@@ -608,8 +608,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._chat_window.set_chat_title(jid, title)
         for room, users in self._muc_users.items():
             changed = False
-            for info in users.values():
-                if info.get("real_jid", "").split("/", 1)[0] == jid:
+            for nick, info in users.items():
+                virtual_jid = f"{room}/{nick}"
+                if (info.get("real_jid", "").split("/", 1)[0] == jid
+                        or info.get("avatar_jid", "") == jid
+                        or virtual_jid == jid):
                     info["avatar_jid"] = jid
                     info["avatar_path"] = path
                     changed = True
@@ -632,6 +635,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _show_profile(self, jid: str):
         """Show the contact's vCard (fetching it if not yet known)."""
         if not self._client:
+            return
+        if "/" in jid:
+            self._pending_profile.add(jid)
+            self._request_vcard(jid)
             return
         contact = self._client.get_contact(jid) if self._client else None
         card = getattr(contact, "vcard", None) if contact else None
@@ -870,7 +877,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._request_vcard(bare_jid)
 
     def _on_message_send(self, jid: str, body: str):
-        if self._client:
+        if self._client and isinstance(jid, str) and jid.strip():
+            jid = jid.strip()
             self._client.send_message(jid, body)
             chat = self._chat_window.get_chat(jid)
             if chat:
@@ -908,8 +916,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "avatar_jid": previous.get("avatar_jid", ""),
                 "avatar_path": previous.get("avatar_path", ""),
             }
-            if real_jid and self._client:
-                self._client.get_vcard(real_jid)
+            if self._client:
+                self._client.get_vcard(real_jid or f"{room}/{nick}")
         chat = self._chat_window.get_chat(room)
         if chat:
             self_nick = self._muc_self_nicks.get(room, "")
@@ -927,14 +935,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muc_participant_clicked(self, room: str, nick: str):
         info = self._participant_info(room, nick)
-        target = info.get("real_jid", "") or f"{room}/{nick}"
+        real_jid = info.get("real_jid")
+        target = real_jid.strip() if isinstance(real_jid, str) else ""
+        if not target or target.lower() == "none":
+            target = f"{room}/{nick}"
         chat = self._chat_window.open_chat(target, nick)
         if not chat._history:
             self._load_history(target)
 
     def _on_muc_participant_context(self, room: str, nick: str, pos):
         info = self._participant_info(room, nick)
-        real_jid = info.get("real_jid", "").split("/", 1)[0]
+        raw_real_jid = info.get("real_jid")
+        real_jid = (raw_real_jid.split("/", 1)[0]
+                    if isinstance(raw_real_jid, str) else "")
         own = self._participant_info(room, self._muc_self_nicks.get(room, ""))
         can_manage = (own.get("role") == "moderator"
                       or own.get("affiliation") in ("admin", "owner"))
@@ -958,13 +971,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_muc_participant_profile(self, room: str, nick: str,
                                       real_jid: str):
-        if real_jid:
-            self._show_profile(real_jid)
-            return
-        chat = self._chat_window.get_chat(room)
-        if chat:
-            from jabbim.include.utils import format_time
-            chat.add_status(tr("muc_user_vcard_unavailable"), format_time())
+        self._show_profile(real_jid or f"{room}/{nick}")
 
     def _muc_user_command(self, room: str, nick: str):
         chat = self._chat_window.get_chat(room)

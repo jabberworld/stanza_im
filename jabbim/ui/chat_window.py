@@ -94,6 +94,9 @@ class ChatWindow(QtWidgets.QMainWindow):
     def open_chat(self, jid: str, display_name: str,
                   focus: bool = True) -> ChatWidget:
         """Open (or focus) a 1-on-1 chat tab for *jid*."""
+        if not isinstance(jid, str) or not jid.strip():
+            raise ValueError("A chat target JID is required")
+        jid = jid.strip()
         if jid in self._tabs:
             if focus:
                 self._focus_tab(jid)

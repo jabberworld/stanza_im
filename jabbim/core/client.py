@@ -109,6 +109,10 @@ class JabberClient:
     def send_message(self, jid: str, body: str, mtype: str = "chat",
                      mhtml: str | None = None) -> None:
         """Send a message."""
+        if not isinstance(jid, str) or not jid.strip():
+            logger.warning("Skipping message with empty target: %r", jid)
+            return
+        jid = jid.strip()
         msg = self.xmpp.Message()
         msg["to"] = jid
         msg["type"] = mtype
@@ -442,21 +446,24 @@ class JabberClient:
     def get_vcard(self, jid: str) -> None:
         """Request vCard for *jid*.  Fire-and-forget; result arrives via
         the ``vcard_received`` event as ``(jid, card_dict)``."""
-        bare = str(jid).split("/", 1)[0]
-        cached = self._vcard_cache.get(bare)
+        requested = str(jid)
+        bare = requested.split("/", 1)[0]
+        cache_key = requested if "/" in requested else bare
+        cached = self._vcard_cache.get(cache_key)
         if cached is not None:
-            contact = self.get_contact(bare)
-            contact.vcard = cached
-            if cached.get("avatar_path"):
-                contact.avatar_path = cached["avatar_path"]
-            self.emit("vcard_received", bare, cached)
+            if "/" not in requested:
+                contact = self.get_contact(bare)
+                contact.vcard = cached
+                if cached.get("avatar_path"):
+                    contact.avatar_path = cached["avatar_path"]
+            self.emit("vcard_received", requested, cached)
             return
-        if bare in self._vcard_inflight:
+        if cache_key in self._vcard_inflight:
             return
-        self._vcard_inflight.add(bare)
+        self._vcard_inflight.add(cache_key)
         vcard = self.xmpp.plugin["xep_0054"]
         loop = asyncio.get_event_loop()
-        loop.create_task(self._fetch_vcard(vcard, bare))
+        loop.create_task(self._fetch_vcard(vcard, requested))
 
     async def _fetch_vcard(self, vcard, jid: str) -> None:
         try:
@@ -465,7 +472,7 @@ class JabberClient:
             logger.debug("vCard for %s unavailable", jid, exc_info=True)
             self._vcard_inflight.discard(jid)
             return
-        self._on_vcard(iq)
+        self._on_vcard(iq, jid)
         self._vcard_inflight.discard(jid)
 
     async def set_own_vcard(self, card: dict) -> bool:
@@ -725,21 +732,24 @@ class JabberClient:
         jid = str(event.get("from", ""))
         self.emit("disco_info_received", jid)
 
-    def _on_vcard(self, iq) -> None:
-        jid = str(iq.get("from", ""))
+    def _on_vcard(self, iq, requested_jid: str = "") -> None:
+        jid = str(iq.get("from", "")) or requested_jid
         bare = jid.split("/")[0]
         card = _parse_vcard(iq)
+        card["jid"] = jid
         photo = card.get("photo")
         if photo:
             try:
                 from jabbim.include.avatars import save_avatar
-                card["avatar_path"] = save_avatar(bare or jid, photo)
+                card["avatar_path"] = save_avatar(jid or bare, photo)
             except Exception:
                 pass
-        contact = self.get_contact(bare)
-        if not card.get("avatar_path") and contact.avatar_path:
-            card["avatar_path"] = contact.avatar_path
-        contact.vcard = card
+        if "/" not in jid:
+            contact = self.get_contact(bare)
+            if not card.get("avatar_path") and contact.avatar_path:
+                card["avatar_path"] = contact.avatar_path
+            contact.vcard = card
+        self._vcard_cache.put(jid or bare, card)
         logger.debug("vCard received for %s", bare or jid)
         self.emit("vcard_received", bare or jid, card)
 
@@ -762,7 +772,7 @@ class JabberClient:
             self._mam_inflight.discard(jid)
 
     async def _fetch_history_mam_impl(self, jid: str, since: str | None,
-                                      limit: int) -> int:
+                                       limit: int) -> int:
         mam = self.xmpp.plugin["xep_0313"]
         end = None
         if since:
@@ -776,31 +786,39 @@ class JabberClient:
             except ValueError:
                 end = None
         rsm = {"max": int(limit)}
-        try:
-            task = (
-                mam.retrieve(jid=jid, end=end, rsm=rsm)
-                if jid in self.groupchats
-                else mam.retrieve(with_jid=jid, end=end, rsm=rsm)
-            )
-            iq = await asyncio.wait_for(task, timeout=25.0)
-        except asyncio.TimeoutError:
-            logger.info("MAM query timed out for %s", jid)
-            self.emit("mam_unavailable", jid)
-            return 0
-        except Exception:
-            logger.debug("MAM query failed for %s", jid, exc_info=True)
-            self.emit("mam_unavailable", jid)
-            return 0
-        if str(iq.get("type", "result")) == "error":
-            logger.debug("MAM query returned an error for %s", jid)
-            self.emit("mam_unavailable", jid)
-            return 0
-
+        modes = [(jid in self.groupchats, end)]
+        if end is not None:
+            modes.append((not (jid in self.groupchats), end))
+            modes.append((jid in self.groupchats, None))
+            modes.append((not (jid in self.groupchats), None))
+        else:
+            modes.append((not (jid in self.groupchats), None))
         results = []
-        try:
-            results = iq.get("mam", {}).get("results") or []
-        except Exception:
-            pass
+        last_error = None
+        for use_archive_jid, query_end in modes:
+            try:
+                task = (mam.retrieve(jid=jid, end=query_end, rsm=rsm)
+                        if use_archive_jid
+                        else mam.retrieve(with_jid=jid, end=query_end, rsm=rsm))
+                iq = await asyncio.wait_for(task, timeout=25.0)
+                if str(iq.get("type", "result")) == "error":
+                    last_error = iq
+                    continue
+                last_error = None
+                results = iq.get("mam", {}).get("results") or []
+                if results:
+                    break
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+                logger.info("MAM query timed out for %s", jid)
+            except Exception as exc:
+                last_error = exc
+                logger.debug("MAM query failed for %s", jid, exc_info=True)
+        if not results and last_error is not None:
+            logger.debug("MAM returned no usable results for %s: %r",
+                         jid, last_error)
+            self.emit("mam_unavailable", jid)
+            return 0
 
         me = self.jid_str.split("@")[0]
         my_nick = ""

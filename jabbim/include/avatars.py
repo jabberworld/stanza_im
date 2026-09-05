@@ -23,7 +23,10 @@ _MISSING = object()
 
 
 def _safe_name(jid: str) -> str:
-    return _SAFE_RE.sub("_", str(jid).split("/")[0])
+    value = str(jid)
+    bare, separator, resource = value.partition("/")
+    key = value if separator and "@" in bare else bare
+    return _SAFE_RE.sub("_", key)
 
 
 def ensure_dirs() -> None:
@@ -82,7 +85,9 @@ def default_avatar_uri() -> str:
 
 def avatar_data_uri(jid: str) -> str | None:
     """Return a PNG data-URI for *jid*'s cached avatar, or ``None``."""
-    jid = str(jid).split("/")[0]
+    jid = str(jid)
+    bare, separator, resource = jid.partition("/")
+    jid = jid if separator and "@" in bare else bare
     uri = _URI_CACHE.get(jid, _MISSING)
     if uri is not _MISSING:
         return uri

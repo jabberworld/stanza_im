@@ -33,9 +33,15 @@ class VCardCache:
         except (OSError, ValueError):
             self._items = {}
 
+    @staticmethod
+    def _key(jid: str) -> str:
+        value = str(jid)
+        bare, separator, resource = value.partition("/")
+        # MUC virtual JIDs identify a specific occupant and must retain nick.
+        return value if separator and "@" in bare else bare
+
     def get(self, jid: str, max_age: float = MAX_AGE) -> dict | None:
-        bare = str(jid).split("/", 1)[0]
-        item = self._items.get(bare)
+        item = self._items.get(self._key(jid))
         if not isinstance(item, dict):
             return None
         fetched_at = float(item.get("fetched_at", 0))
@@ -45,7 +51,7 @@ class VCardCache:
         return dict(card) if isinstance(card, dict) else None
 
     def put(self, jid: str, card: dict) -> None:
-        bare = str(jid).split("/", 1)[0]
+        bare = self._key(jid)
         safe = {key: value for key, value in card.items()
                 if key != "photo" and isinstance(value, (str, int, float, bool, type(None)))}
         self._items[bare] = {"fetched_at": time.time(), "card": safe}
