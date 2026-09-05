@@ -44,6 +44,7 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0004")  # Data Forms
         self.xmpp.register_plugin("xep_0049")  # Private XML Storage
         self.xmpp.register_plugin("xep_0128")  # Service Discovery Extensions
+        self.xmpp.register_plugin("xep_0030")  # Service Discovery
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
         # xep_0313 pulls in xep_0059 (RSM) and xep_0297 (Forward) automatically
 
@@ -268,6 +269,29 @@ class JabberClient:
         logger.info("Joined room %s as %s (%d occupants)",
                     room, gi.nick, len(occupants))
         self.emit("muc_joined", room, subject or gi.subject, occupants)
+
+    def get_muc_info(self, room: str) -> None:
+        """Request the advertised room name through XEP-0030."""
+        asyncio.get_event_loop().create_task(self._fetch_muc_info(room))
+
+    async def _fetch_muc_info(self, room: str) -> None:
+        try:
+            iq = await self.xmpp.plugin["xep_0030"].get_info(jid=room)
+            info = iq["disco_info"]
+            name = ""
+            for identity in info.get("identities", []):
+                category = str(identity.get("category", ""))
+                value = str(identity.get("name", "") or "")
+                if category == "conference" and value:
+                    name = value
+                    break
+                if value and not name:
+                    name = value
+            if name:
+                self.emit("muc_info_received", room, name)
+        except Exception:
+            logger.debug("Could not retrieve MUC info for %s",
+                         room, exc_info=True)
 
     def _store_muc_history(self, room: str, entries) -> None:
         """Persist messages returned by the MUC join handshake."""
@@ -640,12 +664,16 @@ class JabberClient:
         real_jid = ""
         try:
             muc = pres.get("muc")
+            if muc is None:
+                muc = pres["muc"]
             if muc is not None:
                 role = str(muc.get("role", ""))
                 affiliation = str(muc.get("affiliation", ""))
                 item = muc.get("item")
+                if item is None:
+                    item = muc["item"]
                 if item is not None:
-                    real_jid = str(item.get("jid", ""))
+                    real_jid = str(item.get("jid", "") or item["jid"])
         except Exception:
             pass
 

@@ -259,6 +259,17 @@ class ChatWidget(QtWidgets.QWidget):
         self._status_lines.append((text, timestamp))
         self._view.add_status(text, timestamp)
 
+    def set_history_status(self, text: str):
+        """Replace the transient server-history status and re-render once."""
+        fetching = tr("history_server_fetching")
+        self._status_lines = [item for item in self._status_lines
+                              if item[0] != fetching]
+        if text:
+            self._status_lines.append((text, time.strftime("%H:%M:%S")))
+        self._preserve_fraction = self._view.scroll_fraction()
+        self._anchor_bottom = False
+        self._render_all()
+
     def _render_entry(self, entry: dict):
         self._view.add_message(sender=entry["sender"], body=entry["body"],
                                timestamp=entry.get("timestamp", ""),

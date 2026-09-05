@@ -357,6 +357,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.add_status(f"Joined as {nick}", format_time())
             chat.set_bookmarked(room in self._bookmarks)
         self._request_vcard(room)
+        self._client.get_muc_info(room)
         self._sync_conference_roster(room)
 
     def _on_muc_leave(self, room: str):
@@ -415,6 +416,10 @@ class MainWindow(QtWidgets.QMainWindow):
         message = (tr("muc_join_waiting") if condition == "timeout"
                    else tr("muc_join_failed", reason=condition or code))
         chat.add_status(message, format_time())
+
+    def _on_muc_info_received(self, room: str, name: str):
+        if room in self._muc_self_nicks and name:
+            self._chat_window.set_chat_title(room, name)
 
     def _muc_display_name(self, room: str, preferred: str = "") -> str:
         if preferred:
@@ -509,6 +514,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("typing", self._on_typing)
         c.on("receipt_delivered", self._on_receipt_delivered)
         c.on("muc_joined", self._on_muc_joined)
+        c.on("muc_info_received", self._on_muc_info_received)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("mam_unavailable", self._on_mam_unavailable)
         # roster removals are delivered via roster_item_removed (from client)
@@ -772,8 +778,7 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("Requesting MAM history for %s before %s", jid, since or "now")
         chat = self._chat_window.get_chat(jid)
         if chat:
-            from jabbim.include.utils import format_time
-            chat.add_status(tr("history_server_fetching"), format_time())
+            chat.set_history_status(tr("history_server_fetching"))
         self._start_task(self._fetch_server_history(jid, since or None))
 
     async def _fetch_server_history(self, jid: str, since):
@@ -791,6 +796,9 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if chat:
             logger.info("MAM history for %s stored %d messages", jid, stored or 0)
+            chat.set_history_status(
+                tr("history_server_loaded", n=stored or 0)
+                if stored else tr("history_server_empty"))
             chat.server_fetch_done(stored or 0)
 
     def _on_mam_unavailable(self, jid: str):
@@ -799,7 +807,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from jabbim.include.utils import format_time
         chat.mark_server_exhausted()
-        chat.add_status(tr("history_server_unavailable"), format_time())
+        chat.set_history_status(tr("history_server_unavailable"))
 
     def _on_remove_contact(self, jid: str):
         if self._client:
@@ -933,8 +941,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         menu = QtWidgets.QMenu(self)
         profile = menu.addAction(tr("muc_user_view_vcard"))
-        profile.setEnabled(bool(real_jid))
-        profile.triggered.connect(lambda: self._show_profile(real_jid))
+        profile.triggered.connect(
+            lambda: self._show_muc_participant_profile(room, nick, real_jid))
         command = menu.addAction(tr("muc_user_execute_command"))
         command.triggered.connect(
             lambda: self._muc_user_command(room, nick))
@@ -947,6 +955,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 lambda checked=False, value=role:
                 self._change_muc_role(room, nick, value))
         menu.exec(pos)
+
+    def _show_muc_participant_profile(self, room: str, nick: str,
+                                      real_jid: str):
+        if real_jid:
+            self._show_profile(real_jid)
+            return
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            from jabbim.include.utils import format_time
+            chat.add_status(tr("muc_user_vcard_unavailable"), format_time())
 
     def _muc_user_command(self, room: str, nick: str):
         chat = self._chat_window.get_chat(room)

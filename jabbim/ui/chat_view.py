@@ -222,5 +222,5 @@ else:
         def set_scroll_fraction(self, fraction: float):
             fraction = max(0.0, min(1.0, float(fraction)))
             vbar = self.verticalScrollBar()
-            vbar.setValue(vbar.minimum()
-                          + fraction * (vbar.maximum() - vbar.minimum()))
+            vbar.setValue(int(vbar.minimum()
+                              + fraction * (vbar.maximum() - vbar.minimum())))
