@@ -883,6 +883,7 @@ class JabberClient:
         stored = 0
         parsed = 0
         skipped = 0
+        skip_reasons: dict[str, int] = {}
         for result in results:
             try:
                 fwd = _stanza_value(result, "forwarded")
@@ -891,10 +892,12 @@ class JabberClient:
                     logger.warning("MAM result %d for %s has no message stanza: %r",
                                    results.index(result), jid, result)
                     skipped += 1
+                    skip_reasons["no_stanza"] = skip_reasons.get("no_stanza", 0) + 1
                     continue
                 body = str(_stanza_value(msg, "body") or "")
                 if not body:
                     skipped += 1
+                    skip_reasons["empty_body"] = skip_reasons.get("empty_body", 0) + 1
                     continue
                 parsed += 1
                 frm = str(_stanza_value(msg, "from") or "")
@@ -922,11 +925,14 @@ class JabberClient:
                 stored += 1
             except Exception:
                 skipped += 1
+                skip_reasons["exception"] = skip_reasons.get("exception", 0) + 1
                 logger.debug("Could not parse MAM result for %s",
                              jid, exc_info=True)
                 continue
         logger.info("MAM returned %d results for %s: parsed=%d skipped=%d stored=%d",
                     len(results), jid, parsed, skipped, stored)
+        if skip_reasons:
+            logger.info("MAM skip reasons for %s: %s", jid, skip_reasons)
         if results and parsed and not stored:
             self.emit("mam_parse_error", jid, len(results), parsed, skipped)
             return -1
@@ -966,6 +972,13 @@ def _forwarded_stanza(forwarded):
     """Extract the inner stanza from slixmpp's XEP-0297 object."""
     if forwarded is None:
         return None
+    xml = getattr(forwarded, "xml", None)
+    if xml is None and hasattr(forwarded, "iter"):
+        xml = forwarded
+    if xml is not None:
+        for node in xml.iter():
+            if str(node.tag).rsplit("}", 1)[-1] == "message":
+                return node
     getter = getattr(forwarded, "get_stanza", None)
     if getter is not None:
         stanza = getter()
@@ -987,6 +1000,18 @@ def _stanza_value(stanza, key: str, default=""):
     """Read a slixmpp stanza field through both public interfaces."""
     if stanza is None:
         return default
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is not None:
+        if key in xml.attrib:
+            return xml.attrib[key]
+        for node in xml.iter():
+            if str(node.tag).rsplit("}", 1)[-1] != key:
+                continue
+            if key in node.attrib:
+                return node.attrib[key]
+            return node if key in ("delay", "forwarded") else (node.text or "")
     try:
         value = stanza.get(key)
         if value not in (None, ""):
