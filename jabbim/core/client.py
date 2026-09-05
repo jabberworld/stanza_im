@@ -286,9 +286,11 @@ class JabberClient:
             iq = await self.xmpp.plugin["xep_0030"].get_info(jid=room)
             info = iq["disco_info"]
             name = ""
-            for identity in info.get("identities", []) or []:
-                category = str(identity.get("category", ""))
-                value = str(identity.get("name", "") or "")
+            for element in iq.xml.iter():
+                if not str(element.tag).endswith("identity"):
+                    continue
+                category = str(element.get("category", ""))
+                value = str(element.get("name", "") or "")
                 if category == "conference" and value:
                     name = value
                     break
@@ -883,7 +885,7 @@ class JabberClient:
         skipped = 0
         for result in results:
             try:
-                fwd = result.get("forwarded")
+                fwd = _stanza_value(result, "forwarded")
                 msg = _forwarded_stanza(fwd) or result
                 if msg is None or not hasattr(msg, "get"):
                     logger.warning("MAM result %d for %s has no message stanza: %r",
