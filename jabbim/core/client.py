@@ -590,6 +590,10 @@ class JabberClient:
             ts = msg.get("delay", {}).get("stamp", None)
             if isinstance(ts, datetime.datetime):
                 ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
+            room, separator, nick = frm.partition("/")
+            if separator and room in self.groupchats:
+                self.emit("muc_private_message", room, nick, body, ts)
+                return
             self.emit("message_received", frm, body, ts)
 
     def _on_groupchat_message(self, msg) -> None:
@@ -798,7 +802,10 @@ class JabberClient:
             modes.append((not (jid in self.groupchats), None))
         results = []
         last_error = None
-        for use_archive_jid, query_end in modes:
+        for index, (use_archive_jid, query_end) in enumerate(modes, 1):
+            mode = "jid" if use_archive_jid else "with_jid"
+            logger.info("MAM query %d for %s: mode=%s end=%s max=%s",
+                        index, jid, mode, query_end, limit)
             try:
                 task = (mam.retrieve(jid=jid, end=query_end, rsm=rsm)
                         if use_archive_jid
@@ -806,9 +813,13 @@ class JabberClient:
                 iq = await asyncio.wait_for(task, timeout=25.0)
                 if str(iq.get("type", "result")) == "error":
                     last_error = iq
+                    logger.warning("MAM IQ error for %s (%s): %s",
+                                   jid, mode, str(iq))
                     continue
                 last_error = None
                 results = iq.get("mam", {}).get("results") or []
+                logger.info("MAM query %d for %s returned %d results",
+                            index, jid, len(results))
                 if results:
                     break
             except asyncio.TimeoutError:
@@ -833,6 +844,10 @@ class JabberClient:
             try:
                 fwd = result.get("forwarded")
                 msg = _forwarded_stanza(fwd) or result
+                if msg is None or not hasattr(msg, "get"):
+                    logger.warning("MAM result %d for %s has no message stanza: %r",
+                                   results.index(result), jid, result)
+                    continue
                 body = str(msg.get("body", "") or "")
                 if not body:
                     continue

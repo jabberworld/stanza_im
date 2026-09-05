@@ -380,7 +380,7 @@ class MainWindow(QtWidgets.QMainWindow):
             nick = info.nick if info else self._client.jid_str.split("@", 1)[0]
             self._muc_self_nicks[room] = nick
             chat = self._chat_window.open_groupchat(
-                room, nick, self._muc_display_name(room, subject))
+                room, nick, self._muc_display_name(room))
             self._load_history(room)
             self._request_vcard(room)
         users = self._muc_users.setdefault(room, {})
@@ -403,9 +403,13 @@ class MainWindow(QtWidgets.QMainWindow):
                                                n=len(users))
         chat.set_status_text(title)
         self._chat_window.set_chat_title(
-            room, self._muc_display_name(room, subject))
+            room, self._muc_display_name(room))
         chat.refresh_history()
         chat.set_bookmarked(room in self._bookmarks)
+        if self._client:
+            for nick, info in users.items():
+                real_jid = info.get("real_jid")
+                self._client.get_vcard(real_jid or f"{room}/{nick}")
         self._sync_conference_roster(room)
 
     def _on_muc_join_error(self, room: str, condition: str, code: str):
@@ -505,6 +509,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("roster_item_removed", self._on_roster_item_removed)
         c.on("presence_changed", self._on_presence_changed)
         c.on("message_received", self._on_message_received)
+        c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
         c.on("auth_failed", self._on_auth_failed)
@@ -876,6 +881,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self._tray.show_message(sender_name, body)
         self._request_vcard(bare_jid)
 
+    def _on_muc_private_message(self, room: str, nick: str,
+                                body: str, ts):
+        from jabbim.include.utils import ts_to_time
+        info = self._participant_info(room, nick)
+        real_jid = info.get("real_jid")
+        target = real_jid.strip() if isinstance(real_jid, str) else ""
+        if not target or target.lower() == "none":
+            target = f"{room}/{nick}"
+        chat = self._chat_window.open_chat(target, nick)
+        chat.add_message(sender=nick, body=body,
+                         timestamp=ts_to_time(ts), direction="incoming",
+                         sender_jid=info.get("avatar_jid", "") or target)
+        from jabbim.core import history
+        history.store_message(target, "incoming", body, sender=nick)
+
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
             jid = jid.strip()
@@ -917,7 +937,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 "avatar_path": previous.get("avatar_path", ""),
             }
             if self._client:
-                self._client.get_vcard(real_jid or f"{room}/{nick}")
+                request_jid = (real_jid if isinstance(real_jid, str)
+                               and real_jid.lower() != "none" else "")
+                self._client.get_vcard(request_jid or f"{room}/{nick}")
         chat = self._chat_window.get_chat(room)
         if chat:
             self_nick = self._muc_self_nicks.get(room, "")

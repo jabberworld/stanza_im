@@ -524,6 +524,10 @@ class ChatWidget(QtWidgets.QWidget):
         status = QtWidgets.QLabel(row)
         status.setPixmap(self._status_icon(user.get("show", "offline"))
                          .pixmap(16, 16))
+        text = QtWidgets.QLabel(label, row)
+        text.setToolTip(user.get("status", ""))
+        layout.addWidget(status)
+        layout.addWidget(text, 1)
         avatar = QtWidgets.QLabel(row)
         avatar.setFixedSize(28, 28)
         path = user.get("avatar_path", "") or default_avatar()
@@ -532,11 +536,7 @@ class ChatWidget(QtWidgets.QWidget):
             avatar.setPixmap(pix.scaled(
                 28, 28, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                 QtCore.Qt.TransformationMode.SmoothTransformation))
-        text = QtWidgets.QLabel(label, row)
-        text.setToolTip(user.get("status", ""))
-        layout.addWidget(status)
         layout.addWidget(avatar)
-        layout.addWidget(text, 1)
         item = QtWidgets.QListWidgetItem()
         item.setData(QtCore.Qt.ItemDataRole.UserRole, nick)
         item.setSizeHint(row.sizeHint())

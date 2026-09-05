@@ -21,6 +21,14 @@ def _photo_pixmap(card: dict, size: int = 96) -> QtGui.QIcon:
                 size, size,
                 QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                 QtCore.Qt.TransformationMode.SmoothTransformation))
+    path = card.get("avatar_path") or ""
+    if path:
+        pix = QtGui.QPixmap(path)
+        if not pix.isNull():
+            return QtGui.QIcon(pix.scaled(
+                size, size,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation))
     style = QtWidgets.QApplication.style()
     return style.standardIcon(
         QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView)

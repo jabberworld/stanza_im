@@ -48,7 +48,10 @@ def save_avatar(jid: str, raw: bytes) -> str:
     path = avatar_path(jid)
     with open(path, "wb") as fh:
         fh.write(raw)
-    _URI_CACHE.pop(str(jid).split("/")[0], None)
+    value = str(jid)
+    bare, separator, resource = value.partition("/")
+    key = value if separator and "@" in bare else bare
+    _URI_CACHE.pop(key, None)
     return path
 
 
