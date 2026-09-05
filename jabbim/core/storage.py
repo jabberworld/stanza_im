@@ -67,7 +67,8 @@ class Config:
         "last_status": "online",
         "window": {"width": 300, "height": 600,
                    "x": 0, "y": 0, "maximized": False},
-        "chat": {"show_avatars": True, "theme": "", "history_limit": 200},
+        "chat": {"show_avatars": True, "theme": "", "history_limit": 200,
+                 "tab_title_length": 30},
         "notifications": {"tray_blink": True, "popups": True},
         "ui": {"close_to_tray": True},
     }

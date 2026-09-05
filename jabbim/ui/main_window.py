@@ -56,6 +56,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── Chat window (standalone) ─────────────────────────────
         self._chat_window = ChatWindow(self._theme_factory)
+        self._chat_window.set_tab_title_length(
+            self._config.chat.tab_title_length)
         self._chat_window.message_to_send.connect(self._on_message_send)
         self._chat_window.groupchat_message_to_send.connect(self._on_groupchat_send)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
@@ -64,6 +66,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.clear_history_requested.connect(self._on_clear_history)
         self._chat_window.server_history_requested.connect(self._on_server_history)
         self._chat_window.bookmark_toggled.connect(self._toggle_bookmark)
+        self._chat_window.participant_clicked.connect(
+            self._on_muc_participant_clicked)
+        self._chat_window.participant_context_requested.connect(
+            self._on_muc_participant_context)
         self._chat_window.hide()
 
         # ── Tray ─────────────────────────────────────────────────
@@ -320,6 +326,7 @@ class MainWindow(QtWidgets.QMainWindow):
             avatar_path=getattr(contact, "avatar_path", None),
         ))
         self._conference_roster.add(room)
+        self._recount_groups()
         self._roster.sort_and_update()
 
     def _sync_all_conference_roster(self):
@@ -329,7 +336,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _join_muc(self, room: str, nick: str, password: str = ""):
         if not self._client:
             return
-        display_name = room.split("@")[0]
+        display_name = self._muc_display_name(room)
         is_new = not self._chat_window.has_chat(room)
         if is_new:
             self._chat_window.open_groupchat(room, nick, display_name)
@@ -360,6 +367,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if room in self._conference_roster:
             self._roster.remove_user(room)
             self._conference_roster.discard(room)
+            self._recount_groups()
             self._roster.sort_and_update()
         from jabbim.core import history
         history.close(room)
@@ -371,7 +379,7 @@ class MainWindow(QtWidgets.QMainWindow):
             nick = info.nick if info else self._client.jid_str.split("@", 1)[0]
             self._muc_self_nicks[room] = nick
             chat = self._chat_window.open_groupchat(
-                room, nick, room.split("@", 1)[0])
+                room, nick, self._muc_display_name(room, subject))
             self._load_history(room)
             self._request_vcard(room)
         users = self._muc_users.setdefault(room, {})
@@ -393,6 +401,9 @@ class MainWindow(QtWidgets.QMainWindow):
         title += (" · " if title else "") + tr("muc_participants_count",
                                                n=len(users))
         chat.set_status_text(title)
+        self._chat_window.set_chat_title(
+            room, self._muc_display_name(room, subject))
+        chat.refresh_history()
         chat.set_bookmarked(room in self._bookmarks)
         self._sync_conference_roster(room)
 
@@ -405,6 +416,17 @@ class MainWindow(QtWidgets.QMainWindow):
                    else tr("muc_join_failed", reason=condition or code))
         chat.add_status(message, format_time())
 
+    def _muc_display_name(self, room: str, preferred: str = "") -> str:
+        if preferred:
+            return preferred
+        if self._client:
+            contact = self._client.get_contact(room)
+            card = getattr(contact, "vcard", None) or {}
+            name = card.get("fn") or card.get("nickname") or ""
+            if name:
+                return name
+        return room.split("@", 1)[0]
+
     def _on_preferences(self):
         from jabbim.ui.preferences import PreferencesDialog
         dlg = PreferencesDialog(self._config, self._theme_factory, self)
@@ -416,6 +438,8 @@ class MainWindow(QtWidgets.QMainWindow):
         variant = self._config.chat.theme
         self._chat_window.reload_themes(variant)
         self._chat_window.set_show_avatars(self._config.chat.show_avatars)
+        self._chat_window.set_tab_title_length(
+            self._config.chat.tab_title_length)
         self._set_tray_status_icon(self._config.last_status)
 
     def _on_about(self):
@@ -513,6 +537,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Full roster arrived (initial load or server refresh)."""
         self._rebuild_roster(items)
         self._sync_all_conference_roster()
+        self._recount_groups()
         self._roster.sort_and_update()
 
     def _on_roster_item_added(self, item):
@@ -571,6 +596,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._roster.update_user(jid, avatar_path=path)
         if jid in self._conference_roster:
             self._sync_conference_roster(jid)
+        if jid in self._muc_self_nicks:
+            title = card.get("fn") or card.get("nickname") or ""
+            if title:
+                self._chat_window.set_chat_title(jid, title)
         for room, users in self._muc_users.items():
             changed = False
             for info in users.values():
@@ -740,6 +769,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Load the whole server-side conversation into the chat window."""
         if not self._client:
             return
+        logger.info("Requesting MAM history for %s before %s", jid, since or "now")
         chat = self._chat_window.get_chat(jid)
         if chat:
             from jabbim.include.utils import format_time
@@ -760,6 +790,7 @@ class MainWindow(QtWidgets.QMainWindow):
             stored = None
         chat = self._chat_window.get_chat(jid)
         if chat:
+            logger.info("MAM history for %s stored %d messages", jid, stored or 0)
             chat.server_fetch_done(stored or 0)
 
     def _on_mam_unavailable(self, jid: str):
@@ -882,6 +913,51 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_groupchat_send(self, room: str, body: str):
         if self._client:
             self._client.send_muc_message(room, body)
+
+    def _participant_info(self, room: str, nick: str) -> dict:
+        return self._muc_users.get(room, {}).get(nick, {})
+
+    def _on_muc_participant_clicked(self, room: str, nick: str):
+        info = self._participant_info(room, nick)
+        target = info.get("real_jid", "") or f"{room}/{nick}"
+        chat = self._chat_window.open_chat(target, nick)
+        if not chat._history:
+            self._load_history(target)
+
+    def _on_muc_participant_context(self, room: str, nick: str, pos):
+        info = self._participant_info(room, nick)
+        real_jid = info.get("real_jid", "").split("/", 1)[0]
+        own = self._participant_info(room, self._muc_self_nicks.get(room, ""))
+        can_manage = (own.get("role") == "moderator"
+                      or own.get("affiliation") in ("admin", "owner"))
+
+        menu = QtWidgets.QMenu(self)
+        profile = menu.addAction(tr("muc_user_view_vcard"))
+        profile.setEnabled(bool(real_jid))
+        profile.triggered.connect(lambda: self._show_profile(real_jid))
+        command = menu.addAction(tr("muc_user_execute_command"))
+        command.triggered.connect(
+            lambda: self._muc_user_command(room, nick))
+        menu.addSeparator()
+        roles = menu.addMenu(tr("muc_user_change_role"))
+        for role in ("visitor", "participant", "moderator"):
+            action = roles.addAction(tr(f"muc_role_{role}"))
+            action.setEnabled(can_manage)
+            action.triggered.connect(
+                lambda checked=False, value=role:
+                self._change_muc_role(room, nick, value))
+        menu.exec(pos)
+
+    def _muc_user_command(self, room: str, nick: str):
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            from jabbim.include.utils import format_time
+            chat.add_status(tr("muc_user_command_unavailable"), format_time())
+
+    def _change_muc_role(self, room: str, nick: str, role: str):
+        if not self._client:
+            return
+        self._client.set_muc_role(room, nick, role)
 
     # ── Status ────────────────────────────────────────────────────
 

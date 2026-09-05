@@ -62,6 +62,9 @@ class ChatWidget(QtWidgets.QWidget):
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since_ts
     bookmark_toggled = QtCore.pyqtSignal(str)              # MUC room
+    participant_clicked = QtCore.pyqtSignal(str, str)      # room, nick
+    participant_context_requested = QtCore.pyqtSignal(
+        str, str, QtCore.QPoint)                            # room, nick, global pos
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
                  is_muc: bool = False, parent=None):
@@ -131,11 +134,7 @@ class ChatWidget(QtWidgets.QWidget):
         header.addWidget(self._history_btn)
         layout.addLayout(header)
 
-        # Chat view + (for MUC) participant sidebar
-        content = QtWidgets.QHBoxLayout()
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(0)
-
+        # Chat view + resizable MUC participant sidebar
         chat_col = QtWidgets.QVBoxLayout()
         chat_col.setContentsMargins(0, 0, 0, 0)
         chat_col.setSpacing(0)
@@ -158,13 +157,27 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_btn.clicked.connect(self._send)
         input_row.addWidget(self._send_btn)
         chat_col.addLayout(input_row)
-        content.addLayout(chat_col, stretch=1)
+        chat_panel = QtWidgets.QWidget(self)
+        chat_panel.setLayout(chat_col)
 
         self._users_list = QtWidgets.QListWidget()
-        self._users_list.setFixedWidth(160)
+        self._users_list.setMinimumWidth(120)
+        self._users_list.setMaximumWidth(420)
         self._users_list.setVisible(self.is_muc)
-        content.addWidget(self._users_list)
-        layout.addLayout(content, stretch=1)
+        self._users_list.setContextMenuPolicy(
+            QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self._users_list.itemClicked.connect(self._on_muc_user_clicked)
+        self._users_list.customContextMenuRequested.connect(
+            self._on_muc_context_menu)
+
+        self._content_splitter = QtWidgets.QSplitter(
+            QtCore.Qt.Orientation.Horizontal, self)
+        self._content_splitter.addWidget(chat_panel)
+        self._content_splitter.addWidget(self._users_list)
+        self._content_splitter.setStretchFactor(0, 1)
+        self._content_splitter.setStretchFactor(1, 0)
+        self._content_splitter.setSizes([self.width() - 180, 180])
+        layout.addWidget(self._content_splitter, stretch=1)
 
         self._typing_timer = QtCore.QTimer(self)
         self._typing_timer.setSingleShot(True)
@@ -302,6 +315,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._anchor_bottom = True
         self._preserve_fraction = None
         self._render_all()
+        if self.is_muc and not self._history:
+            QtCore.QTimer.singleShot(0, self._on_near_top)
 
     def prepend_history(self, entries: list[dict], exhausted: bool):
         """Insert older rows at the top of the window, keeping position."""
@@ -512,9 +527,25 @@ class ChatWidget(QtWidgets.QWidget):
         layout.addWidget(avatar)
         layout.addWidget(text, 1)
         item = QtWidgets.QListWidgetItem()
+        item.setData(QtCore.Qt.ItemDataRole.UserRole, nick)
         item.setSizeHint(row.sizeHint())
         self._users_list.addItem(item)
         self._users_list.setItemWidget(item, row)
+
+    def _on_muc_user_clicked(self, item: QtWidgets.QListWidgetItem):
+        nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if nick:
+            self.participant_clicked.emit(self.jid, str(nick))
+
+    def _on_muc_context_menu(self, position: QtCore.QPoint):
+        item = self._users_list.itemAt(position)
+        if not item:
+            return
+        nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if nick:
+            self.participant_context_requested.emit(
+                self.jid, str(nick),
+                self._users_list.viewport().mapToGlobal(position))
 
     @staticmethod
     def _status_icon(show: str):

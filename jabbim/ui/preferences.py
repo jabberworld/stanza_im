@@ -108,6 +108,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._history_limit.setRange(10, 5000)
         self._history_limit.setSingleStep(10)
         form.addRow(tr("prefs_history_limit"), self._history_limit)
+        self._tab_title_length = QtWidgets.QSpinBox()
+        self._tab_title_length.setRange(10, 120)
+        self._tab_title_length.setSingleStep(5)
+        form.addRow(tr("prefs_tab_title_length"), self._tab_title_length)
         return page
 
     def _page_notifications(self):
@@ -143,6 +147,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         idx = self._theme_combo.findData(cfg.chat.theme)
         self._theme_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._history_limit.setValue(int(cfg.chat.history_limit or 200))
+        self._tab_title_length.setValue(int(cfg.chat.tab_title_length or 30))
         self._tray_blink.setChecked(cfg.notifications.tray_blink)
         self._popups.setChecked(cfg.notifications.popups)
 
@@ -154,6 +159,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.chat.show_avatars = self._show_avatars.isChecked()
         cfg.chat.theme = self._theme_combo.currentData() or ""
         cfg.chat.history_limit = self._history_limit.value()
+        cfg.chat.tab_title_length = self._tab_title_length.value()
         cfg.notifications.tray_blink = self._tray_blink.isChecked()
         cfg.notifications.popups = self._popups.isChecked()
         cfg.save()

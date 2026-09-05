@@ -52,6 +52,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._theme = theme_factory
         self._tabs: dict[str, ChatWidget] = {}  # jid -> widget
         self._tab_order: list[str] = []         # ordered jid list
+        self._tab_title_length = 30
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(500, 400)
@@ -104,6 +105,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
+        widget.participant_clicked.connect(self.participant_clicked)
+        widget.participant_context_requested.connect(
+            self.participant_context_requested)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -129,7 +133,10 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
-        idx = self._tab_widget.addTab(widget, f"🔒 {display_name}")
+        widget.participant_clicked.connect(self.participant_clicked)
+        widget.participant_context_requested.connect(
+            self.participant_context_requested)
+        idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
         self._tab_order.append(room)
@@ -167,6 +174,32 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             widget.set_show_avatars(show)
 
+    def set_tab_title_length(self, length: int):
+        self._tab_title_length = max(10, int(length))
+        for index in range(self._tab_widget.count()):
+            widget = self._tab_widget.widget(index)
+            if isinstance(widget, ChatWidget):
+                self._tab_widget.setTabText(index, self._tab_caption(widget))
+
+    def set_chat_title(self, jid: str, title: str):
+        widget = self._tabs.get(jid)
+        if not widget:
+            return
+        widget.display_name = title
+        widget._name_label.setText(title)
+        index = self._tab_widget.indexOf(widget)
+        if index >= 0:
+            self._tab_widget.setTabText(index, self._tab_caption(widget))
+        self._update_title()
+
+    def _tab_caption(self, widget: ChatWidget) -> str:
+        title = widget.display_name
+        prefix = "🔒 " if widget.is_muc else ""
+        available = max(1, self._tab_title_length - len(prefix))
+        if len(title) > available:
+            title = title[:max(1, available - 1)] + "…"
+        return prefix + title
+
     def tab_count(self) -> int:
         return len(self._tabs)
 
@@ -195,6 +228,9 @@ class ChatWindow(QtWidgets.QMainWindow):
     clear_history_requested = QtCore.pyqtSignal(str)    # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since
     bookmark_toggled = QtCore.pyqtSignal(str)               # MUC room
+    participant_clicked = QtCore.pyqtSignal(str, str)       # room, nick
+    participant_context_requested = QtCore.pyqtSignal(
+        str, str, QtCore.QPoint)
 
     # ── Internal ──────────────────────────────────────────────────
 

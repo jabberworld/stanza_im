@@ -250,18 +250,52 @@ class JabberClient:
         gi = self.groupchats.get(room)
         if gi:
             gi.subject = subject
+            gi.pending_history = _history or []
         self._emit_muc_joined(room, subject, list(occupants or []))
 
     def _emit_muc_joined(self, room: str, subject: str = "",
                          occupants: list | None = None) -> None:
         gi = self.groupchats.get(room)
-        if not gi or gi.joined:
+        if not gi:
+            return
+        if gi.pending_history:
+            self._store_muc_history(room, gi.pending_history)
+            gi.pending_history = []
+        if gi.joined:
             return
         gi.joined = True
         occupants = occupants if occupants is not None else list(gi.users)
         logger.info("Joined room %s as %s (%d occupants)",
                     room, gi.nick, len(occupants))
         self.emit("muc_joined", room, subject or gi.subject, occupants)
+
+    def _store_muc_history(self, room: str, entries) -> None:
+        """Persist messages returned by the MUC join handshake."""
+        if not entries:
+            return
+        from jabbim.core import history
+        gi = self.groupchats.get(room)
+        my_nick = gi.nick if gi else ""
+        for entry in entries:
+            try:
+                forwarded = entry.get("forwarded") if hasattr(entry, "get") else None
+                msg = forwarded.get("stanza") if forwarded else entry
+                body = str(msg.get("body", "") or "")
+                if not body:
+                    continue
+                frm = str(msg.get("from", ""))
+                nick = frm.split("/", 1)[1] if "/" in frm else frm
+                direction = "outgoing" if nick == my_nick else "incoming"
+                sender = "Me" if direction == "outgoing" else nick
+                stamp = msg.get("delay", {}).get("stamp", "")
+                if isinstance(stamp, datetime.datetime):
+                    stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
+                history.store_message(room, direction, body,
+                                      timestamp=_normalize_ts(str(stamp)) or None,
+                                      sender=sender, skip_existing=True)
+            except Exception:
+                logger.debug("Could not store MUC join history for %s",
+                             room, exc_info=True)
 
     def _muc_task_done(self, room: str, task) -> None:
         """Consume the join task's result so asyncio never warns about an
@@ -363,6 +397,13 @@ class JabberClient:
     def send_muc_message(self, room: str, body: str) -> None:
         """Send a message to a MUC room."""
         self.send_message(room, body, mtype="groupchat")
+
+    def set_muc_role(self, room: str, nick: str, role: str) -> None:
+        """Request a MUC role change for an occupant."""
+        result = self.xmpp.plugin["xep_0045"].set_role(
+            room, nick, role, reason="")
+        if asyncio.iscoroutine(result):
+            asyncio.get_event_loop().create_task(result)
 
     def set_muc_subject(self, room: str, subject: str) -> None:
         """Set the subject/topic of a MUC room."""
@@ -747,7 +788,11 @@ class JabberClient:
                 if not body:
                     continue
                 frm = str(msg.get("from", ""))
-                ts = _normalize_ts(str(msg.get("delay", {}).get("stamp", "")))
+                delay = msg.get("delay") or {}
+                stamp = delay.get("stamp", "") if hasattr(delay, "get") else ""
+                if isinstance(stamp, datetime.datetime):
+                    stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
+                ts = _normalize_ts(str(stamp))
                 direction = "incoming"
                 sender = ""
                 if jid in self.groupchats:
@@ -766,7 +811,11 @@ class JabberClient:
                                       skip_existing=True)
                 stored += 1
             except Exception:
+                logger.debug("Could not parse MAM result for %s",
+                             jid, exc_info=True)
                 continue
+        logger.info("MAM returned %d results, stored %d messages for %s",
+                    len(results), stored, jid)
         return stored
 
     def _on_chatstate(self, msg) -> None:
@@ -816,7 +865,8 @@ class ContactInfo:
 class GroupChatInfo:
     """Lightweight groupchat data object."""
 
-    __slots__ = ("room", "nick", "subject", "users", "joined")
+    __slots__ = ("room", "nick", "subject", "users", "joined",
+                 "pending_history")
 
     def __init__(self, room: str, nick: str):
         self.room = room
@@ -824,3 +874,4 @@ class GroupChatInfo:
         self.subject = ""
         self.users: dict[str, dict] = {}  # {nick: {show, status, role, affiliation}}
         self.joined = False
+        self.pending_history: list = []
