@@ -307,7 +307,7 @@ class JabberClient:
         for entry in entries:
             try:
                 forwarded = entry.get("forwarded") if hasattr(entry, "get") else None
-                msg = forwarded.get("stanza") if forwarded else entry
+                msg = _forwarded_stanza(forwarded) or entry
                 body = str(msg.get("body", "") or "")
                 if not body:
                     continue
@@ -446,7 +446,10 @@ class JabberClient:
     def get_vcard(self, jid: str) -> None:
         """Request vCard for *jid*.  Fire-and-forget; result arrives via
         the ``vcard_received`` event as ``(jid, card_dict)``."""
-        requested = str(jid)
+        requested = _clean_jid(jid)
+        if not requested:
+            logger.debug("Skipping vCard request with empty JID: %r", jid)
+            return
         bare = requested.split("/", 1)[0]
         cache_key = requested if "/" in requested else bare
         cached = self._vcard_cache.get(cache_key)
@@ -680,7 +683,7 @@ class JabberClient:
                 if item is None:
                     item = muc["item"]
                 if item is not None:
-                    real_jid = str(item.get("jid", "") or item["jid"])
+                    real_jid = _clean_jid(item.get("jid", "") or item["jid"])
         except Exception:
             pass
 
@@ -733,7 +736,7 @@ class JabberClient:
         self.emit("disco_info_received", jid)
 
     def _on_vcard(self, iq, requested_jid: str = "") -> None:
-        jid = str(iq.get("from", "")) or requested_jid
+        jid = _clean_jid(iq.get("from", "")) or _clean_jid(requested_jid)
         bare = jid.split("/")[0]
         card = _parse_vcard(iq)
         card["jid"] = jid
@@ -829,7 +832,7 @@ class JabberClient:
         for result in results:
             try:
                 fwd = result.get("forwarded")
-                msg = fwd.get("stanza") if fwd else result
+                msg = _forwarded_stanza(fwd) or result
                 body = str(msg.get("body", "") or "")
                 if not body:
                     continue
@@ -884,6 +887,35 @@ def _normalize_ts(ts: str) -> str:
     if len(ts) >= 19 and ts[10] == "T":
         return ts[:19]
     return ts
+
+
+def _clean_jid(value) -> str:
+    """Normalize stanza values so None never becomes the JID ``"None"``."""
+    if value is None:
+        return ""
+    result = str(value).strip()
+    return "" if result.lower() in ("", "none", "null") else result
+
+
+def _forwarded_stanza(forwarded):
+    """Extract the inner stanza from slixmpp's XEP-0297 object."""
+    if forwarded is None:
+        return None
+    getter = getattr(forwarded, "get_stanza", None)
+    if getter is not None:
+        stanza = getter()
+        if stanza:
+            return stanza
+    try:
+        stanza = forwarded.get("stanza")
+        if stanza:
+            return stanza
+    except (AttributeError, KeyError, TypeError):
+        pass
+    try:
+        return forwarded["stanza"]
+    except (KeyError, TypeError, AttributeError):
+        return None
 
 
 # ── Data classes ──────────────────────────────────────────────────
