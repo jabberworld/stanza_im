@@ -1,0 +1,16 @@
+Titulek
+Horni: 1f1412
+Dolni: 392927
+
+Pozadí profilu
+Horni: cb9f46
+Dolni: d9c78a
+
+Roster odshora dolù
+Horni: 241a19
+Dolni: 3b2a28
+
+Okraj okna: 533b38
+Vnitøní okraj: 5e4845
+
+Barva textu: f1d09a

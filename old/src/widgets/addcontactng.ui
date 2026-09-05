@@ -1,0 +1,240 @@
+<ui version="4.0" >
+ <class>addContact</class>
+ <widget class="QDialog" name="addContact" >
+  <property name="geometry" >
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>443</width>
+    <height>512</height>
+   </rect>
+  </property>
+  <property name="windowTitle" >
+   <string>Find user</string>
+  </property>
+  <layout class="QGridLayout" >
+   <property name="margin" >
+    <number>9</number>
+   </property>
+   <property name="spacing" >
+    <number>6</number>
+   </property>
+   <item row="2" column="0" colspan="3" >
+    <layout class="QHBoxLayout" >
+     <property name="margin" >
+      <number>0</number>
+     </property>
+     <property name="spacing" >
+      <number>6</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="label_2" >
+       <property name="text" >
+        <string>Service:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="service" >
+       <property name="sizePolicy" >
+        <sizepolicy>
+         <hsizetype>7</hsizetype>
+         <vsizetype>0</vsizetype>
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="1" column="0" colspan="3" >
+    <widget class="QWidget" native="1" name="_tabBar" />
+   </item>
+   <item row="9" column="1" >
+    <widget class="QPushButton" name="addToRoster" >
+     <property name="text" >
+      <string>Add to roster</string>
+     </property>
+     <property name="autoDefault" >
+      <bool>false</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="0" colspan="3" >
+    <layout class="QHBoxLayout" >
+     <property name="margin" >
+      <number>0</number>
+     </property>
+     <property name="spacing" >
+      <number>6</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="searchLabel" >
+       <property name="text" >
+        <string>User:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="lineEdit" />
+     </item>
+     <item>
+      <widget class="QPushButton" name="search" >
+       <property name="text" >
+        <string>Search</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="add" >
+       <property name="text" >
+        <string>Add</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="8" column="0" >
+    <spacer>
+     <property name="orientation" >
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" >
+      <size>
+       <width>20</width>
+       <height>1</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="0" column="0" colspan="3" >
+    <widget class="QLabel" name="label" >
+     <property name="text" >
+      <string>&lt;!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+&lt;html>&lt;head>&lt;meta name="qrichtext" content="1" />&lt;style type="text/css">
+p, li { white-space: pre-wrap; }
+&lt;/style>&lt;/head>&lt;h2>Find user&lt;/h2>&lt;/body>&lt;/html></string>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="0" colspan="3" >
+    <widget class="QTreeWidget" name="treeWidget" >
+     <property name="sizePolicy" >
+      <sizepolicy>
+       <hsizetype>7</hsizetype>
+       <vsizetype>7</vsizetype>
+       <horstretch>0</horstretch>
+       <verstretch>100</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="rootIsDecorated" >
+      <bool>false</bool>
+     </property>
+     <column>
+      <property name="text" >
+       <string>1</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item row="3" column="0" colspan="3" >
+    <widget class="QTextBrowser" name="description" >
+     <property name="maximumSize" >
+      <size>
+       <width>16777215</width>
+       <height>70</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="0" colspan="3" >
+    <widget class="QLabel" name="empty" >
+     <property name="text" >
+      <string>No contact matching your criteria was found</string>
+     </property>
+     <property name="alignment" >
+      <set>Qt::AlignHCenter|Qt::AlignTop</set>
+     </property>
+    </widget>
+   </item>
+   <item row="9" column="2" >
+    <widget class="QPushButton" name="pushButton" >
+     <property name="text" >
+      <string>Cancel</string>
+     </property>
+     <property name="autoDefault" >
+      <bool>false</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="9" column="0" >
+    <spacer>
+     <property name="orientation" >
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="sizeHint" >
+      <size>
+       <width>218</width>
+       <height>21</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="5" column="0" colspan="3" >
+    <widget class="QLabel" name="picture" />
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>lineEdit</sender>
+   <signal>returnPressed()</signal>
+   <receiver>search</receiver>
+   <slot>click()</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>201</x>
+     <y>67</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>347</x>
+     <y>67</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>addToRoster</sender>
+   <signal>clicked()</signal>
+   <receiver>addContact</receiver>
+   <slot>accept()</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>257</x>
+     <y>375</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>194</x>
+     <y>369</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>pushButton</sender>
+   <signal>clicked()</signal>
+   <receiver>addContact</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>363</x>
+     <y>376</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>74</x>
+     <y>375</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

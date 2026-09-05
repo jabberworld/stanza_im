@@ -1,0 +1,410 @@
+# SPEC.md — Jabbim-next Specification
+
+## 1. Overview
+
+Jabbim-next is a desktop XMPP/Jabber client for Linux, inspired by the original
+Jabbim (2007-2012). It provides a classic two-panel IM experience: a roster
+(contact list) panel on the left, and a tabbed chat area on the right.
+
+**Target platform**: Linux (Debian 12+, Ubuntu 22.04+)
+**Stack**: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml
+
+## 2. Launch
+
+```bash
+python main.py           # from project root
+python -m jabbim         # as module
+```
+
+Entry point: `main.py` → `jabbim.app.run()` → creates QApplication + qasync
+event loop (`qasync.QEventLoop`), creates MainWindow, enters loop.
+
+## 3. File Structure
+
+```
+jabbim/
+├── app.py              — QApplication + qasync event loop
+├── core/
+│   ├── client.py       — XMPP client wrapper (slixmpp)
+│   └── storage.py      — Config (TOML) + JSONL chat history (XDG)
+├── ui/
+│   ├── main_window.py  — Main window (3-page stack)
+│   ├── login_widget.py — Login form + config prefill/save
+│   ├── roster_widget.py— Custom-painted contact list
+│   ├── roster_style.py — QPainter rendering strategy
+│   ├── chat_window.py  — Tab container for conversations
+│   ├── chat_widget.py  — Single chat tab (header + view + input)
+│   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
+│   ├── chat_themes.py  — Adium-style HTML generator
+│   ├── tray.py         — System tray icon
+│   └── icons.py        — LRU icon cache
+├── i18n/               — Translation dicts (en.py, ru.py)
+├── include/            — Constants (XDG paths), enumerators, utilities
+└── plugins/            — (future)
+```
+
+## 4. Configuration & Persistence
+
+Follows the XDG Base Directory spec. All files created with **0600** perms.
+
+| Path | Location |
+|------|----------|
+| Config (TOML) | `$XDG_CONFIG_HOME/jabbim/config.toml` |
+| Chat history (JSONL) | `$XDG_DATA_HOME/jabbim/history/<bare-jid>.jsonl` |
+| Cache | `$XDG_CACHE_HOME/jabbim/` |
+
+- Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
+- Password stored **plaintext** (explicit user decision); file permissions 0600
+- History appended line-by-line as JSON, one file per bare JID
+
+## 5. Main Window (`ui/main_window.py`)
+
+Layout: `QMainWindow` with a `QStackedWidget` containing three pages:
+
+| Page | Index | Content |
+|------|-------|---------|
+| Login | 0 | `LoginWidget` — JID, password, status, connect |
+| Splash | 1 | Progress bar + status label + Cancel button |
+| Roster | 2 | Status combo + search bar + `RosterWidget` in `QScrollArea` |
+
+Window properties:
+- Title: "Jabbim-next" (with unread count prefix when applicable)
+- Minimum size: 280×500, default: 300×600
+- Close button hides to tray instead of quitting
+- Tray icon always visible
+
+### 5.1 State Transitions
+
+```
+Login → (connect) → Splash → (success) → Roster
+Splash → (failure) → Login (with error message)
+Roster → (close) → Tray (hidden)
+Tray → (show) → Roster
+```
+
+## 6. Login Form (`ui/login_widget.py`)
+
+Widgets:
+- Logo image (from `resources/images/logo.png`)
+- JID input (`QLineEdit`, placeholder "user@server")
+- Password input (`QLineEdit`, echo=Password)
+- Status combo (`QComboBox`): Online, Chatty, Away, XA, DND (with icons)
+- "Save password" checkbox
+- "Auto connect" checkbox (enabled only when save is checked)
+- Connect button (default, triggers on Enter in JID/password)
+- Info/error label
+
+Signal: `login_requested(jid, password, show)`
+
+### 6.1 Config Integration
+
+- On startup, `_load_config()` prefills JID, password (if saved) and
+  auto-connect checkbox from `config.toml`
+- On connect, `_save_config()` writes lasted JID / password / status / flags
+- `should_auto_connect()` — auto-connect on launch
+
+## 6.2 Roster Events (client → UI)
+
+The XMPP client emits diff-based roster events:
+
+| Event | Description |
+|-------|-------------|
+| `roster_received(items)` | Initial roster download finished |
+| `roster_item_added(item)` | New contact (subscription change) |
+| `roster_item_removed(jid)` | Contact removed |
+
+Presence is aggregated per **bare JID** across resources — best `show` wins
+via `SHOW_ORDER`; empty/`available` normalized to `"online"`.
+
+## 7. Roster (`ui/roster_widget.py` + `ui/roster_style.py`)
+
+### 7.1 Data Model
+
+```python
+@dataclass
+class GroupItem:
+    name: str
+    expanded: bool = True
+    online_count: int = 0
+    total_count: int = 0
+
+@dataclass
+class UserItem:
+    jid: str
+    name: str
+    group: str
+    status: str = "offline"
+    status_message: str = ""
+    icon_key: str = "offline"
+    avatar_path: str | None = None
+    unread_count: int = 0
+    mood: str = ""
+    meta_parent_jid: str | None = None
+```
+
+### 7.2 Rendering
+
+Custom `paintEvent()` draws all items. No child widgets.
+
+**Group header**: Background stripe (AlternateBase), expand/collapse arrow,
+bold group name, online/total count "(3/7)" on the right.
+
+**User item**: Status icon (16×16) + avatar placeholder (24×24) + name (bold) +
+status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect).
+
+Dynamic height: 32px without status message, 52px with.
+
+### 7.3 Interactions
+
+| Action | Trigger |
+|--------|---------|
+| Expand/collapse group | Left-click on group header |
+| Select contact | Left-click on user item |
+| Open chat | Double-click on user item |
+| Context menu | Right-click on user item |
+| Search | Text in search input (filters by name/jid) |
+| Keyboard: Enter | Open chat for selected contact |
+| Keyboard: Delete | Context menu for selected contact |
+
+### 7.4 Strategy Pattern
+
+`RosterStyle` is pluggable via `set_style()`. The default renderer handles
+avatar, name, status icon, status message, unread badge.
+
+Future: hot-swappable styles from `resources/rosterstyles/`.
+
+## 8. Chat Window (`ui/chat_window.py`)
+
+### 8.1 Modes
+
+Configurable via settings (Phase 2):
+
+| Mode | Behavior |
+|------|----------|
+| Standalone | Separate `QMainWindow`, hides when no tabs |
+| Embedded | `QWidget` inside MainWindow splitter |
+
+Default: standalone.
+
+### 8.2 Tab Management
+
+- Custom `_TabBar` with middle-click close and mouse-wheel cycling
+- Close button in corner widget
+- Tab tooltip shows full JID
+- `Ctrl+1..9` for direct tab access (Phase 2)
+- `Ctrl+Tab` / `Ctrl+Shift+Tab` for next/prev (native Qt)
+- Tab label: display name (MUC: prefixed with room icon)
+
+### 8.3 Tab Lifecycle
+
+| Event | Action |
+|-------|--------|
+| Open chat | Create `ChatWidget`, add tab, focus input |
+| Close tab | Remove tab, cleanup widget |
+| Last tab closed | Hide window |
+| New incoming message | Create tab if needed, add message, blink tray |
+
+## 9. Chat Widget (`ui/chat_widget.py`)
+
+Single conversation tab. Layout:
+
+```
+┌─────────────────────────────────────┐
+│ Name Label          Status Label    │ ← contact info header
+├─────────────────────────────────────┤
+│                                     │
+│         ChatView (QWebEngine)       │ ← messages
+│                                     │
+├─────────────────────────────────────┤
+│ [Input: QTextPlainTextEdit] [Send]  │ ← input bar
+└─────────────────────────────────────┘
+```
+
+- Input: `QPlainTextEdit`, max height 60px, placeholder "Send"
+- Send on Enter (without Shift), Shift+Enter for newline
+- Signal: `message_sent(jid, body)`
+
+## 10. Chat View (`ui/chat_view.py`)
+
+### 10.1 QWebEngineView Mode (default)
+
+- Uses `QWebEngineView` + `QWebChannel` for Python↔JS communication
+- `_ChatBridge` QObject exposed to JS as "bridge"
+- Bridge methods: `on_link_clicked(url)`, `on_ft_accept(sid)`, `on_ft_reject(sid)`
+- Messages added via `page().runJavaScript()` — creates div, appends, auto-scrolls
+- Shared `QWebEngineProfile` across all views (memory optimization)
+
+### 10.2 QTextBrowser Fallback
+
+When QWebEngine is not available, falls back to `QTextBrowser` with plain HTML
+appending. No CSS themes, but functional.
+
+## 11. Chat Themes (`ui/chat_themes.py`)
+
+### 11.1 Template System
+
+Adium-compatible chat skins from `resources/chatskins/`.
+
+Default skin: `minimal-mod/`
+
+Template files:
+- `Incoming/Content.html` — first message from contact
+- `Incoming/NextContent.html` — consecutive message from same contact
+- `Outgoing/Content.html` — first message from self
+- `Outgoing/NextContent.html` — consecutive message from self
+- `Status.html` — system/status messages
+- `main.css` — base stylesheet
+- `Variants/*.css` — 27 color variant stylesheets
+
+### 11.2 Template Variables
+
+| Variable | Description |
+|----------|-------------|
+| `%sender%` | Sender display name |
+| `%message%` | Message body (HTML) |
+| `%time%` | Timestamp (hh:mm:ss) |
+| `%senderColor%` | Color for sender name |
+| `%userIconPath%` | Path to user's buddy icon |
+| `%textbackgroundcolor{0.75}%` | Background with opacity |
+
+### 11.3 Rendering Pipeline
+
+1. `ChatThemeFactory.render_message()` fills template variables
+2. `ChatView.add_message()` wraps in JSON, calls JS `addMessage`
+3. JS creates `<div>`, appends to `#chat`, scrolls to bottom
+4. Auto-scroll only if user was near bottom
+
+## 12. Tray (`ui/tray.py`)
+
+- System tray icon (built from `resources/images/apps/jabbim.svg` + PNGs via
+  `build_app_icon()`, multi-size 16/22/32/48)
+- Context menu: Show/Hide, Quit
+- Click: toggle main window visibility
+- Blinking: alternates between icon and blank every 500ms when unread messages exist
+- Notifications: `showMessage()` for connection status, errors
+
+## 13. Icon Cache (`ui/icons.py`)
+
+LRU cache for QPixmap icons:
+
+- Max 200 entries
+- 60-second stale TTL
+- Auto-eviction timer every 30 seconds
+- Methods: `get(path)`, `get_status_icon(show)`, `get_action_icon(name)`, `get_category_icon(name)`
+- Avatars NOT cached long-term — loaded on-demand in paintEvent
+
+## 14. XMPP Client (`core/client.py`)
+
+### 14.1 Architecture
+
+Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
+- xep_0054 (vCard), xep_0045 (MUC), xep_0066 (OOB), xep_0085 (Chat State)
+- xep_0184 (Receipts), xep_0224 (Attention), xep_0048 (Bookmarks)
+- xep_0050 (Ad-hoc Commands), xep_0004 (Data Forms), xep_0049 (Private XML)
+
+### 14.2 Event System
+
+```
+slixmpp event → handler → emit(event_name, *args) → UI callbacks
+```
+
+| Event Name | Arguments | Description |
+|------------|-----------|-------------|
+| session_started | — | Session established |
+| presence_changed | bare_jid, show, status | Contact presence update (agg. per bare JID) |
+| roster_received | items | Initial roster download finished |
+| roster_item_added | item | Contact added |
+| roster_item_removed | jid | Contact removed |
+| message_received | from, body, timestamp | Incoming 1-on-1 message |
+| groupchat_message | room, nick, body, ts | Incoming MUC message |
+| groupchat_presence | room, nick, show, status | MUC presence |
+| auth_failed | — | Authentication error |
+| disconnected | — | Connection lost |
+| subscribed | jid | Subscription accepted |
+| unsubscribed | jid | Unsubscribed |
+
+### 14.3 High-Level API
+
+```python
+client.connect_async()          # Connect to server
+client.disconnect()             # Graceful disconnect
+client.send_message(jid, body)  # Send 1-on-1 message
+client.send_presence(show, status)  # Set presence
+client.send_chat_state(jid, state)  # Typing indicator
+client.request_roster()         # Fetch roster
+client.get_roster_snapshot()    # Return current roster as list of ContactInfo
+client.get_contact(jid)         # Look up a contact by bare JID
+client.add_contact(jid, name)   # Add + subscribe
+client.remove_contact(jid)      # Remove + unsubscribe
+client.join_muc(room, nick)     # Join MUC room
+client.leave_muc(room)          # Leave MUC room
+client.send_muc_message(room, body)  # Send to MUC
+client.get_vcard(jid)           # Request vCard
+```
+
+### 14.4 Data Classes
+
+```python
+class ContactInfo:       # jid, name, groups, show, status, avatar_path, resources
+class GroupChatInfo:     # room, nick, subject, users
+```
+
+## 15. i18n System (`i18n/`)
+
+### 15.1 Format
+
+Python modules with `STRINGS` dict:
+
+```python
+# jabbim/i18n/en.py
+STRINGS = {
+    "status_online": "Online",
+    "login_connect": "Connect",
+    ...
+}
+```
+
+### 15.2 Usage
+
+```python
+from jabbim.i18n import tr
+label.setText(tr("status_online"))
+error.setText(tr("error_nickname_conflict"))
+```
+
+Auto-detects language from `LANG` env var. Falls back to English.
+
+## 16. Resources
+
+Copied from original Jabbim `resources/`:
+
+| Resource | Count | Reusable |
+|----------|-------|----------|
+| Status icons (16/32/48) | ~300 PNG | Yes, as-is |
+| Action icons (16/22) | ~30 PNG | Yes, as-is |
+| Category icons (16/32) | ~15 PNG | Yes, as-is |
+| App icons + SVG | ~10 files | Yes |
+| Emoticons (39 × 2 sizes) | 78 PNG + cfg | Yes |
+| Mood icons | 61 PNG + cfg | Yes |
+| Activity icons | 78 PNG + cfg | Yes |
+| Sound packs (3 × 9 WAV) | 27 WAV | Yes |
+| Chat skins (minimal-mod, candy) | HTML/CSS | Yes, directly |
+| CSS variants | 54 CSS | Yes, directly |
+| QSS themes | 8 themes | Needs Qt6 syntax update |
+| Locale .ts/.qm | 9 languages | Replaced by i18n/*.py |
+
+## 17. Phase 2 Features (planned)
+
+- vCard viewing/editing
+- PEP (User Tune, User Mood, User Activity)
+- Ad-hoc Commands
+- Privacy Lists
+- Service Discovery
+- Metacontacts
+- Bookmarks management
+- MAM (XEP-0313) — message history
+- HTTP Upload (XEP-0363) — file sending
+- Plugin system (convention-based discovery)
+- Embedded chat mode (splitter in main window)
+- Preferences dialog
+- File transfer (SI + IBB)

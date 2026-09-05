@@ -1,0 +1,18 @@
+[Desktop Entry]
+Categories=Network;InstantMessaging;Qt;
+Name=Jabbim
+Name[cs]=Jabbim
+Name[da]=Jabbim
+GenericName=Jabber IM Client
+GenericName[cs]=Jabber IM klient
+GenericName[da]=Jabber IM klient
+Comment=A user-friendly Jabber client
+Comment[cs]=Přívětivý Jabber klient
+Comment[da]=Brugervenlig Jabber klient
+Exec=jabbim
+Icon=jabbim
+StartupNotify=true
+StartupWMClass=jabbim.py
+Terminal=false
+Type=Application
+Encoding=UTF-8

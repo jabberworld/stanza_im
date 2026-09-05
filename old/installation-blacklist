@@ -1,0 +1,42 @@
+# This file contains regexps for files which are NOT to be installed into
+# /usr/share/jabbim by 'make install'
+# The whole relative path is matched against them and it must match exactly
+# (imagine a $ at the end of every regex here)
+.*\.py[co]
+.*\.pro
+.*\.orig
+epydoc\.cfg
+installation-blacklist
+install-files\.py
+jabbim
+jabbim\.(in|sh)
+ui2py\.py
+images/32x32/status/rsvg2png.sh
+Makefile
+# playground, not parts of Jabbim:
+(gui-)?test.py
+highlighter.py
+paint(\.py|\.ui|_ui\.py)
+# dot-files and directories (catches .svn and .git directories):
+(.*/)?\..*
+# qm files suffice for end use:
+locales/[^/]+\.ts
+plugins/[^/]+/[^/]+\.ts
+# Do not install internal copies of standard modules,
+# packagers must declare the right dependencies.
+# python-configobj:
+(.*/)?configobj.py
+# This only contains useful information about installing:
+README
+# These are supposed to be handled specially by packagers:
+AUTHORS
+COPYING
+jabbim\.desktop
+# not sure if this file is currently needed at all (jabbim.py itself
+# understands the --uri parameter), but it surely is of no use to install it
+# under /usr/share/jabbim:
+plugins/remote/jabbim_remote.py
+# Jabbim never uses SVGs directly, it uses PNG generated from them.
+.*\.svg
+# *.ui are just sources for generated *.py files
+.*\.ui

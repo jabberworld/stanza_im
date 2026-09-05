@@ -1,0 +1,300 @@
+<ui version="4.0" >
+ <class>joingroupchat</class>
+ <widget class="QDialog" name="joingroupchat" >
+  <property name="geometry" >
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>375</width>
+    <height>380</height>
+   </rect>
+  </property>
+  <property name="windowTitle" >
+   <string>Join Chat Room</string>
+  </property>
+  <layout class="QGridLayout" >
+   <property name="margin" >
+    <number>9</number>
+   </property>
+   <property name="spacing" >
+    <number>6</number>
+   </property>
+   <item row="3" column="0" >
+    <spacer>
+     <property name="orientation" >
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0" >
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="0" column="0" >
+    <widget class="QLabel" name="label" >
+     <property name="maximumSize" >
+      <size>
+       <width>48</width>
+       <height>48</height>
+      </size>
+     </property>
+     <property name="text" >
+      <string/>
+     </property>
+     <property name="pixmap" >
+      <pixmap>:/images/48x48/categories/conferences.png</pixmap>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1" >
+    <widget class="QLabel" name="label_2" >
+     <property name="text" >
+      <string>Chat rooms allow you to chat with more users in one window.</string>
+     </property>
+     <property name="wordWrap" >
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="0" colspan="2" >
+    <widget class="QGroupBox" name="groupBox" >
+     <property name="title" >
+      <string>Join the chat room</string>
+     </property>
+     <layout class="QVBoxLayout" >
+      <property name="spacing" >
+       <number>6</number>
+      </property>
+      <property name="margin" >
+       <number>9</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" >
+        <property name="spacing" >
+         <number>6</number>
+        </property>
+        <property name="margin" >
+         <number>0</number>
+        </property>
+        <item>
+         <layout class="QVBoxLayout" >
+          <property name="spacing" >
+           <number>6</number>
+          </property>
+          <property name="margin" >
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="label_3" >
+            <property name="text" >
+             <string>Your nickname:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_4" >
+            <property name="text" >
+             <string>Room name:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_5" >
+            <property name="text" >
+             <string>Room server:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_6" >
+            <property name="text" >
+             <string>Password:</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" >
+          <property name="spacing" >
+           <number>6</number>
+          </property>
+          <property name="margin" >
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLineEdit" name="nickname" />
+          </item>
+          <item>
+           <widget class="QLineEdit" name="roomName" />
+          </item>
+          <item>
+           <widget class="QComboBox" name="serverName" >
+            <property name="editable" >
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="password" />
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="2" column="0" colspan="2" >
+    <widget class="QGroupBox" name="groupBox_2" >
+     <property name="title" >
+      <string>Bookmark</string>
+     </property>
+     <layout class="QGridLayout" >
+      <property name="margin" >
+       <number>9</number>
+      </property>
+      <property name="spacing" >
+       <number>6</number>
+      </property>
+      <item row="1" column="0" >
+       <layout class="QHBoxLayout" >
+        <property name="spacing" >
+         <number>6</number>
+        </property>
+        <property name="margin" >
+         <number>0</number>
+        </property>
+        <item>
+         <widget class="QLabel" name="bookmarkNameLabel" >
+          <property name="text" >
+           <string>Bookmark name:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="bookmarkName" />
+        </item>
+       </layout>
+      </item>
+      <item row="0" column="0" >
+       <widget class="QCheckBox" name="bookmarkChat" >
+        <property name="text" >
+         <string>Bookmark this chat room</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" >
+       <widget class="QCheckBox" name="autojoin" >
+        <property name="text" >
+         <string>Join this chat room automaticaly at login</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="4" column="0" colspan="2" >
+    <layout class="QGridLayout" name="buttons" >
+     <property name="spacing" >
+      <number>6</number>
+     </property>
+     <item row="0" column="0" >
+      <widget class="QPushButton" name="browser" >
+       <property name="text" >
+        <string>Browse chat rooms</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1" >
+      <widget class="QDialogButtonBox" name="buttonBox" >
+       <property name="orientation" >
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="standardButtons" >
+        <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <tabstops>
+  <tabstop>nickname</tabstop>
+  <tabstop>roomName</tabstop>
+  <tabstop>password</tabstop>
+  <tabstop>bookmarkChat</tabstop>
+  <tabstop>bookmarkName</tabstop>
+  <tabstop>autojoin</tabstop>
+ </tabstops>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>accepted()</signal>
+   <receiver>joingroupchat</receiver>
+   <slot>accept()</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>237</x>
+     <y>355</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>368</x>
+     <y>258</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>joingroupchat</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>319</x>
+     <y>355</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>367</x>
+     <y>205</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>bookmarkChat</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>bookmarkName</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>114</x>
+     <y>213</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>162</x>
+     <y>249</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>bookmarkChat</sender>
+   <signal>toggled(bool)</signal>
+   <receiver>autojoin</receiver>
+   <slot>setEnabled(bool)</slot>
+   <hints>
+    <hint type="sourcelabel" >
+     <x>119</x>
+     <y>218</y>
+    </hint>
+    <hint type="destinationlabel" >
+     <x>120</x>
+     <y>272</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

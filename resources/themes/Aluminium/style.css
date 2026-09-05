@@ -1,0 +1,68 @@
+QWidget, QDialog { background: #fff url(themes/Aluminium/metal.png) top center; }
+QDialog QWidget { background: transparent; }
+QLabel, QCheckBox { background: transparent;  color: #444; }
+QLineEdit { border: 2px groove #999; border-radius: 10px; background: #fff; padding: 0px 4px; }
+QGroupBox { border: 2px groove #999; border-radius: 4px; margin-top: 10px; }
+QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding: 0 4px; }
+QTextEdit { border: 2px groove #999; border-radius: 4px; background: rgba(255,255,255,20%); }
+QSplitter::handle:horizontal { image: url(themes/Aluminium/splitter_horizontal.png); }
+QSplitter::handle:vertical { image: url(themes/Aluminium/splitter_vertical.png); }
+
+/* scrollbar */
+QScrollBar:vertical, #splitter QScrollBar:vertical, #splitter_2 QScrollBar:vertical { border: 1px solid #888; border-bottom: 0px; border-top: 0px; background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #aaa, stop: 0.4 #eee, stop: 1.0 #fff); width: 13px; margin: 15px 0 15px 0; }
+QScrollBar::handle:vertical { background: url(themes/Aluminium/handlebar_vertical.png) repeat-y top left; border-top: 1px solid #555; border-bottom: 1px solid #555; border-radius: 6px; min-height: 20px; }
+QScrollBar::add-line:vertical { border: 1px solid #888; border-top: 0px; background: #fff; height: 15px; subcontrol-position: bottom; subcontrol-origin: margin; }
+QScrollBar::sub-line:vertical { border: 1px solid #888; border-bottom: 0px; background: #fff; height: 15px; subcontrol-position: top; subcontrol-origin: margin; }
+QScrollBar::up-arrow:vertical { background: url(themes/Aluminium/arrow_up.png) no-repeat center center; }
+QScrollBar::down-arrow:vertical { background: url(themes/Aluminium/arrow_down.png) no-repeat center center; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+QScrollBar:horizontal, #splitter QScrollBar:horizontal, #splitter_2 QScrollBar:horizontal { border: 1px solid #888; border-left: 0px; border-right: 0px; background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #aaa, stop: 0.4 #eee, stop: 1.0 #fff); height: 13px; margin: 0px 15px 0 15px; }
+QScrollBar::handle:horizontal { background: url(themes/Aluminium/handlebar_horizontal.png) repeat-x top left; border-left: 1px solid #555; border-right: 1px solid #555; border-radius: 6px; min-width: 20px; }
+QScrollBar::add-line:horizontal { border: 1px solid #888; border-right: 0px; background: #fff; width: 15px; subcontrol-position: left; subcontrol-origin: margin; }
+QScrollBar::sub-line:horizontal { border: 1px solid #888; border-left: 0px; background: #fff; width: 15px; subcontrol-position: right; subcontrol-origin: margin; }
+QScrollBar::right-arrow:horizontal { background: url(themes/Aluminium/arrow_left.png) no-repeat center center; }
+QScrollBar::left-arrow:horizontal { background: url(themes/Aluminium/arrow_right.png) no-repeat center center; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+QTextBrowser { background: rgba(255,255,255,20%); }
+
+/* menu */
+QWidget QMenuBar::item, QMenuBar#menubar::item { background: transparent; font-weight: bold; }
+QWidget QMenu { background: #fff url(themes/Aluminium/metal.png) top center; } 
+QWidget QMenu:selected { background: #52b6ff; }
+QWidget QMenu::separator { background: #ddd; height: 1px; margin: 0px 5px; }
+
+/* roster */
+QWidget#rosterTab > QWidget#rosterWidget > QWidget{ border:0; background: transparent; }
+QTreeWidget#rosterView{ background: transparent;  }
+QWidget#selectedItemStyle{ border: 0px; color:rgba(160,169,255,50%); background: rgba(160,190,255,20%); }
+QWidget#groupStyleWidget { background: rgba(160,190,255,50%); }
+QWidget#userStyleWidget { background-color:rgba(0,0,0,0); }
+QWidget QTreeWidget, QWidget QListWidget { border: 2px groove #bbb; border-radius: 4px; background: rgba(255,255,255,20%); }
+
+
+/* tabs */
+QTabWidget#tabWidget::pane, QTabWidget::pane { border-top: 2px groove #bbb; }
+QTabWidget#tabWidget::tab-bar, QTabWidget::tab-bar { left: 10px; }
+QTabBar { background: transparent; }
+QTabWidget#tabWidget > QTabBar::tab, QTabBar::tab {background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #eee, stop: 0.4 #e0e0e0, stop: 0.5 #D8D8D8, stop: 1.0 #eee); border: 1px solid #ccc; border-bottom: 0px; border-top-left-radius: 4px; border-top-right-radius: 4px; min-width: 32px; padding: 4px 4px 0px 4px;  margin: 0px 0px 2px 0px; }
+QTabWidget#tabWidget > QTabBar::tab:selected, QTabWidget#tabWidget > QTabBar::tab:hover { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #fff, stop: 0.4 #f4f4f4, stop: 0.5 #e7e7e7, stop: 1.0 #fff); }
+QTabWidget#tabWidget > QTabBar::tab:selected, QTabBar::tab:selected { border-color: #ccc; }
+QTabWidget#tabWidget > QTabBar::tab:!selected, QTabBar::tab:!selected { margin-top: 4px; }
+QTabWidget#tabWidget > QTabBar::tab:selected, QTabBar::tab:selected { margin-left: -1px; margin-right: -1px; }
+QTabWidget#tabWidget > QTabBar::tab:first:selected, QTabBar::tab:first:selected { margin-left: 0; }
+QTabWidget#tabWidget > QTabBar::tab:last:selected, QTabBar::tab:last:selected { margin-right: 0; }
+QTabWidget#tabWidget > QTabBar::tab:only-one, QTabBar::tab:only-one { margin: 0; }
+
+/* groupchat */
+#groupchatwidget QWidget, #chatwidget QWidget { background: transparent; }
+#groupchatwidget #users, #chatwidget #users { background: rgba(255,255,255,20%); }
+#groupchatwidget #viewWidget, #chatwidget #viewWidget { background: rgba(255,255,255,50%); }
+
+/* other */
+QTextBrowser#info { border: 0px; color: #555; }
+QLabel#selfName { margin-left:15px; }
+QWidget#frame, #statusWidget { border: 0px; }
+#statusMessage { border: 2px groove #bbb; border-radius: 6px; padding: 2px; }
+QToolButton#statusWidget::menu-indicator { image: url(); }
+QTextEdit#line { background: rgba(255,255,255,40%); }
