@@ -31,6 +31,20 @@ def format_time_short(timestamp: float | None = None) -> str:
     return f"{h:02d}:{m:02d}"
 
 
+def ts_to_time(ts: str | None) -> str:
+    """Trim a stored ``YYYY-MM-DDTHH:MM:SS`` timestamp to *hh:mm:ss*."""
+    if ts is None:
+        return format_time()
+    if not isinstance(ts, str):
+        if hasattr(ts, "strftime"):
+            ts = ts.strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            ts = str(ts)
+    if len(ts) >= 19 and ts[10] == "T":
+        return ts[11:19]
+    return ts or format_time()
+
+
 def get_os_info() -> str:
     """Return a short OS description string for XEP-0092."""
     return f"{platform.system()} {platform.release()}"

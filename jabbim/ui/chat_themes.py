@@ -34,6 +34,19 @@ def _webchannel_script() -> str:
 document.addEventListener('DOMContentLoaded', function () {{
     new QWebChannel(qt.webChannelTransport, function (channel) {{
         window.bridge = channel.objects.bridge;
+        var last = 0;
+        function onScroll() {{
+            var now = Date.now();
+            if (now - last < 120) return;
+            last = now;
+            var st = window.scrollY || 0;
+            var sh = document.body.scrollHeight;
+            var ih = window.innerHeight;
+            var max = Math.max(1, sh - ih);
+            window.bridge.on_scroll_fraction(Math.min(1, st / max));
+            if (st <= ih) window.bridge.on_near_top();
+        }}
+        window.addEventListener('scroll', onScroll);
     }});
 }});
 document.addEventListener('click', function (e) {{

@@ -23,6 +23,8 @@ if HAS_WEBENGINE:
         link_clicked = QtCore.pyqtSignal(str)
         file_transfer_accept = QtCore.pyqtSignal(str)
         file_transfer_reject = QtCore.pyqtSignal(str)
+        near_top = QtCore.pyqtSignal()
+        scroll_fraction = QtCore.pyqtSignal(float)
 
         @QtCore.pyqtSlot(str)
         def on_link_clicked(self, url: str):
@@ -36,16 +38,28 @@ if HAS_WEBENGINE:
         def on_ft_reject(self, sid: str):
             self.file_transfer_reject.emit(sid)
 
+        @QtCore.pyqtSlot()
+        def on_near_top(self):
+            self.near_top.emit()
+
+        @QtCore.pyqtSlot(float)
+        def on_scroll_fraction(self, fraction: float):
+            self.scroll_fraction.emit(fraction)
+
     class ChatView(QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
         link_clicked = QtCore.pyqtSignal(str)
+        near_top = QtCore.pyqtSignal()
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
             self._theme = theme
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
+            self._bridge.near_top.connect(self.near_top)
+            self._fraction = 1.0
+            self._bridge.scroll_fraction.connect(self._set_fraction)
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -67,14 +81,18 @@ if HAS_WEBENGINE:
                 for chunk in pending:
                     self._append_chunk(chunk)
 
+        def _set_fraction(self, fraction: float):
+            self._fraction = float(fraction) if fraction == fraction else 1.0
+
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
             js = f"""
             var chat = document.getElementById('chat');
-            if (!chat) return;
-            var div = document.createElement('div');
-            div.innerHTML = {safe};
-            chat.appendChild(div);
+            if (chat) {{
+                var div = document.createElement('div');
+                div.innerHTML = {safe};
+                chat.appendChild(div);
+            }}
             window.scrollTo(0, document.body.scrollHeight);
             """
             self.page().runJavaScript(js)
@@ -121,17 +139,55 @@ if HAS_WEBENGINE:
         def evaluate_js(self, code: str):
             self.page().runJavaScript(code)
 
+        def scroll_to_bottom(self):
+            self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
+
+        def scroll_fraction(self) -> float:
+            return self._fraction
+
+        def set_scroll_fraction(self, fraction: float):
+            fraction = max(0.0, min(1.0, float(fraction)))
+            js = (
+                "requestAnimationFrame(function(){"
+                "  document.body.scrollTop;"
+                "  window.scrollTo(0, %r * Math.max(0, "
+                "    document.body.scrollHeight - window.innerHeight));"
+                "});" % fraction
+            )
+            self.evaluate_js(js)
+
 else:
     # Fallback: QTextBrowser when QWebEngine is not available
     class ChatView(QtWidgets.QTextBrowser):
         """Fallback chat display using QTextBrowser (no CSS themes)."""
 
         link_clicked = QtCore.pyqtSignal(str)
+        near_top = QtCore.pyqtSignal()
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
             self._theme = theme
-            self.setOpenExternalLinks(True)
+            self.setOpenExternalLinks(False)
+            self.anchorClicked.connect(
+                lambda url: self.link_clicked.emit(url.toString()))
+            self._near_top_hit = False
+            self._fraction = 1.0
+
+        def scrollContentsBy(self, dx: int, dy: int) -> None:
+            super().scrollContentsBy(dx, dy)
+            self._check_scroll()
+
+        def _check_scroll(self):
+            vbar = self.verticalScrollBar()
+            span = max(1, vbar.maximum() - vbar.minimum())
+            self._fraction = (vbar.value() - vbar.minimum()) / span
+            offset = vbar.value() - vbar.minimum()
+            if offset <= vbar.pageStep():
+                if not self._near_top_hit:
+                    self._near_top_hit = True
+                    self.near_top.emit()
+            else:
+                self._near_top_hit = False
 
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
@@ -147,9 +203,24 @@ else:
 
         def clear(self):
             super().clear()
+            self._near_top_hit = False
+            self._fraction = 1.0
 
         def evaluate_js(self, code: str):
             pass
 
         def load_theme(self, variant: str = ""):
             pass
+
+        def scroll_to_bottom(self):
+            vbar = self.verticalScrollBar()
+            vbar.setValue(vbar.maximum())
+
+        def scroll_fraction(self) -> float:
+            return self._fraction
+
+        def set_scroll_fraction(self, fraction: float):
+            fraction = max(0.0, min(1.0, float(fraction)))
+            vbar = self.verticalScrollBar()
+            vbar.setValue(vbar.minimum()
+                          + fraction * (vbar.maximum() - vbar.minimum()))

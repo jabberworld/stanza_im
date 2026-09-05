@@ -6,4 +6,3 @@ dist/
 .venv/
 venv/
 *.deb
-core

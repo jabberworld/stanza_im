@@ -14,7 +14,7 @@ import time
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from jabbim.i18n import tr, load as load_i18n
-from jabbim.include.avatars import parse_vcard_photo, save_avatar
+from jabbim.include.avatars import save_avatar
 from jabbim.include.enumerators import populate_translations, show_to_icon_key
 from jabbim.include.constants import APP_NAME, VERSION
 from jabbim.core.storage import Config
@@ -61,6 +61,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
+        self._chat_window.clear_history_requested.connect(self._on_clear_history)
+        self._chat_window.server_history_requested.connect(self._on_server_history)
+        self._chat_window.bookmark_toggled.connect(self._toggle_bookmark)
         self._chat_window.hide()
 
         # ── Tray ─────────────────────────────────────────────────
@@ -79,8 +82,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── State ────────────────────────────────────────────────
         self._visible = True
         self._unread_total = 0
-        self._muc_users: dict[str, set[str]] = {}
+        self._muc_users: dict[str, dict[str, dict]] = {}
+        self._muc_self_nicks: dict[str, str] = {}
+        self._conference_roster: set[str] = set()
+        self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
+        self._pending_profile: set[str] = set()
 
         self._chat_window.typing_changed.connect(self._on_typing_local)
 
@@ -158,7 +165,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     def _build_menu(self):
-        """Application menu bar: File (contacts, rooms, preferences) + Help."""
+        """Application menu bar: file actions, bookmarks and help."""
         menubar = self.menuBar()
 
         file_menu = menubar.addMenu(tr("menu_file"))
@@ -166,12 +173,17 @@ class MainWindow(QtWidgets.QMainWindow):
         add_contact.triggered.connect(self._on_add_contact)
         join_room = file_menu.addAction(tr("menu_join_groupchat"))
         join_room.triggered.connect(self._on_join_groupchat_dialog)
+        my_vcard = file_menu.addAction(tr("menu_edit_my_vcard"))
+        my_vcard.triggered.connect(self._edit_my_vcard)
         file_menu.addSeparator()
         prefs = file_menu.addAction(tr("menu_preferences"))
         prefs.triggered.connect(self._on_preferences)
         file_menu.addSeparator()
         quit_act = file_menu.addAction(tr("menu_quit"))
         quit_act.triggered.connect(self._quit)
+
+        self._bookmarks_menu = menubar.addMenu(tr("menu_bookmarks"))
+        self._bookmarks_menu.aboutToShow.connect(self._refresh_bookmarks_menu)
 
         help_menu = menubar.addMenu(tr("menu_help"))
         about = help_menu.addAction(tr("menu_about"))
@@ -206,25 +218,192 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._join_muc(room.strip(), nick.strip())
 
-    def _join_muc(self, room: str, nick: str):
+    def _refresh_bookmarks_menu(self):
+        """Refresh the server-side conference bookmarks before displaying it."""
+        self._bookmarks_menu.clear()
+        if not self._client:
+            action = self._bookmarks_menu.addAction(tr("menu_bookmarks_empty"))
+            action.setEnabled(False)
+            return
+        loading = self._bookmarks_menu.addAction(tr("bookmarks_loading"))
+        loading.setEnabled(False)
+        self._start_task(self._load_bookmarks())
+
+    async def _load_bookmarks(self):
+        bookmarks = await self._client.list_bookmarks()
+        self._bookmarks = {item["jid"]: item for item in bookmarks}
+        self._rebuild_bookmarks_menu()
+        for room in self._muc_self_nicks:
+            chat = self._chat_window.get_chat(room)
+            if chat:
+                chat.set_bookmarked(room in self._bookmarks)
+
+    def _rebuild_bookmarks_menu(self):
+        self._bookmarks_menu.clear()
+        if not self._bookmarks:
+            action = self._bookmarks_menu.addAction(tr("menu_bookmarks_empty"))
+            action.setEnabled(False)
+            return
+        for room, bookmark in sorted(self._bookmarks.items()):
+            label = room.split("@", 1)[0]
+            submenu = self._bookmarks_menu.addMenu(label)
+            join = submenu.addAction(tr("bookmark_join"))
+            join.triggered.connect(
+                lambda checked=False, item=bookmark: self._join_bookmark(item))
+            auto = submenu.addAction(tr("bookmark_autojoin"))
+            auto.setCheckable(True)
+            auto.setChecked(bool(bookmark.get("autojoin")))
+            auto.toggled.connect(
+                lambda value, item=bookmark: self._set_bookmark_autojoin(item, value))
+            remove = submenu.addAction(tr("bookmark_remove"))
+            remove.triggered.connect(
+                lambda checked=False, jid=room: self._remove_bookmark(jid))
+
+    def _join_bookmark(self, bookmark: dict):
+        room = bookmark.get("jid", "")
+        if not room:
+            return
+        nick = bookmark.get("nick", "") or self._client.jid_str.split("@", 1)[0]
+        self._join_muc(room, nick, bookmark.get("password", ""))
+
+    def _set_bookmark_autojoin(self, bookmark: dict, autojoin: bool):
+        if not self._client:
+            return
+        bookmark["autojoin"] = bool(autojoin)
+        self._start_task(self._client.save_bookmark(
+            bookmark["jid"], bookmark.get("nick", ""),
+            bookmark.get("password", ""), autojoin=autojoin))
+
+    def _remove_bookmark(self, room: str):
+        if not self._client:
+            return
+        self._bookmarks.pop(room, None)
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            chat.set_bookmarked(False)
+        self._start_task(self._client.remove_bookmark(room))
+        self._rebuild_bookmarks_menu()
+
+    def _toggle_bookmark(self, room: str):
+        if not self._client:
+            return
+        if room in self._bookmarks:
+            self._remove_bookmark(room)
+            return
+        nick = self._muc_self_nicks.get(room, self._client.jid_str.split("@", 1)[0])
+        bookmark = {"jid": room, "nick": nick, "password": "", "autojoin": False}
+        self._bookmarks[room] = bookmark
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            chat.set_bookmarked(True)
+        self._start_task(self._client.save_bookmark(
+            room, nick, "", autojoin=False))
+
+    def _sync_conference_roster(self, room: str):
+        """Represent an active MUC using the normal roster row renderer."""
+        if not self._client or room not in self._muc_self_nicks:
+            return
+        nick = self._muc_self_nicks[room]
+        info = self._muc_users.get(room, {}).get(nick, {})
+        contact = self._client.get_contact(room)
+        status = info.get("show", "online") or "online"
+        status_message = info.get("status", "")
+        self._roster.remove_user(room)
+        self._roster.add_user(UserItem(
+            jid=room,
+            name=room.split("@", 1)[0],
+            group=tr("roster_group_conferences"),
+            status=status,
+            status_message=status_message,
+            icon_key=status if status in ("online", "chat", "away", "xa", "dnd", "offline")
+            else "online",
+            avatar_path=getattr(contact, "avatar_path", None),
+        ))
+        self._conference_roster.add(room)
+        self._roster.sort_and_update()
+
+    def _sync_all_conference_roster(self):
+        for room in self._muc_self_nicks:
+            self._sync_conference_roster(room)
+
+    def _join_muc(self, room: str, nick: str, password: str = ""):
         if not self._client:
             return
         display_name = room.split("@")[0]
-        if not self._chat_window.has_chat(room):
+        is_new = not self._chat_window.has_chat(room)
+        if is_new:
             self._chat_window.open_groupchat(room, nick, display_name)
-        self._muc_users.setdefault(room, set()).add(nick)
-        self._client.join_muc(room, nick)
+        self._muc_self_nicks[room] = nick
+        self._muc_users.setdefault(room, {})[nick] = {
+            "nick": nick, "show": "online", "status": "",
+            "role": "", "affiliation": "",
+        }
+        self._client.join_muc(room, nick, password=password, save_bookmark=False)
         chat = self._chat_window.get_chat(room)
         if chat:
+            if is_new:
+                self._load_history(room)
+            chat.set_self_nick(nick)
+            chat.update_muc_users(list(self._muc_users[room].values()),
+                                  self_nick=nick)
             from jabbim.include.utils import format_time
             chat.add_status(f"Joined as {nick}", format_time())
+            chat.set_bookmarked(room in self._bookmarks)
+        self._request_vcard(room)
+        self._sync_conference_roster(room)
 
     def _on_muc_leave(self, room: str):
         if self._client:
             self._client.leave_muc(room)
         self._muc_users.pop(room, None)
+        self._muc_self_nicks.pop(room, None)
+        if room in self._conference_roster:
+            self._roster.remove_user(room)
+            self._conference_roster.discard(room)
+            self._roster.sort_and_update()
         from jabbim.core import history
         history.close(room)
+
+    def _on_muc_joined(self, room: str, subject: str, occupants):
+        chat = self._chat_window.get_chat(room)
+        if not chat:
+            info = self._client.groupchats.get(room) if self._client else None
+            nick = info.nick if info else self._client.jid_str.split("@", 1)[0]
+            self._muc_self_nicks[room] = nick
+            chat = self._chat_window.open_groupchat(
+                room, nick, room.split("@", 1)[0])
+            self._load_history(room)
+            self._request_vcard(room)
+        users = self._muc_users.setdefault(room, {})
+        for occ in occupants or []:
+            if isinstance(occ, str):
+                nick = occ
+            elif isinstance(occ, (tuple, list)) and occ:
+                nick = occ[0]
+            else:
+                nick = str(occ)
+            users.setdefault(nick, {
+                "nick": nick, "show": "online", "status": "",
+                "role": "", "affiliation": "",
+            })
+        self_nick = self._muc_self_nicks.get(room, "")
+        chat.set_self_nick(self_nick)
+        chat.update_muc_users(list(users.values()), self_nick=self_nick)
+        title = subject or ""
+        title += (" · " if title else "") + tr("muc_participants_count",
+                                               n=len(users))
+        chat.set_status_text(title)
+        chat.set_bookmarked(room in self._bookmarks)
+        self._sync_conference_roster(room)
+
+    def _on_muc_join_error(self, room: str, condition: str, code: str):
+        chat = self._chat_window.get_chat(room)
+        if not chat:
+            return
+        from jabbim.include.utils import format_time
+        message = (tr("muc_join_waiting") if condition == "timeout"
+                   else tr("muc_join_failed", reason=condition or code))
+        chat.add_status(message, format_time())
 
     def _on_preferences(self):
         from jabbim.ui.preferences import PreferencesDialog
@@ -305,6 +484,9 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("vcard_received", self._on_vcard_received)
         c.on("typing", self._on_typing)
         c.on("receipt_delivered", self._on_receipt_delivered)
+        c.on("muc_joined", self._on_muc_joined)
+        c.on("muc_join_error", self._on_muc_join_error)
+        c.on("mam_unavailable", self._on_mam_unavailable)
         # roster removals are delivered via roster_item_removed (from client)
 
     def _on_session_started(self):
@@ -330,6 +512,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_roster_received(self, items):
         """Full roster arrived (initial load or server refresh)."""
         self._rebuild_roster(items)
+        self._sync_all_conference_roster()
         self._roster.sort_and_update()
 
     def _on_roster_item_added(self, item):
@@ -367,21 +550,85 @@ class MainWindow(QtWidgets.QMainWindow):
         self._request_vcard(jid)
 
     def _request_vcard(self, jid: str):
-        """Ask the server for *jid*'s vCard once per session (best-effort)."""
-        if not self._client or jid in self._vcard_requested:
+        """Request a cached or fresh vCard; the client enforces the TTL."""
+        if not self._client:
             return
         self._vcard_requested.add(jid)
         self._client.get_vcard(jid)
 
-    def _on_vcard_received(self, jid: str, iq):
-        raw = parse_vcard_photo(iq)
-        if not raw:
+    def _on_vcard_received(self, jid: str, card: dict):
+        path = card.get("avatar_path") or ""
+        raw = card.get("photo")
+        if raw:
+            try:
+                path = save_avatar(jid, raw)
+            except Exception:
+                path = ""
+        if path:
+            contact = self._client.get_contact(jid) if self._client else None
+            if contact:
+                contact.avatar_path = path
+            self._roster.update_user(jid, avatar_path=path)
+        if jid in self._conference_roster:
+            self._sync_conference_roster(jid)
+        for room, users in self._muc_users.items():
+            changed = False
+            for info in users.values():
+                if info.get("real_jid", "").split("/", 1)[0] == jid:
+                    info["avatar_jid"] = jid
+                    info["avatar_path"] = path
+                    changed = True
+            if changed:
+                chat = self._chat_window.get_chat(room)
+                if chat:
+                    chat.update_muc_users(
+                        list(users.values()),
+                        self_nick=self._muc_self_nicks.get(room, ""))
+                    chat.refresh_avatars()
+        if jid in self._pending_profile:
+            self._pending_profile.discard(jid)
+            self._open_vcard_info(jid, card)
+
+    def _open_vcard_info(self, jid: str, card: dict):
+        from jabbim.ui.vcard_dialog import VCardInfoDialog
+        dlg = VCardInfoDialog(jid, card)
+        dlg.exec()
+
+    def _show_profile(self, jid: str):
+        """Show the contact's vCard (fetching it if not yet known)."""
+        if not self._client:
             return
-        path = save_avatar(jid, raw)
         contact = self._client.get_contact(jid) if self._client else None
-        if contact:
-            contact.avatar_path = path
-        self._roster.update_user(jid, avatar_path=path)
+        card = getattr(contact, "vcard", None) if contact else None
+        if isinstance(card, dict) and (card.get("fn") or card.get("nickname") or card.get("email")):
+            self._open_vcard_info(jid, card)
+        else:
+            self._pending_profile.add(jid)
+            self._request_vcard(jid)
+
+    def _edit_my_vcard(self):
+        if not self._client:
+            return
+        self._start_task(self._fetch_and_edit_my_vcard())
+
+    async def _fetch_and_edit_my_vcard(self):
+        from jabbim.include.vcard import parse_vcard
+        from jabbim.ui.vcard_dialog import VCardEditDialog
+        my = self._client.jid_str
+        card = {}
+        try:
+            iq = await self._client.xmpp.plugin["xep_0054"].get_vcard(my)
+            card = parse_vcard(iq)
+        except Exception:
+            pass
+        if isinstance(card, dict) and "jid" in card:
+            card["jid"] = my
+        dlg = VCardEditDialog(card or {"jid": my})
+        if not dlg.exec():
+            return
+        await self._client.set_own_vcard(dlg.collect())
+        QtWidgets.QMessageBox.information(self, APP_NAME,
+                                          tr("vcard_saved"))
 
     def _recount_groups(self):
         """Recount online/total per group after presence changes."""
@@ -417,6 +664,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_contact_open(self, jid: str):
         display_name = self._roster_name(jid) or jid.split("@")[0]
+        if jid in self._muc_self_nicks:
+            self._chat_window.open_groupchat(
+                jid, self._muc_self_nicks[jid], display_name)
+            return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)
         if is_new:
@@ -436,20 +687,88 @@ class MainWindow(QtWidgets.QMainWindow):
             limit = int(self._config.chat.history_limit)
         except (TypeError, ValueError):
             limit = 200
-        for entry in history.load_history(jid, limit=limit):
-            ts = entry.get("timestamp", "")
-            timestamp = ts[11:19] if isinstance(ts, str) and len(ts) >= 19 else ""
-            chat.add_message(sender=entry.get("sender", "") or "Me",
-                             body=entry.get("body", ""),
-                             timestamp=timestamp,
-                             direction=entry.get("direction", "incoming"))
+        entries = history.load_history(jid, limit=limit)
+        exhausted = bool(entries) and bool(entries[0].get("id")) \
+            and not history.older_available(jid, entries[0]["id"])
+        chat.set_history(entries, limit, exhausted)
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
-        menu.addAction("Open Chat", lambda: self._on_contact_open(jid))
+        menu.addAction(tr("ctx_open_chat"), lambda: self._on_contact_open(jid))
+        menu.addAction(tr("ctx_view_profile"), lambda: self._show_profile(jid))
         menu.addSeparator()
-        menu.addAction("Remove Contact", lambda: self._on_remove_contact(jid))
+        menu.addAction(tr("ctx_rename"), lambda: self._rename_contact(jid))
+        menu.addAction(tr("ctx_move_group"), lambda: self._move_to_group(jid))
+        if self._client:
+            menu.addAction(tr("ctx_resend_auth"),
+                           lambda: self._client.resend_subscription(jid))
+        menu.addSeparator()
+        menu.addAction(tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
+        menu.addAction(tr("ctx_remove_contact"), lambda: self._on_remove_contact(jid))
         menu.exec(pos)
+
+    def _rename_contact(self, jid: str):
+        if not self._client:
+            return
+        current = self._roster_name(jid) or jid.split("@")[0]
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, tr("ctx_rename"), tr("ctx_rename_prompt"), text=current)
+        if not ok:
+            return
+        name = name.strip()
+        self._client.update_contact(jid, name=name)
+        self._roster.update_user(jid, name=name)
+
+    def _move_to_group(self, jid: str):
+        if not self._client:
+            return
+        group, ok = QtWidgets.QInputDialog.getText(
+            self, tr("ctx_move_group"), tr("ctx_move_group_prompt"))
+        if not ok:
+            return
+        groups = [g.strip() for g in group.strip().split(",") if g.strip()]
+        self._client.update_contact(jid, groups=groups)
+
+    def _on_clear_history(self, jid: str):
+        from jabbim.core import history
+        history.clear(jid)
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.history_cleared()
+
+    def _on_server_history(self, jid: str, since: str = ""):
+        """Load the whole server-side conversation into the chat window."""
+        if not self._client:
+            return
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            from jabbim.include.utils import format_time
+            chat.add_status(tr("history_server_fetching"), format_time())
+        self._start_task(self._fetch_server_history(jid, since or None))
+
+    async def _fetch_server_history(self, jid: str, since):
+        client = self._client
+        if not client:
+            return
+        try:
+            limit = int(self._config.chat.history_limit)
+        except (TypeError, ValueError):
+            limit = 200
+        try:
+            stored = await client.fetch_history_mam(jid, since, limit)
+        except Exception:
+            stored = None
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.server_fetch_done(stored or 0)
+
+    def _on_mam_unavailable(self, jid: str):
+        chat = self._chat_window.get_chat(jid)
+        if not chat:
+            return
+        from jabbim.include.utils import format_time
+        chat.mark_server_exhausted()
+        chat.add_status(tr("history_server_unavailable"), format_time())
 
     def _on_remove_contact(self, jid: str):
         if self._client:
@@ -483,8 +802,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_unread(jid)
 
     def _on_message_received(self, frm: str, body: str, ts):
+        from jabbim.include.utils import ts_to_time
         bare_jid = frm.split("/")[0]
-        timestamp = ts or time.strftime("%H:%M:%S")
+        timestamp = ts_to_time(ts)
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
 
         if not self._chat_window.has_chat(bare_jid):
@@ -524,21 +844,40 @@ class MainWindow(QtWidgets.QMainWindow):
     # ── Groupchat ─────────────────────────────────────────────────
 
     def _on_groupchat_message(self, room: str, nick: str, body: str, ts):
-        timestamp = ts or time.strftime("%H:%M:%S")
+        from jabbim.include.utils import ts_to_time
+        timestamp = ts_to_time(ts)
         chat = self._chat_window.get_chat(room)
         if chat:
+            user = self._muc_users.get(room, {}).get(nick, {})
             chat.add_message(sender=nick, body=body,
-                             timestamp=timestamp, direction="incoming")
+                             timestamp=timestamp, direction="incoming",
+                             sender_jid=(user.get("avatar_jid", "")
+                                         or user.get("real_jid", "")))
 
-    def _on_groupchat_presence(self, room: str, nick: str, show: str, status: str):
-        users = self._muc_users.setdefault(room, set())
+    def _on_groupchat_presence(self, room: str, nick: str, show: str,
+                               status: str, role: str = "",
+                               affiliation: str = "", real_jid: str = ""):
+        users = self._muc_users.setdefault(room, {})
         if show == "unavailable":
-            users.discard(nick)
+            users.pop(nick, None)
         else:
-            users.add(nick)
+            previous = users.get(nick, {})
+            users[nick] = {
+                "nick": nick, "show": show, "status": status,
+                "role": role, "affiliation": affiliation,
+                "real_jid": real_jid or previous.get("real_jid", ""),
+                "avatar_jid": previous.get("avatar_jid", ""),
+                "avatar_path": previous.get("avatar_path", ""),
+            }
+            if real_jid and self._client:
+                self._client.get_vcard(real_jid)
         chat = self._chat_window.get_chat(room)
         if chat:
+            self_nick = self._muc_self_nicks.get(room, "")
+            chat.update_muc_users(list(users.values()), self_nick=self_nick)
             chat.set_status_text(f"{tr('muc_participants')}: {len(users)}")
+        if nick == self._muc_self_nicks.get(room):
+            self._sync_conference_roster(room)
 
     def _on_groupchat_send(self, room: str, body: str):
         if self._client:
@@ -605,8 +944,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._visible:
             self._visible = False
             self.hide()
-            if self._chat_window.isVisible():
-                self._chat_window.hide()
         else:
             state = self.windowState()
             state &= ~QtCore.Qt.WindowState.WindowMinimized

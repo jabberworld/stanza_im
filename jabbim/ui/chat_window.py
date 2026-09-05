@@ -101,6 +101,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(jid, display_name, self._theme)
         widget.message_sent.connect(self._on_message_sent)
         widget.typing_changed.connect(self.typing_changed)
+        widget.clear_history_requested.connect(self.clear_history_requested)
+        widget.server_history_requested.connect(self.server_history_requested)
+        widget.bookmark_toggled.connect(self.bookmark_toggled)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -123,6 +126,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(room, display_name, self._theme, is_muc=True)
         widget.message_sent.connect(self._on_groupchat_message_sent)
         widget.typing_changed.connect(self.typing_changed)
+        widget.clear_history_requested.connect(self.clear_history_requested)
+        widget.server_history_requested.connect(self.server_history_requested)
+        widget.bookmark_toggled.connect(self.bookmark_toggled)
         idx = self._tab_widget.addTab(widget, f"🔒 {display_name}")
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -186,6 +192,9 @@ class ChatWindow(QtWidgets.QMainWindow):
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave
     typing_changed = QtCore.pyqtSignal(str, bool)       # jid, is_typing
+    clear_history_requested = QtCore.pyqtSignal(str)    # jid
+    server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since
+    bookmark_toggled = QtCore.pyqtSignal(str)               # MUC room
 
     # ── Internal ──────────────────────────────────────────────────
 
