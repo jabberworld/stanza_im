@@ -483,7 +483,7 @@ class JabberClient:
         msg["subject"] = subject
         msg.send()
 
-    def get_vcard(self, jid: str) -> None:
+    def get_vcard(self, jid: str, force: bool = False) -> None:
         """Request vCard for *jid*.  Fire-and-forget; result arrives via
         the ``vcard_received`` event as ``(jid, card_dict)``."""
         requested = _clean_jid(jid)
@@ -492,7 +492,7 @@ class JabberClient:
             return
         bare = requested.split("/", 1)[0]
         cache_key = requested if "/" in requested else bare
-        cached = self._vcard_cache.get(cache_key)
+        cached = None if force else self._vcard_cache.get(cache_key)
         if cached is not None:
             if "/" not in requested:
                 contact = self.get_contact(bare)

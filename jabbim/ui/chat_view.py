@@ -76,10 +76,38 @@ if HAS_WEBENGINE:
 
         def _on_load_finished(self, ok: bool):
             self._ready = ok
+            if ok:
+                self._install_scroll_js()
             if ok and self._pending:
                 pending, self._pending = self._pending, []
                 for chunk in pending:
                     self._append_chunk(chunk)
+
+        _SCROLL_JS = """
+        (function installJabbimScroll() {
+            if (window.__jabbimScrollInstalled) return;
+            if (!window.bridge) {
+                window.setTimeout(installJabbimScroll, 50);
+                return;
+            }
+            window.__jabbimScrollInstalled = true;
+            var last = 0;
+            window.addEventListener('scroll', function () {
+                var now = Date.now();
+                if (now - last < 120) return;
+                last = now;
+                var st = window.scrollY || 0;
+                var sh = document.body.scrollHeight;
+                var ih = window.innerHeight;
+                var max = Math.max(1, sh - ih);
+                window.bridge.on_scroll_fraction(Math.min(1, st / max));
+                if (st <= ih) window.bridge.on_near_top();
+            });
+        })();
+        """
+
+        def _install_scroll_js(self):
+            self.page().runJavaScript(self._SCROLL_JS)
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0

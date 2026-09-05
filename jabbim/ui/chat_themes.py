@@ -34,6 +34,8 @@ def _webchannel_script() -> str:
 document.addEventListener('DOMContentLoaded', function () {{
     new QWebChannel(qt.webChannelTransport, function (channel) {{
         window.bridge = channel.objects.bridge;
+        if (window.__jabbimScrollInstalled) return;
+        window.__jabbimScrollInstalled = true;
         var last = 0;
         function onScroll() {{
             var now = Date.now();

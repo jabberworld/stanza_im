@@ -360,7 +360,7 @@ class MainWindow(QtWidgets.QMainWindow):
             from jabbim.include.utils import format_time
             chat.add_status(f"Joined as {nick}", format_time())
             chat.set_bookmarked(room in self._bookmarks)
-        self._request_vcard(room)
+        self._request_vcard(room, force=True)
         self._client.get_muc_info(room)
         self._sync_conference_roster(room)
 
@@ -387,7 +387,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat = self._chat_window.open_groupchat(
                 room, nick, self._muc_display_name(room))
             self._load_history(room)
-            self._request_vcard(room)
+            self._request_vcard(room, force=True)
         users = self._muc_users.setdefault(room, {})
         for occ in occupants or []:
             if isinstance(occ, str):
@@ -597,12 +597,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._roster.add_user(user)
         self._request_vcard(jid)
 
-    def _request_vcard(self, jid: str):
+    def _request_vcard(self, jid: str, force: bool = False):
         """Request a cached or fresh vCard; the client enforces the TTL."""
         if not self._client:
             return
         self._vcard_requested.add(jid)
-        self._client.get_vcard(jid)
+        self._client.get_vcard(jid, force=force)
 
     def _on_vcard_received(self, jid: str, card: dict):
         path = card.get("avatar_path") or ""
