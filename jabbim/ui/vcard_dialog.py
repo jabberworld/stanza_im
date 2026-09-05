@@ -82,7 +82,8 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._status_index = tabs.addTab(self._fields_page(status_data, (
             "jid", "presence", "status_message", "resource",
             "status_updated", "vcard_updated", "client_time", "software",
-            "software_version", "os", "ping")), tr("vcard_tab_status"))
+            "software_version", "os", "ping"), hide_empty=True),
+            tr("vcard_tab_status"))
         layout.addWidget(tabs)
 
         btn = QtWidgets.QDialogButtonBox(
@@ -97,19 +98,20 @@ class VCardInfoDialog(QtWidgets.QDialog):
         page = self._fields_page(self._status_data, (
             "jid", "presence", "status_message", "resource",
             "status_updated", "vcard_updated", "client_time", "software",
-            "software_version", "os", "ping"))
+            "software_version", "os", "ping"), hide_empty=True)
         self._tabs.removeTab(self._status_index)
         self._status_index = self._tabs.addTab(page, tr("vcard_tab_status"))
         self._tabs.setCurrentIndex(self._status_index)
 
     @staticmethod
-    def _fields_page(values: dict, keys: tuple[str, ...]):
+    def _fields_page(values: dict, keys: tuple[str, ...],
+                     hide_empty: bool = False):
         page = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(page)
         for key in keys:
-            if not values.get(key):
+            if hide_empty and not values.get(key):
                 continue
-            form.addRow(tr(f"vcard_field_{key}"),
+            form.addRow(f"{tr(f'vcard_field_{key}')}:" ,
                         QtWidgets.QLabel(str(values.get(key) or "-")))
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,

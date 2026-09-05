@@ -10,7 +10,7 @@ from jabbim.include.constants import CACHE_DIR
 
 _PATH = os.path.join(CACHE_DIR, "vcard-cache.json")
 MAX_AGE = 60 * 60
-_CARD_VERSION = 2
+_CARD_VERSION = 3
 
 
 class VCardCache:

@@ -116,6 +116,8 @@ class ChatThemeFactory:
         substituted in the remaining text, then the <a> links are restored.
         """
         escaped = escape_html(body)
+        escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
+        escaped = escaped.replace("\n", "<br>")
         tokenised, anchors = self._tokenize_urls(escaped)
         emotified = smile_to_html(tokenised)
         return restore_url_tokens(emotified, anchors)

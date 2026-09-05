@@ -413,6 +413,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for nick, info in users.items():
                 real_jid = info.get("real_jid")
                 self._client.get_vcard(real_jid or f"{room}/{nick}")
+            self._client.get_muc_info(room)
         self._sync_conference_roster(room)
 
     def _on_muc_join_error(self, room: str, condition: str, code: str):

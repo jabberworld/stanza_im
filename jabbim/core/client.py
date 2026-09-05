@@ -305,6 +305,7 @@ class JabberClient:
                     name = value
                     break
             if name:
+                logger.info("MUC room name received for %s: %s", room, name)
                 self.emit("muc_info_received", room, name)
         except Exception:
             logger.debug("Could not retrieve MUC info for %s",
@@ -977,7 +978,7 @@ def _stanza_value(stanza, key: str, default=""):
         return default
     try:
         value = stanza.get(key)
-        if value is not None:
+        if value not in (None, ""):
             return value
     except (AttributeError, KeyError, TypeError):
         pass
