@@ -883,6 +883,7 @@ class JabberClient:
         stored = 0
         parsed = 0
         skipped = 0
+        duplicates = 0
         skip_reasons: dict[str, int] = {}
         for result in results:
             try:
@@ -919,21 +920,25 @@ class JabberClient:
                         direction = "outgoing"
                         sender = "Me"
                 from jabbim.core import history
-                history.store_message(jid, direction, body,
-                                      timestamp=ts or None, sender=sender,
-                                      skip_existing=True)
-                stored += 1
+                inserted = history.store_message(
+                    jid, direction, body, timestamp=ts or None,
+                    sender=sender, skip_existing=True)
+                if inserted:
+                    stored += 1
+                else:
+                    duplicates += 1
             except Exception:
                 skipped += 1
                 skip_reasons["exception"] = skip_reasons.get("exception", 0) + 1
                 logger.debug("Could not parse MAM result for %s",
                              jid, exc_info=True)
                 continue
-        logger.info("MAM returned %d results for %s: parsed=%d skipped=%d stored=%d",
-                    len(results), jid, parsed, skipped, stored)
+        logger.info("MAM returned %d results for %s: parsed=%d skipped=%d "
+                    "duplicates=%d stored=%d", len(results), jid, parsed,
+                    skipped, duplicates, stored)
         if skip_reasons:
             logger.info("MAM skip reasons for %s: %s", jid, skip_reasons)
-        if results and parsed and not stored:
+        if results and parsed and not stored and not duplicates:
             self.emit("mam_parse_error", jid, len(results), parsed, skipped)
             return -1
         return stored

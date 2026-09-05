@@ -385,9 +385,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._server_fetching = False
         self._history = entries
         self._db_exhausted = (not entries
-                              or (entries[0].get("id") is not None
-                                  and not history.older_available(
-                                      self.jid, entries[0]["id"])))
+                              or not history.older_available_timestamp(
+                                  self.jid, self.oldest_ts()))
         self._render_all()
 
     def first_loaded_id(self):
@@ -396,9 +395,9 @@ class ChatWidget(QtWidgets.QWidget):
         return None
 
     def oldest_ts(self):
-        if self._history:
-            return self._history[0].get("timestamp") or ""
-        return ""
+        timestamps = [entry.get("timestamp", "") for entry in self._history
+                      if entry.get("timestamp")]
+        return min(timestamps) if timestamps else ""
 
     def _batch_size(self):
         return max(50, self._window_size // 2)
@@ -428,14 +427,16 @@ class ChatWidget(QtWidgets.QWidget):
             return
         from jabbim.core import history
         self._hist_loading = True
-        before_id = self.first_loaded_id()
-        if before_id is not None and history.older_available(self.jid, before_id):
-            rows = history.load_older(self.jid, before_id, self._batch_size())
+        before_ts = self.oldest_ts()
+        if before_ts and history.older_available_timestamp(self.jid, before_ts):
+            rows = history.load_older_timestamp(
+                self.jid, before_ts, self._batch_size())
             exhausted = not rows
             if rows:
-                next_before = rows[0].get("id")
-                exhausted = not (next_before is not None
-                                 and history.older_available(self.jid, next_before))
+                next_before = rows[0].get("timestamp", "")
+                exhausted = not (next_before and
+                                 history.older_available_timestamp(
+                                     self.jid, next_before))
             self.prepend_history(rows, exhausted)
         else:
             self._db_exhausted = True

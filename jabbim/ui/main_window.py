@@ -91,6 +91,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_total = 0
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_self_nicks: dict[str, str] = {}
+        self._muc_names: dict[str, str] = {}
         self._conference_roster: set[str] = set()
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
@@ -319,7 +320,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.remove_user(room)
         self._roster.add_user(UserItem(
             jid=room,
-            name=room.split("@", 1)[0],
+            name=self._muc_display_name(room),
             group=tr("roster_group_conferences"),
             status=status,
             status_message=status_message,
@@ -368,6 +369,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.leave_muc(room)
         self._muc_users.pop(room, None)
         self._muc_self_nicks.pop(room, None)
+        self._muc_names.pop(room, None)
         if room in self._conference_roster:
             self._roster.remove_user(room)
             self._conference_roster.discard(room)
@@ -427,11 +429,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muc_info_received(self, room: str, name: str):
         if room in self._muc_self_nicks and name:
+            self._muc_names[room] = name
             self._chat_window.set_chat_title(room, name)
+            self._sync_conference_roster(room)
 
     def _muc_display_name(self, room: str, preferred: str = "") -> str:
         if preferred:
             return preferred
+        if room in self._muc_names:
+            return self._muc_names[room]
         if self._client:
             contact = self._client.get_contact(room)
             card = getattr(contact, "vcard", None) or {}
@@ -778,8 +784,8 @@ class MainWindow(QtWidgets.QMainWindow):
         except (TypeError, ValueError):
             limit = 200
         entries = history.load_history(jid, limit=limit)
-        exhausted = bool(entries) and bool(entries[0].get("id")) \
-            and not history.older_available(jid, entries[0]["id"])
+        exhausted = bool(entries) and not history.older_available_timestamp(
+            jid, entries[0].get("timestamp", ""))
         chat.set_history(entries, limit, exhausted)
 
     def _on_contact_context(self, jid: str, pos):

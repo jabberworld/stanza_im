@@ -90,7 +90,7 @@ def _row_to_entry(row) -> dict:
 
 def store_message(jid: str, direction: str, body: str,
                   timestamp: str | None = None, sender: str = "",
-                  skip_existing: bool = False) -> None:
+                  skip_existing: bool = False) -> bool:
     """Append a message to *jid*'s history.
 
     With ``skip_existing`` a row with the same (sender, body, timestamp)
@@ -105,15 +105,17 @@ def store_message(jid: str, direction: str, body: str,
                 "SELECT id FROM messages WHERE sender = ? AND body = ? "
                 "AND timestamp = ? LIMIT 1", (sender, body, ts)).fetchone()
             if row:
-                return
+                return False
         conn.execute(
             "INSERT INTO messages (direction, sender, body, timestamp) "
             "VALUES (?, ?, ?, ?)",
             (direction, sender, body, ts),
         )
         conn.commit()
+        return True
     except sqlite3.Error as exc:
         logger.warning("Could not save history for %s: %s", jid, exc)
+        return False
 
 
 def load_history(jid: str, limit: int = 200, since: str | None = None,
@@ -137,7 +139,8 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
         cur = conn.execute(
             f"SELECT * FROM ("
             f"SELECT id, direction, sender, body, timestamp FROM messages"
-            f"{clause} ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
+            f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
+            f"ORDER BY timestamp ASC, id ASC",
             params)
         return [_row_to_entry(r) for r in cur.fetchall()]
     except sqlite3.Error as exc:
@@ -161,6 +164,33 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
     except sqlite3.Error as exc:
         logger.warning("Could not load older history for %s: %s", jid, exc)
         return []
+
+
+def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
+    """Load messages older than timestamp *before*, chronologically."""
+    try:
+        conn = _connection(jid)
+        cur = conn.execute(
+            "SELECT * FROM (SELECT id, direction, sender, body, timestamp "
+            "FROM messages WHERE timestamp < ? "
+            "ORDER BY timestamp DESC, id DESC LIMIT ?) "
+            "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
+        return [_row_to_entry(r) for r in cur.fetchall()]
+    except sqlite3.Error as exc:
+        logger.warning("Could not load older timestamp history for %s: %s",
+                       jid, exc)
+        return []
+
+
+def older_available_timestamp(jid: str, before: str) -> bool:
+    try:
+        conn = _connection(jid)
+        row = conn.execute(
+            "SELECT 1 FROM messages WHERE timestamp < ? LIMIT 1",
+            (before,)).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        return False
 
 
 def count_messages(jid: str) -> int:
