@@ -527,6 +527,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("mam_unavailable", self._on_mam_unavailable)
+        c.on("mam_parse_error", self._on_mam_parse_error)
         # roster removals are delivered via roster_item_removed (from client)
 
     def _on_session_started(self):
@@ -854,6 +855,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 tr("history_server_loaded", n=stored or 0)
                 if stored else tr("history_server_empty"))
             chat.server_fetch_done(stored or 0)
+
+    def _on_mam_parse_error(self, jid: str, results: int,
+                            parsed: int, skipped: int):
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.set_history_status(tr("history_server_parse_error"))
 
     def _on_mam_unavailable(self, jid: str):
         chat = self._chat_window.get_chat(jid)

@@ -879,6 +879,8 @@ class JabberClient:
         if gi:
             my_nick = gi.nick
         stored = 0
+        parsed = 0
+        skipped = 0
         for result in results:
             try:
                 fwd = result.get("forwarded")
@@ -886,10 +888,13 @@ class JabberClient:
                 if msg is None or not hasattr(msg, "get"):
                     logger.warning("MAM result %d for %s has no message stanza: %r",
                                    results.index(result), jid, result)
+                    skipped += 1
                     continue
                 body = str(_stanza_value(msg, "body") or "")
                 if not body:
+                    skipped += 1
                     continue
+                parsed += 1
                 frm = str(_stanza_value(msg, "from") or "")
                 delay = _stanza_value(msg, "delay") or {}
                 stamp = _stanza_value(delay, "stamp")
@@ -914,11 +919,15 @@ class JabberClient:
                                       skip_existing=True)
                 stored += 1
             except Exception:
+                skipped += 1
                 logger.debug("Could not parse MAM result for %s",
                              jid, exc_info=True)
                 continue
-        logger.info("MAM returned %d results, stored %d messages for %s",
-                    len(results), stored, jid)
+        logger.info("MAM returned %d results for %s: parsed=%d skipped=%d stored=%d",
+                    len(results), jid, parsed, skipped, stored)
+        if results and parsed and not stored:
+            self.emit("mam_parse_error", jid, len(results), parsed, skipped)
+            return -1
         return stored
 
     def _on_chatstate(self, msg) -> None:

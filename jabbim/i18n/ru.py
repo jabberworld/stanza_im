@@ -55,6 +55,7 @@ STRINGS = {
     "history_server_unavailable": "На сервере нет архива переписки.",
     "history_server_loaded": "С сервера загружено сообщений: {n}.",
     "history_server_empty": "Более старых сообщений на сервере не найдено.",
+    "history_server_parse_error": "История получена, но не удалось разобрать сообщения.",
     "bookmarks_loading": "Загрузка закладок...",
     "menu_bookmarks_empty": "Нет закладок конференций",
     "bookmark_join": "Войти",

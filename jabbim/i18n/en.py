@@ -55,6 +55,7 @@ STRINGS = {
     "history_server_unavailable": "Server has no archived history.",
     "history_server_loaded": "Loaded {n} messages from server.",
     "history_server_empty": "No older messages found on server.",
+    "history_server_parse_error": "Server history was received but could not be parsed.",
     "bookmarks_loading": "Loading bookmarks...",
     "menu_bookmarks_empty": "No conference bookmarks",
     "bookmark_join": "Join",

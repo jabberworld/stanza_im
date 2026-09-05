@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import webbrowser
+import logging
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -16,6 +17,8 @@ from jabbim.i18n import tr
 from jabbim.include.avatars import avatar_data_uri, default_avatar, default_avatar_uri
 from jabbim.ui.chat_view import ChatView
 from jabbim.ui.chat_themes import ChatThemeFactory
+
+logger = logging.getLogger(__name__)
 
 _TYPING_DEBOUNCE_MS = 2000
 
@@ -356,6 +359,9 @@ class ChatWidget(QtWidgets.QWidget):
     def server_fetch_done(self, stored: int):
         """A MAM fetch finished: reload the (now larger) window."""
         self._server_fetching = False
+        if stored < 0:
+            self._hist_loading = False
+            return
         if stored > 0:
             self.refresh_history(size=self._window_size * 4)
         else:
@@ -440,12 +446,17 @@ class ChatWidget(QtWidgets.QWidget):
         if self._server_fetching or self._server_exhausted:
             return
         self._server_fetching = True
+        logger.info("Requesting server history from widget: jid=%s since=%s",
+                    self.jid, self.oldest_ts() or "now")
         self.server_history_requested.emit(self.jid, self.oldest_ts() or None)
 
     def _request_clear_history(self):
         self.clear_history_requested.emit(self.jid)
 
     def _on_near_top(self):
+        logger.info("History near-top: jid=%s local=%d db_exhausted=%s server_exhausted=%s fetching=%s",
+                    self.jid, len(self._history), self._db_exhausted,
+                    self._server_exhausted, self._server_fetching)
         if (self._cleared or self._server_exhausted or self._hist_loading
                 or self._server_fetching):
             return
