@@ -105,6 +105,11 @@ STRINGS = {
     "vcard_field_resource": "Resource",
     "vcard_field_vcard_updated": "vCard updated",
     "vcard_field_client_time": "Client time",
+    "vcard_field_software": "Client",
+    "vcard_field_software_version": "Client version",
+    "vcard_field_os": "Operating system",
+    "vcard_field_ping": "Ping",
+    "vcard_field_status_updated": "Status updated",
     # Groupchat
     "muc_leave": "Leave Room",
     "muc_leave_confirm": "{room}",

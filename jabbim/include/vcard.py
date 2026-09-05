@@ -21,6 +21,9 @@ def _t(element, *path) -> str:
         for tag in path:
             nodes = [c for c in node.iter() if c.tag == f"{{{_NS}}}{tag}"]
             if not nodes:
+                nodes = [c for c in node.iter()
+                         if str(c.tag).rsplit("}", 1)[-1].upper() == tag.upper()]
+            if not nodes:
                 return ""
             node = nodes[0]
         return (node.text or "").strip()
@@ -80,7 +83,9 @@ def parse_vcard(iq) -> dict:
         card["region"] = _t(root, "ADR", "REGION") or card["region"]
         card["pcode"] = _t(root, "ADR", "PCODE") or card["pcode"]
         card["country"] = _t(root, "ADR", "CTRY") or card["country"]
-        card["description"] = _t(root, "DESC") or card["description"]
+        card["description"] = (_t(root, "DESC")
+                                or _t(root, "DESCRIPTION")
+                                or card["description"])
         if card.get("photo") is None:
             card["photo"] = parse_vcard_photo(iq)
         break

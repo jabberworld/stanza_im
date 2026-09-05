@@ -45,6 +45,9 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0049")  # Private XML Storage
         self.xmpp.register_plugin("xep_0128")  # Service Discovery Extensions
         self.xmpp.register_plugin("xep_0030")  # Service Discovery
+        self.xmpp.register_plugin("xep_0092")  # Software version
+        self.xmpp.register_plugin("xep_0199")  # Ping
+        self.xmpp.register_plugin("xep_0202")  # Entity time
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
         # xep_0313 pulls in xep_0059 (RSM) and xep_0297 (Forward) automatically
 
@@ -283,7 +286,7 @@ class JabberClient:
             iq = await self.xmpp.plugin["xep_0030"].get_info(jid=room)
             info = iq["disco_info"]
             name = ""
-            for identity in info.get("identities", []):
+            for identity in info.get("identities", []) or []:
                 category = str(identity.get("category", ""))
                 value = str(identity.get("name", "") or "")
                 if category == "conference" and value:
@@ -291,11 +294,45 @@ class JabberClient:
                     break
                 if value and not name:
                     name = value
+            for element in iq.xml.iter():
+                if not str(element.tag).endswith("field"):
+                    continue
+                if element.get("var") != "muc#roomconfig_roomname":
+                    continue
+                value = next((child.text or "" for child in element
+                              if str(child.tag).endswith("value")), "").strip()
+                if value:
+                    name = value
+                    break
             if name:
                 self.emit("muc_info_received", room, name)
         except Exception:
             logger.debug("Could not retrieve MUC info for %s",
                          room, exc_info=True)
+
+    def probe_entity(self, jid: str) -> None:
+        asyncio.get_event_loop().create_task(self._probe_entity(jid))
+
+    async def _probe_entity(self, jid: str) -> None:
+        info: dict[str, str] = {}
+        try:
+            result = await self.xmpp.plugin["xep_0092"].get_version(jid)
+            info["software"] = str(result.get("software", "") or "")
+            info["version"] = str(result.get("version", "") or "")
+            info["os"] = str(result.get("os", "") or "")
+        except Exception:
+            logger.debug("Software version unavailable for %s", jid,
+                         exc_info=True)
+        try:
+            info["ping"] = f"{await self.xmpp.plugin['xep_0199'].ping(jid, timeout=5):.3f}s"
+        except Exception:
+            logger.debug("Ping unavailable for %s", jid, exc_info=True)
+        try:
+            result = await self.xmpp.plugin["xep_0202"].get_entity_time(jid)
+            info["client_time"] = str(result.get("time", "") or result.get("utc", ""))
+        except Exception:
+            logger.debug("Entity time unavailable for %s", jid, exc_info=True)
+        self.emit("entity_info_received", jid, info)
 
     def _store_muc_history(self, room: str, entries) -> None:
         """Persist messages returned by the MUC join handshake."""
@@ -308,14 +345,14 @@ class JabberClient:
             try:
                 forwarded = entry.get("forwarded") if hasattr(entry, "get") else None
                 msg = _forwarded_stanza(forwarded) or entry
-                body = str(msg.get("body", "") or "")
+                body = str(_stanza_value(msg, "body") or "")
                 if not body:
                     continue
-                frm = str(msg.get("from", ""))
+                frm = str(_stanza_value(msg, "from") or "")
                 nick = frm.split("/", 1)[1] if "/" in frm else frm
                 direction = "outgoing" if nick == my_nick else "incoming"
                 sender = "Me" if direction == "outgoing" else nick
-                stamp = msg.get("delay", {}).get("stamp", "")
+                stamp = _stanza_value(_stanza_value(msg, "delay"), "stamp")
                 if isinstance(stamp, datetime.datetime):
                     stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
                 history.store_message(room, direction, body,
@@ -849,12 +886,12 @@ class JabberClient:
                     logger.warning("MAM result %d for %s has no message stanza: %r",
                                    results.index(result), jid, result)
                     continue
-                body = str(msg.get("body", "") or "")
+                body = str(_stanza_value(msg, "body") or "")
                 if not body:
                     continue
-                frm = str(msg.get("from", ""))
-                delay = msg.get("delay") or {}
-                stamp = delay.get("stamp", "") if hasattr(delay, "get") else ""
+                frm = str(_stanza_value(msg, "from") or "")
+                delay = _stanza_value(msg, "delay") or {}
+                stamp = _stanza_value(delay, "stamp")
                 if isinstance(stamp, datetime.datetime):
                     stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
                 ts = _normalize_ts(str(stamp))
@@ -932,6 +969,23 @@ def _forwarded_stanza(forwarded):
         return forwarded["stanza"]
     except (KeyError, TypeError, AttributeError):
         return None
+
+
+def _stanza_value(stanza, key: str, default=""):
+    """Read a slixmpp stanza field through both public interfaces."""
+    if stanza is None:
+        return default
+    try:
+        value = stanza.get(key)
+        if value is not None:
+            return value
+    except (AttributeError, KeyError, TypeError):
+        pass
+    try:
+        value = stanza[key]
+        return default if value is None else value
+    except (KeyError, TypeError, AttributeError):
+        return default
 
 
 # ── Data classes ──────────────────────────────────────────────────

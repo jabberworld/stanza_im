@@ -10,6 +10,7 @@ from jabbim.include.constants import CACHE_DIR
 
 _PATH = os.path.join(CACHE_DIR, "vcard-cache.json")
 MAX_AGE = 60 * 60
+_CARD_VERSION = 2
 
 
 class VCardCache:
@@ -50,6 +51,8 @@ class VCardCache:
         card = item.get("card")
         if not isinstance(card, dict):
             return None
+        if int(item.get("version", 0)) < _CARD_VERSION:
+            return None
         result = dict(card)
         result.setdefault("fetched_at", fetched_at)
         return result
@@ -58,7 +61,8 @@ class VCardCache:
         bare = self._key(jid)
         safe = {key: value for key, value in card.items()
                 if key != "photo" and isinstance(value, (str, int, float, bool, type(None)))}
-        self._items[bare] = {"fetched_at": time.time(), "card": safe}
+        self._items[bare] = {"version": _CARD_VERSION,
+                             "fetched_at": time.time(), "card": safe}
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix="vcard-", dir=os.path.dirname(self.path))
         try:

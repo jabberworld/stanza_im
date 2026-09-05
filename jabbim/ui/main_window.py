@@ -95,6 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
         self._pending_profile: set[str] = set()
+        self._vcard_dialogs: dict[str, object] = {}
 
         self._chat_window.typing_changed.connect(self._on_typing_local)
 
@@ -522,6 +523,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("receipt_delivered", self._on_receipt_delivered)
         c.on("muc_joined", self._on_muc_joined)
         c.on("muc_info_received", self._on_muc_info_received)
+        c.on("entity_info_received", self._on_entity_info_received)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("mam_unavailable", self._on_mam_unavailable)
         # roster removals are delivered via roster_item_removed (from client)
@@ -641,6 +643,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "presence": "",
             "status_message": "",
             "resource": "",
+            "status_updated": "",
             "client_time": card.get("client_time", ""),
             "vcard_updated": card.get("fetched_at", ""),
         }
@@ -658,8 +661,19 @@ class MainWindow(QtWidgets.QMainWindow):
                     status["presence"] = info.get("show", "")
                     status["status_message"] = info.get("status", "")
                     status["resource"] = nick
+                    status["status_updated"] = info.get("status_updated", "")
         dlg = VCardInfoDialog(jid, card, status=status)
+        self._vcard_dialogs[jid] = dlg
+        dlg.finished.connect(lambda _result, key=jid:
+                             self._vcard_dialogs.pop(key, None))
+        if self._client:
+            self._client.probe_entity(jid)
         dlg.exec()
+
+    def _on_entity_info_received(self, jid: str, info: dict):
+        dialog = self._vcard_dialogs.get(jid)
+        if dialog is not None:
+            dialog.update_status(info)
 
     def _show_profile(self, jid: str):
         """Show the contact's vCard (fetching it if not yet known)."""
@@ -962,6 +976,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "real_jid": real_jid or previous.get("real_jid", ""),
                 "avatar_jid": previous.get("avatar_jid", ""),
                 "avatar_path": previous.get("avatar_path", ""),
+                "status_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             if self._client:
                 request_jid = (real_jid if isinstance(real_jid, str)

@@ -63,6 +63,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         layout.addLayout(head)
 
         tabs = QtWidgets.QTabWidget()
+        self._tabs = tabs
         tabs.addTab(self._fields_page(card, (
             "fn", "nickname", "bday", "tel", "url", "email")),
             tr("vcard_tab_general"))
@@ -77,10 +78,11 @@ class VCardInfoDialog(QtWidgets.QDialog):
         status_data = dict(status or {})
         status_data.setdefault("jid", card.get("jid") or jid)
         status_data.setdefault("vcard_updated", card.get("fetched_at", ""))
-        tabs.addTab(self._fields_page(status_data, (
+        self._status_data = status_data
+        self._status_index = tabs.addTab(self._fields_page(status_data, (
             "jid", "presence", "status_message", "resource",
-            "vcard_updated", "client_time")),
-            tr("vcard_tab_status"))
+            "status_updated", "vcard_updated", "client_time", "software",
+            "software_version", "os", "ping")), tr("vcard_tab_status"))
         layout.addWidget(tabs)
 
         btn = QtWidgets.QDialogButtonBox(
@@ -89,11 +91,24 @@ class VCardInfoDialog(QtWidgets.QDialog):
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
 
+    def update_status(self, values: dict):
+        self._status_data.update({key: value for key, value in values.items()
+                                  if value not in (None, "")})
+        page = self._fields_page(self._status_data, (
+            "jid", "presence", "status_message", "resource",
+            "status_updated", "vcard_updated", "client_time", "software",
+            "software_version", "os", "ping"))
+        self._tabs.removeTab(self._status_index)
+        self._status_index = self._tabs.addTab(page, tr("vcard_tab_status"))
+        self._tabs.setCurrentIndex(self._status_index)
+
     @staticmethod
     def _fields_page(values: dict, keys: tuple[str, ...]):
         page = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(page)
         for key in keys:
+            if not values.get(key):
+                continue
             form.addRow(tr(f"vcard_field_{key}"),
                         QtWidgets.QLabel(str(values.get(key) or "-")))
         form.addItem(QtWidgets.QSpacerItem(
