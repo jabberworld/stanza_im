@@ -756,9 +756,10 @@ class JabberClient:
             if not card.get("avatar_path") and contact.avatar_path:
                 card["avatar_path"] = contact.avatar_path
             contact.vcard = card
+        card["fetched_at"] = time.time()
         self._vcard_cache.put(jid or bare, card)
-        logger.debug("vCard received for %s", bare or jid)
-        self.emit("vcard_received", bare or jid, card)
+        logger.debug("vCard received for %s", jid or bare)
+        self.emit("vcard_received", jid or bare, card)
 
     async def fetch_history_mam(self, jid: str, since: str | None = None,
                                 limit: int = 200) -> int:

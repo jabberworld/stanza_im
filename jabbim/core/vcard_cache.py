@@ -48,7 +48,11 @@ class VCardCache:
         if time.time() - fetched_at > max_age:
             return None
         card = item.get("card")
-        return dict(card) if isinstance(card, dict) else None
+        if not isinstance(card, dict):
+            return None
+        result = dict(card)
+        result.setdefault("fetched_at", fetched_at)
+        return result
 
     def put(self, jid: str, card: dict) -> None:
         bare = self._key(jid)

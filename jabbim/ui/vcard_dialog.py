@@ -37,7 +37,8 @@ def _photo_pixmap(card: dict, size: int = 96) -> QtGui.QIcon:
 class VCardInfoDialog(QtWidgets.QDialog):
     """Read-only summary of a contact's vCard."""
 
-    def __init__(self, jid: str, card: dict, parent=None):
+    def __init__(self, jid: str, card: dict, status: dict | None = None,
+                 parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("vcard_info_title"))
         self.setMinimumWidth(360)
@@ -61,18 +62,44 @@ class VCardInfoDialog(QtWidgets.QDialog):
         head.addLayout(head_col, 1)
         layout.addLayout(head)
 
-        fields = QtWidgets.QFormLayout()
-        for key in ("nickname", "email", "url", "bday", "title",
-                    "role", "org", "orgunit", "tel"):
-            fields.addRow(tr(f"vcard_field_{key}"),
-                          QtWidgets.QLabel(card.get(key) or "-"))
-        layout.addLayout(fields)
+        tabs = QtWidgets.QTabWidget()
+        tabs.addTab(self._fields_page(card, (
+            "fn", "nickname", "bday", "tel", "url", "email")),
+            tr("vcard_tab_general"))
+        tabs.addTab(self._fields_page(card, (
+            "org", "orgunit", "title", "role")),
+            tr("vcard_tab_work"))
+        tabs.addTab(self._fields_page(card, (
+            "street", "locality", "region", "pcode", "country")),
+            tr("vcard_tab_address"))
+        tabs.addTab(self._fields_page(card, ("description",)),
+                    tr("vcard_tab_about"))
+        status_data = dict(status or {})
+        status_data.setdefault("jid", card.get("jid") or jid)
+        status_data.setdefault("vcard_updated", card.get("fetched_at", ""))
+        tabs.addTab(self._fields_page(status_data, (
+            "jid", "presence", "status_message", "resource",
+            "vcard_updated", "client_time")),
+            tr("vcard_tab_status"))
+        layout.addWidget(tabs)
 
         btn = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close)
         btn.rejected.connect(self.reject)
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
+
+    @staticmethod
+    def _fields_page(values: dict, keys: tuple[str, ...]):
+        page = QtWidgets.QWidget()
+        form = QtWidgets.QFormLayout(page)
+        for key in keys:
+            form.addRow(tr(f"vcard_field_{key}"),
+                        QtWidgets.QLabel(str(values.get(key) or "-")))
+        form.addItem(QtWidgets.QSpacerItem(
+            1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Expanding))
+        return page
 
 
 class VCardEditDialog(QtWidgets.QDialog):

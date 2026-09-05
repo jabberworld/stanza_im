@@ -66,6 +66,7 @@ DATA_DIR = _xdg_dir("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
 CACHE_DIR = _xdg_dir("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.toml")
+APP_LOG_FILE = os.path.join(_PROJECT_ROOT, "jabbim.log")
 
 HISTORY_DIR = os.path.join(DATA_DIR, "history")
 AVATARS_DIR = os.path.join(CACHE_DIR, "avatars")

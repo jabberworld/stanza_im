@@ -47,6 +47,12 @@ def parse_vcard(iq) -> dict:
         "org": "",
         "orgunit": "",
         "tel": "",
+        "street": "",
+        "locality": "",
+        "region": "",
+        "pcode": "",
+        "country": "",
+        "description": "",
         "photo": None,
     }
     try:
@@ -69,6 +75,12 @@ def parse_vcard(iq) -> dict:
         card["org"] = _t(root, "ORG", "ORGNAME") or card["org"]
         card["orgunit"] = _t(root, "ORG", "ORGUNIT") or card["orgunit"]
         card["tel"] = _t(root, "TEL", "NUMBER") or card["tel"]
+        card["street"] = _t(root, "ADR", "STREET") or card["street"]
+        card["locality"] = _t(root, "ADR", "LOCALITY") or card["locality"]
+        card["region"] = _t(root, "ADR", "REGION") or card["region"]
+        card["pcode"] = _t(root, "ADR", "PCODE") or card["pcode"]
+        card["country"] = _t(root, "ADR", "CTRY") or card["country"]
+        card["description"] = _t(root, "DESC") or card["description"]
         if card.get("photo") is None:
             card["photo"] = parse_vcard_photo(iq)
         break
@@ -89,6 +101,7 @@ def build_vcard(plugin, card: dict):
         ("title", "TITLE"),
         ("role", "ROLE"),
         ("url", "URL"),
+        ("description", "DESC"),
     ):
         value = (card.get(key) or "").strip()
         if value:
@@ -104,6 +117,17 @@ def build_vcard(plugin, card: dict):
             vcard["ORG"]["ORGNAME"] = org
         if orgunit:
             vcard["ORG"]["ORGUNIT"] = orgunit
+    address = {
+        "street": "STREET",
+        "locality": "LOCALITY",
+        "region": "REGION",
+        "pcode": "PCODE",
+        "country": "CTRY",
+    }
+    for key, interface in address.items():
+        value = (card.get(key) or "").strip()
+        if value:
+            vcard["ADR"][interface] = value
     photo = card.get("photo")
     if photo:
         if isinstance(photo, str):

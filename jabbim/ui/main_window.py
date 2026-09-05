@@ -87,6 +87,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── State ────────────────────────────────────────────────
         self._visible = True
+        self._shutting_down = False
         self._unread_total = 0
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_self_nicks: dict[str, str] = {}
@@ -326,6 +327,7 @@ class MainWindow(QtWidgets.QMainWindow):
             avatar_path=getattr(contact, "avatar_path", None),
         ))
         self._conference_roster.add(room)
+        self._roster._groups[tr("roster_group_conferences")].single_count = True
         self._recount_groups()
         self._roster.sort_and_update()
 
@@ -634,7 +636,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_vcard_info(self, jid: str, card: dict):
         from jabbim.ui.vcard_dialog import VCardInfoDialog
-        dlg = VCardInfoDialog(jid, card)
+        status = {
+            "jid": card.get("jid") or jid,
+            "presence": "",
+            "status_message": "",
+            "resource": "",
+            "client_time": card.get("client_time", ""),
+            "vcard_updated": card.get("fetched_at", ""),
+        }
+        if self._client:
+            bare = jid.split("/", 1)[0]
+            contact = self._client.get_contact(bare)
+            status["presence"] = getattr(contact, "show", "")
+            status["status_message"] = getattr(contact, "status", "")
+            status["resource"] = jid.split("/", 1)[1] if "/" in jid else ""
+        for room, users in self._muc_users.items():
+            for nick, info in users.items():
+                if (info.get("real_jid", "") == jid
+                        or info.get("avatar_jid", "") == jid
+                        or f"{room}/{nick}" == jid):
+                    status["presence"] = info.get("show", "")
+                    status["status_message"] = info.get("status", "")
+                    status["resource"] = nick
+        dlg = VCardInfoDialog(jid, card, status=status)
         dlg.exec()
 
     def _show_profile(self, jid: str):
@@ -679,6 +703,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _recount_groups(self):
         """Recount online/total per group after presence changes."""
+        for group in self._roster._groups.values():
+            group.online_count = 0
+            group.total_count = 0
         counts: dict[str, list[int]] = {}
         for user in self._roster._users:
             entry = counts.setdefault(user.group, [0, 0])
@@ -1078,12 +1105,41 @@ class MainWindow(QtWidgets.QMainWindow):
             self._visible = True
 
     def _quit(self):
-        if self._client is not None and hasattr(self._client, "disconnect"):
-            asyncio.ensure_future(self._client.disconnect())
+        if self._shutting_down:
+            return
+        self._shutting_down = True
         self._tray.hide()
-        self.app.quit()
+        self.hide()
+        self._chat_window.close()
+        self._start_task(self._shutdown_async())
+
+    async def _shutdown_async(self):
+        try:
+            if self._client is not None and hasattr(self._client, "disconnect"):
+                try:
+                    await asyncio.wait_for(self._client.disconnect(), timeout=3.0)
+                except Exception:
+                    logger.debug("XMPP disconnect did not finish cleanly",
+                                 exc_info=True)
+        finally:
+            current = asyncio.current_task()
+            pending = [task for task in asyncio.all_tasks()
+                       if task is not current and not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending, return_exceptions=True),
+                        timeout=1.0)
+                except asyncio.TimeoutError:
+                    logger.debug("Some background tasks did not cancel in time")
+            self.app.quit()
 
     def closeEvent(self, event):
+        if self._shutting_down:
+            event.accept()
+            return
         self._save_window_geometry()
         if self._config.ui.close_to_tray:
             self.hide()
@@ -1091,6 +1147,7 @@ class MainWindow(QtWidgets.QMainWindow):
             event.ignore()
         else:
             self._quit()
+            event.accept()
             event.accept()
 
     def showEvent(self, event):

@@ -19,6 +19,7 @@ class GroupItem:
     expanded: bool = True
     online_count: int = 0
     total_count: int = 0
+    single_count: bool = False
     height: int = 24
 
 
@@ -115,7 +116,8 @@ class RosterStyle:
                          item.name)
 
         # Online/total count "(3/7)" on the right
-        count_text = f"({item.online_count}/{item.total_count})"
+        count_text = (str(item.total_count) if item.single_count
+                      else f"({item.online_count}/{item.total_count})")
         painter.setPen(pal.color(QtGui.QPalette.ColorRole.Mid))
         count_rect = QtCore.QRect(rect.right() - 60, rect.top(),
                                   56, rect.height())
