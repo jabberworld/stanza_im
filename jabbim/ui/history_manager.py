@@ -145,23 +145,33 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         nav_row.addWidget(self._btn_refresh)
         nav_row.addStretch(1)
         self._btn_first = QtWidgets.QPushButton(tr("history_first_day"))
+        self._btn_first.setAutoDefault(False)
+        self._btn_first.setDefault(False)
         self._btn_first.clicked.connect(lambda: self._jump_day(first=True))
         self._btn_first.setEnabled(False)
         nav_row.addWidget(self._btn_first)
         self._btn_prev_day = QtWidgets.QPushButton(tr("history_prev_day"))
+        self._btn_prev_day.setAutoDefault(False)
+        self._btn_prev_day.setDefault(False)
         self._btn_prev_day.clicked.connect(lambda: self._jump_day(-1))
         self._btn_prev_day.setEnabled(False)
         nav_row.addWidget(self._btn_prev_day)
         self._btn_next_day = QtWidgets.QPushButton(tr("history_next_day"))
+        self._btn_next_day.setAutoDefault(False)
+        self._btn_next_day.setDefault(False)
         self._btn_next_day.clicked.connect(lambda: self._jump_day(1))
         self._btn_next_day.setEnabled(False)
         nav_row.addWidget(self._btn_next_day)
         self._btn_last = QtWidgets.QPushButton(tr("history_last_day"))
+        self._btn_last.setAutoDefault(False)
+        self._btn_last.setDefault(False)
         self._btn_last.clicked.connect(lambda: self._jump_day(last=True))
         self._btn_last.setEnabled(False)
         nav_row.addWidget(self._btn_last)
         nav_row.addStretch(1)
         close_btn = QtWidgets.QPushButton(tr("dialog_close"))
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
         close_btn.clicked.connect(self.accept)
         nav_row.addWidget(close_btn)
         right_layout.addLayout(nav_row)
@@ -500,6 +510,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _go_to_day(self, pos: int, last_match: bool = False) -> None:
         if not (0 <= pos < len(self._all_days)):
+            return
+        if not self._query:
             return
         day = self._all_days[pos]
         query = self._query
