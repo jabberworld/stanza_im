@@ -59,6 +59,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._active_jid: str | None = None
         self._remote_activity: dict[str, str] = {}
         self._chat_options = {}
+        self._muc_leave_confirm: Callable[[str], bool] | None = None
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(500, 400)
@@ -304,13 +305,19 @@ class ChatWindow(QtWidgets.QMainWindow):
     def _close_tab(self, index: int):
         widget = self._tab_widget.widget(index)
         if isinstance(widget, ChatWidget):
-            if not widget.is_muc:
-                self.activity_changed.emit(widget.jid, "gone")
             if widget.is_muc:
+                if self._muc_leave_confirm and not self._muc_leave_confirm(
+                        widget.jid):
+                    return
                 self.muc_leave_requested.emit(widget.jid)
             else:
+                self.activity_changed.emit(widget.jid, "gone")
                 self.tab_closed.emit(widget.jid)
             self.close_chat(widget.jid)
+
+    def set_muc_leave_confirm(self, callback) -> None:
+        """Let the owner veto closing a MUC tab (``callback(room) -> bool``)."""
+        self._muc_leave_confirm = callback
 
     def _on_tab_changed(self, index: int):
         previous = self._active_jid

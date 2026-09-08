@@ -180,8 +180,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         muc_form.addRow(muc_show_status_text)
         muc_show_status_text.setEnabled(muc_show_status.isChecked())
         muc_show_status.toggled.connect(muc_show_status_text.setEnabled)
-        muc_form.addRow(self._check("muc_auto_nick", tr("prefs_muc_auto_nick"), False))
-        muc_form.addRow(self._check("muc_confirm_leave", tr("prefs_muc_confirm_leave"), False))
+        muc_form.addRow(self._check("muc_auto_nick", tr("prefs_muc_auto_nick")))
+        muc_form.addRow(self._check("muc_confirm_leave",
+                                    tr("prefs_muc_confirm_leave")))
+        muc_form.addRow(self._check("muc_minimize_startup",
+                                    tr("prefs_muc_minimize_startup")))
         return self._tabs([(tr("prefs_general"), general),
                            (tr("prefs_chat_tab"), chat),
                            (tr("prefs_conferences"), muc)])
@@ -333,6 +336,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "muc_show_status_text": chat.muc_show_status_text,
             "muc_auto_nick": chat.muc_auto_nick,
             "muc_confirm_leave": chat.muc_confirm_leave,
+            "muc_minimize_startup": chat.muc_minimize_startup,
             "send_software": privacy.send_software,
             "send_typing_notifications": getattr(privacy, "send_typing_notifications", privacy.send_chatstates),
             "send_activity_notifications": getattr(privacy, "send_activity_notifications", privacy.send_chatstates),
@@ -377,7 +381,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("send_ctrl_enter", "show_status", "show_receipts", "show_mood",
                     "show_music", "show_avatars", "muc_show_presence",
                     "muc_show_status", "muc_show_status_text",
-                    "muc_auto_nick", "muc_confirm_leave"):
+                    "muc_auto_nick", "muc_confirm_leave",
+                    "muc_minimize_startup"):
             cfg.chat[key] = self._value(key)
         cfg.chat.theme = self._value("chat_theme") or ""
         cfg.appearance.chat_theme = cfg.chat.theme

@@ -80,6 +80,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
+        self._chat_window.set_muc_leave_confirm(self._confirm_muc_leave)
         self._chat_window.clear_history_requested.connect(self._on_clear_history)
         self._chat_window.server_history_requested.connect(self._on_server_history)
         self._chat_window.bookmark_toggled.connect(self._toggle_bookmark)
@@ -110,6 +111,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_self_nicks: dict[str, str] = {}
         self._muc_names: dict[str, str] = {}
         self._muc_avatar_paths: dict[str, str] = {}
+        self._muc_join_tries: dict[str, int] = {}
+        self._muc_base_nicks: dict[str, str] = {}
         self._conference_roster: set[str] = set()
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
@@ -501,6 +504,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if is_new:
             self._chat_window.open_groupchat(room, nick, display_name)
         self._muc_self_nicks[room] = nick
+        self._muc_base_nicks[room] = nick
+        self._muc_join_tries[room] = 0
         self._muc_users.setdefault(room, {})[nick] = {
             "nick": nick, "show": "online", "status": "",
             "role": "", "affiliation": "",
@@ -530,6 +535,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_self_nicks.pop(room, None)
         self._muc_names.pop(room, None)
         self._muc_avatar_paths.pop(room, None)
+        self._muc_join_tries.pop(room, None)
+        self._muc_base_nicks.pop(room, None)
         if room in self._conference_roster:
             self._roster.remove_user(room)
             self._conference_roster.discard(room)
@@ -539,17 +546,49 @@ class MainWindow(QtWidgets.QMainWindow):
         history.close(room)
 
     def _on_leave_conference(self, room: str):
+        if not self._confirm_muc_leave(room):
+            return
         self._on_muc_leave(room)
         self._chat_window.close_chat(room)
 
+    def _confirm_muc_leave(self, room: str) -> bool:
+        """Ask before leaving a MUC when the preference is enabled."""
+        if self._shutting_down or not self._config.chat.muc_confirm_leave:
+            return True
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setWindowTitle(tr("muc_leave"))
+        box.setText(tr("muc_leave_confirm",
+                       room=self._muc_display_name(room)))
+        ok = box.addButton(tr("dialog_ok"),
+                           QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("dialog_cancel"),
+                      QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(ok)
+        box.exec()
+        return box.clickedButton() is ok
+
+    def _should_minimize_muc(self, room: str) -> bool:
+        """Auto-joined MUCs stay out of the chat window on startup."""
+        client = self._client
+        if not client or not self._config.chat.muc_minimize_startup:
+            return False
+        return room in getattr(client, "autojoin_rooms", set())
+
     def _on_muc_joined(self, room: str, subject: str, occupants):
-        chat = self._chat_window.get_chat(room)
-        if not chat:
+        self._muc_join_tries.pop(room, None)
+        if room not in self._muc_self_nicks:
             info = self._client.groupchats.get(room) if self._client else None
-            nick = info.nick if info else self._client.jid_str.split("@", 1)[0]
+            nick = info.nick if info else (
+                self._client.jid_str.split("@", 1)[0]
+                if self._client else "")
             self._muc_self_nicks[room] = nick
+        minimized = self._should_minimize_muc(room)
+        chat = self._chat_window.get_chat(room)
+        if not chat and not minimized:
             chat = self._chat_window.open_groupchat(
-                room, nick, self._muc_display_name(room))
+                room, self._muc_self_nicks[room],
+                self._muc_display_name(room))
             self._load_history(room)
             self._request_vcard(room, force=True)
         users = self._muc_users.setdefault(room, {})
@@ -564,16 +603,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 "nick": nick, "show": "online", "status": "",
                 "role": "", "affiliation": "",
             })
-        self_nick = self._muc_self_nicks.get(room, "")
-        chat.set_self_nick(self_nick)
-        chat.update_muc_users(list(users.values()), self_nick=self_nick)
-        title = subject or ""
-        title += (" · " if title else "") + tr("muc_participants_count",
-                                               n=len(users))
-        chat.set_status_text(title)
-        self._chat_window.set_chat_title(
-            room, self._muc_display_name(room))
-        chat.set_bookmarked(room in self._bookmarks)
+        if chat:
+            self_nick = self._muc_self_nicks.get(room, "")
+            chat.set_self_nick(self_nick)
+            chat.update_muc_users(list(users.values()), self_nick=self_nick)
+            title = subject or ""
+            title += (" · " if title else "") + tr("muc_participants_count",
+                                                   n=len(users))
+            chat.set_status_text(title)
+            self._chat_window.set_chat_title(
+                room, self._muc_display_name(room))
+            chat.set_bookmarked(room in self._bookmarks)
         if self._client:
             for nick, info in users.items():
                 real_jid = info.get("real_jid")
@@ -581,7 +621,58 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.get_muc_info(room)
         self._sync_conference_roster(room)
 
+    def _schedule_muc_nick_retry(self, room: str) -> bool:
+        """Re-join a busy nick with more underscores; False when exhausted."""
+        client = self._client
+        if not client:
+            return False
+        tries = self._muc_join_tries.get(room, 0)
+        if tries >= 2:
+            return False
+        if room not in self._muc_base_nicks:
+            gi = client.groupchats.get(room)
+            base = gi.nick if gi else ""
+            self._muc_base_nicks[room] = base or client.jid_str.split("@", 1)[0]
+        base = self._muc_base_nicks.get(room, "")
+        if not base:
+            return False
+        tries += 1
+        self._muc_join_tries[room] = tries
+        new_nick = base + "_" * tries
+        gi = client.groupchats.get(room)
+        password = gi.password if gi else ""
+        client.join_muc(room, new_nick, password=password)
+        self._update_muc_self_nick(room, new_nick)
+        return True
+
+    def _update_muc_self_nick(self, room: str, nick: str) -> None:
+        old = self._muc_self_nicks.get(room, "")
+        self._muc_self_nicks[room] = nick
+        users = self._muc_users.setdefault(room, {})
+        if old and old in users:
+            entry = users.pop(old)
+            entry["nick"] = nick
+            users[nick] = entry
+        chat = self._chat_window.get_chat(room)
+        if not chat:
+            return
+        chat.set_self_nick(nick)
+        chat.update_muc_users(list(users.values()), self_nick=nick)
+        from jabbim.include.utils import format_time
+        chat.add_status(tr("muc_nick_retrying", nick=nick), format_time())
+
     def _on_muc_join_error(self, room: str, condition: str, code: str):
+        if condition == "conflict" and self._config.chat.muc_auto_nick:
+            if self._schedule_muc_nick_retry(room):
+                return
+            self._muc_join_tries.pop(room, None)
+            self._muc_base_nicks.pop(room, None)
+            chat = self._chat_window.get_chat(room)
+            if chat:
+                from jabbim.include.utils import format_time
+                chat.add_status(tr("muc_nick_conflict_give_up"),
+                                format_time())
+            return
         chat = self._chat_window.get_chat(room)
         if not chat:
             return

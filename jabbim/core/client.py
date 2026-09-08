@@ -39,6 +39,7 @@ class JabberClient:
         self.host = host
         self.port = int(port or 0)
         self.auto_join_conferences = auto_join_conferences
+        self.autojoin_rooms: set[str] = set()
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
         self.send_chatstates = (self.send_typing_notifications
@@ -296,8 +297,11 @@ class JabberClient:
         ``muc_join_error`` event; success emits ``muc_joined`` with the room
         subject and the initial occupant list.
         """
-        self.groupchats.setdefault(room, GroupChatInfo(room=room, nick=nick))
-        self.groupchats[room].joined = False
+        gi = self.groupchats.setdefault(
+            room, GroupChatInfo(room=room, nick=nick))
+        gi.nick = nick
+        gi.password = password or ""
+        gi.joined = False
         loop = asyncio.get_event_loop()
         if save_bookmark:
             loop.create_task(self.save_bookmark(room, nick, password,
@@ -1054,6 +1058,7 @@ class JabberClient:
             if not autojoin or not room or room in self.groupchats:
                 continue
             logger.info("Auto-joining bookmarked room %s", room)
+            self.autojoin_rooms.add(room)
             try:
                 self.join_muc(room, nick, password=password, save_bookmark=False)
             except Exception:
@@ -1644,12 +1649,13 @@ class ContactInfo:
 class GroupChatInfo:
     """Lightweight groupchat data object."""
 
-    __slots__ = ("room", "nick", "subject", "users", "joined",
+    __slots__ = ("room", "nick", "password", "subject", "users", "joined",
                  "pending_history")
 
     def __init__(self, room: str, nick: str):
         self.room = room
         self.nick = nick
+        self.password = ""
         self.subject = ""
         self.users: dict[str, dict] = {}  # {nick: {show, status, role, affiliation}}
         self.joined = False

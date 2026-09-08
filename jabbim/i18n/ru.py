@@ -227,7 +227,7 @@ STRINGS = {
     "vcard_field_status_updated": "Статус обновлён",
     # Groupchat
     "muc_leave": "Покинуть комнату",
-    "muc_leave_confirm": "{room}",
+    "muc_leave_confirm": "Покинуть конференцию {room}?",
     "muc_topic": "{topic}",
     "muc_participants": "Участники",
     "muc_you": "вы",
@@ -254,6 +254,8 @@ STRINGS = {
     "muc_join_failed": "Не удалось войти в комнату: {reason}",
     "muc_join_waiting": "Ожидание подтверждения входа в комнату...",
     "muc_invite": "Пригласить в комнату",
+    "muc_nick_retrying": "Ник занят — пробую войти как {nick}",
+    "muc_nick_conflict_give_up": "Не удалось войти в конференцию: ник занят после 3 попыток.",
     # Notifications
     "notify_auth_request": "{jid}",
     "notify_auth_accept": "Принять",
@@ -304,6 +306,7 @@ STRINGS = {
     "prefs_muc_show_status_text": "Показывать текст статуса",
     "prefs_muc_auto_nick": "Автоматически менять ник при конфликтах",
     "prefs_muc_confirm_leave": "Запрос при выходе из комнаты",
+    "prefs_muc_minimize_startup": "При запуске сворачивать конференции",
     "prefs_privacy": "Приватность",
     "prefs_send_software": "Отправлять версию приложения и ОС",
     "prefs_send_chatstates": "Отправлять уведомления об активности",

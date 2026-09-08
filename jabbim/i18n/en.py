@@ -227,7 +227,7 @@ STRINGS = {
     "vcard_field_status_updated": "Status updated",
     # Groupchat
     "muc_leave": "Leave Room",
-    "muc_leave_confirm": "{room}",
+    "muc_leave_confirm": "Do you really want to leave the conference {room}?",
     "muc_topic": "{topic}",
     "muc_participants": "Participants",
     "muc_you": "you",
@@ -254,6 +254,8 @@ STRINGS = {
     "muc_join_failed": "Could not join the room: {reason}",
     "muc_join_waiting": "Waiting for the room to accept the join request...",
     "muc_invite": "Invite to room",
+    "muc_nick_retrying": "Nickname is busy — trying again as {nick}",
+    "muc_nick_conflict_give_up": "Could not join the conference: the nickname is still busy after 3 attempts.",
     # Notifications
     "notify_auth_request": "{jid}",
     "notify_auth_accept": "Accept",
@@ -304,6 +306,7 @@ STRINGS = {
     "prefs_muc_show_status_text": "Show status text",
     "prefs_muc_auto_nick": "Automatically change nickname on conflicts",
     "prefs_muc_confirm_leave": "Ask before leaving a room",
+    "prefs_muc_minimize_startup": "Minimize conferences on startup",
     "prefs_privacy": "Privacy",
     "prefs_send_software": "Send application and OS version",
     "prefs_send_chatstates": "Send activity notifications",
