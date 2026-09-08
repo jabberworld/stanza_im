@@ -57,6 +57,39 @@ main.py                          # python main.py entry point
 pyproject.toml                   # Package config
 ```
 
+Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`
+and `ui/conference_dialog.py`. The latter provides conference joining,
+XEP-0030 room browsing, room vCard requests and JID copying. Conference
+servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
+names are preserved and used as the menu label with a localpart fallback.
+The conference browser uses the names and metadata returned by the service's
+`disco#items` response and does not issue one `disco#info` request per room.
+vCard information dialogs are opened non-modally from async callbacks.
+Chat and MUC tabs use separate `ChatThemeFactory` instances, while emoticon
+sets are discovered from `resources/emoticons/*/smileys*.cfg`. Preferences
+show a live preview of the selected emoticon set.
+`ServiceBrowserDialog` groups XEP-0030 items into conferences, gateways,
+services and uncategorized items. It discovers the account domain on open and
+builds the tree fully lazily with no eager discovery: a node renders its
+direct children "as is" from one `disco#items` request, every service item
+shows a tentative expand arrow, and expanding or clicking a node issues its
+own `disco#items` before the branch contents are drawn — nodes that return no
+children lose their arrow. Deep items inherit the parent's icon (no per-child
+`disco#info`); only the top level is classified via `disco#info` to drive the
+category grouping. Disco requests (items/info) pass the parent's
+`node` attribute so node-scoped services (e.g. gateways) resolve fully, and
+items that equal their own parent (`jid`+`node`) are dropped to prevent
+self-referencing loops. `Автообзор` recursively pre-loads the tree (bounded
+depth, cycle-safe). Used servers are persisted in `connection.service_servers`.
+Double-clicking a conference fills both room and server in `JoinConferenceDialog`
+and runs the full join flow (server persistence, bookmark support).
+Chat avatar `<img>` elements carry `class="avatar"`; `ChatView.update_sender_avatar`
+updates only `img.avatar`, never emoticon images in the same message.
+
+UI convention: context menus and menu-bar menus always use icons. Load them via
+`MainWindow._menu_icon(name)` (search order: `ACTIONS_DIR_16` →
+`CATEGORIES_DIR_16` → `STATUS_DIR_32`); `SearchDialog._icon` mirrors this order.
+
 ## Key Design Patterns
 
 ### 1. Asyncio + Qt Integration (`app.py`)
@@ -129,6 +162,11 @@ subscription changes. Presence is aggregated by **bare JID** across resources
 (best `show` wins via `SHOW_ORDER`), and empty/`available` shows are normalized
 to `"online"`.
 
+Preferences use icon navigation and nested tabs. `Apply` applies settings
+without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
+Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
+checkable group assignment and creation of new groups.
+
 ## Memory Management Rules
 
 1. **IconCache**: max 200 entries, 60s TTL, auto-eviction every 30s
@@ -146,6 +184,13 @@ python -m jabbim            # Module
 
 Requires: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml.
 System libs: libglib2.0, libgl1, libx11-6, libfontconfig1 (for PyQt6).
+
+## Commit Convention
+
+Commit changes to the local git repository automatically after each logical unit
+of work (one bug fix or feature = one commit). Match the commit message style of
+the existing history (short imperative summary line). Do not commit secrets or
+unintended files; check `git status` before committing.
 
 ## Headless Test Environment
 
