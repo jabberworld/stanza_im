@@ -64,6 +64,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._refresh()
         if initial_jid:
             self._select_jid(initial_jid)
+        self._search.setFocus()
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QHBoxLayout(self)
@@ -118,6 +119,10 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         search_row.addWidget(self._btn_next_match)
         self._btn_all_time = QtWidgets.QPushButton(tr("history_all_time"))
         self._btn_all_time.setCheckable(True)
+        self._btn_all_time.setAutoDefault(False)
+        self._btn_all_time.setDefault(False)
+        self._btn_all_time.setFocusPolicy(
+            QtCore.Qt.FocusPolicy.NoFocus)
         self._btn_all_time.toggled.connect(self._on_mode_toggled)
         search_row.addWidget(self._btn_all_time)
         right_layout.addLayout(search_row)
@@ -177,6 +182,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._refresh()
         if jid:
             self._select_jid(jid)
+        self._search.setFocus()
 
     def _refresh(self) -> None:
         try:
@@ -282,7 +288,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         font = bold.font()
         font.setBold(True)
         bold.setFont(font)
-        bold.setForeground(QtGui.QBrush(QtGui.QColor(0x1a, 0x5f, 0x9e)))
+        bold.setForeground(QtGui.QBrush(QtGui.QColor(0x0d, 0x4f, 0x8b)))
+        bold.setBackground(QtGui.QBrush(QtGui.QColor(0xd8, 0xe6, 0xf5)))
         for date in self._dates:
             try:
                 y, m, d = (int(p) for p in date.split("-"))
@@ -382,6 +389,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 f'{body}</p>')
         parts.append("</body></html>")
         self._messages.setHtml("\n".join(parts))
+        scroll = self._messages.verticalScrollBar()
+        scroll.setValue(scroll.maximum())
 
         doc = self._messages.document()
         block = doc.begin()
@@ -422,6 +431,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._jump_to_match(0)
         else:
             self._status.setText(tr("history_no_results"))
+        self._search.setFocus()
 
     def _run_all_time_search(self) -> None:
         results = history.search_dates(self._jid, self._query)
@@ -451,6 +461,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 self._select_date(date)
             self._jump_to_first_match()
             self._results.show()
+        self._search.setFocus()
 
     def _on_match_prev(self) -> None:
         if self._btn_all_time.isChecked():
@@ -482,6 +493,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 self._select_date(date)
             self._jump_to_first_match()
             self._results.show()
+        self._search.setFocus()
 
     def _update_match_buttons(self) -> None:
         if self._btn_all_time.isChecked():
