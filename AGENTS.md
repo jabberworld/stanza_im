@@ -85,10 +85,17 @@ Double-clicking a conference fills both room and server in `JoinConferenceDialog
 and runs the full join flow (server persistence, bookmark support).
 Chat avatar `<img>` elements carry `class="avatar"`; `ChatView.update_sender_avatar`
 updates only `img.avatar`, never emoticon images in the same message.
+`HistoryManagerDialog` (opened from the roster contact context menu and the
+Actions menu) groups contacts with history by their roster groups or the
+`core/known_contacts.py` registry (persisted JID → name/groups/conference flag
+so removed contacts keep their names), shows per-day bold dates in a
+`QCalendarWidget`, and supports day-scoped and all-time substring search
+(`core/history.dates/load_day/search_dates`).
 
 UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)` (search order: `ACTIONS_DIR_16` →
-`CATEGORIES_DIR_16` → `STATUS_DIR_32`); `SearchDialog._icon` mirrors this order.
+`CATEGORIES_DIR_16` → `STATUS_DIR_32` → `PLACES_DIR_22`); `SearchDialog._icon`
+mirrors the first three dirs.
 
 ## Key Design Patterns
 

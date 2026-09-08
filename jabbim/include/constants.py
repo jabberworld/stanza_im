@@ -33,6 +33,10 @@ ACTIONS_DIR_22 = os.path.join(IMAGES_DIR, "22x22", "actions")
 CATEGORIES_DIR_16 = os.path.join(IMAGES_DIR, "16x16", "categories")
 CATEGORIES_DIR_32 = os.path.join(IMAGES_DIR, "32x32", "categories")
 
+PLACES_DIR_16 = os.path.join(IMAGES_DIR, "16x16", "places")
+PLACES_DIR_22 = os.path.join(IMAGES_DIR, "22x22", "places")
+PLACES_DIR_32 = os.path.join(IMAGES_DIR, "32x32", "places")
+
 APP_ICON_16 = os.path.join(IMAGES_DIR, "16x16", "apps")
 APP_ICON_22 = os.path.join(IMAGES_DIR, "22x22", "apps")
 APP_ICON_32 = os.path.join(IMAGES_DIR, "32x32", "apps")

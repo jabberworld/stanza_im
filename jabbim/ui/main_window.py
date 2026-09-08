@@ -19,7 +19,8 @@ from jabbim.include.avatars import save_avatar
 from jabbim.include.enumerators import populate_translations, show_to_icon_key
 from jabbim.include.constants import (APP_NAME, VERSION,
                                       ACTIONS_DIR_16, CATEGORIES_DIR_16,
-                                      STATUS_DIR_32)
+                                      STATUS_DIR_32,
+                                      PLACES_DIR_22)
 from jabbim.core.storage import Config
 from jabbim.ui.icons import init_icons
 from jabbim.ui.login_widget import LoginWidget
@@ -114,6 +115,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._vcard_requested: set[str] = set()
         self._pending_profile: set[str] = set()
         self._vcard_dialogs: dict[str, object] = {}
+        self._history_manager: object | None = None
         self._last_activity = time.monotonic()
         self._auto_status_applied = False
         self.app.installEventFilter(self)
@@ -208,7 +210,8 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _menu_icon(filename: str) -> QtGui.QIcon:
         """Load an action/category/status icon for menus from resources."""
-        for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32):
+        for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32,
+                          PLACES_DIR_22):
             pix = QtGui.QPixmap(os.path.join(directory, filename))
             if not pix.isNull():
                 return QtGui.QIcon(pix)
@@ -231,6 +234,9 @@ class MainWindow(QtWidgets.QMainWindow):
         my_vcard = actions_menu.addAction(self._menu_icon("v-card.png"),
                                           tr("menu_edit_my_vcard"))
         my_vcard.triggered.connect(self._edit_my_vcard)
+        history_act = actions_menu.addAction(self._menu_icon("history.png"),
+                                             tr("menu_history"))
+        history_act.triggered.connect(self._on_history_manager)
         actions_menu.addSeparator()
         plugins_menu = actions_menu.addMenu(self._menu_icon("exec.png"),
                                             tr("menu_plugins"))
@@ -475,6 +481,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ))
         self._conference_roster.add(room)
         self._roster._groups[tr("roster_group_conferences")].single_count = True
+        self._remember_contact(room, name=self._muc_display_name(room),
+                               groups=[tr("roster_group_conferences")],
+                               is_conference=True)
         self._recount_groups()
         self._roster.sort_and_update()
 
@@ -812,6 +821,8 @@ class MainWindow(QtWidgets.QMainWindow):
         contact = self._client.get_contact(jid) if self._client else None
         show = contact.show if contact else "offline"
         status = contact.status if contact else ""
+        self._remember_contact(jid, name=name, groups=groups,
+                               is_conference=False)
         for group in groups:
             user = UserItem(
                 jid=jid,
@@ -1045,6 +1056,8 @@ class MainWindow(QtWidgets.QMainWindow):
                        lambda: self._on_contact_open(jid))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
                        lambda checked=False: defer(lambda: self._show_profile(jid)))
+        menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
+                       lambda checked=False: defer(lambda: self._on_history_contact(jid)))
         if not is_conf:
             menu.addSeparator()
             menu.addAction(self._menu_icon("edit.png"), tr("ctx_rename"),
@@ -1100,6 +1113,7 @@ class MainWindow(QtWidgets.QMainWindow):
         name = name.strip()
         self._client.update_contact(jid, name=name)
         self._roster.update_user(jid, name=name)
+        self._remember_contact(jid, name=name)
 
     def _move_to_group(self, jid: str):
         if not self._client:
@@ -1114,6 +1128,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_contact_groups(self, jid: str, groups: list[str]):
         if self._client:
             self._client.update_contact(jid, groups=groups)
+        self._remember_contact(jid, groups=groups)
 
     def _create_contact_group(self, jid: str):
         name, ok = QtWidgets.QInputDialog.getText(
@@ -1127,6 +1142,90 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.history_cleared()
+
+    # ── History manager ───────────────────────────────────────────
+
+    def _remember_contact(self, jid: str, name: str = "",
+                          groups: list[str] | None = None,
+                          is_conference: bool | None = None):
+        """Persist JID → name/groups/conference so removed contacts and
+        inactive rooms keep their names in the history manager."""
+        if not jid:
+            return
+        from jabbim.core import known_contacts
+        entry = known_contacts.get(jid)
+        if is_conference is None:
+            is_conference = entry.get("is_conference", False)
+        known_contacts.update(
+            jid,
+            name=name or entry.get("name", ""),
+            groups=list(groups) if groups is not None else None,
+            is_conference=is_conference)
+
+    def _history_catalog(self) -> list[dict]:
+        """Build the contact catalog for the history manager.
+
+        Merges the live roster (names/groups take precedence), the persisted
+        known-contacts registry (removed contacts / inactive rooms) and the
+        history files themselves (unrecognised JIDs).  Each entry carries
+        ``{"jid", "name", "groups": [...], "is_conference": bool}``.
+        """
+        from jabbim.core import history, known_contacts
+        entries: dict[str, dict] = {}
+        for user in self._roster._users:
+            entry = entries.setdefault(user.jid, {
+                "jid": user.jid,
+                "name": user.name or user.jid,
+                "groups": [],
+                "is_conference": user.jid in self._conference_roster,
+            })
+            if user.name:
+                entry["name"] = user.name or entry["name"]
+            if user.group not in entry["groups"]:
+                entry["groups"].append(user.group)
+        for jid, data in known_contacts.all().items():
+            entry = entries.setdefault(jid, {
+                "jid": jid,
+                "name": data.get("name") or jid.split("@", 1)[0],
+                "groups": [],
+                "is_conference": bool(data.get("is_conference")),
+            })
+            if jid in self._conference_roster:
+                entry["is_conference"] = True
+            if not entry["groups"]:
+                entry["groups"] = list(data.get("groups", []))
+            if entry["is_conference"] and tr("roster_group_conferences") \
+                    not in entry["groups"]:
+                entry["groups"].insert(0, tr("roster_group_conferences"))
+        for jid in history.list_history_jids():
+            contacts = {u.jid for u in self._roster._users}
+            if jid not in entries and jid not in contacts:
+                entries[jid] = {
+                    "jid": jid,
+                    "name": jid.split("@", 1)[0],
+                    "groups": [],
+                    "is_conference": False,
+                }
+        for entry in entries.values():
+            if not entry["groups"]:
+                entry["groups"] = [tr("category_personal")]
+        return list(entries.values())
+
+    def _on_history_manager(self):
+        self._open_history_manager("")
+
+    def _on_history_contact(self, jid: str):
+        self._open_history_manager(jid)
+
+    def _open_history_manager(self, jid: str):
+        from jabbim.ui.history_manager import HistoryManagerDialog
+        if self._history_manager is None:
+            self._history_manager = HistoryManagerDialog(
+                self._history_catalog, parent=self)
+        self._history_manager.open_for(jid)
+        self._history_manager.show()
+        self._history_manager.raise_()
+        self._history_manager.activateWindow()
 
     def _on_server_history(self, jid: str, since: str = ""):
         """Load the whole server-side conversation into the chat window."""
@@ -1211,6 +1310,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_message_received(self, frm: str, body: str, ts):
         bare_jid = frm.split("/")[0]
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
+        self._remember_contact(bare_jid, name=sender_name,
+                               is_conference=False)
 
         if not self._chat_window.has_chat(bare_jid):
             self._chat_window.open_chat(bare_jid, sender_name, focus=False)
@@ -1245,6 +1346,7 @@ class MainWindow(QtWidgets.QMainWindow):
         target = real_jid.strip() if isinstance(real_jid, str) else ""
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
+        self._remember_contact(target, name=nick, is_conference=True)
         chat = self._chat_window.open_chat(target, nick)
         chat.add_message(sender=nick, body=body,
                          timestamp=ts or _current_timestamp(), direction="incoming",
@@ -1266,6 +1368,7 @@ class MainWindow(QtWidgets.QMainWindow):
             history.store_message(
                 jid, "outgoing", body,
                 timestamp=_current_timestamp(), sender="Me")
+            self._remember_contact(jid)
 
     # ── Groupchat ─────────────────────────────────────────────────
 
@@ -1292,6 +1395,9 @@ class MainWindow(QtWidgets.QMainWindow):
         from jabbim.core import history
         history.store_message(room, "incoming", body,
                               timestamp=ts or _current_timestamp(), sender=nick)
+        self._remember_contact(room, name=self._muc_display_name(room),
+                               groups=[tr("roster_group_conferences")],
+                               is_conference=True)
 
     def _on_groupchat_presence(self, room: str, nick: str, show: str,
                                status: str, role: str = "",
