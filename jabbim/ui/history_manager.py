@@ -12,8 +12,8 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from jabbim.core import history
-from jabbim.include.constants import ACTIONS_DIR_16, CATEGORIES_DIR_16, \
-    STATUS_DIR_32
+from jabbim.include.constants import ACTIONS_DIR_16, APP_ICON_16, \
+    CATEGORIES_DIR_16, STATUS_DIR_32
 from jabbim.include.utils import escape_html
 from jabbim.i18n import tr
 
@@ -28,7 +28,8 @@ def _time_of(ts: str) -> str:
 
 
 def _icon(filename: str) -> QtGui.QIcon:
-    for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32):
+    for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32,
+                      APP_ICON_16):
         pix = QtGui.QPixmap(os.path.join(directory, filename))
         if not pix.isNull():
             return QtGui.QIcon(pix)
@@ -207,6 +208,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _rebuild_tree(self) -> None:
         self._tree.blockSignals(True)
         self._tree.clear()
+        app_icon = _icon("jabbim.png")
         groups: dict[str, list[dict]] = {}
         for contact in self._catalog:
             for group in contact["groups"]:
@@ -220,6 +222,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             header.setExpanded(True)
             for contact in contacts:
                 item = QtWidgets.QTreeWidgetItem([contact["name"]])
+                item.setIcon(0, app_icon)
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole,
                              contact["jid"])
                 item.setToolTip(0, contact["jid"])
