@@ -391,6 +391,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             if not sender.strip():
                 sender = self._jid.split("@", 1)[0]
             body = escape_html(entry.get("body", ""))
+            body = body.replace("\r\n", "\n").replace("\r", "\n").replace(
+                "\n", "<br>")
             arrow = "→" if entry.get("direction") == "outgoing" else "←"
             parts.append(
                 f'<p><span style="color:#808080">{escape_html(date)}'
