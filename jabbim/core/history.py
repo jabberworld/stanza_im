@@ -205,6 +205,89 @@ def older_available_timestamp(jid: str, before: str) -> bool:
         return False
 
 
+def has_history(jid: str) -> bool:
+    """True when *jid* has a history store (SQLite db or legacy JSONL)."""
+    return os.path.isfile(_path(jid)) or _jsonl_exists(jid)
+
+
+def _jsonl_exists(jid: str) -> bool:
+    try:
+        from jabbim.core.storage import history_path
+        return os.path.isfile(history_path(jid))
+    except ImportError:
+        return False
+
+
+def list_history_jids() -> set[str]:
+    """Return the set of JIDs that have a local history store.
+
+    JIDs are recovered from ``.sqlite3`` filenames; safely recoverable ones
+    (those containing a ``@``) are returned as-is, ambiguous slugs are kept
+    verbatim.  The slash character in ``room/nick`` is stored as ``_`` so such
+    legacy files can only be recovered against the known-contacts registry.
+    """
+    jids: set[str] = set()
+    try:
+        files = os.listdir(HISTORY_DIR)
+    except OSError:
+        return jids
+    for name in files:
+        if not name.endswith(".sqlite3"):
+            continue
+        slug = name[:-len(".sqlite3")]
+        if "@" in slug:
+            jids.add(slug)
+    return jids
+
+
+def dates(jid: str) -> list[str]:
+    """Return the sorted list of ``YYYY-MM-DD`` dates that have messages."""
+    try:
+        conn = _connection(jid)
+        rows = conn.execute(
+            "SELECT DISTINCT substr(timestamp, 1, 10) AS d "
+            "FROM messages WHERE d != '' ORDER BY d").fetchall()
+        return [row[0] for row in rows if row[0]]
+    except sqlite3.Error as exc:
+        logger.warning("Could not read history dates for %s: %s", jid, exc)
+        return []
+
+
+def load_day(jid: str, date: str) -> list[dict]:
+    """Read every message stored on *date* (``YYYY-MM-DD``), oldest first."""
+    try:
+        conn = _connection(jid)
+        cur = conn.execute(
+            "SELECT id, direction, sender, body, timestamp, archive_id "
+            "FROM messages "
+            "WHERE substr(timestamp, 1, 10) = ? "
+            "ORDER BY timestamp ASC, id ASC", (date,))
+        return [_row_to_entry(r) for r in cur.fetchall()]
+    except sqlite3.Error as exc:
+        logger.warning("Could not read history day %s for %s: %s",
+                       date, jid, exc)
+        return []
+
+
+def search_dates(jid: str, query: str) -> list[tuple[str, int]]:
+    """Return ``[(date, count)]`` of days containing a case-insensitive
+    substring match of *query* in the message body, newest first."""
+    try:
+        conn = _connection(jid)
+        cur = conn.execute(
+            "SELECT substr(timestamp, 1, 10) AS d, COUNT(*) "
+            "FROM messages WHERE body LIKE ? ESCAPE '\\' GROUP BY d "
+            "ORDER BY d DESC", (f"%{_like_escape(query)}%",))
+        return [(row[0], int(row[1])) for row in cur.fetchall() if row[0]]
+    except sqlite3.Error as exc:
+        logger.warning("Could not search history for %s: %s", jid, exc)
+        return []
+
+
+def _like_escape(query: str) -> str:
+    return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def count_messages(jid: str) -> int:
     try:
         conn = _connection(jid)
