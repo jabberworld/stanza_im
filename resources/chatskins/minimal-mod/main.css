@@ -153,8 +153,10 @@ a:hover{
 }
 
 .message {
-	overflow: auto;
+    overflow: auto;
 }
+.time_initial .delivery { display: block; color: #777; margin-left: 0; }
+.typing-indicator { color: #888; font-style: italic; padding: 3px 16px; min-height: 18px; }
 .context_message { color: #999; }
 
 .message, .context_message

@@ -9,6 +9,7 @@ from __future__ import annotations
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from jabbim.include.constants import APP_NAME
+from jabbim.i18n import tr
 from jabbim.ui.chat_widget import ChatWidget
 from jabbim.ui.chat_themes import ChatThemeFactory
 
@@ -47,12 +48,17 @@ class ChatWindow(QtWidgets.QMainWindow):
     would be a plain QWidget (subclassed here for compatibility).
     """
 
-    def __init__(self, theme_factory: ChatThemeFactory, parent=None):
+    def __init__(self, theme_factory: ChatThemeFactory,
+                 muc_theme_factory: ChatThemeFactory | None = None, parent=None):
         super().__init__(parent)
         self._theme = theme_factory
+        self._muc_theme = muc_theme_factory or theme_factory
         self._tabs: dict[str, ChatWidget] = {}  # jid -> widget
         self._tab_order: list[str] = []         # ordered jid list
         self._tab_title_length = 30
+        self._active_jid: str | None = None
+        self._remote_activity: dict[str, str] = {}
+        self._chat_options = {}
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(500, 400)
@@ -79,6 +85,18 @@ class ChatWindow(QtWidgets.QMainWindow):
                             activated=lambda i=i: self._goto_tab(i - 1))
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+W"), self,
                         activated=self._close_current_tab)
+        QtGui.QShortcut(QtGui.QKeySequence("Esc"), self,
+                        activated=self._on_escape)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+PgUp"), self,
+                        activated=lambda: self._cycle_tab(-1))
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+PgDown"), self,
+                        activated=lambda: self._cycle_tab(1))
+
+    def _cycle_tab(self, step: int):
+        count = self._tab_widget.count()
+        if count > 1:
+            self._tab_widget.setCurrentIndex(
+                (self._tab_widget.currentIndex() + step) % count)
 
     def _goto_tab(self, index: int):
         if 0 <= index < self._tab_widget.count():
@@ -88,6 +106,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         idx = self._tab_widget.currentIndex()
         if idx >= 0:
             self._close_tab(idx)
+
+    def _on_escape(self):
+        widget = self._tab_widget.currentWidget()
+        if isinstance(widget, ChatWidget) and widget.is_muc:
+            self.hide()
+            return
+        self._close_current_tab()
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -103,6 +128,7 @@ class ChatWindow(QtWidgets.QMainWindow):
             return self._tabs[jid]
 
         widget = ChatWidget(jid, display_name, self._theme)
+        widget.set_chat_options(self._chat_options)
         widget.message_sent.connect(self._on_message_sent)
         widget.typing_changed.connect(self.typing_changed)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -130,7 +156,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             self._focus_tab(room)
             return self._tabs[room]
 
-        widget = ChatWidget(room, display_name, self._theme, is_muc=True)
+        widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
+        widget.set_chat_options(self._chat_options)
         widget.message_sent.connect(self._on_groupchat_message_sent)
         widget.typing_changed.connect(self.typing_changed)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -155,6 +182,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         return self._tabs.get(jid)
 
     def close_chat(self, jid: str) -> None:
+        self._remote_activity.pop(jid, None)
         if jid in self._tabs:
             idx = self._tab_widget.indexOf(self._tabs[jid])
             if idx >= 0:
@@ -168,14 +196,30 @@ class ChatWindow(QtWidgets.QMainWindow):
     def has_chat(self, jid: str) -> bool:
         return jid in self._tabs
 
-    def reload_themes(self, variant: str = ""):
+    def reload_themes(self, variant: str = "", muc_variant: str | None = None):
         """Re-apply the chat theme variant to all open tabs."""
+        self._theme.set_variant(variant)
+        self._muc_theme.set_variant(muc_variant if muc_variant is not None else variant)
         for widget in self._tabs.values():
-            widget.reload_theme(variant)
+            if widget.is_muc and muc_variant is not None:
+                widget.reload_theme(muc_variant)
+            elif not widget.is_muc:
+                widget.reload_theme(variant)
+
+    def reload_emoticons(self, skin: str):
+        self._theme.set_emoticon_skin(skin)
+        self._muc_theme.set_emoticon_skin(skin)
+        for widget in self._tabs.values():
+            widget.reload_theme()
 
     def set_show_avatars(self, show: bool):
         for widget in self._tabs.values():
             widget.set_show_avatars(show)
+
+    def set_chat_options(self, options):
+        self._chat_options = dict(options)
+        for widget in self._tabs.values():
+            widget.set_chat_options(options)
 
     def set_tab_title_length(self, length: int):
         self._tab_title_length = max(10, int(length))
@@ -216,15 +260,35 @@ class ChatWindow(QtWidgets.QMainWindow):
         """Title reflects the currently active chat."""
         w = self._tab_widget.currentWidget()
         if isinstance(w, ChatWidget) and w.display_name:
-            self.setWindowTitle(w.display_name)
+            state = self._remote_activity.get(w.jid, "")
+            suffix = "" if not state else f" ({state})"
+            self.setWindowTitle(w.display_name + suffix)
         else:
             self.setWindowTitle(APP_NAME)
+
+    def set_remote_activity(self, jid: str, state: str):
+        widget = self._tabs.get(jid)
+        if widget is not None and widget.is_muc:
+            return
+        if state in ("active", "inactive", "gone", "composing", "paused"):
+            labels = {
+                "active": tr("chat_activity_active"),
+                "inactive": tr("chat_activity_inactive"),
+                "composing": tr("chat_is_typing", name="").strip(),
+                "paused": tr("chat_activity_inactive"),
+                "gone": tr("chat_activity_gone"),
+            }
+            self._remote_activity[jid] = labels.get(state, state)
+        if widget is not None:
+            widget.set_status_text(tr("chat_activity_gone") if state == "gone" else "")
+        self._update_title()
 
     # ── Signals ───────────────────────────────────────────────────
 
     message_to_send = QtCore.pyqtSignal(str, str)       # jid, body
     groupchat_message_to_send = QtCore.pyqtSignal(str, str)  # room, body
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
+    activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave
     typing_changed = QtCore.pyqtSignal(str, bool)       # jid, is_typing
@@ -240,6 +304,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     def _close_tab(self, index: int):
         widget = self._tab_widget.widget(index)
         if isinstance(widget, ChatWidget):
+            if not widget.is_muc:
+                self.activity_changed.emit(widget.jid, "gone")
             if widget.is_muc:
                 self.muc_leave_requested.emit(widget.jid)
             else:
@@ -247,10 +313,22 @@ class ChatWindow(QtWidgets.QMainWindow):
             self.close_chat(widget.jid)
 
     def _on_tab_changed(self, index: int):
+        previous = self._active_jid
+        current = None
         widget = self._tab_widget.currentWidget()
         if isinstance(widget, ChatWidget):
+            current = widget.jid
             widget.focus_input()
             self.tab_focused.emit(widget.jid)
+        previous_widget = self._tabs.get(previous) if previous else None
+        current_widget = self._tabs.get(current) if current else None
+        if (previous and previous != current and previous_widget
+                and not previous_widget.is_muc):
+            self.activity_changed.emit(previous, "inactive")
+        if (current and current != previous and current_widget
+                and not current_widget.is_muc):
+            self.activity_changed.emit(current, "active")
+        self._active_jid = current
         self._update_title()
 
     def _focus_tab(self, jid: str):

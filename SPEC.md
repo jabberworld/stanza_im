@@ -43,6 +43,36 @@ jabbim/
 └── plugins/            — (future)
 ```
 
+Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
+and `ui/conference_dialog.py`. Conference discovery uses XEP-0030; used
+conference servers are stored in `connection.conference_servers`. XEP-0048
+bookmark names are preserved and used in the Bookmarks menu with a localpart
+fallback.
+The conference browser consumes room names and metadata directly from
+`disco#items`; it does not probe every room individually. Contact and room
+vCard dialogs are opened asynchronously without nested modal event loops.
+Appearance settings support independent ordinary-chat and conference theme
+variants. Emoticon sets are discovered from cfg files under
+`resources/emoticons`, and the settings dialog previews up to ten images from
+the selected set.
+The service browser uses XEP-0030 discovery, groups identities by category and
+builds the tree fully lazily with no eager discovery: a node renders its direct
+children "as is" from a single `disco#items` request (with the parent's `node`
+attribute forwarded, so node-scoped gateways/services resolve fully), every
+service item shows a tentative expand arrow immediately, and expanding or
+clicking a node issues its own `disco#items` before the branch contents are
+drawn — nodes that return no children lose their arrow. Deep items inherit the
+parent's icon; only the top level is classified via `disco#info` to drive the
+category grouping. Items that repeat their own parent (`jid`+`node`) are
+dropped to avoid self-referencing loops.
+`Автообзор` recursively browses the whole tree with a bounded depth. Used
+servers are stored in `connection.service_servers`. Double-clicking a
+conference pre-fills both room and server in the join dialog, which completes
+the standard join flow (server persistence and bookmark support). Emoticon
+replacement uses one non-overlapping match pass so generated image HTML is not
+processed again as text. Chat avatar images are tagged `class="avatar"` so
+avatar updates never overwrite emoticon images inside a message.
+
 ## 4. Configuration & Persistence
 
 Follows the XDG Base Directory spec. All files created with **0600** perms.
@@ -160,11 +190,18 @@ Dynamic height: 32px without status message, 52px with.
 |--------|---------|
 | Expand/collapse group | Left-click on group header |
 | Select contact | Left-click on user item |
+| Clear selection | Left/right-click on empty roster space |
 | Open chat | Double-click on user item |
-| Context menu | Right-click on user item |
+| Context menu | Right-click on user item (opens once via `contextMenuEvent`) |
 | Search | Text in search input (filters by name/jid) |
 | Keyboard: Enter | Open chat for selected contact |
 | Keyboard: Delete | Context menu for selected contact |
+
+Context menu differs for conferences (items in `_conference_roster` /
+`_muc_self_nicks`): «Переименовать», «Группа» and
+«Повторить запрос авторизации» are hidden, and «Удалить контакт» becomes
+«Покинуть конференцию» (`ctx_leave_conference`) which leaves the MUC
+(`_on_muc_leave`) and closes its tab.
 
 ### 7.4 Strategy Pattern
 
@@ -194,6 +231,11 @@ Default: standalone.
 - `Ctrl+1..9` for direct tab access (Phase 2)
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` for next/prev (native Qt)
 - Tab label: display name (MUC: prefixed with room icon)
+- Esc closes the current tab; Ctrl+PgUp/Ctrl+PgDown cycle tabs; Ctrl+1..9
+  selects a tab and Ctrl+W closes it.
+- Esc on a MUC tab hides the chat window instead of closing the tab (the
+  conference stays active and is reopened from the roster); Esc on a 1-on-1
+  tab keeps the legacy behavior (closes the tab).
 
 ### 8.3 Tab Lifecycle
 
@@ -231,13 +273,28 @@ Single conversation tab. Layout:
 - Uses `QWebEngineView` + `QWebChannel` for Python↔JS communication
 - `_ChatBridge` QObject exposed to JS as "bridge"
 - Bridge methods: `on_link_clicked(url)`, `on_ft_accept(sid)`, `on_ft_reject(sid)`
-- Messages added via `page().runJavaScript()` — creates div, appends, auto-scrolls
+- Messages added via `page().runJavaScript()` — creates div, inserts before the
+  typing slot, auto-scrolls
+- A permanent `#jabbim-typing-slot` (`min-height`) sits at the bottom of `#chat`;
+  the typing indicator only changes its `textContent`, so "пишет…"
+  appearing/disappearing never shifts the chat
+- Typing clears on any non-composing chat state (including `gone`) and is
+  re-shown when composing resumes
 - Shared `QWebEngineProfile` across all views (memory optimization)
 
 ### 10.2 QTextBrowser Fallback
 
 When QWebEngine is not available, falls back to `QTextBrowser` with plain HTML
-appending. No CSS themes, but functional.
+appending. No CSS themes, but functional. The typing block is marked and removed
+on clear; new messages are inserted before it (no stale "пишет…" lines).
+
+### 10.3 Chat States (XEP-0085)
+
+`gone` sets the window title and chat header status to
+«пользователь закрыл чат» (`chat_activity_gone` i18n key); any later non-`gone`
+state clears it. MUC chats ignore remote activity. Closing a chat tab
+(`close_chat`) discards the stored remote activity, so reopening the tab starts
+with a clean title and header.
 
 ## 11. Chat Themes (`ui/chat_themes.py`)
 

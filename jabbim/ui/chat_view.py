@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+import html
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 try:
     from PyQt6 import QtWebChannel
@@ -13,6 +14,9 @@ except ImportError:
     HAS_WEBENGINE = False
 
 from jabbim.ui.chat_themes import ChatThemeFactory
+
+
+TYPING_MARKER = "\u200bJabbimTyping\u200b"
 
 
 if HAS_WEBENGINE:
@@ -57,8 +61,9 @@ if HAS_WEBENGINE:
             self._theme = theme
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
-            self._bridge.near_top.connect(self.near_top)
+            self._bridge.near_top.connect(self._on_bridge_near_top)
             self._fraction = 1.0
+            self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
 
             channel = QtWebChannel.QWebChannel()
@@ -71,6 +76,10 @@ if HAS_WEBENGINE:
             self._ready = False
             self.loadFinished.connect(self._on_load_finished)
 
+            self._scroll_poll = QtCore.QTimer(self)
+            self._scroll_poll.setInterval(250)
+            self._scroll_poll.timeout.connect(self._poll_scroll_position)
+
             # Load the empty page
             self._load_empty()
 
@@ -78,6 +87,9 @@ if HAS_WEBENGINE:
             self._ready = ok
             if ok:
                 self._install_scroll_js()
+                self._scroll_poll.start()
+            else:
+                self._scroll_poll.stop()
             if ok and self._pending:
                 pending, self._pending = self._pending, []
                 for chunk in pending:
@@ -87,6 +99,13 @@ if HAS_WEBENGINE:
         (function installJabbimScroll() {
             if (window.__jabbimScrollInstalled) return;
             if (!window.bridge) {
+                if (window.QWebChannel && window.qt && qt.webChannelTransport) {
+                    new QWebChannel(qt.webChannelTransport, function (channel) {
+                        window.bridge = channel.objects.bridge;
+                        installJabbimScroll();
+                    });
+                    return;
+                }
                 window.setTimeout(installJabbimScroll, 50);
                 return;
             }
@@ -109,6 +128,37 @@ if HAS_WEBENGINE:
         def _install_scroll_js(self):
             self.page().runJavaScript(self._SCROLL_JS)
 
+        def _poll_scroll_position(self):
+            if not self._ready:
+                return
+            self.page().runJavaScript(
+                "[window.scrollY || document.documentElement.scrollTop || "
+                "document.body.scrollTop || 0, window.innerHeight || 0]",
+                self._on_scroll_position,
+            )
+
+        def _on_bridge_near_top(self):
+            if self._near_top_hit:
+                return
+            self._near_top_hit = True
+            self.near_top.emit()
+
+        def _on_scroll_position(self, value):
+            if not isinstance(value, list) or len(value) < 2:
+                return
+            try:
+                offset = float(value[0])
+                viewport = float(value[1])
+            except (TypeError, ValueError):
+                return
+            near_top = offset <= max(24.0, viewport)
+            if near_top:
+                if not self._near_top_hit:
+                    self._near_top_hit = True
+                    self.near_top.emit()
+            else:
+                self._near_top_hit = False
+
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
 
@@ -119,7 +169,9 @@ if HAS_WEBENGINE:
             if (chat) {{
                 var div = document.createElement('div');
                 div.innerHTML = {safe};
-                chat.appendChild(div);
+                var slot = document.getElementById('jabbim-typing-slot');
+                if (slot) {{ chat.insertBefore(div, slot); }}
+                else {{ chat.appendChild(div); }}
             }}
             window.scrollTo(0, document.body.scrollHeight);
             """
@@ -139,13 +191,14 @@ if HAS_WEBENGINE:
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
-                        user_icon_path: str = ""):
+                        user_icon_path: str = "", message_id: str = ""):
             """Add a message to the chat view."""
             html = self._theme.render_message(
                 sender=sender, body=body, timestamp=timestamp,
                 direction=direction, is_next=is_next,
                 sender_color=sender_color, user_icon_path=user_icon_path,
             )
+            html = self._mark_message(html, sender, message_id)
             if not self._ready:
                 self._pending.append(html)
                 return
@@ -159,6 +212,85 @@ if HAS_WEBENGINE:
                 return
             self._append_chunk(html)
 
+        def prepend_messages(self, messages: list[dict]) -> None:
+            """Insert older messages before the current document."""
+            if not messages:
+                return
+            html = "".join(self._mark_message(self._theme.render_message(
+                sender=entry.get("sender", "Me"),
+                body=entry.get("body", ""),
+                timestamp=entry.get("timestamp", ""),
+                direction=entry.get("direction", "incoming"),
+                is_next=entry.get("is_next", False),
+                sender_color="#000000",
+                user_icon_path=entry.get("user_icon_path", ""),
+            ), entry.get("sender", "Me")) for entry in messages)
+            if not self._ready:
+                self._pending.insert(0, html)
+                return
+            safe = json.dumps(html)
+            self.page().runJavaScript(f"""
+            (function() {{
+                var chat = document.getElementById('chat');
+                if (!chat) return;
+                var anchor = document.elementFromPoint(
+                    Math.max(4, window.innerWidth / 2),
+                    Math.max(4, window.innerHeight / 2));
+                var anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+                chat.insertAdjacentHTML('afterbegin', {safe});
+                function restoreAnchor() {{
+                    if (!anchor) return;
+                    var delta = anchor.getBoundingClientRect().top - anchorTop;
+                    if (Math.abs(delta) > 0.1) window.scrollBy(0, delta);
+                }}
+                // Images and WebEngine layout can change height after the
+                // insertion; correct against the same visible node again.
+                requestAnimationFrame(function() {{
+                    restoreAnchor();
+                    requestAnimationFrame(restoreAnchor);
+                }});
+                [50, 150, 300].forEach(function (delay) {{
+                    window.setTimeout(restoreAnchor, delay);
+                }});
+            }})();
+            """)
+
+        @staticmethod
+        def _mark_message(content: str, sender: str, message_id: str = "") -> str:
+            marker = (' data-jabbim-id="' + html.escape(message_id, quote=True) + '"'
+                      if message_id else "")
+            return ('<div class="jabbim-message"' + marker + ' data-jabbim-sender="'
+                    + html.escape(sender or "Me", quote=True) + '">'
+                    + content + '</div>')
+
+        def mark_message_delivered(self, message_id: str) -> None:
+            safe = json.dumps(message_id)
+            self.page().runJavaScript(f"""
+            var node = document.querySelector('[data-jabbim-id=' + JSON.stringify({safe}) + ']');
+            var stamp = node && node.querySelector('.time_initial');
+            if (stamp && !stamp.querySelector('.delivery')) {{
+                var mark = document.createElement('span');
+                mark.className = 'delivery'; mark.textContent = '✓'; stamp.appendChild(mark);
+            }}
+            """)
+
+        def set_typing_indicator(self, text: str):
+            safe = json.dumps(text or "")
+            self.page().runJavaScript(f"""
+            var slot = document.getElementById('jabbim-typing-slot');
+            if (slot) slot.textContent = {safe};
+            """)
+
+        def update_sender_avatar(self, sender: str, avatar_uri: str) -> None:
+            safe_sender = json.dumps(sender or "Me")
+            safe_uri = json.dumps(avatar_uri or "")
+            self.page().runJavaScript(f"""
+            var sender = {safe_sender};
+            document.querySelectorAll(
+                '[data-jabbim-sender=' + JSON.stringify(sender) + '] img.avatar'
+            ).forEach(function(img) {{ img.src = {safe_uri}; }});
+            """)
+
         def clear(self):
             """Clear all messages."""
             self._pending.clear()
@@ -168,6 +300,7 @@ if HAS_WEBENGINE:
             self.page().runJavaScript(code)
 
         def scroll_to_bottom(self):
+            self._near_top_hit = False
             self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
 
         def scroll_fraction(self) -> float:
@@ -175,6 +308,7 @@ if HAS_WEBENGINE:
 
         def set_scroll_fraction(self, fraction: float):
             fraction = max(0.0, min(1.0, float(fraction)))
+            self._near_top_hit = fraction <= 0.0
             js = (
                 "requestAnimationFrame(function(){"
                 "  document.body.scrollTop;"
@@ -217,17 +351,74 @@ else:
             else:
                 self._near_top_hit = False
 
+        def _typing_block_start(self) -> int:
+            """Position of the paragraph with our typing marker, if any."""
+            block = self.document().begin()
+            while block.isValid():
+                if block.text().startswith(TYPING_MARKER):
+                    return block.position()
+                block = block.next()
+            return -1
+
+        def _append_before_typing(self, html: str) -> None:
+            pos = self._typing_block_start()
+            if pos < 0:
+                self.append(html)
+                return
+            cursor = QtGui.QTextCursor(self.document())
+            cursor.setPosition(pos)
+            cursor.insertHtml(html)
+            cursor.insertBlock()
+
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
-                        user_icon_path: str = ""):
+                        user_icon_path: str = "", message_id: str = ""):
             if direction == "incoming":
-                self.append(f"<b>{sender}</b> <i>({timestamp})</i>: {body}")
+                self._append_before_typing(
+                    f"<b>{sender}</b> <i>({timestamp})</i>: {body}")
             else:
-                self.append(f"<b style='color:#0066cc'>{sender}</b> <i>({timestamp})</i>: {body}")
+                self._append_before_typing(
+                    f"<b style='color:#0066cc'>{sender}</b> <i>({timestamp})</i>: {body}")
 
         def add_status(self, text: str, timestamp: str):
-            self.append(f"<i>({timestamp}) {text}</i>")
+            self._append_before_typing(f"<i>({timestamp}) {text}</i>")
+
+        def prepend_messages(self, messages: list[dict]) -> None:
+            """Insert older messages while keeping the visible content fixed."""
+            if not messages:
+                return
+            bar = self.verticalScrollBar()
+            old_max = bar.maximum()
+            old_value = bar.value()
+            cursor = self.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+            self.setTextCursor(cursor)
+            html = "".join(
+                f"<b>{entry.get('sender', 'Me')}</b> "
+                f"<i>({entry.get('timestamp', '')})</i>: "
+                f"{entry.get('body', '')}"
+                for entry in messages
+            )
+            cursor.insertHtml(html)
+            QtCore.QCoreApplication.processEvents()
+            bar.setValue(old_value + bar.maximum() - old_max)
+
+        def update_sender_avatar(self, sender: str, avatar_uri: str) -> None:
+            pass
+
+        def mark_message_delivered(self, message_id: str) -> None:
+            pass
+
+        def set_typing_indicator(self, text: str):
+            pos = self._typing_block_start()
+            if pos >= 0:
+                cursor = QtGui.QTextCursor(self.document())
+                cursor.setPosition(pos)
+                cursor.select(QtGui.QTextCursor.SelectionType.BlockUnderCursor)
+                cursor.removeSelectedText()
+            if text:
+                self.append(f"<i id='jabbim-typing'>{TYPING_MARKER}_{html.escape(text)}</i>")
 
         def clear(self):
             super().clear()

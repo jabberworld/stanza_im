@@ -65,7 +65,8 @@ document.addEventListener('click', function (e) {{
 class ChatThemeFactory:
     """Loads Adium-style chat skin templates and generates HTML for messages."""
 
-    def __init__(self, skin_dir: str | None = None):
+    def __init__(self, skin_dir: str | None = None,
+                 emoticon_skin: str = "default/smileys.cfg"):
         self._skin_dir = skin_dir or os.path.join(CHATSKINS_DIR, "minimal-mod")
         self._templates: dict[str, str] = {}
         self._css: str = ""
@@ -74,6 +75,7 @@ class ChatThemeFactory:
         self._status_template: str = ""
         self._variants: dict[str, str] = {}
         self._current_variant_css: str = ""
+        self._emoticon_skin = emoticon_skin
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -110,6 +112,9 @@ class ChatThemeFactory:
     def set_variant(self, name: str) -> None:
         self._current_variant_css = self._variants.get(name, "")
 
+    def set_emoticon_skin(self, skin: str) -> None:
+        self._emoticon_skin = skin
+
     def _transform_body(self, body: str) -> str:
         """Escape plain text, then add clickable links and emoticons.
 
@@ -121,7 +126,7 @@ class ChatThemeFactory:
         escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
         escaped = escaped.replace("\n", "<br>")
         tokenised, anchors = self._tokenize_urls(escaped)
-        emotified = smile_to_html(tokenised)
+        emotified = smile_to_html(tokenised, self._emoticon_skin)
         return restore_url_tokens(emotified, anchors)
 
     @staticmethod
@@ -197,6 +202,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {self._header}
 {messages_html}
 {self._footer}
+<div id="jabbim-typing-slot" class="typing-indicator"></div>
 </div>
 {_webchannel_script()}
 </body>
@@ -221,6 +227,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 <div id="chat">
 {self._header}
 {self._footer}
+<div id="jabbim-typing-slot" class="typing-indicator"></div>
 </div>
 {_webchannel_script()}
 </body>

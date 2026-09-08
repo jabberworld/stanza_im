@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from jabbim.ui import tooltip as tooltip_mod
 from jabbim.ui.roster_style import RosterStyle, GroupItem, UserItem
 
 
@@ -32,9 +33,11 @@ class RosterWidget(QtWidgets.QWidget):
         self._hover_jid: str | None = None
         self._search_text: str = ""
         self._filter: str = ""
+        self._show_offline = True
 
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self._tooltip_provider = None
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -42,6 +45,11 @@ class RosterWidget(QtWidgets.QWidget):
         self._style = style
         self._recalc_heights()
         self.update()
+
+    def set_tooltip_provider(self, provider) -> None:
+        """Set a callable ``(jid) -> (html, avatar_path|None)`` used for
+        contact tooltips (default: no tooltips)."""
+        self._tooltip_provider = provider
 
     def add_group(self, name: str) -> GroupItem:
         if name not in self._groups:
@@ -84,6 +92,13 @@ class RosterWidget(QtWidgets.QWidget):
 
     def set_search_filter(self, text: str) -> None:
         self._filter = text.lower()
+        self._recalc_heights()
+        self.update()
+
+    def set_show_offline(self, value: bool) -> None:
+        """Show or hide contacts whose current presence is offline."""
+        self._show_offline = value
+        self._recalc_heights()
         self.update()
 
     def sort_and_update(self) -> None:
@@ -107,6 +122,9 @@ class RosterWidget(QtWidgets.QWidget):
         for group_name in self._sorted_groups:
             group = self._groups[group_name]
             users = self._sorted_users.get(group_name, [])
+
+            if not self._show_offline:
+                users = [u for u in users if u.status != "offline"]
 
             if self._filter:
                 users = [u for u in users if self._filter in u.name.lower()
@@ -159,7 +177,8 @@ class RosterWidget(QtWidgets.QWidget):
     def _recalc_heights(self) -> None:
         h = self._total_height()
         self.setMinimumHeight(h)
-        self.setMaximumHeight(h)
+        self.setMaximumHeight(16777215)
+        self.updateGeometry()
 
     def _visible_user_jids(self) -> list[str]:
         """JIDs of users currently visible (group expansion + search filter)."""
@@ -169,6 +188,8 @@ class RosterWidget(QtWidgets.QWidget):
             if not group.expanded:
                 continue
             users = self._sorted_users.get(group_name, [])
+            if not self._show_offline:
+                users = [u for u in users if u.status != "offline"]
             if self._filter:
                 users = [u for u in users if self._filter in u.name.lower()
                          or self._filter in u.jid.lower()]
@@ -205,6 +226,7 @@ class RosterWidget(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing)
 
         dirty = event.rect()
+        painter.fillRect(dirty, QtCore.Qt.GlobalColor.white)
         cy = 0
         for kind, item in self._visible_items():
             if kind == "group":
@@ -224,8 +246,11 @@ class RosterWidget(QtWidgets.QWidget):
         painter.end()
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        tooltip_mod.hide()
         hit = self._item_at(int(event.position().y()))
         if hit is None:
+            self._selected_jid = None
+            self.update()
             return
         kind, item = hit
         if kind == "group":
@@ -237,13 +262,37 @@ class RosterWidget(QtWidgets.QWidget):
             self.update()
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 self.contact_clicked.emit(item.jid)
-            elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                self.contact_context_menu.emit(item.jid, event.globalPosition().toPoint())
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        tooltip_mod.hide()
         hit = self._item_at(int(event.position().y()))
         if hit and hit[0] == "user":
             self.contact_double_clicked.emit(hit[1].jid)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        hit = self._item_at(int(event.position().y()))
+        if hit is not None and hit[0] == "user":
+            jid = hit[1].jid
+            if jid != self._hover_jid:
+                self._hover_jid = jid
+                tooltip_mod.hide()
+                if self._tooltip_provider is not None:
+                    html, avatar = self._tooltip_provider(jid)
+                    if html:
+                        tooltip_mod.show(event.globalPosition().toPoint(),
+                                         html, avatar)
+        elif self._hover_jid is not None:
+            self._hover_jid = None
+            tooltip_mod.hide()
+
+    def leaveEvent(self, event) -> None:
+        self._hover_jid = None
+        tooltip_mod.hide()
+        super().leaveEvent(event)
+
+    def hideEvent(self, event) -> None:
+        tooltip_mod.hide()
+        super().hideEvent(event)
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
         hit = self._item_at(event.pos().y())
