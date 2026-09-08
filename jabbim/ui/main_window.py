@@ -1105,11 +1105,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 return user.name or user.jid
         return ""
 
+    def _seed_muc_chat(self, room: str, chat, *, title: str = "",
+                       is_new: bool = False) -> None:
+        """Push the current MUC occupant state into an open tab."""
+        self_nick = self._muc_self_nicks.get(room, "")
+        users = self._muc_users.get(room, {})
+        chat.set_self_nick(self_nick)
+        chat.update_muc_users(list(users.values()), self_nick=self_nick)
+        chat_title = title or self._muc_display_name(room)
+        text = chat_title + (" · " if chat_title else "")
+        text += tr("muc_participants_count", n=len(users))
+        chat.set_status_text(text)
+        self._chat_window.set_chat_title(room, chat_title)
+        chat.set_bookmarked(room in self._bookmarks)
+        if is_new:
+            self._load_history(room)
+            self._request_vcard(room, force=True)
+
     def _on_contact_open(self, jid: str):
         display_name = self._roster_name(jid) or jid.split("@")[0]
         if jid in self._muc_self_nicks:
-            self._chat_window.open_groupchat(
+            is_new = not self._chat_window.has_chat(jid)
+            chat = self._chat_window.open_groupchat(
                 jid, self._muc_self_nicks[jid], display_name)
+            self._seed_muc_chat(jid, chat, title=display_name, is_new=is_new)
             return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)
