@@ -397,7 +397,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         parts.append("</body></html>")
         self._messages.setHtml("\n".join(parts))
         scroll = self._messages.verticalScrollBar()
+        cursor = QtGui.QTextCursor(self._messages.document())
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        self._messages.setTextCursor(cursor)
+        self._messages.ensureCursorVisible()
         scroll.setValue(scroll.maximum())
+        QtCore.QTimer.singleShot(0, self._snap_scroll_end)
 
         doc = self._messages.document()
         block = doc.begin()
@@ -539,6 +544,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         casefold = self._query.casefold()
         self._matches = [i for i, entry in enumerate(self._entries)
                          if casefold in entry.get("body", "").casefold()]
+
+    def _snap_scroll_end(self) -> None:
+        if self._matches:
+            return
+        scroll = self._messages.verticalScrollBar()
+        scroll.setValue(scroll.maximum())
 
     def _jump_to_match(self, index: int) -> None:
         if not self._matches or not (0 <= index < len(self._matches)):
