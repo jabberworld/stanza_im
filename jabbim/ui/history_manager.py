@@ -7,7 +7,6 @@ and day-navigation buttons.
 """
 from __future__ import annotations
 
-import datetime
 import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -17,10 +16,6 @@ from jabbim.include.constants import ACTIONS_DIR_16, CATEGORIES_DIR_16, \
     STATUS_DIR_32
 from jabbim.include.utils import escape_html
 from jabbim.i18n import tr
-
-
-def _utc_today() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
 
 def _time_of(ts: str) -> str:
@@ -56,6 +51,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._query: str = ""
         self._matches: list[int] = []
         self._match_index = -1
+        self._all_days: list[str] = []
         self._message_blocks: list[int] = []
 
         self.setWindowTitle(tr("history_manager"))
@@ -261,6 +257,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _set_contact(self, jid: str, name: str) -> None:
         self._jid = jid
         self._name = name
+        self._search.setText("")
+        self._all_days = []
         self._clear_search_state()
         self._results.hide()
         if not jid:
@@ -272,10 +270,9 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         else:
             self._dates = []
         self._mark_calendar_dates()
+        self._date = ""
         if self._dates:
-            today = _utc_today()
-            date = today if today in self._dates else self._dates[-1]
-            self._select_date(date)
+            self._select_date(self._dates[-1])
         else:
             self._select_date("")
 
@@ -423,6 +420,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._run_day_search()
 
     def _run_day_search(self) -> None:
+        if self._date:
+            self._load_date(self._date)
         self._find_day_matches()
         self._results.hide()
         self._match_index = 0 if self._matches else -1
@@ -435,37 +434,35 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _run_all_time_search(self) -> None:
         results = history.search_dates(self._jid, self._query)
+        ordered = list(reversed(results))
+        self._all_days = [date for date, _ in ordered]
         self._results.clear()
-        for date, count in results:
+        for date, count in ordered:
             item = QtWidgets.QListWidgetItem(f"{date} · {count}")
             item.setData(QtCore.Qt.ItemDataRole.UserRole, date)
             self._results.addItem(item)
         self._update_match_buttons()
-        if results:
-            self._results.show()
-            self._results.setCurrentRow(0)
-            first = results[0][0]
-            if first in self._dates and first != self._date:
-                self._select_date(first)
-                self._jump_to_first_match()
-            elif first == self._date:
-                self._jump_to_first_match()
-        else:
+        if not self._all_days:
             self._results.hide()
             self._status.setText(tr("history_no_results"))
+            self._search.setFocus()
+            return
+        self._results.show()
+        self._results.setCurrentRow(0)
+        self._go_to_day(0)
+        self._search.setFocus()
 
     def _on_result_picked(self, item: QtWidgets.QListWidgetItem) -> None:
         date = item.data(QtCore.Qt.ItemDataRole.UserRole)
-        if date in self._dates:
-            if date != self._date:
-                self._select_date(date)
-            self._jump_to_first_match()
+        if date in self._all_days:
+            self._go_to_day(self._all_days.index(date))
+        if self._btn_all_time.isChecked():
             self._results.show()
         self._search.setFocus()
 
     def _on_match_prev(self) -> None:
         if self._btn_all_time.isChecked():
-            self._step_results(-1)
+            self._step_all_time(-1)
             return
         if not self._matches:
             return
@@ -474,26 +471,49 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _on_match_next(self) -> None:
         if self._btn_all_time.isChecked():
-            self._step_results(1)
+            self._step_all_time(1)
             return
         if not self._matches:
             return
         self._match_index = (self._match_index + 1) % len(self._matches)
         self._jump_to_match(self._match_index)
 
-    def _step_results(self, delta: int) -> None:
-        if self._results.count() == 0:
+    def _step_all_time(self, delta: int) -> None:
+        if not self._all_days:
             return
-        row = (self._results.currentRow() + delta) % self._results.count()
-        self._results.setCurrentRow(row)
-        item = self._results.item(row)
-        date = item.data(QtCore.Qt.ItemDataRole.UserRole)
-        if date in self._dates:
-            if date != self._date:
-                self._select_date(date)
-            self._jump_to_first_match()
-            self._results.show()
+        pos = self._all_days.index(self._date) \
+            if self._date in self._all_days else 0
+        n = len(self._all_days)
+        if delta > 0:
+            if self._match_index + 1 < len(self._matches):
+                self._match_index += 1
+                self._jump_to_match(self._match_index)
+            else:
+                self._go_to_day((pos + 1) % n)
+        else:
+            if self._match_index > 0:
+                self._match_index -= 1
+                self._jump_to_match(self._match_index)
+            else:
+                self._go_to_day((pos - 1) % n, last_match=True)
         self._search.setFocus()
+
+    def _go_to_day(self, pos: int, last_match: bool = False) -> None:
+        if not (0 <= pos < len(self._all_days)):
+            return
+        day = self._all_days[pos]
+        query = self._query
+        if day != self._date:
+            self._select_date(day)
+        self._query = query
+        self._find_day_matches()
+        self._match_index = len(self._matches) - 1 if last_match else 0
+        self._update_match_buttons()
+        self._results.setCurrentRow(pos)
+        if not self._btn_all_time.isChecked():
+            self._results.hide()
+        if self._matches:
+            self._jump_to_match(self._match_index)
 
     def _update_match_buttons(self) -> None:
         if self._btn_all_time.isChecked():
@@ -507,13 +527,6 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         casefold = self._query.casefold()
         self._matches = [i for i, entry in enumerate(self._entries)
                          if casefold in entry.get("body", "").casefold()]
-
-    def _jump_to_first_match(self) -> None:
-        self._find_day_matches()
-        self._match_index = 0 if self._matches else -1
-        self._update_match_buttons()
-        if self._matches:
-            self._jump_to_match(0)
 
     def _jump_to_match(self, index: int) -> None:
         if not self._matches or not (0 <= index < len(self._matches)):
@@ -541,4 +554,5 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _on_mode_toggled(self, checked: bool) -> None:
         self._clear_search_state()
+        self._all_days = []
         self._results.hide()
