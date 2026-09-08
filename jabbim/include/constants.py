@@ -10,6 +10,7 @@ VERSION = "0.1.0"
 # its own resources/ copy — prefer that if it exists.
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # .../jabbim
 _PROJECT_ROOT = os.path.dirname(_PKG_DIR)                                        # .../ (source checkout)
+PROJECT_ROOT = _PROJECT_ROOT
 _SIBLING_RESOURCES = os.path.join(_PROJECT_ROOT, "resources")
 _PKG_RESOURCES = os.path.join(_PKG_DIR, "resources")
 RESOURCES_DIR = (_PKG_RESOURCES if os.path.isdir(_PKG_RESOURCES)

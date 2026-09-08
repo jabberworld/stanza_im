@@ -5,6 +5,7 @@ import os
 import platform
 import re
 import time
+import datetime
 
 
 def get_home_dir() -> str:
@@ -32,7 +33,7 @@ def format_time_short(timestamp: float | None = None) -> str:
 
 
 def ts_to_time(ts: str | None) -> str:
-    """Trim a stored ``YYYY-MM-DDTHH:MM:SS`` timestamp to *hh:mm:ss*."""
+    """Format an ISO timestamp, including the date when older than one day."""
     if ts is None:
         return format_time()
     if not isinstance(ts, str):
@@ -41,6 +42,17 @@ def ts_to_time(ts: str | None) -> str:
         else:
             ts = str(ts)
     if len(ts) >= 19 and ts[10] == "T":
+        try:
+            parsed = datetime.datetime.fromisoformat(
+                ts.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone()
+            now = datetime.datetime.now(parsed.tzinfo)
+            fmt = "%Y-%m-%d %H:%M:%S" if now - parsed >= datetime.timedelta(days=1) \
+                else "%H:%M:%S"
+            return parsed.strftime(fmt)
+        except ValueError:
+            pass
         return ts[11:19]
     return ts or format_time()
 

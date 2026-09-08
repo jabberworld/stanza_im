@@ -14,6 +14,19 @@ from jabbim.include.avatars import parse_vcard_photo
 _NS = "vcard-temp"
 
 
+def image_mime_type(raw: bytes) -> str:
+    """Return the MIME type for a supported image payload."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
 def _t(element, *path) -> str:
     """Return the text of the first element found by walking *path*."""
     try:
@@ -138,6 +151,6 @@ def build_vcard(plugin, card: dict):
         if isinstance(photo, str):
             photo = base64.b64decode(photo)
         if isinstance(photo, (bytes, bytearray)):
-            vcard["PHOTO"]["TYPE"] = "image/png"
+            vcard["PHOTO"]["TYPE"] = image_mime_type(bytes(photo))
             vcard["PHOTO"]["BINVAL"] = bytes(photo)
     return vcard

@@ -88,6 +88,8 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
         btn = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close)
+        btn.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
+            tr("dialog_ok"))
         btn.rejected.connect(self.reject)
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
@@ -126,7 +128,8 @@ class VCardEditDialog(QtWidgets.QDialog):
     def __init__(self, card: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("vcard_edit_title"))
-        self.setMinimumWidth(380)
+        self.setMinimumSize(520, 430)
+        self._card = card
 
         self._photo: bytes | None = (card.get("photo")
                                      if isinstance(card.get("photo"), bytes)
@@ -144,9 +147,17 @@ class VCardEditDialog(QtWidgets.QDialog):
         self._pic_label = QtWidgets.QLabel()
         self._pic_label.setFixedSize(96, 96)
         self._refresh_pic()
-        head.addWidget(self._pic_label)
+        head.addWidget(self._pic_label, 0, QtCore.Qt.AlignmentFlag.AlignTop)
 
         pic_col = QtWidgets.QVBoxLayout()
+        title = QtWidgets.QLabel(card.get("fn") or card.get("jid") or "")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self._title_label = title
+        subtitle = QtWidgets.QLabel(card.get("jid") or "")
+        subtitle.setStyleSheet("color: gray;")
+        pic_col.addWidget(title)
+        pic_col.addWidget(subtitle)
+        pic_col.addSpacing(8)
         self._pick_btn = QtWidgets.QPushButton(tr("vcard_pick_photo"))
         self._pick_btn.clicked.connect(self._pick_photo)
         self._remove_btn = QtWidgets.QPushButton(tr("vcard_remove_photo"))
@@ -158,20 +169,50 @@ class VCardEditDialog(QtWidgets.QDialog):
         layout.addLayout(head)
 
         self._fields: dict[str, QtWidgets.QLineEdit] = {}
-        form = QtWidgets.QFormLayout()
-        for key in ("fn", "nickname", "email", "url", "bday", "title",
-                    "role", "org", "orgunit", "tel"):
-            edit = QtWidgets.QLineEdit(card.get(key) or "")
-            self._fields[key] = edit
-            form.addRow(tr(f"vcard_field_{key}"), edit)
-        layout.addLayout(form)
+        tabs = QtWidgets.QTabWidget()
+        tabs.addTab(self._edit_fields_page((
+            "fn", "nickname", "bday", "tel", "url", "email")),
+            tr("vcard_tab_general"))
+        tabs.addTab(self._edit_fields_page((
+            "org", "orgunit", "title", "role")),
+            tr("vcard_tab_work"))
+        tabs.addTab(self._edit_fields_page((
+            "street", "locality", "region", "pcode", "country")),
+            tr("vcard_tab_address"))
+        tabs.addTab(self._edit_fields_page(("description",), multiline=True),
+                    tr("vcard_tab_about"))
+        layout.addWidget(tabs)
+
+        self._fields["fn"].textChanged.connect(
+            lambda value: self._title_label.setText(value or self._card.get("jid", "")))
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Save
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel).setText(
+            tr("dialog_cancel"))
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Save).setText(
+            tr("vcard_publish"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _edit_fields_page(self, keys: tuple[str, ...],
+                          multiline: bool = False) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        form = QtWidgets.QFormLayout(page)
+        for key in keys:
+            if multiline:
+                edit = QtWidgets.QPlainTextEdit(self._card.get(key) or "")
+                edit.setMinimumHeight(180)
+            else:
+                edit = QtWidgets.QLineEdit(self._card.get(key) or "")
+            self._fields[key] = edit
+            form.addRow(tr(f"vcard_field_{key}"), edit)
+        form.addItem(QtWidgets.QSpacerItem(
+            1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Expanding))
+        return page
 
     def _refresh_pic(self):
         if self._photo:
@@ -209,7 +250,11 @@ class VCardEditDialog(QtWidgets.QDialog):
         self._refresh_pic()
 
     def collect(self) -> dict:
-        card = {key: edit.text().strip()
-                for key, edit in self._fields.items()}
+        card = {}
+        for key, edit in self._fields.items():
+            value = (edit.toPlainText() if isinstance(edit, QtWidgets.QPlainTextEdit)
+                     else edit.text())
+            card[key] = value.strip()
         card["photo"] = self._photo
+        card["jid"] = self._card.get("jid", "")
         return card

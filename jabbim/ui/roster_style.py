@@ -81,7 +81,7 @@ class RosterStyle:
         pal = self._palette()
 
         # Background stripe
-        bg = pal.color(QtGui.QPalette.ColorRole.AlternateBase)
+        bg = pal.color(QtGui.QPalette.ColorRole.Window)
         painter.fillRect(rect, bg)
 
         # Expand/collapse arrow
@@ -145,6 +145,7 @@ class RosterStyle:
 
         x = rect.left() + self.MARGIN_LEFT
         y = rect.top()
+        icon_y = y + (rect.height() - self.STATUS_ICON_DRAW) // 2
 
         # Status icon (always, left-aligned).  Source is 32x32, drawn at
         # STATUS_ICON_DRAW px.
@@ -156,7 +157,7 @@ class RosterStyle:
                     self.STATUS_ICON_DRAW, self.STATUS_ICON_DRAW,
                     QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                     QtCore.Qt.TransformationMode.SmoothTransformation)
-                painter.drawPixmap(x, y + (rect.height() - self.STATUS_ICON_DRAW) // 2, scaled)
+                painter.drawPixmap(x, icon_y, scaled)
 
         # Text block (name + status message) between status icon and avatar.
         name_x = x + self.STATUS_ICON_DRAW + 8
@@ -195,18 +196,24 @@ class RosterStyle:
                          QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
                          display_name)
 
-        # Status message (if present, below the name)
-        if item.status_message:
+        # Status message (if present): first line only, aligned to the bottom
+        # edge of the status icon.
+        first_line = (item.status_message.splitlines() or [""])[0]
+        if first_line:
             painter.setPen(pal.color(QtGui.QPalette.ColorRole.Mid))
             sm_font = painter.font()
             sm_font.setItalic(True)
             sm_font.setPointSize(max(sm_font.pointSize() - 1, 7))
             painter.setFont(sm_font)
-            sm_rect = QtCore.QRect(name_x, y + 18,
-                                   min(self.STATUS_MSG_MAX_WIDTH,
-                                       avail_right - name_x), 14)
+            fm = painter.fontMetrics()
+            sm_top = icon_y + self.STATUS_ICON_DRAW - fm.height()
+            sm_rect = QtCore.QRect(
+                name_x, sm_top,
+                min(self.STATUS_MSG_MAX_WIDTH, avail_right - name_x),
+                max(1, rect.bottom() - sm_top))
+            clipped = first_line[:40] + ("…" if len(first_line) > 40 else "")
             painter.drawText(sm_rect,
                              QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
-                             item.status_message[:40] + ("…" if len(item.status_message) > 40 else ""))
+                             clipped)
 
         painter.restore()

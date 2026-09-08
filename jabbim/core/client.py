@@ -8,14 +8,18 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import platform
 import time
+import uuid
 from typing import Any, Callable
 
 import slixmpp
+from slixmpp.jid import JID
 
 from jabbim.include.enumerators import SHOW_ORDER
 from jabbim.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from jabbim.core.vcard_cache import VCardCache
+from jabbim.include.constants import APP_NAME, VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +27,27 @@ logger = logging.getLogger(__name__)
 class JabberClient:
     """High-level XMPP client built on top of slixmpp.ClientXMPP."""
 
-    def __init__(self, jid: str, password: str, resource: str = "Jabbim-next"):
+    def __init__(self, jid: str, password: str, resource: str = "jabbim",
+                 host: str = "", port: int = 0,
+                 auto_join_conferences: bool = True,
+                 send_chatstates: bool = True,
+                 send_typing_notifications: bool = True,
+                 send_activity_notifications: bool = True,
+                 send_software: bool = True):
         self.jid_str = jid
         self.resource = resource
+        self.host = host
+        self.port = int(port or 0)
+        self.auto_join_conferences = auto_join_conferences
+        self.send_typing_notifications = send_typing_notifications if send_chatstates else False
+        self.send_activity_notifications = send_activity_notifications if send_chatstates else False
+        self.send_chatstates = (self.send_typing_notifications
+                                or self.send_activity_notifications)
+        self.send_software = send_software
         self._full_jid = f"{jid}/{resource}"
 
         self.xmpp = slixmpp.ClientXMPP(jid, password, sasl_mech="SCRAM-SHA-1")
+        self.xmpp.requested_jid = JID(f"{jid}/{resource}")
         self.xmpp.auto_reconnect = True
         self.xmpp.reconnect_max_retries = 5
 
@@ -42,10 +61,16 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0048")  # Bookmarks
         self.xmpp.register_plugin("xep_0050")  # Ad-hoc Commands
         self.xmpp.register_plugin("xep_0004")  # Data Forms
+        self.xmpp.register_plugin("xep_0077")  # In-Band Registration
+        self.xmpp.register_plugin("xep_0055")  # Search
         self.xmpp.register_plugin("xep_0049")  # Private XML Storage
         self.xmpp.register_plugin("xep_0128")  # Service Discovery Extensions
         self.xmpp.register_plugin("xep_0030")  # Service Discovery
-        self.xmpp.register_plugin("xep_0092")  # Software version
+        self.xmpp.register_plugin("xep_0092", {
+            "name": APP_NAME if send_software else "",
+            "version": VERSION,
+            "os": f"Python {platform.python_version()}" if send_software else "",
+        })
         self.xmpp.register_plugin("xep_0199")  # Ping
         self.xmpp.register_plugin("xep_0202")  # Entity time
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
@@ -60,9 +85,12 @@ class JabberClient:
         self.groupchats: dict[str, GroupChatInfo] = {}
         self.presences: dict[str, dict] = {}  # {full_jid: {show, status, ...}}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
+        self._mam_cursors: dict[str, str] = {}
         self._vcard_cache = VCardCache()
         self._vcard_inflight: set[str] = set()
         self._muc_join_tasks: dict[str, asyncio.Task] = {}
+        self._version_probed: set[str] = set()        # full JIDs (XEP-0092)
+        self._muc_version_probed: set[tuple[str, str]] = set()
 
         # Hook up slixmpp events
         self.xmpp.add_event_handler("session_start", self._on_session_start)
@@ -84,6 +112,17 @@ class JabberClient:
 
     # ── Public API ────────────────────────────────────────────────
 
+    def _start_task(self, coro) -> None:
+        """Schedule *coro* on the current event loop (best-effort)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return
+        loop.create_task(coro)
+
     def on(self, event: str, callback: Callable) -> None:
         """Register a callback for an internal event name."""
         self._callbacks.setdefault(event, []).append(callback)
@@ -98,7 +137,7 @@ class JabberClient:
 
     async def connect_async(self) -> None:
         """Connect to the XMPP server and start the session."""
-        result = self.xmpp.connect()
+        result = self.xmpp.connect(self.host or None, self.port or None)
         if asyncio.iscoroutine(result):
             await result
         elif isinstance(result, asyncio.Future):
@@ -110,22 +149,25 @@ class JabberClient:
             self.xmpp.disconnect()
 
     def send_message(self, jid: str, body: str, mtype: str = "chat",
-                     mhtml: str | None = None) -> None:
+                     mhtml: str | None = None) -> str:
         """Send a message."""
         if not isinstance(jid, str) or not jid.strip():
             logger.warning("Skipping message with empty target: %r", jid)
-            return
+            return ""
         jid = jid.strip()
         msg = self.xmpp.Message()
         msg["to"] = jid
         msg["type"] = mtype
         msg["body"] = body
+        message_id = uuid.uuid4().hex
+        msg["id"] = message_id
         if mtype == "chat":
             msg["request_receipt"] = True  # XEP-0184
         if mhtml:
             msg["html"]["body"] = mhtml
         logger.debug("Sending %s message to %s: %r", mtype, jid, body[:200])
         msg.send()
+        return message_id
 
     def send_presence(self, show: str | None = None, status: str = "",
                       priority: int | None = None) -> None:
@@ -153,6 +195,10 @@ class JabberClient:
 
     def send_chat_state(self, jid: str, state: str) -> None:
         """Send a XEP-0085 chat state notification."""
+        if state in ("composing", "paused") and not self.send_typing_notifications:
+            return
+        if state in ("active", "inactive", "gone") and not self.send_activity_notifications:
+            return
         msg = self.xmpp.Message()
         msg["to"] = jid
         msg["type"] = "chat"
@@ -186,17 +232,52 @@ class JabberClient:
             self.contacts[jid] = ContactInfo(jid)
         return self.contacts[jid]
 
-    def add_contact(self, jid: str, name: str = "", groups: list[str] | None = None,
-                    message: str = "") -> None:
-        """Add a contact and send a subscribe request."""
-        self.xmpp.send_presence_subscription(
-            pto=jid,
-            pfrom=self._full_jid,
-            ptype="subscribe",
-            pnick=name,
+    async def gateway_info(self, service: str) -> dict:
+        """Return gateway description/prompt information from a service."""
+        iq = await self.xmpp.plugin["xep_0030"].get_info(jid=service)
+        is_gateway = any(
+            str(node.get("category", "")).lower() == "gateway"
+            for node in iq.xml.iter() if str(node.tag).endswith("identity")
         )
+        if not is_gateway:
+            raise ValueError("The selected service is not a gateway")
+        query = next((node for node in iq.xml.iter()
+                      if str(node.tag).endswith("query")
+                      and node.get("xmlns") == "jabber:iq:gateway"), None)
+        return {"gateway": True,
+                "desc": (next((n.text or "" for n in query
+                               if str(n.tag).endswith("desc")), "")
+                         if query is not None else ""),
+                "prompt": (next((n.text or "" for n in query
+                                 if str(n.tag).endswith("prompt")), "")
+                           if query is not None else "")}
+
+    async def gateway_translate(self, service: str, prompt: str) -> str:
+        """Translate an external service ID through an XMPP gateway."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = service
+        query = iq.xml.makeelement("{jabber:iq:gateway}query", {})
+        child = iq.xml.makeelement("{jabber:iq:gateway}prompt", {})
+        child.text = prompt
+        query.append(child)
+        iq.xml.append(query)
+        result = await iq.send()
+        for node in result.xml.iter():
+            if str(node.tag).endswith("jid") and node.text:
+                return node.text.strip()
+        raise ValueError("The gateway did not return an XMPP address")
+
+    def add_contact(self, jid: str, name: str = "", groups: list[str] | None = None,
+                    message: str = "", request_subscription: bool = True) -> None:
+        """Add a contact and send a subscribe request."""
+        if request_subscription:
+            self.xmpp.send_presence_subscription(
+                pto=jid, pfrom=self._full_jid, ptype="subscribe", pnick=name)
         if groups:
             self.xmpp.update_roster(jid, name=name, groups=groups)
+        if message.strip():
+            self.send_message(jid, message.strip())
 
     def remove_contact(self, jid: str) -> None:
         """Remove a contact from the roster."""
@@ -281,6 +362,358 @@ class JabberClient:
         """Request the advertised room name through XEP-0030."""
         asyncio.get_event_loop().create_task(self._fetch_muc_info(room))
 
+    async def list_conference_rooms(self, server: str) -> list[dict]:
+        """Return discoverable conference rooms on *server*."""
+        if not server.strip():
+            return []
+        result = await self.xmpp.plugin["xep_0030"].get_items(jid=server)
+        rooms = []
+        for item in result.xml.iter():
+            if not str(item.tag).endswith("item") or not item.get("jid"):
+                continue
+            jid = str(item.get("jid"))
+            rooms.append({"jid": jid, "name": str(item.get("name") or jid.split("@", 1)[0]),
+                          "private": False, "users": [], "occupants": ""})
+        return rooms
+
+    async def discover_conference_service(self) -> str:
+        """Find the first conference service advertised by the account domain."""
+        result = await self.xmpp.plugin["xep_0030"].get_items(
+            jid=self.jid_str.split("@", 1)[-1])
+        for item in result.xml.iter():
+            service = str(item.get("jid") or "")
+            if not service:
+                continue
+            try:
+                info = await self.xmpp.plugin["xep_0030"].get_info(jid=service)
+                if any(str(node.get("category", "")).lower() == "conference"
+                       for node in info.xml.iter()
+                       if str(node.tag).endswith("identity")):
+                    return service
+            except Exception:
+                continue
+        return ""
+
+    async def discover_services(self, server: str) -> list[dict]:
+        """Discover direct service items and classify their disco identities."""
+        if not server.strip():
+            return []
+        result = await self.xmpp.plugin["xep_0030"].get_items(jid=server)
+        services = []
+        for node in result.xml.iter():
+            if not str(node.tag).endswith("item") or not node.get("jid"):
+                continue
+            item = {"jid": str(node.get("jid")),
+                    "node": str(node.get("node") or ""),
+                    "name": str(node.get("name") or node.get("jid")),
+                    "category": "", "type": "", "features": [], "items": []}
+            try:
+                info = await self.xmpp.plugin["xep_0030"].get_info(
+                    jid=item["jid"], node=item["node"] or None)
+                for identity in info.xml.iter():
+                    if str(identity.tag).endswith("identity"):
+                        item["category"] = str(identity.get("category") or "")
+                        item["type"] = str(identity.get("type") or "")
+                        break
+                item["features"] = []
+                for feature in info.xml.iter():
+                    if str(feature.tag).endswith("feature"):
+                        var = str(feature.get("var") or "")
+                        if var:
+                            item["features"].append(var)
+            except Exception:
+                pass
+            services.append(item)
+        return services
+
+    async def discover_service_items(self, service: str, node: str = "") -> list[dict]:
+        result = await self.xmpp.plugin["xep_0030"].get_items(
+            jid=service, node=node or None)
+        return [{"jid": str(item.get("jid")),
+                 "node": str(item.get("node") or ""),
+                 "name": str(item.get("name") or item.get("jid")),
+                 "category": "", "type": "", "items": []}
+                for item in result.xml.iter()
+                if str(item.tag).endswith("item") and item.get("jid")]
+
+    async def discover_service_info(self, service: str, node: str = "") -> dict:
+        """Return the first disco identity and feature list of a service."""
+        try:
+            info = await self.xmpp.plugin["xep_0030"].get_info(
+                jid=service, node=node or None)
+        except Exception:
+            return {"jid": service, "node": node, "name": service,
+                    "category": "", "type": "", "features": []}
+        features = [str(f.get("var") or "") for f in info.xml.iter()
+                    if str(f.tag).endswith("feature") and f.get("var")]
+        name = ""
+        for element in info.xml.iter():
+            if not str(element.tag).endswith("identity"):
+                continue
+            category = str(element.get("category") or "")
+            type_ = str(element.get("type") or "")
+            value = str(element.get("name") or "")
+            if name == "" and value:
+                name = value
+            if category:
+                return {"jid": service, "node": node, "name": name or service,
+                        "category": category, "type": type_,
+                        "features": features}
+        return {"jid": service, "node": node, "name": name or service,
+                "category": "", "type": "", "features": features}
+
+    # ── Service actions: registration / search / ad-hoc commands ───────
+
+    async def get_registration_form(self, jid: str) -> dict:
+        """Return the XEP-0077 registration form of a service.
+
+        Returns ``{"registered": bool, "form": ..., "fields": {...}}`` where
+        *form* is an XEP-0004 form stanza (or None) and *fields* holds the
+        legacy fields (username/password/...) when no data form is advertised.
+        """
+        iq = await self.xmpp["xep_0077"].get_registration(jid)
+        reg = iq["register"]
+        form = reg["form"] if reg["form"] and reg["form"].get_fields() else None
+        fields = dict(reg["fields"]) if reg["fields"] else None
+        return {"registered": bool(reg["registered"]), "form": form,
+                "fields": fields}
+
+    async def submit_registration(self, jid: str, values: dict[str, str],
+                                  form=None) -> None:
+        """Register (or update) an account at *jid* with *values*."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = jid
+        if form is not None:
+            self._fill_submit_form(iq["register"]["form"], form)
+        else:
+            allowed = getattr(type(iq["register"]), "form_fields", ())
+            for key, value in values.items():
+                if key in allowed:
+                    iq["register"][key] = value
+        await iq.send()
+        return None
+
+    @staticmethod
+    def _fill_submit_form(submit, form) -> str:
+        """Copy *form* fields (with current values) into a fresh submit form.
+
+        Assigning a received form straight onto ``iq["search"]["form"]`` /
+        ``iq["register"]["form"]`` does not serialize its fields (an empty
+        ``<x type="form"/>`` goes on the wire), so each field is rebuilt on
+        the target.  Returns the copied ``FORM_TYPE``.
+        """
+        submit.set_type("submit")
+        form_type = ""
+        for field in form["fields"]:
+            var = str(field.get("var") or "")
+            if not var:
+                continue
+            value = field.get("value")
+            if var == "FORM_TYPE":
+                if isinstance(value, list):
+                    form_type = str(value[0]) if value else ""
+                else:
+                    form_type = str(value or "")
+                continue
+            if isinstance(value, bool):
+                value = "1" if value else "0"
+            target = submit.add_field(
+                var, ftype=str(field.get("type") or "text-single"),
+                required=bool(field.get("required", False)))
+            if isinstance(value, list):
+                target["value"] = [str(item) for item in value]
+            elif value is not None:
+                target["value"] = str(value)
+        if form_type:
+            submit.add_field("FORM_TYPE", value=form_type, ftype="hidden")
+        return form_type
+
+    async def unregister(self, jid: str) -> None:
+        """Remove the current account registration at *jid* (XEP-0077)."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = jid
+        iq["register"].set_remove(True)
+        await iq.send()
+
+    async def get_search_form(self, jid: str) -> dict:
+        """Return the XEP-0055 search form of a service.
+
+        Returns ``{"form": Form|None, "fields": {name: default}}`` — the
+        second form is used only for legacy (no data form) services.
+        """
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        iq.enable("search")
+        result = await iq.send()
+        search = result["search"]
+        form = search["form"]
+        if form and form.get_fields():
+            return {"form": form, "fields": {}}
+        fields: dict[str, str] = {}
+        for child in search.xml:
+            if not str(child.tag).startswith("{jabber:iq:search}"):
+                continue
+            key = str(child.tag).split("}")[-1]
+            if key == "instructions":
+                continue
+            fields[key] = ""
+        return {"form": None, "fields": fields}
+
+    async def submit_search(self, jid: str, form=None,
+                            values: dict[str, str] | None = None) -> dict:
+        """Submit a XEP-0055 search.
+
+        Returns ``{"rows": [{var: str}], "columns": [(var, label)]}``.
+        """
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = jid
+        if form is not None:
+            self._fill_submit_form(iq["search"]["form"], form)
+        else:
+            for key, value in (values or {}).items():
+                element = iq["search"].xml.makeelement(
+                    f"{{jabber:iq:search}}{key}", {})
+                element.text = str(value)
+                iq["search"].xml.append(element)
+        result = await iq.send()
+        return self._parse_search_rows(result)
+
+    @staticmethod
+    def _parse_search_rows(result) -> dict:
+        """Parse a XEP-0055 search response.
+
+        Returns ``{"rows": [{var: str}], "columns": [(var, label)]}`` where
+        columns describe the result table built from the reported fields.
+        """
+        rows: list[dict] = []
+        for node in result.xml.iter():
+            tag = str(node.tag)
+            if tag.endswith("item") and "{jabber:iq:search}" in tag:
+                jid_value = str(node.get("jid") or "")
+                if jid_value:
+                    rows.append({"jid": jid_value,
+                                 "name": str(node.get("name") or "")})
+        if rows:
+            return {"rows": rows,
+                    "columns": [("name", "name"), ("jid", "jid")]}
+        columns: list[tuple[str, str]] = []
+        form = result["search"]["form"]
+        if form is not None and form["type"] == "result":
+            for var, field in form.get_reported().items():
+                label = str(field.get("label") or var)
+                columns.append((str(var), label))
+            if not columns:
+                columns = [("jid", "JID")]
+            for item in form["items"]:
+                row = {}
+                for var, value in item.items():
+                    if var == "FORM_TYPE":
+                        continue
+                    if isinstance(value, list):
+                        value = ", ".join(str(v) for v in value)
+                    else:
+                        value = str(value or "")
+                    row[str(var)] = value
+                if row:
+                    rows.append(row)
+        return {"rows": rows, "columns": columns}
+
+    async def get_entity_version(self, jid: str) -> dict:
+        """Return software version info (XEP-0092) for *jid*.
+
+        Returns ``{"software": str, "version": str, "os": str}`` with empty
+        strings when the entity does not answer.
+        """
+        info = {"software": "", "version": "", "os": ""}
+        try:
+            result = await self.xmpp.plugin["xep_0092"].get_version(jid)
+            version = result["software_version"]
+            info["software"] = str(version.get("name", "") or "")
+            info["version"] = str(version.get("version", "") or "")
+            info["os"] = str(version.get("os", "") or "")
+        except Exception:
+            logger.debug("Software version unavailable for %s", jid)
+        return info
+
+    async def get_commands_list(self, jid: str) -> list[dict]:
+        """Return the XEP-0050 ad-hoc command list of a service."""
+        node = "http://jabber.org/protocol/commands"
+        result = await self.xmpp["xep_0030"].get_items(jid=jid, node=node)
+        return [{"jid": str(item.get("jid") or jid),
+                 "node": str(item.get("node") or ""),
+                 "name": str(item.get("name") or item.get("node") or "")}
+                for item in result.xml.iter()
+                if str(item.tag).endswith("item") and item.get("node")]
+
+    async def start_command(self, jid: str, node: str) -> dict:
+        """Start an ad-hoc command and await its first response."""
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future = loop.create_future()
+        session = {"next": self._command_handle(fut),
+                   "error": self._command_error(fut),
+                   "payload": None}
+        self.xmpp["xep_0050"].start_command(jid, node, session)
+        iq = await asyncio.wait_for(fut, timeout=30)
+        return self._parse_command_result(iq, session)
+
+    async def continue_command(self, session: dict, action: str = "next",
+                               form=None) -> dict:
+        """Continue an ad-hoc command with *form* data or *action*."""
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future = loop.create_future()
+        session["next"] = self._command_handle(fut)
+        session["error"] = self._command_error(fut)
+        session["payload"] = [form.xml] if form is not None else None
+        plugin = self.xmpp["xep_0050"]
+        if action == "cancel":
+            plugin.cancel_command(session)
+        elif action == "complete":
+            plugin.complete_command(session)
+        else:
+            plugin.continue_command(session, action)
+        iq = await asyncio.wait_for(fut, timeout=30)
+        return self._parse_command_result(iq, session)
+
+    def _parse_command_result(self, iq, session: dict) -> dict:
+        if iq["type"] == "error":
+            return {"session": session, "error": self._command_error_text(iq),
+                    "form": None, "actions": [], "notes": [], "status": ""}
+        command = iq["command"]
+        form = command["form"]
+        return {"session": session,
+                "sessionid": command["sessionid"],
+                "status": command["status"],
+                "form": form if form and form.get_fields() else None,
+                "actions": sorted(command["actions"] or ()),
+                "notes": list(command["notes"] or ()) or [],
+                "error": ""}
+
+    @staticmethod
+    def _command_error_text(iq) -> str:
+        if iq["type"] != "error":
+            return ""
+        return iq["error"]["text"] or iq["error"]["condition"] or "error"
+
+    @classmethod
+    def _command_error(cls, fut: asyncio.Future):
+        def handler(iq, session):
+            if not fut.done():
+                cond = (iq["error"]["text"] or iq["error"]["condition"]
+                        if iq["type"] == "error" else "command error")
+                fut.set_exception(Exception(cond))
+        return handler
+
+    @staticmethod
+    def _command_handle(fut: asyncio.Future):
+        def handler(iq, session):
+            if not fut.done():
+                fut.set_result(iq)
+        return handler
+
     async def _fetch_muc_info(self, room: str) -> None:
         try:
             iq = await self.xmpp.plugin["xep_0030"].get_info(jid=room)
@@ -320,21 +753,21 @@ class JabberClient:
         info: dict[str, str] = {}
         try:
             result = await self.xmpp.plugin["xep_0092"].get_version(jid)
-            info["software"] = str(result.get("software", "") or "")
-            info["version"] = str(result.get("version", "") or "")
-            info["os"] = str(result.get("os", "") or "")
+            version = result["software_version"]
+            info["software"] = str(version.get("name", "") or "")
+            info["version"] = str(version.get("version", "") or "")
+            info["os"] = str(version.get("os", "") or "")
         except Exception:
-            logger.debug("Software version unavailable for %s", jid,
-                         exc_info=True)
+            logger.debug("Software version unavailable for %s", jid)
         try:
             info["ping"] = f"{await self.xmpp.plugin['xep_0199'].ping(jid, timeout=5):.3f}s"
         except Exception:
-            logger.debug("Ping unavailable for %s", jid, exc_info=True)
+            logger.debug("Ping unavailable for %s", jid)
         try:
             result = await self.xmpp.plugin["xep_0202"].get_entity_time(jid)
             info["client_time"] = str(result.get("time", "") or result.get("utc", ""))
         except Exception:
-            logger.debug("Entity time unavailable for %s", jid, exc_info=True)
+            logger.debug("Entity time unavailable for %s", jid)
         self.emit("entity_info_received", jid, info)
 
     def _store_muc_history(self, room: str, entries) -> None:
@@ -378,7 +811,7 @@ class JabberClient:
             pass
 
     async def save_bookmark(self, room: str, nick: str, password: str = "",
-                            autojoin: bool = True) -> None:
+                            autojoin: bool = True, name: str = "") -> None:
         """Save (or update) a conference bookmark for *room* (XEP-0048)."""
         from slixmpp.plugins.xep_0048 import Bookmarks
 
@@ -397,11 +830,11 @@ class JabberClient:
         existing = [c for c in bookmarks["conferences"] if c["jid"] != room]
         bookmarks = Bookmarks()
         for conf in existing:
-            bookmarks.add_conference(conf["jid"], conf["nick"],
-                                     autojoin=conf["autojoin"],
+            bookmarks.add_conference(conf["jid"], conf["nick"], name=conf.get("name"),
+                                      autojoin=conf["autojoin"],
                                      password=conf["password"])
-        bookmarks.add_conference(room, nick,
-                                 autojoin=bool(autojoin), password=password)
+        bookmarks.add_conference(room, nick, name=name or None,
+                                  autojoin=bool(autojoin), password=password)
         try:
             await plugin.set_bookmarks(bookmarks)
             logger.debug("Saved bookmark for room %s", room)
@@ -423,6 +856,7 @@ class JabberClient:
                     "nick": str(conf["nick"] or ""),
                     "password": str(conf["password"] or ""),
                     "autojoin": bool(conf["autojoin"]),
+                    "name": str(conf.get("name") or ""),
                 }
                 for conf in bookmarks["conferences"]
                 if conf["jid"]
@@ -446,7 +880,7 @@ class JabberClient:
             for conf in old["conferences"]:
                 if str(conf["jid"]) != room:
                     bookmarks.add_conference(
-                        conf["jid"], conf["nick"],
+                        conf["jid"], conf["nick"], name=conf.get("name"),
                         autojoin=conf["autojoin"], password=conf["password"])
             await plugin.set_bookmarks(bookmarks)
         except Exception:
@@ -512,7 +946,7 @@ class JabberClient:
         try:
             iq = await vcard.get_vcard(jid)
         except Exception:
-            logger.debug("vCard for %s unavailable", jid, exc_info=True)
+            logger.debug("vCard for %s unavailable", jid)
             self._vcard_inflight.discard(jid)
             return
         self._on_vcard(iq, jid)
@@ -598,6 +1032,8 @@ class JabberClient:
         ``get_bookmarks``.
         """
         plugin = self.xmpp.plugin["xep_0048"]
+        if not self.auto_join_conferences:
+            return
         try:
             result = await plugin.get_bookmarks()
             if plugin.storage_method == "xep_0223":
@@ -630,6 +1066,8 @@ class JabberClient:
             ts = msg.get("delay", {}).get("stamp", None)
             if isinstance(ts, datetime.datetime):
                 ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
+            elif ts:
+                ts = _normalize_ts(str(ts))
             room, separator, nick = frm.partition("/")
             if separator and room in self.groupchats:
                 self.emit("muc_private_message", room, nick, body, ts)
@@ -643,11 +1081,18 @@ class JabberClient:
         ts = msg.get("delay", {}).get("stamp", None)
         if isinstance(ts, datetime.datetime):
             ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
-        self.emit("groupchat_message", room, nick, body, ts)
+        elif ts:
+            ts = _normalize_ts(str(ts))
+        # Live room echoes may also carry an archive marker. History replay
+        # additionally has delayed delivery, which is the reliable signal.
+        archived = _has_stanza_element(msg, "archived") and bool(ts)
+        archive_id = _archive_result_id(msg) if archived else ""
+        self.emit("groupchat_message", room, nick, body, ts, archived,
+                  archive_id)
 
     def _on_presence(self, pres) -> None:
         frm = str(pres["from"])
-        bare, _, _resource = frm.partition("/")
+        bare, _, resource = frm.partition("/")
         ptype = str(pres["type"])
         show = str(pres.get("show", ""))
         if ptype != "available":
@@ -655,7 +1100,26 @@ class JabberClient:
         elif show in ("", "available", "None"):
             show = "online"
         status = str(pres.get("status", ""))
-        self.presences[frm] = {"show": show, "status": status, "type": ptype}
+        try:
+            priority = int(pres.get("priority", 0) or 0)
+        except (TypeError, ValueError):
+            priority = 0
+        self.presences[frm] = {"show": show, "status": status, "type": ptype,
+                               "priority": priority, "client": ""}
+
+        contact = self.get_contact(bare)
+        if ptype != "available":
+            if resource:
+                contact.resources.pop(resource, None)
+        else:
+            previous_client = contact.resources.get(resource, {}).get("client", "")
+            contact.resources[resource] = {
+                "show": show, "status": status, "priority": priority,
+                "client": previous_client,
+            }
+            if resource and frm not in self._version_probed:
+                self._version_probed.add(frm)
+                self._start_task(self._prefetch_version(frm))
 
         # Aggregate presence across all resources of the same contact.
         best_show = "offline"
@@ -670,10 +1134,26 @@ class JabberClient:
                 best_show = s
                 best_status = info["status"]
 
-        contact = self.get_contact(bare)
         contact.show = best_show
         contact.status = best_status
         self.emit("presence_changed", bare, best_show, best_status)
+
+    async def _prefetch_version(self, full_jid: str) -> None:
+        """Best-effort XEP-0092 lookup for a contact resource (for tooltips)."""
+        try:
+            info = await asyncio.wait_for(
+                self.get_entity_version(full_jid), timeout=8)
+        except Exception:
+            return
+        software = info.get("software") or ""
+        bare, _, resource = full_jid.partition("/")
+        try:
+            self.presences[full_jid]["client"] = software
+        except KeyError:
+            return
+        contact = self.get_contact(bare)
+        if resource and resource in contact.resources:
+            contact.resources[resource]["client"] = software
 
     def _on_roster_update(self, iq) -> None:
         """A roster push or full roster response arrived.  slixmpp's internal
@@ -735,17 +1215,36 @@ class JabberClient:
         if show == "unavailable":
             gi.users.pop(nick, None)
         else:
+            previous_client = gi.users.get(nick, {}).get("client", "")
             gi.users[nick] = {
                 "show": show,
                 "status": status,
                 "role": role,
                 "affiliation": affiliation,
                 "real_jid": real_jid,
+                "client": previous_client,
             }
+            if real_jid and (room, nick) not in self._muc_version_probed:
+                self._muc_version_probed.add((room, nick))
+                self._start_task(self._prefetch_muc_version(room, nick, real_jid))
         if nick == gi.nick and show != "unavailable":
             self._emit_muc_joined(room, gi.subject, list(gi.users))
         self.emit("groupchat_presence", room, nick, show, status, role,
                   affiliation, real_jid)
+
+    async def _prefetch_muc_version(self, room: str, nick: str,
+                                    jid: str) -> None:
+        """Best-effort XEP-0092 lookup for a MUC participant's client."""
+        try:
+            info = await asyncio.wait_for(
+                self.get_entity_version(jid), timeout=8)
+        except Exception:
+            return
+        software = info.get("software") or ""
+        gi = self.groupchats.get(room)
+        if gi and nick in gi.users:
+            gi.users[nick]["client"] = software
+        self.emit("groupchat_presence_details", room, nick)
 
     def _on_subscribed(self, pres) -> None:
         frm = str(pres["from"])
@@ -802,17 +1301,19 @@ class JabberClient:
         self.emit("vcard_received", jid or bare, card)
 
     async def fetch_history_mam(self, jid: str, since: str | None = None,
-                                limit: int = 200) -> int:
+                                limit: int = 200) -> int | None:
         """Fetch older messages for *jid* from the server archive (MAM,
         XEP-0313) and store them locally.
 
         Queries only the range strictly before the locally stored ``since``
         timestamp so overlapping messages are not re-fetched.  Returns the
-        number of messages stored (0 on failure or while another query for
-        the same JID is in flight).
+        number of messages stored, or ``None`` when another query for the
+        same JID is in flight.
         """
         if jid in self._mam_inflight:
-            return 0
+            return None
+        if since is None:
+            self._mam_cursors.pop(jid, None)
         self._mam_inflight.add(jid)
         try:
             return await self._fetch_history_mam_impl(jid, since, limit)
@@ -826,14 +1327,22 @@ class JabberClient:
         if since:
             try:
                 ts = since
-                if len(ts) >= 19 and ts[10] == "T":
-                    ts = ts[:19]
-                end = datetime.datetime.fromisoformat(ts)
+                end = datetime.datetime.fromisoformat(
+                    ts.replace("Z", "+00:00"))
                 if end.tzinfo is None:
                     end = end.replace(tzinfo=datetime.timezone.utc)
             except ValueError:
                 end = None
+        cursor = self._mam_cursors.get(jid)
+        if cursor:
+            end = None
         rsm = {"max": int(limit)}
+        if cursor:
+            rsm["before"] = cursor
+        elif since is None:
+            # slixmpp serializes True as an empty <before/> element. An empty
+            # string is omitted, which makes ejabberd return the oldest page.
+            rsm["before"] = True
         modes = [(jid in self.groupchats, end)]
         if end is not None:
             modes.append((not (jid in self.groupchats), end))
@@ -845,8 +1354,8 @@ class JabberClient:
         last_error = None
         for index, (use_archive_jid, query_end) in enumerate(modes, 1):
             mode = "jid" if use_archive_jid else "with_jid"
-            logger.info("MAM query %d for %s: mode=%s end=%s max=%s",
-                        index, jid, mode, query_end, limit)
+            logger.info("MAM query %d for %s: mode=%s end=%s before=%s max=%s",
+                        index, jid, mode, query_end, rsm.get("before"), limit)
             try:
                 task = (mam.retrieve(jid=jid, end=query_end, rsm=rsm)
                         if use_archive_jid
@@ -868,12 +1377,29 @@ class JabberClient:
                 logger.info("MAM query timed out for %s", jid)
             except Exception as exc:
                 last_error = exc
-                logger.debug("MAM query failed for %s", jid, exc_info=True)
+                logger.debug("MAM query %d for %s failed: %r",
+                             index, jid, exc)
         if not results and last_error is not None:
             logger.debug("MAM returned no usable results for %s: %r",
                          jid, last_error)
             self.emit("mam_unavailable", jid)
             return 0
+
+        if results:
+            archive_ids = []
+            for result in results:
+                archive_id = _archive_result_id(result)
+                if archive_id:
+                    archive_ids.append(str(archive_id))
+            if archive_ids:
+                try:
+                    self._mam_cursors[jid] = min(archive_ids, key=int)
+                except ValueError:
+                    self._mam_cursors[jid] = archive_ids[0]
+                logger.info("MAM cursor for %s advanced to before=%s",
+                            jid, self._mam_cursors[jid])
+            else:
+                logger.warning("MAM results for %s have no archive cursor", jid)
 
         me = self.jid_str.split("@")[0]
         my_nick = ""
@@ -902,11 +1428,15 @@ class JabberClient:
                     continue
                 parsed += 1
                 frm = str(_stanza_value(msg, "from") or "")
-                delay = _stanza_value(msg, "delay") or {}
-                stamp = _stanza_value(delay, "stamp")
-                if isinstance(stamp, datetime.datetime):
-                    stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
-                ts = _normalize_ts(str(stamp))
+                stamp = _message_timestamp(msg, result)
+                if not stamp:
+                    skipped += 1
+                    skip_reasons["missing_timestamp"] = (
+                        skip_reasons.get("missing_timestamp", 0) + 1)
+                    logger.warning("MAM result for %s has no server timestamp",
+                                   jid)
+                    continue
+                ts = _normalize_ts(stamp)
                 direction = "incoming"
                 sender = ""
                 if jid in self.groupchats:
@@ -922,7 +1452,8 @@ class JabberClient:
                 from jabbim.core import history
                 inserted = history.store_message(
                     jid, direction, body, timestamp=ts or None,
-                    sender=sender, skip_existing=True)
+                    sender=sender, skip_existing=True,
+                    archive_id=_archive_result_id(result))
                 if inserted:
                     stored += 1
                 else:
@@ -941,28 +1472,86 @@ class JabberClient:
         if results and parsed and not stored and not duplicates:
             self.emit("mam_parse_error", jid, len(results), parsed, skipped)
             return -1
-        return stored
+        return stored + duplicates
 
     def _on_chatstate(self, msg) -> None:
         frm = str(msg["from"]).split("/")[0]
         state = str(msg["chat_state"])
-        if state == "composing":
-            self.emit("typing", frm, True)
-        else:
-            self.emit("typing", frm, False)
+        self.emit("chatstate_received", frm, state)
+        if state in ("composing", "paused"):
+            self.emit("typing", frm, state == "composing")
 
     def _on_receipt_received(self, msg) -> None:
         frm = str(msg["from"]).split("/")[0]
         logger.debug("Message receipt delivered to %s", frm)
-        self.emit("receipt_delivered", frm)
+        receipt_id = str(msg.get("receipt", "") or msg.get("id", ""))
+        self.emit("receipt_delivered", frm, receipt_id)
 
 
 def _normalize_ts(ts: str) -> str:
-    """Trim a XEP-0082 timestam to the storage format ``YYYY-MM-DDTHH:MM:SS``."""
-    ts = ts.strip()
-    if len(ts) >= 19 and ts[10] == "T":
-        return ts[:19]
-    return ts
+    """Normalize an XEP-0082 timestamp to canonical UTC ISO-8601."""
+    value = str(ts or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    parsed = parsed.astimezone(datetime.timezone.utc)
+    return parsed.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _message_timestamp(message, result=None) -> str:
+    """Extract the original server timestamp from a MAM result."""
+    for stanza in (message, result):
+        delay = _stanza_value(stanza, "delay")
+        stamp = _stanza_value(delay, "stamp")
+        if isinstance(stamp, datetime.datetime):
+            return stamp.strftime("%Y-%m-%dT%H:%M:%S")
+        if stamp:
+            value = str(stamp).strip()
+            if value:
+                return value
+    return ""
+
+
+def _archive_result_id(result) -> str:
+    """Return the stable archive id from a forwarded MAM result."""
+    # Prefer the archive markers in the raw XML. The slixmpp MAM result
+    # wrapper does not always expose its outer ``result`` attributes through
+    # the normal stanza mapping interface.
+    for xml in (getattr(result, "xml", None), result):
+        if xml is None or not hasattr(xml, "iter"):
+            continue
+        for node in xml.iter():
+            tag = str(node.tag).rsplit("}", 1)[-1]
+            if tag in ("archived", "stanza-id", "result"):
+                value = node.attrib.get("id")
+                if value:
+                    return str(value)
+    forwarded = _stanza_value(result, "forwarded")
+    message = _forwarded_stanza(forwarded)
+    if message is not None:
+        for key in ("stanza-id", "archived"):
+            marker = _stanza_value(message, key)
+            value = _stanza_value(marker, "id")
+            if value:
+                return str(value)
+    value = _stanza_value(result, "id")
+    return str(value) if value else ""
+
+
+def _has_stanza_element(stanza, tag: str) -> bool:
+    """Return whether a stanza contains an XML child named *tag*."""
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return False
+    return any(str(node.tag).rsplit("}", 1)[-1] == tag
+               for node in xml.iter())
 
 
 def _clean_jid(value) -> str:

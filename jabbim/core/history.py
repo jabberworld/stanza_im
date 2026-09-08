@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS messages (
     direction TEXT NOT NULL,
     sender TEXT NOT NULL DEFAULT '',
     body TEXT NOT NULL DEFAULT '',
-    timestamp TEXT NOT NULL
+    timestamp TEXT NOT NULL,
+    archive_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
@@ -63,6 +64,9 @@ def _connection(jid: str) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "archive_id" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN archive_id TEXT")
         conn.commit()
     except sqlite3.Error:
         conn.close()
@@ -78,19 +82,20 @@ def _connection(jid: str) -> sqlite3.Connection:
 
 
 def _row_to_entry(row) -> dict:
-    _id, direction, sender, body, timestamp = row
+    _id, direction, sender, body, timestamp, archive_id = row
     return {
         "id": _id,
         "direction": direction,
         "sender": sender,
         "body": body,
         "timestamp": timestamp,
+        "archive_id": archive_id or "",
     }
 
 
 def store_message(jid: str, direction: str, body: str,
                   timestamp: str | None = None, sender: str = "",
-                  skip_existing: bool = False) -> bool:
+                  skip_existing: bool = False, archive_id: str = "") -> bool:
     """Append a message to *jid*'s history.
 
     With ``skip_existing`` a row with the same (sender, body, timestamp)
@@ -101,15 +106,22 @@ def store_message(jid: str, direction: str, body: str,
         conn = _connection(jid)
         ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%S")
         if skip_existing:
-            row = conn.execute(
-                "SELECT id FROM messages WHERE sender = ? AND body = ? "
-                "AND timestamp = ? LIMIT 1", (sender, body, ts)).fetchone()
+            row = None
+            if archive_id:
+                row = conn.execute(
+                    "SELECT id FROM messages WHERE archive_id = ? LIMIT 1",
+                    (archive_id,)).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT id FROM messages WHERE sender = ? AND body = ? "
+                    "AND timestamp = ? LIMIT 1", (sender, body, ts)).fetchone()
             if row:
                 return False
         conn.execute(
-            "INSERT INTO messages (direction, sender, body, timestamp) "
-            "VALUES (?, ?, ?, ?)",
-            (direction, sender, body, ts),
+            "INSERT INTO messages "
+            "(direction, sender, body, timestamp, archive_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (direction, sender, body, ts, archive_id or None),
         )
         conn.commit()
         return True
@@ -138,7 +150,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
         params.append(str(int(limit)))
         cur = conn.execute(
             f"SELECT * FROM ("
-            f"SELECT id, direction, sender, body, timestamp FROM messages"
+            f"SELECT id, direction, sender, body, timestamp, archive_id FROM messages"
             f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
             f"ORDER BY timestamp ASC, id ASC",
             params)
@@ -157,7 +169,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
         conn = _connection(jid)
         cur = conn.execute(
             "SELECT * FROM ("
-            "SELECT id, direction, sender, body, timestamp FROM messages "
+            "SELECT id, direction, sender, body, timestamp, archive_id FROM messages "
             "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
             (str(int(before_id)), str(int(limit))))
         return [_row_to_entry(r) for r in cur.fetchall()]
@@ -171,7 +183,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
     try:
         conn = _connection(jid)
         cur = conn.execute(
-            "SELECT * FROM (SELECT id, direction, sender, body, timestamp "
+            "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id "
             "FROM messages WHERE timestamp < ? "
             "ORDER BY timestamp DESC, id DESC LIMIT ?) "
             "ORDER BY timestamp ASC, id ASC", (before, int(limit)))

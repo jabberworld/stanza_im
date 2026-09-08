@@ -10,13 +10,17 @@ from __future__ import annotations
 import time
 import webbrowser
 import logging
+import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from jabbim.i18n import tr
-from jabbim.include.avatars import avatar_data_uri, default_avatar, default_avatar_uri
+from jabbim.include.avatars import (
+    avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
+)
 from jabbim.ui.chat_view import ChatView
 from jabbim.ui.chat_themes import ChatThemeFactory
+from jabbim.ui import tooltip as tooltip_mod
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +60,37 @@ def _ts_from_entry(entry: dict) -> str:
     return ts
 
 
+class _ParticipantRow(QtWidgets.QWidget):
+    """A MUC participant row that reports hover/press so ChatWidget can show
+    the rich custom tooltip (Qt tooltips are plain-text only).
+
+    Child labels ignore mouse move events, which then propagate to this row.
+    """
+
+    def __init__(self, parent=None, on_hover=None, on_leave=None,
+                 on_press=None):
+        super().__init__(parent)
+        self._on_hover = on_hover
+        self._on_leave = on_leave
+        self._on_press = on_press
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._on_hover is not None:
+            self._on_hover(event.globalPosition().toPoint())
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._on_press is not None:
+            self._on_press()
+        super().mousePressEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._on_leave is not None:
+            self._on_leave()
+        super().leaveEvent(event)
+
+
 class ChatWidget(QtWidgets.QWidget):
     """A single chat tab's content: header info + message view + input bar."""
 
@@ -76,6 +111,10 @@ class ChatWidget(QtWidgets.QWidget):
         self.display_name = display_name
         self.is_muc = is_muc
         self._show_avatars = True
+        self._send_ctrl_enter = False
+        self._send_typing_notifications = True
+        self._send_activity_notifications = True
+        self._show_status = True
         self._last_sender: str = ""
         self._history: list[dict] = []
         self._status_lines: list[tuple[str, str]] = []
@@ -90,6 +129,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._preserve_fraction: float | None = None
         self._users: list[dict] = []
         self._self_nick: str = ""
+        self._hovered_participant: str = ""
         self._bookmarked = False
         self._bookmark_action = None
         self._last_view_h = 0
@@ -206,25 +246,32 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if self._input.toPlainText().strip():
             if not self._typing_timer.isActive():
-                self.typing_changed.emit(self.jid, True)
+                if self._send_typing_notifications:
+                    self.typing_changed.emit(self.jid, True)
             self._typing_timer.start()
         else:
             self._typing_timer.stop()
-            self.typing_changed.emit(self.jid, False)
+            if self._send_typing_notifications:
+                self.typing_changed.emit(self.jid, False)
 
     def _typing_paused(self):
-        self.typing_changed.emit(self.jid, False)
+        if self._send_typing_notifications:
+            self.typing_changed.emit(self.jid, False)
 
     def eventFilter(self, obj, event):
         if obj is self._input and event.type() == QtCore.QEvent.Type.KeyPress:
-            if (event.key() == QtCore.Qt.Key.Key_Return
-                    and not event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier):
+            modifiers = event.modifiers()
+            has_ctrl = bool(modifiers & QtCore.Qt.KeyboardModifier.ControlModifier)
+            send_key = has_ctrl if self._send_ctrl_enter else not has_ctrl
+            if (event.key() in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter)
+                    and send_key
+                    and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self._send()
                 return True
         return super().eventFilter(obj, event)
 
     def _send(self):
-        text = self._input.toPlainText().strip()
+        text = self._input.toPlainText()
         if not text:
             return
         self._typing_timer.stop()
@@ -236,7 +283,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def add_message(self, sender: str, body: str, timestamp: str,
                     direction: str = "incoming", is_next: bool = False,
-                    sender_jid: str = ""):
+                    sender_jid: str = "", archive_id: str = "",
+                    message_id: str = ""):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -248,8 +296,11 @@ class ChatWidget(QtWidgets.QWidget):
             is_next = True
         timestamp = timestamp or time.strftime("%H:%M:%S")
         entry = {"sender": sender or "Me", "body": body or "",
-                 "timestamp": timestamp, "direction": direction,
-                 "is_next": is_next, "sender_jid": sender_jid}
+                  "timestamp": timestamp, "direction": direction,
+                  "is_next": is_next, "sender_jid": sender_jid,
+                  "archive_id": archive_id,
+                  "message_id": message_id or (uuid.uuid4().hex if direction == "outgoing" else ""),
+                  "delivered": False}
         self._messages.append(entry)
         self._render_entry(entry)
         if direction == "incoming" or sender == "Me":
@@ -263,34 +314,58 @@ class ChatWidget(QtWidgets.QWidget):
         self._view.add_status(text, timestamp)
 
     def set_history_status(self, text: str):
-        """Replace the transient server-history status and re-render once."""
+        """Replace the transient server-history status without moving scroll."""
         fetching = tr("history_server_fetching")
         self._status_lines = [item for item in self._status_lines
                               if item[0] != fetching]
         if text:
             self._status_lines.append((text, time.strftime("%H:%M:%S")))
-        self._preserve_fraction = self._view.scroll_fraction()
-        self._anchor_bottom = False
-        self._render_all()
 
     def _render_entry(self, entry: dict):
+        from jabbim.include.utils import ts_to_time
         self._view.add_message(sender=entry["sender"], body=entry["body"],
-                               timestamp=entry.get("timestamp", ""),
-                               direction=entry.get("direction", "incoming"),
-                               is_next=entry.get("is_next", False),
-                                user_icon_path=self._user_icon(
-                                    entry.get("direction", "incoming"),
-                                    entry.get("sender_jid", "")))
+                               timestamp=ts_to_time(entry.get("timestamp", "")),
+                                direction=entry.get("direction", "incoming"),
+                                is_next=entry.get("is_next", False),
+                                message_id=entry.get("message_id", ""),
+                                 user_icon_path=self._user_icon(
+                                     entry.get("direction", "incoming"),
+                                     entry.get("sender_jid", ""),
+                                     entry.get("sender", "")))
 
-    def _user_icon(self, direction: str, sender_jid: str = "") -> str:
+    def _user_icon(self, direction: str, sender_jid: str = "",
+                   sender: str = "") -> str:
         """Return a PNG data-URI for the sender avatar."""
         if not self._show_avatars:
             return ""
         if direction == "outgoing":
             return default_avatar_uri()
         if self.is_muc:
+            if not sender_jid and sender:
+                participant = next(
+                    (user for user in self._users
+                     if self._same_nick(user.get("nick", ""), sender)), None)
+                if participant:
+                    direct_uri = avatar_file_data_uri(
+                        participant.get("avatar_path", ""))
+                    if direct_uri:
+                        return direct_uri
+                    sender_jid = (participant.get("avatar_jid", "")
+                                  or participant.get("real_jid", ""))
+                    if sender_jid:
+                        logger.debug("Resolved historical avatar: room=%s nick=%s jid=%s",
+                                     self.jid, sender, sender_jid)
             return avatar_data_uri(sender_jid) or default_avatar_uri()
         return avatar_data_uri(sender_jid or self.jid) or default_avatar_uri()
+
+    @staticmethod
+    def _same_nick(left: str, right: str) -> bool:
+        import re
+        import unicodedata
+        normalize = lambda value: re.sub(
+            r"\s+", " ", unicodedata.normalize("NFKC", value or "")
+        ).strip().casefold()
+        return normalize(left) == normalize(right)
 
     def _render_all(self):
         """Clear the view and re-render everything, restoring scroll."""
@@ -304,15 +379,31 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.add_status(marker, "")
         for text, timestamp in self._status_lines:
             self._view.add_status(text, timestamp)
-        for entry in self._history:
-            self._render_entry(entry)
-        for entry in self._messages:
+        entries = []
+        seen = set()
+        for entry in self._history + self._messages:
+            key = self._entry_key(entry)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(entry)
+        entries.sort(key=lambda entry: (
+            entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
+        for entry in entries:
             self._render_entry(entry)
         self._preserve_fraction = None
         if self._anchor_bottom:
             self._view.scroll_to_bottom()
         else:
             self._view.set_scroll_fraction(keep)
+
+    @staticmethod
+    def _entry_key(entry: dict) -> tuple:
+        if entry.get("archive_id"):
+            return ("archive", entry["archive_id"])
+        return (entry.get("direction", "incoming"),
+                entry.get("sender", ""), entry.get("body", ""),
+                entry.get("timestamp", ""))
 
     # ── History window management ─────────────────────────────────
 
@@ -334,15 +425,30 @@ class ChatWidget(QtWidgets.QWidget):
 
     def prepend_history(self, entries: list[dict], exhausted: bool):
         """Insert older rows at the top of the window, keeping position."""
-        if not entries:
+        from jabbim.include.utils import ts_to_time
+        known = {self._entry_key(entry) for entry in self._history}
+        unique = []
+        for entry in entries:
+            key = self._entry_key(entry)
+            if key in known:
+                continue
+            known.add(key)
+            unique.append(entry)
+        if not unique:
             self._hist_loading = False
             self._db_exhausted = bool(exhausted)
             return
         self._preserve_fraction = self._view.scroll_fraction()
-        self._history = list(entries) + self._history
+        self._history = unique + self._history
         self._db_exhausted = bool(exhausted)
         self._hist_loading = False
-        self._render_all()
+        self._view.prepend_messages([
+             {**entry, "user_icon_path": self._user_icon(
+                 entry.get("direction", "incoming"),
+                 entry.get("sender_jid", ""), entry.get("sender", "")),
+             "timestamp": ts_to_time(entry.get("timestamp", ""))}
+            for entry in unique
+        ])
 
     def history_cleared(self):
         """Local history was wiped — reset buffers and show the marker."""
@@ -357,16 +463,48 @@ class ChatWidget(QtWidgets.QWidget):
         self._render_all()
 
     def server_fetch_done(self, stored: int):
-        """A MAM fetch finished: reload the (now larger) window."""
+        """Add the newly fetched older messages to the current window."""
+        from jabbim.core import history
+
         self._server_fetching = False
         if stored < 0:
             self._hist_loading = False
             return
         if stored > 0:
-            self.refresh_history(size=self._window_size * 4)
+            self._server_exhausted = False
+            before = self.oldest_ts()
+            if before:
+                rows = history.load_older_timestamp(
+                    self.jid, before, self._window_size)
+                # These rows belong to the MAM page just stored. Do not
+                # expose the same SQLite rows through a second paging path;
+                # the next page is controlled by the MAM archive cursor.
+                self.prepend_history(rows, True)
+                self._db_exhausted = True
+            else:
+                self._history = history.load_history(
+                    self.jid, limit=self._window_size)
+                self._merge_live_history()
+                self._db_exhausted = True
+                self._anchor_bottom = True
+                self._render_all()
         else:
             self._hist_loading = False
             self._server_exhausted = True
+
+    def _merge_live_history(self):
+        """Fold messages received during MAM loading into the DB window."""
+        if not self._messages:
+            return
+        known = {self._entry_key(entry) for entry in self._history}
+        for entry in self._messages:
+            key = self._entry_key(entry)
+            if key not in known:
+                self._history.append(entry)
+                known.add(key)
+        self._history.sort(key=lambda entry: (
+            entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
+        self._messages.clear()
 
     def mark_server_exhausted(self):
         """Server has no MAM archive or it errored out — stop retrying."""
@@ -529,18 +667,24 @@ class ChatWidget(QtWidgets.QWidget):
         if self._self_nick and nick == self._self_nick:
             label = f"{label} ({tr('muc_you')})"
 
-        row = QtWidgets.QWidget(self._users_list)
+        row = _ParticipantRow(
+            self._users_list,
+            on_hover=lambda pos: self._muc_user_hover(nick, pos),
+            on_leave=self._muc_user_leave,
+            on_press=tooltip_mod.hide)
         layout = QtWidgets.QHBoxLayout(row)
         layout.setContentsMargins(2, 1, 2, 1)
         layout.setSpacing(4)
         status = QtWidgets.QLabel(row)
+        status.setMouseTracking(True)
         status.setPixmap(self._status_icon(user.get("show", "offline"))
                          .pixmap(16, 16))
         text = QtWidgets.QLabel(label, row)
-        text.setToolTip(user.get("status", ""))
+        text.setMouseTracking(True)
         layout.addWidget(status)
         layout.addWidget(text, 1)
         avatar = QtWidgets.QLabel(row)
+        avatar.setMouseTracking(True)
         avatar.setFixedSize(28, 28)
         path = user.get("avatar_path", "") or default_avatar()
         pix = QtGui.QPixmap(path)
@@ -554,6 +698,54 @@ class ChatWidget(QtWidgets.QWidget):
         item.setSizeHint(row.sizeHint())
         self._users_list.addItem(item)
         self._users_list.setItemWidget(item, row)
+
+    def _participant_tooltip(self, user: dict) -> str:
+        """Rich-text tooltip for a MUC participant row."""
+        from jabbim.include.utils import escape_html
+        nick = user.get("nick", "")
+        lines = [f"<b>{escape_html(nick)}</b>"]
+        real_jid = user.get("real_jid", "")
+        if real_jid:
+            lines.append(f"{tr('tooltip_real_jid')}: {escape_html(real_jid)}")
+        client = user.get("client", "")
+        if client:
+            lines.append(f"{tr('tooltip_client')}: {escape_html(client)}")
+        role = user.get("role", "")
+        if role:
+            label = tr(f"muc_role_{role}")
+            lines.append(f"{tr('tooltip_role')}: {escape_html(label)}")
+        affiliation = user.get("affiliation", "")
+        if affiliation:
+            label = tr(f"muc_affiliation_{affiliation}")
+            lines.append(f"{tr('tooltip_affiliation')}: {escape_html(label)}")
+        status = user.get("status", "")
+        if status:
+            lines.append("<i>"
+                         + escape_html(status).replace("\n", "<br>")
+                         + "</i>")
+        return "<br>".join(lines)
+
+    def _muc_user_hover(self, nick: str, global_pos: QtCore.QPoint) -> None:
+        """Show the rich tooltip once per participant (restart on change)."""
+        if nick == self._hovered_participant:
+            return
+        self._hovered_participant = nick
+        self._muc_user_tooltip(nick, global_pos)
+
+    def _muc_user_tooltip(self, nick: str, global_pos: QtCore.QPoint) -> None:
+        tooltip_mod.hide()
+        user = next((u for u in self._users if u.get("nick", "") == nick),
+                    None)
+        if user is None:
+            return
+        html = self._participant_tooltip(user)
+        avatar = user.get("avatar_path", "") or None
+        if html:
+            tooltip_mod.show(global_pos, html, avatar)
+
+    def _muc_user_leave(self) -> None:
+        tooltip_mod.hide()
+        self._hovered_participant = ""
 
     def _on_muc_user_clicked(self, item: QtWidgets.QListWidgetItem):
         nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
@@ -585,6 +777,35 @@ class ChatWidget(QtWidgets.QWidget):
     def set_show_avatars(self, show: bool):
         self._show_avatars = show
 
+    def set_chat_options(self, options):
+        self._send_ctrl_enter = bool(options.get("send_ctrl_enter", False))
+        self._send_typing_notifications = bool(options.get("send_typing_notifications", True))
+        self._send_activity_notifications = bool(options.get("send_activity_notifications", True))
+        self._show_status = bool(options.get("show_status", True))
+        self._status_label.setVisible(self._show_status)
+        self.set_show_avatars(bool(options.get("show_avatars", True)))
+
+    def mark_delivered(self, message_id: str) -> None:
+        if not message_id:
+            return
+        for entry in reversed(self._messages):
+            if entry.get("message_id") == message_id:
+                entry["delivered"] = True
+                self._view.mark_message_delivered(message_id)
+                return
+
+    def refresh_avatar_for_sender(self, sender: str, sender_jid: str) -> None:
+        """Refresh only messages belonging to a participant avatar update."""
+        changed = False
+        for entry in self._history + self._messages:
+            if self._same_nick(entry.get("sender", ""), sender):
+                if entry.get("sender_jid", "") != sender_jid:
+                    entry["sender_jid"] = sender_jid
+                    changed = True
+        if changed:
+            self._view.update_sender_avatar(
+                sender, self._user_icon("incoming", sender_jid, sender))
+
     def refresh_avatars(self):
         """Re-render messages after a participant avatar was cached."""
         self._preserve_fraction = self._view.scroll_fraction()
@@ -602,10 +823,10 @@ class ChatWidget(QtWidgets.QWidget):
         self._render_all()
 
     def set_typing(self, name: str, is_typing: bool):
-        if is_typing:
-            self._status_label.setText(tr("chat_is_typing", name=name))
-        else:
-            self._status_label.setText("")
+        if not self._show_status:
+            return
+        self._view.set_typing_indicator(
+            tr("chat_is_typing", name=name) if is_typing else "")
 
     def set_status_text(self, text: str):
         """Override the header status label (e.g. MUC participant count)."""

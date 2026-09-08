@@ -103,6 +103,17 @@ def avatar_data_uri(jid: str) -> str | None:
     return uri
 
 
+def avatar_file_data_uri(path: str) -> str | None:
+    """Return a data URI for an already resolved avatar cache path."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return png_data_uri(fh.read())
+    except OSError:
+        return None
+
+
 _VCARD_NS = "vcard-temp"
 
 
@@ -134,10 +145,17 @@ def parse_vcard_photo(vcard_iq) -> bytes | None:
 
 
 def png_data_uri(raw: bytes) -> str | None:
-    """Return a ``data:image/png;base64,...`` URI from PNG bytes.
-
-    Returns ``None`` if the bytes are not a valid PNG (header check only).
-    """
-    if not raw or raw[:8] != b"\x89PNG\r\n\x1a\n":
+    """Return an image data URI for common vCard photo formats."""
+    if not raw:
         return None
-    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        mime = "image/png"
+    elif raw[:3] == b"\xff\xd8\xff":
+        mime = "image/jpeg"
+    elif raw[:6] in (b"GIF87a", b"GIF89a"):
+        mime = "image/gif"
+    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        return None
+    return "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii")
