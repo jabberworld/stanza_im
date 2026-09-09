@@ -50,11 +50,14 @@ class _JumpButtonMixin:
             self.height() - button.height() - 16)
 
     def _update_jump_button(self):
+        at_bottom = self.scroll_fraction() >= 0.999
+        show = (not at_bottom) and getattr(self, "_overflow", False)
+        self._set_jump_visible(show)
+
+    def _set_jump_visible(self, show: bool):
         button = getattr(self, "_jump_button", None)
         if button is None:
             return
-        at_bottom = self.scroll_fraction() >= 0.999
-        show = (not at_bottom) and getattr(self, "_overflow", False)
         if button.isVisible() != show:
             button.setVisible(show)
         self._position_jump_button()
@@ -74,6 +77,7 @@ if HAS_WEBENGINE:
         file_transfer_reject = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
         scroll_fraction = QtCore.pyqtSignal(float)
+        jump_clicked = QtCore.pyqtSignal()
 
         @QtCore.pyqtSlot(str)
         def on_link_clicked(self, url: str):
@@ -95,6 +99,10 @@ if HAS_WEBENGINE:
         def on_scroll_fraction(self, fraction: float):
             self.scroll_fraction.emit(fraction)
 
+        @QtCore.pyqtSlot()
+        def on_jump_clicked(self):
+            self.jump_clicked.emit()
+
     class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
@@ -111,7 +119,7 @@ if HAS_WEBENGINE:
             self._overflow = False
             self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
-            self._create_jump_button()
+            self._bridge.jump_clicked.connect(self.scroll_to_bottom)
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -134,6 +142,7 @@ if HAS_WEBENGINE:
             self._ready = ok
             if ok:
                 self._install_scroll_js()
+                self._install_jump_js()
                 self._scroll_poll.start()
             else:
                 self._scroll_poll.stop()
@@ -174,6 +183,40 @@ if HAS_WEBENGINE:
 
         def _install_scroll_js(self):
             self.page().runJavaScript(self._SCROLL_JS)
+
+        _JUMP_JS = """
+        (function installStanzaJump() {
+            if (document.getElementById('stanza-jump')) return;
+            var d = document.createElement('div');
+            d.id = 'stanza-jump';
+            d.style.cssText =
+                'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);' +
+                'width:34px;height:34px;line-height:34px;text-align:center;' +
+                'border-radius:17px;background:rgba(60,60,60,0.85);' +
+                'color:#fff;font-size:18px;cursor:pointer;z-index:9999;' +
+                'display:none;user-select:none;';
+            d.addEventListener('mouseenter', function () {
+                d.style.background = 'rgba(40,40,40,0.95)';
+            });
+            d.addEventListener('mouseleave', function () {
+                d.style.background = 'rgba(60,60,60,0.85)';
+            });
+            d.addEventListener('click', function () {
+                if (window.bridge) window.bridge.on_jump_clicked();
+            });
+            d.textContent = '\\u25bc';
+            document.body.appendChild(d);
+        })();
+        """
+
+        def _install_jump_js(self):
+            self.page().runJavaScript(self._JUMP_JS)
+
+        def _set_jump_visible(self, show: bool):
+            self.evaluate_js(
+                "var d = document.getElementById('stanza-jump');"
+                "if (d) d.style.display = %s;"
+                % ("'block'" if show else "'none'"))
 
         def _poll_scroll_position(self):
             if not self._ready:
