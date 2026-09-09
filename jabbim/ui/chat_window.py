@@ -261,7 +261,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         """Title reflects the currently active chat."""
         w = self._tab_widget.currentWidget()
         if isinstance(w, ChatWidget) and w.display_name:
-            state = self._remote_activity.get(w.jid, "")
+            state = "" if w.is_muc else self._remote_activity.get(w.jid, "")
             suffix = "" if not state else f" ({state})"
             self.setWindowTitle(w.display_name + suffix)
         else:

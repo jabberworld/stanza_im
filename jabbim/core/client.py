@@ -1485,6 +1485,10 @@ class JabberClient:
         return stored + duplicates
 
     def _on_chatstate(self, msg) -> None:
+        # Chat states (XEP-0085) apply to 1:1 messaging only — ignore
+        # groupchat messages so a conference never appears "active".
+        if str(msg["type"]) == "groupchat":
+            return
         frm = str(msg["from"]).split("/")[0]
         state = str(msg["chat_state"])
         self.emit("chatstate_received", frm, state)
