@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import html
+import logging
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -16,6 +17,8 @@ except ImportError:
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 
+
+logger = logging.getLogger(__name__)
 
 TYPING_MARKER = "\u200bStanzaTyping\u200b"
 
@@ -125,6 +128,12 @@ if HAS_WEBENGINE:
             channel.registerObject("bridge", self._bridge)
             self.page().setWebChannel(channel)
 
+            try:
+                self.page().javaScriptConsoleMessage.connect(
+                    self._on_js_console)
+            except (AttributeError, RuntimeError):
+                pass
+
             # Messages added before the (async) page load completes would see
             # no #chat node; buffer them until the load has finished.
             self._pending: list[str] = []
@@ -150,6 +159,9 @@ if HAS_WEBENGINE:
                 pending, self._pending = self._pending, []
                 for chunk in pending:
                     self._append_chunk(chunk)
+
+        def _on_js_console(self, level, message: str, line: int, source: str):
+            logger.debug("chat JS [%s:%s] %s", source, line, message)
 
         _SCROLL_JS = """
         (function installStanzaScroll() {
@@ -202,7 +214,10 @@ if HAS_WEBENGINE:
                 d.style.background = 'rgba(60,60,60,0.85)';
             });
             d.addEventListener('click', function () {
-                if (window.bridge) window.bridge.on_jump_clicked();
+                window.scrollTo(0, document.body.scrollHeight);
+                if (window.bridge && window.bridge.on_jump_clicked) {
+                    window.bridge.on_jump_clicked();
+                }
             });
             d.textContent = '\\u25bc';
             document.body.appendChild(d);
