@@ -100,6 +100,7 @@ class ChatWidget(QtWidgets.QWidget):
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since_ts
     bookmark_toggled = QtCore.pyqtSignal(str)              # MUC room
+    set_subject_requested = QtCore.pyqtSignal(str)         # MUC room
     participant_clicked = QtCore.pyqtSignal(str, str)      # room, nick
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)                            # room, nick, global pos
@@ -149,10 +150,28 @@ class ChatWidget(QtWidgets.QWidget):
         header.setContentsMargins(4, 2, 4, 2)
         self._name_label = QtWidgets.QLabel(self.display_name)
         self._name_label.setStyleSheet("font-weight: bold;")
+        self._name_label.setVisible(not self.is_muc)
         self._status_label = QtWidgets.QLabel("")
         self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._status_label.setVisible(not self.is_muc)
         header.addWidget(self._name_label)
         header.addWidget(self._status_label)
+
+        self._subject_btn = QtWidgets.QToolButton(self)
+        self._subject_btn.setText(tr("muc_subject_label"))
+        self._subject_btn.setAutoRaise(True)
+        self._subject_btn.setToolTip(tr("muc_set_subject_title"))
+        self._subject_btn.setVisible(self.is_muc)
+        self._subject_btn.clicked.connect(
+            lambda: self.set_subject_requested.emit(self.jid))
+        header.addWidget(self._subject_btn)
+
+        self._subject_edit = QtWidgets.QLineEdit("", self)
+        self._subject_edit.setReadOnly(True)
+        self._subject_edit.setStyleSheet(
+            "border: none; background: transparent;")
+        self._subject_edit.setVisible(self.is_muc)
+        header.addWidget(self._subject_edit)
         header.addStretch()
 
         self._history_menu = QtWidgets.QMenu(self)
@@ -187,11 +206,6 @@ class ChatWidget(QtWidgets.QWidget):
             lambda: self.bookmark_toggled.emit(self.jid))
         header.addWidget(self._bookmark_btn)
         layout.addLayout(header)
-
-        self._subject_label = QtWidgets.QLabel("")
-        self._subject_label.setStyleSheet("color: gray; font-size: 11px;")
-        self._subject_label.setVisible(self.is_muc)
-        layout.addWidget(self._subject_label)
 
         # Chat view + resizable MUC participant sidebar
         chat_col = QtWidgets.QVBoxLayout()
@@ -810,7 +824,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_typing_notifications = bool(options.get("send_typing_notifications", True))
         self._send_activity_notifications = bool(options.get("send_activity_notifications", True))
         self._show_status = bool(options.get("show_status", True))
-        self._status_label.setVisible(self._show_status)
+        self._status_label.setVisible(self._show_status and not self.is_muc)
         self.set_show_avatars(bool(options.get("show_avatars", True)))
 
     def mark_delivered(self, message_id: str) -> None:
@@ -850,7 +864,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._bookmark_btn.setToolTip(label)
 
     def set_subject(self, subjects: list[tuple[str, str]] | None = None):
-        """Display the MUC subject in its dedicated header field.
+        """Display the MUC subject in the read-only header field.
 
         *subjects* is an ordered list of ``(lang, text)`` pairs; the default
         (empty ``lang``) variant wins, otherwise the first non-empty one.
@@ -866,9 +880,8 @@ class ChatWidget(QtWidgets.QWidget):
                 if candidate:
                     text = candidate
                     break
-        self._subject_label.setText(text)
-        self._subject_label.setToolTip(text)
-        self._subject_label.setVisible(self.is_muc and bool(text))
+        self._subject_edit.setText(text)
+        self._subject_edit.setToolTip(text)
 
     def reload_theme(self, variant: str = ""):
         self._view.load_theme(variant)

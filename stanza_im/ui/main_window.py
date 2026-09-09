@@ -86,6 +86,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.clear_history_requested.connect(self._on_clear_history)
         self._chat_window.server_history_requested.connect(self._on_server_history)
         self._chat_window.bookmark_toggled.connect(self._toggle_bookmark)
+        self._chat_window.set_subject_requested.connect(self._on_set_subject)
         self._chat_window.participant_clicked.connect(
             self._on_muc_participant_clicked)
         self._chat_window.participant_context_requested.connect(
@@ -463,6 +464,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_task(self._client.save_bookmark(
             room, nick, "", autojoin=False))
 
+    def _on_set_subject(self, room: str):
+        if not self._client:
+            return
+        current = ""
+        for lang, text in self._client.get_muc_subjects(room):
+            if not lang:
+                current = text
+                break
+        if not current and self._client.get_muc_subjects(room):
+            current = self._client.get_muc_subjects(room)[0][1]
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, tr("muc_set_subject_title"), tr("muc_subject_label"),
+            QtWidgets.QLineEdit.EchoMode.Normal, current)
+        if ok and self._client:
+            self._client.set_muc_subject(room, text.strip())
+
     def _sync_conference_roster(self, room: str):
         """Represent an active MUC using the normal roster row renderer."""
         if not self._client or room not in self._muc_self_nicks:
@@ -614,7 +631,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if not subjects and subject:
                 subjects = [("", subject)]
             chat.set_subject(subjects)
-            chat.set_status_text(tr("muc_participants_count", n=len(users)))
             self._chat_window.set_chat_title(
                 room, self._muc_display_name(room))
             chat.set_bookmarked(room in self._bookmarks)
@@ -1136,7 +1152,6 @@ class MainWindow(QtWidgets.QMainWindow):
         chat.set_self_nick(self_nick)
         chat.update_muc_users(list(users.values()), self_nick=self_nick)
         chat_title = title or self._muc_display_name(room)
-        chat.set_status_text(tr("muc_participants_count", n=len(users)))
         if self._client:
             chat.set_subject(self._client.get_muc_subjects(room))
         self._chat_window.set_chat_title(room, chat_title)
@@ -1562,7 +1577,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             self_nick = self._muc_self_nicks.get(room, "")
             chat.update_muc_users(list(users.values()), self_nick=self_nick)
-            chat.set_status_text(f"{tr('muc_participants')}: {len(users)}")
             if self._config.chat.muc_show_presence and show == "unavailable":
                 chat.add_status(tr("muc_user_left", nick=nick), time.strftime("%H:%M:%S"))
             elif self._config.chat.muc_show_presence and not was_present:
