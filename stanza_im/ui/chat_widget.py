@@ -170,6 +170,10 @@ class ChatWidget(QtWidgets.QWidget):
         self._subject_edit.setReadOnly(True)
         self._subject_edit.setStyleSheet(
             "border: none; background: transparent;")
+        self._subject_edit.setMinimumWidth(120)
+        self._subject_edit.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred)
         self._subject_edit.setVisible(self.is_muc)
         header.addWidget(self._subject_edit)
         header.addStretch()

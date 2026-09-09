@@ -35,7 +35,11 @@ def _message_subjects(stanza) -> list[tuple[str, str]]:
     """
     if stanza is None:
         return []
-    xml = getattr(stanza, "xml", None) or stanza
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return []
     items: list[tuple[str, str]] = []
     for el in xml.iter():
         tag = el.tag
@@ -129,6 +133,7 @@ class JabberClient:
         self.xmpp.add_event_handler("presence_subscribed", self._on_subscribed)
         self.xmpp.add_event_handler("presence_unsubscribed", self._on_unsubscribed)
         self.xmpp.add_event_handler("groupchat_message", self._on_groupchat_message)
+        self.xmpp.add_event_handler("groupchat_subject", self._on_groupchat_subject)
         self.xmpp.add_event_handler("groupchat_presence", self._on_groupchat_presence)
         self.xmpp.add_event_handler("got_online", self._on_got_online)
         self.xmpp.add_event_handler("failed_auth", self._on_auth_failed)
@@ -1161,6 +1166,28 @@ class JabberClient:
         archive_id = _archive_result_id(msg) if archived else ""
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled)
+
+    def _on_groupchat_subject(self, msg) -> None:
+        """A MUC subject was set/announced (subject-only message).
+
+        Servers deliver the current subject right after joining and on every
+        change as a ``<message type="groupchat"><subject>…</subject></message>``
+        stanza, which slixmpp routes to the ``groupchat_subject`` event.
+        """
+        room = str(msg["from"]).split("/")[0]
+        if room not in self.groupchats:
+            return
+        subjects = _message_subjects(msg)
+        if not subjects:
+            return
+        default = next((t for lang, t in subjects if not lang), "")
+        if not default:
+            default = subjects[0][1]
+        gi = self.groupchats.get(room)
+        if gi:
+            gi.subject = default
+        self._muc_subjects[room] = subjects
+        self.emit("muc_subject_changed", room, list(subjects))
 
     def _on_presence(self, pres) -> None:
         frm = str(pres["from"])
