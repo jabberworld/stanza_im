@@ -55,6 +55,7 @@ STRINGS = {
     "chat_activity_inactive": "неактивен",
     "chat_activity_gone": "пользователь закрыл чат",
     "chat_send": "Отправить",
+    "chat_scroll_to_bottom": "К последнему сообщению",
     "msg_delivered": "✓ Доставлено",
     "chat_file_transfer": "Передача файлов",
     "history_load_earlier": "Загрузить более ранние",

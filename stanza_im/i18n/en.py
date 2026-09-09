@@ -55,6 +55,7 @@ STRINGS = {
     "chat_activity_inactive": "inactive",
     "chat_activity_gone": "user closed the chat",
     "chat_send": "Send",
+    "chat_scroll_to_bottom": "Scroll to bottom",
     "msg_delivered": "✓ Delivered",
     "chat_file_transfer": "File Transfer",
     "history_load_earlier": "Load earlier",

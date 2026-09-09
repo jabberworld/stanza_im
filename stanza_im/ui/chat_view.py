@@ -13,10 +13,55 @@ try:
 except ImportError:
     HAS_WEBENGINE = False
 
+from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 
 
 TYPING_MARKER = "\u200bStanzaTyping\u200b"
+
+
+class _JumpButtonMixin:
+    """Floating 'jump to bottom' button for either chat backend."""
+
+    def _create_jump_button(self):
+        button = QtWidgets.QToolButton(self)
+        button.setText("\u25bc")
+        button.setAutoRaise(True)
+        button.setToolTip(tr("chat_scroll_to_bottom"))
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setFixedSize(34, 34)
+        button.setStyleSheet(
+            "QToolButton {"
+            "  background: rgba(60, 60, 60, 0.85);"
+            "  color: white; border: none; border-radius: 17px;"
+            "  font-size: 18px;"
+            "}"
+            "QToolButton:hover { background: rgba(40, 40, 40, 0.95); }")
+        button.clicked.connect(self.scroll_to_bottom)
+        button.hide()
+        self._jump_button = button
+
+    def _position_jump_button(self):
+        button = getattr(self, "_jump_button", None)
+        if button is None:
+            return
+        button.move(
+            (self.width() - button.width()) // 2,
+            self.height() - button.height() - 16)
+
+    def _update_jump_button(self):
+        button = getattr(self, "_jump_button", None)
+        if button is None:
+            return
+        at_bottom = self.scroll_fraction() >= 0.999
+        show = (not at_bottom) and getattr(self, "_overflow", False)
+        if button.isVisible() != show:
+            button.setVisible(show)
+        self._position_jump_button()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_jump_button()
 
 
 if HAS_WEBENGINE:
@@ -50,7 +95,7 @@ if HAS_WEBENGINE:
         def on_scroll_fraction(self, fraction: float):
             self.scroll_fraction.emit(fraction)
 
-    class ChatView(QtWebEngineWidgets.QWebEngineView):
+    class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
         link_clicked = QtCore.pyqtSignal(str)
@@ -63,8 +108,10 @@ if HAS_WEBENGINE:
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
             self._fraction = 1.0
+            self._overflow = False
             self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
+            self._create_jump_button()
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -132,8 +179,9 @@ if HAS_WEBENGINE:
             if not self._ready:
                 return
             self.page().runJavaScript(
-                "[window.scrollY || document.documentElement.scrollTop || "
-                "document.body.scrollTop || 0, window.innerHeight || 0]",
+                "var st = window.scrollY || document.documentElement.scrollTop "
+                "|| document.body.scrollTop || 0; "
+                "[st, window.innerHeight || 0, document.body.scrollHeight || 0]",
                 self._on_scroll_position,
             )
 
@@ -144,13 +192,20 @@ if HAS_WEBENGINE:
             self.near_top.emit()
 
         def _on_scroll_position(self, value):
-            if not isinstance(value, list) or len(value) < 2:
+            if not isinstance(value, list) or len(value) < 3:
                 return
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
+                total = float(value[2])
             except (TypeError, ValueError):
                 return
+            self._overflow = total > viewport
+            if self._overflow:
+                span = max(1.0, total - viewport)
+                self._fraction = min(1.0, offset / span)
+            else:
+                self._fraction = 1.0
             near_top = offset <= max(24.0, viewport)
             if near_top:
                 if not self._near_top_hit:
@@ -158,12 +213,15 @@ if HAS_WEBENGINE:
                     self.near_top.emit()
             else:
                 self._near_top_hit = False
+            self._update_jump_button()
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
+            self._update_jump_button()
 
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
+            do_scroll = 1 if self._fraction >= 0.999 else 0
             js = f"""
             var chat = document.getElementById('chat');
             if (chat) {{
@@ -173,13 +231,16 @@ if HAS_WEBENGINE:
                 if (slot) {{ chat.insertBefore(div, slot); }}
                 else {{ chat.appendChild(div); }}
             }}
-            window.scrollTo(0, document.body.scrollHeight);
+            if ({do_scroll}) window.scrollTo(0, document.body.scrollHeight);
             """
             self.page().runJavaScript(js)
 
         def _load_empty(self):
             self._pending.clear()
             self._ready = False
+            self._fraction = 1.0
+            self._overflow = False
+            self._update_jump_button()
             html = self._theme.generate_empty_page()
             self.setHtml(html, QtCore.QUrl("about:blank"))
 
@@ -297,6 +358,9 @@ if HAS_WEBENGINE:
         def clear(self):
             """Clear all messages."""
             self._pending.clear()
+            self._fraction = 1.0
+            self._overflow = False
+            self._update_jump_button()
             self._load_empty()
 
         def evaluate_js(self, code: str):
@@ -304,6 +368,8 @@ if HAS_WEBENGINE:
 
         def scroll_to_bottom(self):
             self._near_top_hit = False
+            self._fraction = 1.0
+            self._update_jump_button()
             self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
 
         def scroll_fraction(self) -> float:
@@ -312,6 +378,7 @@ if HAS_WEBENGINE:
         def set_scroll_fraction(self, fraction: float):
             fraction = max(0.0, min(1.0, float(fraction)))
             self._near_top_hit = fraction <= 0.0
+            self._fraction = fraction
             js = (
                 "requestAnimationFrame(function(){"
                 "  document.body.scrollTop;"
@@ -320,10 +387,11 @@ if HAS_WEBENGINE:
                 "});" % fraction
             )
             self.evaluate_js(js)
+            self._update_jump_button()
 
 else:
     # Fallback: QTextBrowser when QWebEngine is not available
-    class ChatView(QtWidgets.QTextBrowser):
+    class ChatView(_JumpButtonMixin, QtWidgets.QTextBrowser):
         """Fallback chat display using QTextBrowser (no CSS themes)."""
 
         link_clicked = QtCore.pyqtSignal(str)
@@ -337,6 +405,8 @@ else:
                 lambda url: self.link_clicked.emit(url.toString()))
             self._near_top_hit = False
             self._fraction = 1.0
+            self._overflow = False
+            self._create_jump_button()
 
         def scrollContentsBy(self, dx: int, dy: int) -> None:
             super().scrollContentsBy(dx, dy)
@@ -344,8 +414,12 @@ else:
 
         def _check_scroll(self):
             vbar = self.verticalScrollBar()
-            span = max(1, vbar.maximum() - vbar.minimum())
-            self._fraction = (vbar.value() - vbar.minimum()) / span
+            span = vbar.maximum() - vbar.minimum()
+            self._overflow = span > 0
+            if self._overflow:
+                self._fraction = (vbar.value() - vbar.minimum()) / span
+            else:
+                self._fraction = 1.0
             offset = vbar.value() - vbar.minimum()
             if offset <= vbar.pageStep():
                 if not self._near_top_hit:
@@ -353,6 +427,7 @@ else:
                     self.near_top.emit()
             else:
                 self._near_top_hit = False
+            self._update_jump_button()
 
         def _typing_block_start(self) -> int:
             """Position of the paragraph with our typing marker, if any."""
@@ -364,14 +439,23 @@ else:
             return -1
 
         def _append_before_typing(self, html: str) -> None:
+            vbar = self.verticalScrollBar()
+            was_at_bottom = self._fraction >= 0.999
+            old_value = vbar.value()
             pos = self._typing_block_start()
             if pos < 0:
                 self.append(html)
-                return
-            cursor = QtGui.QTextCursor(self.document())
-            cursor.setPosition(pos)
-            cursor.insertHtml(html)
-            cursor.insertBlock()
+            else:
+                cursor = QtGui.QTextCursor(self.document())
+                cursor.setPosition(pos)
+                cursor.insertHtml(html)
+                cursor.insertBlock()
+            if was_at_bottom:
+                self._fraction = 1.0
+                vbar.setValue(vbar.maximum())
+            else:
+                vbar.setValue(old_value)
+            self._check_scroll()
 
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
@@ -428,6 +512,8 @@ else:
             super().clear()
             self._near_top_hit = False
             self._fraction = 1.0
+            self._overflow = False
+            self._update_jump_button()
 
         def evaluate_js(self, code: str):
             pass
@@ -436,8 +522,10 @@ else:
             pass
 
         def scroll_to_bottom(self):
+            self._fraction = 1.0
             vbar = self.verticalScrollBar()
             vbar.setValue(vbar.maximum())
+            self._update_jump_button()
 
         def scroll_fraction(self) -> float:
             return self._fraction
@@ -447,3 +535,4 @@ else:
             vbar = self.verticalScrollBar()
             vbar.setValue(int(vbar.minimum()
                               + fraction * (vbar.maximum() - vbar.minimum())))
+            self._update_jump_button()
