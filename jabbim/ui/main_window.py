@@ -69,6 +69,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_theme_factory.set_variant(self._config.appearance.muc_theme)
         self._theme_factory.set_emoticon_skin(self._config.appearance.emoticon_theme)
         self._muc_theme_factory.set_emoticon_skin(self._config.appearance.emoticon_theme)
+        self._theme_factory.set_message_styling(self._config.chat.message_styling)
+        self._muc_theme_factory.set_message_styling(self._config.chat.message_styling)
 
         # ── Chat window (standalone) ─────────────────────────────
         self._chat_window = ChatWindow(self._theme_factory, self._muc_theme_factory)
@@ -753,6 +755,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if emoticon_skin != getattr(self, "_applied_emoticon_skin", "default/smileys.cfg"):
             self._chat_window.reload_emoticons(emoticon_skin)
             self._applied_emoticon_skin = emoticon_skin
+        styling = bool(self._config.chat.message_styling)
+        if styling != getattr(self, "_applied_message_styling", None):
+            self._theme_factory.set_message_styling(styling)
+            self._muc_theme_factory.set_message_styling(styling)
+            self._applied_message_styling = styling
         self._chat_window.set_chat_options(self._config.chat)
         if self._client:
             self._client.send_typing_notifications = self._config.privacy.send_typing_notifications
@@ -1417,7 +1424,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_tab_focused(self, jid: str):
         self._reset_unread(jid)
 
-    def _on_message_received(self, frm: str, body: str, ts):
+    def _on_message_received(self, frm: str, body: str, ts,
+                             unstyled: bool = False):
         bare_jid = frm.split("/")[0]
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
         self._remember_contact(bare_jid, name=sender_name,
@@ -1430,7 +1438,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.add_message(sender=sender_name, body=body,
                              timestamp=ts or _current_timestamp(),
-                             direction="incoming")
+                             direction="incoming", unstyled=unstyled)
 
         from jabbim.core import history
         history.store_message(bare_jid, "incoming", body,
@@ -1450,7 +1458,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._request_vcard(bare_jid)
 
     def _on_muc_private_message(self, room: str, nick: str,
-                                 body: str, ts):
+                                 body: str, ts, unstyled: bool = False):
         info = self._participant_info(room, nick)
         real_jid = info.get("real_jid")
         target = real_jid.strip() if isinstance(real_jid, str) else ""
@@ -1460,6 +1468,7 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.open_chat(target, nick)
         chat.add_message(sender=nick, body=body,
                          timestamp=ts or _current_timestamp(), direction="incoming",
+                         unstyled=unstyled,
                          sender_jid=info.get("avatar_jid", "") or target)
         from jabbim.core import history
         history.store_message(target, "incoming", body,
@@ -1484,7 +1493,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_groupchat_message(self, room: str, nick: str, body: str,
                               ts, archived: bool = False,
-                              archive_id: str = ""):
+                              archive_id: str = "", unstyled: bool = False):
         if archived:
             from jabbim.core import history
             history.store_message(room, "incoming", body,
@@ -1499,6 +1508,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.add_message(sender=nick, body=body,
                              timestamp=ts or _current_timestamp(),
                              direction="incoming",
+                             unstyled=unstyled,
                              sender_jid=(user.get("avatar_jid", "")
                                          or user.get("real_jid", "")),
                              archive_id=archive_id)

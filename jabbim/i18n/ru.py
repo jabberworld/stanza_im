@@ -357,6 +357,7 @@ STRINGS = {
     "prefs_auto_connect": "Автоподключение",
     "prefs_save_password": "Запоминать пароль",
     "prefs_show_avatars": "Показывать аватарки",
+    "prefs_message_styling": "Форматировать текст сообщений (XEP-0393)",
     "prefs_theme": "Тема чата:",
     "prefs_theme_default": "По умолчанию",
     "prefs_history_limit": "Загружать сообщений истории:",

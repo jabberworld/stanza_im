@@ -76,6 +76,7 @@ class ChatThemeFactory:
         self._variants: dict[str, str] = {}
         self._current_variant_css: str = ""
         self._emoticon_skin = emoticon_skin
+        self._message_styling = True
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -115,14 +116,33 @@ class ChatThemeFactory:
     def set_emoticon_skin(self, skin: str) -> None:
         self._emoticon_skin = skin
 
-    def _transform_body(self, body: str) -> str:
+    def set_message_styling(self, enabled: bool) -> None:
+        """Enable/disable XEP-0393 message styling in rendered bodies."""
+        self._message_styling = bool(enabled)
+
+    def _transform_body(self, body: str, styled: bool = True) -> str:
+        """Turn a plain-text body into message HTML.
+
+        With styling enabled the XEP-0393 parser runs first and delegates
+        plain-text regions to :meth:`_body_fragment`, so URLs/emoticons still
+        apply inside styled spans but never inside ``<code>``/``<pre>``.
+        """
+        if self._message_styling and styled:
+            from jabbim.xmpp import message_styling
+            try:
+                return message_styling.render(body, self._body_fragment)
+            except Exception:
+                pass
+        return self._body_fragment(body)
+
+    def _body_fragment(self, raw: str) -> str:
         """Escape plain text, then add clickable links and emoticons.
 
         Order matters: URLs are replaced with tokens first so emoticon codes
         (e.g. ``:/`` inside ``https://``) can't corrupt them, emoticons are
         substituted in the remaining text, then the <a> links are restored.
         """
-        escaped = escape_html(body)
+        escaped = escape_html(raw)
         escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
         escaped = escaped.replace("\n", "<br>")
         tokenised, anchors = self._tokenize_urls(escaped)
@@ -137,13 +157,13 @@ class ChatThemeFactory:
     def render_message(self, sender: str, body: str, timestamp: str,
                        direction: str, is_next: bool = False,
                        sender_color: str = "#000000",
-                       user_icon_path: str = "") -> str:
+                       user_icon_path: str = "", unstyled: bool = False) -> str:
         """Render a single message to HTML using the skin template."""
         key = direction
         if is_next:
             key += "_next"
         template = self._templates.get(key, self._templates.get(direction, "{body}"))
-        body_html = self._transform_body(body)
+        body_html = self._transform_body(body, styled=not unstyled)
 
         html = template.replace("%sender%", escape_html(sender)) \
                        .replace("%message%", body_html) \

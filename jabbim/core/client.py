@@ -77,6 +77,9 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
         # xep_0313 pulls in xep_0059 (RSM) and xep_0297 (Forward) automatically
 
+        # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
+        self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
+
         # Callbacks: list of callables keyed by event name
         self._callbacks: dict[str, list[Callable]] = {}
 
@@ -1068,6 +1071,7 @@ class JabberClient:
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
+            unstyled = _has_stanza_element(msg, "unstyled")
             ts = msg.get("delay", {}).get("stamp", None)
             if isinstance(ts, datetime.datetime):
                 ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
@@ -1075,14 +1079,15 @@ class JabberClient:
                 ts = _normalize_ts(str(ts))
             room, separator, nick = frm.partition("/")
             if separator and room in self.groupchats:
-                self.emit("muc_private_message", room, nick, body, ts)
+                self.emit("muc_private_message", room, nick, body, ts, unstyled)
                 return
-            self.emit("message_received", frm, body, ts)
+            self.emit("message_received", frm, body, ts, unstyled)
 
     def _on_groupchat_message(self, msg) -> None:
         room = str(msg["from"]).split("/")[0]
         nick = str(msg["from"]).split("/", 1)[1] if "/" in str(msg["from"]) else ""
         body = str(msg["body"])
+        unstyled = _has_stanza_element(msg, "unstyled")
         ts = msg.get("delay", {}).get("stamp", None)
         if isinstance(ts, datetime.datetime):
             ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
@@ -1093,7 +1098,7 @@ class JabberClient:
         archived = _has_stanza_element(msg, "archived") and bool(ts)
         archive_id = _archive_result_id(msg) if archived else ""
         self.emit("groupchat_message", room, nick, body, ts, archived,
-                  archive_id)
+                  archive_id, unstyled)
 
     def _on_presence(self, pres) -> None:
         frm = str(pres["from"])

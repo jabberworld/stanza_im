@@ -167,6 +167,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         chat_form.addRow(self._check("show_mood", tr("prefs_show_mood"), False))
         chat_form.addRow(self._check("show_music", tr("prefs_show_music"), False))
         chat_form.addRow(self._check("show_avatars", tr("prefs_show_avatars")))
+        chat_form.addRow(self._check("message_styling",
+                                     tr("prefs_message_styling")))
         chat_form.addRow(tr("prefs_history_limit"), self._spin("history_limit_chat", 10, 5000))
         chat_form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length_chat", 10, 120))
 
@@ -331,6 +333,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
             "show_receipts": chat.show_receipts, "show_mood": chat.show_mood,
             "show_music": chat.show_music, "show_avatars": chat.show_avatars,
+            "message_styling": chat.message_styling,
             "muc_show_presence": chat.muc_show_presence,
             "muc_show_status": chat.muc_show_status,
             "muc_show_status_text": chat.muc_show_status_text,
@@ -379,7 +382,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)
         for key in ("send_ctrl_enter", "show_status", "show_receipts", "show_mood",
-                    "show_music", "show_avatars", "muc_show_presence",
+                    "show_music", "show_avatars", "message_styling",
+                    "muc_show_presence",
                     "muc_show_status", "muc_show_status_text",
                     "muc_auto_nick", "muc_confirm_leave",
                     "muc_minimize_startup"):

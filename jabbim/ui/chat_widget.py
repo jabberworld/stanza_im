@@ -284,7 +284,7 @@ class ChatWidget(QtWidgets.QWidget):
     def add_message(self, sender: str, body: str, timestamp: str,
                     direction: str = "incoming", is_next: bool = False,
                     sender_jid: str = "", archive_id: str = "",
-                    message_id: str = ""):
+                    message_id: str = "", unstyled: bool = False):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -300,7 +300,7 @@ class ChatWidget(QtWidgets.QWidget):
                   "is_next": is_next, "sender_jid": sender_jid,
                   "archive_id": archive_id,
                   "message_id": message_id or (uuid.uuid4().hex if direction == "outgoing" else ""),
-                  "delivered": False}
+                  "delivered": False, "unstyled": unstyled}
         self._messages.append(entry)
         self._render_entry(entry)
         if direction == "incoming" or sender == "Me":
@@ -328,6 +328,7 @@ class ChatWidget(QtWidgets.QWidget):
                                 direction=entry.get("direction", "incoming"),
                                 is_next=entry.get("is_next", False),
                                 message_id=entry.get("message_id", ""),
+                                unstyled=entry.get("unstyled", False),
                                  user_icon_path=self._user_icon(
                                      entry.get("direction", "incoming"),
                                      entry.get("sender_jid", ""),

@@ -191,12 +191,14 @@ if HAS_WEBENGINE:
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
-                        user_icon_path: str = "", message_id: str = ""):
+                        user_icon_path: str = "", message_id: str = "",
+                        unstyled: bool = False):
             """Add a message to the chat view."""
             html = self._theme.render_message(
                 sender=sender, body=body, timestamp=timestamp,
                 direction=direction, is_next=is_next,
                 sender_color=sender_color, user_icon_path=user_icon_path,
+                unstyled=unstyled,
             )
             html = self._mark_message(html, sender, message_id)
             if not self._ready:
@@ -224,6 +226,7 @@ if HAS_WEBENGINE:
                 is_next=entry.get("is_next", False),
                 sender_color="#000000",
                 user_icon_path=entry.get("user_icon_path", ""),
+                unstyled=entry.get("unstyled", False),
             ), entry.get("sender", "Me")) for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
@@ -373,7 +376,8 @@ else:
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
-                        user_icon_path: str = "", message_id: str = ""):
+                        user_icon_path: str = "", message_id: str = "",
+                        unstyled: bool = False):
             if direction == "incoming":
                 self._append_before_typing(
                     f"<b>{sender}</b> <i>({timestamp})</i>: {body}")

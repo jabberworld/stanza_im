@@ -357,6 +357,7 @@ STRINGS = {
     "prefs_auto_connect": "Connect automatically",
     "prefs_save_password": "Remember password",
     "prefs_show_avatars": "Show avatars",
+    "prefs_message_styling": "Format message text (XEP-0393)",
     "prefs_theme": "Chat theme:",
     "prefs_theme_default": "Default",
     "prefs_history_limit": "History messages to load:",

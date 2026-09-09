@@ -74,7 +74,7 @@ class Config:
                  "muc_show_presence": True, "muc_show_status": True,
                  "muc_show_status_text": True,
                  "muc_auto_nick": True, "muc_confirm_leave": True,
-                 "muc_minimize_startup": True},
+                 "muc_minimize_startup": True, "message_styling": True},
         "application": {"close_to_tray": True, "history_limit": 60,
                          "tab_title_length": 30},
         "connection": {"auto_join_conferences": True,
