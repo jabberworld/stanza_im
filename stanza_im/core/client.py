@@ -12,6 +12,7 @@ import platform
 import time
 import uuid
 from typing import Any, Callable
+from xml.etree import ElementTree as ET
 
 import slixmpp
 from slixmpp.jid import JID
@@ -22,6 +23,28 @@ from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.include.constants import APP_NAME, VERSION
 
 logger = logging.getLogger(__name__)
+
+_XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+
+
+def _message_subjects(stanza) -> list[tuple[str, str]]:
+    """Return all ``<subject>`` variants as ``(lang, text)`` pairs.
+
+    ``lang`` is ``""`` for the default (unspecified) subject. Matches any
+    namespaced ``subject`` element (client or ``muc#user``) by local name.
+    """
+    if stanza is None:
+        return []
+    xml = getattr(stanza, "xml", None) or stanza
+    items: list[tuple[str, str]] = []
+    for el in xml.iter():
+        tag = el.tag
+        if not isinstance(tag, str):
+            continue
+        if tag.rsplit("}", 1)[-1] != "subject" or el.text is None:
+            continue
+        items.append((el.get(_XML_LANG, "") or "", str(el.text)))
+    return items
 
 
 class JabberClient:
@@ -88,6 +111,7 @@ class JabberClient:
         self.contacts: dict[str, ContactInfo] = {}
         self.groupchats: dict[str, GroupChatInfo] = {}
         self.presences: dict[str, dict] = {}  # {full_jid: {show, status, ...}}
+        self._muc_subjects: dict[str, list[tuple[str, str]]] = {}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
         self._mam_cursors: dict[str, str] = {}
         self._vcard_cache = VCardCache()
@@ -342,11 +366,15 @@ class JabberClient:
             return
 
         pres, subject_msg, occupants, _history = result
-        subject = str(subject_msg.get("subject", "")) if subject_msg else ""
+        subjects = _message_subjects(subject_msg)
+        subject = next((t for lang, t in subjects if not lang), "")
+        if not subject and subjects:
+            subject = subjects[0][1]
         gi = self.groupchats.get(room)
         if gi:
             gi.subject = subject
             gi.pending_history = _history or []
+        self._muc_subjects[room] = subjects or [("", subject)]
         self._emit_muc_joined(room, subject, list(occupants or []))
 
     def _emit_muc_joined(self, room: str, subject: str = "",
@@ -364,6 +392,9 @@ class JabberClient:
         logger.info("Joined room %s as %s (%d occupants)",
                     room, gi.nick, len(occupants))
         self.emit("muc_joined", room, subject or gi.subject, occupants)
+        subjects = self._muc_subjects.get(
+            room, [("", subject or gi.subject)])
+        self.emit("muc_subject_changed", room, list(subjects))
 
     def get_muc_info(self, room: str) -> None:
         """Request the advertised room name through XEP-0030."""
@@ -914,15 +945,35 @@ class JabberClient:
         if asyncio.iscoroutine(result):
             asyncio.get_event_loop().create_task(result)
 
-    def set_muc_subject(self, room: str, subject: str) -> None:
-        """Set the subject/topic of a MUC room."""
+    def set_muc_subject(self, room: str, subject: str,
+                        langs: list[tuple[str, str]] | None = None) -> None:
+        """Set the subject/topic of a MUC room.
+
+        *langs* is an optional list of ``(lang_code, text)`` variants sent as
+        extra ``<subject xml:lang="...">`` elements per RFC 6121; the default
+        subject goes to the primary ``<subject>`` element.
+        """
         nick = self.groupchats[room].nick if room in self.groupchats else ""
         to = f"{room}/{nick}"
         msg = self.xmpp.Message()
         msg["to"] = to
         msg["type"] = "groupchat"
         msg["subject"] = subject
+        for lang, text in (langs or []):
+            el = ET.SubElement(msg.xml, "{jabber:client}subject")
+            if lang:
+                el.set(_XML_LANG, lang)
+            el.text = text
+        self._muc_subjects[room] = [("", subject)] + [
+            (lang, text) for lang, text in (langs or []) if lang]
+        gi = self.groupchats.get(room)
+        if gi:
+            gi.subject = subject
         msg.send()
+
+    def get_muc_subjects(self, room: str) -> list[tuple[str, str]]:
+        """All known ``(lang, text)`` subject variants for a room."""
+        return list(self._muc_subjects.get(room, []))
 
     def get_vcard(self, jid: str, force: bool = False) -> None:
         """Request vCard for *jid*.  Fire-and-forget; result arrives via
@@ -1087,6 +1138,17 @@ class JabberClient:
         room = str(msg["from"]).split("/")[0]
         nick = str(msg["from"]).split("/", 1)[1] if "/" in str(msg["from"]) else ""
         body = str(msg["body"])
+        subjects = _message_subjects(msg)
+        if not body and subjects:
+            default = next((t for lang, t in subjects if not lang), "")
+            if not default and subjects:
+                default = subjects[0][1]
+            gi = self.groupchats.get(room)
+            if gi:
+                gi.subject = default
+            self._muc_subjects[room] = subjects
+            self.emit("muc_subject_changed", room, list(subjects))
+            return
         unstyled = _has_stanza_element(msg, "unstyled")
         ts = msg.get("delay", {}).get("stamp", None)
         if isinstance(ts, datetime.datetime):

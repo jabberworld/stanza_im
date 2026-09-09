@@ -132,6 +132,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._hovered_participant: str = ""
         self._bookmarked = False
         self._bookmark_action = None
+        self._subjects: list[tuple[str, str]] = []
         self._last_view_h = 0
         self._build_ui(theme)
         self._view.near_top.connect(self._on_near_top)
@@ -175,7 +176,22 @@ class ChatWidget(QtWidgets.QWidget):
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         self._history_btn.setMenu(self._history_menu)
         header.addWidget(self._history_btn)
+
+        self._bookmark_btn = QtWidgets.QToolButton(self)
+        self._bookmark_btn.setIcon(self._bookmark_icon())
+        self._bookmark_btn.setCheckable(True)
+        self._bookmark_btn.setToolTip(tr("bookmark_add"))
+        self._bookmark_btn.setVisible(self.is_muc)
+        self._bookmark_btn.setAutoRaise(True)
+        self._bookmark_btn.clicked.connect(
+            lambda: self.bookmark_toggled.emit(self.jid))
+        header.addWidget(self._bookmark_btn)
         layout.addLayout(header)
+
+        self._subject_label = QtWidgets.QLabel("")
+        self._subject_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._subject_label.setVisible(self.is_muc)
+        layout.addWidget(self._subject_label)
 
         # Chat view + resizable MUC participant sidebar
         chat_col = QtWidgets.QVBoxLayout()
@@ -774,6 +790,16 @@ class ChatWidget(QtWidgets.QWidget):
             pass
         return QtGui.QIcon()
 
+    @staticmethod
+    def _bookmark_icon():
+        try:
+            from stanza_im.ui.icons import icons
+            if icons is not None:
+                return QtGui.QIcon(icons.get_category_icon("bookmarks"))
+        except Exception:
+            pass
+        return QtGui.QIcon()
+
     # ── Misc API ──────────────────────────────────────────────────
 
     def set_show_avatars(self, show: bool):
@@ -816,9 +842,33 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_bookmarked(self, bookmarked: bool):
         self._bookmarked = bool(bookmarked)
+        label = tr("bookmark_remove" if self._bookmarked else "bookmark_add")
         if self._bookmark_action is not None:
-            self._bookmark_action.setText(
-                tr("bookmark_remove" if self._bookmarked else "bookmark_add"))
+            self._bookmark_action.setText(label)
+        if getattr(self, "_bookmark_btn", None) is not None:
+            self._bookmark_btn.setChecked(self._bookmarked)
+            self._bookmark_btn.setToolTip(label)
+
+    def set_subject(self, subjects: list[tuple[str, str]] | None = None):
+        """Display the MUC subject in its dedicated header field.
+
+        *subjects* is an ordered list of ``(lang, text)`` pairs; the default
+        (empty ``lang``) variant wins, otherwise the first non-empty one.
+        """
+        self._subjects = list(subjects or [])
+        text = ""
+        for lang, candidate in self._subjects:
+            if not lang and candidate:
+                text = candidate
+                break
+        if not text:
+            for lang, candidate in self._subjects:
+                if candidate:
+                    text = candidate
+                    break
+        self._subject_label.setText(text)
+        self._subject_label.setToolTip(text)
+        self._subject_label.setVisible(self.is_muc and bool(text))
 
     def reload_theme(self, variant: str = ""):
         self._view.load_theme(variant)

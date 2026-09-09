@@ -609,10 +609,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self_nick = self._muc_self_nicks.get(room, "")
             chat.set_self_nick(self_nick)
             chat.update_muc_users(list(users.values()), self_nick=self_nick)
-            title = subject or ""
-            title += (" · " if title else "") + tr("muc_participants_count",
-                                                   n=len(users))
-            chat.set_status_text(title)
+            subjects = (self._client.get_muc_subjects(room)
+                        if self._client else [])
+            if not subjects and subject:
+                subjects = [("", subject)]
+            chat.set_subject(subjects)
+            chat.set_status_text(tr("muc_participants_count", n=len(users)))
             self._chat_window.set_chat_title(
                 room, self._muc_display_name(room))
             chat.set_bookmarked(room in self._bookmarks)
@@ -622,6 +624,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.get_vcard(real_jid or f"{room}/{nick}")
             self._client.get_muc_info(room)
         self._sync_conference_roster(room)
+
+    def _on_muc_subject_changed(self, room: str, subjects):
+        if self._client:
+            gi = self._client.groupchats.get(room)
+            if gi:
+                default = next((t for lang, t in subjects if not lang), "")
+                if not default:
+                    default = subjects[0][1] if subjects else ""
+                if default:
+                    gi.subject = default
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            chat.set_subject(subjects)
 
     def _schedule_muc_nick_retry(self, room: str) -> bool:
         """Re-join a busy nick with more underscores; False when exhausted."""
@@ -863,6 +878,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("chatstate_received", self._on_chatstate_received)
         c.on("receipt_delivered", self._on_receipt_delivered)
         c.on("muc_joined", self._on_muc_joined)
+        c.on("muc_subject_changed", self._on_muc_subject_changed)
         c.on("muc_info_received", self._on_muc_info_received)
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("muc_join_error", self._on_muc_join_error)
@@ -1120,9 +1136,9 @@ class MainWindow(QtWidgets.QMainWindow):
         chat.set_self_nick(self_nick)
         chat.update_muc_users(list(users.values()), self_nick=self_nick)
         chat_title = title or self._muc_display_name(room)
-        text = chat_title + (" · " if chat_title else "")
-        text += tr("muc_participants_count", n=len(users))
-        chat.set_status_text(text)
+        chat.set_status_text(tr("muc_participants_count", n=len(users)))
+        if self._client:
+            chat.set_subject(self._client.get_muc_subjects(room))
         self._chat_window.set_chat_title(room, chat_title)
         chat.set_bookmarked(room in self._bookmarks)
         if is_new:
