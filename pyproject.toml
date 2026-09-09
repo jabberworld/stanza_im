@@ -1,7 +1,7 @@
 [project]
-name = "jabbim-next"
+name = "stanza-im"
 version = "0.1.0"
-description = "A user-friendly XMPP/Jabber client inspired by Jabbim"
+description = "Stanza IM — a lightweight XMPP/Jabber client inspired by Jabbim"
 requires-python = ">=3.10"
 license = {text = "GPL-2.0-or-later"}
 dependencies = [
@@ -13,7 +13,8 @@ dependencies = [
 ]
 
 [project.scripts]
-jabbim = "jabbim.app:run"
+stanza-im = "stanza_im.app:run"
+jabbim = "stanza_im.app:run"
 
 [build-system]
 requires = ["setuptools>=68.0"]

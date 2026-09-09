@@ -1,4 +1,4 @@
-"""Jabbim-next XMPP Client.
+"""Stanza IM XMPP Client.
 
 Launch: python main.py
 """
@@ -7,5 +7,5 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from jabbim.app import run
+from stanza_im.app import run
 sys.exit(run())

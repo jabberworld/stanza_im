@@ -1,1 +1,0 @@
-"""Jabbim-next XMPP Client."""

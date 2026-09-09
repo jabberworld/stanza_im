@@ -1,8 +1,8 @@
-# SPEC.md — Jabbim-next Specification
+# SPEC.md — Stanza IM Specification
 
 ## 1. Overview
 
-Jabbim-next is a desktop XMPP/Jabber client for Linux, inspired by the original
+Stanza IM is a desktop XMPP/Jabber client for Linux, inspired by the original
 Jabbim (2007-2012). It provides a classic two-panel IM experience: a roster
 (contact list) panel on the left, and a tabbed chat area on the right.
 
@@ -13,22 +13,25 @@ Jabbim (2007-2012). It provides a classic two-panel IM experience: a roster
 
 ```bash
 python main.py           # from project root
-python -m jabbim         # as module
+python -m stanza_im      # as module
 ```
 
-Entry point: `main.py` → `jabbim.app.run()` → creates QApplication + qasync
+Entry point: `main.py` → `stanza_im.app.run()` → creates QApplication + qasync
 event loop (`qasync.QEventLoop`), creates MainWindow, enters loop.
 
 ## 3. File Structure
 
 ```
-jabbim/
+stanza_im/
 ├── app.py              — QApplication + qasync event loop
 ├── core/
 │   ├── client.py       — XMPP client wrapper (slixmpp)
-│   └── storage.py      — Config (TOML) + JSONL chat history (XDG)
+│   ├── storage.py      — Config (TOML) + JSONL chat history (XDG)
+│   ├── history.py      — SQLite chat-history access (day/summary queries)
+│   ├── known_contacts.py — persisted JID → name/groups/conference registry
+│   └── vcard_cache.py  — vCard avatar download/cache coordination
 ├── ui/
-│   ├── main_window.py  — Main window (3-page stack)
+│   ├── main_window.py  — Main window (3-page stack), actions and menus
 │   ├── login_widget.py — Login form + config prefill/save
 │   ├── roster_widget.py— Custom-painted contact list
 │   ├── roster_style.py — QPainter rendering strategy
@@ -36,8 +39,15 @@ jabbim/
 │   ├── chat_widget.py  — Single chat tab (header + view + input)
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
+│   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
+│   ├── conference_dialog.py — Join + XEP-0030 conference browser
+│   ├── service_browser.py   — XEP-0030 service discovery browser
+│   ├── history_manager.py   — Per-contact history browser
+│   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
+│   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
+├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser)
 ├── i18n/               — Translation dicts (en.py, ru.py)
 ├── include/            — Constants (XDG paths), enumerators, utilities
 └── plugins/            — (future)
@@ -79,9 +89,10 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 
 | Path | Location |
 |------|----------|
-| Config (TOML) | `$XDG_CONFIG_HOME/jabbim/config.toml` |
-| Chat history (JSONL) | `$XDG_DATA_HOME/jabbim/history/<bare-jid>.jsonl` |
-| Cache | `$XDG_CACHE_HOME/jabbim/` |
+| Config (TOML) | `$XDG_CONFIG_HOME/stanza-im/config.toml` |
+| Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/history/<bare-jid>.jsonl` |
+| Chat history (SQLite) | `$XDG_DATA_HOME/stanza-im/history/` |
+| Cache | `$XDG_CACHE_HOME/stanza-im/` |
 
 - Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
 - Password stored **plaintext** (explicit user decision); file permissions 0600
@@ -98,7 +109,7 @@ Layout: `QMainWindow` with a `QStackedWidget` containing three pages:
 | Roster | 2 | Status combo + search bar + `RosterWidget` in `QScrollArea` |
 
 Window properties:
-- Title: "Jabbim-next" (with unread count prefix when applicable)
+- Title: "Stanza IM" (with unread count prefix when applicable)
 - Minimum size: 280×500, default: 300×600
 - Close button hides to tray instead of quitting
 - Tray icon always visible
@@ -275,7 +286,7 @@ Single conversation tab. Layout:
 - Bridge methods: `on_link_clicked(url)`, `on_ft_accept(sid)`, `on_ft_reject(sid)`
 - Messages added via `page().runJavaScript()` — creates div, inserts before the
   typing slot, auto-scrolls
-- A permanent `#jabbim-typing-slot` (`min-height`) sits at the bottom of `#chat`;
+- A permanent `#stanza-typing-slot` (`min-height`) sits at the bottom of `#chat`;
   the typing indicator only changes its `textContent`, so "пишет…"
   appearing/disappearing never shifts the chat
 - Typing clears on any non-composing chat state (including `gone`) and is
@@ -331,10 +342,20 @@ Template files:
 3. JS creates `<div>`, appends to `#chat`, scrolls to bottom
 4. Auto-scroll only if user was near bottom
 
+### 11.4 Message Styling (XEP-0393)
+
+When enabled (Preferences → Chat), `xmpp/message_styling.py` parses the plain
+text body first: `*strong*`, `_em_`, `~strike~`, `` `code` ``, ```` ``` ````
+(pre) and `>` (blockquote). The styling fragment hook escapes text, links URLs
+and swaps emoticons for the remaining plain spans only — never inside
+`<code>`/`<pre>`. Incoming messages that carry `<unstyled/>` (or the setting
+being off) fall back to the plain pipeline. Supported feature is advertised as
+`urn:xmpp:styling:0`.
+
 ## 12. Tray (`ui/tray.py`)
 
-- System tray icon (built from `resources/images/apps/jabbim.svg` + PNGs via
-  `build_app_icon()`, multi-size 16/22/32/48)
+- System tray icon (built from `resources/images/scalable/apps/stanza-im.svg` +
+  PNGs via `build_app_icon()`, multi-size 16/22/32/48)
 - Context menu: Show/Hide, Quit
 - Click: toggle main window visibility
 - Blinking: alternates between icon and blank every 500ms when unread messages exist
@@ -358,6 +379,13 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 - xep_0054 (vCard), xep_0045 (MUC), xep_0066 (OOB), xep_0085 (Chat State)
 - xep_0184 (Receipts), xep_0224 (Attention), xep_0048 (Bookmarks)
 - xep_0050 (Ad-hoc Commands), xep_0004 (Data Forms), xep_0049 (Private XML)
+- xep_0030 (Service Discovery), xep_0128 (Disco Extensions), xep_0055 (Search)
+- xep_0077 (Registration), xep_0092 (Software Version), xep_0199 (Ping)
+- xep_0202 (Entity Time), xep_0313 (MAM, pulls in xep_0059/xep_0297)
+- XEP-0393 Message Styling advertised via disco feature `urn:xmpp:styling:0`
+  (parsed by `xmpp/message_styling.py`; toggle in Preferences → Chat)
+
+See `XEPs.md` for the full supported-extensions matrix.
 
 ### 14.2 Event System
 
@@ -372,8 +400,9 @@ slixmpp event → handler → emit(event_name, *args) → UI callbacks
 | roster_received | items | Initial roster download finished |
 | roster_item_added | item | Contact added |
 | roster_item_removed | jid | Contact removed |
-| message_received | from, body, timestamp | Incoming 1-on-1 message |
-| groupchat_message | room, nick, body, ts | Incoming MUC message |
+| message_received | from, body, timestamp, unstyled | Incoming 1-on-1 message |
+| message_failed | jid, body, error | Message delivery failed |
+| groupchat_message | room, nick, body, ts, archived, archive_id, unstyled | Incoming MUC message |
 | groupchat_presence | room, nick, show, status | MUC presence |
 | auth_failed | — | Authentication error |
 | disconnected | — | Connection lost |
@@ -413,7 +442,7 @@ class GroupChatInfo:     # room, nick, subject, users
 Python modules with `STRINGS` dict:
 
 ```python
-# jabbim/i18n/en.py
+# stanza_im/i18n/en.py
 STRINGS = {
     "status_online": "Online",
     "login_connect": "Connect",
@@ -424,7 +453,7 @@ STRINGS = {
 ### 15.2 Usage
 
 ```python
-from jabbim.i18n import tr
+from stanza_im.i18n import tr
 label.setText(tr("status_online"))
 error.setText(tr("error_nickname_conflict"))
 ```
@@ -452,16 +481,14 @@ Copied from original Jabbim `resources/`:
 
 ## 17. Phase 2 Features (planned)
 
-- vCard viewing/editing
-- PEP (User Tune, User Mood, User Activity)
-- Ad-hoc Commands
+- PEP (User Tune, User Mood, User Activity publication)
 - Privacy Lists
-- Service Discovery
 - Metacontacts
-- Bookmarks management
-- MAM (XEP-0313) — message history
 - HTTP Upload (XEP-0363) — file sending
+- File transfer (SI + IBB)
 - Plugin system (convention-based discovery)
 - Embedded chat mode (splitter in main window)
-- Preferences dialog
-- File transfer (SI + IBB)
+
+Implemented since the original spec: vCard viewing/editing, ad-hoc commands,
+service discovery (browser), bookmarks management, MAM (XEP-0313),
+preferences dialog, search/registration dialogs.

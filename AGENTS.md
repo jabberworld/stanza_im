@@ -1,9 +1,10 @@
-# AGENTS.md — Jabbim-next Architecture
+# AGENTS.md — Stanza IM Architecture
 
 ## Overview
 
-Jabbim-next is a lightweight XMPP/Jabber desktop client for Linux, inspired by the
+Stanza IM is a lightweight XMPP/Jabber desktop client for Linux, inspired by the
 original Jabbim client (2007-2012). Written in Python 3 + PyQt6 + slixmpp.
+The supported XMPP extensions are listed in `XEPs.md`.
 
 **Design goals**: lightweight, fast, low memory usage, modern XMPP standards.
 
@@ -18,18 +19,21 @@ original Jabbim client (2007-2012). Written in Python 3 + PyQt6 + slixmpp.
 | Persistence | XDG Base Directory + TOML config + JSONL chat history |
 | Chat rendering | QWebEngineView + QWebChannel (HTML/CSS themes) |
 | Roster rendering | Custom QPainter on QWidget (no QTreeView) |
-| i18n | Python dicts in `jabbim/i18n/*.py`, no compilation |
+| i18n | Python dicts in `stanza_im/i18n/*.py`, no compilation |
 
 ## Directory Structure
 
 ```
-jabbim/                          # Python package
+stanza_im/                      # Python package
 ├── __init__.py
-├── __main__.py                  # python -m jabbim
+├── __main__.py                  # python -m stanza_im
 ├── app.py                       # Entry point: qasync event loop
 ├── core/
 │   ├── client.py                # JabberClient: slixmpp wrapper
-│   └── storage.py               # Config (TOML) + JSONL chat history (XDG)
+│   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
+│   ├── history.py               # SQLite chat-history queries (dates/load_day/search)
+│   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
+│   └── vcard_cache.py           # vCard avatar download coordination
 ├── ui/
 │   ├── main_window.py           # Main window: stack (login/splash/roster)
 │   ├── login_widget.py          # Login form + config prefill/save
@@ -41,7 +45,8 @@ jabbim/                          # Python package
 │   ├── chat_themes.py           # Adium-style theme HTML generator
 │   ├── tray.py                  # System tray icon + blink
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
-├── xmpp/                        # (Phase 2) Extended XMPP modules
+├── xmpp/
+│   └── message_styling.py       # XEP-0393 Message Styling parser
 ├── include/
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
 │   ├── enumerators.py           # XMPP show/icon/mood/activity maps
@@ -52,9 +57,10 @@ jabbim/                          # Python package
 │   └── ru.py                    # Russian strings
 ├── plugins/                     # (Future) Plugin system
 resources/                       # Images, chat skins, sounds, etc.
-old/                             # Original Jabbim code (reference only)
+old/                             # Original Jabbim code (reference only, gitignored)
 main.py                          # python main.py entry point
-pyproject.toml                   # Package config
+pyproject.toml                   # Package config (distribution: stanza-im)
+XEPs.md                          # Supported XEP list (living document)
 ```
 
 Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`
@@ -117,8 +123,8 @@ Everything follows the XDG Base Directory spec:
 
 | Path | Location |
 |------|----------|
-| Config (TOML) | `$XDG_CONFIG_HOME/jabbim/config.toml` (0600) |
-| Chat history (JSONL) | `$XDG_DATA_HOME/jabbim/history/<bare-jid>.jsonl` (0600) |
+| Config (TOML) | `$XDG_CONFIG_HOME/stanza-im/config.toml` (0600) |
+| Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/history/<bare-jid>.jsonl` (0600) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
 Passwords are stored plaintext per user request (file is 0600). History is
@@ -145,6 +151,13 @@ methods to JavaScript for link clicks, file transfer buttons, etc.
 **Theme engine** (`chat_themes.py`): Loads HTML templates and CSS variants from
 `resources/chatskins/minimal-mod/` or `candy/`. Templates use `%sender%`,
 `%message%`, `%time%`, `%userIconPath%`, `%senderColor%` placeholders.
+
+**Message Styling** (`xmpp/message_styling.py`, XEP-0393): `render(body, fragment)`
+parses `*em*`/`_em_`/`~strike~`/`` `code` ``/pre/quote markup and calls `fragment`
+only for plain spans (escape + URLs + emoticons; never inside `<code>`/`<pre>`).
+`ChatThemeFactory.set_message_styling()` toggles it; `unstyled` messages and the
+preferences switch both fall back to the plain pipeline. Feature advertised as
+`urn:xmpp:styling:0`.
 
 ### 5. LRU Icon Cache (`icons.py`)
 
@@ -186,11 +199,13 @@ checkable group assignment and creation of new groups.
 
 ```bash
 python main.py              # Direct
-python -m jabbim            # Module
+python -m stanza_im         # Module
 ```
 
 Requires: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml.
 System libs: libglib2.0, libgl1, libx11-6, libfontconfig1 (for PyQt6).
+Distribution name: `stanza-im` (console script `stanza-im`, legacy `jabbim`
+alias kept for compatibility).
 
 ## Commit Convention
 
