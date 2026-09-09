@@ -1,4 +1,0 @@
-import chatwindow
-import joingroupchat
-import mucbrowser
-import abstractchatwidget

@@ -1,9 +1,0 @@
-THIS SOFTWARE IS RELEASED UNDER GPL LICENSE
-===========================================
-
-In order to get working your ibuddy you need to install and run, before start jabbim, the pybuddy server.
-You can get Pybuddy at http://code.google.com/p/pybuddy/
-
-Once you have started src/pybuddy-daemon.py you are ready to use your ibuddy starting jabbim and selecting this plugin. You can edit the file ibuddy.py in order to change the colors of the toy.
-
-Please send comments to leandro@leandro.org (email & jid)
