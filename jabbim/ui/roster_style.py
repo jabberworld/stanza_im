@@ -210,10 +210,11 @@ class RosterStyle:
             sm_rect = QtCore.QRect(
                 name_x, sm_top,
                 min(self.STATUS_MSG_MAX_WIDTH, avail_right - name_x),
-                max(1, rect.bottom() - sm_top))
+                fm.height())
             clipped = first_line[:40] + ("…" if len(first_line) > 40 else "")
             painter.drawText(sm_rect,
-                             QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
+                             QtCore.Qt.AlignmentFlag.AlignTop
+                             | QtCore.Qt.AlignmentFlag.AlignLeft,
                              clipped)
 
         painter.restore()

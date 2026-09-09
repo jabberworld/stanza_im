@@ -651,7 +651,8 @@ class ChatWidget(QtWidgets.QWidget):
         for section, users in sections.items():
             if not users:
                 continue
-            header = QtWidgets.QListWidgetItem(tr(f"muc_section_{section}"))
+            header = QtWidgets.QListWidgetItem(
+                f"{tr(f'muc_section_{section}')} ({len(users)})")
             font = header.font()
             font.setBold(True)
             header.setFont(font)
