@@ -148,6 +148,7 @@ class ChatWidget(QtWidgets.QWidget):
         # Contact info header
         header = QtWidgets.QHBoxLayout()
         header.setContentsMargins(4, 2, 4, 2)
+        header.setSpacing(6)
         self._name_label = QtWidgets.QLabel(self.display_name)
         self._name_label.setStyleSheet("font-weight: bold;")
         self._name_label.setVisible(not self.is_muc)
@@ -169,14 +170,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._subject_edit = QtWidgets.QLineEdit("", self)
         self._subject_edit.setReadOnly(True)
         self._subject_edit.setStyleSheet(
-            "border: none; background: transparent;")
+            "border: none; background: transparent; padding-left: 2px;")
         self._subject_edit.setMinimumWidth(120)
         self._subject_edit.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Preferred)
         self._subject_edit.setVisible(self.is_muc)
         header.addWidget(self._subject_edit)
-        header.addStretch()
 
         self._history_menu = QtWidgets.QMenu(self)
         act_load = self._history_menu.addAction(tr("history_load_earlier"))
@@ -192,14 +192,6 @@ class ChatWidget(QtWidgets.QWidget):
             self._bookmark_action.triggered.connect(
                 lambda: self.bookmark_toggled.emit(self.jid))
 
-        self._history_btn = QtWidgets.QToolButton(self)
-        self._history_btn.setText("\u2026")
-        self._history_btn.setToolTip(tr("history_menu_tooltip"))
-        self._history_btn.setPopupMode(
-            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._history_btn.setMenu(self._history_menu)
-        header.addWidget(self._history_btn)
-
         self._bookmark_btn = QtWidgets.QToolButton(self)
         self._bookmark_btn.setIcon(self._bookmark_icon())
         self._bookmark_btn.setCheckable(True)
@@ -209,6 +201,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._bookmark_btn.clicked.connect(
             lambda: self.bookmark_toggled.emit(self.jid))
         header.addWidget(self._bookmark_btn)
+
+        self._history_btn = QtWidgets.QToolButton(self)
+        self._history_btn.setText("\u2026")
+        self._history_btn.setToolTip(tr("history_menu_tooltip"))
+        self._history_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._history_btn.setMenu(self._history_menu)
+        header.addWidget(self._history_btn)
         layout.addLayout(header)
 
         # Chat view + resizable MUC participant sidebar

@@ -27,6 +27,7 @@ from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.roster_widget import RosterWidget, UserItem
 from stanza_im.ui.chat_window import ChatWindow
 from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.subject_dialog import SubjectDialog
 from stanza_im.ui.tray import TrayIcon
 
 logger = logging.getLogger(__name__)
@@ -467,18 +468,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_set_subject(self, room: str):
         if not self._client:
             return
-        current = ""
-        for lang, text in self._client.get_muc_subjects(room):
-            if not lang:
-                current = text
-                break
-        if not current and self._client.get_muc_subjects(room):
-            current = self._client.get_muc_subjects(room)[0][1]
-        text, ok = QtWidgets.QInputDialog.getText(
-            self, tr("muc_set_subject_title"), tr("muc_subject_label"),
-            QtWidgets.QLineEdit.EchoMode.Normal, current)
-        if ok and self._client:
-            self._client.set_muc_subject(room, text.strip())
+        dialog = SubjectDialog(room, self._client.get_muc_subjects(room),
+                               self._chat_window)
+        if not dialog.exec():
+            return
+        result = dialog.result_subjects()
+        default = next((text for lang, text in result if not lang), "")
+        langs = [(lang, text) for lang, text in result if lang]
+        self._client.set_muc_subject(room, default, langs=langs)
 
     def _sync_conference_roster(self, room: str):
         """Represent an active MUC using the normal roster row renderer."""
