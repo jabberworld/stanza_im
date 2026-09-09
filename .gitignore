@@ -6,3 +6,9 @@ dist/
 .venv/
 venv/
 *.deb
+
+# Original Jabbim sources (reference only)
+old/
+# Runtime junk
+core
+jabbim.log
