@@ -250,7 +250,7 @@ STRINGS = {
     "muc_subject_label": "Тема:",
     "muc_subject_default": "По умолчанию",
     "muc_subject_add_language": "Добавить язык темы",
-    "muc_subject_language_prompt": "Введите код языка (например, en, ru, uk):",
+    "muc_subject_language_select": "Язык темы:",
     "muc_set_subject_title": "Изменить тему",
     "muc_user_joined": "{nick} вошёл в комнату",
     "muc_user_left": "{nick} вышел из комнаты",

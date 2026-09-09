@@ -250,7 +250,7 @@ STRINGS = {
     "muc_subject_label": "Subject:",
     "muc_subject_default": "Default",
     "muc_subject_add_language": "Add subject language",
-    "muc_subject_language_prompt": "Enter a language code (e.g. en, ru, uk):",
+    "muc_subject_language_select": "Subject language:",
     "muc_set_subject_title": "Set room subject",
     "muc_user_joined": "{nick} joined the room",
     "muc_user_left": "{nick} left the room",

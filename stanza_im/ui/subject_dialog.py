@@ -5,6 +5,22 @@ from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
 
+_PRESET_LANGUAGES = [
+    ("de", "Deutsch"),
+    ("en", "English"),
+    ("es", "Español"),
+    ("fr", "Français"),
+    ("it", "Italiano"),
+    ("ja", "日本語"),
+    ("ko", "한국어"),
+    ("nl", "Nederlands"),
+    ("pl", "Polski"),
+    ("pt", "Português"),
+    ("ru", "Русский"),
+    ("uk", "Українська"),
+    ("zh", "中文"),
+]
+
 
 class SubjectDialog(QtWidgets.QDialog):
     """Edit a room subject, one tab per language variant.
@@ -56,13 +72,40 @@ class SubjectDialog(QtWidgets.QDialog):
         self._editors.append((lang, editor))
         return editor
 
+    def _pick_language(self) -> str:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(tr("muc_subject_add_language"))
+        dialog.setMinimumWidth(280)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(QtWidgets.QLabel(tr("muc_subject_language_select")))
+        combo = QtWidgets.QComboBox()
+        combo.setEditable(True)
+        for code, name in _PRESET_LANGUAGES:
+            combo.addItem(f"{name} ({code})", code)
+        combo.setCurrentIndex(0)
+        layout.addWidget(combo)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText(
+            tr("dialog_ok"))
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel).setText(
+            tr("dialog_cancel"))
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if not dialog.exec():
+            return ""
+        text = combo.currentText().strip()
+        index = combo.findText(text)
+        if index >= 0:
+            return combo.itemData(index)
+        return text
+
     def _add_language(self, language: str = ""):
         if not language:
-            language, ok = QtWidgets.QInputDialog.getText(
-                self, tr("muc_subject_add_language"),
-                tr("muc_subject_language_prompt"))
-            language = language.strip()
-            if not ok or not language:
+            language = self._pick_language()
+            if not language:
                 return
         for i, (lang, _) in enumerate(self._editors):
             if lang == language:
