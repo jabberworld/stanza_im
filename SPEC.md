@@ -445,6 +445,30 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
 - Blinking: alternates between icon and blank every 500ms when unread messages exist
 - Notifications: `showMessage()` for connection status, errors
 
+## 12A. OSD Notifications (`ui/osd.py`)
+
+- `OsdManager` owns a stack of translucent frameless always-on-top windows
+  (`Qt.Tool | FramelessWindowHint | WindowStaysOnTopHint`) with an icon, bold
+  title and word-wrapped body; clicking dismisses (and may focus the chat).
+- All windows dock to a saved base position (`notifications.osd_x/osd_y`, the
+  position of the first notification) and stack from it: top-down when
+  `osd_topdown` is on (second below, third below that), otherwise upward
+  (newest above). Positions are recomputed on add/dismiss; `stack_position()` is
+  a pure function. The max on-screen count is `osd_max` (oldest is evicted) and
+  each window auto-hides after `osd_duration` seconds.
+- Preferences → Notifications → OSD shows a draggable preview at the saved
+  base position; dragging updates `osd_x/osd_y` in the shared `Config` (live,
+  persisted on Save) and re-entry re-docks it to the saved position.
+- Triggers (all gated on `osd_enabled`):
+  - `osd_message`: 1:1 and private-groupchat messages, only when that chat is
+    not the focused conversation.
+  - `osd_typing`: a contact starting to compose (XEP-0085).
+  - `osd_status`: `never` / `available` (crossings between online+chat and any
+    other show) / `any` (every transition); skips the initial presence sync.
+  - `osd_conference`: `never` / `mention` (own nick in the body) / `all`.
+  - `osd_file`: `_notify_osd_file(sender, filename)` entry point reserved for
+    incoming p2p file transfers.
+
 ## 13. Icon Cache (`ui/icons.py`)
 
 LRU cache for QPixmap icons:

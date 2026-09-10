@@ -29,6 +29,7 @@ from stanza_im.ui.chat_window import ChatWindow
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.subject_dialog import SubjectDialog
 from stanza_im.ui.tray import TrayIcon
+from stanza_im.ui.osd import OsdManager
 
 logger = logging.getLogger(__name__)
 _HISTORY_BATCH_LIMIT = 60
@@ -104,6 +105,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tray.quit_requested.connect(self._quit)
         self._set_tray_status_icon(self._config.last_status)
         self._tray.show()
+
+        # ── OSD notifications ─────────────────────────────────────
+        self._osd = OsdManager(self._config, self._icons)
+        self._osd_status_seen: set[str] = set()
 
         # ── UI ───────────────────────────────────────────────────
         self._build_ui()
@@ -816,7 +821,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_preferences(self):
         from stanza_im.ui.preferences import PreferencesDialog
-        dlg = PreferencesDialog(self._config, self._theme_factory, self)
+        dlg = PreferencesDialog(self._config, self._theme_factory,
+                                osd_manager=self._osd, parent=self)
         dlg.settings_applied.connect(self._on_settings_applied)
         dlg.exec()
 
@@ -1178,6 +1184,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             time.strftime("%H:%M:%S"))
         self._recount_groups()
         self._roster.sort_and_update()
+        self._maybe_osd_status(bare_jid, show, old_show)
 
     def _on_subscribed(self, jid: str):
         """A new contact was added (our subscribe was accepted)."""
@@ -1544,6 +1551,7 @@ class MainWindow(QtWidgets.QMainWindow):
                           if isinstance(body, str) and body.startswith("/me ")
                           else body)
             self._tray.show_message(sender_name, popup_body)
+        self._maybe_osd_message(sender_name, body, bare_jid)
         self._request_vcard(bare_jid)
 
     def _on_muc_private_message(self, room: str, nick: str,
@@ -1569,6 +1577,7 @@ class MainWindow(QtWidgets.QMainWindow):
                               timestamp=ts or _current_timestamp(), sender=nick,
                               origin_id=reply_able_id,
                               reply_to=reply_to, reply_id=reply_id)
+        self._maybe_osd_message(nick, body, target)
 
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
@@ -1626,6 +1635,7 @@ class MainWindow(QtWidgets.QMainWindow):
                               timestamp=ts or _current_timestamp(), sender=nick,
                               origin_id=reply_ref_id,
                               reply_to=reply_to, reply_id=reply_id)
+        self._maybe_osd_groupchat(room, nick, body)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
@@ -1792,6 +1802,8 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.set_typing(self._roster_name(jid) or jid.split("@")[0], is_typing)
+        if is_typing:
+            self._maybe_osd_typing(jid)
 
     def _on_typing_local(self, jid: str, is_typing: bool):
         if self._client:
@@ -1818,6 +1830,94 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.mark_delivered(message_id)
+
+    # ── OSD helpers ─────────────────────────────────────────────
+
+    @staticmethod
+    def _osd_body(text, limit: int = 180) -> str:
+        text = " ".join((text or "").split())
+        if len(text) > limit:
+            text = text[:limit] + "…"
+        return text
+
+    def _osd_for(self, jid) -> bool:
+        """True when the app is not focused on *jid*'s chat."""
+        return not (self._chat_window.isVisible()
+                    and self._chat_window.current_jid() == jid)
+
+    def _osd_click(self, jid, nick: str = ""):
+        self._chat_window.show()
+        self._chat_window.raise_()
+        self._chat_window.activateWindow()
+        if jid in self._conference_roster:
+            self._chat_window.open_groupchat(
+                jid, self._muc_self_nicks.get(jid, "") or nick,
+                self._muc_display_name(jid))
+            return
+        self._chat_window.open_chat(
+            jid, self._roster_name(jid) or nick or jid, focus=True)
+
+    def _maybe_osd_message(self, title: str, body: str, jid: str):
+        cfg = self._config.notifications
+        if not cfg.osd_enabled or not cfg.osd_message or not self._osd_for(jid):
+            return
+        self._osd.show(QtGui.QIcon(), title, self._osd_body(body),
+                       on_click=lambda: self._osd_click(jid))
+
+    def _maybe_osd_typing(self, jid: str):
+        cfg = self._config.notifications
+        if not cfg.osd_enabled or not cfg.osd_typing or not self._osd_for(jid):
+            return
+        name = self._roster_name(jid) or jid.split("@")[0]
+        self._osd.show(QtGui.QIcon(), tr("osd_typing_title"),
+                       tr("osd_typing", name=name),
+                       on_click=lambda: self._osd_click(jid))
+
+    def _maybe_osd_status(self, jid: str, new_show: str, old_show: str):
+        cfg = self._config.notifications
+        mode = getattr(cfg, "osd_status", "available")
+        if not cfg.osd_enabled or mode == "never" or old_show == new_show:
+            return
+        if jid not in self._osd_status_seen:
+            self._osd_status_seen.add(jid)
+            return
+
+        def _available(show: str) -> bool:
+            return show in ("online", "chat")
+
+        if mode == "available" and _available(new_show) == _available(old_show):
+            return
+        name = self._roster_name(jid) or jid.split("@")[0]
+        icon = QtGui.QIcon(self._icons.get_status_icon(new_show))
+        self._osd.show(
+            icon, name,
+            tr("status_changed", status=tr(f"status_{new_show}")),
+            on_click=lambda: self._osd_click(jid))
+
+    def _maybe_osd_groupchat(self, room: str, nick: str, body: str):
+        cfg = self._config.notifications
+        mode = getattr(cfg, "osd_conference", "mention")
+        if not cfg.osd_enabled or mode == "never" or not self._osd_for(room):
+            return
+        if mode == "mention":
+            me = self._muc_self_nicks.get(room, "")
+            if not me or me.lower() not in (body or "").lower():
+                return
+        title = nick or room
+        if mode == "mention":
+            title = self._muc_display_name(room) or room
+            body = tr("osd_conference_mention", nick=nick, body=self._osd_body(body))
+        self._osd.show(QtGui.QIcon(), title, self._osd_body(body),
+                       on_click=lambda: self._osd_click(room, nick))
+
+    def _notify_osd_file(self, sender: str, filename: str):
+        """Entry point for incoming file-transfer notifications (used by the
+        p2p file-transfer code once it is wired to incoming files)."""
+        cfg = self._config.notifications
+        if not cfg.osd_enabled or not cfg.osd_file:
+            return
+        self._osd.show(QtGui.QIcon(), sender or tr("osd_file"),
+                       tr("osd_file", filename=filename or ""))
 
     def _on_status_change(self, index: int):
         show = self._status_combo.currentData()

@@ -16,15 +16,21 @@ class PreferencesDialog(QtWidgets.QDialog):
     settings_applied = QtCore.pyqtSignal()
 
     def __init__(self, config: Config, theme_factory: ChatThemeFactory,
-                 parent=None):
+                 osd_manager=None, parent=None):
         super().__init__(parent)
         self._config = config
         self._theme_factory = theme_factory
+        self._osd_manager = osd_manager
         self.setWindowTitle(tr("prefs_title"))
         self.setMinimumSize(760, 540)
         self._controls: dict[str, QtWidgets.QWidget] = {}
         self._build_ui()
         self._load_values()
+
+    def done(self, result):
+        if self._osd_manager is not None:
+            self._osd_manager.hide_preview()
+        super().done(result)
 
     def _build_ui(self):
         outer = QtWidgets.QVBoxLayout(self)
@@ -110,6 +116,14 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _spin(self, key: str, minimum: int, maximum: int) -> QtWidgets.QSpinBox:
         widget = QtWidgets.QSpinBox()
         widget.setRange(minimum, maximum)
+        self._controls[key] = widget
+        return widget
+
+    def _combo(self, key: str,
+               options: list[tuple[str, str]]) -> QtWidgets.QComboBox:
+        widget = QtWidgets.QComboBox()
+        for label_key, data in options:
+            widget.addItem(tr(label_key), data)
         self._controls[key] = widget
         return widget
 
@@ -261,13 +275,44 @@ class PreferencesDialog(QtWidgets.QDialog):
             sound_form.addRow(self._check(key, tr(f"prefs_{key}"), False))
 
         osd, osd_form = self._page()
-        osd_form.addRow(self._check("osd_enabled", tr("prefs_osd_enabled"), False))
+        osd_form.addRow(self._check("osd_enabled", tr("prefs_osd_enabled")))
+        osd_form.addRow(tr("prefs_osd_duration"),
+                        self._spin("osd_duration", 1, 60))
+        osd_form.addRow(tr("prefs_osd_max"), self._spin("osd_max", 1, 10))
+        osd_form.addRow(self._check("osd_message", tr("prefs_osd_message")))
+        osd_form.addRow(self._check("osd_file", tr("prefs_osd_file")))
+        osd_form.addRow(self._check("osd_typing", tr("prefs_osd_typing")))
+        osd_form.addRow(tr("prefs_osd_status"),
+                        self._combo("osd_status", [
+                            ("osd_status_never", "never"),
+                            ("osd_status_available", "available"),
+                            ("osd_status_any", "any"),
+                        ]))
+        osd_form.addRow(tr("prefs_osd_conference"),
+                        self._combo("osd_conference", [
+                            ("osd_conf_never", "never"),
+                            ("osd_conf_mention", "mention"),
+                            ("osd_conf_all", "all"),
+                        ]))
+        osd_form.addRow(self._check("osd_topdown", tr("prefs_osd_topdown")))
 
         tray, tray_form = self._page()
         tray_form.addRow(self._check("tray_blink", tr("prefs_tray_blink")))
         tray_form.addRow(self._check("popups", tr("prefs_popups")))
-        return self._tabs([(tr("prefs_sounds"), sounds),
-                           (tr("prefs_osd"), osd), (tr("prefs_tray"), tray)])
+        tabs = self._tabs([(tr("prefs_sounds"), sounds),
+                           (tr("prefs_osd"), osd),
+                           (tr("prefs_tray"), tray)])
+        self._osd_tab_index = 1
+        tabs.currentChanged.connect(self._on_notifications_tab_changed)
+        return tabs
+
+    def _on_notifications_tab_changed(self, index: int):
+        if self._osd_manager is None:
+            return
+        if index == self._osd_tab_index:
+            self._osd_manager.show_preview()
+        else:
+            self._osd_manager.hide_preview()
 
     def _page_status(self):
         page, form = self._page()
@@ -350,6 +395,14 @@ class PreferencesDialog(QtWidgets.QDialog):
                                else appearance.emoticon_theme),
             "tray_blink": notifications.tray_blink, "popups": notifications.popups,
             "osd_enabled": notifications.osd_enabled,
+            "osd_duration": notifications.osd_duration,
+            "osd_max": notifications.osd_max,
+            "osd_message": notifications.osd_message,
+            "osd_file": notifications.osd_file,
+            "osd_typing": notifications.osd_typing,
+            "osd_status": notifications.osd_status,
+            "osd_conference": notifications.osd_conference,
+            "osd_topdown": notifications.osd_topdown,
             "auto_away": status.auto_away, "away_minutes": status.away_minutes,
             "auto_xa": status.auto_xa, "xa_minutes": status.xa_minutes,
         }
@@ -400,6 +453,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.notifications.tray_blink = self._value("tray_blink")
         cfg.notifications.popups = self._value("popups")
         cfg.notifications.osd_enabled = self._value("osd_enabled")
+        for key in ("osd_duration", "osd_max", "osd_message", "osd_file",
+                    "osd_typing", "osd_status", "osd_conference",
+                    "osd_topdown"):
+            cfg.notifications[key] = self._value(key)
         for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
             cfg.notifications[key] = self._value(key)
         for key in ("auto_away", "away_minutes", "auto_xa", "xa_minutes"):
