@@ -154,11 +154,21 @@ move = QtGui.QMouseEvent(
     QtCore.Qt.MouseButton.LeftButton,
     QtCore.Qt.KeyboardModifier.NoModifier)
 QtWidgets.QApplication.sendEvent(_win, press)
+check("press accepted for drag", press.isAccepted())
 QtWidgets.QApplication.sendEvent(_win, move)
 check("preview dragged on screen", (_win.x(), _win.y()) == (150, 85))
 check("drag persists position",
       m4._cfg.osd_x == 150 and m4._cfg.osd_y == 85)
 m4.hide_preview()
+
+# 8. system-move (moveEvent) reports position ------------------------------
+m5 = OsdManager(make_cfg())
+m5.show_preview()
+m5._preview["window"]._system_dragging = True
+m5._preview["window"].move(777, 555)
+check("system-move reports position",
+      m5._cfg.osd_x == 777 and m5._cfg.osd_y == 555)
+m5.hide_preview()
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

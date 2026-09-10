@@ -53,6 +53,8 @@ class _OsdWindow(QtWidgets.QWidget):
         self.setFixedWidth(_OSD_WIDTH)
 
         self._drag_offset: QtCore.QPoint | None = None
+        self._press_global: QtCore.QPoint | None = None
+        self._system_dragging = False
         self._draggable = draggable
         self._on_clicked = None
         self._on_moved = None
@@ -113,20 +115,49 @@ class _OsdWindow(QtWidgets.QWidget):
             if self._draggable:
                 self._drag_offset = (
                     event.globalPosition().toPoint() - self.pos())
+                self._press_global = event.globalPosition().toPoint()
+                self._system_dragging = False
                 self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+                event.accept()
             else:
                 self._click()
                 event.accept()
 
     def mouseMoveEvent(self, event):
-        if self._drag_offset is not None and self._draggable:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            if self._on_moved:
-                self._on_moved(self.x(), self.y())
+        if not self._draggable or self._press_global is None:
+            return
+        if self._system_dragging:
+            return
+        if (event.globalPosition().toPoint()
+                - self._press_global).manhattanLength() < 6:
+            return
+        # Prefer a compositor-managed drag (works on X11 and Wayland); fall
+        # back to moving the window manually when it is unavailable.
+        try:
+            handle = self.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                self._system_dragging = True
+                self.move(self._press_global - self._drag_offset)
+                return
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+        self.move(event.globalPosition().toPoint() - self._drag_offset)
+        if self._on_moved:
+            self._on_moved(self.x(), self.y())
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if (self._system_dragging and self._on_moved
+                and self.x() > -16000 and self.y() > -16000):
+            self._on_moved(self.x(), self.y())
 
     def mouseReleaseEvent(self, event):
-        if self._drag_offset is not None:
+        if self._press_global is not None or self._system_dragging:
+            if self._on_moved and self.x() > -16000 and self.y() > -16000:
+                self._on_moved(self.x(), self.y())
+            self._press_global = None
             self._drag_offset = None
+            self._system_dragging = False
             self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
 
 

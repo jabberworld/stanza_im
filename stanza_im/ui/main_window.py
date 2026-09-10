@@ -1853,13 +1853,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.show()
         self._chat_window.raise_()
         self._chat_window.activateWindow()
-        if jid in self._conference_roster:
-            self._chat_window.open_groupchat(
-                jid, self._muc_self_nicks.get(jid, "") or nick,
-                self._muc_display_name(jid))
-            return
-        self._chat_window.open_chat(
-            jid, self._roster_name(jid) or nick or jid, focus=True)
+        self._on_contact_open(jid)
 
     def _maybe_osd_message(self, title: str, body: str, jid: str):
         cfg = self._config.notifications
