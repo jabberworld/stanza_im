@@ -224,9 +224,52 @@ if HAS_WEBENGINE:
             """
             scheme = str(url.scheme()).lower()
             if scheme in ("stanza", "mam", "http", "https", "mailto"):
+                self._schedule_content_probe()
                 self.link_clicked.emit(url.toString())
                 return False
             return scheme in ("about", "data", "") or not url.isValid()
+
+        def _schedule_content_probe(self) -> None:
+            """Schedule a check that the conversation survived the click.
+
+            A denied/blocked link can, in rare cases, end with the page being
+            reloaded to an empty document that still contains ``#chat``, which
+            the loadFinished probe would miss.  If messages vanished, restore
+            through ``document_lost``.
+            """
+            def _count(result):
+                if result is None:
+                    return
+                try:
+                    self._pre_click_messages = int(result)
+                except (TypeError, ValueError):
+                    self._pre_click_messages = 0
+            try:
+                self._page.runJavaScript(
+                    "document.querySelectorAll('#chat .stanza-message').length",
+                    _count)
+            except RuntimeError:
+                return
+            QtCore.QTimer.singleShot(
+                400, self._verify_after_click)
+
+        def _verify_after_click(self) -> None:
+            def _check(result):
+                try:
+                    after = int(result) if result is not None else 0
+                except (TypeError, ValueError):
+                    return
+                if int(getattr(self, "_pre_click_messages", 0) or 0) > 0 \
+                        and after == 0:
+                    logger.warning(
+                        "chat contents vanished after a click; restoring")
+                    self.document_lost.emit()
+            try:
+                self._page.runJavaScript(
+                    "document.querySelectorAll('#chat .stanza-message').length",
+                    _check)
+            except RuntimeError:
+                pass
 
         def _on_load_finished(self, ok: bool):
             if ok:
@@ -272,11 +315,6 @@ if HAS_WEBENGINE:
                 self.document_lost.emit()
 
         def _on_js_console(self, level, message: str, line: int, source: str):
-            prefix = "stanza-edit:"
-            if isinstance(message, str) and message.startswith(prefix):
-                self.link_clicked.emit(
-                    "stanza:edit:" + message[len(prefix):])
-                return
             logger.debug("chat JS [%s:%s] %s", source, line, message)
 
         _SCROLL_JS = """
@@ -419,19 +457,14 @@ if HAS_WEBENGINE:
                 menu.style.top = (y + 2) + 'px';
                 menu.style.left = (x + 2) + 'px';
                 if (wrap.getAttribute('data-stanza-outgoing') === '1') {
-                    var edit = document.createElement('button');
-                    edit.type = 'button';
+                    var edit = document.createElement('a');
+                    edit.href = 'stanza:edit:' + encodeURIComponent(
+                        wrap.getAttribute('data-stanza-id') || '');
                     edit.textContent = EDIT_LABEL || 'Edit';
-                    edit.addEventListener('click', function (ev) {
-                        ev.stopPropagation();
-                        ev.preventDefault();
-                        var ref = wrap.getAttribute('data-stanza-id') || '';
-                        if (ref) {
-                            try {
-                                console.log('stanza-edit:' + encodeURIComponent(ref));
-                            } catch (err) {}
-                        }
-                        closeMenu();
+                    // Close the overlay only AFTER the navigation has been
+                    // initiated: removing the link mid-click can abort it.
+                    edit.addEventListener('click', function () {
+                        window.setTimeout(closeMenu, 0);
                     });
                     menu.appendChild(edit);
                 }

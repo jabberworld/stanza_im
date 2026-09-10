@@ -170,15 +170,17 @@ check("history replaced",
 _view_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
-check("edit menu is button via console",
-      "console.log('stanza-edit:'" in _view_src
+check("edit menu is anchor",
+      "edit.href = 'stanza:edit:'" in _view_src
+      and "setTimeout(closeMenu, 0)" in _view_src
       and "data-stanza-outgoing" in _view_src)
-check("no js-location or href edit navigation",
+check("no js-location or console edit delivery",
       "window.location.href = 'stanza:edit:'" not in _view_src
-      and "edit.href = 'stanza:edit:'" not in _view_src)
-check("console parses edit prefix",
-      "stanza-edit:" in _view_src and "stanza:edit:" in _view_src
-      and "link_clicked.emit" in _view_src)
+      and "console.log('stanza-edit:'" not in _view_src)
+check("post-click content probe present",
+      "_schedule_content_probe" in _view_src
+      and "_verify_after_click" in _view_src
+      and "document_lost.emit" in _view_src)
 
 # 7. edited marker rendered at the end of the phrase by the theme -------------
 from stanza_im.ui.chat_themes import ChatThemeFactory

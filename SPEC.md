@@ -544,13 +544,16 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 ### 14.4 Last Message Correction (XEP-0308)
 
 - Any own message can be edited: Ctrl+Up in the input starts editing the last
-  one, and the message menu adds "Edit" for our own messages — a button whose
-  click is delivered over `javaScriptConsoleMessage` as a `stanza-edit:` payload
-  (no in-page navigation, so the chat document is never touched) and decoded in
-  `_on_js_console`. The edited body loads into the input with a cancelable
-  "Editing…" banner; sending emits `message_edit_sent` and the client attaches
+  one, and the message menu adds "Edit" for our own messages — an anchor routed
+  via `stanza:edit:<id>` through `acceptNavigationRequest` (the same working
+  navigation path as replies/mentions; the overlay menu is closed a tick later
+  so the navigating link is never removed mid-click). The edited body loads
+  into the input with a cancelable "Editing…" banner; sending emits
+  `message_edit_sent` and the client attaches
   `<replace xmlns='urn:xmpp:message-correct:0' id='…'/>` as the first child
-  (with a fresh stanza id).
+  (with a fresh stanza id). After every handled click a content probe
+  (`_schedule_content_probe`/`_verify_after_click`) re-renders the window via
+  `document_lost` if the conversation ever vanished.
 - `send_message`/`send_muc_message` accept `replace_id`; `edit_message()`
   wraps them. Received corrections (1:1 and MUC) are matched by the referenced
   id and, with `chat.allow_incoming_edits` on (default), replace the original
