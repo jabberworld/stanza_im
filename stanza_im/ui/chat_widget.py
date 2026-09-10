@@ -91,6 +91,35 @@ class _ParticipantRow(QtWidgets.QWidget):
         super().leaveEvent(event)
 
 
+class _SubjectEdit(QtWidgets.QLineEdit):
+    """Read-only MUC subject field with the app's rich tooltip.
+
+    The native QToolTip renders as a black block over the WebEngine surface,
+    so hover/leave are forwarded to the custom tooltip popup instead.
+    """
+
+    def __init__(self, text, parent=None, on_hover=None, on_leave=None):
+        super().__init__(text, parent)
+        self._on_hover = on_hover
+        self._on_leave = on_leave
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._on_hover is not None:
+            self._on_hover(event.globalPosition().toPoint())
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._on_leave is not None:
+            self._on_leave()
+        super().mousePressEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._on_leave is not None:
+            self._on_leave()
+        super().leaveEvent(event)
+
+
 class ChatWidget(QtWidgets.QWidget):
     """A single chat tab's content: header info + message view + input bar."""
 
@@ -167,7 +196,10 @@ class ChatWidget(QtWidgets.QWidget):
             lambda: self.set_subject_requested.emit(self.jid))
         header.addWidget(self._subject_btn)
 
-        self._subject_edit = QtWidgets.QLineEdit("", self)
+        self._subject_edit = _SubjectEdit(
+            "", self,
+            on_hover=self._subject_tooltip,
+            on_leave=tooltip_mod.hide)
         self._subject_edit.setReadOnly(True)
         self._subject_edit.setStyleSheet(
             "border: none; background: transparent; padding-left: 2px;")
@@ -887,7 +919,15 @@ class ChatWidget(QtWidgets.QWidget):
                     text = candidate
                     break
         self._subject_edit.setText(text)
-        self._subject_edit.setToolTip(text)
+
+    def _subject_tooltip(self, global_pos: QtCore.QPoint) -> None:
+        """Show the MUC subject via the rich tooltip popup."""
+        text = self._subject_edit.text().strip()
+        if not text:
+            tooltip_mod.hide()
+            return
+        from stanza_im.include.utils import escape_html
+        tooltip_mod.show(global_pos, escape_html(text))
 
     def reload_theme(self, variant: str = ""):
         self._view.load_theme(variant)
