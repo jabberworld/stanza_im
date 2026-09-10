@@ -296,6 +296,16 @@ via `render_message(edited=True)`, `chat.allow_incoming_edits` on) or arrive
 as new messages (off). History gains `message_id`/`edited` columns and
 `replace_message()`.
 
+HTTP File Upload (XEP-0363): a toolbar above the chat input carries icon
+buttons for Clear, History (moved from the tab header), vCard and "Send file"
+(a menu with "P2P" / "HTTP Upload"); the input is vertically resizable
+(`chat.input_height`, persisted) and files can be dropped straight into the
+chat. `client.upload_http(jid, path)` discovers the `urn:xmpp:http:upload:0`
+service (cached), requests a `<slot>`, PUTs the bytes in a thread and sends the
+`get` URL as a 1:1/MUC message; `file_upload_progress` events surface as chat
+status lines. The roster context menu additionally offers "Send file → P2P /
+HTTP Upload".
+
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide

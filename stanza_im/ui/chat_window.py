@@ -149,6 +149,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.participant_clicked.connect(self.participant_clicked)
         widget.participant_context_requested.connect(
             self.participant_context_requested)
+        widget.vcard_requested.connect(self.vcard_requested)
+        widget.file_upload_requested.connect(self.file_upload_requested)
+        widget.input_height_changed.connect(self.input_height_changed)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -183,6 +186,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.participant_clicked.connect(self.participant_clicked)
         widget.participant_context_requested.connect(
             self.participant_context_requested)
+        widget.vcard_requested.connect(self.vcard_requested)
+        widget.file_upload_requested.connect(self.file_upload_requested)
+        widget.input_height_changed.connect(self.input_height_changed)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -323,6 +329,9 @@ class ChatWindow(QtWidgets.QMainWindow):
     participant_clicked = QtCore.pyqtSignal(str, str)       # room, nick
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)
+    vcard_requested = QtCore.pyqtSignal(str)                   # jid
+    file_upload_requested = QtCore.pyqtSignal(str, str, str)   # jid, path, method
+    input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
 
     # ── Internal ──────────────────────────────────────────────────
 

@@ -87,6 +87,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.message_edit_to_send.connect(self._on_message_edit_send)
         self._chat_window.groupchat_message_edit_to_send.connect(
             self._on_groupchat_edit_send)
+        self._chat_window.vcard_requested.connect(self._on_chat_vcard)
+        self._chat_window.file_upload_requested.connect(
+            self._on_chat_file_upload)
+        self._chat_window.input_height_changed.connect(
+            self._on_input_height_changed)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
@@ -957,6 +962,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("mds_displayed", self._on_mds_displayed)
         c.on("message_corrected", self._on_message_corrected)
         c.on("groupchat_message_corrected", self._on_groupchat_message_corrected)
+        c.on("file_upload_progress", self._on_file_upload_progress)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
@@ -1283,6 +1289,15 @@ class MainWindow(QtWidgets.QMainWindow):
                        lambda: self._on_contact_open(jid))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
                        lambda checked=False: defer(lambda: self._show_profile(jid)))
+        if self._client:
+            send_menu = menu.addMenu(self._menu_icon("upload.png"),
+                                     tr("ctx_send_file"))
+            send_menu.addAction(
+                tr("ft_p2p"),
+                lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "p2p")))
+            send_menu.addAction(
+                tr("ft_http_upload"),
+                lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "http")))
         menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
                        lambda checked=False: defer(lambda: self._on_history_contact(jid)))
         if not is_conf:
@@ -1329,9 +1344,16 @@ class MainWindow(QtWidgets.QMainWindow):
                            tr("ctx_remove_contact"), lambda: self._on_remove_contact(jid))
         menu.exec(pos)
 
-    def _rename_contact(self, jid: str):
-        if not self._client:
+    def _pick_and_send_file(self, jid: str, method: str):
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(self)
+        if not path or not self._client:
             return
+        if method == "p2p":
+            self._client.send_file(jid, path)
+        else:
+            self._start_task(self._client.upload_http(jid, path))
+
+    def _rename_contact(self, jid: str):
         current = self._roster_name(jid) or jid.split("@")[0]
         name, ok = QtWidgets.QInputDialog.getText(
             self, tr("ctx_rename"), tr("ctx_rename_prompt"), text=current)
@@ -1826,6 +1848,45 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
+
+    def _on_chat_vcard(self, jid: str):
+        if jid in self._muc_self_nicks:
+            self._show_muc_room_info(jid)
+        else:
+            self._show_profile(jid)
+
+    def _on_input_height_changed(self, jid: str, height: int):
+        self._config.chat.input_height = int(height)
+        self._config.save()
+
+    def _on_chat_file_upload(self, jid: str, path: str, method: str):
+        if not self._client:
+            return
+        if method == "p2p":
+            self._client.send_file(jid, path)
+            return
+        self._start_task(self._client.upload_http(jid, path))
+
+    def _on_file_upload_progress(self, jid: str, phase: str, detail: str = ""):
+        bare = jid.split("/")[0]
+        chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(jid)
+        if not chat:
+            return
+        if phase == "start":
+            chat.add_status(tr("ft_upload_started",
+                               file=os.path.basename(detail)),
+                            time.strftime("%H:%M:%S"))
+        elif phase == "done":
+            chat.add_status(tr("ft_upload_done", url=detail),
+                            time.strftime("%H:%M:%S"))
+        elif phase == "error":
+            chat.add_status(tr("ft_upload_failed", error=detail or ""),
+                            time.strftime("%H:%M:%S"))
+
+    def _show_muc_room_info(self, room: str):
+        member = self._muc_users.get(room, {}).get(
+            self._muc_self_nicks.get(room, ""), {})
+        self._show_profile(member.get("real_jid") or room)
 
     def _on_message_corrected(self, frm: str, ref_id: str, body: str, ts,
                               unstyled: bool = False,

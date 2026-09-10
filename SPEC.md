@@ -566,6 +566,23 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
   phrase (`render_message(edited=True)`, i18n tooltip;
   `data-stanza-outgoing`/`data-edited` on the wrapper drives the menu).
 
+### 14.5 HTTP File Upload (XEP-0363)
+
+- A toolbar above the input offers icon buttons: Clear chat, History (moved
+  from the tab header), vCard, and Send file (a menu with "P2P" and
+  "HTTP Upload"). The input is vertically resizable via a thin drag handle
+  (persisted in `chat.input_height`), and files may be dropped directly into
+  the chat window.
+- `core/client.py` implements the protocol:
+  `upload_http(jid, path)` → discover the service (`urn:xmpp:http:upload:0`
+  via disco items/info, cached) → request a `<slot>` (filename/size/
+  content-type) → PUT the bytes (`urllib.request` in a thread, honouring the
+  `put` headers) → send the `get` URL as a 1:1 or MUC message. Progress is
+  reported through `file_upload_progress(jid, start|done|error, detail)` and
+  shown as chat status lines.
+- "P2P" still routes to the `send_file` placeholder; the roster context menu
+  also gains "Send file → P2P / HTTP Upload" for contacts (and conferences).
+
 See `XEPs.md` for the full supported-extensions matrix.
 
 ### 14.2 Event System

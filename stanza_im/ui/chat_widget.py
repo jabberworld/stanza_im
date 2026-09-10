@@ -10,12 +10,17 @@ from __future__ import annotations
 import time
 import webbrowser
 import logging
+import os
 import uuid
 from urllib.parse import unquote
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import (
+    ACTIONS_DIR_16, ACTIONS_DIR_22, CATEGORIES_DIR_16, STATUS_DIR_32,
+    PLACES_DIR_22,
+)
 from stanza_im.include.avatars import (
     avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
 )
@@ -92,6 +97,36 @@ class _ParticipantRow(QtWidgets.QWidget):
         super().leaveEvent(event)
 
 
+class _InputHandle(QtWidgets.QFrame):
+    """Thin draggable bar that resizes the chat input vertically."""
+
+    height_changed = QtCore.pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(6)
+        self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
+        self.setStyleSheet("_InputHandle { background: rgba(0, 0, 0, 0.05); }")
+        self._press_y: float | None = None
+        self._press_h = 60
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._press_y = float(event.globalPosition().y())
+            self._press_h = int(getattr(self.parentWidget(), "_input_height", 60))
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._press_y is None:
+            return
+        dy = float(event.globalPosition().y()) - self._press_y
+        self.height_changed.emit(int(self._press_h + dy))
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._press_y = None
+
+
 class _SubjectEdit(QtWidgets.QLineEdit):
     """Read-only MUC subject field with the app's rich tooltip.
 
@@ -138,6 +173,9 @@ class ChatWidget(QtWidgets.QWidget):
     participant_clicked = QtCore.pyqtSignal(str, str)      # room, nick
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)                            # room, nick, global pos
+    vcard_requested = QtCore.pyqtSignal(str)                # jid
+    file_upload_requested = QtCore.pyqtSignal(str, str, str)  # jid, path, method
+    input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
                  is_muc: bool = False, parent=None):
@@ -239,13 +277,6 @@ class ChatWidget(QtWidgets.QWidget):
             lambda: self.bookmark_toggled.emit(self.jid))
         header.addWidget(self._bookmark_btn)
 
-        self._history_btn = QtWidgets.QToolButton(self)
-        self._history_btn.setText("\u2026")
-        self._history_btn.setToolTip(tr("history_menu_tooltip"))
-        self._history_btn.setPopupMode(
-            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._history_btn.setMenu(self._history_menu)
-        header.addWidget(self._history_btn)
         layout.addLayout(header)
 
         # Chat view + resizable MUC participant sidebar
@@ -310,6 +341,48 @@ class ChatWidget(QtWidgets.QWidget):
         self._editing_id = ""
         self._editing_previous = ""
 
+        # ── Input bar buttons ─────────────────────────────────────
+        actions_row = QtWidgets.QHBoxLayout()
+        actions_row.setContentsMargins(4, 2, 4, 0)
+        actions_row.setSpacing(2)
+
+        clear_btn = QtWidgets.QToolButton(self)
+        clear_btn.setIcon(self._chat_icon("process-stop.png"))
+        clear_btn.setToolTip(tr("chat_clear"))
+        clear_btn.setAutoRaise(True)
+        clear_btn.clicked.connect(lambda: self.clear_history_requested.emit(self.jid))
+        actions_row.addWidget(clear_btn)
+
+        self._history_btn = QtWidgets.QToolButton(self)
+        self._history_btn.setIcon(self._chat_icon("history.png"))
+        self._history_btn.setToolTip(tr("history_menu_tooltip"))
+        self._history_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._history_btn.setMenu(self._history_menu)
+        actions_row.addWidget(self._history_btn)
+
+        vcard_btn = QtWidgets.QToolButton(self)
+        vcard_btn.setIcon(self._chat_icon("v-card.png"))
+        vcard_btn.setToolTip(tr("chat_vcard"))
+        vcard_btn.setAutoRaise(True)
+        vcard_btn.clicked.connect(lambda: self.vcard_requested.emit(self.jid))
+        actions_row.addWidget(vcard_btn)
+
+        send_menu = QtWidgets.QMenu(self)
+        send_p2p = send_menu.addAction(tr("ft_p2p"))
+        send_p2p.triggered.connect(lambda: self._choose_file_send("p2p"))
+        send_http = send_menu.addAction(tr("ft_http_upload"))
+        send_http.triggered.connect(lambda: self._choose_file_send("http"))
+        self._send_file_btn = QtWidgets.QToolButton(self)
+        self._send_file_btn.setIcon(self._chat_icon("upload.png"))
+        self._send_file_btn.setToolTip(tr("chat_send_file"))
+        self._send_file_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._send_file_btn.setMenu(send_menu)
+        actions_row.addWidget(self._send_file_btn)
+        actions_row.addStretch(1)
+        chat_col.addLayout(actions_row)
+
         self._nick_complete_candidates: list[str] = []
         self._nick_complete_index = -1
         self._nick_complete_inserted = ""
@@ -320,7 +393,10 @@ class ChatWidget(QtWidgets.QWidget):
         input_row = QtWidgets.QHBoxLayout()
         input_row.setContentsMargins(4, 2, 4, 2)
         self._input = QtWidgets.QPlainTextEdit()
-        self._input.setMaximumHeight(60)
+        self._input_height = 60
+        self._input.setMinimumHeight(40)
+        self._input.setMaximumHeight(240)
+        self._input.setFixedHeight(self._input_height)
         self._input.setPlaceholderText(tr("chat_send"))
         self._input.installEventFilter(self)
         self._input.textChanged.connect(self._on_input_changed)
@@ -330,8 +406,15 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_btn.clicked.connect(self._send)
         input_row.addWidget(self._send_btn)
         chat_col.addLayout(input_row)
+
+        # Resize handle under the input
+        self._input_handle = _InputHandle(self)
+        self._input_handle.height_changed.connect(self._set_input_height)
+        chat_col.addWidget(self._input_handle)
+
         chat_panel = QtWidgets.QWidget(self)
         chat_panel.setLayout(chat_col)
+        self.setAcceptDrops(True)
 
         self._users_list = QtWidgets.QListWidget()
         self._users_list.setMinimumWidth(120)
@@ -1309,6 +1392,43 @@ class ChatWidget(QtWidgets.QWidget):
         return QtGui.QIcon()
 
     @staticmethod
+    def _chat_icon(filename: str) -> QtGui.QIcon:
+        for directory in (ACTIONS_DIR_16, ACTIONS_DIR_22, CATEGORIES_DIR_16,
+                          STATUS_DIR_32, PLACES_DIR_22):
+            pix = QtGui.QPixmap(os.path.join(directory, filename))
+            if not pix.isNull():
+                return QtGui.QIcon(pix)
+        return QtGui.QIcon()
+
+    def _set_input_height(self, height: int):
+        height = max(40, min(240, int(height)))
+        if height != self._input_height:
+            self._input_height = height
+            self._input.setFixedHeight(height)
+            self.input_height_changed.emit(self.jid, height)
+
+    def _choose_file_send(self, method: str):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _filter = QFileDialog.getOpenFileName(self, tr("chat_send_file"))
+        if path:
+            self.file_upload_requested.emit(self.jid, path, method)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                self.file_upload_requested.emit(self.jid, url.toLocalFile(),
+                                               "http")
+        event.acceptProposedAction()
+
+    @staticmethod
     def _bookmark_icon():
         try:
             from stanza_im.ui.icons import icons
@@ -1330,6 +1450,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_status = bool(options.get("show_status", True))
         self._status_label.setVisible(self._show_status and not self.is_muc)
         self.set_show_avatars(bool(options.get("show_avatars", True)))
+        self._set_input_height(int(options.get("input_height", self._input_height) or 60))
 
     def mark_delivered(self, message_id: str) -> None:
         if not message_id:

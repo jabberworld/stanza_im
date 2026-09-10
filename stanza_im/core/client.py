@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import mimetypes
+import os
 import platform
 import time
 import uuid
@@ -34,8 +36,10 @@ NS_MDS_ASSIST = "urn:xmpp:mds:server-assist:0"
 NS_PUBSUB = "http://jabber.org/protocol/pubsub"
 NS_PUBSUB_EVENT = "http://jabber.org/protocol/pubsub#event"
 NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
+NS_DISCO_ITEMS = "http://jabber.org/protocol/disco#items"
 NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
+NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 
 
 def _replace_reference(stanza) -> str:
@@ -187,6 +191,7 @@ class JabberClient:
         self._mds_local: dict[str, str] = {}
         self._mds_server_assist = False
         self._mds_pubsub_options = False
+        self._upload_service_cache: str | None = None
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
         self.send_chatstates = (self.send_typing_notifications
@@ -1252,6 +1257,122 @@ class JabberClient:
         """Send a file via SI file transfer (XEP-0066 / XEP-0096)."""
         # Placeholder — will be implemented in Phase 2
         logger.info("File transfer to %s: %s (not yet implemented)", jid, filepath)
+
+    # ── XEP-0363 HTTP File Upload ────────────────────────────────
+
+    def upload_http(self, jid: str, path: str):
+        """Upload *path* via HTTP Upload and share the URL in *jid*'s chat."""
+        return self._http_upload_flow(jid, path)
+
+    async def _http_upload_flow(self, jid: str, path: str) -> None:
+        self.emit("file_upload_progress", jid, "start", path)
+        try:
+            service = await self._http_upload_service()
+            if not service:
+                raise RuntimeError("HTTP Upload is not available")
+            filename = os.path.basename(str(path))
+            size = os.path.getsize(str(path))
+            content_type = mimetypes.guess_type(filename)[0] \
+                or "application/octet-stream"
+            put_url, get_url, headers = await self._http_upload_slot(
+                service, filename, size, content_type)
+            with open(str(path), "rb") as fh:
+                data = fh.read()
+            await self._http_upload_put(put_url, data, headers)
+            target = jid.split("/")[0] if "/" in jid else jid
+            if self.groupchats.get(target):
+                self.send_muc_message(target, get_url)
+            else:
+                self.send_message(target, get_url)
+            self.emit("file_upload_progress", jid, "done", get_url)
+        except Exception as exc:  # noqa: BLE001 - surfaced as a status line
+            logger.warning("HTTP Upload failed for %s: %s", jid, exc)
+            self.emit("file_upload_progress", jid, "error", str(exc))
+
+    async def _http_upload_service(self) -> str:
+        cached = getattr(self, "_upload_service_cache", None)
+        if cached is not None:
+            return cached
+        domain = self.jid_str.split("@")[-1]
+        candidates = [domain]
+        try:
+            discovered = await self.xmpp["xep_0030"].get_items(domain)
+            xml = getattr(discovered, "xml", None)
+            if xml is not None:
+                for child in xml.iter("{%s}item" % NS_DISCO_ITEMS):
+                    jid_candidate = (child.get("jid") or "").strip()
+                    if jid_candidate and jid_candidate not in candidates:
+                        candidates.append(jid_candidate)
+        except Exception as exc:
+            logger.debug("HTTP Upload disco items failed on %s: %s", domain, exc)
+        for candidate in candidates:
+            try:
+                info = await self.xmpp["xep_0030"].get_info(candidate)
+                xml = getattr(info, "xml", None)
+                features = {el.get("var") or "" for el in xml.iter(
+                    "{%s}feature" % NS_DISCO_INFO)} if xml is not None else set()
+            except Exception:
+                features = set()
+            if NS_UPLOAD in features:
+                self._upload_service_cache = candidate
+                return candidate
+        self._upload_service_cache = ""
+        return ""
+
+    def _http_upload_request_iq(self, service: str, filename: str,
+                                size: int, content_type: str):
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = service
+        request = ET.SubElement(iq.xml, "{%s}request" % NS_UPLOAD)
+        request.set("filename", filename)
+        request.set("size", str(int(size)))
+        request.set("content-type", content_type)
+        return iq
+
+    @staticmethod
+    def _parse_upload_slot(result):
+        put_url = get_url = ""
+        headers: dict[str, str] = {}
+        for el in result.xml.iter():
+            if el.tag == "{%s}put" % NS_UPLOAD:
+                put_url = el.get("url") or ""
+                for header in el:
+                    if header.tag == "{%s}header" % NS_UPLOAD:
+                        headers[str(header.get("name") or "")] = \
+                            str(header.text or "")
+            elif el.tag == "{%s}get" % NS_UPLOAD:
+                get_url = el.get("url") or ""
+        return put_url, get_url, headers
+
+    async def _http_upload_slot(self, service: str, filename: str,
+                                size: int, content_type: str):
+        iq = self._http_upload_request_iq(service, filename, size, content_type)
+        result = await iq.send()
+        put_url, get_url, headers = self._parse_upload_slot(result)
+        if not put_url or not get_url:
+            raise RuntimeError("invalid HTTP Upload slot response")
+        return put_url, get_url, headers
+
+    @staticmethod
+    async def _http_upload_put(url: str, data: bytes,
+                               headers: dict[str, str]) -> None:
+        def _upload():
+            import urllib.error as urllib_error
+            import urllib.request as urllib_request
+            put_headers = {
+                "Content-Type": headers.get("Content-Type")
+                or "application/octet-stream",
+            }
+            for name, value in headers.items():
+                if name.lower() != "content-type":
+                    put_headers[name] = value
+            request = urllib_request.Request(
+                url, data=data, method="PUT", headers=put_headers)
+            with urllib_request.urlopen(request, timeout=120) as response:
+                response.read()
+
+        await asyncio.to_thread(_upload)
 
     def get_muc_list(self, service: str) -> None:
         """Discover MUC rooms on *service* via Service Discovery."""

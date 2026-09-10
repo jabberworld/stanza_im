@@ -76,7 +76,7 @@ class Config:
                  "muc_auto_nick": True, "muc_confirm_leave": True,
                  "muc_minimize_startup": True, "message_styling": True,
                  "message_displayed_sync": True,
-                 "allow_incoming_edits": True},
+                 "allow_incoming_edits": True, "input_height": 60},
         "application": {"close_to_tray": True, "history_limit": 60,
                          "tab_title_length": 30},
         "connection": {"auto_join_conferences": True,
