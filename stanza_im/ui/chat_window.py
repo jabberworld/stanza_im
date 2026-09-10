@@ -73,7 +73,10 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_widget = QtWidgets.QTabWidget()
         self._tab_widget.setTabBar(_TabBar())
         self._tab_widget.setTabsClosable(True)
+        self._tab_widget.setMovable(True)
+        self._tab_widget.tabBar().setMovable(True)
         self._tab_widget.tabCloseRequested.connect(self._close_tab)
+        self._tab_widget.tabBar().tabMoved.connect(self._on_tab_moved)
         self._tab_widget.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tab_widget)
 
@@ -317,6 +320,15 @@ class ChatWindow(QtWidgets.QMainWindow):
                 self.activity_changed.emit(widget.jid, "gone")
                 self.tab_closed.emit(widget.jid)
             self.close_chat(widget.jid)
+
+    def _on_tab_moved(self, from_index: int, to_index: int):
+        """Keep the ordered jid list in sync with drag-reordered tabs."""
+        order = []
+        for i in range(self._tab_widget.count()):
+            widget = self._tab_widget.widget(i)
+            if isinstance(widget, ChatWidget):
+                order.append(widget.jid)
+        self._tab_order = order
 
     def set_muc_leave_confirm(self, callback) -> None:
         """Let the owner veto closing a MUC tab (``callback(room) -> bool``)."""
