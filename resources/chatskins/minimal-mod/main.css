@@ -159,23 +159,31 @@ a:hover{
 .message_actions {
     float: right;
     visibility: hidden;
-    width: 32px;
-    text-align: right;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1px;
+    padding: 0 3px;
+    height: 16px;
+    border-radius: 4px;
+    background: #ececec;
 }
 .stanza-message:hover .message_actions { visibility: visible; }
 .message_actions button {
     border: 0;
     background: transparent;
     cursor: pointer;
-    color: #999;
+    color: #555;
     font-size: 10px;
     line-height: 1;
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 14px;
     padding: 0;
     margin: 0;
+    border-radius: 3px;
 }
-.message_actions button:hover { color: #333; background: #ddd; border-radius: 3px; }
+.message_actions button:hover { background: #d5d5d5; }
 
 .time_initial .delivery { display: block; color: #777; margin-left: 0; }
 .typing-indicator { color: #888; font-style: italic; padding: 3px 16px; min-height: 18px; }

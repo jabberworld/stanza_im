@@ -35,11 +35,11 @@ class _JumpButtonMixin:
         button.setFixedSize(34, 34)
         button.setStyleSheet(
             "QToolButton {"
-            "  background: rgba(60, 60, 60, 0.85);"
-            "  color: white; border: none; border-radius: 17px;"
+            "  background: #ececec;"
+            "  color: #555; border: none; border-radius: 17px;"
             "  font-size: 18px;"
             "}"
-            "QToolButton:hover { background: rgba(40, 40, 40, 0.95); }")
+            "QToolButton:hover { background: #d9d9d9; }")
         button.clicked.connect(self.scroll_to_bottom)
         button.hide()
         self._jump_button = button
@@ -212,14 +212,14 @@ if HAS_WEBENGINE:
             d.style.cssText =
                 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);' +
                 'width:34px;height:34px;line-height:34px;text-align:center;' +
-                'border-radius:17px;background:rgba(60,60,60,0.85);' +
-                'color:#fff;font-size:18px;cursor:pointer;z-index:9999;' +
+                'border-radius:17px;background:#ececec;' +
+                'color:#555;font-size:18px;cursor:pointer;z-index:9999;' +
                 'display:none;user-select:none;';
             d.addEventListener('mouseenter', function () {
-                d.style.background = 'rgba(40,40,40,0.95)';
+                d.style.background = '#d9d9d9';
             });
             d.addEventListener('mouseleave', function () {
-                d.style.background = 'rgba(60,60,60,0.85)';
+                d.style.background = '#ececec';
             });
             d.addEventListener('click', function () {
                 window.scrollTo(0, document.body.scrollHeight);
@@ -268,7 +268,21 @@ if HAS_WEBENGINE:
                                body: str, x: int, y: int):
             if action == "reply":
                 return
+            # Defer the menu out of the QWebChannel callback and open it
+            # non-modally: a blocking exec() here can starve the renderer
+            # and the menu never paints.
+            pos = QtCore.QPoint(int(x), int(y))
+            QtCore.QTimer.singleShot(
+                0, lambda: self._open_message_menu(sender, time, body, pos))
+
+        def _open_message_menu(self, sender: str, time: str, body: str,
+                               pos: QtCore.QPoint):
+            menu = getattr(self, "_message_menu", None)
+            if menu is not None:
+                menu.close()
+                menu.deleteLater()
             menu = QtWidgets.QMenu(self)
+            self._message_menu = menu
             copy_icon = QtGui.QIcon.fromTheme("edit-copy")
             if copy_icon.isNull():
                 copy_icon = self.style().standardIcon(
@@ -277,7 +291,14 @@ if HAS_WEBENGINE:
             copy_action.triggered.connect(
                 lambda: QtWidgets.QApplication.clipboard().setText(
                     self._copy_text(sender, time, body)))
-            menu.exec(self.mapToGlobal(QtCore.QPoint(int(x), int(y))))
+            menu.aboutToHide.connect(menu.deleteLater)
+            menu.aboutToHide.connect(
+                lambda: self._handle_menu_closed(menu))
+            menu.popup(self.mapToGlobal(pos))
+
+        def _handle_menu_closed(self, menu):
+            if getattr(self, "_message_menu", None) is menu:
+                self._message_menu = None
 
         @staticmethod
         def _copy_text(sender: str, time_text: str, body: str) -> str:

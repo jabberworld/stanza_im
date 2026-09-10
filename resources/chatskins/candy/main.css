@@ -61,8 +61,15 @@
 	{
 		float: right;
 		visibility: hidden;
-		width: 32px;
-		text-align: right;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 1px;
+		padding: 0 3px;
+		height: 16px;
+		border-radius: 4px;
+		background: #ececec;
 	}
 	.stanza-message:hover .message_actions { visibility: visible; }
 	.message_actions button
@@ -72,14 +79,11 @@
 		cursor: pointer;
 		font-size: 10px;
 		line-height: 1;
-		width: 15px;
-		height: 15px;
+		width: 17px;
+		height: 14px;
 		padding: 0;
 		margin: 0;
-	}
-	.incoming_row .message_actions button, .outgoing_row .message_actions button
-	{
-		color: rgba(255, 255, 255, 0.85);
+		color: rgba(0, 0, 0, 0.6);
 	}
 	.next_message .message_actions button { color: rgba(0, 0, 0, 0.45); }
 	.message_actions button:hover { background: rgba(0, 0, 0, 0.18); border-radius: 3px; }
