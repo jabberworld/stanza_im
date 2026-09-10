@@ -197,6 +197,19 @@ class ChatThemeFactory:
                 f' <span class="action">* {escape_html(sender)} {phrase_html}</span>'
                 f'</div>')
 
+    # XEP-0461 Message Replies ──────────────────────────────────────
+
+    def render_reply(self, sender: str, quote: str = "") -> str:
+        """Render a XEP-0461 reply-bar above the message body."""
+        label = tr("reply_in_reply_to", sender=sender or "…")
+        esc_quote = escape_html(quote or "")
+        return (f'<div class="stanza-reply">'
+                f'<span class="reply-arrow">\u21b0</span> '
+                f'<span class="reply-label">{escape_html(label)}</span>'
+                + (f' <span class="reply-quote">{esc_quote}</span>'
+                   if quote else '')
+                + '</div>')
+
     def generate_page(self, messages: list[dict], base_url: str = "") -> str:
         """Generate a complete HTML page containing the given messages.
 
@@ -238,6 +251,10 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 .stanza-action {{ padding: 2px 8px; font-style: italic; color: #666; }}
 .stanza-action .time {{ font-style: normal; font-size: 10px; color: #999; margin-right: 6px; }}
 .stanza-action .action {{ font-style: italic; }}
+.stanza-reply {{ padding: 3px 8px; font-size: 11px; color: #666;
+                 border-left: 3px solid #bbb; background: rgba(0,0,0,.04); margin-bottom: 1px; }}
+.stanza-reply .reply-label {{ font-weight: bold; }}
+.stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
 </style>
 </head>
 <body>
@@ -267,6 +284,10 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 .stanza-action {{ padding: 2px 8px; font-style: italic; color: #666; }}
 .stanza-action .time {{ font-style: normal; font-size: 10px; color: #999; margin-right: 6px; }}
 .stanza-action .action {{ font-style: italic; }}
+.stanza-reply {{ padding: 3px 8px; font-size: 11px; color: #666;
+                 border-left: 3px solid #bbb; background: rgba(0,0,0,.04); margin-bottom: 1px; }}
+.stanza-reply .reply-label {{ font-weight: bold; }}
+.stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
 </style>
 </head>
 <body>

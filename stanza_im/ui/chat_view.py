@@ -81,6 +81,7 @@ if HAS_WEBENGINE:
         near_top = QtCore.pyqtSignal()
         scroll_fraction = QtCore.pyqtSignal(float)
         jump_clicked = QtCore.pyqtSignal()
+        reply_requested = QtCore.pyqtSignal(str, str, str, str)  # reply_id, author, sender, snippet
 
         @QtCore.pyqtSlot(str)
         def on_link_clicked(self, url: str):
@@ -106,11 +107,16 @@ if HAS_WEBENGINE:
         def on_jump_clicked(self):
             self.jump_clicked.emit()
 
+        @QtCore.pyqtSlot(str, str, str, str)
+        def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
+            self.reply_requested.emit(reply_id, author, sender, snippet)
+
     class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
         link_clicked = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
+        reply_requested = QtCore.pyqtSignal(str, str, str, str)
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
@@ -123,6 +129,7 @@ if HAS_WEBENGINE:
             self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self.scroll_to_bottom)
+            self._bridge.reply_requested.connect(self.reply_requested)
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -334,7 +341,19 @@ if HAS_WEBENGINE:
                 if ((btn.getAttribute('data-action') || 'menu') === 'menu') {
                     openMenu(btn, e.clientX, e.clientY);
                 }
-                // 'reply' intentionally does nothing yet (XEP-0461 later).
+                else if (btn.getAttribute('data-action') === 'reply') {
+                    var wrap = btn.closest('.stanza-message');
+                    var replyId = wrap ? wrap.getAttribute('data-reply-id') : '';
+                    if (!replyId) return;
+                    var bodyNode = wrap.querySelector(
+                        '.message, .message_incoming, .message_outgoing, .next_message');
+                    var body = bodyNode
+                        ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
+                    var sender = wrap.getAttribute('data-stanza-sender') || '';
+                    var author = wrap.getAttribute('data-reply-author') || '';
+                    if (window.bridge && window.bridge.on_reply)
+                        window.bridge.on_reply(replyId, author, sender, body);
+                }
             });
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') closeMenu();
@@ -446,8 +465,14 @@ if HAS_WEBENGINE:
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
                         user_icon_path: str = "", message_id: str = "",
-                        unstyled: bool = False, raw_timestamp: str = ""):
-            """Add a message to the chat view."""
+                        unstyled: bool = False, raw_timestamp: str = "",
+                        reply_able_id: str = "", reply_author: str = "",
+                        reply_quote=None):
+            """Add a message to the chat view.
+
+            *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
+            as a XEP-0461 reply bar above the message.
+            """
             phrase = self._action_phrase(body)
             if phrase is not None:
                 html = self._theme.render_action(sender, phrase, timestamp)
@@ -458,7 +483,11 @@ if HAS_WEBENGINE:
                     sender_color=sender_color, user_icon_path=user_icon_path,
                     unstyled=unstyled,
                 )
-            html = self._mark_message(html, sender, message_id, raw_timestamp)
+            if reply_quote is not None:
+                ref_sender, ref_snippet = reply_quote
+                html = self._theme.render_reply(ref_sender, ref_snippet) + html
+            html = self._mark_message(html, sender, message_id, raw_timestamp,
+                                      reply_able_id, reply_author)
             if not self._ready:
                 self._pending.append(html)
                 return
@@ -488,23 +517,33 @@ if HAS_WEBENGINE:
                 body = entry.get("body", "")
                 phrase = self._action_phrase(body)
                 if phrase is not None:
-                    return self._theme.render_action(
+                    html_msg = self._theme.render_action(
                         entry.get("sender", "Me"), phrase,
                         entry.get("timestamp", ""))
-                return self._theme.render_message(
-                    sender=entry.get("sender", "Me"),
-                    body=body,
-                    timestamp=entry.get("timestamp", ""),
-                    direction=entry.get("direction", "incoming"),
-                    is_next=entry.get("is_next", False),
-                    sender_color="#000000",
-                    user_icon_path=entry.get("user_icon_path", ""),
-                    unstyled=entry.get("unstyled", False),
-                )
+                else:
+                    html_msg = self._theme.render_message(
+                        sender=entry.get("sender", "Me"),
+                        body=body,
+                        timestamp=entry.get("timestamp", ""),
+                        direction=entry.get("direction", "incoming"),
+                        is_next=entry.get("is_next", False),
+                        sender_color=entry.get("sender_color", "#000000"),
+                        user_icon_path=entry.get("user_icon_path", ""),
+                        unstyled=entry.get("unstyled", False),
+                    )
+                reply_quote = entry.get("reply_quote")
+                if reply_quote is not None:
+                    ref_sender, ref_snippet = reply_quote
+                    html_msg = (self._theme.render_reply(ref_sender, ref_snippet)
+                                + html_msg)
+                return html_msg
 
             html = "".join(self._mark_message(
                 entry_html(entry), entry.get("sender", "Me"),
-                entry.get("raw_timestamp", "")) for entry in messages)
+                entry.get("message_id", ""),
+                entry.get("raw_timestamp", ""),
+                entry.get("origin_id", ""), entry.get("reply_author", ""))
+                for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
                 return
@@ -537,15 +576,19 @@ if HAS_WEBENGINE:
 
         @staticmethod
         def _mark_message(content: str, sender: str, message_id: str = "",
-                          raw_timestamp: str = "") -> str:
+                          raw_timestamp: str = "", reply_able_id: str = "",
+                          reply_author: str = "") -> str:
             marker = (' data-stanza-id="' + html.escape(message_id, quote=True) + '"'
                       if message_id else "")
             stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'
                      if raw_timestamp else "")
+            rid = ' data-reply-id="' + html.escape(reply_able_id, quote=True) + '"'
+            rauthor = ' data-reply-author="' + html.escape(reply_author, quote=True) + '"'
             return ('<div class="stanza-message"' + marker + stamp
                     + ' data-stanza-sender="'
-                    + html.escape(sender or "Me", quote=True) + '">'
-                    + content + '</div>')
+                    + html.escape(sender or "Me", quote=True) + '"'
+                    + rid + rauthor
+                    + '>' + content + '</div>')
 
         def mark_message_delivered(self, message_id: str) -> None:
             safe = json.dumps(message_id)
@@ -616,6 +659,7 @@ else:
 
         link_clicked = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
+        reply_requested = QtCore.pyqtSignal(str, str, str, str)
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
@@ -681,19 +725,32 @@ else:
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
                         user_icon_path: str = "", message_id: str = "",
-                        unstyled: bool = False, raw_timestamp: str = ""):
+                        unstyled: bool = False, raw_timestamp: str = "",
+                        reply_able_id: str = "", reply_author: str = "",
+                        reply_quote=None):
+            reply_line = ""
+            if reply_quote is not None:
+                ref_sender, ref_snippet = reply_quote
+                label = tr("reply_in_reply_to", sender=ref_sender or "…")
+                if ref_snippet:
+                    label += f": {html.escape(ref_snippet)}"
+                reply_line = (f'<div class="stanza-reply" style="color:#888;'
+                              f'font-size:11px">\u21b0 {html.escape(label)}</div>')
             phrase = (body[4:]
                       if isinstance(body, str) and body.startswith("/me ")
                       else None)
             if phrase is not None:
                 self._append_before_typing(
+                    reply_line +
                     f"<i>({timestamp}) * {sender or 'Me'} "
                     f"{phrase}</i>")
             elif direction == "incoming":
                 self._append_before_typing(
+                    reply_line +
                     f"<b>{sender}</b> <i>({timestamp})</i>: {body}")
             else:
                 self._append_before_typing(
+                    reply_line +
                     f"<b style='color:#0066cc'>{sender}</b> <i>({timestamp})</i>: {body}")
 
         def add_status(self, text: str, timestamp: str):
@@ -712,13 +769,25 @@ else:
 
             def entry_html(entry: dict) -> str:
                 body = entry.get("body", "")
+                reply_line = ""
+                reply_quote = entry.get("reply_quote")
+                if reply_quote is not None:
+                    ref_sender, ref_snippet = reply_quote
+                    label = tr("reply_in_reply_to", sender=ref_sender or "…")
+                    if ref_snippet:
+                        label += f": {html.escape(ref_snippet)}"
+                    reply_line = (
+                        f'<div class="stanza-reply" style="color:#888;'
+                        f'font-size:11px">\u21b0 {html.escape(label)}</div>')
                 phrase = (body[4:]
                           if isinstance(body, str) and body.startswith("/me ")
                           else None)
                 if phrase is not None:
-                    return (f"<i>({entry.get('timestamp', '')}) * "
+                    return (reply_line +
+                            f"<i>({entry.get('timestamp', '')}) * "
                             f"{entry.get('sender', 'Me')} {phrase}</i>")
-                return (f"<b>{entry.get('sender', 'Me')}</b> "
+                return (reply_line +
+                        f"<b>{entry.get('sender', 'Me')}</b> "
                         f"<i>({entry.get('timestamp', '')})</i>: {body}")
 
             html = "".join(entry_html(entry) for entry in messages)

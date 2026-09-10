@@ -124,6 +124,8 @@ class ChatWidget(QtWidgets.QWidget):
     """A single chat tab's content: header info + message view + input bar."""
 
     message_sent = QtCore.pyqtSignal(str, str)  # jid, body
+    message_reply_sent = QtCore.pyqtSignal(str, str, str, str, str, str)
+    #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
     link_clicked = QtCore.pyqtSignal(str)
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
@@ -251,7 +253,33 @@ class ChatWidget(QtWidgets.QWidget):
         self._view = ChatView(theme)
         self._view.link_clicked.connect(self._open_link)
         self._view.link_clicked.connect(self.link_clicked)
+        self._view.reply_requested.connect(self._on_reply_requested)
         chat_col.addWidget(self._view, stretch=1)
+
+        # Reply context bar (XEP-0461): shown while composing a reply.
+        self._reply_ctx = QtWidgets.QFrame(self)
+        self._reply_ctx.setObjectName("reply-ctx")
+        self._reply_ctx.setStyleSheet(
+            "#reply-ctx { background: #f0f0f0; border-bottom: 1px solid #d8d8d8; }"
+            "#reply-ctx QLabel { color: #444; font-size: 12px; }")
+        _ctx = QtWidgets.QHBoxLayout(self._reply_ctx)
+        _ctx.setContentsMargins(8, 3, 4, 3)
+        _ctx.setSpacing(6)
+        self._reply_label = QtWidgets.QLabel("")
+        self._reply_label.setWordWrap(True)
+        _ctx.addWidget(self._reply_label, stretch=1)
+        self._reply_cancel = QtWidgets.QToolButton(self._reply_ctx)
+        self._reply_cancel.setText("\u00d7")
+        self._reply_cancel.setAutoRaise(True)
+        self._reply_cancel.setToolTip(tr("reply_cancel"))
+        self._reply_cancel.clicked.connect(self._cancel_reply)
+        _ctx.addWidget(self._reply_cancel)
+        self._reply_ctx.setVisible(False)
+        chat_col.addWidget(self._reply_ctx)
+        self._reply_id = ""
+        self._reply_to = ""
+        self._reply_ref_sender = ""
+        self._reply_ref_body = ""
 
         # Input area
         input_row = QtWidgets.QHBoxLayout()
@@ -346,7 +374,13 @@ class ChatWidget(QtWidgets.QWidget):
         if text.startswith("/") and self._handle_slash_command(text):
             self._input.clear()
             return
-        self.message_sent.emit(self.jid, text)
+        if self._reply_id:
+            self.message_reply_sent.emit(
+                self.jid, text, self._reply_to, self._reply_id,
+                self._reply_ref_sender, self._reply_ref_body)
+            self._clear_reply_state()
+        else:
+            self.message_sent.emit(self.jid, text)
         self._input.clear()
 
     def _handle_slash_command(self, text: str) -> bool:
@@ -365,12 +399,95 @@ class ChatWidget(QtWidgets.QWidget):
             return True
         return False
 
+    # ── XEP-0461 replies ──────────────────────────────────────────
+
+    @staticmethod
+    def _split_reply_quote(body: str):
+        """Split a reply body into (display_body, fallback_quote).
+
+        XEP-0421 fallback bodies are prefixed with ``> Sender wrote: …``
+        lines. Those become the *quote*; everything after the blank line is
+        the real body.
+        """
+        if not body:
+            return body, ""
+        in_quote = True
+        quote, rest = [], []
+        for line in body.split("\n"):
+            if in_quote and line.startswith("> "):
+                quote.append(line[2:].strip())
+            else:
+                in_quote = False
+                rest.append(line)
+        while rest and not rest[0].strip():
+            rest.pop(0)
+        snippet = " ".join(item for item in quote if item)
+        return "\n".join(rest), snippet
+
+    def _find_message(self, stable_id: str):
+        """Locate a stored message whose stable id matches the reply target."""
+        if not stable_id:
+            return None
+        for entry in reversed(list(self._messages) + list(self._history)):
+            if (entry.get("origin_id") == stable_id
+                    or entry.get("message_id") == stable_id
+                    or entry.get("archive_id") == stable_id):
+                return entry
+        return None
+
+    def _reply_quote_for(self, entry: dict):
+        """Resolve a reply reference to (sender_name, body_quote)."""
+        original = self._find_message(entry.get("reply_id", ""))
+        if original:
+            return (original.get("sender", ""), original.get("body", ""))
+        return (self._author_display(entry.get("reply_to", "")), "")
+
+    @staticmethod
+    def _author_display(reply_to: str) -> str:
+        """Human-friendly author name from a full JID or room/nick."""
+        if not reply_to:
+            return ""
+        if "/" in reply_to:
+            return reply_to.rsplit("/", 1)[1]
+        return reply_to
+
+    def _on_reply_requested(self, reply_id: str, author: str, sender: str,
+                            snippet: str):
+        """Start composing a XEP-0461 reply in this chat."""
+        self._reply_id = reply_id
+        self._reply_to = author or sender or self.jid
+        self._reply_ref_sender = sender or self._author_display(author)
+        self._reply_ref_body = snippet or ""
+        label = tr("reply_in_reply_to",
+                   sender=self._reply_ref_sender or self._reply_to)
+        hint = " ".join((snippet or "").split())
+        if hint:
+            if len(hint) > 90:
+                hint = hint[:90] + "\u2026"
+            label += f": {hint}"
+        self._reply_label.setText(label)
+        self._reply_ctx.setVisible(True)
+        self._input.setFocus()
+
+    def _cancel_reply(self):
+        self._clear_reply_state()
+        self._input.setFocus()
+
+    def _clear_reply_state(self):
+        self._reply_id = ""
+        self._reply_to = ""
+        self._reply_ref_sender = ""
+        self._reply_ref_body = ""
+        self._reply_ctx.setVisible(False)
+
     # ── Message rendering ─────────────────────────────────────────
 
     def add_message(self, sender: str, body: str, timestamp: str,
                     direction: str = "incoming", is_next: bool = False,
                     sender_jid: str = "", archive_id: str = "",
-                    message_id: str = "", unstyled: bool = False):
+                    message_id: str = "", unstyled: bool = False,
+                    reply_able_id: str = "", reply_author: str = "",
+                    reply_to: str = "", reply_id: str = ""):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -386,7 +503,9 @@ class ChatWidget(QtWidgets.QWidget):
                   "is_next": is_next, "sender_jid": sender_jid,
                   "archive_id": archive_id,
                   "message_id": message_id or (uuid.uuid4().hex if direction == "outgoing" else ""),
-                  "delivered": False, "unstyled": unstyled}
+                  "delivered": False, "unstyled": unstyled,
+                  "origin_id": reply_able_id, "reply_author": reply_author,
+                  "reply_to": reply_to, "reply_id": reply_id}
         self._messages.append(entry)
         self._render_entry(entry)
         if direction == "incoming" or sender == "Me":
@@ -408,14 +527,25 @@ class ChatWidget(QtWidgets.QWidget):
             self._status_lines.append((text, time.strftime("%H:%M:%S")))
 
     def _render_entry(self, entry: dict):
+        body = entry.get("body", "")
+        reply_quote = None
+        if entry.get("reply_id"):
+            body, fb_quote = self._split_reply_quote(body)
+            ref_sender, ref_body = self._reply_quote_for(entry)
+            if not ref_body:
+                ref_body = fb_quote
+            reply_quote = (ref_sender or entry.get("reply_author") or "", ref_body)
         from stanza_im.include.utils import ts_to_time
-        self._view.add_message(sender=entry["sender"], body=entry["body"],
+        self._view.add_message(sender=entry["sender"], body=body,
                                timestamp=ts_to_time(entry.get("timestamp", "")),
                                 direction=entry.get("direction", "incoming"),
                                 is_next=entry.get("is_next", False),
                                 message_id=entry.get("message_id", ""),
                                 unstyled=entry.get("unstyled", False),
                                 raw_timestamp=entry.get("timestamp", ""),
+                                reply_able_id=entry.get("origin_id", ""),
+                                reply_author=entry.get("reply_author", ""),
+                                reply_quote=reply_quote,
                                  user_icon_path=self._user_icon(
                                      entry.get("direction", "incoming"),
                                      entry.get("sender_jid", ""),
@@ -535,7 +665,13 @@ class ChatWidget(QtWidgets.QWidget):
                  entry.get("direction", "incoming"),
                  entry.get("sender_jid", ""), entry.get("sender", "")),
              "timestamp": ts_to_time(entry.get("timestamp", "")),
-             "raw_timestamp": entry.get("timestamp", "")}
+             "raw_timestamp": entry.get("timestamp", ""),
+             "body": (entry.get("body", "") if not entry.get("reply_id")
+                      else self._split_reply_quote(entry.get("body", ""))[0]),
+             "origin_id": entry.get("origin_id", ""),
+             "reply_author": entry.get("reply_author", ""),
+             "reply_quote": self._reply_quote_for(entry)
+                            if entry.get("reply_id") else None}
             for entry in unique
         ])
 

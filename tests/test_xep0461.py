@@ -1,0 +1,162 @@
+"""Offscreen smoke test for XEP-0461 Message Replies.
+
+Run with:
+    QT_QPA_PLATFORM=offscreen python3 tests/test_xep0461.py
+"""
+import os
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from xml.etree import ElementTree as ET
+
+from PyQt6 import QtCore, QtWidgets
+import slixmpp
+
+from stanza_im.core import client as client_mod
+from stanza_im.core import history as history_mod
+from stanza_im.i18n import load as i18n_load
+from stanza_im.ui import chat_themes
+
+i18n_load("en")
+
+
+FAILURES = []
+
+
+def check(name, cond):
+    print(("PASS" if cond else "FAIL") + ": " + name)
+    if not cond:
+        FAILURES.append(name)
+
+
+def make_message(body="hello", mid="abc", oid="", sid_by="", sid_id=""):
+    m = slixmpp.Message()
+    m["id"] = mid
+    m["body"] = body
+    if oid:
+        el = ET.SubElement(m.xml, "{urn:xmpp:sid:0}origin-id")
+        el.set("id", oid)
+    if sid_by and sid_id:
+        el = ET.SubElement(m.xml, "{urn:xmpp:sid:0}stanza-id")
+        el.set("by", sid_by)
+        el.set("id", sid_id)
+    return m
+
+
+# 1. XML helpers ----------------------------------------------------------
+msg = make_message(oid="oid-1", sid_by="room@conf.example", sid_id="sid-9")
+reply = ET.SubElement(msg.xml, "{urn:xmpp:reply:0}reply")
+reply.set("to", "anna@example.com/tablet")
+reply.set("id", "abc")
+
+check("_reply_reference to", client_mod._reply_reference(msg) ==
+      ("anna@example.com/tablet", "abc"))
+check("_origin_id", client_mod._origin_id(msg) == "oid-1")
+check("_stanza_id exact by", client_mod._stanza_id(msg, "room@conf.example") == "sid-9")
+check("_stanza_id full by", client_mod._stanza_id(msg, "room@conf.example/bot") == "sid-9")
+
+# 2. _attach_reply (reply first child + XEP-0421 fallback) ----------------
+m2 = make_message(body="Me: the plan changed", mid="m2")
+client_mod.JabberClient._attach_reply(
+    m2, "bob@example.com/Swift", "abc", prefix_len=14)
+children = list(m2.xml)
+check("reply is first child",
+      children[0].tag == "{urn:xmpp:reply:0}reply" and
+      children[0].get("to") == "bob@example.com/Swift" and
+      children[0].get("id") == "abc")
+fb = [el for el in m2.xml if el.tag == "{urn:xmpp:fallback:0}fallback"]
+check("fallback present", len(fb) == 1 and fb[0].get("for") == "urn:xmpp:reply:0")
+
+# 3. compose_reply_body quote format --------------------------------------
+quote = client_mod.compose_reply_body("Alice wrote:\nare you in?")
+check("quote lines", quote.startswith("> Alice wrote:\n> are you in?\n") and
+      quote.endswith("\n"))
+
+# 4. send_message builds a reply body when ref is known --------------------
+# (patch send to capture, without connecting)
+sent = []
+c = client_mod.JabberClient("me@example.com", "pw")
+c.xmpp.send = lambda stanza: sent.append(stanza)
+message_id = c.send_message(
+    "bob@example.com", "me too", reply_to="bob@example.com/Swift",
+    reply_id="abc", reply_ref_sender="Anna", reply_ref_body="are you in?")
+check("send_message returns id", bool(message_id))
+check("send_message reply first child",
+      sent and sent[0].xml[0].tag == "{urn:xmpp:reply:0}reply")
+check("send_message body quoted",
+      sent and str(sent[0]["body"]).startswith("> Anna wrote:"))
+plain_id = c.send_message("bob@example.com", "just hi")
+check("plain message unquoted",
+      sent[-1] and str(sent[-1]["body"]) == "just hi")
+
+# 5. history round-trip ----------------------------------------------------
+tmpd = tempfile.mkdtemp(prefix="xep0461_hist_")
+try:
+    old_dir = history_mod.HISTORY_DIR
+    history_mod.HISTORY_DIR = tmpd
+    ok = history_mod.store_message(
+        "bob@example.com", "outgoing", "> Anna wrote:\n> are you in?\nme too",
+        timestamp="2026-01-01T10:00:00", sender="Me",
+        origin_id="m2", reply_to="bob@example.com/Swift", reply_id="abc")
+    check("store reply in history", ok)
+    rows = history_mod.load_history("bob@example.com", limit=10)
+    check("load reply fields", rows and rows[0]["origin_id"] == "m2" and
+          rows[0]["reply_to"] == "bob@example.com/Swift" and
+          rows[0]["reply_id"] == "abc")
+    history_mod.HISTORY_DIR = old_dir
+finally:
+    import shutil
+    shutil.rmtree(tmpd, ignore_errors=True)
+
+# 6. theme render_reply ----------------------------------------------------
+theme = chat_themes.ChatThemeFactory()
+html = theme.render_reply("Anna", "are you in?")
+check("render_reply markup", html and "stanza-reply" in html and
+      "Anna" in html)
+bare = theme.render_reply("Anna", "")
+check("render_reply no-snippet", bare and "stanza-reply" in bare)
+
+# 7. ChatWidget reply flow (offscreen, QTextBrowser fallback) --------------
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+from stanza_im.ui.chat_widget import ChatWidget
+
+cw = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+emitted = []
+cw.message_reply_sent.connect(lambda *a: emitted.append(a))
+
+cw._on_reply_requested("abc", "alice@example.com/res", "Alice",
+                       "are you in?")
+check("reply state set", cw._reply_id == "abc" and
+      cw._reply_to == "alice@example.com/res" and
+      cw._reply_ref_body == "are you in?")
+check("reply banner visible", not cw._reply_ctx.isHidden())
+
+cw._input.setPlainText("me too")
+cw._send()
+check("reply signal emitted", len(emitted) == 1 and
+      emitted[0] == ("bob@example.com", "me too", "alice@example.com/res",
+                     "abc", "Alice", "are you in?"))
+check("reply state cleared", cw._reply_id == "" and
+      cw._reply_ctx.isHidden())
+
+# 8. plain send still goes through message_sent ---------------------------
+plain = []
+cw.message_sent.connect(lambda *a: plain.append(a))
+cw._input.setPlainText("hi")
+cw._send()
+check("plain message_sent", len(plain) == 1 and plain[0] ==
+      ("bob@example.com", "hi"))
+
+# 9. reply quote resolution from stored message ---------------------------
+cw.add_message(sender="Alice", body="are you in?",
+               timestamp="10:00", direction="incoming",
+               reply_able_id="oid-1", reply_author="alice@example.com/res")
+resolved = cw._reply_quote_for({"reply_id": "oid-1"})
+check("reply_quote_for", resolved == ("Alice", "are you in?"))
+
+print("FAILURES:", FAILURES if FAILURES else "none")
+sys.exit(1 if FAILURES else 0)

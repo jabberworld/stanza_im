@@ -80,6 +80,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_chat_options(self._config.chat)
         self._chat_window.message_to_send.connect(self._on_message_send)
         self._chat_window.groupchat_message_to_send.connect(self._on_groupchat_send)
+        self._chat_window.message_reply_to_send.connect(self._on_message_reply_send)
+        self._chat_window.groupchat_message_reply_to_send.connect(
+            self._on_groupchat_reply_send)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
@@ -1501,7 +1504,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_unread(jid)
 
     def _on_message_received(self, frm: str, body: str, ts,
-                             unstyled: bool = False):
+                             unstyled: bool = False,
+                             reply_able_id: str = "", reply_author: str = "",
+                             reply_to: str = "", reply_id: str = ""):
         bare_jid = frm.split("/")[0]
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
         self._remember_contact(bare_jid, name=sender_name,
@@ -1514,12 +1519,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.add_message(sender=sender_name, body=body,
                              timestamp=ts or _current_timestamp(),
-                             direction="incoming", unstyled=unstyled)
+                             direction="incoming", unstyled=unstyled,
+                             reply_able_id=reply_able_id,
+                             reply_author=reply_author or frm,
+                             reply_to=reply_to, reply_id=reply_id)
 
         from stanza_im.core import history
         history.store_message(bare_jid, "incoming", body,
                               timestamp=ts or _current_timestamp(),
-                              sender=sender_name)
+                              sender=sender_name,
+                              origin_id=reply_able_id,
+                              reply_to=reply_to, reply_id=reply_id)
 
         # Unread badge + tray blink (skip when conversation is on screen)
         active = (self._chat_window.isVisible()
@@ -1537,7 +1547,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._request_vcard(bare_jid)
 
     def _on_muc_private_message(self, room: str, nick: str,
-                                 body: str, ts, unstyled: bool = False):
+                                 body: str, ts, unstyled: bool = False,
+                                 reply_able_id: str = "", reply_author: str = "",
+                                 reply_to: str = "", reply_id: str = ""):
         info = self._participant_info(room, nick)
         real_jid = info.get("real_jid")
         target = real_jid.strip() if isinstance(real_jid, str) else ""
@@ -1548,10 +1560,15 @@ class MainWindow(QtWidgets.QMainWindow):
         chat.add_message(sender=nick, body=body,
                          timestamp=ts or _current_timestamp(), direction="incoming",
                          unstyled=unstyled,
-                         sender_jid=info.get("avatar_jid", "") or target)
+                         sender_jid=info.get("avatar_jid", "") or target,
+                         reply_able_id=reply_able_id,
+                         reply_author=reply_author or f"{room}/{nick}",
+                         reply_to=reply_to, reply_id=reply_id)
         from stanza_im.core import history
         history.store_message(target, "incoming", body,
-                              timestamp=ts or _current_timestamp(), sender=nick)
+                              timestamp=ts or _current_timestamp(), sender=nick,
+                              origin_id=reply_able_id,
+                              reply_to=reply_to, reply_id=reply_id)
 
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
@@ -1561,23 +1578,30 @@ class MainWindow(QtWidgets.QMainWindow):
             if chat:
                 chat.add_message(sender="Me", body=body,
                                  timestamp=_current_timestamp(), direction="outgoing",
-                                 message_id=message_id)
+                                 message_id=message_id,
+                                 reply_able_id=message_id,
+                                 reply_author=jid)
             from stanza_im.core import history
             history.store_message(
                 jid, "outgoing", body,
-                timestamp=_current_timestamp(), sender="Me")
+                timestamp=_current_timestamp(), sender="Me",
+                origin_id=message_id)
             self._remember_contact(jid)
 
     # ── Groupchat ─────────────────────────────────────────────────
 
     def _on_groupchat_message(self, room: str, nick: str, body: str,
                               ts, archived: bool = False,
-                              archive_id: str = "", unstyled: bool = False):
+                              archive_id: str = "", unstyled: bool = False,
+                              reply_able_id: str = "", reply_author: str = "",
+                              reply_to: str = "", reply_id: str = ""):
         if archived:
             from stanza_im.core import history
             history.store_message(room, "incoming", body,
                                   timestamp=ts or _current_timestamp(),
-                                  sender=nick, archive_id=archive_id)
+                                  sender=nick, archive_id=archive_id,
+                                  origin_id=reply_able_id,
+                                  reply_to=reply_to, reply_id=reply_id)
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
@@ -1590,10 +1614,15 @@ class MainWindow(QtWidgets.QMainWindow):
                              unstyled=unstyled,
                              sender_jid=(user.get("avatar_jid", "")
                                          or user.get("real_jid", "")),
-                             archive_id=archive_id)
+                             archive_id=archive_id,
+                             reply_able_id=reply_able_id,
+                             reply_author=reply_author or f"{room}/{nick}",
+                             reply_to=reply_to, reply_id=reply_id)
         from stanza_im.core import history
         history.store_message(room, "incoming", body,
-                              timestamp=ts or _current_timestamp(), sender=nick)
+                              timestamp=ts or _current_timestamp(), sender=nick,
+                              origin_id=reply_able_id,
+                              reply_to=reply_to, reply_id=reply_id)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
@@ -1660,6 +1689,40 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_groupchat_send(self, room: str, body: str):
         if self._client:
             self._client.send_muc_message(room, body)
+
+    # ── XEP-0461 reply sends ──────────────────────────────────────
+
+    def _on_message_reply_send(self, jid: str, body: str, reply_to: str,
+                               reply_id: str, ref_sender: str,
+                               ref_body: str):
+        if not (self._client and isinstance(jid, str) and jid.strip()):
+            return
+        jid = jid.strip()
+        message_id = self._client.send_message(
+            jid, body, reply_to=reply_to, reply_id=reply_id,
+            reply_ref_sender=ref_sender, reply_ref_body=ref_body)
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.add_message(
+                sender="Me", body=body,
+                timestamp=_current_timestamp(), direction="outgoing",
+                message_id=message_id,
+                reply_able_id=message_id, reply_author=jid,
+                reply_to=reply_to, reply_id=reply_id)
+        from stanza_im.core import history
+        history.store_message(
+            jid, "outgoing", body,
+            timestamp=_current_timestamp(), sender="Me",
+            origin_id=message_id, reply_to=reply_to, reply_id=reply_id)
+        self._remember_contact(jid)
+
+    def _on_groupchat_reply_send(self, room: str, body: str, reply_to: str,
+                                 reply_id: str, ref_sender: str,
+                                 ref_body: str):
+        if self._client:
+            self._client.send_muc_message(
+                room, body, reply_to=reply_to, reply_id=reply_id,
+                reply_ref_sender=ref_sender, reply_ref_body=ref_body)
 
     def _participant_info(self, room: str, nick: str) -> dict:
         return self._muc_users.get(room, {}).get(nick, {})

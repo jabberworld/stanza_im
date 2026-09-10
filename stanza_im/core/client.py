@@ -25,6 +25,79 @@ from stanza_im.include.constants import APP_NAME, VERSION
 logger = logging.getLogger(__name__)
 
 _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
+NS_REPLY = "urn:xmpp:reply:0"      # XEP-0461 Message Replies
+NS_SID = "urn:xmpp:sid:0"          # XEP-0359 Unique and Stable Stanza IDs
+
+
+def _reply_reference(stanza) -> tuple[str, str]:
+    """Return ``(to, id)`` of a XEP-0461 ``<reply/>`` on *stanza* ("" if none)."""
+    xml = getattr(stanza, "xml", None)
+    if xml is None:
+        return ("", "")
+    for el in xml:
+        if el.tag == "{%s}reply" % NS_REPLY:
+            return (str(el.get("to", "")), str(el.get("id", "")))
+    return ("", "")
+
+
+def _origin_id(stanza) -> str:
+    """Return the XEP-0359 ``origin-id`` value of *stanza*, else ""."""
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return ""
+    for el in xml.iter():
+        if el.tag == "{%s}origin-id" % NS_SID:
+            return str(el.get("id", ""))
+    return ""
+
+
+def _stanza_id(stanza, by: str) -> str:
+    """Return the XEP-0359 ``stanza-id`` registered by *by*, else "".
+
+    ``by`` is matched against the element's ``by`` attribute both verbatim
+    and as the bare JID (some servers stamp the full JID).
+    """
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return ""
+    for el in xml.iter():
+        if el.tag != "{%s}stanza-id" % NS_SID:
+            continue
+        el_by = str(el.get("by", ""))
+        if el_by and (el_by == by or el_by.split("/")[0] == by.split("/")[0]):
+            return str(el.get("id", ""))
+    return ""
+
+
+def _make_unique_id(xml) -> str:
+    """Return a stable, per-stanza unique id used as the ``origin-id``.
+
+    Prefers the message ``id`` attribute when available, otherwise derives a
+    short value from the message content (hash of the XML serialisation).
+    """
+    aid = str(xml.get("id", "") or "")
+    if aid:
+        return aid
+    try:
+        return "%04x" % (hash(ET.tostring(xml)) & 0xFFFFFFFF)
+    except Exception:
+        return aid
+
+
+def compose_reply_body(prefix: str) -> str:
+    """Build a XEP-0393 quote body referencing a message, used as the
+    XEP-0421 compatibility fallback when replying without a known stanza-id.
+
+    *prefix* is the quoted ``"Sender wrote:\\n<text>"`` block; it is added
+    verbatim as a ``> `` quoted block in the body so non-reply-aware clients
+    still see the referenced message (XEP-0461 §4).
+    """
+    lines = ["> " + line if line else "> " for line in prefix.splitlines()]
+    return "\n".join(lines) + "\n\n" if prefix else ""
 
 
 def _message_subjects(stanza) -> list[tuple[str, str]]:
@@ -106,6 +179,8 @@ class JabberClient:
 
         # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
+        # XEP-0461 Message Replies (urn:xmpp:reply:0) — advertised in disco.
+        self.xmpp["xep_0030"].add_feature(NS_REPLY)
 
         # Callbacks: list of callables keyed by event name
         self._callbacks: dict[str, list[Callable]] = {}
@@ -182,8 +257,18 @@ class JabberClient:
             self.xmpp.disconnect()
 
     def send_message(self, jid: str, body: str, mtype: str = "chat",
-                     mhtml: str | None = None) -> str:
-        """Send a message."""
+                     mhtml: str | None = None, reply_to: str = "",
+                     reply_id: str = "", reply_ref_sender: str = "",
+                     reply_ref_body: str = "") -> str:
+        """Send a message.
+
+        With *reply_to* + *reply_id* a XEP-0461 ``<reply/>`` is attached as
+        the first child of ``<message>`` (so the recipient's client can render
+        the referenced message).  When *reply_ref_body* is given (the quoted
+        original text) the body is prefixed with a XEP-0393 ``> `` quote and a
+        XEP-0421 ``<fallback for='urn:xmpp:reply:0'>`` is added so clients
+        without reply support still see the context.
+        """
         if not isinstance(jid, str) or not jid.strip():
             logger.warning("Skipping message with empty target: %r", jid)
             return ""
@@ -191,16 +276,44 @@ class JabberClient:
         msg = self.xmpp.Message()
         msg["to"] = jid
         msg["type"] = mtype
+        body = str(body)
+        quote = ""
+        if reply_ref_body and reply_ref_sender:
+            prefix = f"{reply_ref_sender} wrote:\n{reply_ref_body}"
+            quote = compose_reply_body(prefix)
+            body = quote + body
         msg["body"] = body
         message_id = uuid.uuid4().hex
         msg["id"] = message_id
+        if reply_to and reply_id:
+            self._attach_reply(msg, reply_to, reply_id, prefix_len=len(quote))
         if mtype == "chat":
             msg["request_receipt"] = True  # XEP-0184
         if mhtml:
             msg["html"]["body"] = mhtml
-        logger.debug("Sending %s message to %s: %r", mtype, jid, body[:200])
+        logger.debug("Sending %s message to %s (reply_id=%s): %r",
+                     mtype, jid, reply_id, body[:200])
         msg.send()
         return message_id
+
+    @staticmethod
+    def _attach_reply(msg, reply_to: str, reply_id: str,
+                      prefix_len: int = 0) -> None:
+        """Attach a XEP-0461 ``<reply/>`` as the first child of ``<message>``,
+        plus an optional XEP-0421 compatibility fallback marking the quoted
+        prefix (``prefix_len`` bytes of ``<body>``)."""
+        xml = msg.xml
+        reply = ET.SubElement(xml, "{%s}reply" % NS_REPLY)
+        reply.set("to", reply_to)
+        reply.set("id", reply_id)
+        xml.remove(reply)
+        xml.insert(0, reply)
+        if prefix_len:
+            fallback = ET.SubElement(xml, "{urn:xmpp:fallback:0}fallback")
+            fallback.set("for", NS_REPLY)
+            fb_body = ET.SubElement(fallback, "body")
+            fb_body.set("start", "0")
+            fb_body.set("end", str(prefix_len))
 
     def send_presence(self, show: str | None = None, status: str = "",
                       priority: int | None = None) -> None:
@@ -836,7 +949,10 @@ class JabberClient:
                     stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
                 history.store_message(room, direction, body,
                                       timestamp=_normalize_ts(str(stamp)) or None,
-                                      sender=sender, skip_existing=True)
+                                      sender=sender, skip_existing=True,
+                                      origin_id=_stanza_id(msg, room) or "",
+                                      reply_to=_reply_reference(msg)[0],
+                                      reply_id=_reply_reference(msg)[1])
             except Exception:
                 logger.debug("Could not store MUC join history for %s",
                              room, exc_info=True)
@@ -939,9 +1055,14 @@ class JabberClient:
             task.cancel()
         self.groupchats.pop(room, None)
 
-    def send_muc_message(self, room: str, body: str) -> None:
-        """Send a message to a MUC room."""
-        self.send_message(room, body, mtype="groupchat")
+    def send_muc_message(self, room: str, body: str, reply_to: str = "",
+                         reply_id: str = "", reply_ref_sender: str = "",
+                         reply_ref_body: str = "") -> None:
+        """Send a message to a MUC room, optionally replying to *reply_id*."""
+        self.send_message(room, body, mtype="groupchat",
+                          reply_to=reply_to, reply_id=reply_id,
+                          reply_ref_sender=reply_ref_sender,
+                          reply_ref_body=reply_ref_body)
 
     def set_muc_role(self, room: str, nick: str, role: str) -> None:
         """Request a MUC role change for an occupant."""
@@ -1133,15 +1254,20 @@ class JabberClient:
                 ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
             elif ts:
                 ts = _normalize_ts(str(ts))
+            reply_to, reply_id = _reply_reference(msg)
+            stable_id = _origin_id(msg) or str(msg.get("id") or "")
             room, separator, nick = frm.partition("/")
             if separator and room in self.groupchats:
-                self.emit("muc_private_message", room, nick, body, ts, unstyled)
+                self.emit("muc_private_message", room, nick, body, ts, unstyled,
+                          stable_id, frm, reply_to, reply_id)
                 return
-            self.emit("message_received", frm, body, ts, unstyled)
+            self.emit("message_received", frm, body, ts, unstyled,
+                      stable_id, frm, reply_to, reply_id)
 
     def _on_groupchat_message(self, msg) -> None:
-        room = str(msg["from"]).split("/")[0]
-        nick = str(msg["from"]).split("/", 1)[1] if "/" in str(msg["from"]) else ""
+        frm = str(msg["from"])
+        room = frm.split("/")[0]
+        nick = frm.split("/", 1)[1] if "/" in frm else ""
         body = str(msg["body"])
         subjects = _message_subjects(msg)
         if not body and subjects:
@@ -1164,8 +1290,12 @@ class JabberClient:
         # additionally has delayed delivery, which is the reliable signal.
         archived = _has_stanza_element(msg, "archived") and bool(ts)
         archive_id = _archive_result_id(msg) if archived else ""
+        reply_to, reply_id = _reply_reference(msg)
+        stable_id = _stanza_id(msg, room)
+        if not stable_id and archived and archive_id:
+            stable_id = archive_id
         self.emit("groupchat_message", room, nick, body, ts, archived,
-                  archive_id, unstyled)
+                  archive_id, unstyled, stable_id, frm, reply_to, reply_id)
 
     def _on_groupchat_subject(self, msg) -> None:
         """A MUC subject was set/announced (subject-only message).
@@ -1549,10 +1679,17 @@ class JabberClient:
                         direction = "outgoing"
                         sender = "Me"
                 from stanza_im.core import history
+                if jid in self.groupchats:
+                    stable = _stanza_id(msg, jid) or _archive_result_id(result)
+                else:
+                    stable = _origin_id(msg) or str(msg.get("id") or "")
                 inserted = history.store_message(
                     jid, direction, body, timestamp=ts or None,
                     sender=sender, skip_existing=True,
-                    archive_id=_archive_result_id(result))
+                    archive_id=_archive_result_id(result),
+                    origin_id=stable,
+                    reply_to=_reply_reference(msg)[0],
+                    reply_id=_reply_reference(msg)[1])
                 if inserted:
                     stored += 1
                 else:

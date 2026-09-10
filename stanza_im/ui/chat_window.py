@@ -134,6 +134,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
         widget.message_sent.connect(self._on_message_sent)
+        widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.typing_changed.connect(self.typing_changed)
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
@@ -165,6 +166,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
         widget.message_sent.connect(self._on_groupchat_message_sent)
+        widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
         widget.typing_changed.connect(self.typing_changed)
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
@@ -295,6 +297,10 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     message_to_send = QtCore.pyqtSignal(str, str)       # jid, body
     groupchat_message_to_send = QtCore.pyqtSignal(str, str)  # room, body
+    message_reply_to_send = QtCore.pyqtSignal(str, str, str, str, str, str)
+    #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
+    groupchat_message_reply_to_send = QtCore.pyqtSignal(
+        str, str, str, str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
@@ -368,5 +374,18 @@ class ChatWindow(QtWidgets.QMainWindow):
     def _on_message_sent(self, jid: str, body: str):
         self.message_to_send.emit(jid, body)
 
+    def _on_message_reply_sent(self, jid: str, body: str, reply_to: str,
+                               reply_id: str, ref_sender: str,
+                               ref_body: str):
+        self.message_reply_to_send.emit(jid, body, reply_to, reply_id,
+                                        ref_sender, ref_body)
+
     def _on_groupchat_message_sent(self, room: str, body: str):
         self.groupchat_message_to_send.emit(room, body)
+
+    def _on_groupchat_message_reply_sent(self, room: str, body: str,
+                                         reply_to: str, reply_id: str,
+                                         ref_sender: str, ref_body: str):
+        self.groupchat_message_reply_to_send.emit(room, body, reply_to,
+                                                  reply_id, ref_sender,
+                                                  ref_body)

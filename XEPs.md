@@ -34,6 +34,7 @@ document — update it whenever a new XEP is implemented.
 | XEP-0297 | Stanza Forwarding | Brought in by XEP-0313 to unwrap forwarded MAM results. |
 | XEP-0313 | Message Archive Management | Loads server-side history for a chat (`plugin["xep_0313"], RSM-paginated`) into the conversation. |
 | XEP-0393 | Message Styling | Parses `*bold*`/`_em_`/`` `code` ``/blockquote/pre markup (`xmpp/message_styling.py`), advertised via `urn:xmpp:styling:0`, toggleable in Preferences → Chat. |
+| XEP-0461 | Message Replies | Reply button in message actions composes a reply with a quote banner; sends `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>` as the first child of `<message>` (or falls back to a plain message without a reply source), picks the referenced id from `origin-id`/`id` in 1:1 chats and the server `stanza-id` in MUC, adds an XEP-0421 fallback body quote for legacy clients (`_send_reply`/`_attach_reply` in `core/client.py`), and renders the referenced message as a `.stanza-reply` bar above the body. |
 
 ## Legacy / unplanned
 

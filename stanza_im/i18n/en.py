@@ -59,6 +59,8 @@ STRINGS = {
     "chat_reply": "Reply...",
     "chat_copy": "Copy",
     "msg_delivered": "✓ Delivered",
+    "reply_in_reply_to": "In reply to {sender}",
+    "reply_cancel": "Cancel reply",
     "chat_file_transfer": "File Transfer",
     "history_load_earlier": "Load earlier",
     "history_clear": "Clear local history",
