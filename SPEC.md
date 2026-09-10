@@ -460,8 +460,10 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   a pure function. The max on-screen count is `osd_max` (oldest is evicted) and
   each window auto-hides after `osd_duration` seconds.
 - Preferences → Notifications → OSD shows a draggable preview at the saved
-  base position; dragging moves it via `QWindow.startSystemMove()` (compositor
-  driven, with a manual `move()` fallback), updates `osd_x/osd_y` in the shared
+  base position; dragging moves it by grabbing the mouse and calling
+  `move()` on X11 (works even when the window manager ignores the
+  `_NET_WM_MOVERESIZE` protocol, e.g. Trinity) or `QWindow.startSystemMove()`
+  on Wayland, updates `osd_x/osd_y` in the shared
   `Config` (live, persisted on Save) and re-entry re-docks it to the saved
   position. The settings dialog is opened non-modally so the preview window
   keeps receiving mouse input (a modal `exec()` would block it).

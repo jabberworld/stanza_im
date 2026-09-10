@@ -220,8 +220,9 @@ children are mouse-transparent so drags/clicks reach the window) docked to a
 saved base position (`notifications.osd_x/osd_y`). A draggable preview from the
 preferences OSD page
 moves the base (written to the shared `Config` live, persisted on Save); the
-drag is delegated to the compositor via `QWindow.startSystemMove()` (falling
-back to manual `move()`), so it works on X11 and Wayland, and the settings
+drag grabs the mouse and moves the window manually on X11 (reliable even on
+window managers that ignore `_NET_WM_MOVERESIZE`, e.g. Trinity) and uses
+`QWindow.startSystemMove()` on Wayland, and the settings
 dialog is opened non-modally so the preview keeps receiving input. Stacking
 is top-down or bottom-up per `osd_topdown`, capped by `osd_max` (oldest evicted),
 auto-hiding after `osd_duration`; a pure `stack_position()` keeps the math

@@ -155,7 +155,14 @@ move = QtGui.QMouseEvent(
     QtCore.Qt.KeyboardModifier.NoModifier)
 QtWidgets.QApplication.sendEvent(_win, press)
 check("press accepted for drag", press.isAccepted())
+check("x11 uses manual drag", not _win._use_system_move)
 QtWidgets.QApplication.sendEvent(_win, move)
+_release = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonRelease, QtCore.QPointF(40, 30),
+    QtCore.QPointF(230, 100), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.NoButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(_win, _release)
 check("preview dragged on screen", (_win.x(), _win.y()) == (150, 85))
 check("drag persists position",
       m4._cfg.osd_x == 150 and m4._cfg.osd_y == 85)
@@ -189,6 +196,12 @@ _move9 = QtGui.QMouseEvent(
     QtCore.Qt.KeyboardModifier.NoModifier)
 QtWidgets.QApplication.sendEvent(_win9, _press9)
 QtWidgets.QApplication.sendEvent(_win9, _move9)
+_release9 = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonRelease, QtCore.QPointF(40, 30),
+    QtCore.QPointF(230, 100), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.NoButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(_win9, _release9)
 check("preview drags while settings open",
       (_win9.x(), _win9.y()) == (150, 85))
 check("drag persists while settings open",

@@ -28,12 +28,10 @@ def _register_custom_url_schemes() -> None:
     try:
         from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
         for name in (b"stanza", b"mam"):
-            known = QWebEngineUrlScheme.schemeByName(name)
-            if not known.isValid():
-                scheme = QWebEngineUrlScheme(name)
-                scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
-                scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
-                QWebEngineUrlScheme.registerScheme(scheme)
+            scheme = QWebEngineUrlScheme(name)
+            scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+            scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
+            QWebEngineUrlScheme.registerScheme(scheme)
         logger.info("Registered custom URL schemes stanza/mam")
     except Exception as exc:  # pragma: no cover - optional capability
         logger.warning("Could not register custom URL schemes: %s", exc)

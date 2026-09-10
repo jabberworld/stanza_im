@@ -335,8 +335,9 @@ cw_win._on_escape()
 check("esc closes last 1:1 tab", not cw_win.has_chat("bob@example.com"))
 
 # 16. document_lost self-heal re-renders the conversation -------------------
-check("scheme registration uses isValid",
-      "isValid()" in _view_src and "_register_custom_url_schemes" in _view_src)
+check("scheme registration present",
+      "_register_custom_url_schemes" in _view_src
+      and "registerScheme" in _view_src and "schemeByName" not in _view_src)
 check("document_lost signal exists",
       "document_lost = QtCore.pyqtSignal()" in _view_src)
 restore_cw = ChatWidget("bob@example.com", "Bob",

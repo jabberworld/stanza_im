@@ -58,6 +58,12 @@ class _OsdWindow(QtWidgets.QWidget):
         self._draggable = draggable
         self._on_clicked = None
         self._on_moved = None
+        app = QtWidgets.QApplication.instance()
+        platform = (app.platformName() if app else "").lower()
+        # startSystemMove() (_NET_WM_MOVERESIZE) is unreliable on some X11
+        # window managers (e.g. Trinity) that acknowledge it but never move the
+        # window; use it only on Wayland and move manually on X11.
+        self._use_system_move = platform.startswith("wayland")
 
         frame = QtWidgets.QFrame(self)
         frame.setObjectName("osd-frame")
@@ -118,6 +124,8 @@ class _OsdWindow(QtWidgets.QWidget):
                 self._press_global = event.globalPosition().toPoint()
                 self._system_dragging = False
                 self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+                if not self._use_system_move:
+                    self.grabMouse()
                 event.accept()
             else:
                 self._click()
@@ -131,16 +139,17 @@ class _OsdWindow(QtWidgets.QWidget):
         if (event.globalPosition().toPoint()
                 - self._press_global).manhattanLength() < 6:
             return
-        # Prefer a compositor-managed drag (works on X11 and Wayland); fall
-        # back to moving the window manually when it is unavailable.
-        try:
-            handle = self.windowHandle()
-            if handle is not None and handle.startSystemMove():
-                self._system_dragging = True
-                self.move(self._press_global - self._drag_offset)
-                return
-        except (AttributeError, RuntimeError, TypeError):
-            pass
+        if self._use_system_move:
+            try:
+                handle = self.windowHandle()
+                if handle is not None and handle.startSystemMove():
+                    self._system_dragging = True
+                    self.move(self._press_global - self._drag_offset)
+                    return
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+        # Manual move: reliable on X11 (the window is override-redirect) and
+        # a safe fallback for any other platform.
         self.move(event.globalPosition().toPoint() - self._drag_offset)
         if self._on_moved:
             self._on_moved(self.x(), self.y())
@@ -155,6 +164,8 @@ class _OsdWindow(QtWidgets.QWidget):
         if self._press_global is not None or self._system_dragging:
             if self._on_moved and self.x() > -16000 and self.y() > -16000:
                 self._on_moved(self.x(), self.y())
+            if self.underMouse():
+                self.releaseMouse()
             self._press_global = None
             self._drag_offset = None
             self._system_dragging = False
