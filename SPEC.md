@@ -522,6 +522,25 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 - Non-`chat`/`normal` forwards (e.g. groupchat) are ignored, and nothing is
   ever re-forwarded/acknowledged in response to a carbon.
 
+### 14.3 Message Displayed Synchronization (XEP-0490)
+
+- Own "displayed up to" state is tracked per chat (`_mds_last_sid/…_id`) from
+  the server `stanza-id` of received 1:1 / PM / MUC messages and published to
+  the private PEP node `urn:xmpp:mds:displayed:0` (item id = the chat's JID,
+  payload `<displayed><stanza-id by=… id=…/></displayed>`). Publish-options
+  (persist/max/send-last/access=whitelist) are attached when the server
+  advertises `http://jabber.org/protocol/pubsub#publish-options`.
+- **Server-assist**: when the server announces `urn:xmpp:mds:server-assist:0`,
+  a single message to the chat's bare JID carries both a XEP-0333
+  `<displayed id=…/>` marker and the MDS `<displayed>` element (verified not
+  to be an otherwise-empty message); otherwise plain PEP publication is used.
+- Triggered from `MainWindow` when a chat becomes the focused tab
+  (`_on_tab_focused`) or receives a message while active.
+- Incoming PEP events (`type=headline`, `from` = own bare JID) and a catch-up
+  fetch after bind apply remote displayed states (`mds_displayed` event):
+  unread is cleared and an "Displayed on another device" status line is added
+  to an open chat. Config `chat.message_displayed_sync` (default on).
+
 See `XEPs.md` for the full supported-extensions matrix.
 
 ### 14.2 Event System

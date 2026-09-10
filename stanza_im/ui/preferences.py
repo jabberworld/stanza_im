@@ -175,6 +175,8 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _page_chat(self):
         general, general_form = self._page()
         general_form.addRow(self._check("send_ctrl_enter", tr("prefs_send_ctrl_enter")))
+        general_form.addRow(self._check("message_displayed_sync",
+                                        tr("prefs_message_displayed_sync")))
 
         chat, chat_form = self._page()
         chat_form.addRow(self._check("show_status", tr("prefs_show_status")))
@@ -378,6 +380,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "host": connection.host, "port": connection.port,
             "proxy_host": connection.proxy_host, "proxy_port": connection.proxy_port,
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
+            "message_displayed_sync": chat.message_displayed_sync,
             "show_receipts": chat.show_receipts, "show_mood": chat.show_mood,
             "show_music": chat.show_music, "show_avatars": chat.show_avatars,
             "message_styling": chat.message_styling,
@@ -442,7 +445,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_show_presence",
                     "muc_show_status", "muc_show_status_text",
                     "muc_auto_nick", "muc_confirm_leave",
-                    "muc_minimize_startup"):
+                    "muc_minimize_startup", "message_displayed_sync"):
             cfg.chat[key] = self._value(key)
         cfg.chat.theme = self._value("chat_theme") or ""
         cfg.appearance.chat_theme = cfg.chat.theme

@@ -273,6 +273,14 @@ picked out of `<received>`/`<sent>` with `_carbon_inner` and emitted as
 `message_received(..., carbon=True)` / `message_carbon_sent(...)`, so the UI
 renders and stores multi-device activity like normal incoming/outgoing messages.
 
+Message Displayed Synchronization (XEP-0490, `chat.message_displayed_sync`,
+default on): the latest server `stanza-id` per chat is tracked on receive and
+published to the private PEP node `urn:xmpp:mds:displayed:0` when the chat is
+focused/active (server-assist via a companion XEP-0333 marker when the server
+announces `urn:xmpp:mds:server-assist:0`); incoming PEP events and a catch-up
+fetch apply remote displayed states — unread is cleared and an open chat gets
+an "Displayed on another device" status line.
+
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide

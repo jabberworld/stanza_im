@@ -29,6 +29,12 @@ NS_REPLY = "urn:xmpp:reply:0"      # XEP-0461 Message Replies
 NS_SID = "urn:xmpp:sid:0"          # XEP-0359 Unique and Stable Stanza IDs
 NS_CARBONS = "urn:xmpp:carbons:2"  # XEP-0280 Message Carbons
 NS_FORWARD = "urn:xmpp:forward:0"  # XEP-0297 Stanza Forwarding
+NS_MDS = "urn:xmpp:mds:displayed:0"          # XEP-0490 Displayed Synchronization
+NS_MDS_ASSIST = "urn:xmpp:mds:server-assist:0"
+NS_PUBSUB = "http://jabber.org/protocol/pubsub"
+NS_PUBSUB_EVENT = "http://jabber.org/protocol/pubsub#event"
+NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
+NS_DATA = "jabber:x:data"
 
 
 def _carbon_inner(msg, which: str):
@@ -152,23 +158,30 @@ class JabberClient:
                  send_typing_notifications: bool = True,
                  send_activity_notifications: bool = True,
                  send_software: bool = True,
-                 message_carbons: bool = True):
-        self.jid_str = jid
+                 message_carbons: bool = True,
+                 message_displayed_sync: bool = True):
+        self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
         self.port = int(port or 0)
         self.auto_join_conferences = auto_join_conferences
         self.autojoin_rooms: set[str] = set()
         self.message_carbons = message_carbons
+        self.message_displayed_sync = message_displayed_sync
+        self._mds_last_sid: dict[str, str] = {}
+        self._mds_last_id: dict[str, str] = {}
+        self._mds_local: dict[str, str] = {}
+        self._mds_server_assist = False
+        self._mds_pubsub_options = False
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
         self.send_chatstates = (self.send_typing_notifications
                                 or self.send_activity_notifications)
         self.send_software = send_software
-        self._full_jid = f"{jid}/{resource}"
+        self._full_jid = f"{self.jid_str}/{resource}"
 
         self.xmpp = slixmpp.ClientXMPP(jid, password, sasl_mech="SCRAM-SHA-1")
-        self.xmpp.requested_jid = JID(f"{jid}/{resource}")
+        self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")
         self.xmpp.auto_reconnect = True
         self.xmpp.reconnect_max_retries = 5
 
@@ -197,11 +210,15 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
         # xep_0313 pulls in xep_0059 (RSM) and xep_0297 (Forward) automatically
         self.xmpp.register_plugin("xep_0280")  # Message Carbons
+        self.xmpp.register_plugin("xep_0163")  # PEP
+        self.xmpp.register_plugin("xep_0060")  # PubSub
 
         # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
         # XEP-0461 Message Replies (urn:xmpp:reply:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature(NS_REPLY)
+        # XEP-0490 Displayed Synchronization — advertise PEP notification support.
+        self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
 
         # Callbacks: list of callables keyed by event name
         self._callbacks: dict[str, list[Callable]] = {}
@@ -1233,6 +1250,9 @@ class JabberClient:
                 logger.info("Enabled message carbons (XEP-0280)")
             except Exception as exc:
                 logger.warning("Could not enable message carbons: %s", exc)
+        if self.message_displayed_sync:
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._mds_init())
         self.emit("session_started")
         loop = asyncio.get_event_loop()
         loop.create_task(self._autojoin_bookmarks())
@@ -1273,17 +1293,191 @@ class JabberClient:
             except Exception:
                 logger.debug("Could not auto-join room %s", room, exc_info=True)
 
+    # ── XEP-0490 Message Displayed Synchronization ───────────────
+
+    def _mds_track(self, chat_jid: str, msg, server_sid: str) -> None:
+        """Remember the latest server stanza-id (+ message id) of *chat_jid*."""
+        self._mds_last_sid[chat_jid] = server_sid
+        msg_id = str(msg.get("id") or "")
+        if msg_id:
+            self._mds_last_id[chat_jid] = msg_id
+
+    def mds_mark_displayed(self, chat_jid: str, sid: str = "",
+                           msg_id: str = "") -> None:
+        """Flag *chat_jid* as displayed up to the latest received message."""
+        if not self.message_displayed_sync:
+            return
+        chat_jid = str(chat_jid or "").strip()
+        if not chat_jid:
+            return
+        sid = sid or self._mds_last_sid.get(chat_jid)
+        if not sid:
+            logger.debug("MDS: nothing to mark displayed in %s", chat_jid)
+            return
+        msg_id = msg_id or self._mds_last_id.get(chat_jid, "")
+        self._mds_local[chat_jid] = sid
+        loop = asyncio.get_event_loop()
+        if self._mds_server_assist and msg_id:
+            task = self._mds_publish_message(chat_jid, sid, msg_id)
+        else:
+            task = self._mds_publish_pep(chat_jid, sid)
+        loop.create_task(task)
+
+    async def _mds_init(self) -> None:
+        try:
+            await self._mds_detect_server()
+        except Exception as exc:
+            logger.debug("MDS server detection failed: %s", exc)
+        try:
+            await self._mds_catch_up()
+        except Exception as exc:
+            logger.debug("MDS catch-up failed: %s", exc)
+
+    async def _mds_detect_server(self) -> None:
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = self.jid_str
+        ET.SubElement(iq.xml, "{%s}query" % NS_DISCO_INFO)
+        result = await iq.send()
+        features = {el.get("var") or "" for el in
+                    result.xml.iter("{%s}feature" % NS_DISCO_INFO)}
+        self._mds_server_assist = NS_MDS_ASSIST in features
+        self._mds_pubsub_options = (
+            "http://jabber.org/protocol/pubsub#publish-options" in features)
+        logger.debug("MDS server assist=%s publish-options=%s",
+                     self._mds_server_assist, self._mds_pubsub_options)
+
+    async def _mds_catch_up(self) -> None:
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = ""
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        ET.SubElement(pubsub, "{%s}items" % NS_PUBSUB).set("node", NS_MDS)
+        result = await iq.send()
+        for item_id, sid, by in self._mds_scan_result(result.xml):
+            if by and by.split("/")[0] != self.jid_str:
+                continue
+            self._mds_apply_remote(item_id, sid)
+
+    async def _mds_publish_pep(self, chat_jid: str, sid: str) -> None:
+        await self._mds_build_pep(chat_jid, sid).send()
+
+    def _mds_build_pep(self, chat_jid: str, sid: str):
+        """Build the PEP publish IQ (not sent), used by tests too."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = ""
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        publish = ET.SubElement(pubsub, "{%s}publish" % NS_PUBSUB)
+        publish.set("node", NS_MDS)
+        item = ET.SubElement(publish, "{%s}item" % NS_PUBSUB)
+        item.set("id", chat_jid)
+        disp = ET.SubElement(item, "{%s}displayed" % NS_MDS)
+        sid_el = ET.SubElement(disp, "{urn:xmpp:sid:0}stanza-id")
+        sid_el.set("by", self.jid_str)
+        sid_el.set("id", sid)
+        if self._mds_pubsub_options:
+            options = ET.SubElement(pubsub, "{%s}publish-options" % NS_PUBSUB)
+            form = ET.SubElement(options, "{%s}x" % NS_DATA)
+            form.set("type", "submit")
+            for var, val in (
+                ("FORM_TYPE",
+                 "http://jabber.org/protocol/pubsub#publish-options"),
+                ("pubsub#persist_items", "true"),
+                ("pubsub#max_items", "max"),
+                ("pubsub#send_last_published_item", "never"),
+                ("pubsub#access_model", "whitelist"),
+            ):
+                field = ET.SubElement(form, "{%s}field" % NS_DATA)
+                field.set("var", var)
+                if var == "FORM_TYPE":
+                    field.set("type", "hidden")
+                value = ET.SubElement(field, "{%s}value" % NS_DATA)
+                value.text = val
+        return iq
+
+    async def _mds_publish_message(self, chat_jid: str, sid: str,
+                                   msg_id: str) -> None:
+        await self._mds_build_message(chat_jid, sid, msg_id).send()
+
+    def _mds_build_message(self, chat_jid: str, sid: str, msg_id: str):
+        msg = self.xmpp.Message()
+        msg["to"] = chat_jid
+        msg["type"] = "chat"
+        marker = ET.SubElement(msg.xml, "{urn:xmpp:chat-markers:0}displayed")
+        marker.set("id", msg_id)
+        disp = ET.SubElement(msg.xml, "{%s}displayed" % NS_MDS)
+        sid_el = ET.SubElement(disp, "{urn:xmpp:sid:0}stanza-id")
+        sid_el.set("by", self.jid_str)
+        sid_el.set("id", sid)
+        return msg
+
+    def _maybe_mds_event(self, msg) -> None:
+        if str(msg["from"]).split("/")[0] != self.jid_str:
+            return
+        for item_id, sid, by in self._mds_scan_event(msg):
+            if by and by.split("/")[0] != self.jid_str:
+                continue
+            self._mds_apply_remote(item_id, sid)
+
+    @staticmethod
+    def _mds_payload(container):
+        for child in container:
+            if child.tag == "{%s}displayed" % NS_MDS:
+                sid_el = child.find("{urn:xmpp:sid:0}stanza-id")
+                if sid_el is not None:
+                    return sid_el.get("id") or "", sid_el.get("by") or ""
+        return "", ""
+
+    def _mds_scan_event(self, msg):
+        for el in msg.xml:
+            if el.tag != "{%s}event" % NS_PUBSUB_EVENT:
+                continue
+            items = el.find("{%s}items" % NS_PUBSUB_EVENT)
+            if items is None or items.get("node") != NS_MDS:
+                continue
+            for item in items:
+                if item.tag != "{%s}item" % NS_PUBSUB_EVENT:
+                    continue
+                sid, by = self._mds_payload(item)
+                yield item.get("id") or "", sid, by
+
+    def _mds_scan_result(self, root):
+        for items in root.iter("{%s}items" % NS_PUBSUB):
+            if items.get("node") != NS_MDS:
+                continue
+            for item in items.iter("{%s}item" % NS_PUBSUB):
+                sid, by = self._mds_payload(item)
+                yield item.get("id") or "", sid, by
+
+    def _mds_apply_remote(self, chat_jid: str, sid: str) -> None:
+        if not sid or not chat_jid:
+            return
+        if self._mds_local.get(chat_jid) == sid:
+            return
+        self._mds_local[chat_jid] = sid
+        logger.debug("MDS: %s displayed up to %s", chat_jid, sid)
+        self.emit("mds_displayed", chat_jid)
+
     def _on_message(self, msg) -> None:
+        if msg["type"] == "headline":
+            self._maybe_mds_event(msg)
+            return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
             unstyled, ts, reply_to, reply_id, stable_id = \
                 self._message_fields(msg)
+            server_sid = _stanza_id(msg, self.jid_str)
             room, separator, nick = frm.partition("/")
             if separator and room in self.groupchats:
+                if server_sid:
+                    self._mds_track(frm, msg, server_sid)
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
                           stable_id, frm, reply_to, reply_id)
                 return
+            if server_sid:
+                self._mds_track(frm.split("/")[0], msg, server_sid)
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id)
 
@@ -1316,6 +1510,9 @@ class JabberClient:
         frm = str(inner["from"])
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
+        server_sid = _stanza_id(inner, self.jid_str)
+        if server_sid:
+            self._mds_track(frm.split("/")[0], inner, server_sid)
         self.emit("message_received", frm, body, ts, unstyled,
                   stable_id, frm, reply_to, reply_id, True)
 
@@ -1370,6 +1567,8 @@ class JabberClient:
         stable_id = _stanza_id(msg, room)
         if not stable_id and archived and archive_id:
             stable_id = archive_id
+        if stable_id:
+            self._mds_track(room, msg, stable_id)
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id)
 

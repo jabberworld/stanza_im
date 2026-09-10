@@ -902,6 +902,7 @@ class MainWindow(QtWidgets.QMainWindow):
             send_activity_notifications=self._config.privacy.send_activity_notifications,
             send_software=self._config.privacy.send_software,
             message_carbons=connection.message_carbons,
+            message_displayed_sync=self._config.chat.message_displayed_sync,
         )
         self._connect_client_signals()
 
@@ -949,6 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("presence_changed", self._on_presence_changed)
         c.on("message_received", self._on_message_received)
         c.on("message_carbon_sent", self._on_message_carbon_sent)
+        c.on("mds_displayed", self._on_mds_displayed)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
@@ -1525,6 +1527,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_tab_focused(self, jid: str):
         self._reset_unread(jid)
+        if self._client:
+            self._client.mds_mark_displayed(jid)
 
     def _on_message_received(self, frm: str, body: str, ts,
                              unstyled: bool = False,
@@ -1563,6 +1567,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._unread_total += 1
             if self._config.notifications.tray_blink:
                 self._tray.start_blinking()
+        if active and self._client:
+            self._client.mds_mark_displayed(bare_jid)
         if self._config.notifications.popups and not active:
             popup_body = (f"* {sender_name} {body[4:]}"
                           if isinstance(body, str) and body.startswith("/me ")
@@ -1597,6 +1603,15 @@ class MainWindow(QtWidgets.QMainWindow):
             timestamp=ts or _current_timestamp(), sender="Me",
             origin_id=stable_id, reply_to=reply_to, reply_id=reply_id)
 
+    def _on_mds_displayed(self, chat_jid: str):
+        """Another of our devices flagged *chat_jid* as displayed (XEP-0490)."""
+        bare = chat_jid.split("/")[0]
+        self._reset_unread(bare)
+        chat = self._chat_window.get_chat(bare)
+        if chat:
+            chat.add_status(tr("mds_displayed_elsewhere"),
+                            time.strftime("%H:%M:%S"))
+
     def _on_muc_private_message(self, room: str, nick: str,
                                  body: str, ts, unstyled: bool = False,
                                  reply_able_id: str = "", reply_author: str = "",
@@ -1621,6 +1636,9 @@ class MainWindow(QtWidgets.QMainWindow):
                               origin_id=reply_able_id,
                               reply_to=reply_to, reply_id=reply_id)
         self._maybe_osd_message(nick, body, target)
+        if (self._client and self._chat_window.isVisible()
+                and self._chat_window.current_jid() == target):
+            self._client.mds_mark_displayed(target)
 
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
@@ -1679,6 +1697,9 @@ class MainWindow(QtWidgets.QMainWindow):
                               origin_id=reply_ref_id,
                               reply_to=reply_to, reply_id=reply_id)
         self._maybe_osd_groupchat(room, nick, body)
+        if (self._client and self._chat_window.isVisible()
+                and self._chat_window.current_jid() == room):
+            self._client.mds_mark_displayed(room)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
