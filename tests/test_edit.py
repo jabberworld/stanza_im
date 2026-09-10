@@ -170,14 +170,28 @@ check("history replaced",
 _view_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
-check("edit menu is anchor",
-      "edit.href = 'stanza:edit:'" in _view_src
+check("edit menu is button via console",
+      "console.log('stanza-edit:'" in _view_src
       and "data-stanza-outgoing" in _view_src)
-check("no js-location edit navigation",
-      "window.location.href = 'stanza:edit:'" not in _view_src)
-check("edited marker appended at end",
-      "content = content + tag" in _view_src
-      and "font-weight:bold" in _view_src)
+check("no js-location or href edit navigation",
+      "window.location.href = 'stanza:edit:'" not in _view_src
+      and "edit.href = 'stanza:edit:'" not in _view_src)
+check("console parses edit prefix",
+      "stanza-edit:" in _view_src and "stanza:edit:" in _view_src
+      and "link_clicked.emit" in _view_src)
+
+# 7. edited marker rendered at the end of the phrase by the theme -------------
+from stanza_im.ui.chat_themes import ChatThemeFactory
+theme = ChatThemeFactory()
+html_plain = theme.render_message("Bob", "hello world", "10:00", "incoming")
+html_edited = theme.render_message("Bob", "hello world", "10:00",
+                                   "incoming", edited=True)
+check("edited marker in theme",
+      "class=\"stanza-edited\"" in html_edited and "font-size:16px" in html_edited)
+pos_plain = html_plain.index("hello world")
+pos_edit = html_edited.index("class=\"stanza-edited\"")
+check("marker after phrase", pos_edit > pos_plain)
+check("marker absent when not edited", "stanza-edited" not in html_plain)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

@@ -272,6 +272,11 @@ if HAS_WEBENGINE:
                 self.document_lost.emit()
 
         def _on_js_console(self, level, message: str, line: int, source: str):
+            prefix = "stanza-edit:"
+            if isinstance(message, str) and message.startswith(prefix):
+                self.link_clicked.emit(
+                    "stanza:edit:" + message[len(prefix):])
+                return
             logger.debug("chat JS [%s:%s] %s", source, line, message)
 
         _SCROLL_JS = """
@@ -414,11 +419,20 @@ if HAS_WEBENGINE:
                 menu.style.top = (y + 2) + 'px';
                 menu.style.left = (x + 2) + 'px';
                 if (wrap.getAttribute('data-stanza-outgoing') === '1') {
-                    var edit = document.createElement('a');
-                    edit.href = 'stanza:edit:' + encodeURIComponent(
-                        wrap.getAttribute('data-stanza-id') || '');
+                    var edit = document.createElement('button');
+                    edit.type = 'button';
                     edit.textContent = EDIT_LABEL || 'Edit';
-                    edit.addEventListener('click', function () { closeMenu(); });
+                    edit.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        ev.preventDefault();
+                        var ref = wrap.getAttribute('data-stanza-id') || '';
+                        if (ref) {
+                            try {
+                                console.log('stanza-edit:' + encodeURIComponent(ref));
+                            } catch (err) {}
+                        }
+                        closeMenu();
+                    });
                     menu.appendChild(edit);
                 }
                 var item = document.createElement('button');
@@ -580,7 +594,7 @@ if HAS_WEBENGINE:
                     direction=direction, is_next=is_next,
                     sender_color=sender_color, user_icon_path=user_icon_path,
                     unstyled=unstyled, mention=self.mention_senders,
-                )
+                    edited=edited)
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote
                 html = self._theme.render_reply(ref_sender, ref_snippet) + html
@@ -663,6 +677,7 @@ if HAS_WEBENGINE:
                         user_icon_path=entry.get("user_icon_path", ""),
                         unstyled=entry.get("unstyled", False),
                         mention=self.mention_senders,
+                        edited=entry.get("edited", False),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -715,12 +730,6 @@ if HAS_WEBENGINE:
                           raw_timestamp: str = "", reply_able_id: str = "",
                           reply_author: str = "", reply_body: str = "",
                           outgoing: bool = False, edited: bool = False) -> str:
-            if edited:
-                tag = ('<span class="stanza-edited" style="color:#777;'
-                       'font-size:13px;font-weight:bold;margin-left:4px;'
-                       'cursor:help;" title="%s">\u270e</span>'
-                       % html.escape(tr("msg_edited_tooltip"), quote=True))
-                content = content + tag
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
                     "%REPLY_TARGET%",

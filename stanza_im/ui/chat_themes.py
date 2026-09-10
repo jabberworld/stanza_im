@@ -183,17 +183,23 @@ class ChatThemeFactory:
                        direction: str, is_next: bool = False,
                        sender_color: str = "#000000",
                        user_icon_path: str = "", unstyled: bool = False,
-                       mention: bool = False) -> str:
+                       mention: bool = False, edited: bool = False) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
-        ``stanza:mention:`` link (MUC nickname mentions).
+        ``stanza:mention:`` link (MUC nickname mentions).  With *edited* a
+        bold «✎» marker is appended right after the message phrase.
         """
         key = direction
         if is_next:
             key += "_next"
         template = self._templates.get(key, self._templates.get(direction, "{body}"))
         body_html = self._transform_body(body, styled=not unstyled)
+        if edited:
+            body_html += ('<span class="stanza-edited" style="color:#777;'
+                          'font-size:16px;font-weight:bold;margin-left:4px;'
+                          'cursor:help;" title="%s">\u270e</span>'
+                          % escape_html(tr("msg_edited_tooltip")))
 
         sender_html = escape_html(sender)
         if mention and direction == "incoming" and sender:
