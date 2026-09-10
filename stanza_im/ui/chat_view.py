@@ -16,11 +16,37 @@ try:
 except ImportError:
     HAS_WEBENGINE = False
 
+
+def _register_custom_url_schemes() -> None:
+    """Register ``stanza``/``mam`` as application-handled URL schemes.
+
+    Must run before the first QWebEngineProfile is used. Knowing the scheme
+    stops Chromium from attempting (and erroring on) a real navigation when
+    an anchor is clicked; the actual routing still happens in
+    ``acceptNavigationRequest``.
+    """
+    try:
+        from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
+        known = QWebEngineUrlScheme.schemeByName(b"stanza")
+        if known.syntax() != QWebEngineUrlScheme.Syntax.Host:
+            for name in (b"stanza", b"mam"):
+                scheme = QWebEngineUrlScheme(name)
+                scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+                scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
+                QWebEngineUrlScheme.registerScheme(scheme)
+            logger.debug("Registered custom URL schemes stanza/mam")
+    except Exception as exc:  # pragma: no cover - optional capability
+        logger.warning("Could not register custom URL schemes: %s", exc)
+
+
+logger = logging.getLogger(__name__)
+
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 
 
-logger = logging.getLogger(__name__)
+if HAS_WEBENGINE:
+    _register_custom_url_schemes()
 
 TYPING_MARKER = "\u200bStanzaTyping\u200b"
 
@@ -204,18 +230,45 @@ if HAS_WEBENGINE:
             return scheme in ("about", "data", "") or not url.isValid()
 
         def _on_load_finished(self, ok: bool):
-            self._ready = ok
             if ok:
+                self._ready = True
                 self._install_scroll_js()
                 self._install_jump_js()
                 self._install_action_js()
                 self._scroll_poll.start()
             else:
-                self._scroll_poll.stop()
-            if ok and self._pending:
+                logger.warning("chat page load finished with error: %s",
+                               self.url().toString())
+                # A denied/blocked navigation (stanza:/mam:/mailto:) can emit
+                # a spurious loadFinished(false) even though the current
+                # document (#chat) is still alive. Probe the DOM instead of
+                # wedging _ready=False forever.
+                self._ready = False
+                self._probe_chat_alive()
+                return
+            if self._pending:
                 pending, self._pending = self._pending, []
                 for chunk in pending:
                     self._append_chunk(chunk)
+
+        def _probe_chat_alive(self):
+            """Check whether the ``#chat`` node survived a rejected load."""
+            def _handle(result):
+                if result == "ok":
+                    self._ready = True
+                    if self._pending:
+                        pending, self._pending = self._pending, []
+                        for chunk in pending:
+                            self._append_chunk(chunk)
+                else:
+                    logger.warning("chat document lost; reloading empty page")
+                    self._load_empty()
+            try:
+                self._page.runJavaScript(
+                    "var n = document.getElementById('chat');"
+                    " n ? 'ok' : 'missing'", _handle)
+            except RuntimeError:
+                self._load_empty()
 
         def _on_js_console(self, level, message: str, line: int, source: str):
             logger.debug("chat JS [%s:%s] %s", source, line, message)
@@ -526,6 +579,8 @@ if HAS_WEBENGINE:
                                       reply_able_id, reply_author,
                                       reply_body=body)
             if not self._ready:
+                logger.debug("chat add_message buffered (page not ready, "
+                             "pending=%d)", len(self._pending))
                 self._pending.append(html)
                 return
             self._append_chunk(html)

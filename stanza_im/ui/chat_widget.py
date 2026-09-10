@@ -1201,10 +1201,20 @@ class ChatWidget(QtWidgets.QWidget):
                 sender, self._user_icon("incoming", sender_jid, sender))
 
     def refresh_avatars(self):
-        """Re-render messages after a participant avatar was cached."""
-        self._preserve_fraction = self._view.scroll_fraction()
-        self._anchor_bottom = False
-        self._render_all()
+        """Update avatar images in place after a participant avatar cached.
+
+        Drives the WebEngine ``img.avatar`` elements directly instead of
+        clearing and reloading the whole chat document (which would wedge
+        live rendering if the reload fails).
+        """
+        for entry in self._history + self._messages:
+            sender = entry.get("sender", "")
+            if entry.get("direction") != "incoming" or not sender:
+                continue
+            self._view.update_sender_avatar(
+                sender,
+                self._user_icon("incoming", entry.get("sender_jid", ""),
+                                sender))
 
     def set_bookmarked(self, bookmarked: bool):
         self._bookmarked = bool(bookmarked)

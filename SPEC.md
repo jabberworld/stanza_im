@@ -386,9 +386,14 @@ The per-message reply trigger is an anchor
 link, MUC mention or `mam://load` marker — requests a navigation intercepted on
 the C++ side by `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`,
 which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
-schemes and denies the in-view load. No QWebChannel call, console mirror or JS
-click handler is involved, so clicks reach Python even when the WebChannel
-transport is unavailable. `ChatWidget._handle_reply_uri` decodes the URI and
+schemes and denies the in-view load. `stanza`/`mam` are pre-registered as
+app-handled schemes (`QWebEngineUrlScheme.registerScheme`) so Chromium never
+starts a real load or error page; a stray `loadFinished(false)` from a blocked
+link is self-healed by `_on_load_finished`/`_probe_chat_alive` (which probes
+that `#chat` survived and un-wedges the pending buffer), and `refresh_avatars`
+updates avatar `<img>` elements in place rather than reloading the document.
+No QWebChannel call, console mirror or JS click handler is involved, so clicks
+reach Python even when the WebChannel transport is unavailable. `ChatWidget._handle_reply_uri` decodes the URI and
 inserts the referenced message into the input as an XEP-0421 quote block
 (`> Sender wrote:\n> text`) with the cursor below it; a reply banner
 (`chat_widget._reply_ctx`) stays as an indicator and `×` cancels, removing the

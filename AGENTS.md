@@ -167,6 +167,14 @@ link, MUC mention or `mam://load` marker — requests a navigation that is
 intercepted on the C++ side by `_StanzaPage.acceptNavigationRequest` →
 `ChatView._accept_navigation`, which emits `link_clicked` for the
 `stanza`/`mam`/`http`/`https`/`mailto` schemes and denies the in-view load.
+The `stanza`/`mam` schemes are pre-registered as app-handled with
+`QWebEngineUrlScheme.registerScheme` (`_register_custom_url_schemes`) so
+Chromium never starts (and errors on) a real load; a denied navigation is
+thus harmless. A stray `loadFinished(false)` from a blocked link is
+self-healed by `_on_load_finished`/`_probe_chat_alive`, which verifies that
+`#chat` survived and un-wedges the pending-message buffer. `refresh_avatars`
+updates avatar `<img>` elements in place instead of clearing the whole
+document, so avatar caching can never stall live rendering.
 No QWebChannel call, console mirror or JS click handler is involved, so clicks
 reach Python even when the WebChannel transport is unavailable. The
 `qwebchannel.js` glue (Qt `:/qtwebchannel` resource, falling back to

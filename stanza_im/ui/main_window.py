@@ -1607,6 +1607,8 @@ class MainWindow(QtWidgets.QMainWindow):
                      room, nick, archive_id or "none")
         reply_ref_id = reply_able_id or archive_id
         chat = self._chat_window.get_chat(room)
+        logger.debug("Groupchat live: room=%s nick=%s chat_present=%s",
+                     room, nick, chat is not None)
         if chat:
             user = self._muc_users.get(room, {}).get(nick, {})
             chat.add_message(sender=nick, body=body,
