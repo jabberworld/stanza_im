@@ -10,6 +10,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 try:
     from PyQt6 import QtWebChannel
+    from PyQt6 import QtWebEngineCore
     from PyQt6 import QtWebEngineWidgets
     HAS_WEBENGINE = True
 except ImportError:
@@ -126,7 +127,7 @@ if HAS_WEBENGINE:
         def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
             self.reply_requested.emit(reply_id, author, sender, snippet)
 
-    class _StanzaPage(QtWebEngineWidgets.QWebEnginePage):
+    class _StanzaPage(QtWebEngineCore.QWebEnginePage):
         """QWebEnginePage that routes clicks to Python via navigation.
 
         Anchors (links, mentions, reply, MAM) navigate to their ``href``;
