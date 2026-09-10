@@ -127,6 +127,7 @@ class ChatWidget(QtWidgets.QWidget):
     message_sent = QtCore.pyqtSignal(str, str)  # jid, body
     message_reply_sent = QtCore.pyqtSignal(str, str, str, str, str, str)
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
+    message_edit_sent = QtCore.pyqtSignal(str, str, str)  # jid, body, edit_id
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
     link_clicked = QtCore.pyqtSignal(str)
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
@@ -285,6 +286,30 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_ref_body = ""
         self._reply_quote_range: tuple[int, int] | None = None
         self._reply_quote_text = ""
+
+        # Editing banner + state (XEP-0308)
+        self._edit_ctx = QtWidgets.QFrame(self)
+        self._edit_ctx.setObjectName("edit-ctx")
+        self._edit_ctx.setStyleSheet(
+            "#edit-ctx { background: #fdeecc; border-bottom: 1px solid #e0c875; }"
+            "#edit-ctx QLabel { color: #6b5b1f; font-size: 12px; }")
+        _edit_layout = QtWidgets.QHBoxLayout(self._edit_ctx)
+        _edit_layout.setContentsMargins(8, 3, 4, 3)
+        _edit_layout.setSpacing(6)
+        self._edit_label = QtWidgets.QLabel("")
+        self._edit_label.setWordWrap(True)
+        _edit_layout.addWidget(self._edit_label, stretch=1)
+        self._edit_cancel = QtWidgets.QToolButton(self._edit_ctx)
+        self._edit_cancel.setText("\u00d7")
+        self._edit_cancel.setAutoRaise(True)
+        self._edit_cancel.setToolTip(tr("edit_cancel"))
+        self._edit_cancel.clicked.connect(self._cancel_edit)
+        _edit_layout.addWidget(self._edit_cancel)
+        self._edit_ctx.setVisible(False)
+        chat_col.addWidget(self._edit_ctx)
+        self._editing_id = ""
+        self._editing_previous = ""
+
         self._nick_complete_candidates: list[str] = []
         self._nick_complete_index = -1
         self._nick_complete_inserted = ""
@@ -340,6 +365,9 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:mention:"):
             self._handle_mention_uri(url)
+            return
+        if url.startswith("stanza:edit:"):
+            self._handle_edit_uri(url)
             return
         if url == "mam://load":
             self.load_more_from_server()
@@ -407,6 +435,15 @@ class ChatWidget(QtWidgets.QWidget):
                 backward = event.key() == QtCore.Qt.Key.Key_Backtab
                 if self._tab_complete_nick(backward):
                     return True
+            if (event.key() == QtCore.Qt.Key.Key_Up and has_ctrl
+                    and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                    and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
+                    and self._edit_last_sent()):
+                return True
+            if (event.key() in (QtCore.Qt.Key.Key_Escape,)
+                    and self._editing_id):
+                self._cancel_edit()
+                return True
         return super().eventFilter(obj, event)
 
     def _tab_complete_nick(self, backward: bool = False) -> bool:
@@ -482,6 +519,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._typing_timer.stop()
         self.typing_changed.emit(self.jid, False)
         if text.startswith("/") and self._handle_slash_command(text):
+            self._input.clear()
+            return
+        if self._editing_id:
+            self.message_edit_sent.emit(self.jid, text, self._editing_id)
+            self._clear_edit_state()
             self._input.clear()
             return
         if self._reply_id and text.lstrip().startswith("> "):
@@ -579,6 +621,7 @@ class ChatWidget(QtWidgets.QWidget):
         style quote block with the cursor below it; the banner stays as an
         indicator and the reply reference is kept for the outgoing stanza.
         """
+        self._clear_edit_state()
         self._reply_id = reply_id
         self._reply_to = author or sender or self.jid
         display = sender or self._author_display(author) or self._reply_to
@@ -639,6 +682,88 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_quote_text = ""
         self._reply_ctx.setVisible(False)
 
+    # ── XEP-0308 editing ─────────────────────────────────────────
+
+    def _handle_edit_uri(self, url: str) -> None:
+        ref = unquote(url[len("stanza:edit:"):])
+        if not ref:
+            return
+        entry = self._find_editable(ref)
+        if entry is not None:
+            self._begin_edit(entry)
+
+    def _find_editable(self, ref: str):
+        """Locate a message editable via *ref* (must be our own message)."""
+        if not ref:
+            return None
+        for entry in reversed(list(self._messages) + list(self._history)):
+            if (str(entry.get("message_id") or "") == ref
+                    or str(self._reply_target_id(entry) or "") == ref):
+                if self._is_mine(entry):
+                    return entry
+        return None
+
+    def _is_mine(self, entry: dict) -> bool:
+        if entry.get("direction") == "outgoing":
+            return True
+        return bool(self.is_muc and self._self_nick
+                    and entry.get("sender") == self._self_nick)
+
+    def _edit_last_sent(self) -> bool:
+        """Edit the newest message we sent (Ctrl+Up)."""
+        for entry in reversed(list(self._messages) + list(self._history)):
+            mine = (entry.get("direction") == "outgoing"
+                    or (self.is_muc and self._self_nick
+                        and entry.get("sender") == self._self_nick))
+            ref = str(entry.get("message_id") or "") or self._reply_target_id(entry)
+            if mine and ref:
+                self._begin_edit(entry)
+                return True
+        return False
+
+    def _begin_edit(self, entry: dict) -> None:
+        ref = str(entry.get("message_id") or "") or self._reply_target_id(entry)
+        if not ref:
+            return
+        self._cancel_reply()
+        self._editing_id = ref
+        self._editing_previous = self._input.toPlainText()
+        body = entry.get("body", "") or ""
+        if entry.get("reply_id"):
+            body = self._split_reply_quote(body)[0]
+        self._input.setPlainText(body)
+        cursor = self._input.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        self._input.setTextCursor(cursor)
+        self._edit_label.setText(tr("edit_in_progress"))
+        self._edit_ctx.setVisible(True)
+        self._input.setFocus()
+
+    def _cancel_edit(self):
+        self._input.setPlainText(self._editing_previous)
+        self._clear_edit_state()
+        self._input.setFocus()
+
+    def _clear_edit_state(self):
+        self._editing_id = ""
+        self._editing_previous = ""
+        self._edit_ctx.setVisible(False)
+
+    def edit_message_by_ref(self, ref_id: str, new_body: str) -> bool:
+        """Replace the body of *ref_id*'s message and mark it edited."""
+        for entry in list(self._messages) + list(self._history):
+            if (str(entry.get("message_id") or "") == ref_id
+                    or str(self._reply_target_id(entry) or "") == ref_id):
+                entry["body"] = new_body
+                entry["edited"] = True
+                dom_ref = entry.get("message_id") or self._reply_target_id(entry) \
+                    or ref_id
+                html = self._view.render_message_html(
+                    **self._entry_view_kwargs(entry))
+                self._view.replace_message_ref(dom_ref, html)
+                return True
+        return False
+
     # ── Message rendering ─────────────────────────────────────────
 
     def add_message(self, sender: str, body: str, timestamp: str,
@@ -646,7 +771,8 @@ class ChatWidget(QtWidgets.QWidget):
                     sender_jid: str = "", archive_id: str = "",
                     message_id: str = "", unstyled: bool = False,
                     reply_able_id: str = "", reply_author: str = "",
-                    reply_to: str = "", reply_id: str = ""):
+                    reply_to: str = "", reply_id: str = "",
+                    edited: bool = False):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -661,10 +787,12 @@ class ChatWidget(QtWidgets.QWidget):
                   "timestamp": timestamp, "direction": direction,
                   "is_next": is_next, "sender_jid": sender_jid,
                   "archive_id": archive_id,
-                  "message_id": message_id or (uuid.uuid4().hex if direction == "outgoing" else ""),
+                  "message_id": (message_id or reply_able_id
+                              or (uuid.uuid4().hex if direction == "outgoing" else "")),
                   "delivered": False, "unstyled": unstyled,
                   "origin_id": reply_able_id, "reply_author": reply_author,
-                  "reply_to": reply_to, "reply_id": reply_id}
+                  "reply_to": reply_to, "reply_id": reply_id,
+                  "edited": edited}
         self._messages.append(entry)
         self._render_entry(entry)
         if direction == "incoming" or sender == "Me":
@@ -685,30 +813,37 @@ class ChatWidget(QtWidgets.QWidget):
         if text:
             self._status_lines.append((text, time.strftime("%H:%M:%S")))
 
-    def _render_entry(self, entry: dict):
+    def _entry_view_kwargs(self, entry: dict) -> dict:
         body = entry.get("body", "")
         reply_quote = None
         if entry.get("reply_id"):
             body, fb_quote = self._split_reply_quote(body)
             ref_sender, ref_body = self._reply_quote_for(entry)
-            if not ref_body:
-                ref_body = fb_quote
-            reply_quote = (ref_sender or entry.get("reply_author") or "", ref_body)
+            reply_quote = (ref_sender or entry.get("reply_author") or "",
+                           ref_body or fb_quote)
         from stanza_im.include.utils import ts_to_time
-        self._view.add_message(sender=entry["sender"], body=body,
-                               timestamp=ts_to_time(entry.get("timestamp", "")),
-                               direction=entry.get("direction", "incoming"),
-                               is_next=entry.get("is_next", False),
-                               message_id=entry.get("message_id", ""),
-                               unstyled=entry.get("unstyled", False),
-                               raw_timestamp=entry.get("timestamp", ""),
-                               reply_able_id=self._reply_target_id(entry),
-                               reply_author=entry.get("reply_author", ""),
-                               reply_quote=reply_quote,
-                               user_icon_path=self._user_icon(
-                                   entry.get("direction", "incoming"),
-                                   entry.get("sender_jid", ""),
-                                   entry.get("sender", "")))
+        return {
+            "sender": entry["sender"],
+            "body": body,
+            "timestamp": ts_to_time(entry.get("timestamp", "")),
+            "direction": entry.get("direction", "incoming"),
+            "is_next": entry.get("is_next", False),
+            "message_id": entry.get("message_id", ""),
+            "unstyled": entry.get("unstyled", False),
+            "raw_timestamp": entry.get("timestamp", ""),
+            "reply_able_id": self._reply_target_id(entry),
+            "reply_author": entry.get("reply_author", ""),
+            "reply_quote": reply_quote,
+            "user_icon_path": self._user_icon(
+                entry.get("direction", "incoming"),
+                entry.get("sender_jid", ""),
+                entry.get("sender", "")),
+            "outgoing": self._is_mine(entry),
+            "edited": bool(entry.get("edited")),
+        }
+
+    def _render_entry(self, entry: dict):
+        self._view.add_message(**self._entry_view_kwargs(entry))
 
     def _user_icon(self, direction: str, sender_jid: str = "",
                    sender: str = "") -> str:
@@ -837,7 +972,9 @@ class ChatWidget(QtWidgets.QWidget):
              "origin_id": self._reply_target_id(entry),
              "reply_author": entry.get("reply_author", ""),
              "reply_quote": self._reply_quote_for(entry)
-                            if entry.get("reply_id") else None}
+                            if entry.get("reply_id") else None,
+             "outgoing": self._is_mine(entry),
+             "edited": bool(entry.get("edited"))}
             for entry in unique
         ])
 

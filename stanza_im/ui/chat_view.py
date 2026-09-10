@@ -344,6 +344,7 @@ if HAS_WEBENGINE:
             window.__stanzaActionsInstalled = true;
 
             var MENU_CLASS = 'stanza-menu';
+            var EDIT_LABEL = %EDIT_LABEL%;
             var menu = null;
 
             function closeMenu() {
@@ -412,6 +413,20 @@ if HAS_WEBENGINE:
                 menu.style.position = 'fixed';
                 menu.style.top = (y + 2) + 'px';
                 menu.style.left = (x + 2) + 'px';
+                if (wrap.getAttribute('data-stanza-outgoing') === '1') {
+                    var edit = document.createElement('button');
+                    edit.type = 'button';
+                    edit.textContent = EDIT_LABEL || 'Edit';
+                    edit.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        var ref = wrap.getAttribute('data-stanza-id');
+                        if (ref) {
+                            window.location.href = 'stanza:edit:' + encodeURIComponent(ref);
+                        }
+                        closeMenu();
+                    });
+                    menu.appendChild(edit);
+                }
                 var item = document.createElement('button');
                 item.type = 'button';
                 item.textContent = btn.getAttribute('data-copy-label') || 'Copy';
@@ -453,7 +468,9 @@ if HAS_WEBENGINE:
         """
 
         def _install_action_js(self):
-            self.page().runJavaScript(self._ACTION_JS)
+            code = self._ACTION_JS.replace(
+                "%EDIT_LABEL%", json.dumps(tr("chat_edit")))
+            self.page().runJavaScript(code)
 
         def _close_stanza_menu(self):
             """Close the in-page message menu (e.g. focus leaves the view)."""
@@ -551,40 +568,68 @@ if HAS_WEBENGINE:
                 self._theme.set_variant(variant)
             self._load_empty()
 
+        def render_message_html(self, sender: str, body: str, timestamp: str,
+                                direction: str, is_next: bool = False,
+                                sender_color: str = "#000000",
+                                user_icon_path: str = "", message_id: str = "",
+                                unstyled: bool = False, raw_timestamp: str = "",
+                                reply_able_id: str = "", reply_author: str = "",
+                                reply_quote=None, outgoing: bool = False,
+                                edited: bool = False) -> str:
+            """Render (and mark) a single message's full HTML node."""
+            phrase = self._action_phrase(body)
+            if phrase is not None:
+                html = self._theme.render_action(sender, phrase, timestamp)
+            else:
+                html = self._theme.render_message(
+                    sender=sender, body=body, timestamp=timestamp,
+                    direction=direction, is_next=is_next,
+                    sender_color=sender_color, user_icon_path=user_icon_path,
+                    unstyled=unstyled, mention=self.mention_senders,
+                )
+            if reply_quote is not None:
+                ref_sender, ref_snippet = reply_quote
+                html = self._theme.render_reply(ref_sender, ref_snippet) + html
+            return self._mark_message(html, sender, message_id, raw_timestamp,
+                                      reply_able_id, reply_author,
+                                      reply_body=body, outgoing=outgoing,
+                                      edited=edited)
+
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
                         user_icon_path: str = "", message_id: str = "",
                         unstyled: bool = False, raw_timestamp: str = "",
                         reply_able_id: str = "", reply_author: str = "",
-                        reply_quote=None):
+                        reply_quote=None, outgoing: bool = False,
+                        edited: bool = False):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
             as a XEP-0461 reply bar above the message.
             """
-            phrase = self._action_phrase(body)
-            if phrase is not None:
-                html = self._theme.render_action(sender, phrase, timestamp)
-            else:
-                html = self._theme.render_message(
-                sender=sender, body=body, timestamp=timestamp,
-                direction=direction, is_next=is_next,
-                sender_color=sender_color, user_icon_path=user_icon_path,
-                unstyled=unstyled, mention=self.mention_senders,
-            )
-            if reply_quote is not None:
-                ref_sender, ref_snippet = reply_quote
-                html = self._theme.render_reply(ref_sender, ref_snippet) + html
-            html = self._mark_message(html, sender, message_id, raw_timestamp,
-                                      reply_able_id, reply_author,
-                                      reply_body=body)
+            html = self.render_message_html(
+                sender, body, timestamp, direction, is_next,
+                sender_color, user_icon_path, message_id, unstyled,
+                raw_timestamp, reply_able_id, reply_author, reply_quote,
+                outgoing, edited)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
                 self._pending.append(html)
                 return
             self._append_chunk(html)
+
+        def replace_message_ref(self, ref_id: str, html_node: str) -> None:
+            """Replace an existing message node identified by *ref_id*."""
+            try:
+                self.page().runJavaScript(
+                    "var ref = " + json.dumps(str(ref_id)) + ";"
+                    "var n = document.querySelector('[data-stanza-id=' +"
+                    " JSON.stringify(ref) + ']');"
+                    "if (n) n.outerHTML = " + json.dumps(html_node) + ";")
+            except RuntimeError:
+                pass
 
         @staticmethod
         def _action_phrase(body: str):
@@ -637,7 +682,9 @@ if HAS_WEBENGINE:
                 entry.get("message_id", ""),
                 entry.get("raw_timestamp", ""),
                 entry.get("origin_id", ""), entry.get("reply_author", ""),
-                reply_body=entry.get("body", ""))
+                reply_body=entry.get("body", ""),
+                outgoing=entry.get("outgoing", False),
+                edited=entry.get("edited", False))
                 for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
@@ -672,22 +719,32 @@ if HAS_WEBENGINE:
         @staticmethod
         def _mark_message(content: str, sender: str, message_id: str = "",
                           raw_timestamp: str = "", reply_able_id: str = "",
-                          reply_author: str = "", reply_body: str = "") -> str:
+                          reply_author: str = "", reply_body: str = "",
+                          outgoing: bool = False, edited: bool = False) -> str:
+            if edited:
+                tag = ('<span class="stanza-edited" style="color:#999;'
+                       'font-size:10px;vertical-align:super;cursor:help;'
+                       'margin-right:2px;" title="%s">\u270e</span>'
+                       % html.escape(tr("msg_edited_tooltip"), quote=True))
+                content = tag + content
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
                     "%REPLY_TARGET%",
                     _compose_reply_target(reply_able_id, reply_author,
                                           sender, reply_body))
-            marker = (' data-stanza-id="' + html.escape(message_id, quote=True) + '"'
-                      if message_id else "")
+            node_id = message_id or reply_able_id
+            marker = (' data-stanza-id="' + html.escape(node_id, quote=True) + '"'
+                      if node_id else "")
             stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'
                      if raw_timestamp else "")
             rid = ' data-reply-id="' + html.escape(reply_able_id, quote=True) + '"'
             rauthor = ' data-reply-author="' + html.escape(reply_author, quote=True) + '"'
+            outward = ' data-stanza-outgoing="1"' if outgoing else ""
+            edited_attr = ' data-edited="1"' if edited else ""
             return ('<div class="stanza-message"' + marker + stamp
                     + ' data-stanza-sender="'
                     + html.escape(sender or "Me", quote=True) + '"'
-                    + rid + rauthor
+                    + rid + rauthor + outward + edited_attr
                     + '>' + content + '</div>')
 
         def mark_message_delivered(self, message_id: str) -> None:
@@ -828,7 +885,9 @@ else:
                         user_icon_path: str = "", message_id: str = "",
                         unstyled: bool = False, raw_timestamp: str = "",
                         reply_able_id: str = "", reply_author: str = "",
-                        reply_quote=None):
+                        reply_quote=None, outgoing: bool = False,
+                        edited: bool = False):
+            edited_suffix = " " + tr("msg_edited_tooltip") if edited else ""
             reply_line = ""
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote
@@ -844,15 +903,22 @@ else:
                 self._append_before_typing(
                     reply_line +
                     f"<i>({timestamp}) * {sender or 'Me'} "
-                    f"{phrase}</i>")
+                    f"{phrase}{edited_suffix}</i>")
             elif direction == "incoming":
                 self._append_before_typing(
                     reply_line +
-                    f"<b>{sender}</b> <i>({timestamp})</i>: {body}")
+                    f"<b>{sender}</b> <i>({timestamp})</i>: {body}{edited_suffix}")
             else:
                 self._append_before_typing(
                     reply_line +
-                    f"<b style='color:#0066cc'>{sender}</b> <i>({timestamp})</i>: {body}")
+                    f"<b style='color:#0066cc'>{sender}</b> "
+                    f"<i>({timestamp})</i>: {body}{edited_suffix}")
+
+        def render_message_html(self, *args, **kwargs) -> str:
+            return ""
+
+        def replace_message_ref(self, ref_id: str, html_node: str) -> None:
+            return
 
         def add_status(self, text: str, timestamp: str):
             self._append_before_typing(f"<i>({timestamp}) {text}</i>")

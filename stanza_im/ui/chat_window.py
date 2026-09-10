@@ -139,6 +139,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_chat_options(self._chat_options)
         widget.message_sent.connect(self._on_message_sent)
         widget.message_reply_sent.connect(self._on_message_reply_sent)
+        widget.message_edit_sent.connect(self._on_message_edit_sent)
         widget.typing_changed.connect(self.typing_changed)
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
@@ -171,6 +172,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_chat_options(self._chat_options)
         widget.message_sent.connect(self._on_groupchat_message_sent)
         widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
+        widget.message_edit_sent.connect(
+            self._on_groupchat_message_edit_sent)
         widget.typing_changed.connect(self.typing_changed)
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
@@ -305,6 +308,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
     groupchat_message_reply_to_send = QtCore.pyqtSignal(
         str, str, str, str, str, str)
+    message_edit_to_send = QtCore.pyqtSignal(str, str, str)      # jid, body, id
+    groupchat_message_edit_to_send = QtCore.pyqtSignal(str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
@@ -393,3 +398,10 @@ class ChatWindow(QtWidgets.QMainWindow):
         self.groupchat_message_reply_to_send.emit(room, body, reply_to,
                                                   reply_id, ref_sender,
                                                   ref_body)
+
+    def _on_message_edit_sent(self, jid: str, body: str, edit_id: str):
+        self.message_edit_to_send.emit(jid, body, edit_id)
+
+    def _on_groupchat_message_edit_sent(self, room: str, body: str,
+                                        edit_id: str):
+        self.groupchat_message_edit_to_send.emit(room, body, edit_id)

@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS messages (
     archive_id TEXT,
     origin_id TEXT,
     reply_to TEXT,
-    reply_id TEXT
+    reply_id TEXT,
+    message_id TEXT,
+    edited INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
@@ -73,6 +75,12 @@ def _connection(jid: str) -> sqlite3.Connection:
         for col in ("origin_id", "reply_to", "reply_id"):
             if col not in columns:
                 conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
+        for col in ("message_id",):
+            if col not in columns:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
+        if "edited" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN edited "
+                         "INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     except sqlite3.Error:
         conn.close()
@@ -88,7 +96,8 @@ def _connection(jid: str) -> sqlite3.Connection:
 
 
 def _row_to_entry(row) -> dict:
-    _id, direction, sender, body, timestamp, archive_id, origin_id, reply_to, reply_id = row
+    _id, direction, sender, body, timestamp, archive_id, origin_id, \
+        reply_to, reply_id, message_id, edited = row
     return {
         "id": _id,
         "direction": direction,
@@ -99,6 +108,8 @@ def _row_to_entry(row) -> dict:
         "origin_id": origin_id or "",
         "reply_to": reply_to or "",
         "reply_id": reply_id or "",
+        "message_id": message_id or "",
+        "edited": bool(edited),
     }
 
 
@@ -106,7 +117,8 @@ def store_message(jid: str, direction: str, body: str,
                   timestamp: str | None = None, sender: str = "",
                   skip_existing: bool = False, archive_id: str = "",
                   origin_id: str = "", reply_to: str = "",
-                  reply_id: str = "") -> bool:
+                  reply_id: str = "", message_id: str = "",
+                  edited: bool = False) -> bool:
     """Append a message to *jid*'s history.
 
     With ``skip_existing`` a row with the same (sender, body, timestamp)
@@ -131,15 +143,35 @@ def store_message(jid: str, direction: str, body: str,
         conn.execute(
             "INSERT INTO messages "
             "(direction, sender, body, timestamp, archive_id, "
-            "origin_id, reply_to, reply_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "origin_id, reply_to, reply_id, message_id, edited) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (direction, sender, body, ts, archive_id or None,
-             origin_id or None, reply_to or None, reply_id or None),
+             origin_id or None, reply_to or None, reply_id or None,
+             message_id or None, 1 if edited else 0),
         )
         conn.commit()
         return True
     except sqlite3.Error as exc:
         logger.warning("Could not save history for %s: %s", jid, exc)
+        return False
+
+
+def replace_message(jid: str, ref_id: str, new_body: str) -> bool:
+    """Replace the body of a stored message referenced by *ref_id* and mark
+    it as edited (XEP-0308 corrections).  Matches by ``message_id`` or
+    ``origin_id``."""
+    if not ref_id:
+        return False
+    try:
+        conn = _connection(jid)
+        cur = conn.execute(
+            "UPDATE messages SET body = ?, edited = 1 "
+            "WHERE message_id = ? OR origin_id = ?",
+            (new_body, ref_id, ref_id))
+        conn.commit()
+        return cur.rowcount > 0
+    except sqlite3.Error as exc:
+        logger.warning("Could not replace history for %s: %s", jid, exc)
         return False
 
 
@@ -164,7 +196,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
         cur = conn.execute(
             f"SELECT * FROM ("
             f"SELECT id, direction, sender, body, timestamp, archive_id,"
-            f" origin_id, reply_to, reply_id FROM messages"
+            f" origin_id, reply_to, reply_id, message_id, edited FROM messages"
             f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
             f"ORDER BY timestamp ASC, id ASC",
             params)
@@ -184,7 +216,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
         cur = conn.execute(
             "SELECT * FROM ("
             "SELECT id, direction, sender, body, timestamp, archive_id,"
-            " origin_id, reply_to, reply_id FROM messages "
+            " origin_id, reply_to, reply_id, message_id, edited FROM messages "
             "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
             (str(int(before_id)), str(int(limit))))
         return [_row_to_entry(r) for r in cur.fetchall()]
@@ -199,7 +231,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
         conn = _connection(jid)
         cur = conn.execute(
             "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
-            " origin_id, reply_to, reply_id "
+            " origin_id, reply_to, reply_id, message_id, edited "
             "FROM messages WHERE timestamp < ? "
             "ORDER BY timestamp DESC, id DESC LIMIT ?) "
             "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
@@ -275,7 +307,7 @@ def load_day(jid: str, date: str) -> list[dict]:
         conn = _connection(jid)
         cur = conn.execute(
             "SELECT id, direction, sender, body, timestamp, archive_id,"
-            " origin_id, reply_to, reply_id "
+            " origin_id, reply_to, reply_id, message_id, edited "
             "FROM messages "
             "WHERE substr(timestamp, 1, 10) = ? "
             "ORDER BY timestamp ASC, id ASC", (date,))

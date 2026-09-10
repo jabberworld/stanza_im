@@ -541,6 +541,23 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
   unread is cleared and an "Displayed on another device" status line is added
   to an open chat. Config `chat.message_displayed_sync` (default on).
 
+### 14.4 Last Message Correction (XEP-0308)
+
+- Any own message can be edited: Ctrl+Up in the input starts editing the last
+  one, and the message context menu adds "Edit" for our own messages (routed
+  via `stanza:edit:<id>` through `acceptNavigationRequest`). The edited body
+  loads into the input with a cancelable "Editing…" banner; sending emits
+  `message_edit_sent` and the client attaches
+  `<replace xmlns='urn:xmpp:message-correct:0' id='…'/>` as the first child
+  (with a fresh stanza id).
+- `send_message`/`send_muc_message` accept `replace_id`; `edit_message()`
+  wraps them. Received corrections (1:1 and MUC) are matched by the referenced
+  id and, with `chat.allow_incoming_edits` on (default), replace the original
+  message in the chat and history (body updated, `edited` flag, message_id
+  column); with the toggle off they are delivered as ordinary new messages.
+- Replaced messages show a «✎» marker (`.stanza-edited`, `data-stanza-outgoing`
+  /`data-edited` on the wrapper drives the menu).
+
 See `XEPs.md` for the full supported-extensions matrix.
 
 ### 14.2 Event System

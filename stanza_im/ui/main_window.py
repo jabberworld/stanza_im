@@ -84,6 +84,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.message_reply_to_send.connect(self._on_message_reply_send)
         self._chat_window.groupchat_message_reply_to_send.connect(
             self._on_groupchat_reply_send)
+        self._chat_window.message_edit_to_send.connect(self._on_message_edit_send)
+        self._chat_window.groupchat_message_edit_to_send.connect(
+            self._on_groupchat_edit_send)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
@@ -903,6 +906,7 @@ class MainWindow(QtWidgets.QMainWindow):
             send_software=self._config.privacy.send_software,
             message_carbons=connection.message_carbons,
             message_displayed_sync=self._config.chat.message_displayed_sync,
+            allow_incoming_edits=self._config.chat.allow_incoming_edits,
         )
         self._connect_client_signals()
 
@@ -951,6 +955,8 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("message_received", self._on_message_received)
         c.on("message_carbon_sent", self._on_message_carbon_sent)
         c.on("mds_displayed", self._on_mds_displayed)
+        c.on("message_corrected", self._on_message_corrected)
+        c.on("groupchat_message_corrected", self._on_groupchat_message_corrected)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
@@ -1800,6 +1806,50 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.send_muc_message(
                 room, body, reply_to=reply_to, reply_id=reply_id,
                 reply_ref_sender=ref_sender, reply_ref_body=ref_body)
+
+    def _on_message_edit_send(self, jid: str, body: str, edit_id: str):
+        """Send a XEP-0308 correction (1:1) and replace it locally."""
+        if not (self._client and isinstance(jid, str) and jid.strip()):
+            return
+        jid = jid.strip()
+        self._client.edit_message(jid, body, edit_id)
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.edit_message_by_ref(edit_id, body)
+        from stanza_im.core import history
+        history.replace_message(jid, edit_id, body)
+        self._remember_contact(jid)
+
+    def _on_groupchat_edit_send(self, room: str, body: str, edit_id: str):
+        if self._client:
+            self._client.edit_message(room, body, edit_id, mtype="groupchat")
+        self._remember_contact(room, name=self._muc_display_name(room),
+                               groups=[tr("roster_group_conferences")],
+                               is_conference=True)
+
+    def _on_message_corrected(self, frm: str, ref_id: str, body: str, ts,
+                              unstyled: bool = False,
+                              stable_id: str = "", reply_to: str = "",
+                              reply_id: str = ""):
+        """A contact corrected a message they sent (XEP-0308)."""
+        bare = frm.split("/")[0]
+        chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(frm)
+        if chat:
+            chat.edit_message_by_ref(ref_id, body)
+        from stanza_im.core import history
+        history.replace_message(bare, ref_id, body)
+
+    def _on_groupchat_message_corrected(self, room: str, ref_id: str,
+                                        body: str, ts, unstyled: bool = False,
+                                        stable_id: str = "", frm: str = "",
+                                        reply_to: str = "",
+                                        reply_id: str = ""):
+        """A participant corrected their MUC message (XEP-0308)."""
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            chat.edit_message_by_ref(ref_id, body)
+        from stanza_im.core import history
+        history.replace_message(room, ref_id, body)
 
     def _participant_info(self, room: str, nick: str) -> dict:
         return self._muc_users.get(room, {}).get(nick, {})

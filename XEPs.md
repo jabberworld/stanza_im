@@ -20,6 +20,7 @@ document — update it whenever a new XEP is implemented.
 | XEP-0082 | XMPP Date and Time Profiles | Normalizes server timestamps to canonical UTC ISO-8601 (`_normalize_ts`). |
 | XEP-0085 | Chat State Notifications | Sends typing/composing states and shows the remote activity suffix in the chat window title. |
 | XEP-0280 | Message Carbons | Copies of 1:1 messages sent/received by other of our resources are shown in the matching chats (`carbon_received`/`carbon_sent` in `core/client.py`, config `connection.message_carbons`) and stored in history. |
+| XEP-0308 | Last Message Correction | Any of our own messages can be edited (Ctrl+Up for the last one, "Edit" in the message context menu); the input switches to edit mode with a cancelable banner and sending a correction attaches `<replace xmlns='urn:xmpp:message-correct:0' id='…'/>` (new stanza id) which replaces the original locally. Incoming corrections replace the message (✎ marker) or, with `chat.allow_incoming_edits` off, arrive as new messages. |
 | XEP-0092 | Software Version | Contact and MUC participant tooltips show the remote client (`plugin["xep_0092"]`). |
 | XEP-0096 | SI File Transfer | Not implemented yet — pre-registered for the Phase 2 file transfer work. |
 | XEP-0107 | User Mood | Mood/activity name tables used for UI labels; publishing is not implemented yet. |

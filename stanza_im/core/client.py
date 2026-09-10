@@ -35,6 +35,18 @@ NS_PUBSUB = "http://jabber.org/protocol/pubsub"
 NS_PUBSUB_EVENT = "http://jabber.org/protocol/pubsub#event"
 NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
 NS_DATA = "jabber:x:data"
+NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
+
+
+def _replace_reference(stanza) -> str:
+    """Return the ``id`` of a XEP-0308 ``<replace/>`` on *stanza* ("" if none)."""
+    xml = getattr(stanza, "xml", None)
+    if xml is None:
+        return ""
+    for el in xml:
+        if el.tag == "{%s}replace" % NS_CORRECT:
+            return str(el.get("id", ""))
+    return ""
 
 
 def _carbon_inner(msg, which: str):
@@ -159,7 +171,8 @@ class JabberClient:
                  send_activity_notifications: bool = True,
                  send_software: bool = True,
                  message_carbons: bool = True,
-                 message_displayed_sync: bool = True):
+                 message_displayed_sync: bool = True,
+                 allow_incoming_edits: bool = True):
         self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
@@ -168,6 +181,7 @@ class JabberClient:
         self.autojoin_rooms: set[str] = set()
         self.message_carbons = message_carbons
         self.message_displayed_sync = message_displayed_sync
+        self.allow_incoming_edits = allow_incoming_edits
         self._mds_last_sid: dict[str, str] = {}
         self._mds_last_id: dict[str, str] = {}
         self._mds_local: dict[str, str] = {}
@@ -299,7 +313,8 @@ class JabberClient:
     def send_message(self, jid: str, body: str, mtype: str = "chat",
                      mhtml: str | None = None, reply_to: str = "",
                      reply_id: str = "", reply_ref_sender: str = "",
-                     reply_ref_body: str = "") -> str:
+                     reply_ref_body: str = "",
+                     replace_id: str = "") -> str:
         """Send a message.
 
         With *reply_to* + *reply_id* a XEP-0461 ``<reply/>`` is attached as
@@ -327,6 +342,8 @@ class JabberClient:
         msg["id"] = message_id
         if reply_to and reply_id:
             self._attach_reply(msg, reply_to, reply_id, prefix_len=len(quote))
+        if replace_id:
+            self._attach_replace(msg, replace_id)
         if mtype == "chat":
             msg["request_receipt"] = True  # XEP-0184
         if mhtml:
@@ -354,6 +371,16 @@ class JabberClient:
             fb_body = ET.SubElement(fallback, "body")
             fb_body.set("start", "0")
             fb_body.set("end", str(prefix_len))
+
+    @staticmethod
+    def _attach_replace(msg, replace_id: str) -> None:
+        """Attach a XEP-0308 ``<replace id='…'/>`` as the first child of
+        ``<message>`` (the message replaces *replace_id*)."""
+        xml = msg.xml
+        replace = ET.SubElement(xml, "{%s}replace" % NS_CORRECT)
+        replace.set("id", replace_id)
+        xml.remove(replace)
+        xml.insert(0, replace)
 
     def send_presence(self, show: str | None = None, status: str = "",
                       priority: int | None = None) -> None:
@@ -1097,12 +1124,18 @@ class JabberClient:
 
     def send_muc_message(self, room: str, body: str, reply_to: str = "",
                          reply_id: str = "", reply_ref_sender: str = "",
-                         reply_ref_body: str = "") -> None:
-        """Send a message to a MUC room, optionally replying to *reply_id*."""
+                         reply_ref_body: str = "", replace_id: str = "") -> None:
+        """Send a message to a MUC room, optionally replying or correcting."""
         self.send_message(room, body, mtype="groupchat",
                           reply_to=reply_to, reply_id=reply_id,
                           reply_ref_sender=reply_ref_sender,
-                          reply_ref_body=reply_ref_body)
+                          reply_ref_body=reply_ref_body,
+                          replace_id=replace_id)
+
+    def edit_message(self, jid: str, body: str, replace_id: str,
+                     mtype: str = "chat") -> str:
+        """Send a XEP-0308 correction replacing *replace_id* with *body*."""
+        return self.send_message(jid, body, mtype=mtype, replace_id=replace_id)
 
     def set_muc_role(self, room: str, nick: str, role: str) -> None:
         """Request a MUC role change for an occupant."""
@@ -1469,15 +1502,30 @@ class JabberClient:
             unstyled, ts, reply_to, reply_id, stable_id = \
                 self._message_fields(msg)
             server_sid = _stanza_id(msg, self.jid_str)
+            replace_ref = _replace_reference(msg)
             room, separator, nick = frm.partition("/")
             if separator and room in self.groupchats:
                 if server_sid:
                     self._mds_track(frm, msg, server_sid)
+                if replace_ref:
+                    if self.allow_incoming_edits:
+                        self.emit("message_corrected", frm, replace_ref,
+                                  body, ts, unstyled, stable_id,
+                                  reply_to, reply_id)
+                        return
+                    logger.debug("Incoming correction ignored (edits disabled)")
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
                           stable_id, frm, reply_to, reply_id)
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
+            if replace_ref:
+                if self.allow_incoming_edits:
+                    self.emit("message_corrected", frm, replace_ref,
+                              body, ts, unstyled, stable_id,
+                              reply_to, reply_id)
+                    return
+                logger.debug("Incoming correction ignored (edits disabled)")
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id)
 
@@ -1569,6 +1617,14 @@ class JabberClient:
             stable_id = archive_id
         if stable_id:
             self._mds_track(room, msg, stable_id)
+        replace_ref = _replace_reference(msg)
+        if replace_ref:
+            if self.allow_incoming_edits:
+                self.emit("groupchat_message_corrected",
+                          room, replace_ref, body, ts, unstyled,
+                          stable_id, frm, reply_to, reply_id)
+                return
+            logger.debug("Incoming MUC correction ignored (edits disabled)")
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id)
 
