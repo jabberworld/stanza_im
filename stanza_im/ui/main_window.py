@@ -1605,6 +1605,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
+        reply_ref_id = reply_able_id or archive_id
         chat = self._chat_window.get_chat(room)
         if chat:
             user = self._muc_users.get(room, {}).get(nick, {})
@@ -1615,13 +1616,13 @@ class MainWindow(QtWidgets.QMainWindow):
                              sender_jid=(user.get("avatar_jid", "")
                                          or user.get("real_jid", "")),
                              archive_id=archive_id,
-                             reply_able_id=reply_able_id,
+                             reply_able_id=reply_ref_id,
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id)
         from stanza_im.core import history
         history.store_message(room, "incoming", body,
                               timestamp=ts or _current_timestamp(), sender=nick,
-                              origin_id=reply_able_id,
+                              origin_id=reply_ref_id,
                               reply_to=reply_to, reply_id=reply_id)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],

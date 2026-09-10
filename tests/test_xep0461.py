@@ -93,6 +93,17 @@ plain_id = c.send_message("bob@example.com", "just hi")
 check("plain message unquoted",
       sent[-1] and str(sent[-1]["body"]) == "just hi")
 
+# 4b. quote-only send (no resolvable reference) -----------------------------
+sent.clear()
+qonly_id = c.send_message("bob@example.com", "me too",
+                          reply_ref_sender="Anna", reply_ref_body="are you in?")
+check("quote-only returns id", bool(qonly_id))
+check("quote-only body quoted",
+      sent and str(sent[-1]["body"]).startswith("> Anna wrote:"))
+check("quote-only has no reply element",
+      sent and not any(el.tag == "{urn:xmpp:reply:0}reply"
+                       for el in sent[-1].xml))
+
 # 5. history round-trip ----------------------------------------------------
 tmpd = tempfile.mkdtemp(prefix="xep0461_hist_")
 try:
@@ -119,6 +130,14 @@ check("render_reply markup", html and "stanza-reply" in html and
       "Anna" in html)
 bare = theme.render_reply("Anna", "")
 check("render_reply no-snippet", bare and "stanza-reply" in bare)
+
+# 6b. reply button JS handles messages without a reference id -------------
+_view_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
+check("reply JS no silent bail", "if (!replyId) return;" not in _view_src)
+check("reply JS stanza-id fallback",
+      "wrap.getAttribute('data-stanza-id')" in _view_src)
 
 # 7. ChatWidget reply flow (offscreen, QTextBrowser fallback) --------------
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -157,6 +176,28 @@ cw.add_message(sender="Alice", body="are you in?",
                reply_able_id="oid-1", reply_author="alice@example.com/res")
 resolved = cw._reply_quote_for({"reply_id": "oid-1"})
 check("reply_quote_for", resolved == ("Alice", "are you in?"))
+
+# 10. quote-only reply (message without a reference id) --------------------
+emitted.clear()
+cw._on_reply_requested("", "alice@example.com/res", "Alice", "are you in?")
+check("quote-only banner visible", not cw._reply_ctx.isHidden())
+cw._input.setPlainText("still yes")
+cw._send()
+check("quote-only reply emitted with empty id",
+      len(emitted) == 1 and emitted[0] ==
+      ("bob@example.com", "still yes", "alice@example.com/res",
+       "", "Alice", "are you in?"))
+check("quote-only state cleared", cw._reply_id == "" and
+      cw._reply_ctx.isHidden())
+
+# 11. reply target id fallback chain ---------------------------------------
+check("reply_target_id origin", ChatWidget._reply_target_id(
+    {"origin_id": "o", "archive_id": "a", "message_id": "m"}) == "o")
+check("reply_target_id archive", ChatWidget._reply_target_id(
+    {"origin_id": "", "archive_id": "a", "message_id": "m"}) == "a")
+check("reply_target_id message", ChatWidget._reply_target_id(
+    {"origin_id": "", "archive_id": "", "message_id": "m"}) == "m")
+check("reply_target_id empty", ChatWidget._reply_target_id({}) == "")
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

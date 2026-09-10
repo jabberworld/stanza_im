@@ -160,12 +160,14 @@ preferences switch both fall back to the plain pipeline. Feature advertised as
 `urn:xmpp:styling:0`.
 
 **Message Replies** (XEP-0461): the per-message action menu's reply button
-pins a quote banner above the input; `client._send_reply` attaches
+pins a quote banner above the input; `client._attach_reply` attaches
 `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>` as the first child of
 `<message>` plus an optional XEP-0421 fallback (`> Sender wrote: …`) wrapped in
 `<fallback for='urn:xmpp:reply:0'>` for legacy clients. Replyable ids come from
-`origin-id`/`id` (1:1) and the server `stanza-id` (MUC, by the room's bare JID);
-replies with no resolvable reference are sent as plain messages. Received
+`origin-id`/`id` (1:1) and the server `stanza-id` (MUC, by the room's bare JID),
+falling back to `archive_id` then `message_id` (`ChatWidget._reply_target_id`);
+the reply button is never a no-op — a message with no resolvable reference still
+opens the banner and is sent as a plain message carrying the `> ` quote. Received
 replies are parsed in `client._on_message`/`_on_groupchat_message`, stored in
 history (`origin_id`/`reply_to`/`reply_id`, see `core/history.py`) and rendered
 with the `.stanza-reply` quote bar (body quotes stripped) via

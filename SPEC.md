@@ -379,7 +379,7 @@ being off) fall back to the plain pipeline. Supported feature is advertised as
 
 A reply button appears in the per-message action menu. Clicking it pins a reply
 banner above the input bar (`chat_widget._reply_ctx`); sending emits
-`message_reply_sent`. `JabberClient._send_reply` attaches a
+`message_reply_sent`. `JabberClient._attach_reply` attaches a
 `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>` as the **first child** of the
 `<message>` stanza, and — when the local quote is available (XEP-0421
 fallback) — prepends `> Sender wrote: …` lines wrapped in a
@@ -388,7 +388,12 @@ message.
 
 - Replyable ids: 1:1 messages use the local `origin-id` when present, else the
   message `id`; MUC messages use the server-assigned `stanza-id` (by the room's
-  bare JID) — client replies are ignored when no such id exists.
+  bare JID). Rendering falls back through `origin_id` → `archive_id` →
+  `message_id` (`ChatWidget._reply_target_id`), and the JS button additionally
+  falls back to `data-stanza-id`, so the action is never a silent no-op.
+- When no reference id can be resolved the reply is still sent: the banner
+  opens and the message goes out as a plain `chat`/`groupchat` body carrying the
+  `> Sender wrote: …` quote, with no `<reply/>` element.
 - Received replies are stored in history (`origin_id`, `reply_to`, `reply_id`
   columns) and rendered with the referenced text in a `.stanza-reply` quote bar
   above the body; leading XEP-0421 quote lines are stripped from the displayed
@@ -427,7 +432,7 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 - XEP-0393 Message Styling advertised via disco feature `urn:xmpp:styling:0`
   (parsed by `xmpp/message_styling.py`; toggle in Preferences → Chat)
 - XEP-0461 Message Replies advertised via disco feature `urn:xmpp:reply:0`
-  (manual `<reply/>` handling in `client._on_message`/`_send_reply` —
+  (manual `<reply/>` handling in `client._on_message`/`_attach_reply` —
   slixmpp has no plugin for it)
 
 See `XEPs.md` for the full supported-extensions matrix.

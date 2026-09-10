@@ -344,13 +344,15 @@ if HAS_WEBENGINE:
                 else if (btn.getAttribute('data-action') === 'reply') {
                     var wrap = btn.closest('.stanza-message');
                     var replyId = wrap ? wrap.getAttribute('data-reply-id') : '';
-                    if (!replyId) return;
-                    var bodyNode = wrap.querySelector(
-                        '.message, .message_incoming, .message_outgoing, .next_message');
+                    if (!replyId && wrap) {
+                        replyId = wrap.getAttribute('data-stanza-id') || '';
+                    }
+                    var bodyNode = wrap ? wrap.querySelector(
+                        '.message, .message_incoming, .message_outgoing, .next_message') : null;
                     var body = bodyNode
                         ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
-                    var sender = wrap.getAttribute('data-stanza-sender') || '';
-                    var author = wrap.getAttribute('data-reply-author') || '';
+                    var sender = wrap ? wrap.getAttribute('data-stanza-sender') || '' : '';
+                    var author = wrap ? wrap.getAttribute('data-reply-author') || '' : '';
                     if (window.bridge && window.bridge.on_reply)
                         window.bridge.on_reply(replyId, author, sender, body);
                 }
