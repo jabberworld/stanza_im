@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from xml.etree import ElementTree as ET
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 import slixmpp
 
 from stanza_im.core import client as client_mod
@@ -131,13 +131,22 @@ check("render_reply markup", html and "stanza-reply" in html and
 bare = theme.render_reply("Anna", "")
 check("render_reply no-snippet", bare and "stanza-reply" in bare)
 
-# 6b. reply button JS handles messages without a reference id -------------
-_view_src = open(os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
-check("reply JS no silent bail", "if (!replyId) return;" not in _view_src)
+# 6b. reply button JS routes via the page-level link handler ---------------
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_theme_src = open(os.path.join(
+    _root, "stanza_im", "ui", "chat_themes.py"), encoding="utf-8").read()
+check("reply JS routes via on_link_clicked",
+      "stanza:reply:" in _theme_src and "on_link_clicked" in _theme_src)
 check("reply JS stanza-id fallback",
-      "wrap.getAttribute('data-stanza-id')" in _view_src)
+      "data-stanza-id" in _theme_src)
+_view_src = open(os.path.join(
+    _root, "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
+check("ACTION_JS reply branch removed",
+      "data-action" + "' === 'reply'" not in _view_src)
+check("qwebchannel bundled",
+      os.path.isfile(os.path.join(_root, "resources", "qwebchannel.js")))
+from stanza_im.ui import chat_themes as _ct
+check("webchannel script non-empty", bool(_ct._webchannel_script()))
 
 # 7. ChatWidget reply flow (offscreen, QTextBrowser fallback) --------------
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -198,6 +207,81 @@ check("reply_target_id archive", ChatWidget._reply_target_id(
 check("reply_target_id message", ChatWidget._reply_target_id(
     {"origin_id": "", "archive_id": "", "message_id": "m"}) == "m")
 check("reply_target_id empty", ChatWidget._reply_target_id({}) == "")
+
+# 12. stanza:reply URI drives the banner via _open_link --------------------
+from urllib.parse import quote as _quote
+cw2 = ChatWidget("room@conf/x", "Room", chat_themes.ChatThemeFactory(),
+                 is_muc=True)
+cw2._reply_ctx.setVisible(False)
+cw2._open_link("stanza:reply:oid-9/" + _quote("alice@example.com/res", safe="")
+               + "/Alice/" + _quote("hello bob"))
+check("stanza:reply sets banner",
+      not cw2._reply_ctx.isHidden() and cw2._reply_id == "oid-9"
+      and cw2._reply_ref_sender == "Alice"
+      and cw2._reply_ref_body == "hello bob")
+
+# 13. stanza:mention inserts "nick: " with focus (MUC only) -----------------
+cw2.show()
+cw2.activateWindow()
+QtWidgets.QApplication.processEvents()
+cw2._input.setPlainText("")
+cw2._open_link("stanza:mention:" + _quote("Bob The Cat"))
+check("stanza:mention inserts",
+      cw2._input.toPlainText() == "Bob The Cat: ")
+check("stanza:mention focuses input", cw2._input.hasFocus())
+plain_chat = ChatWidget("x@example.com", "X", chat_themes.ChatThemeFactory())
+plain_chat._open_link("stanza:mention:" + _quote("Bob"))
+check("stanza:mention ignored in 1:1",
+      plain_chat._input.toPlainText() == "")
+
+# 14. Tab completion of MUC nicks ------------------------------------------
+cw3 = ChatWidget("room@conf/y", "Room", chat_themes.ChatThemeFactory(),
+                 is_muc=True)
+cw3.update_muc_users([
+    {"nick": "alice"}, {"nick": "albert"}, {"nick": "zoe"},
+    {"nick": "Bob The Cat"},
+])
+
+
+def _type(text):
+    cw3._input.setPlainText(text)
+    cur = cw3._input.textCursor()
+    cur.movePosition(QtGui.QTextCursor.MoveOperation.End)
+    cw3._input.setTextCursor(cur)
+
+
+cw3._input.setFocus()
+_type("")
+cw3._tab_complete_nick()
+check("tab all nicks first", cw3._input.toPlainText() == "albert")
+cw3._tab_complete_nick()
+check("tab all nicks cycle", cw3._input.toPlainText() == "alice")
+_type("bo")
+cw3._tab_complete_nick()
+check("tab prefix match", cw3._input.toPlainText() == "Bob The Cat")
+_type("x")
+check("tab no match returns False", cw3._tab_complete_nick() is False)
+_type("")
+cw3._tab_complete_nick(backward=True)
+check("tab backward starts from end", cw3._input.toPlainText() == "zoe")
+_type("echo hi al")
+cw3._tab_complete_nick()
+check("tab completes mid-line word",
+      cw3._input.toPlainText() == "echo hi albert")
+
+# 15. Esc collapses current tab, others remain -----------------------------
+from stanza_im.ui.chat_window import ChatWindow
+cw_win = ChatWindow(chat_themes.ChatThemeFactory(),
+                    chat_themes.ChatThemeFactory())
+cw_win.set_muc_leave_confirm(lambda room: True)
+cw_win.open_groupchat("room@conf/x", "Nick", "Room")
+cw_win.open_chat("bob@example.com", "Bob", focus=False)
+cw_win._on_escape()
+check("esc closes muc tab", not cw_win.has_chat("room@conf/x"))
+check("esc keeps 1:1 tab", cw_win.has_chat("bob@example.com"))
+check("esc keeps window visible", cw_win.isVisible())
+cw_win._on_escape()
+check("esc closes last tab", not cw_win.has_chat("bob@example.com"))
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

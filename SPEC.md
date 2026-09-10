@@ -242,11 +242,11 @@ Default: standalone.
 - `Ctrl+1..9` for direct tab access (Phase 2)
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` for next/prev (native Qt)
 - Tab label: display name (MUC: prefixed with room icon)
-- Esc closes the current tab; Ctrl+PgUp/Ctrl+PgDown cycle tabs; Ctrl+1..9
-  selects a tab and Ctrl+W closes it.
-- Esc on a MUC tab hides the chat window instead of closing the tab (the
-  conference stays active and is reopened from the roster); Esc on a 1-on-1
-  tab keeps the legacy behavior (closes the tab).
+- Esc closes the current tab (uniform for 1-on-1 and MUC); Ctrl+PgUp/Ctrl+PgDown
+  cycle tabs; Ctrl+1..9 selects a tab and Ctrl+W closes it.
+- Esc collapses the current conversation back to the roster: it closes the tab
+  (MUC rooms are left) while other tabs stay open; the window hides only once
+  the last tab is closed.
 
 ### 8.3 Tab Lifecycle
 
@@ -377,9 +377,14 @@ being off) fall back to the plain pipeline. Supported feature is advertised as
 
 ### 11.5 Message Replies (XEP-0461)
 
-A reply button appears in the per-message action menu. Clicking it pins a reply
-banner above the input bar (`chat_widget._reply_ctx`); sending emits
-`message_reply_sent`. `JabberClient._attach_reply` attaches a
+A reply button appears in the per-message action menu. Its click is caught by
+the page-level handler in `chat_themes._webchannel_script()`, which encodes a
+`stanza:reply:id/author/sender/body` URI and hands it to the proven
+`bridge.on_link_clicked` channel; `ChatWidget._handle_reply_uri` decodes it and
+pins a reply banner above the input bar (`chat_widget._reply_ctx`); sending
+emits `message_reply_sent`. The `qwebchannel.js` glue prefers Qt's
+`:/qtwebchannel` resource and falls back to the packaged `resources/qwebchannel.js`
+so `window.bridge` is always defined. `JabberClient._attach_reply` attaches a
 `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>` as the **first child** of the
 `<message>` stanza, and — when the local quote is available (XEP-0421
 fallback) — prepends `> Sender wrote: …` lines wrapped in a
@@ -398,6 +403,18 @@ message.
   columns) and rendered with the referenced text in a `.stanza-reply` quote bar
   above the body; leading XEP-0421 quote lines are stripped from the displayed
   body. Supported feature advertised as `urn:xmpp:reply:0`.
+
+### 11.6 MUC Mentions & Nick Completion
+
+- In groupchats the incoming sender name is rendered as a clickable
+  `stanza:mention:nick` link (`ChatThemeFactory.render_message(mention=...)`,
+  enabled per view via `ChatView.mention_senders`). Clicking it inserts
+  `nick: ` at the cursor and focuses the input
+  (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats.
+- `Tab` / `Shift+Tab` in a MUC input completes the nick before the cursor:
+  with no prefix it cycles all participants, otherwise only nicks matching the
+  prefix; repeated presses walk the candidate list (wrapping) and any edit
+  restarts the search (`ChatWidget._tab_complete_nick`).
 
 ## 12. Tray (`ui/tray.py`)
 

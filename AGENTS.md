@@ -159,8 +159,14 @@ only for plain spans (escape + URLs + emoticons; never inside `<code>`/`<pre>`).
 preferences switch both fall back to the plain pipeline. Feature advertised as
 `urn:xmpp:styling:0`.
 
-**Message Replies** (XEP-0461): the per-message action menu's reply button
-pins a quote banner above the input; `client._attach_reply` attaches
+**Message Replies** (XEP-0461): the per-message reply button is caught by the
+page-level click handler in `chat_themes._webchannel_script()` and routed to
+`bridge.on_link_clicked("stanza:reply:id/author/sender/body")`, decoded in
+`ChatWidget._handle_reply_uri` (id falls back to `data-stanza-id`); this rides
+the proven link channel instead of a dedicated bridge slot. The `qwebchannel.js`
+glue prefers Qt's `:/qtwebchannel` resource and falls back to the packaged copy
+in `resources/qwebchannel.js` so `window.bridge` is always defined. The reply
+button pins a quote banner above the input; `client._attach_reply` attaches
 `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>` as the first child of
 `<message>` plus an optional XEP-0421 fallback (`> Sender wrote: …`) wrapped in
 `<fallback for='urn:xmpp:reply:0'>` for legacy clients. Replyable ids come from
@@ -172,6 +178,16 @@ replies are parsed in `client._on_message`/`_on_groupchat_message`, stored in
 history (`origin_id`/`reply_to`/`reply_id`, see `core/history.py`) and rendered
 with the `.stanza-reply` quote bar (body quotes stripped) via
 `chat_themes.render_reply()`. Feature advertised as `urn:xmpp:reply:0`.
+
+**MUC mentions & Tab completion**: in groupchats the incoming sender name is
+rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
+enabled via `ChatView.mention_senders`); clicking it inserts `nick: ` into the
+input with focus (`ChatWidget._handle_mention_uri`). `Tab`/`Shift+Tab` in a MUC
+input completes the nick before the cursor — all participants when nothing was
+typed, otherwise nicks matching the prefix — cycling on repeat presses
+(`ChatWidget._tab_complete_nick`). `Esc` in the chat window collapses the
+current tab back to the roster (leaving a MUC, keeping other tabs; the window
+hides only after the last tab).
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

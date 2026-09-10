@@ -11,6 +11,7 @@ import time
 import webbrowser
 import logging
 import uuid
+from urllib.parse import unquote
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -251,6 +252,7 @@ class ChatWidget(QtWidgets.QWidget):
         chat_col.setContentsMargins(0, 0, 0, 0)
         chat_col.setSpacing(0)
         self._view = ChatView(theme)
+        self._view.mention_senders = self.is_muc
         self._view.link_clicked.connect(self._open_link)
         self._view.link_clicked.connect(self.link_clicked)
         self._view.reply_requested.connect(self._on_reply_requested)
@@ -280,6 +282,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_to = ""
         self._reply_ref_sender = ""
         self._reply_ref_body = ""
+        self._nick_complete_prefix = ""
+        self._nick_complete_candidates: list[str] = []
+        self._nick_complete_index = -1
 
         # Input area
         input_row = QtWidgets.QHBoxLayout()
@@ -325,6 +330,12 @@ class ChatWidget(QtWidgets.QWidget):
     # ── Link / marker handling ────────────────────────────────────
 
     def _open_link(self, url: str):
+        if url.startswith("stanza:reply:"):
+            self._handle_reply_uri(url)
+            return
+        if url.startswith("stanza:mention:"):
+            self._handle_mention_uri(url)
+            return
         if url == "mam://load":
             self.load_more_from_server()
             return
@@ -333,6 +344,29 @@ class ChatWidget(QtWidgets.QWidget):
             webbrowser.open(url)
             return
         self.link_clicked.emit(url)
+
+    def _handle_reply_uri(self, url: str) -> None:
+        """Decode a ``stanza:reply:id/author/sender/body`` click and start a
+        XEP-0461 reply (page JS routes the reply button here)."""
+        parts = url[len("stanza:reply:"):].split("/", 3)
+        reply_id = unquote(parts[0]) if len(parts) > 0 else ""
+        author = unquote(parts[1]) if len(parts) > 1 else ""
+        sender = unquote(parts[2]) if len(parts) > 2 else ""
+        snippet = unquote(parts[3]) if len(parts) > 3 else ""
+        self._on_reply_requested(reply_id, author, sender, snippet)
+
+    def _handle_mention_uri(self, url: str) -> None:
+        """Insert ``nick: `` from a ``stanza:mention:nick`` click (MUC only)."""
+        if not self.is_muc:
+            return
+        nick = unquote(url[len("stanza:mention:"):])
+        if not nick:
+            return
+        cursor = self._input.textCursor()
+        before = self._input.toPlainText()[:cursor.position()]
+        prefix = " " if before and not before[-1].isspace() else ""
+        self._input.insertPlainText(prefix + nick + ": ")
+        self._input.setFocus()
 
     # ── Typing indicators ─────────────────────────────────────────
 
@@ -363,7 +397,65 @@ class ChatWidget(QtWidgets.QWidget):
                     and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier):
                 self._send()
                 return True
+            if event.key() in (QtCore.Qt.Key.Key_Tab,
+                               QtCore.Qt.Key.Key_Backtab):
+                backward = event.key() == QtCore.Qt.Key.Key_Backtab
+                if self._tab_complete_nick(backward):
+                    return True
         return super().eventFilter(obj, event)
+
+    def _tab_complete_nick(self, backward: bool = False) -> bool:
+        """Complete the MUC nick being typed before the cursor with Tab.
+
+        Cycles through matching participants (all nicks when no prefix was
+        typed), wrapping around.  Repeated Tab presses keep walking the same
+        candidate list while the completed word is unchanged.  Returns True
+        when the event was consumed.
+        """
+        if not self.is_muc:
+            return False
+        tc = self._input.textCursor()
+        block_text = tc.block().text()
+        pos = tc.positionInBlock()
+        start = block_text.rfind(" ", 0, pos) + 1
+        current_word = block_text[start:pos]
+
+        def _nicks():
+            return sorted(
+                (u.get("nick", "") for u in self._users if u.get("nick")),
+                key=str.lower)
+
+        if (self._nick_complete_candidates
+                and 0 <= self._nick_complete_index < len(
+                    self._nick_complete_candidates)
+                and current_word == self._nick_complete_candidates[
+                    self._nick_complete_index]
+                and current_word.startswith(self._nick_complete_prefix)):
+            candidates = self._nick_complete_candidates
+            index = (self._nick_complete_index + (-1 if backward else 1)) \
+                % len(candidates)
+        else:
+            if current_word:
+                pool = [n for n in _nicks()
+                        if n.lower().startswith(current_word.lower())]
+            else:
+                pool = _nicks()
+            if not pool:
+                return False
+            candidates = pool
+            index = len(pool) - 1 if backward else 0
+
+        nick = candidates[index]
+        self._nick_complete_prefix = current_word
+        self._nick_complete_candidates = candidates
+        self._nick_complete_index = index
+
+        new_tc = QtGui.QTextCursor(tc)
+        new_tc.setPosition(tc.block().position() + start)
+        new_tc.setPosition(tc.position(), QtGui.QTextCursor.MoveMode.KeepAnchor)
+        new_tc.insertText(nick)
+        self._input.setTextCursor(new_tc)
+        return True
 
     def _send(self):
         text = self._input.toPlainText()

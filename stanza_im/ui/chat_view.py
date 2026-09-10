@@ -121,6 +121,7 @@ if HAS_WEBENGINE:
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
             self._theme = theme
+            self.mention_senders = False
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
@@ -341,21 +342,6 @@ if HAS_WEBENGINE:
                 if ((btn.getAttribute('data-action') || 'menu') === 'menu') {
                     openMenu(btn, e.clientX, e.clientY);
                 }
-                else if (btn.getAttribute('data-action') === 'reply') {
-                    var wrap = btn.closest('.stanza-message');
-                    var replyId = wrap ? wrap.getAttribute('data-reply-id') : '';
-                    if (!replyId && wrap) {
-                        replyId = wrap.getAttribute('data-stanza-id') || '';
-                    }
-                    var bodyNode = wrap ? wrap.querySelector(
-                        '.message, .message_incoming, .message_outgoing, .next_message') : null;
-                    var body = bodyNode
-                        ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
-                    var sender = wrap ? wrap.getAttribute('data-stanza-sender') || '' : '';
-                    var author = wrap ? wrap.getAttribute('data-reply-author') || '' : '';
-                    if (window.bridge && window.bridge.on_reply)
-                        window.bridge.on_reply(replyId, author, sender, body);
-                }
             });
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') closeMenu();
@@ -480,11 +466,11 @@ if HAS_WEBENGINE:
                 html = self._theme.render_action(sender, phrase, timestamp)
             else:
                 html = self._theme.render_message(
-                    sender=sender, body=body, timestamp=timestamp,
-                    direction=direction, is_next=is_next,
-                    sender_color=sender_color, user_icon_path=user_icon_path,
-                    unstyled=unstyled,
-                )
+                sender=sender, body=body, timestamp=timestamp,
+                direction=direction, is_next=is_next,
+                sender_color=sender_color, user_icon_path=user_icon_path,
+                unstyled=unstyled, mention=self.mention_senders,
+            )
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote
                 html = self._theme.render_reply(ref_sender, ref_snippet) + html
@@ -532,6 +518,7 @@ if HAS_WEBENGINE:
                         sender_color=entry.get("sender_color", "#000000"),
                         user_icon_path=entry.get("user_icon_path", ""),
                         unstyled=entry.get("unstyled", False),
+                        mention=self.mention_senders,
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:

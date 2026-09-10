@@ -111,3 +111,13 @@
 		color: #222;
 	}
 	.stanza-menu button:hover { background: #e0edff; }
+.sendername a.mention, .sender a.mention {
+	color: inherit;
+	text-decoration: none;
+	cursor: pointer;
+}
+.sendername a.mention:hover, .sender a.mention:hover {
+	text-decoration: underline dotted;
+	background: rgba(0, 0, 0, 0.08);
+	border-radius: 3px;
+}

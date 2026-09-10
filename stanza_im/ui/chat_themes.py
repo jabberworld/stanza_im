@@ -1,8 +1,10 @@
 """Chat theme engine — generates HTML from Adium-style chat skin templates."""
 from __future__ import annotations
 
+import logging
 import os
 import re
+from urllib.parse import quote
 
 from PyQt6 import QtCore
 
@@ -11,24 +13,48 @@ from stanza_im.include.emoticons import smile_to_html
 from stanza_im.include.utils import escape_html, restore_url_tokens
 from stanza_im.i18n import tr
 
+_logger = logging.getLogger(__name__)
+
+
+def _qwebchannel_js() -> str:
+    """Return the ``qwebchannel.js`` glue ($undefined if unavailable).
+
+    Prefers Qt's bundled resource (``:/qtwebchannel/qwebchannel.js``) and
+    falls back to the copy shipped in ``resources/qwebchannel.js`` so the
+    ``window.bridge`` channel works even when the resource is missing.
+    """
+    try:
+        fh = QtCore.QFile(":/qtwebchannel/qwebchannel.js")
+        if fh.open(QtCore.QIODevice.OpenModeFlag.ReadOnly):
+            try:
+                js = bytes(fh.readAll()).decode("utf-8", "replace")
+                if js.strip():
+                    return js
+            finally:
+                fh.close()
+    except ImportError:
+        pass
+    bundled = os.path.join(CHATSKINS_DIR, os.pardir, "qwebchannel.js")
+    if os.path.isfile(bundled):
+        with open(bundled, "r", encoding="utf-8") as fh:
+            js = fh.read()
+            if js.strip():
+                return js
+    _logger.warning("qwebchannel.js not found (Qt resource or bundled copy)")
+    return ""
+
 
 def _webchannel_script() -> str:
     """Inline QWebChannel glue so Python↔JS bridge works across pages.
 
-    Reads Qt's bundled ``qwebchannel.js`` and installs ``window.bridge``
-    plus a global link-click handler.  Returns '' when WebEngine's
-    qwebchannel resource (or the module) is unavailable.
+    Reads Qt's bundled ``qwebchannel.js`` (or the packaged copy in
+    ``resources/``) and installs ``window.bridge`` plus a global click
+    handler that routes both link clicks and XEP-0461 reply buttons to
+    ``bridge.on_link_clicked``.  Returns '' only when the script itself is
+    unavailable.
     """
-    try:
-        from PyQt6 import QtCore
-        fh = QtCore.QFile(":/qtwebchannel/qwebchannel.js")
-        if not fh.open(QtCore.QIODevice.OpenModeFlag.ReadOnly):
-            return ""
-        js = bytes(fh.readAll()).decode("utf-8", "replace")
-        fh.close()
-        if not js:
-            return ""
-    except ImportError:
+    js = _qwebchannel_js()
+    if not js:
         return ""
     return f"""<script>
 {js}
@@ -57,6 +83,31 @@ document.addEventListener('click', function (e) {{
     if (el && el.getAttribute('href')) {{
         e.preventDefault();
         if (window.bridge) {{ window.bridge.on_link_clicked(el.href); }}
+        return;
+    }}
+    var reply = e.target && e.target.closest
+        ? e.target.closest('.message_actions button[data-action="reply"]')
+        : null;
+    if (reply) {{
+        e.preventDefault();
+        var wrap = reply.closest('.stanza-message');
+        var replyId = wrap ? (wrap.getAttribute('data-reply-id')
+                              || wrap.getAttribute('data-stanza-id') || '') : '';
+        var bodyNode = wrap ? wrap.querySelector(
+            '.message, .message_incoming, .message_outgoing, .next_message')
+            : null;
+        var body = bodyNode
+            ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
+        var sender = wrap ? (wrap.getAttribute('data-stanza-sender') || '') : '';
+        var author = wrap ? (wrap.getAttribute('data-reply-author') || '') : '';
+        var uri = 'stanza:reply:' + encodeURIComponent(replyId) + '/'
+            + encodeURIComponent(author) + '/' + encodeURIComponent(sender)
+            + '/' + encodeURIComponent(body);
+        if (window.bridge && window.bridge.on_link_clicked) {{
+            window.bridge.on_link_clicked(uri);
+        }} else {{
+            console.log('stanza reply dropped (bridge missing): ' + uri);
+        }}
     }}
 }});
 </script>
@@ -158,15 +209,27 @@ class ChatThemeFactory:
     def render_message(self, sender: str, body: str, timestamp: str,
                        direction: str, is_next: bool = False,
                        sender_color: str = "#000000",
-                       user_icon_path: str = "", unstyled: bool = False) -> str:
-        """Render a single message to HTML using the skin template."""
+                       user_icon_path: str = "", unstyled: bool = False,
+                       mention: bool = False) -> str:
+        """Render a single message to HTML using the skin template.
+
+        With *mention* the incoming sender name is wrapped in a clickable
+        ``stanza:mention:`` link (MUC nickname mentions).
+        """
         key = direction
         if is_next:
             key += "_next"
         template = self._templates.get(key, self._templates.get(direction, "{body}"))
         body_html = self._transform_body(body, styled=not unstyled)
 
-        html = template.replace("%sender%", escape_html(sender)) \
+        sender_html = escape_html(sender)
+        if mention and direction == "incoming" and sender:
+            dst = "stanza:mention:" + quote(sender, safe="")
+            sender_html = (f'<a class="mention" href="{dst}" '
+                           f'title="{escape_html(tr("muc_mention_sender"))}">'
+                           f'{sender_html}</a>')
+
+        html = template.replace("%sender%", sender_html) \
                        .replace("%message%", body_html) \
                        .replace("%time%", timestamp) \
                        .replace("%senderColor%", sender_color) \

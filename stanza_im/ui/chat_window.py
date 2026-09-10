@@ -112,10 +112,9 @@ class ChatWindow(QtWidgets.QMainWindow):
             self._close_tab(idx)
 
     def _on_escape(self):
-        widget = self._tab_widget.currentWidget()
-        if isinstance(widget, ChatWidget) and widget.is_muc:
-            self.hide()
-            return
+        # Esc collapses the current conversation back to the roster: the tab
+        # is closed (leaving a MUC room) and the window stays open while other
+        # tabs remain; it hides only when the tab was the last one.
         self._close_current_tab()
 
     # ── Public API ────────────────────────────────────────────────

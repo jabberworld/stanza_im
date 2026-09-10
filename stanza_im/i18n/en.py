@@ -61,6 +61,7 @@ STRINGS = {
     "msg_delivered": "✓ Delivered",
     "reply_in_reply_to": "In reply to {sender}",
     "reply_cancel": "Cancel reply",
+    "muc_mention_sender": "Mention",
     "chat_file_transfer": "File Transfer",
     "history_load_earlier": "Load earlier",
     "history_clear": "Clear local history",
