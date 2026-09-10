@@ -6,18 +6,33 @@ from PyQt6 import QtCore, QtWidgets
 from stanza_im.i18n import tr
 
 _PRESET_LANGUAGES = [
+    ("ar", "العربية"),
+    ("cs", "Čeština"),
     ("de", "Deutsch"),
+    ("el", "Ελληνικά"),
     ("en", "English"),
     ("es", "Español"),
+    ("fa", "فارسی"),
+    ("fi", "Suomi"),
     ("fr", "Français"),
+    ("he", "עברית"),
+    ("hi", "हिन्दी"),
+    ("hu", "Magyar"),
+    ("id", "Bahasa Indonesia"),
     ("it", "Italiano"),
     ("ja", "日本語"),
     ("ko", "한국어"),
     ("nl", "Nederlands"),
+    ("no", "Norsk"),
     ("pl", "Polski"),
     ("pt", "Português"),
+    ("ro", "Română"),
     ("ru", "Русский"),
+    ("sv", "Svenska"),
+    ("th", "ไทย"),
+    ("tr", "Türkçe"),
     ("uk", "Українська"),
+    ("vi", "Tiếng Việt"),
     ("zh", "中文"),
 ]
 
@@ -72,17 +87,21 @@ class SubjectDialog(QtWidgets.QDialog):
         self._editors.append((lang, editor))
         return editor
 
+    def _language_combo(self) -> QtWidgets.QComboBox:
+        """Non-editable language selector populated from the presets."""
+        combo = QtWidgets.QComboBox()
+        for code, name in _PRESET_LANGUAGES:
+            combo.addItem(f"{name} ({code})", code)
+        combo.setCurrentIndex(0)
+        return combo
+
     def _pick_language(self) -> str:
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle(tr("muc_subject_add_language"))
         dialog.setMinimumWidth(280)
         layout = QtWidgets.QVBoxLayout(dialog)
         layout.addWidget(QtWidgets.QLabel(tr("muc_subject_language_select")))
-        combo = QtWidgets.QComboBox()
-        combo.setEditable(True)
-        for code, name in _PRESET_LANGUAGES:
-            combo.addItem(f"{name} ({code})", code)
-        combo.setCurrentIndex(0)
+        combo = self._language_combo()
         layout.addWidget(combo)
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -96,11 +115,7 @@ class SubjectDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
         if not dialog.exec():
             return ""
-        text = combo.currentText().strip()
-        index = combo.findText(text)
-        if index >= 0:
-            return combo.itemData(index)
-        return text
+        return str(combo.currentData())
 
     def _add_language(self, language: str = ""):
         if not language:
