@@ -448,8 +448,11 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
 ## 12A. OSD Notifications (`ui/osd.py`)
 
 - `OsdManager` owns a stack of translucent frameless always-on-top windows
-  (`Qt.Tool | FramelessWindowHint | WindowStaysOnTopHint`) with an icon, bold
+  (`Qt.Tool | FramelessWindowHint | WindowStaysOnTopHint |
+  X11BypassWindowManagerHint | WindowDoesNotAcceptFocus`) with an icon, bold
   title and word-wrapped body; clicking dismisses (and may focus the chat).
+  Frame and label children are mouse-transparent so drags and clicks reach the
+  window itself, and each window is raised on show/restack.
 - All windows dock to a saved base position (`notifications.osd_x/osd_y`, the
   position of the first notification) and stack from it: top-down when
   `osd_topdown` is on (second below, third below that), otherwise upward
@@ -460,8 +463,8 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   base position; dragging updates `osd_x/osd_y` in the shared `Config` (live,
   persisted on Save) and re-entry re-docks it to the saved position.
 - Triggers (all gated on `osd_enabled`):
-  - `osd_message`: 1:1 and private-groupchat messages, only when that chat is
-    not the focused conversation.
+  - `osd_message`: 1:1 and private-groupchat messages, only when the chat window
+  is not the active window on that conversation.
   - `osd_typing`: a contact starting to compose (XEP-0085).
   - `osd_status`: `never` / `available` (crossings between online+chat and any
     other show) / `any` (every transition); skips the initial presence sync.

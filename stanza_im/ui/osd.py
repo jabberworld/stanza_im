@@ -45,9 +45,11 @@ class _OsdWindow(QtWidgets.QWidget):
             QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
+            | QtCore.Qt.WindowType.X11BypassWindowManagerHint
             | QtCore.Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setMouseTracking(True)
         self.setFixedWidth(_OSD_WIDTH)
 
         self._drag_offset: QtCore.QPoint | None = None
@@ -86,6 +88,14 @@ class _OsdWindow(QtWidgets.QWidget):
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(frame)
+
+        # Let every mouse event reach the window itself: clicks and (for the
+        # preview) drags must not be swallowed by the frame/label children.
+        frame.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        for child in frame.findChildren(QtWidgets.QWidget):
+            child.setAttribute(
+                QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self.setCursor(
             QtCore.Qt.CursorShape.OpenHandCursor if draggable
@@ -191,6 +201,7 @@ class OsdManager:
         self._windows.append(rec)
         win.show()
         win.adjustSize()
+        win.raise_()
         if duration and duration > 0:
             timer = QtCore.QTimer(win)
             timer.setSingleShot(True)
@@ -245,3 +256,4 @@ class OsdManager:
             y = stack_position(index, base.y(), heights, topdown, _OSD_GAP)
             win = rec["window"]
             win.move(base.x(), y)
+            win.raise_()

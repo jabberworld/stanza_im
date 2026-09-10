@@ -1841,8 +1841,12 @@ class MainWindow(QtWidgets.QMainWindow):
         return text
 
     def _osd_for(self, jid) -> bool:
-        """True when the app is not focused on *jid*'s chat."""
-        return not (self._chat_window.isVisible()
+        """True when the app is not focused on *jid*'s chat.
+
+        The chat window may stay visible while the roster (or another app)
+        is active, so gate on the actual active window, not mere visibility.
+        """
+        return not (self._chat_window.isActiveWindow()
                     and self._chat_window.current_jid() == jid)
 
     def _osd_click(self, jid, nick: str = ""):

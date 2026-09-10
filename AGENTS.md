@@ -215,16 +215,19 @@ tab is removed, the room stays joined, other tabs keep the window open); on a
 and closes a 1:1 tab.
 
 **OSD notifications** (`ui/osd.py`): `OsdManager` owns a stack of translucent
-frameless always-on-top windows docked to a saved base position
-(`notifications.osd_x/osd_y`). A draggable preview from the preferences OSD page
+frameless always-on-top windows (flags include `X11BypassWindowManagerHint`,
+children are mouse-transparent so drags/clicks reach the window) docked to a
+saved base position (`notifications.osd_x/osd_y`). A draggable preview from the
+preferences OSD page
 moves the base (written to the shared `Config` live, persisted on Save). Stacking
 is top-down or bottom-up per `osd_topdown`, capped by `osd_max` (oldest evicted),
 auto-hiding after `osd_duration`; a pure `stack_position()` keeps the math
 unit-testable. MainWindow triggers gate on `notifications.osd_enabled` and the
-per-event toggles: `osd_message` (1:1 + private, only when that chat is not
-focused), `osd_typing`, `osd_status` (`never`/`available`/`any`, skipping the
-initial presence sync), `osd_conference` (`never`/`mention`/`all`), plus the
-`_notify_osd_file` entry point wired for future p2p file transfers.
+per-event toggles: `osd_message` (1:1 + private, only while the chat window is
+not the active window on that conversation), `osd_typing`, `osd_status`
+(`never`/`available`/`any`, skipping the initial presence sync),
+`osd_conference` (`never`/`mention`/`all`), plus the `_notify_osd_file` entry
+point wired for future p2p file transfers.
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

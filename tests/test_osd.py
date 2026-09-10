@@ -15,7 +15,7 @@ os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.core.storage import Config
@@ -128,6 +128,37 @@ check("osd tab shows preview", p_mgr._preview is not None)
 dlg._on_notifications_tab_changed(0)
 check("leaving osd tab hides preview", p_mgr._preview is None)
 dlg.close()
+
+# 7. preview drag behaviour --------------------------------------------------
+m4 = OsdManager(make_cfg())
+m4.show_preview()
+preview_win = m4._preview["window"]
+flags = preview_win.windowFlags()
+check("osd stays on top", bool(flags & QtCore.Qt.WindowType.WindowStaysOnTopHint)
+      and bool(flags & QtCore.Qt.WindowType.X11BypassWindowManagerHint))
+check("osd children ignore mouse",
+      all(child.testAttribute(
+          QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+          for child in preview_win.findChildren(QtWidgets.QWidget)))
+
+_win = m4._preview["window"]
+_win.move(120, 80)
+press = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonPress, QtCore.QPointF(30, 20),
+    QtCore.QPointF(200, 95), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+move = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseMove, QtCore.QPointF(40, 30),
+    QtCore.QPointF(230, 100), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(_win, press)
+QtWidgets.QApplication.sendEvent(_win, move)
+check("preview dragged on screen", (_win.x(), _win.y()) == (150, 85))
+check("drag persists position",
+      m4._cfg.osd_x == 150 and m4._cfg.osd_y == 85)
+m4.hide_preview()
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
