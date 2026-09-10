@@ -334,5 +334,22 @@ check("ctrl-w leaves muc", left_rooms == ["room@conf/x"])
 cw_win._on_escape()
 check("esc closes last 1:1 tab", not cw_win.has_chat("bob@example.com"))
 
+# 16. document_lost self-heal re-renders the conversation -------------------
+check("scheme registration uses isValid",
+      "isValid()" in _view_src and "_register_custom_url_schemes" in _view_src)
+check("document_lost signal exists",
+      "document_lost = QtCore.pyqtSignal()" in _view_src)
+restore_cw = ChatWidget("bob@example.com", "Bob",
+                        chat_themes.ChatThemeFactory())
+restore_cw.add_message(sender="Alice", body="hello doc",
+                       timestamp="10:00", direction="incoming")
+restore_cw.add_message(sender="Alice", body="second line",
+                       timestamp="10:01", direction="incoming")
+restore_cw._view.clear()
+restore_cw._restore_after_document_lost()
+check("document_lost restore keeps text",
+      "hello doc" in restore_cw._view.toPlainText()
+      and "second line" in restore_cw._view.toPlainText())
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

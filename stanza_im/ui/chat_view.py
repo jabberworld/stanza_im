@@ -27,14 +27,14 @@ def _register_custom_url_schemes() -> None:
     """
     try:
         from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
-        known = QWebEngineUrlScheme.schemeByName(b"stanza")
-        if known.syntax() != QWebEngineUrlScheme.Syntax.Host:
-            for name in (b"stanza", b"mam"):
+        for name in (b"stanza", b"mam"):
+            known = QWebEngineUrlScheme.schemeByName(name)
+            if not known.isValid():
                 scheme = QWebEngineUrlScheme(name)
                 scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
                 scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
                 QWebEngineUrlScheme.registerScheme(scheme)
-            logger.debug("Registered custom URL schemes stanza/mam")
+        logger.info("Registered custom URL schemes stanza/mam")
     except Exception as exc:  # pragma: no cover - optional capability
         logger.warning("Could not register custom URL schemes: %s", exc)
 
@@ -174,6 +174,7 @@ if HAS_WEBENGINE:
         link_clicked = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
+        document_lost = QtCore.pyqtSignal()
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
@@ -263,12 +264,14 @@ if HAS_WEBENGINE:
                 else:
                     logger.warning("chat document lost; reloading empty page")
                     self._load_empty()
+                    self.document_lost.emit()
             try:
                 self._page.runJavaScript(
                     "var n = document.getElementById('chat');"
                     " n ? 'ok' : 'missing'", _handle)
             except RuntimeError:
                 self._load_empty()
+                self.document_lost.emit()
 
         def _on_js_console(self, level, message: str, line: int, source: str):
             logger.debug("chat JS [%s:%s] %s", source, line, message)
@@ -759,6 +762,7 @@ else:
         link_clicked = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
+        document_lost = QtCore.pyqtSignal()
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)

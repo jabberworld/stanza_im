@@ -172,7 +172,10 @@ The `stanza`/`mam` schemes are pre-registered as app-handled with
 Chromium never starts (and errors on) a real load; a denied navigation is
 thus harmless. A stray `loadFinished(false)` from a blocked link is
 self-healed by `_on_load_finished`/`_probe_chat_alive`, which verifies that
-`#chat` survived and un-wedges the pending-message buffer. `refresh_avatars`
+`#chat` survived and un-wedges the pending-message buffer; if the document was
+truly wiped it reloads the empty page and emits `document_lost`, which makes
+`ChatWidget._restore_after_document_lost` re-render the whole conversation
+instead of leaving a blank chat. `refresh_avatars`
 updates avatar `<img>` elements in place instead of clearing the whole
 document, so avatar caching can never stall live rendering.
 No QWebChannel call, console mirror or JS click handler is involved, so clicks

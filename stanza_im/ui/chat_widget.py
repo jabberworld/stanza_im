@@ -256,6 +256,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._view.link_clicked.connect(self._open_link)
         self._view.link_clicked.connect(self.link_clicked)
         self._view.reply_requested.connect(self._on_reply_requested)
+        self._view.document_lost.connect(self._restore_after_document_lost)
         chat_col.addWidget(self._view, stretch=1)
 
         # Reply context bar (XEP-0461): shown while composing a reply.
@@ -742,6 +743,13 @@ class ChatWidget(QtWidgets.QWidget):
             r"\s+", " ", unicodedata.normalize("NFKC", value or "")
         ).strip().casefold()
         return normalize(left) == normalize(right)
+
+    def _restore_after_document_lost(self):
+        """The WebEngine document was wiped (blocked load); rebuild it from
+        the local window instead of leaving a blank chat."""
+        self._preserve_fraction = None
+        self._anchor_bottom = True
+        self._render_all()
 
     def _render_all(self):
         """Clear the view and re-render everything, restoring scroll."""

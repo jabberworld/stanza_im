@@ -390,7 +390,10 @@ schemes and denies the in-view load. `stanza`/`mam` are pre-registered as
 app-handled schemes (`QWebEngineUrlScheme.registerScheme`) so Chromium never
 starts a real load or error page; a stray `loadFinished(false)` from a blocked
 link is self-healed by `_on_load_finished`/`_probe_chat_alive` (which probes
-that `#chat` survived and un-wedges the pending buffer), and `refresh_avatars`
+that `#chat` survived and un-wedges the pending buffer; a truly lost document
+reloads the empty page and emits `document_lost`, so
+`ChatWidget._restore_after_document_lost` re-renders the whole window), and
+`refresh_avatars`
 updates avatar `<img>` elements in place rather than reloading the document.
 No QWebChannel call, console mirror or JS click handler is involved, so clicks
 reach Python even when the WebChannel transport is unavailable. `ChatWidget._handle_reply_uri` decodes the URI and
