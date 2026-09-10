@@ -235,6 +235,18 @@ a:hover{
     color: #222;
 }
 .stanza-menu button:hover { background: #e0edff; }
+.stanza-menu a {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 6px 14px;
+    text-align: left;
+    text-decoration: none;
+    font-size: 13px;
+    color: #222;
+}
+.stanza-menu a:hover { background: #e0edff; }
 
 .time_initial .delivery { display: block; color: #777; margin-left: 0; }
 .typing-indicator { color: #888; font-style: italic; padding: 3px 16px; min-height: 18px; }

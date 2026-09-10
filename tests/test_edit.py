@@ -131,6 +131,18 @@ cw._cancel_edit()
 check("edit cancel restores", cw._input.toPlainText() == "abc"
       and cw._editing_id == "")
 
+# Ctrl+Up picks the newest live message even when older history exists
+cw4 = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+cw4._history.append({"sender": "Me", "body": "old-history",
+                     "timestamp": "09:00", "direction": "outgoing",
+                     "message_id": "hist-old", "edited": False})
+cw4.add_message(sender="Me", body="newer1", timestamp="10:00",
+                direction="outgoing", message_id="new-1")
+cw4.add_message(sender="Me", body="newer2", timestamp="10:01",
+                direction="outgoing", message_id="new-2")
+cw4._edit_last_sent()
+check("ctrl-up picks newest live", cw4._input.toPlainText() == "newer2")
+
 # non-last message editable via reference ------------------------------------
 cw2 = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
 cw2.add_message(sender="Me", body="older", timestamp="10:00",
@@ -158,8 +170,14 @@ check("history replaced",
 _view_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
-check("edit menu present",
-      "data-stanza-outgoing" in _view_src and "stanza:edit:" in _view_src)
+check("edit menu is anchor",
+      "edit.href = 'stanza:edit:'" in _view_src
+      and "data-stanza-outgoing" in _view_src)
+check("no js-location edit navigation",
+      "window.location.href = 'stanza:edit:'" not in _view_src)
+check("edited marker appended at end",
+      "content = content + tag" in _view_src
+      and "font-weight:bold" in _view_src)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

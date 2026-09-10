@@ -579,12 +579,19 @@ class ChatWidget(QtWidgets.QWidget):
         """Locate a stored message whose stable id matches the reply target."""
         if not stable_id:
             return None
-        for entry in reversed(list(self._messages) + list(self._history)):
+        for entry in self._newest_first():
             if (entry.get("origin_id") == stable_id
                     or entry.get("message_id") == stable_id
                     or entry.get("archive_id") == stable_id):
                 return entry
         return None
+
+    def _newest_first(self):
+        """Iterate the conversation newest-to-oldest (live then history)."""
+        for entry in reversed(self._messages):
+            yield entry
+        for entry in reversed(self._history):
+            yield entry
 
     @staticmethod
     def _reply_target_id(entry: dict) -> str:
@@ -696,7 +703,7 @@ class ChatWidget(QtWidgets.QWidget):
         """Locate a message editable via *ref* (must be our own message)."""
         if not ref:
             return None
-        for entry in reversed(list(self._messages) + list(self._history)):
+        for entry in self._newest_first():
             if (str(entry.get("message_id") or "") == ref
                     or str(self._reply_target_id(entry) or "") == ref):
                 if self._is_mine(entry):
@@ -711,7 +718,7 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _edit_last_sent(self) -> bool:
         """Edit the newest message we sent (Ctrl+Up)."""
-        for entry in reversed(list(self._messages) + list(self._history)):
+        for entry in self._newest_first():
             mine = (entry.get("direction") == "outgoing"
                     or (self.is_muc and self._self_nick
                         and entry.get("sender") == self._self_nick))

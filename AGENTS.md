@@ -282,13 +282,15 @@ fetch apply remote displayed states — unread is cleared and an open chat gets
 an "Displayed on another device" status line.
 
 Last Message Correction (XEP-0308): any own message is editable (Ctrl+Up =
-last sent; the message context menu adds "Edit" for `data-stanza-outgoing`
-wrappers, routed via `stanza:edit:<id>`); the body loads into the input with a
+last sent; the message menu adds an "Edit" anchor for `data-stanza-outgoing`
+wrappers, routed via `stanza:edit:<id>` through the same `acceptNavigationRequest`
+path as replies/mentions); the body loads into the input with a
 cancelable editing banner and `_send` emits `message_edit_sent`, so the client
 sends `<replace id='…'/>` (fresh stanza id) and replaces the message locally
-(1:1) or via the MUC echo. Incoming corrections replace (edited flag + «✎»
-marker, `chat.allow_incoming_edits` on) or arrive as new messages (off).
-History gains `message_id`/`edited` columns and `replace_message()`.
+(1:1) or via the MUC echo. Incoming corrections replace (edited flag + a bold
+«✎» appended to the message, `chat.allow_incoming_edits` on) or arrive as new
+messages (off). History gains `message_id`/`edited` columns and
+`replace_message()`.
 
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,

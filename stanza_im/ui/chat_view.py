@@ -414,17 +414,11 @@ if HAS_WEBENGINE:
                 menu.style.top = (y + 2) + 'px';
                 menu.style.left = (x + 2) + 'px';
                 if (wrap.getAttribute('data-stanza-outgoing') === '1') {
-                    var edit = document.createElement('button');
-                    edit.type = 'button';
+                    var edit = document.createElement('a');
+                    edit.href = 'stanza:edit:' + encodeURIComponent(
+                        wrap.getAttribute('data-stanza-id') || '');
                     edit.textContent = EDIT_LABEL || 'Edit';
-                    edit.addEventListener('click', function (ev) {
-                        ev.stopPropagation();
-                        var ref = wrap.getAttribute('data-stanza-id');
-                        if (ref) {
-                            window.location.href = 'stanza:edit:' + encodeURIComponent(ref);
-                        }
-                        closeMenu();
-                    });
+                    edit.addEventListener('click', function () { closeMenu(); });
                     menu.appendChild(edit);
                 }
                 var item = document.createElement('button');
@@ -722,11 +716,11 @@ if HAS_WEBENGINE:
                           reply_author: str = "", reply_body: str = "",
                           outgoing: bool = False, edited: bool = False) -> str:
             if edited:
-                tag = ('<span class="stanza-edited" style="color:#999;'
-                       'font-size:10px;vertical-align:super;cursor:help;'
-                       'margin-right:2px;" title="%s">\u270e</span>'
+                tag = ('<span class="stanza-edited" style="color:#777;'
+                       'font-size:13px;font-weight:bold;margin-left:4px;'
+                       'cursor:help;" title="%s">\u270e</span>'
                        % html.escape(tr("msg_edited_tooltip"), quote=True))
-                content = tag + content
+                content = content + tag
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
                     "%REPLY_TARGET%",
