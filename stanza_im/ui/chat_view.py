@@ -240,6 +240,7 @@ if HAS_WEBENGINE:
                 if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
                 menu = null;
             }
+            window.stanzaCloseMenu = closeMenu;
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -311,6 +312,15 @@ if HAS_WEBENGINE:
                 });
                 menu.appendChild(item);
                 document.body.appendChild(menu);
+                var rect = menu.getBoundingClientRect();
+                var M = 4;
+                if (rect.right > window.innerWidth - M) {
+                    menu.style.left =
+                        Math.max(M, window.innerWidth - rect.width - M) + 'px';
+                }
+                if (rect.bottom > window.innerHeight - M) {
+                    menu.style.top = Math.max(M, y - rect.height - 2) + 'px';
+                }
             }
 
             document.addEventListener('click', function (e) {
@@ -335,6 +345,22 @@ if HAS_WEBENGINE:
 
         def _install_action_js(self):
             self.page().runJavaScript(self._ACTION_JS)
+
+        def _close_stanza_menu(self):
+            """Close the in-page message menu (e.g. focus leaves the view)."""
+            try:
+                self.evaluate_js(
+                    "if (window.stanzaCloseMenu) window.stanzaCloseMenu();")
+            except RuntimeError:
+                pass
+
+        def focusOutEvent(self, event):
+            self._close_stanza_menu()
+            super().focusOutEvent(event)
+
+        def hideEvent(self, event):
+            self._close_stanza_menu()
+            super().hideEvent(event)
 
         def _set_jump_visible(self, show: bool):
             self.evaluate_js(
