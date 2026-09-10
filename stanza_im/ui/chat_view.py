@@ -178,6 +178,7 @@ if HAS_WEBENGINE:
             super().__init__(parent)
             self._theme = theme
             self.mention_senders = False
+            self._last_edit_ref = ""
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
@@ -462,11 +463,11 @@ if HAS_WEBENGINE:
                     edit.textContent = EDIT_LABEL || 'Edit';
                     edit.addEventListener('click', function (ev) {
                         ev.stopPropagation();
-                        // Navigate through the in-document .action-edit anchor
-                        // (the same LinkClicked path as reply/mention) instead
-                        // of navigating from the overlay menu.
-                        var relay = wrap.querySelector('.action-edit');
-                        if (relay) { relay.click(); }
+                        // No navigation: leave the reference for the scroll
+                        // poll, which delivers it to Python without touching
+                        // the chat document.
+                        window.__stanzaEditRef =
+                            wrap.getAttribute('data-stanza-id') || '';
                         window.setTimeout(closeMenu, 0);
                     });
                     menu.appendChild(edit);
@@ -544,9 +545,16 @@ if HAS_WEBENGINE:
             self.page().runJavaScript(
                 "var st = window.scrollY || document.documentElement.scrollTop "
                 "|| document.body.scrollTop || 0; "
-                "[st, window.innerHeight || 0, document.body.scrollHeight || 0]",
+                "[st, window.innerHeight || 0, document.body.scrollHeight || 0,"
+                " window.__stanzaEditRef || '']",
                 self._on_scroll_position,
             )
+
+        def _clear_edit_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaEditRef = '';")
+            except RuntimeError:
+                pass
 
         def _on_bridge_near_top(self):
             if self._near_top_hit:
@@ -557,6 +565,14 @@ if HAS_WEBENGINE:
         def _on_scroll_position(self, value):
             if not isinstance(value, list) or len(value) < 3:
                 return
+            if len(value) > 3 and isinstance(value[3], str) and value[3]:
+                self._clear_edit_request()
+                requested = value[3]
+                if requested != getattr(self, "_last_edit_ref", ""):
+                    self._last_edit_ref = requested
+                    self.link_clicked.emit("stanza:edit:" + requested)
+            else:
+                self._last_edit_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -771,12 +787,6 @@ if HAS_WEBENGINE:
                     "%REPLY_TARGET%",
                     _compose_reply_target(reply_able_id, reply_author,
                                           sender, reply_body))
-            ref_id = message_id or reply_able_id
-            if outgoing and ref_id:
-                content += ('<a class="action-edit" '
-                            'href="stanza:edit:' + quote(str(ref_id), safe="") + '" '
-                            'title="%s">\u270e</a>'
-                            % html.escape(tr("chat_edit"), quote=True))
             node_id = message_id or reply_able_id
             marker = (' data-stanza-id="' + html.escape(node_id, quote=True) + '"'
                       if node_id else "")

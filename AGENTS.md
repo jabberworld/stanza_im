@@ -282,19 +282,19 @@ fetch apply remote displayed states — unread is cleared and an open chat gets
 an "Displayed on another device" status line.
 
 Last Message Correction (XEP-0308): any own message is editable (Ctrl+Up =
-last sent; own messages carry an in-document `.action-edit` anchor
-(`stanza:edit:<id>`), and the message menu's "Edit" item clicks that anchor so
-editing uses the same always-safe LinkClicked/`acceptNavigationRequest` path as
-replies/mentions — the overlay-menu navigation previously reset the chat
-document); the body loads into the input with a cancelable editing
-banner and `_send` emits `message_edit_sent`, so the client sends
-`<replace id='…'/>` (fresh stanza id) and replaces the message locally (1:1)
-or via the MUC echo. A post-click content probe (`_schedule_content_probe` /
-`_verify_after_click`) restores the window via `document_lost` if the
-conversation vanished. Incoming corrections replace (edited flag + a large bold
-«✎» appended right after the edited phrase via `render_message(edited=True)`,
-`chat.allow_incoming_edits` on) or arrive as new messages (off). History gains
-`message_id`/`edited` columns and `replace_message()`.
+last sent; the message menu's "Edit" button for `data-stanza-outgoing` wrappers
+stores the referenced id in `window.__stanzaEditRef`, which the always-running
+scroll poll delivers to Python as a `stanza:edit:<id>` ``link_clicked`` —
+editing never navigates, so the chat document is never reset); the body loads
+into the input with a cancelable editing banner and `_send` emits
+`message_edit_sent`, so the client sends `<replace id='…'/>` (fresh stanza id)
+and replaces the message locally (1:1) or via the MUC echo. A post-click
+content probe (`_schedule_content_probe`/`_verify_after_click`) restores the
+window via `document_lost` if the conversation vanished. Incoming corrections
+replace (edited flag + a large bold «✎» appended right after the edited phrase
+via `render_message(edited=True)`, `chat.allow_incoming_edits` on) or arrive
+as new messages (off). History gains `message_id`/`edited` columns and
+`replace_message()`.
 
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,

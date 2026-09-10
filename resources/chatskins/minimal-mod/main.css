@@ -184,23 +184,6 @@ a:hover{
     background: #ececec;
 }
 .stanza-message:hover .message_actions { visibility: visible; }
-.stanza-message { position: relative; }
-.stanza-message .action-edit {
-    position: absolute;
-    top: 2px;
-    right: 4px;
-    display: none;
-    text-decoration: none;
-    color: #555;
-    font-size: 12px;
-    cursor: pointer;
-    background: #ececec;
-    border-radius: 3px;
-    padding: 0 3px;
-    line-height: 14px;
-}
-.stanza-message:hover .action-edit { display: inline-block; }
-.stanza-message .action-edit:hover { background: #d5d5d5; }
 .message_actions button {
     border: 0;
     background: transparent;

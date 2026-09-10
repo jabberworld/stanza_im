@@ -171,19 +171,22 @@ _view_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
 _rootdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-check("edit menu clicks in-document relay",
-      "querySelector('.action-edit')" in _view_src
-      and "relay.click()" in _view_src
+check("edit menu sets poll request",
+      "window.__stanzaEditRef =" in _view_src
+      and "setTimeout(closeMenu, 0)" in _view_src
       and "data-stanza-outgoing" in _view_src)
-check("no overlay navigation for edit",
-      "edit.href = 'stanza:edit:'" not in _view_src
+check("no navigation for edit",
+      "href=\"stanza:edit:" not in _view_src
+      and "edit.href = 'stanza:edit:'" not in _view_src
       and "window.location.href = 'stanza:edit:'" not in _view_src
-      and "console.log('stanza-edit:'" not in _view_src)
-check("in-document edit anchor markup",
-      "class=\"action-edit\"" in _view_src
-      and "href=\"stanza:edit:" in _view_src)
-check("edit anchor css in skins", all(
-    ".action-edit" in open(
+      and "relay.click()" not in _view_src
+      and "querySelector('.action-edit')" not in _view_src)
+check("poll delivers edit ref",
+      "window.__stanzaEditRef || ''" in _view_src
+      and "link_clicked.emit(\"stanza:edit:\" + requested)" in _view_src)
+check("no inline edit anchor or css", all(
+    ".action-edit" not in _view_src
+    and ".action-edit" not in open(
         os.path.join(_rootdir, "resources", "chatskins", skin, "main.css"),
         encoding="utf-8").read()
     for skin in ("minimal-mod", "candy")))
