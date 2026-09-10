@@ -56,6 +56,8 @@ STRINGS = {
     "chat_activity_gone": "user closed the chat",
     "chat_send": "Send",
     "chat_scroll_to_bottom": "Scroll to bottom",
+    "chat_reply": "Reply...",
+    "chat_copy": "Copy",
     "msg_delivered": "✓ Delivered",
     "chat_file_transfer": "File Transfer",
     "history_load_earlier": "Load earlier",

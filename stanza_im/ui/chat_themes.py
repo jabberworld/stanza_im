@@ -9,6 +9,7 @@ from PyQt6 import QtCore
 from stanza_im.include.constants import CHATSKINS_DIR
 from stanza_im.include.emoticons import smile_to_html
 from stanza_im.include.utils import escape_html, restore_url_tokens
+from stanza_im.i18n import tr
 
 
 def _webchannel_script() -> str:
@@ -169,7 +170,8 @@ class ChatThemeFactory:
                        .replace("%message%", body_html) \
                        .replace("%time%", timestamp) \
                        .replace("%senderColor%", sender_color) \
-                       .replace("%userIconPath%", user_icon_path)
+                       .replace("%userIconPath%", user_icon_path) \
+                       .replace("%reply_title%", tr("chat_reply"))
         if "{body}" in html:
             html = html.replace("{body}", body_html)
         return html

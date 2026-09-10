@@ -54,3 +54,32 @@
 
 	/* Color for status message timestamp */
 	.status_row .timestamp	{	color: #58AFEE;		}
+
+
+	/* Message hover actions (reply / menu) */
+	.stanza-message .message_actions
+	{
+		float: right;
+		visibility: hidden;
+		width: 32px;
+		text-align: right;
+	}
+	.stanza-message:hover .message_actions { visibility: visible; }
+	.message_actions button
+	{
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+		font-size: 10px;
+		line-height: 1;
+		width: 15px;
+		height: 15px;
+		padding: 0;
+		margin: 0;
+	}
+	.incoming_row .message_actions button, .outgoing_row .message_actions button
+	{
+		color: rgba(255, 255, 255, 0.85);
+	}
+	.next_message .message_actions button { color: rgba(0, 0, 0, 0.45); }
+	.message_actions button:hover { background: rgba(0, 0, 0, 0.18); border-radius: 3px; }

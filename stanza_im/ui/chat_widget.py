@@ -363,6 +363,7 @@ class ChatWidget(QtWidgets.QWidget):
                                 is_next=entry.get("is_next", False),
                                 message_id=entry.get("message_id", ""),
                                 unstyled=entry.get("unstyled", False),
+                                raw_timestamp=entry.get("timestamp", ""),
                                  user_icon_path=self._user_icon(
                                      entry.get("direction", "incoming"),
                                      entry.get("sender_jid", ""),
@@ -481,7 +482,8 @@ class ChatWidget(QtWidgets.QWidget):
              {**entry, "user_icon_path": self._user_icon(
                  entry.get("direction", "incoming"),
                  entry.get("sender_jid", ""), entry.get("sender", "")),
-             "timestamp": ts_to_time(entry.get("timestamp", ""))}
+             "timestamp": ts_to_time(entry.get("timestamp", "")),
+             "raw_timestamp": entry.get("timestamp", "")}
             for entry in unique
         ])
 

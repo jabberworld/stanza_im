@@ -81,6 +81,7 @@ if HAS_WEBENGINE:
         near_top = QtCore.pyqtSignal()
         scroll_fraction = QtCore.pyqtSignal(float)
         jump_clicked = QtCore.pyqtSignal()
+        message_action = QtCore.pyqtSignal(str, str, str, str, int, int)
 
         @QtCore.pyqtSlot(str)
         def on_link_clicked(self, url: str):
@@ -106,6 +107,11 @@ if HAS_WEBENGINE:
         def on_jump_clicked(self):
             self.jump_clicked.emit()
 
+        @QtCore.pyqtSlot(str, str, str, str, int, int)
+        def on_message_action(self, action: str, sender: str, time: str,
+                              body: str, x: int, y: int):
+            self.message_action.emit(action, sender, time, body, x, y)
+
     class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
@@ -123,6 +129,7 @@ if HAS_WEBENGINE:
             self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self.scroll_to_bottom)
+            self._bridge.message_action.connect(self._on_message_action)
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -152,6 +159,7 @@ if HAS_WEBENGINE:
             if ok:
                 self._install_scroll_js()
                 self._install_jump_js()
+                self._install_action_js()
                 self._scroll_poll.start()
             else:
                 self._scroll_poll.stop()
@@ -226,6 +234,71 @@ if HAS_WEBENGINE:
 
         def _install_jump_js(self):
             self.page().runJavaScript(self._JUMP_JS)
+
+        _ACTION_JS = """
+        (function installStanzaActions() {
+            if (window.__stanzaActionsInstalled) return;
+            window.__stanzaActionsInstalled = true;
+            document.addEventListener('click', function (e) {
+                var btn = e.target && e.target.closest
+                    ? e.target.closest('.message_actions button') : null;
+                if (!btn || !window.bridge) return;
+                e.preventDefault();
+                var wrap = btn.closest('.stanza-message');
+                if (!wrap) return;
+                var timeNode = wrap.querySelector('.time_initial, .timestamp');
+                var bodyNode = wrap.querySelector(
+                    '.message, .message_incoming, .message_outgoing, .next_message');
+                var timeRaw = wrap.getAttribute('data-stanza-time')
+                    || (timeNode ? timeNode.textContent.trim() : '');
+                var body = bodyNode
+                    ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
+                window.bridge.on_message_action(
+                    btn.getAttribute('data-action') || 'menu',
+                    wrap.getAttribute('data-stanza-sender') || '',
+                    timeRaw, body, e.clientX, e.clientY);
+            });
+        })();
+        """
+
+        def _install_action_js(self):
+            self.page().runJavaScript(self._ACTION_JS)
+
+        def _on_message_action(self, action: str, sender: str, time: str,
+                               body: str, x: int, y: int):
+            if action == "reply":
+                return
+            menu = QtWidgets.QMenu(self)
+            copy_icon = QtGui.QIcon.fromTheme("edit-copy")
+            if copy_icon.isNull():
+                copy_icon = self.style().standardIcon(
+                    QtWidgets.QStyle.StandardPixmap.SP_FileIcon)
+            copy_action = menu.addAction(copy_icon, tr("chat_copy"))
+            copy_action.triggered.connect(
+                lambda: QtWidgets.QApplication.clipboard().setText(
+                    self._copy_text(sender, time, body)))
+            menu.exec(self.mapToGlobal(QtCore.QPoint(int(x), int(y))))
+
+        @staticmethod
+        def _copy_text(sender: str, time_text: str, body: str) -> str:
+            """Compose an exact '[date time] sender: body' clipboard string."""
+            import datetime
+            import time as _time
+            full = (time_text or "").strip()
+            if len(full) >= 19 and full[10] == "T":
+                try:
+                    parsed = datetime.datetime.fromisoformat(
+                        full.replace("Z", "+00:00"))
+                    if parsed.tzinfo is not None:
+                        parsed = parsed.astimezone()
+                    full = parsed.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    full = ""
+            if not full:
+                full = _time.strftime("%Y-%m-%d %H:%M:%S")
+            elif "-" not in full:
+                full = _time.strftime("%Y-%m-%d") + " " + full
+            return f"[{full}] {sender}: {body}"
 
         def _set_jump_visible(self, show: bool):
             self.evaluate_js(
@@ -311,7 +384,7 @@ if HAS_WEBENGINE:
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
                         user_icon_path: str = "", message_id: str = "",
-                        unstyled: bool = False):
+                        unstyled: bool = False, raw_timestamp: str = ""):
             """Add a message to the chat view."""
             html = self._theme.render_message(
                 sender=sender, body=body, timestamp=timestamp,
@@ -319,7 +392,7 @@ if HAS_WEBENGINE:
                 sender_color=sender_color, user_icon_path=user_icon_path,
                 unstyled=unstyled,
             )
-            html = self._mark_message(html, sender, message_id)
+            html = self._mark_message(html, sender, message_id, raw_timestamp)
             if not self._ready:
                 self._pending.append(html)
                 return
@@ -346,7 +419,8 @@ if HAS_WEBENGINE:
                 sender_color="#000000",
                 user_icon_path=entry.get("user_icon_path", ""),
                 unstyled=entry.get("unstyled", False),
-            ), entry.get("sender", "Me")) for entry in messages)
+            ), entry.get("sender", "Me"),
+               entry.get("raw_timestamp", "")) for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
                 return
@@ -378,10 +452,14 @@ if HAS_WEBENGINE:
             """)
 
         @staticmethod
-        def _mark_message(content: str, sender: str, message_id: str = "") -> str:
+        def _mark_message(content: str, sender: str, message_id: str = "",
+                          raw_timestamp: str = "") -> str:
             marker = (' data-stanza-id="' + html.escape(message_id, quote=True) + '"'
                       if message_id else "")
-            return ('<div class="stanza-message"' + marker + ' data-stanza-sender="'
+            stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'
+                     if raw_timestamp else "")
+            return ('<div class="stanza-message"' + marker + stamp
+                    + ' data-stanza-sender="'
                     + html.escape(sender or "Me", quote=True) + '">'
                     + content + '</div>')
 
@@ -519,7 +597,7 @@ else:
                         direction: str, is_next: bool = False,
                         sender_color: str = "#000000",
                         user_icon_path: str = "", message_id: str = "",
-                        unstyled: bool = False):
+                        unstyled: bool = False, raw_timestamp: str = ""):
             if direction == "incoming":
                 self._append_before_typing(
                     f"<b>{sender}</b> <i>({timestamp})</i>: {body}")
