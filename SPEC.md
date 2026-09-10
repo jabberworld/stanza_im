@@ -410,11 +410,16 @@ message.
   `stanza:mention:nick` link (`ChatThemeFactory.render_message(mention=...)`,
   enabled per view via `ChatView.mention_senders`). Clicking it inserts
   `nick: ` at the cursor and focuses the input
-  (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats.
-- `Tab` / `Shift+Tab` in a MUC input completes the nick before the cursor:
-  with no prefix it cycles all participants, otherwise only nicks matching the
-  prefix; repeated presses walk the candidate list (wrapping) and any edit
-  restarts the search (`ChatWidget._tab_complete_nick`).
+  (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats. The
+  page click handler routes anchors through the raw `getAttribute('href')`
+  attribute rather than the browser-resolved `el.href`, so the custom
+  `stanza:` scheme reaches Python intact.
+- `Tab` / `Shift+Tab` in a MUC input completes the nick before the cursor and
+  cycles the candidate list with wrap-around on repeat presses. From a blank
+  field the nick is inserted as an address (`nick: ` with a trailing space);
+  while composing a message only the bare nick is completed. The previously
+  inserted token is tracked and replaced, so the cycle never accumulates text,
+  and any edit restarts the search (`ChatWidget._tab_complete_nick`).
 
 ## 12. Tray (`ui/tray.py`)
 

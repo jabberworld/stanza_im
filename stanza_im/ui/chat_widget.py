@@ -282,9 +282,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_to = ""
         self._reply_ref_sender = ""
         self._reply_ref_body = ""
-        self._nick_complete_prefix = ""
         self._nick_complete_candidates: list[str] = []
         self._nick_complete_index = -1
+        self._nick_complete_inserted = ""
+        self._nick_complete_start = -1
+        self._nick_complete_suffix = ""
 
         # Input area
         input_row = QtWidgets.QHBoxLayout()
@@ -405,56 +407,69 @@ class ChatWidget(QtWidgets.QWidget):
         return super().eventFilter(obj, event)
 
     def _tab_complete_nick(self, backward: bool = False) -> bool:
-        """Complete the MUC nick being typed before the cursor with Tab.
+        """Complete the MUC nick before the cursor with Tab.
 
-        Cycles through matching participants (all nicks when no prefix was
-        typed), wrapping around.  Repeated Tab presses keep walking the same
-        candidate list while the completed word is unchanged.  Returns True
-        when the event was consumed.
+        With an empty input the nick is inserted as an address (``nick: ``),
+        otherwise only the nick is completed.  Repeated Tab presses walk the
+        candidate list (wrapping around) and replace the previously inserted
+        token; any edit restarts the search.  Returns True when consumed.
         """
         if not self.is_muc:
             return False
         tc = self._input.textCursor()
-        block_text = tc.block().text()
-        pos = tc.positionInBlock()
-        start = block_text.rfind(" ", 0, pos) + 1
-        current_word = block_text[start:pos]
+        doc = self._input.document()
+        pos = tc.position()
 
-        def _nicks():
-            return sorted(
-                (u.get("nick", "") for u in self._users if u.get("nick")),
-                key=str.lower)
+        continuing = False
+        if (self._nick_complete_inserted
+                and self._nick_complete_start >= 0
+                and self._nick_complete_start
+                + len(self._nick_complete_inserted) == pos):
+            probe = QtGui.QTextCursor(doc)
+            probe.setPosition(self._nick_complete_start)
+            probe.setPosition(
+                self._nick_complete_start + len(self._nick_complete_inserted),
+                QtGui.QTextCursor.MoveMode.KeepAnchor)
+            continuing = probe.selectedText() == self._nick_complete_inserted
 
-        if (self._nick_complete_candidates
-                and 0 <= self._nick_complete_index < len(
-                    self._nick_complete_candidates)
-                and current_word == self._nick_complete_candidates[
-                    self._nick_complete_index]
-                and current_word.startswith(self._nick_complete_prefix)):
+        if continuing:
             candidates = self._nick_complete_candidates
             index = (self._nick_complete_index + (-1 if backward else 1)) \
                 % len(candidates)
+            suffix = self._nick_complete_suffix
+            start = self._nick_complete_start
         else:
+            block_text = tc.block().text()
+            in_block = tc.positionInBlock()
+            start_in_block = block_text.rfind(" ", 0, in_block) + 1
+            current_word = block_text[start_in_block:in_block]
+            pool = sorted(
+                (u.get("nick", "") for u in self._users if u.get("nick")),
+                key=str.lower)
             if current_word:
-                pool = [n for n in _nicks()
+                pool = [n for n in pool
                         if n.lower().startswith(current_word.lower())]
-            else:
-                pool = _nicks()
             if not pool:
+                self._nick_complete_inserted = ""
                 return False
             candidates = pool
             index = len(pool) - 1 if backward else 0
+            suffix = ": " if not self._input.toPlainText().strip() else ""
+            start = tc.block().position() + start_in_block
 
-        nick = candidates[index]
-        self._nick_complete_prefix = current_word
+        new_text = candidates[index] + suffix
+        end = start + len(self._nick_complete_inserted) if continuing else pos
+        edit = QtGui.QTextCursor(doc)
+        edit.setPosition(start)
+        edit.setPosition(end, QtGui.QTextCursor.MoveMode.KeepAnchor)
+        edit.insertText(new_text)
+        self._input.setTextCursor(edit)
+
         self._nick_complete_candidates = candidates
         self._nick_complete_index = index
-
-        new_tc = QtGui.QTextCursor(tc)
-        new_tc.setPosition(tc.block().position() + start)
-        new_tc.setPosition(tc.position(), QtGui.QTextCursor.MoveMode.KeepAnchor)
-        new_tc.insertText(nick)
-        self._input.setTextCursor(new_tc)
+        self._nick_complete_inserted = new_text
+        self._nick_complete_start = start
+        self._nick_complete_suffix = suffix
         return True
 
     def _send(self):

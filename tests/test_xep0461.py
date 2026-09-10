@@ -137,6 +137,9 @@ _theme_src = open(os.path.join(
     _root, "stanza_im", "ui", "chat_themes.py"), encoding="utf-8").read()
 check("reply JS routes via on_link_clicked",
       "stanza:reply:" in _theme_src and "on_link_clicked" in _theme_src)
+check("links routed via raw href attribute",
+      "on_link_clicked(el.getAttribute('href'))" in _theme_src
+      and "on_link_clicked(el.href)" not in _theme_src)
 check("reply JS stanza-id fallback",
       "data-stanza-id" in _theme_src)
 _view_src = open(os.path.join(
@@ -253,21 +256,29 @@ def _type(text):
 cw3._input.setFocus()
 _type("")
 cw3._tab_complete_nick()
-check("tab all nicks first", cw3._input.toPlainText() == "albert")
+check("tab empty field adds address", cw3._input.toPlainText() == "albert: ")
 cw3._tab_complete_nick()
-check("tab all nicks cycle", cw3._input.toPlainText() == "alice")
+check("tab address cycles", cw3._input.toPlainText() == "alice: ")
+cw3._tab_complete_nick()
+check("tab address cycles 3", cw3._input.toPlainText() == "Bob The Cat: ")
+cw3._tab_complete_nick()
+check("tab address cycles 4", cw3._input.toPlainText() == "zoe: ")
+cw3._tab_complete_nick()
+check("tab address wraps around", cw3._input.toPlainText() == "albert: ")
 _type("bo")
 cw3._tab_complete_nick()
-check("tab prefix match", cw3._input.toPlainText() == "Bob The Cat")
+check("tab prefix match bare", cw3._input.toPlainText() == "Bob The Cat")
 _type("x")
 check("tab no match returns False", cw3._tab_complete_nick() is False)
 _type("")
 cw3._tab_complete_nick(backward=True)
-check("tab backward starts from end", cw3._input.toPlainText() == "zoe")
+check("tab backward starts from end", cw3._input.toPlainText() == "zoe: ")
 _type("echo hi al")
 cw3._tab_complete_nick()
 check("tab completes mid-line word",
       cw3._input.toPlainText() == "echo hi albert")
+cw3._tab_complete_nick()
+check("tab mid-line cycles bare", cw3._input.toPlainText() == "echo hi alice")
 
 # 15. Esc collapses current tab, others remain -----------------------------
 from stanza_im.ui.chat_window import ChatWindow

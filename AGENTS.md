@@ -182,12 +182,15 @@ with the `.stanza-reply` quote bar (body quotes stripped) via
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
 enabled via `ChatView.mention_senders`); clicking it inserts `nick: ` into the
-input with focus (`ChatWidget._handle_mention_uri`). `Tab`/`Shift+Tab` in a MUC
-input completes the nick before the cursor — all participants when nothing was
-typed, otherwise nicks matching the prefix — cycling on repeat presses
-(`ChatWidget._tab_complete_nick`). `Esc` in the chat window collapses the
-current tab back to the roster (leaving a MUC, keeping other tabs; the window
-hides only after the last tab).
+input with focus (`ChatWidget._handle_mention_uri`). The page-level click handler
+routes anchors via the raw `getAttribute('href')` (not the resolved `el.href`,
+which normalises custom `stanza:` schemes). `Tab`/`Shift+Tab` in a MUC input
+completes the nick before the cursor and cycles the candidate list on repeat
+presses: from an empty field the nick is inserted as an address (`nick: `),
+mid-message only the bare nick is completed; the previous token is replaced so
+the cycle wraps correctly (`ChatWidget._tab_complete_nick`). `Esc` in the chat
+window collapses the current tab back to the roster (leaving a MUC, keeping
+other tabs; the window hides only after the last tab).
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

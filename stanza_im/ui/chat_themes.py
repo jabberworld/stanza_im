@@ -82,7 +82,9 @@ document.addEventListener('click', function (e) {{
     var el = e.target && e.target.closest ? e.target.closest('a') : null;
     if (el && el.getAttribute('href')) {{
         e.preventDefault();
-        if (window.bridge) {{ window.bridge.on_link_clicked(el.href); }}
+        // Use the raw attribute, not el.href: the browser resolves/normalises
+        // custom schemes (stanza:…) and the resolved property breaks routing.
+        if (window.bridge) {{ window.bridge.on_link_clicked(el.getAttribute('href')); }}
         return;
     }}
     var reply = e.target && e.target.closest
