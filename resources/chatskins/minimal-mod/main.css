@@ -150,6 +150,9 @@ a:hover{
 	padding-left: 6px;
 	font-size: 9px;
 	font-family: Helvetica;
+	/* Reserve the width of a date+time stamp (e.g. 2026-09-10 12:34:56)
+	   so the hover actions align identically in both message variants. */
+	min-width: 21ch;
 }
 
 .message {

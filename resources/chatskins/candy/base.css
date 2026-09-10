@@ -85,6 +85,13 @@
 		font-weight: normal;
 	}
 	
+	/* Reserve the width of a date+time stamp so hover actions align in both
+	   message variants (leave .status_row timestamps untouched). */
+	.incoming_row .timestamp, .outgoing_row .timestamp, .next_message .timestamp
+	{
+		min-width: 21ch;
+	}
+	
 	.next_message .timestamp
 	{
 		color: rgba(0, 0, 0, 0.4);
