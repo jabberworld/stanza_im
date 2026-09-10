@@ -925,6 +925,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_all_conference_roster()
         self._recount_groups()
         self._roster.sort_and_update()
+        # Prefetch bookmarks so MUC bookmark buttons are correct before the
+        # Bookmarks menu is ever opened.
+        self._start_task(self._load_bookmarks())
 
     def _on_roster_item_added(self, item):
         self._add_roster_item(item)
