@@ -282,6 +282,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_to = ""
         self._reply_ref_sender = ""
         self._reply_ref_body = ""
+        self._reply_quote_range: tuple[int, int] | None = None
+        self._reply_quote_text = ""
         self._nick_complete_candidates: list[str] = []
         self._nick_complete_index = -1
         self._nick_complete_inserted = ""
@@ -454,7 +456,7 @@ class ChatWidget(QtWidgets.QWidget):
                 return False
             candidates = pool
             index = len(pool) - 1 if backward else 0
-            suffix = ": " if not self._input.toPlainText().strip() else ""
+            suffix = (": " if not block_text[:start_in_block].strip() else "")
             start = tc.block().position() + start_in_block
 
         new_text = candidates[index] + suffix
@@ -481,13 +483,12 @@ class ChatWidget(QtWidgets.QWidget):
         if text.startswith("/") and self._handle_slash_command(text):
             self._input.clear()
             return
-        if self._reply_id or (self._reply_ref_sender and self._reply_ref_body):
+        if self._reply_id and text.lstrip().startswith("> "):
             self.message_reply_sent.emit(
-                self.jid, text, self._reply_to, self._reply_id,
-                self._reply_ref_sender, self._reply_ref_body)
-            self._clear_reply_state()
+                self.jid, text, self._reply_to, self._reply_id, "", "")
         else:
             self.message_sent.emit(self.jid, text)
+        self._clear_reply_state()
         self._input.clear()
 
     def _handle_slash_command(self, text: str) -> bool:
@@ -571,13 +572,24 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_reply_requested(self, reply_id: str, author: str, sender: str,
                             snippet: str):
-        """Start composing a XEP-0461 reply in this chat."""
+        """Start composing a XEP-0461 reply in this chat.
+
+        The referenced message is inserted into the input as a XEP-0421
+        style quote block with the cursor below it; the banner stays as an
+        indicator and the reply reference is kept for the outgoing stanza.
+        """
         self._reply_id = reply_id
         self._reply_to = author or sender or self.jid
-        self._reply_ref_sender = sender or self._author_display(author)
-        self._reply_ref_body = snippet or ""
-        label = tr("reply_in_reply_to",
-                   sender=self._reply_ref_sender or self._reply_to)
+        display = sender or self._author_display(author) or self._reply_to
+        self._reply_ref_sender = ""
+        self._reply_ref_body = ""
+        quote = self._format_quote(display, snippet)
+        self._input.insertPlainText(quote)
+        cursor = self._input.textCursor()
+        self._reply_quote_text = quote
+        self._reply_quote_range = (
+            max(0, cursor.position() - len(quote)), len(quote))
+        label = tr("reply_in_reply_to", sender=display)
         hint = " ".join((snippet or "").split())
         if hint:
             if len(hint) > 90:
@@ -587,15 +599,43 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_ctx.setVisible(True)
         self._input.setFocus()
 
+    @staticmethod
+    def _format_quote(sender: str, snippet: str) -> str:
+        """Build the XEP-0421 fallback quote block inserted into the input."""
+        lines = ["> " + (sender or "") + " wrote:"]
+        for line in (snippet or "").splitlines() or [""]:
+            lines.append(("> " + line) if line else ">")
+        return "\n".join(lines) + "\n\n"
+
     def _cancel_reply(self):
+        self._remove_inserted_quote()
         self._clear_reply_state()
         self._input.setFocus()
+
+    def _remove_inserted_quote(self) -> None:
+        """Delete the quote block inserted when the reply started (if the
+        user has not edited it since)."""
+        if not self._reply_quote_range or not self._reply_quote_text:
+            return
+        start, length = self._reply_quote_range
+        doc = self._input.document()
+        if start < 0 or start + length > doc.characterCount() - 1:
+            return
+        probe = QtGui.QTextCursor(doc)
+        probe.setPosition(start)
+        probe.setPosition(start + length, QtGui.QTextCursor.MoveMode.KeepAnchor)
+        selected = probe.selectedText().replace("\u2029", "\n")
+        if selected != self._reply_quote_text:
+            return
+        probe.removeSelectedText()
 
     def _clear_reply_state(self):
         self._reply_id = ""
         self._reply_to = ""
         self._reply_ref_sender = ""
         self._reply_ref_body = ""
+        self._reply_quote_range = None
+        self._reply_quote_text = ""
         self._reply_ctx.setVisible(False)
 
     # ── Message rendering ─────────────────────────────────────────

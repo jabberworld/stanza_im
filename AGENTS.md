@@ -160,24 +160,29 @@ preferences switch both fall back to the plain pipeline. Feature advertised as
 `urn:xmpp:styling:0`.
 
 **Message Replies** (XEP-0461): the per-message reply button is caught by the
-page-level click handler in `chat_themes._webchannel_script()` and routed to
-`bridge.on_link_clicked("stanza:reply:id/author/sender/body")`, decoded in
-`ChatWidget._handle_reply_uri` (id falls back to `data-stanza-id`); this rides
-the proven link channel instead of a dedicated bridge slot. The `qwebchannel.js`
-glue prefers Qt's `:/qtwebchannel` resource and falls back to the packaged copy
-in `resources/qwebchannel.js` so `window.bridge` is always defined. The reply
-button pins a quote banner above the input; `client._attach_reply` attaches
-`<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>` as the first child of
-`<message>` plus an optional XEP-0421 fallback (`> Sender wrote: …`) wrapped in
-`<fallback for='urn:xmpp:reply:0'>` for legacy clients. Replyable ids come from
-`origin-id`/`id` (1:1) and the server `stanza-id` (MUC, by the room's bare JID),
-falling back to `archive_id` then `message_id` (`ChatWidget._reply_target_id`);
-the reply button is never a no-op — a message with no resolvable reference still
-opens the banner and is sent as a plain message carrying the `> ` quote. Received
-replies are parsed in `client._on_message`/`_on_groupchat_message`, stored in
-history (`origin_id`/`reply_to`/`reply_id`, see `core/history.py`) and rendered
-with the `.stanza-reply` quote bar (body quotes stripped) via
-`chat_themes.render_reply()`. Feature advertised as `urn:xmpp:reply:0`.
+page-level click handler in `chat_themes._webchannel_script()` and encoded as a
+`stanza:reply:id/author/sender/body` URI (id falls back to `data-stanza-id`),
+then handed to `window.stanzaSend`. `stanzaSend` calls `bridge.on_link_clicked`
+and always mirrors the `sid|uri` payload through `console.log('stanza-click|…')`;
+`ChatView` dedupes both copies by `sid` (`_dispatch_click`) and emits
+`link_clicked`, so clicks work even when the QWebChannel transport is missing
+(the console signal is plain C++). This is the same channel used for ordinary
+links. The `qwebchannel.js` glue prefers Qt's `:/qtwebchannel` resource and
+falls back to the packaged copy in `resources/qwebchannel.js`. Clicking reply
+inserts the referenced message into the input as an XEP-0421 quote block
+(`> Sender wrote:\n> text`) with the cursor below it; a banner remains as an
+indicator and `×` cancels (removing the inserted quote).
+`client._attach_reply` attaches `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>`
+as the first child of `<message>` for messages with a resolvable reference; the
+quote is already in the body, so no automatic fallback is prepended. Replyable
+ids come from `origin-id`/`id` (1:1) and the server `stanza-id` (MUC, by the
+room's bare JID), falling back to `archive_id` then `message_id`
+(`ChatWidget._reply_target_id`); a message with no resolvable reference still
+gets the quote and is sent as a plain message. Received replies are parsed in
+`client._on_message`/`_on_groupchat_message`, stored in history
+(`origin_id`/`reply_to`/`reply_id`, see `core/history.py`) and rendered with the
+`.stanza-reply` quote bar (body quotes stripped) via `chat_themes.render_reply()`.
+Feature advertised as `urn:xmpp:reply:0`.
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
@@ -186,11 +191,13 @@ input with focus (`ChatWidget._handle_mention_uri`). The page-level click handle
 routes anchors via the raw `getAttribute('href')` (not the resolved `el.href`,
 which normalises custom `stanza:` schemes). `Tab`/`Shift+Tab` in a MUC input
 completes the nick before the cursor and cycles the candidate list on repeat
-presses: from an empty field the nick is inserted as an address (`nick: `),
-mid-message only the bare nick is completed; the previous token is replaced so
-the cycle wraps correctly (`ChatWidget._tab_complete_nick`). `Esc` in the chat
-window collapses the current tab back to the roster (leaving a MUC, keeping
-other tabs; the window hides only after the last tab).
+presses: a nick starting the line is inserted as an address (`nick: `),
+mid-line only the bare nick is completed; the previous token is replaced so the
+cycle wraps correctly (`ChatWidget._tab_complete_nick`). `Esc` in the chat
+window collapses a conference back to the roster without leaving the room (the
+tab is removed, the room stays joined, other tabs keep the window open); on a
+1:1 tab Esc closes it. `Ctrl+W` leaves a conference (with the optional confirm)
+and closes a 1:1 tab.
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

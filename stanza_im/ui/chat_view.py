@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import html
 import logging
+import collections
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -123,7 +124,9 @@ if HAS_WEBENGINE:
             self._theme = theme
             self.mention_senders = False
             self._bridge = _ChatBridge()
-            self._bridge.link_clicked.connect(self.link_clicked)
+            self._bridge.link_clicked.connect(self._on_raw_click)
+            self._seen_clicks: "collections.OrderedDict[str, bool]" = \
+                collections.OrderedDict()
             self._bridge.near_top.connect(self._on_bridge_near_top)
             self._fraction = 1.0
             self._overflow = False
@@ -170,7 +173,33 @@ if HAS_WEBENGINE:
                     self._append_chunk(chunk)
 
         def _on_js_console(self, level, message: str, line: int, source: str):
+            prefix = "stanza-click|"
+            if isinstance(message, str) and message.startswith(prefix):
+                payload = message[len(prefix):]
+                sid, sep, uri = payload.partition("|")
+                if sep:
+                    self._dispatch_click(sid, uri)
+                return
             logger.debug("chat JS [%s:%s] %s", source, line, message)
+
+        def _on_raw_click(self, payload: str):
+            """Handle a click delivered through the QWebChannel bridge."""
+            sid, sep, uri = str(payload).partition("|")
+            if not sep:
+                sid, uri = "", str(payload)
+            self._dispatch_click(sid, uri)
+
+        def _dispatch_click(self, sid: str, uri: str):
+            """Emit a routed click once, deduplicating the bridge and console
+            copies of the same ``stanzaSend`` payload."""
+            if sid:
+                if sid in self._seen_clicks:
+                    return
+                self._seen_clicks[sid] = True
+                while len(self._seen_clicks) > 128:
+                    self._seen_clicks.popitem(last=False)
+            logger.debug("chat click: %s", uri)
+            self.link_clicked.emit(uri)
 
         _SCROLL_JS = """
         (function installStanzaScroll() {

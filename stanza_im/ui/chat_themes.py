@@ -49,15 +49,30 @@ def _webchannel_script() -> str:
 
     Reads Qt's bundled ``qwebchannel.js`` (or the packaged copy in
     ``resources/``) and installs ``window.bridge`` plus a global click
-    handler that routes both link clicks and XEP-0461 reply buttons to
-    ``bridge.on_link_clicked``.  Returns '' only when the script itself is
-    unavailable.
+    handler that routes link clicks and XEP-0461 reply buttons through
+    ``stanzaSend``.  ``stanzaSend`` calls the QWebChannel bridge and always
+    mirrors the payload over ``console.log`` so the C++ side receives it
+    even when the WebChannel transport is unavailable (Python dedupes).
+    Returns '' only when the script itself is unavailable.
     """
     js = _qwebchannel_js()
     if not js:
         return ""
     return f"""<script>
 {js}
+window.__stanzaSeq = 0;
+window.stanzaSend = function (uri) {{
+    var sid = 's' + (++window.__stanzaSeq) + '-' + Date.now();
+    var payload = sid + '|' + uri;
+    try {{
+        if (window.bridge && window.bridge.on_link_clicked) {{
+            window.bridge.on_link_clicked(payload);
+        }}
+    }} catch (err) {{ /* fall through to the console channel */ }}
+    try {{
+        console.log('stanza-click|' + payload);
+    }} catch (err) {{}}
+}};
 document.addEventListener('DOMContentLoaded', function () {{
     new QWebChannel(qt.webChannelTransport, function (channel) {{
         window.bridge = channel.objects.bridge;
@@ -84,7 +99,7 @@ document.addEventListener('click', function (e) {{
         e.preventDefault();
         // Use the raw attribute, not el.href: the browser resolves/normalises
         // custom schemes (stanza:…) and the resolved property breaks routing.
-        if (window.bridge) {{ window.bridge.on_link_clicked(el.getAttribute('href')); }}
+        window.stanzaSend(el.getAttribute('href'));
         return;
     }}
     var reply = e.target && e.target.closest
@@ -102,14 +117,9 @@ document.addEventListener('click', function (e) {{
             ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
         var sender = wrap ? (wrap.getAttribute('data-stanza-sender') || '') : '';
         var author = wrap ? (wrap.getAttribute('data-reply-author') || '') : '';
-        var uri = 'stanza:reply:' + encodeURIComponent(replyId) + '/'
+        window.stanzaSend('stanza:reply:' + encodeURIComponent(replyId) + '/'
             + encodeURIComponent(author) + '/' + encodeURIComponent(sender)
-            + '/' + encodeURIComponent(body);
-        if (window.bridge && window.bridge.on_link_clicked) {{
-            window.bridge.on_link_clicked(uri);
-        }} else {{
-            console.log('stanza reply dropped (bridge missing): ' + uri);
-        }}
+            + '/' + encodeURIComponent(body));
     }}
 }});
 </script>

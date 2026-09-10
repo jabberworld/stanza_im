@@ -112,9 +112,14 @@ class ChatWindow(QtWidgets.QMainWindow):
             self._close_tab(idx)
 
     def _on_escape(self):
-        # Esc collapses the current conversation back to the roster: the tab
-        # is closed (leaving a MUC room) and the window stays open while other
-        # tabs remain; it hides only when the tab was the last one.
+        # Esc collapses the current conference back to the roster without
+        # leaving it: the tab is removed but the room stays joined. Other
+        # tabs keep the window open; the window hides only when the tab was
+        # the last one. 1:1 tabs are closed (same as Ctrl+W).
+        widget = self._tab_widget.currentWidget()
+        if isinstance(widget, ChatWidget) and widget.is_muc:
+            self.close_chat(widget.jid)
+            return
         self._close_current_tab()
 
     # ── Public API ────────────────────────────────────────────────

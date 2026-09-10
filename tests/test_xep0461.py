@@ -135,10 +135,11 @@ check("render_reply no-snippet", bare and "stanza-reply" in bare)
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _theme_src = open(os.path.join(
     _root, "stanza_im", "ui", "chat_themes.py"), encoding="utf-8").read()
-check("reply JS routes via on_link_clicked",
-      "stanza:reply:" in _theme_src and "on_link_clicked" in _theme_src)
-check("links routed via raw href attribute",
-      "on_link_clicked(el.getAttribute('href'))" in _theme_src
+check("reply JS routes via stanzaSend",
+      "stanza:reply:" in _theme_src and "stanzaSend" in _theme_src)
+check("clicks mirrored to console channel",
+      "console.log('stanza-click|'" in _theme_src
+      and "window.stanzaSend(el.getAttribute('href'))" in _theme_src
       and "on_link_clicked(el.href)" not in _theme_src)
 check("reply JS stanza-id fallback",
       "data-stanza-id" in _theme_src)
@@ -163,14 +164,19 @@ cw._on_reply_requested("abc", "alice@example.com/res", "Alice",
                        "are you in?")
 check("reply state set", cw._reply_id == "abc" and
       cw._reply_to == "alice@example.com/res" and
-      cw._reply_ref_body == "are you in?")
+      cw._reply_ref_body == "" and
+      cw._input.toPlainText().startswith("> Alice wrote:"))
 check("reply banner visible", not cw._reply_ctx.isHidden())
 
-cw._input.setPlainText("me too")
+cur = cw._input.textCursor()
+cur.movePosition(QtGui.QTextCursor.MoveOperation.End)
+cw._input.setTextCursor(cur)
+cw._input.insertPlainText("me too")
+_expected_body = cw._format_quote("Alice", "are you in?") + "me too"
 cw._send()
 check("reply signal emitted", len(emitted) == 1 and
-      emitted[0] == ("bob@example.com", "me too", "alice@example.com/res",
-                     "abc", "Alice", "are you in?"))
+      emitted[0] == ("bob@example.com", _expected_body,
+                     "alice@example.com/res", "abc", "", ""))
 check("reply state cleared", cw._reply_id == "" and
       cw._reply_ctx.isHidden())
 
@@ -190,17 +196,29 @@ resolved = cw._reply_quote_for({"reply_id": "oid-1"})
 check("reply_quote_for", resolved == ("Alice", "are you in?"))
 
 # 10. quote-only reply (message without a reference id) --------------------
+plain.clear()
 emitted.clear()
 cw._on_reply_requested("", "alice@example.com/res", "Alice", "are you in?")
 check("quote-only banner visible", not cw._reply_ctx.isHidden())
-cw._input.setPlainText("still yes")
+cur = cw._input.textCursor()
+cur.movePosition(QtGui.QTextCursor.MoveOperation.End)
+cw._input.setTextCursor(cur)
+cw._input.insertPlainText("still yes")
 cw._send()
-check("quote-only reply emitted with empty id",
-      len(emitted) == 1 and emitted[0] ==
-      ("bob@example.com", "still yes", "alice@example.com/res",
-       "", "Alice", "are you in?"))
+check("quote-only sent as plain message",
+      len(plain) == 1 and plain[0][0] == "bob@example.com"
+      and plain[0][1].endswith("still yes") and len(emitted) == 0)
 check("quote-only state cleared", cw._reply_id == "" and
       cw._reply_ctx.isHidden())
+# cancel reply removes the inserted quote -------------------------------
+cw._on_reply_requested("abc", "alice@example.com/res", "Alice", "are you in?")
+_q_before = cw._input.toPlainText()
+check("quote inserted on reply", bool(cw._reply_quote_text)
+      and cw._input.toPlainText().startswith("> Alice wrote:"))
+cw._cancel_reply()
+check("cancel removes quote", cw._input.toPlainText() == ""
+      and cw._reply_id == "" and cw._reply_quote_text == ""
+      and cw._reply_ctx.isHidden())
 
 # 11. reply target id fallback chain ---------------------------------------
 check("reply_target_id origin", ChatWidget._reply_target_id(
@@ -211,17 +229,18 @@ check("reply_target_id message", ChatWidget._reply_target_id(
     {"origin_id": "", "archive_id": "", "message_id": "m"}) == "m")
 check("reply_target_id empty", ChatWidget._reply_target_id({}) == "")
 
-# 12. stanza:reply URI drives the banner via _open_link --------------------
+# 12. stanza:reply URI drives the banner + input quote ---------------------
 from urllib.parse import quote as _quote
 cw2 = ChatWidget("room@conf/x", "Room", chat_themes.ChatThemeFactory(),
                  is_muc=True)
 cw2._reply_ctx.setVisible(False)
 cw2._open_link("stanza:reply:oid-9/" + _quote("alice@example.com/res", safe="")
                + "/Alice/" + _quote("hello bob"))
-check("stanza:reply sets banner",
+check("stanza:reply sets quote input",
       not cw2._reply_ctx.isHidden() and cw2._reply_id == "oid-9"
-      and cw2._reply_ref_sender == "Alice"
-      and cw2._reply_ref_body == "hello bob")
+      and cw2._reply_ref_sender == ""
+      and cw2._input.toPlainText().startswith("> Alice wrote:")
+      and "hello bob" in cw2._input.toPlainText())
 
 # 13. stanza:mention inserts "nick: " with focus (MUC only) -----------------
 cw2.show()
@@ -267,7 +286,12 @@ cw3._tab_complete_nick()
 check("tab address wraps around", cw3._input.toPlainText() == "albert: ")
 _type("bo")
 cw3._tab_complete_nick()
-check("tab prefix match bare", cw3._input.toPlainText() == "Bob The Cat")
+check("tab prefix at line start addresses",
+      cw3._input.toPlainText() == "Bob The Cat: ")
+_type("echo bo")
+cw3._tab_complete_nick()
+check("tab prefix mid-line is bare",
+      cw3._input.toPlainText() == "echo Bob The Cat")
 _type("x")
 check("tab no match returns False", cw3._tab_complete_nick() is False)
 _type("")
@@ -280,19 +304,25 @@ check("tab completes mid-line word",
 cw3._tab_complete_nick()
 check("tab mid-line cycles bare", cw3._input.toPlainText() == "echo hi alice")
 
-# 15. Esc collapses current tab, others remain -----------------------------
+# 15. Esc collapses a MUC without leaving; Ctrl+W leaves --------------------
 from stanza_im.ui.chat_window import ChatWindow
 cw_win = ChatWindow(chat_themes.ChatThemeFactory(),
                     chat_themes.ChatThemeFactory())
 cw_win.set_muc_leave_confirm(lambda room: True)
+left_rooms = []
+cw_win.muc_leave_requested.connect(lambda r: left_rooms.append(r))
 cw_win.open_groupchat("room@conf/x", "Nick", "Room")
 cw_win.open_chat("bob@example.com", "Bob", focus=False)
 cw_win._on_escape()
-check("esc closes muc tab", not cw_win.has_chat("room@conf/x"))
+check("esc collapses muc tab", not cw_win.has_chat("room@conf/x"))
+check("esc does not leave muc", left_rooms == [])
 check("esc keeps 1:1 tab", cw_win.has_chat("bob@example.com"))
 check("esc keeps window visible", cw_win.isVisible())
+cw_win.open_groupchat("room@conf/x", "Nick", "Room")
+cw_win._close_current_tab()
+check("ctrl-w leaves muc", left_rooms == ["room@conf/x"])
 cw_win._on_escape()
-check("esc closes last tab", not cw_win.has_chat("bob@example.com"))
+check("esc closes last 1:1 tab", not cw_win.has_chat("bob@example.com"))
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
