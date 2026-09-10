@@ -170,13 +170,23 @@ check("history replaced",
 _view_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
-check("edit menu is anchor",
-      "edit.href = 'stanza:edit:'" in _view_src
-      and "setTimeout(closeMenu, 0)" in _view_src
+_rootdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+check("edit menu clicks in-document relay",
+      "querySelector('.action-edit')" in _view_src
+      and "relay.click()" in _view_src
       and "data-stanza-outgoing" in _view_src)
-check("no js-location or console edit delivery",
-      "window.location.href = 'stanza:edit:'" not in _view_src
+check("no overlay navigation for edit",
+      "edit.href = 'stanza:edit:'" not in _view_src
+      and "window.location.href = 'stanza:edit:'" not in _view_src
       and "console.log('stanza-edit:'" not in _view_src)
+check("in-document edit anchor markup",
+      "class=\"action-edit\"" in _view_src
+      and "href=\"stanza:edit:" in _view_src)
+check("edit anchor css in skins", all(
+    ".action-edit" in open(
+        os.path.join(_rootdir, "resources", "chatskins", skin, "main.css"),
+        encoding="utf-8").read()
+    for skin in ("minimal-mod", "candy")))
 check("post-click content probe present",
       "_schedule_content_probe" in _view_src
       and "_verify_after_click" in _view_src

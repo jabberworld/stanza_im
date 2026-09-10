@@ -457,13 +457,16 @@ if HAS_WEBENGINE:
                 menu.style.top = (y + 2) + 'px';
                 menu.style.left = (x + 2) + 'px';
                 if (wrap.getAttribute('data-stanza-outgoing') === '1') {
-                    var edit = document.createElement('a');
-                    edit.href = 'stanza:edit:' + encodeURIComponent(
-                        wrap.getAttribute('data-stanza-id') || '');
+                    var edit = document.createElement('button');
+                    edit.type = 'button';
                     edit.textContent = EDIT_LABEL || 'Edit';
-                    // Close the overlay only AFTER the navigation has been
-                    // initiated: removing the link mid-click can abort it.
-                    edit.addEventListener('click', function () {
+                    edit.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        // Navigate through the in-document .action-edit anchor
+                        // (the same LinkClicked path as reply/mention) instead
+                        // of navigating from the overlay menu.
+                        var relay = wrap.querySelector('.action-edit');
+                        if (relay) { relay.click(); }
                         window.setTimeout(closeMenu, 0);
                     });
                     menu.appendChild(edit);
@@ -768,6 +771,12 @@ if HAS_WEBENGINE:
                     "%REPLY_TARGET%",
                     _compose_reply_target(reply_able_id, reply_author,
                                           sender, reply_body))
+            ref_id = message_id or reply_able_id
+            if outgoing and ref_id:
+                content += ('<a class="action-edit" '
+                            'href="stanza:edit:' + quote(str(ref_id), safe="") + '" '
+                            'title="%s">\u270e</a>'
+                            % html.escape(tr("chat_edit"), quote=True))
             node_id = message_id or reply_able_id
             marker = (' data-stanza-id="' + html.escape(node_id, quote=True) + '"'
                       if node_id else "")

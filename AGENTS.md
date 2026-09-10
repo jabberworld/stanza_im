@@ -282,15 +282,16 @@ fetch apply remote displayed states — unread is cleared and an open chat gets
 an "Displayed on another device" status line.
 
 Last Message Correction (XEP-0308): any own message is editable (Ctrl+Up =
-last sent; the message menu adds an "Edit" anchor for `data-stanza-outgoing`
-wrappers, routed via `stanza:edit:<id>` through `acceptNavigationRequest` —
-the overlay menu is closed a tick later so the navigating link is never removed
-mid-click, and a post-click content probe (`_schedule_content_probe` /
-`_verify_after_click`) restores the window via `document_lost` if the
-conversation vanished); the body loads into the input with a cancelable editing
+last sent; own messages carry an in-document `.action-edit` anchor
+(`stanza:edit:<id>`), and the message menu's "Edit" item clicks that anchor so
+editing uses the same always-safe LinkClicked/`acceptNavigationRequest` path as
+replies/mentions — the overlay-menu navigation previously reset the chat
+document); the body loads into the input with a cancelable editing
 banner and `_send` emits `message_edit_sent`, so the client sends
 `<replace id='…'/>` (fresh stanza id) and replaces the message locally (1:1)
-or via the MUC echo. Incoming corrections replace (edited flag + a large bold
+or via the MUC echo. A post-click content probe (`_schedule_content_probe` /
+`_verify_after_click`) restores the window via `document_lost` if the
+conversation vanished. Incoming corrections replace (edited flag + a large bold
 «✎» appended right after the edited phrase via `render_message(edited=True)`,
 `chat.allow_incoming_edits` on) or arrive as new messages (off). History gains
 `message_id`/`edited` columns and `replace_message()`.
