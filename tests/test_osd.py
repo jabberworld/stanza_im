@@ -170,5 +170,31 @@ check("system-move reports position",
       m5._cfg.osd_x == 777 and m5._cfg.osd_y == 555)
 m5.hide_preview()
 
+# 9. non-modal settings dialog keeps the preview interactive ---------------
+p_dlg2 = PreferencesDialog(p_cfg, theme, osd_manager=p_mgr)
+p_dlg2.show()
+check("prefs dialog non-modal", not p_dlg2.isModal())
+p_dlg2._on_notifications_tab_changed(1)
+_win9 = p_mgr._preview["window"]
+_win9.move(120, 80)
+_press9 = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonPress, QtCore.QPointF(30, 20),
+    QtCore.QPointF(200, 95), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+_move9 = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseMove, QtCore.QPointF(40, 30),
+    QtCore.QPointF(230, 100), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(_win9, _press9)
+QtWidgets.QApplication.sendEvent(_win9, _move9)
+check("preview drags while settings open",
+      (_win9.x(), _win9.y()) == (150, 85))
+check("drag persists while settings open",
+      p_mgr._cfg.osd_x == 150 and p_mgr._cfg.osd_y == 85)
+p_dlg2.close()
+p_mgr.hide_preview()
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

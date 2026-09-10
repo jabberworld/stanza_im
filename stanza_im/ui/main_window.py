@@ -820,11 +820,25 @@ class MainWindow(QtWidgets.QMainWindow):
         return "<br>".join(lines), contact.avatar_path
 
     def _on_preferences(self):
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return
         from stanza_im.ui.preferences import PreferencesDialog
         dlg = PreferencesDialog(self._config, self._theme_factory,
                                 osd_manager=self._osd, parent=self)
         dlg.settings_applied.connect(self._on_settings_applied)
-        dlg.exec()
+        dlg.finished.connect(self._on_prefs_finished)
+        self._prefs_dialog = dlg
+        # Non-modal so the OSD preview stays interactive while it is open.
+        dlg.show()
+
+    def _on_prefs_finished(self, _result=None):
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None:
+            dlg.finished.disconnect(self._on_prefs_finished)
+        self._prefs_dialog = None
 
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""

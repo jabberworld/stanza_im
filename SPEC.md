@@ -463,7 +463,8 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   base position; dragging moves it via `QWindow.startSystemMove()` (compositor
   driven, with a manual `move()` fallback), updates `osd_x/osd_y` in the shared
   `Config` (live, persisted on Save) and re-entry re-docks it to the saved
-  position.
+  position. The settings dialog is opened non-modally so the preview window
+  keeps receiving mouse input (a modal `exec()` would block it).
 - Triggers (all gated on `osd_enabled`):
   - `osd_message`: 1:1 and private-groupchat messages, only when the chat window
   is not the active window on that conversation.
