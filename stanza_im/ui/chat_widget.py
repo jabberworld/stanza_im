@@ -130,6 +130,7 @@ class ChatWidget(QtWidgets.QWidget):
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since_ts
     bookmark_toggled = QtCore.pyqtSignal(str)              # MUC room
     set_subject_requested = QtCore.pyqtSignal(str)         # MUC room
+    nick_change_requested = QtCore.pyqtSignal(str, str)    # MUC room, nick
     participant_clicked = QtCore.pyqtSignal(str, str)      # room, nick
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)                            # room, nick, global pos
@@ -342,8 +343,27 @@ class ChatWidget(QtWidgets.QWidget):
             return
         self._typing_timer.stop()
         self.typing_changed.emit(self.jid, False)
+        if text.startswith("/") and self._handle_slash_command(text):
+            self._input.clear()
+            return
         self.message_sent.emit(self.jid, text)
         self._input.clear()
+
+    def _handle_slash_command(self, text: str) -> bool:
+        """Handle local slash commands; return True when consumed.
+
+        XEP-0245 ``/me`` is intentionally NOT consumed: the body goes to the
+        wire as-is ("/me laughs") and only the presentation changes.
+        """
+        if text.startswith("/nick "):
+            nick = text[6:].strip()
+            if self.is_muc:
+                self.nick_change_requested.emit(self.jid, nick)
+            else:
+                self.add_status(tr("muc_nick_only_groupchat"),
+                                time.strftime("%H:%M:%S"))
+            return True
+        return False
 
     # ── Message rendering ─────────────────────────────────────────
 

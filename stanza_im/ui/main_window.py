@@ -88,6 +88,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.server_history_requested.connect(self._on_server_history)
         self._chat_window.bookmark_toggled.connect(self._toggle_bookmark)
         self._chat_window.set_subject_requested.connect(self._on_set_subject)
+        self._chat_window.nick_change_requested.connect(self._on_nick_change)
         self._chat_window.participant_clicked.connect(
             self._on_muc_participant_clicked)
         self._chat_window.participant_context_requested.connect(
@@ -117,6 +118,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_avatar_paths: dict[str, str] = {}
         self._muc_join_tries: dict[str, int] = {}
         self._muc_base_nicks: dict[str, str] = {}
+        self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
@@ -593,6 +595,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muc_joined(self, room: str, subject: str, occupants):
         self._muc_join_tries.pop(room, None)
+        self._muc_user_nick_change_from.pop(room, None)
         if room not in self._muc_self_nicks:
             info = self._client.groupchats.get(room) if self._client else None
             nick = info.nick if info else (
@@ -675,11 +678,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_muc_self_nick(room, new_nick)
         return True
 
-    def _update_muc_self_nick(self, room: str, nick: str) -> None:
+    def _update_muc_self_nick(self, room: str, nick: str,
+                              status_key: str = "muc_nick_retrying") -> None:
         old = self._muc_self_nicks.get(room, "")
         self._muc_self_nicks[room] = nick
         users = self._muc_users.setdefault(room, {})
-        if old and old in users:
+        if old and old != nick and old in users:
             entry = users.pop(old)
             entry["nick"] = nick
             users[nick] = entry
@@ -689,9 +693,45 @@ class MainWindow(QtWidgets.QMainWindow):
         chat.set_self_nick(nick)
         chat.update_muc_users(list(users.values()), self_nick=nick)
         from stanza_im.include.utils import format_time
-        chat.add_status(tr("muc_nick_retrying", nick=nick), format_time())
+        chat.add_status(tr(status_key, nick=nick), format_time())
+
+    def _on_nick_change(self, room: str, nick: str):
+        """Handle the /nick command in a conference (rejoin with new nick)."""
+        client = self._client
+        chat = self._chat_window.get_chat(room)
+        if not client:
+            return
+        from stanza_im.include.utils import format_time
+        now = format_time()
+        if room not in self._muc_self_nicks:
+            if chat:
+                chat.add_status(tr("muc_nick_not_in_room"), now)
+            return
+        new_nick = (nick or "").strip()
+        if (not new_nick or any(not c.isprintable() or c.isspace()
+                                for c in new_nick)
+                or "@" in new_nick or "\\" in new_nick):
+            if chat:
+                chat.add_status(tr("muc_nick_invalid"), now)
+            return
+        current = self._muc_self_nicks.get(room, "")
+        if new_nick == current:
+            if chat:
+                chat.add_status(tr("muc_nick_same", nick=new_nick), now)
+            return
+        if room in self._muc_user_nick_change_from:
+            return
+        self._muc_user_nick_change_from[room] = current
+        gi = client.groupchats.get(room)
+        password = gi.password if gi else ""
+        client.join_muc(room, new_nick, password=password)
+        self._update_muc_self_nick(room, new_nick, status_key="muc_nick_changed")
 
     def _on_muc_join_error(self, room: str, condition: str, code: str):
+        if condition == "conflict" and room in self._muc_user_nick_change_from:
+            old = self._muc_user_nick_change_from.pop(room)
+            self._update_muc_self_nick(room, old, status_key="muc_nick_busy")
+            return
         if condition == "conflict" and self._config.chat.muc_auto_nick:
             if self._schedule_muc_nick_retry(room):
                 return
@@ -1485,7 +1525,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._config.notifications.tray_blink:
                 self._tray.start_blinking()
         if self._config.notifications.popups and not active:
-            self._tray.show_message(sender_name, body)
+            popup_body = (f"* {sender_name} {body[4:]}"
+                          if isinstance(body, str) and body.startswith("/me ")
+                          else body)
+            self._tray.show_message(sender_name, popup_body)
         self._request_vcard(bare_jid)
 
     def _on_muc_private_message(self, room: str, nick: str,

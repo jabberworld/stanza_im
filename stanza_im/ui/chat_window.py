@@ -139,6 +139,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
         widget.set_subject_requested.connect(self.set_subject_requested)
+        widget.nick_change_requested.connect(self.nick_change_requested)
         widget.participant_clicked.connect(self.participant_clicked)
         widget.participant_context_requested.connect(
             self.participant_context_requested)
@@ -169,6 +170,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
         widget.set_subject_requested.connect(self.set_subject_requested)
+        widget.nick_change_requested.connect(self.nick_change_requested)
         widget.participant_clicked.connect(self.participant_clicked)
         widget.participant_context_requested.connect(
             self.participant_context_requested)
@@ -301,6 +303,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     clear_history_requested = QtCore.pyqtSignal(str)    # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since
     bookmark_toggled = QtCore.pyqtSignal(str)               # MUC room
+    nick_change_requested = QtCore.pyqtSignal(str, str)     # MUC room, nick
     set_subject_requested = QtCore.pyqtSignal(str)           # MUC room
     participant_clicked = QtCore.pyqtSignal(str, str)       # room, nick
     participant_context_requested = QtCore.pyqtSignal(

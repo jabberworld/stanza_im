@@ -263,6 +263,12 @@ STRINGS = {
     "muc_invite": "Пригласить в комнату",
     "muc_nick_retrying": "Ник занят — пробую войти как {nick}",
     "muc_nick_conflict_give_up": "Не удалось войти в конференцию: ник занят после 3 попыток.",
+    "muc_nick_changed": "Теперь вы известны как {nick}",
+    "muc_nick_invalid": "Этот ник нельзя использовать в конференции",
+    "muc_nick_busy": "Ник {nick} занят — остаётесь в комнате",
+    "muc_nick_same": "Вы уже известны как {nick}",
+    "muc_nick_only_groupchat": "Сменить ник можно только в конференции",
+    "muc_nick_not_in_room": "Вы не находитесь в этой конференции",
     # Notifications
     "notify_auth_request": "{jid}",
     "notify_auth_accept": "Принять",

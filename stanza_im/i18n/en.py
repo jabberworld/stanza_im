@@ -263,6 +263,12 @@ STRINGS = {
     "muc_invite": "Invite to room",
     "muc_nick_retrying": "Nickname is busy — trying again as {nick}",
     "muc_nick_conflict_give_up": "Could not join the conference: the nickname is still busy after 3 attempts.",
+    "muc_nick_changed": "You are now known as {nick}",
+    "muc_nick_invalid": "This nickname is not allowed in a conference",
+    "muc_nick_busy": "Nickname {nick} is busy — staying in the room",
+    "muc_nick_same": "You are already known as {nick}",
+    "muc_nick_only_groupchat": "You can change your nickname only in conferences",
+    "muc_nick_not_in_room": "You are not in this conference",
     # Notifications
     "notify_auth_request": "{jid}",
     "notify_auth_accept": "Accept",

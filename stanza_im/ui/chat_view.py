@@ -448,17 +448,28 @@ if HAS_WEBENGINE:
                         user_icon_path: str = "", message_id: str = "",
                         unstyled: bool = False, raw_timestamp: str = ""):
             """Add a message to the chat view."""
-            html = self._theme.render_message(
-                sender=sender, body=body, timestamp=timestamp,
-                direction=direction, is_next=is_next,
-                sender_color=sender_color, user_icon_path=user_icon_path,
-                unstyled=unstyled,
-            )
+            phrase = self._action_phrase(body)
+            if phrase is not None:
+                html = self._theme.render_action(sender, phrase, timestamp)
+            else:
+                html = self._theme.render_message(
+                    sender=sender, body=body, timestamp=timestamp,
+                    direction=direction, is_next=is_next,
+                    sender_color=sender_color, user_icon_path=user_icon_path,
+                    unstyled=unstyled,
+                )
             html = self._mark_message(html, sender, message_id, raw_timestamp)
             if not self._ready:
                 self._pending.append(html)
                 return
             self._append_chunk(html)
+
+        @staticmethod
+        def _action_phrase(body: str):
+            """Return the phrase for a XEP-0245 /me body, else None."""
+            if isinstance(body, str) and body.startswith("/me "):
+                return body[4:]
+            return None
 
         def add_status(self, text: str, timestamp: str):
             """Add a status/system message."""
@@ -472,17 +483,28 @@ if HAS_WEBENGINE:
             """Insert older messages before the current document."""
             if not messages:
                 return
-            html = "".join(self._mark_message(self._theme.render_message(
-                sender=entry.get("sender", "Me"),
-                body=entry.get("body", ""),
-                timestamp=entry.get("timestamp", ""),
-                direction=entry.get("direction", "incoming"),
-                is_next=entry.get("is_next", False),
-                sender_color="#000000",
-                user_icon_path=entry.get("user_icon_path", ""),
-                unstyled=entry.get("unstyled", False),
-            ), entry.get("sender", "Me"),
-               entry.get("raw_timestamp", "")) for entry in messages)
+
+            def entry_html(entry: dict) -> str:
+                body = entry.get("body", "")
+                phrase = self._action_phrase(body)
+                if phrase is not None:
+                    return self._theme.render_action(
+                        entry.get("sender", "Me"), phrase,
+                        entry.get("timestamp", ""))
+                return self._theme.render_message(
+                    sender=entry.get("sender", "Me"),
+                    body=body,
+                    timestamp=entry.get("timestamp", ""),
+                    direction=entry.get("direction", "incoming"),
+                    is_next=entry.get("is_next", False),
+                    sender_color="#000000",
+                    user_icon_path=entry.get("user_icon_path", ""),
+                    unstyled=entry.get("unstyled", False),
+                )
+
+            html = "".join(self._mark_message(
+                entry_html(entry), entry.get("sender", "Me"),
+                entry.get("raw_timestamp", "")) for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
                 return
@@ -660,7 +682,14 @@ else:
                         sender_color: str = "#000000",
                         user_icon_path: str = "", message_id: str = "",
                         unstyled: bool = False, raw_timestamp: str = ""):
-            if direction == "incoming":
+            phrase = (body[4:]
+                      if isinstance(body, str) and body.startswith("/me ")
+                      else None)
+            if phrase is not None:
+                self._append_before_typing(
+                    f"<i>({timestamp}) * {sender or 'Me'} "
+                    f"{phrase}</i>")
+            elif direction == "incoming":
                 self._append_before_typing(
                     f"<b>{sender}</b> <i>({timestamp})</i>: {body}")
             else:
@@ -680,12 +709,19 @@ else:
             cursor = self.textCursor()
             cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
             self.setTextCursor(cursor)
-            html = "".join(
-                f"<b>{entry.get('sender', 'Me')}</b> "
-                f"<i>({entry.get('timestamp', '')})</i>: "
-                f"{entry.get('body', '')}"
-                for entry in messages
-            )
+
+            def entry_html(entry: dict) -> str:
+                body = entry.get("body", "")
+                phrase = (body[4:]
+                          if isinstance(body, str) and body.startswith("/me ")
+                          else None)
+                if phrase is not None:
+                    return (f"<i>({entry.get('timestamp', '')}) * "
+                            f"{entry.get('sender', 'Me')} {phrase}</i>")
+                return (f"<b>{entry.get('sender', 'Me')}</b> "
+                        f"<i>({entry.get('timestamp', '')})</i>: {body}")
+
+            html = "".join(entry_html(entry) for entry in messages)
             cursor.insertHtml(html)
             QtCore.QCoreApplication.processEvents()
             bar.setValue(old_value + bar.maximum() - old_max)

@@ -184,6 +184,19 @@ class ChatThemeFactory:
                                          .replace("%time%", timestamp)
         return f'<div class="status"><span class="time">{timestamp}</span> {text}</div>'
 
+    def render_action(self, sender: str, body: str, timestamp: str) -> str:
+        """Render a XEP-0245 ``/me`` action: "* <sender> <phrase>" in italics.
+
+        The ``*`` and the sender name are plain text (never styled), while the
+        phrase still passes through the standard fragment pipeline so links and
+        emoticons inside it stay clickable.
+        """
+        phrase_html = self._body_fragment(body)
+        return (f'<div class="stanza-action">'
+                f'<span class="time">{timestamp}</span>'
+                f' <span class="action">* {escape_html(sender)} {phrase_html}</span>'
+                f'</div>')
+
     def generate_page(self, messages: list[dict], base_url: str = "") -> str:
         """Generate a complete HTML page containing the given messages.
 
@@ -197,6 +210,10 @@ class ChatThemeFactory:
         for msg in messages:
             if msg.get("type") == "status":
                 body_parts.append(self.render_status(msg["body"], msg["time"]))
+            elif msg.get("type") == "action":
+                body_parts.append(self.render_action(
+                    msg.get("sender", ""), msg.get("body", ""),
+                    msg.get("time", "")))
             else:
                 body_parts.append(self.render_message(
                     sender=msg.get("sender", ""),
@@ -218,6 +235,9 @@ class ChatThemeFactory:
 <style>
 body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 #chat {{ display: flex; flex-direction: column; }}
+.stanza-action {{ padding: 2px 8px; font-style: italic; color: #666; }}
+.stanza-action .time {{ font-style: normal; font-size: 10px; color: #999; margin-right: 6px; }}
+.stanza-action .action {{ font-style: italic; }}
 </style>
 </head>
 <body>
@@ -244,6 +264,9 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 <style>
 body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 #chat {{ display: flex; flex-direction: column; }}
+.stanza-action {{ padding: 2px 8px; font-style: italic; color: #666; }}
+.stanza-action .time {{ font-style: normal; font-size: 10px; color: #999; margin-right: 6px; }}
+.stanza-action .action {{ font-style: italic; }}
 </style>
 </head>
 <body>
