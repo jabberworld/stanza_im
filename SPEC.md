@@ -277,6 +277,29 @@ Single conversation tab. Layout:
 - Send on Enter (without Shift), Shift+Enter for newline
 - Signal: `message_sent(jid, body)`
 
+### 9.1 Slash Commands
+
+- `/me <action>` (XEP-0245): intentionally NOT intercepted — the body goes to
+  the wire unchanged (`<body>/me laughs</body>`). Rendering matches the first
+  four characters `/me ` only, so `/meshrugs`, `/me's` or a leading space are
+  plain messages. Any render path (live, re-render, history pagination, MAM
+  prepend) presents such bodies as an italic action line `* sender phrase`
+  (`ChatThemeFactory.render_action`, CSS class `.stanza-action`) on the
+  WebEngine backend and as an italic rich-text line on the QTextBrowser
+  fallback. The sender is the contact name / `Me` for 1-on-1 and the room nick
+  for MUC. Tray popups strip the prefix and show `* sender phrase`. The phrase
+  still goes through the plain fragment pipeline (escaped, URLs/emoticons
+  clickable), but never through XEP-0393 styling.
+- `/nick <nick>` (MUC only): intercepted locally — nothing is sent to the
+  room. The conference is re-joined with the new nickname using the stored
+  room password (`client.join_muc`). Per XEP-0045 §17.1 a room nickname is a
+  resourcepart: it must be non-empty (not invisible/whitespace-only), may
+  contain `@`, `\` and spaces, but must not contain control characters, `/`
+  (the resource separator) or exceed 1023 UTF-8 bytes (RFC 7622). A busy
+  nickname reverts to the old one with a `muc_nick_busy` status (user-initiated
+  changes never auto-append underscores). Other `/...` commands are not special
+  and are sent as-is.
+
 ## 10. Chat View (`ui/chat_view.py`)
 
 ### 10.1 QWebEngineView Mode (default)

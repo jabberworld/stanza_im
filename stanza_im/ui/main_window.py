@@ -708,9 +708,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat.add_status(tr("muc_nick_not_in_room"), now)
             return
         new_nick = (nick or "").strip()
-        if (not new_nick or any(not c.isprintable() or c.isspace()
-                                for c in new_nick)
-                or "@" in new_nick or "\\" in new_nick):
+        # XEP-0045 §17.1: a room nickname is a resourcepart — it must be
+        # non-empty (not invisible), may contain "@", "\" and spaces, but no
+        # control characters, no "/" (the resource separator) and no more
+        # than 1023 UTF-8 bytes (RFC 7622).
+        if (not new_nick
+                or any(not c.isprintable() for c in new_nick)
+                or "/" in new_nick
+                or len(new_nick.encode("utf-8")) > 1023):
             if chat:
                 chat.add_status(tr("muc_nick_invalid"), now)
             return

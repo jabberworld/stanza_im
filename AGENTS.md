@@ -159,6 +159,17 @@ only for plain spans (escape + URLs + emoticons; never inside `<code>`/`<pre>`).
 preferences switch both fall back to the plain pipeline. Feature advertised as
 `urn:xmpp:styling:0`.
 
+**Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
+`/me ` render as italic `.stanza-action` lines (`* sender phrase`) via
+`ChatThemeFactory.render_action()`, branched in `chat_view.py` across live
+messages, `prepend_messages`/history and the `QTextBrowser` fallback (the
+phrase is escaped with URLs/emoticons, never XEP-0393-styled). `/nick <nick>`
+is intercepted in `chat_widget._handle_slash_command()` (only in MUC) and
+rejoined with the stored room password by `_on_nick_change`/`_update_muc_self_nick`;
+per XEP-0045 §17.1 the nick is a resourcepart — `@`, `\` and spaces are valid,
+but control characters, `/`, an all-whitespace nick or >1023 UTF-8 bytes are
+rejected, and a busy nick reverts without the auto-underscore retry.
+
 ### 5. LRU Icon Cache (`icons.py`)
 
 Pixmaps are cached with a 200-entry max and 60-second TTL. A `QTimer(30s)` evicts

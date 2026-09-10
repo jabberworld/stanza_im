@@ -30,6 +30,7 @@ document — update it whenever a new XEP is implemented.
 | XEP-0203 | Delayed Delivery | Reads `<delay>` stamps for the original message time in MAM results and offline messages. |
 | XEP-0223 | Persistent Storage | Conference bookmarks persist via pubsub storage (`plugin.storage_method == "xep_0223"`). |
 | XEP-0224 | Attention | Support for attention requests ("nudge") between users. |
+| XEP-0245 | The /me Command | Renders message bodies starting with `/me ` as "* sender phrase" italic action lines across every render path (live, history pagination, both chat backends); the body goes to the wire unchanged. The `/nick` command (rejoin with a new nickname) is an MUC companion feature. |
 | XEP-0297 | Stanza Forwarding | Brought in by XEP-0313 to unwrap forwarded MAM results. |
 | XEP-0313 | Message Archive Management | Loads server-side history for a chat (`plugin["xep_0313"], RSM-paginated`) into the conversation. |
 | XEP-0393 | Message Styling | Parses `*bold*`/`_em_`/`` `code` ``/blockquote/pre markup (`xmpp/message_styling.py`), advertised via `urn:xmpp:styling:0`, toggleable in Preferences → Chat. |
