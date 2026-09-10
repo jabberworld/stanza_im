@@ -87,6 +87,21 @@
 	}
 	.next_message .message_actions button { color: rgba(0, 0, 0, 0.45); }
 	.message_actions button:hover { background: rgba(0, 0, 0, 0.18); border-radius: 3px; }
+	.message_actions a.action-reply
+	{
+		display: inline-block;
+		text-align: center;
+		text-decoration: none;
+		font-size: 10px;
+		line-height: 14px;
+		width: 17px;
+		height: 14px;
+		padding: 0;
+		margin: 0;
+		color: rgba(0, 0, 0, 0.6);
+	}
+	.message_actions a.action-reply:hover { background: rgba(0, 0, 0, 0.18); border-radius: 3px; }
+	.next_message .message_actions a.action-reply { color: rgba(0, 0, 0, 0.45); }
 
 	.stanza-menu {
 		position: fixed;

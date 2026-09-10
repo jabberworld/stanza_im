@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import html
 import logging
-import collections
+from urllib.parse import quote
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -22,6 +22,20 @@ from stanza_im.ui.chat_themes import ChatThemeFactory
 logger = logging.getLogger(__name__)
 
 TYPING_MARKER = "\u200bStanzaTyping\u200b"
+
+
+def _compose_reply_target(reply_id: str, author: str, sender: str,
+                          body: str) -> str:
+    """Percent-encode a ``stanza:reply:id/author/sender/body`` target.
+
+    Fields are URL-encoded (slashes too) and joined with literal ``/`` so
+    ``ChatWidget._handle_reply_uri`` can split them back out.
+    """
+    def _q(value: str) -> str:
+        return quote(value or "", safe="")
+
+    return "/".join(_q(part)
+                    for part in (reply_id, author, sender, body))
 
 
 class _JumpButtonMixin:
@@ -112,6 +126,21 @@ if HAS_WEBENGINE:
         def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
             self.reply_requested.emit(reply_id, author, sender, snippet)
 
+    class _StanzaPage(QtWebEngineWidgets.QWebEnginePage):
+        """QWebEnginePage that routes clicks to Python via navigation.
+
+        Anchors (links, mentions, reply, MAM) navigate to their ``href``;
+        this page intercepts those requests and hands them to the view's
+        ``link_clicked`` signal instead of loading them inside the chat.
+        """
+
+        def __init__(self, view, parent=None):
+            super().__init__(parent)
+            self._view = view
+
+        def acceptNavigationRequest(self, url, _type, is_main_frame):
+            return self._view._accept_navigation(url)
+
     class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
@@ -124,9 +153,7 @@ if HAS_WEBENGINE:
             self._theme = theme
             self.mention_senders = False
             self._bridge = _ChatBridge()
-            self._bridge.link_clicked.connect(self._on_raw_click)
-            self._seen_clicks: "collections.OrderedDict[str, bool]" = \
-                collections.OrderedDict()
+            self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
             self._fraction = 1.0
             self._overflow = False
@@ -135,12 +162,15 @@ if HAS_WEBENGINE:
             self._bridge.jump_clicked.connect(self.scroll_to_bottom)
             self._bridge.reply_requested.connect(self.reply_requested)
 
+            self._page = _StanzaPage(self, parent=self)
+            self.setPage(self._page)
+
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
-            self.page().setWebChannel(channel)
+            self._page.setWebChannel(channel)
 
             try:
-                self.page().javaScriptConsoleMessage.connect(
+                self._page.javaScriptConsoleMessage.connect(
                     self._on_js_console)
             except (AttributeError, RuntimeError):
                 pass
@@ -158,6 +188,20 @@ if HAS_WEBENGINE:
             # Load the empty page
             self._load_empty()
 
+        def _accept_navigation(self, url) -> bool:
+            """Route a page navigation; return True to allow the load.
+
+            Clicking an anchor (link/mention/reply/MAM) requests a navigation
+            to its ``href``; we forward the URL to ``link_clicked`` and deny
+            the load inside the chat.  Everything else (initial ``setHtml``,
+            ``about:``/``data:``) is allowed so the page itself renders.
+            """
+            scheme = str(url.scheme()).lower()
+            if scheme in ("stanza", "mam", "http", "https", "mailto"):
+                self.link_clicked.emit(url.toString())
+                return False
+            return scheme in ("about", "data", "") or not url.isValid()
+
         def _on_load_finished(self, ok: bool):
             self._ready = ok
             if ok:
@@ -173,33 +217,7 @@ if HAS_WEBENGINE:
                     self._append_chunk(chunk)
 
         def _on_js_console(self, level, message: str, line: int, source: str):
-            prefix = "stanza-click|"
-            if isinstance(message, str) and message.startswith(prefix):
-                payload = message[len(prefix):]
-                sid, sep, uri = payload.partition("|")
-                if sep:
-                    self._dispatch_click(sid, uri)
-                return
             logger.debug("chat JS [%s:%s] %s", source, line, message)
-
-        def _on_raw_click(self, payload: str):
-            """Handle a click delivered through the QWebChannel bridge."""
-            sid, sep, uri = str(payload).partition("|")
-            if not sep:
-                sid, uri = "", str(payload)
-            self._dispatch_click(sid, uri)
-
-        def _dispatch_click(self, sid: str, uri: str):
-            """Emit a routed click once, deduplicating the bridge and console
-            copies of the same ``stanzaSend`` payload."""
-            if sid:
-                if sid in self._seen_clicks:
-                    return
-                self._seen_clicks[sid] = True
-                while len(self._seen_clicks) > 128:
-                    self._seen_clicks.popitem(last=False)
-            logger.debug("chat click: %s", uri)
-            self.link_clicked.emit(uri)
 
         _SCROLL_JS = """
         (function installStanzaScroll() {
@@ -504,7 +522,8 @@ if HAS_WEBENGINE:
                 ref_sender, ref_snippet = reply_quote
                 html = self._theme.render_reply(ref_sender, ref_snippet) + html
             html = self._mark_message(html, sender, message_id, raw_timestamp,
-                                      reply_able_id, reply_author)
+                                      reply_able_id, reply_author,
+                                      reply_body=body)
             if not self._ready:
                 self._pending.append(html)
                 return
@@ -560,7 +579,8 @@ if HAS_WEBENGINE:
                 entry_html(entry), entry.get("sender", "Me"),
                 entry.get("message_id", ""),
                 entry.get("raw_timestamp", ""),
-                entry.get("origin_id", ""), entry.get("reply_author", ""))
+                entry.get("origin_id", ""), entry.get("reply_author", ""),
+                reply_body=entry.get("body", ""))
                 for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
@@ -595,7 +615,12 @@ if HAS_WEBENGINE:
         @staticmethod
         def _mark_message(content: str, sender: str, message_id: str = "",
                           raw_timestamp: str = "", reply_able_id: str = "",
-                          reply_author: str = "") -> str:
+                          reply_author: str = "", reply_body: str = "") -> str:
+            if "%REPLY_TARGET%" in content:
+                content = content.replace(
+                    "%REPLY_TARGET%",
+                    _compose_reply_target(reply_able_id, reply_author,
+                                          sender, reply_body))
             marker = (' data-stanza-id="' + html.escape(message_id, quote=True) + '"'
                       if message_id else "")
             stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'

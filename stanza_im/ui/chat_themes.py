@@ -48,11 +48,10 @@ def _webchannel_script() -> str:
     """Inline QWebChannel glue so Python↔JS bridge works across pages.
 
     Reads Qt's bundled ``qwebchannel.js`` (or the packaged copy in
-    ``resources/``) and installs ``window.bridge`` plus a global click
-    handler that routes link clicks and XEP-0461 reply buttons through
-    ``stanzaSend``.  ``stanzaSend`` calls the QWebChannel bridge and always
-    mirrors the payload over ``console.log`` so the C++ side receives it
-    even when the WebChannel transport is unavailable (Python dedupes).
+    ``resources/``) and installs ``window.bridge`` plus a scroll reporter.
+    Click routing does NOT live here: anchors (links, mentions, replies, MAM)
+    navigate to their ``href`` and are intercepted on the C++ side via
+    ``QWebEnginePage.acceptNavigationRequest`` (``ChatView._accept_navigation``).
     Returns '' only when the script itself is unavailable.
     """
     js = _qwebchannel_js()
@@ -60,19 +59,6 @@ def _webchannel_script() -> str:
         return ""
     return f"""<script>
 {js}
-window.__stanzaSeq = 0;
-window.stanzaSend = function (uri) {{
-    var sid = 's' + (++window.__stanzaSeq) + '-' + Date.now();
-    var payload = sid + '|' + uri;
-    try {{
-        if (window.bridge && window.bridge.on_link_clicked) {{
-            window.bridge.on_link_clicked(payload);
-        }}
-    }} catch (err) {{ /* fall through to the console channel */ }}
-    try {{
-        console.log('stanza-click|' + payload);
-    }} catch (err) {{}}
-}};
 document.addEventListener('DOMContentLoaded', function () {{
     new QWebChannel(qt.webChannelTransport, function (channel) {{
         window.bridge = channel.objects.bridge;
@@ -87,40 +73,15 @@ document.addEventListener('DOMContentLoaded', function () {{
             var sh = document.body.scrollHeight;
             var ih = window.innerHeight;
             var max = Math.max(1, sh - ih);
-            window.bridge.on_scroll_fraction(Math.min(1, st / max));
-            if (st <= ih) window.bridge.on_near_top();
+            if (window.bridge && window.bridge.on_scroll_fraction) {{
+                window.bridge.on_scroll_fraction(Math.min(1, st / max));
+            }}
+            if (st <= ih && window.bridge && window.bridge.on_near_top) {{
+                window.bridge.on_near_top();
+            }}
         }}
         window.addEventListener('scroll', onScroll);
     }});
-}});
-document.addEventListener('click', function (e) {{
-    var el = e.target && e.target.closest ? e.target.closest('a') : null;
-    if (el && el.getAttribute('href')) {{
-        e.preventDefault();
-        // Use the raw attribute, not el.href: the browser resolves/normalises
-        // custom schemes (stanza:…) and the resolved property breaks routing.
-        window.stanzaSend(el.getAttribute('href'));
-        return;
-    }}
-    var reply = e.target && e.target.closest
-        ? e.target.closest('.message_actions button[data-action="reply"]')
-        : null;
-    if (reply) {{
-        e.preventDefault();
-        var wrap = reply.closest('.stanza-message');
-        var replyId = wrap ? (wrap.getAttribute('data-reply-id')
-                              || wrap.getAttribute('data-stanza-id') || '') : '';
-        var bodyNode = wrap ? wrap.querySelector(
-            '.message, .message_incoming, .message_outgoing, .next_message')
-            : null;
-        var body = bodyNode
-            ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
-        var sender = wrap ? (wrap.getAttribute('data-stanza-sender') || '') : '';
-        var author = wrap ? (wrap.getAttribute('data-reply-author') || '') : '';
-        window.stanzaSend('stanza:reply:' + encodeURIComponent(replyId) + '/'
-            + encodeURIComponent(author) + '/' + encodeURIComponent(sender)
-            + '/' + encodeURIComponent(body));
-    }}
 }});
 </script>
 """

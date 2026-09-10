@@ -159,17 +159,19 @@ only for plain spans (escape + URLs + emoticons; never inside `<code>`/`<pre>`).
 preferences switch both fall back to the plain pipeline. Feature advertised as
 `urn:xmpp:styling:0`.
 
-**Message Replies** (XEP-0461): the per-message reply button is caught by the
-page-level click handler in `chat_themes._webchannel_script()` and encoded as a
-`stanza:reply:id/author/sender/body` URI (id falls back to `data-stanza-id`),
-then handed to `window.stanzaSend`. `stanzaSend` calls `bridge.on_link_clicked`
-and always mirrors the `sid|uri` payload through `console.log('stanza-click|…')`;
-`ChatView` dedupes both copies by `sid` (`_dispatch_click`) and emits
-`link_clicked`, so clicks work even when the QWebChannel transport is missing
-(the console signal is plain C++). This is the same channel used for ordinary
-links. The `qwebchannel.js` glue prefers Qt's `:/qtwebchannel` resource and
-falls back to the packaged copy in `resources/qwebchannel.js`. Clicking reply
-inserts the referenced message into the input as an XEP-0421 quote block
+**Message Replies** (XEP-0461): the per-message reply trigger is an anchor
+(`<a href="stanza:reply:%REPLY_TARGET%">`) whose target is filled in by
+`ChatView._mark_message` from `_compose_reply_target(reply_id, author, sender,
+body)` (each field percent-encoded, joined with `/`). Clicking it — like any
+link, MUC mention or `mam://load` marker — requests a navigation that is
+intercepted on the C++ side by `_StanzaPage.acceptNavigationRequest` →
+`ChatView._accept_navigation`, which emits `link_clicked` for the
+`stanza`/`mam`/`http`/`https`/`mailto` schemes and denies the in-view load.
+No QWebChannel call, console mirror or JS click handler is involved, so clicks
+reach Python even when the WebChannel transport is unavailable. The
+`qwebchannel.js` glue (Qt `:/qtwebchannel` resource, falling back to
+`resources/qwebchannel.js`) is kept only for scroll/jump reporting. Clicking
+reply inserts the referenced message into the input as an XEP-0421 quote block
 (`> Sender wrote:\n> text`) with the cursor below it; a banner remains as an
 indicator and `×` cancels (removing the inserted quote).
 `client._attach_reply` attaches `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>`
@@ -187,9 +189,10 @@ Feature advertised as `urn:xmpp:reply:0`.
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
 enabled via `ChatView.mention_senders`); clicking it inserts `nick: ` into the
-input with focus (`ChatWidget._handle_mention_uri`). The page-level click handler
-routes anchors via the raw `getAttribute('href')` (not the resolved `el.href`,
-which normalises custom `stanza:` schemes). `Tab`/`Shift+Tab` in a MUC input
+input with focus (`ChatWidget._handle_mention_uri`). Like reply and ordinary
+links, the mention is a plain anchor whose click reaches Python through the
+`acceptNavigationRequest` interception (no JS/bridge involved). `Tab`/`Shift+Tab`
+in a MUC input
 completes the nick before the cursor and cycles the candidate list on repeat
 presses: a nick starting the line is inserted as an address (`nick: `),
 mid-line only the bare nick is completed; the previous token is replaced so the

@@ -380,15 +380,16 @@ being off) fall back to the plain pipeline. Supported feature is advertised as
 
 ### 11.5 Message Replies (XEP-0461)
 
-A reply button appears in the per-message action menu. Its click is caught by
-the page-level handler in `chat_themes._webchannel_script()`, which encodes a
-`stanza:reply:id/author/sender/body` URI and hands it to `window.stanzaSend`.
-`stanzaSend` calls `bridge.on_link_clicked` and always mirrors the `sid|uri`
-payload via `console.log('stanza-click|…')`; `ChatView._dispatch_click`
-dedupes both copies by `sid` and emits `link_clicked`. Clicks therefore reach
-Python even when the QWebChannel transport is missing (the console signal is
-plain C++, independently wired). `ChatWidget._handle_reply_uri` decodes the URI
-and inserts the referenced message into the input as an XEP-0421 quote block
+The per-message reply trigger is an anchor
+(`<a href="stanza:reply:%REPLY_TARGET%">`, placeholder filled by
+`ChatView._mark_message` via `_compose_reply_target`). Clicking it — like any
+link, MUC mention or `mam://load` marker — requests a navigation intercepted on
+the C++ side by `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`,
+which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
+schemes and denies the in-view load. No QWebChannel call, console mirror or JS
+click handler is involved, so clicks reach Python even when the WebChannel
+transport is unavailable. `ChatWidget._handle_reply_uri` decodes the URI and
+inserts the referenced message into the input as an XEP-0421 quote block
 (`> Sender wrote:\n> text`) with the cursor below it; a reply banner
 (`chat_widget._reply_ctx`) stays as an indicator and `×` cancels, removing the
 inserted quote. The `qwebchannel.js` glue prefers Qt's `:/qtwebchannel`
@@ -400,8 +401,8 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
 - Replyable ids: 1:1 messages use the local `origin-id` when present, else the
   message `id`; MUC messages use the server-assigned `stanza-id` (by the room's
   bare JID). Rendering falls back through `origin_id` → `archive_id` →
-  `message_id` (`ChatWidget._reply_target_id`), and the JS button additionally
-  falls back to `data-stanza-id`, so the action is never a silent no-op.
+  `message_id` (`ChatWidget._reply_target_id`), so the action is never a silent
+  no-op.
 - When no reference id can be resolved the reply is still composed: the quote
   goes into the input and the message goes out as a plain `chat`/`groupchat`
   body (no `<reply/>` element). `_send` attaches the reply reference only while
@@ -417,10 +418,9 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   `stanza:mention:nick` link (`ChatThemeFactory.render_message(mention=...)`,
   enabled per view via `ChatView.mention_senders`). Clicking it inserts
   `nick: ` at the cursor and focuses the input
-  (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats. The
-  page click handler routes anchors through the raw `getAttribute('href')`
-  attribute rather than the browser-resolved `el.href`, so the custom
-  `stanza:` scheme reaches Python intact.
+  (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats. Like
+  reply and ordinary links the mention is a plain anchor whose click reaches
+  Python through the `acceptNavigationRequest` interception (no JS/bridge).
 - `Tab` / `Shift+Tab` in a MUC input completes the nick before the cursor and
   cycles the candidate list with wrap-around on repeat presses. A nick that is
   the first token of the line is inserted as an address (`nick: ` with a

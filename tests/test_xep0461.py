@@ -131,20 +131,30 @@ check("render_reply markup", html and "stanza-reply" in html and
 bare = theme.render_reply("Anna", "")
 check("render_reply no-snippet", bare and "stanza-reply" in bare)
 
-# 6b. reply button JS routes via the page-level link handler ---------------
+# 6b. clicks route to Python via navigation interception --------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _theme_src = open(os.path.join(
     _root, "stanza_im", "ui", "chat_themes.py"), encoding="utf-8").read()
-check("reply JS routes via stanzaSend",
-      "stanza:reply:" in _theme_src and "stanzaSend" in _theme_src)
-check("clicks mirrored to console channel",
-      "console.log('stanza-click|'" in _theme_src
-      and "window.stanzaSend(el.getAttribute('href'))" in _theme_src
-      and "on_link_clicked(el.href)" not in _theme_src)
-check("reply JS stanza-id fallback",
-      "data-stanza-id" in _theme_src)
+check("no JS click bridge or console channel",
+      "stanzaSend" not in _theme_src and "stanza-click|" not in _theme_src)
 _view_src = open(os.path.join(
     _root, "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
+check("clicks routed via acceptNavigationRequest",
+      "_StanzaPage" in _view_src and "acceptNavigationRequest" in _view_src
+      and "_accept_navigation" in _view_src and "link_clicked.emit" in _view_src)
+check("reply anchor placeholder in templates", any(
+    'href="stanza:reply:%REPLY_TARGET%"' in open(
+        os.path.join(_root, "resources", "chatskins", skin, direction,
+                     "Content.html"), encoding="utf-8").read()
+    for skin in ("candy", "minimal-mod")
+    for direction in ("Incoming", "Outgoing")))
+from stanza_im.ui.chat_view import _compose_reply_target
+from urllib.parse import unquote as _unquote
+_target = _compose_reply_target("oid-9", "alice@example.com/res", "Alice",
+                                "hello bob/x")
+check("reply target round trip",
+      [_unquote(p) for p in _target.split("/")] ==
+      ["oid-9", "alice@example.com/res", "Alice", "hello bob/x"])
 check("ACTION_JS reply branch removed",
       "data-action" + "' === 'reply'" not in _view_src)
 check("qwebchannel bundled",
