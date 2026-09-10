@@ -901,6 +901,7 @@ class MainWindow(QtWidgets.QMainWindow):
             send_typing_notifications=self._config.privacy.send_typing_notifications,
             send_activity_notifications=self._config.privacy.send_activity_notifications,
             send_software=self._config.privacy.send_software,
+            message_carbons=connection.message_carbons,
         )
         self._connect_client_signals()
 
@@ -947,6 +948,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("roster_item_removed", self._on_roster_item_removed)
         c.on("presence_changed", self._on_presence_changed)
         c.on("message_received", self._on_message_received)
+        c.on("message_carbon_sent", self._on_message_carbon_sent)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
@@ -1527,7 +1529,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_message_received(self, frm: str, body: str, ts,
                              unstyled: bool = False,
                              reply_able_id: str = "", reply_author: str = "",
-                             reply_to: str = "", reply_id: str = ""):
+                             reply_to: str = "", reply_id: str = "",
+                             carbon: bool = False):
         bare_jid = frm.split("/")[0]
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
         self._remember_contact(bare_jid, name=sender_name,
@@ -1566,7 +1569,33 @@ class MainWindow(QtWidgets.QMainWindow):
                           else body)
             self._tray.show_message(sender_name, popup_body)
         self._maybe_osd_message(sender_name, body, bare_jid)
-        self._request_vcard(bare_jid)
+        if not carbon:
+            self._request_vcard(bare_jid)
+
+    def _on_message_carbon_sent(self, jid: str, body: str, ts,
+                                stable_id: str = "", reply_to: str = "",
+                                reply_id: str = ""):
+        """A message sent from another of our resources (XEP-0280 carbon).
+
+        Shown as our own outgoing message in the target chat and stored in
+        history, so every device keeps the same conversation view.
+        """
+        if not isinstance(jid, str) or not jid.strip():
+            return
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.add_message(
+                sender="Me", body=body,
+                timestamp=ts or _current_timestamp(), direction="outgoing",
+                message_id=stable_id,
+                reply_able_id=stable_id, reply_author=jid,
+                reply_to=reply_to, reply_id=reply_id)
+        self._remember_contact(jid)
+        from stanza_im.core import history
+        history.store_message(
+            jid, "outgoing", body,
+            timestamp=ts or _current_timestamp(), sender="Me",
+            origin_id=stable_id, reply_to=reply_to, reply_id=reply_id)
 
     def _on_muc_private_message(self, room: str, nick: str,
                                  body: str, ts, unstyled: bool = False,

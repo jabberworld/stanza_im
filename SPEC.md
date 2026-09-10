@@ -498,11 +498,29 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 - xep_0030 (Service Discovery), xep_0128 (Disco Extensions), xep_0055 (Search)
 - xep_0077 (Registration), xep_0092 (Software Version), xep_0199 (Ping)
 - xep_0202 (Entity Time), xep_0313 (MAM, pulls in xep_0059/xep_0297)
+- xep_0280 (Message Carbons)
 - XEP-0393 Message Styling advertised via disco feature `urn:xmpp:styling:0`
   (parsed by `xmpp/message_styling.py`; toggle in Preferences → Chat)
 - XEP-0461 Message Replies advertised via disco feature `urn:xmpp:reply:0`
   (manual `<reply/>` handling in `client._on_message`/`_attach_reply` —
   slixmpp has no plugin for it)
+
+### 14.2 Message Carbons (XEP-0280)
+
+- Register/modified via the `xep_0280` plugin; `<enable/>` is sent right after
+  initial presence when `connection.message_carbons` is on (default), disco
+  feature `urn:xmpp:carbons:2` added by the plugin on bind.
+- `carbon_received`: the forwarded inner `<message>` (parsed with
+  `_carbon_inner`, wrapped into a `slixmpp.Message`) flows through the same
+  `_message_fields` extraction as direct messages and is emitted as
+  `message_received(..., carbon=True)`. UI renders/stores it like any incoming
+  message (vCard fetch skipped).
+- `carbon_sent`: emitted as `message_carbon_sent(to_bare, body, ts,
+  stable_id, reply_to, reply_id)`; MainWindow shows it as an outgoing "Me"
+  message in the target chat and stores it in history, so every device keeps
+  the same conversation view.
+- Non-`chat`/`normal` forwards (e.g. groupchat) are ignored, and nothing is
+  ever re-forwarded/acknowledged in response to a carbon.
 
 See `XEPs.md` for the full supported-extensions matrix.
 

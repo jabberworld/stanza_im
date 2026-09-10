@@ -81,6 +81,7 @@ class Config:
                         "save_status_message": True, "resource": "jabbim",
                         "override_host": False, "host": "", "port": 5222,
                         "proxy_host": "", "proxy_port": 0,
+                        "message_carbons": True,
                         "conference_servers": [], "service_servers": []},
         "privacy": {"send_software": True, "send_typing_notifications": True,
                      "send_activity_notifications": True, "send_chatstates": True},

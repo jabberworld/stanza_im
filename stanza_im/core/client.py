@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 NS_REPLY = "urn:xmpp:reply:0"      # XEP-0461 Message Replies
 NS_SID = "urn:xmpp:sid:0"          # XEP-0359 Unique and Stable Stanza IDs
+NS_CARBONS = "urn:xmpp:carbons:2"  # XEP-0280 Message Carbons
+NS_FORWARD = "urn:xmpp:forward:0"  # XEP-0297 Stanza Forwarding
+
+
+def _carbon_inner(msg, which: str):
+    """Return the forwarded inner ``<message>`` element of a XEP-0280 carbon
+    (``which`` is ``received`` or ``sent``), or ``None``."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    for el in xml:
+        if el.tag == "{%s}%s" % (NS_CARBONS, which):
+            for fw in el:
+                if fw.tag == "{%s}forwarded" % NS_FORWARD:
+                    for child in fw:
+                        if child.tag.rsplit("}", 1)[-1] == "message":
+                            return child
+    return None
 
 
 def _reply_reference(stanza) -> tuple[str, str]:
@@ -133,13 +151,15 @@ class JabberClient:
                  send_chatstates: bool = True,
                  send_typing_notifications: bool = True,
                  send_activity_notifications: bool = True,
-                 send_software: bool = True):
+                 send_software: bool = True,
+                 message_carbons: bool = True):
         self.jid_str = jid
         self.resource = resource
         self.host = host
         self.port = int(port or 0)
         self.auto_join_conferences = auto_join_conferences
         self.autojoin_rooms: set[str] = set()
+        self.message_carbons = message_carbons
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
         self.send_chatstates = (self.send_typing_notifications
@@ -176,6 +196,7 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0202")  # Entity time
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
         # xep_0313 pulls in xep_0059 (RSM) and xep_0297 (Forward) automatically
+        self.xmpp.register_plugin("xep_0280")  # Message Carbons
 
         # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
@@ -217,6 +238,8 @@ class JabberClient:
         self.xmpp.add_event_handler("roster_update", self._on_roster_update)
         self.xmpp.add_event_handler("chatstate", self._on_chatstate)
         self.xmpp.add_event_handler("receipt_received", self._on_receipt_received)
+        self.xmpp.add_event_handler("carbon_received", self._on_carbon_received)
+        self.xmpp.add_event_handler("carbon_sent", self._on_carbon_sent)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -1204,6 +1227,12 @@ class JabberClient:
         logger.info("Session started, requesting roster...")
         self.request_roster()
         self.send_presence()
+        if self.message_carbons:
+            try:
+                await self.xmpp["xep_0280"].enable()
+                logger.info("Enabled message carbons (XEP-0280)")
+            except Exception as exc:
+                logger.warning("Could not enable message carbons: %s", exc)
         self.emit("session_started")
         loop = asyncio.get_event_loop()
         loop.create_task(self._autojoin_bookmarks())
@@ -1248,14 +1277,8 @@ class JabberClient:
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
-            unstyled = _has_stanza_element(msg, "unstyled")
-            ts = msg.get("delay", {}).get("stamp", None)
-            if isinstance(ts, datetime.datetime):
-                ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
-            elif ts:
-                ts = _normalize_ts(str(ts))
-            reply_to, reply_id = _reply_reference(msg)
-            stable_id = _origin_id(msg) or str(msg.get("id") or "")
+            unstyled, ts, reply_to, reply_id, stable_id = \
+                self._message_fields(msg)
             room, separator, nick = frm.partition("/")
             if separator and room in self.groupchats:
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
@@ -1263,6 +1286,59 @@ class JabberClient:
                 return
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id)
+
+    @staticmethod
+    def _message_fields(msg):
+        """Extract (unstyled, ts, reply_to, reply_id, stable_id) from a
+        1:1 message stanza (shared by direct messages and XEP-0280 carbons)."""
+        unstyled = _has_stanza_element(msg, "unstyled")
+        ts = msg.get("delay", {}).get("stamp", None)
+        if isinstance(ts, datetime.datetime):
+            ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
+        elif ts:
+            ts = _normalize_ts(str(ts))
+        reply_to, reply_id = _reply_reference(msg)
+        stable_id = _origin_id(msg) or str(msg.get("id") or "")
+        return unstyled, ts, reply_to, reply_id, stable_id
+
+    def _on_carbon_received(self, msg) -> None:
+        """A 1:1 message received on another of our resources (XEP-0280)."""
+        element = _carbon_inner(msg, "received")
+        if element is None:
+            return
+        try:
+            inner = slixmpp.Message(xml=element)
+        except Exception:
+            return
+        if inner["type"] not in ("chat", "normal"):
+            return
+        body = str(inner["body"])
+        frm = str(inner["from"])
+        unstyled, ts, reply_to, reply_id, stable_id = \
+            self._message_fields(inner)
+        self.emit("message_received", frm, body, ts, unstyled,
+                  stable_id, frm, reply_to, reply_id, True)
+
+    def _on_carbon_sent(self, msg) -> None:
+        """A 1:1 message sent from another of our resources (XEP-0280)."""
+        element = _carbon_inner(msg, "sent")
+        if element is None:
+            return
+        try:
+            inner = slixmpp.Message(xml=element)
+        except Exception:
+            return
+        if inner["type"] not in ("chat", "normal"):
+            return
+        body = str(inner["body"])
+        target = str(inner["to"] or "")
+        bare = target.split("/")[0] if "/" in target else target
+        if not bare:
+            return
+        unstyled, ts, reply_to, reply_id, stable_id = \
+            self._message_fields(inner)
+        self.emit("message_carbon_sent", bare, body, ts,
+                  stable_id, reply_to, reply_id)
 
     def _on_groupchat_message(self, msg) -> None:
         frm = str(msg["from"])

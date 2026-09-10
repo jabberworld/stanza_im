@@ -147,6 +147,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(self._check("save_password", tr("prefs_save_password")))
         form.addRow(self._check("auto_connect", tr("prefs_auto_connect")))
         form.addRow(self._check("auto_join_conferences", tr("prefs_auto_join_conferences")))
+        form.addRow(self._check("message_carbons", tr("prefs_message_carbons")))
         form.addRow(self._check("save_status_message", tr("prefs_save_status_message")))
 
         advanced, advanced_form = self._page()
@@ -371,6 +372,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "jid": cfg.jid, "password": cfg.password, "save_password": cfg.save_password,
             "auto_connect": cfg.auto_connect,
             "auto_join_conferences": connection.auto_join_conferences,
+            "message_carbons": connection.message_carbons,
             "save_status_message": connection.save_status_message,
             "resource": connection.resource, "override_host": connection.override_host,
             "host": connection.host, "port": connection.port,
@@ -432,6 +434,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.connection.save_status_message = self._value("save_status_message")
         for key in ("resource", "host", "proxy_host"):
             cfg.connection[key] = self._value(key)
+        cfg.connection.message_carbons = self._value("message_carbons")
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)
         for key in ("send_ctrl_enter", "show_status", "show_receipts", "show_mood",

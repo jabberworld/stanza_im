@@ -267,6 +267,12 @@ subscription changes. Presence is aggregated by **bare JID** across resources
 (best `show` wins via `SHOW_ORDER`), and empty/`available` shows are normalized
 to `"online"`.
 
+Message Carbons (XEP-0280, `connection.message_carbons`, default on) are enabled
+after initial presence; forwarded 1:1 copies from other of our resources are
+picked out of `<received>`/`<sent>` with `_carbon_inner` and emitted as
+`message_received(..., carbon=True)` / `message_carbon_sent(...)`, so the UI
+renders and stores multi-device activity like normal incoming/outgoing messages.
+
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide

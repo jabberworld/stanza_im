@@ -308,6 +308,7 @@ STRINGS = {
     "prefs_host": "Хост",
     "prefs_port": "Порт",
     "prefs_auto_join_conferences": "Автоматически подключаться к конференциям при запуске",
+    "prefs_message_carbons": "Включить копии сообщений (синхронизация между устройствами)",
     "prefs_save_status_message": "Сохранять предыдущее статусное сообщение",
     "prefs_chat": "Чат",
     "prefs_chat_tab": "Чат",

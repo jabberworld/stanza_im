@@ -308,6 +308,7 @@ STRINGS = {
     "prefs_host": "Host",
     "prefs_port": "Port",
     "prefs_auto_join_conferences": "Automatically join conferences on startup",
+    "prefs_message_carbons": "Enable message carbons (sync across devices)",
     "prefs_save_status_message": "Save the previous status message",
     "prefs_chat": "Chat",
     "prefs_chat_tab": "Chat",
