@@ -136,10 +136,15 @@ preview_win = m4._preview["window"]
 flags = preview_win.windowFlags()
 check("osd stays on top", bool(flags & QtCore.Qt.WindowType.WindowStaysOnTopHint)
       and bool(flags & QtCore.Qt.WindowType.X11BypassWindowManagerHint))
+close_btn = preview_win.findChild(QtWidgets.QToolButton, "osd-close")
+check("close button present", close_btn is not None)
 check("osd children ignore mouse",
       all(child.testAttribute(
           QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-          for child in preview_win.findChildren(QtWidgets.QWidget)))
+          for child in preview_win.findChildren(QtWidgets.QWidget)
+          if child is not close_btn)
+      and not close_btn.testAttribute(
+          QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents))
 
 _win = m4._preview["window"]
 _win.move(120, 80)
@@ -208,6 +213,16 @@ check("drag persists while settings open",
       p_mgr._cfg.osd_x == 150 and p_mgr._cfg.osd_y == 85)
 p_dlg2.close()
 p_mgr.hide_preview()
+
+# 10. close button dismisses preview and notifications ----------------------
+m6 = OsdManager(make_cfg())
+m6.show_preview()
+m6._preview["window"]._close_btn.click()
+check("close dismisses preview", m6._preview is None and len(m6._windows) == 0)
+m6.show(None, "one", "first")
+m6._windows[0]["window"]._close_btn.click()
+check("close dismisses notification", len(m6._windows) == 0)
+m6.hide_preview()
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

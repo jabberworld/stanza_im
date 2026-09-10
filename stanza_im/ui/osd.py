@@ -58,6 +58,7 @@ class _OsdWindow(QtWidgets.QWidget):
         self._draggable = draggable
         self._on_clicked = None
         self._on_moved = None
+        self._on_close = None
         app = QtWidgets.QApplication.instance()
         platform = (app.platformName() if app else "").lower()
         # startSystemMove() (_NET_WM_MOVERESIZE) is unreliable on some X11
@@ -72,7 +73,10 @@ class _OsdWindow(QtWidgets.QWidget):
             "rgba(255, 255, 255, 90); border-radius: 8px; }"
             "#osd-frame QLabel { color: #fff; background: transparent; }"
             "#osd-title { font-weight: bold; font-size: 13px; }"
-            "#osd-body { font-size: 12px; color: #eee; }")
+            "#osd-body { font-size: 12px; color: #eee; }"
+            "#osd-close { color: #fff; background: transparent; border: 0; "
+            "border-radius: 9px; font-size: 12px; font-weight: bold; }"
+            "#osd-close:hover { background: rgba(255, 255, 255, 45); }")
 
         row = QtWidgets.QHBoxLayout(frame)
         row.setContentsMargins(10, 8, 10, 8)
@@ -93,6 +97,17 @@ class _OsdWindow(QtWidgets.QWidget):
         text_col.addWidget(body_label)
         row.addLayout(text_col, 1)
 
+        close_btn = QtWidgets.QToolButton(frame)
+        close_btn.setObjectName("osd-close")
+        close_btn.setText("\u00d7")
+        close_btn.setAutoRaise(True)
+        close_btn.setFixedSize(18, 18)
+        close_btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        close_btn.setToolTip(tr("osd_close"))
+        close_btn.clicked.connect(self._close)
+        row.addWidget(close_btn, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        self._close_btn = close_btn
+
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(frame)
@@ -104,6 +119,9 @@ class _OsdWindow(QtWidgets.QWidget):
         for child in frame.findChildren(QtWidgets.QWidget):
             child.setAttribute(
                 QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        # …except the close button, which stays clickable.
+        close_btn.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
 
         self.setCursor(
             QtCore.Qt.CursorShape.OpenHandCursor if draggable
@@ -113,6 +131,11 @@ class _OsdWindow(QtWidgets.QWidget):
 
     def _click(self) -> None:
         cb = self._on_clicked
+        if cb:
+            cb()
+
+    def _close(self) -> None:
+        cb = self._on_close
         if cb:
             cb()
 
@@ -240,6 +263,7 @@ class OsdManager:
         win = _OsdWindow(icon, title, body, draggable=draggable)
         rec = {"window": win, "timer": None, "preview": preview,
                "on_click": None}
+        win._on_close = lambda: self._dismiss(rec)
         self._windows.append(rec)
         win.show()
         win.adjustSize()
