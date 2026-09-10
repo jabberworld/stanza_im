@@ -81,7 +81,6 @@ if HAS_WEBENGINE:
         near_top = QtCore.pyqtSignal()
         scroll_fraction = QtCore.pyqtSignal(float)
         jump_clicked = QtCore.pyqtSignal()
-        message_action = QtCore.pyqtSignal(str, str, str, str, int, int)
 
         @QtCore.pyqtSlot(str)
         def on_link_clicked(self, url: str):
@@ -107,11 +106,6 @@ if HAS_WEBENGINE:
         def on_jump_clicked(self):
             self.jump_clicked.emit()
 
-        @QtCore.pyqtSlot(str, str, str, str, int, int)
-        def on_message_action(self, action: str, sender: str, time: str,
-                              body: str, x: int, y: int):
-            self.message_action.emit(action, sender, time, body, x, y)
-
     class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
         """Chat display widget backed by QWebEngineView."""
 
@@ -129,7 +123,6 @@ if HAS_WEBENGINE:
             self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self.scroll_to_bottom)
-            self._bridge.message_action.connect(self._on_message_action)
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -239,11 +232,59 @@ if HAS_WEBENGINE:
         (function installStanzaActions() {
             if (window.__stanzaActionsInstalled) return;
             window.__stanzaActionsInstalled = true;
-            document.addEventListener('click', function (e) {
-                var btn = e.target && e.target.closest
-                    ? e.target.closest('.message_actions button') : null;
-                if (!btn || !window.bridge) return;
-                e.preventDefault();
+
+            var MENU_CLASS = 'stanza-menu';
+            var menu = null;
+
+            function closeMenu() {
+                if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+                menu = null;
+            }
+
+            function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+            function fmtCopyTime(raw) {
+                var full = (raw || '').trim();
+                var m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})/
+                    .exec(full);
+                if (m) return m[1] + '-' + m[2] + '-' + m[3] + ' '
+                    + m[4] + ':' + m[5] + ':' + m[6];
+                if (full && full.indexOf('-') < 0) {
+                    var now = new Date();
+                    return now.getFullYear() + '-' + pad(now.getMonth() + 1)
+                        + '-' + pad(now.getDate()) + ' ' + full;
+                }
+                return full;
+            }
+
+            function composeCopyText(sender, timeRaw, body) {
+                var t = fmtCopyTime(timeRaw);
+                if (!t) {
+                    var now = new Date();
+                    t = now.getFullYear() + '-' + pad(now.getMonth() + 1)
+                        + '-' + pad(now.getDate()) + ' '
+                        + pad(now.getHours()) + ':' + pad(now.getMinutes())
+                        + ':' + pad(now.getSeconds());
+                }
+                return '[' + t + '] ' + (sender || '') + ': ' + (body || '');
+            }
+
+            function copyText(text) {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                var ok = false;
+                try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+                document.body.removeChild(ta);
+                return ok;
+            }
+
+            function openMenu(btn, x, y) {
+                closeMenu();
                 var wrap = btn.closest('.stanza-message');
                 if (!wrap) return;
                 var timeNode = wrap.querySelector('.time_initial, .timestamp');
@@ -253,73 +294,47 @@ if HAS_WEBENGINE:
                     || (timeNode ? timeNode.textContent.trim() : '');
                 var body = bodyNode
                     ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
-                window.bridge.on_message_action(
-                    btn.getAttribute('data-action') || 'menu',
-                    wrap.getAttribute('data-stanza-sender') || '',
-                    timeRaw, body, e.clientX, e.clientY);
+                var sender = wrap.getAttribute('data-stanza-sender') || '';
+
+                menu = document.createElement('div');
+                menu.className = MENU_CLASS;
+                menu.style.position = 'fixed';
+                menu.style.top = (y + 2) + 'px';
+                menu.style.left = (x + 2) + 'px';
+                var item = document.createElement('button');
+                item.type = 'button';
+                item.textContent = btn.getAttribute('data-copy-label') || 'Copy';
+                item.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    copyText(composeCopyText(sender, timeRaw, body));
+                    closeMenu();
+                });
+                menu.appendChild(item);
+                document.body.appendChild(menu);
+            }
+
+            document.addEventListener('click', function (e) {
+                var t = e.target;
+                if (t && t.closest && t.closest('.' + MENU_CLASS)) return;
+                closeMenu();
+                var btn = t && t.closest
+                    ? t.closest('.message_actions button') : null;
+                if (!btn) return;
+                e.preventDefault();
+                if ((btn.getAttribute('data-action') || 'menu') === 'menu') {
+                    openMenu(btn, e.clientX, e.clientY);
+                }
+                // 'reply' intentionally does nothing yet (XEP-0461 later).
             });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeMenu();
+            });
+            window.addEventListener('scroll', function () { closeMenu(); }, true);
         })();
         """
 
         def _install_action_js(self):
             self.page().runJavaScript(self._ACTION_JS)
-
-        def _on_message_action(self, action: str, sender: str, time: str,
-                               body: str, x: int, y: int):
-            if action == "reply":
-                return
-            # Defer the menu out of the QWebChannel callback and open it
-            # non-modally: a blocking exec() here can starve the renderer
-            # and the menu never paints.
-            pos = QtCore.QPoint(int(x), int(y))
-            QtCore.QTimer.singleShot(
-                0, lambda: self._open_message_menu(sender, time, body, pos))
-
-        def _open_message_menu(self, sender: str, time: str, body: str,
-                               pos: QtCore.QPoint):
-            menu = getattr(self, "_message_menu", None)
-            if menu is not None:
-                menu.close()
-                menu.deleteLater()
-            menu = QtWidgets.QMenu(self)
-            self._message_menu = menu
-            copy_icon = QtGui.QIcon.fromTheme("edit-copy")
-            if copy_icon.isNull():
-                copy_icon = self.style().standardIcon(
-                    QtWidgets.QStyle.StandardPixmap.SP_FileIcon)
-            copy_action = menu.addAction(copy_icon, tr("chat_copy"))
-            copy_action.triggered.connect(
-                lambda: QtWidgets.QApplication.clipboard().setText(
-                    self._copy_text(sender, time, body)))
-            menu.aboutToHide.connect(menu.deleteLater)
-            menu.aboutToHide.connect(
-                lambda: self._handle_menu_closed(menu))
-            menu.popup(self.mapToGlobal(pos))
-
-        def _handle_menu_closed(self, menu):
-            if getattr(self, "_message_menu", None) is menu:
-                self._message_menu = None
-
-        @staticmethod
-        def _copy_text(sender: str, time_text: str, body: str) -> str:
-            """Compose an exact '[date time] sender: body' clipboard string."""
-            import datetime
-            import time as _time
-            full = (time_text or "").strip()
-            if len(full) >= 19 and full[10] == "T":
-                try:
-                    parsed = datetime.datetime.fromisoformat(
-                        full.replace("Z", "+00:00"))
-                    if parsed.tzinfo is not None:
-                        parsed = parsed.astimezone()
-                    full = parsed.strftime("%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    full = ""
-            if not full:
-                full = _time.strftime("%Y-%m-%d %H:%M:%S")
-            elif "-" not in full:
-                full = _time.strftime("%Y-%m-%d") + " " + full
-            return f"[{full}] {sender}: {body}"
 
         def _set_jump_visible(self, show: bool):
             self.evaluate_js(

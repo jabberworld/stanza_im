@@ -171,7 +171,8 @@ class ChatThemeFactory:
                        .replace("%time%", timestamp) \
                        .replace("%senderColor%", sender_color) \
                        .replace("%userIconPath%", user_icon_path) \
-                       .replace("%reply_title%", tr("chat_reply"))
+                       .replace("%reply_title%", tr("chat_reply")) \
+                       .replace("%copy_label%", tr("chat_copy"))
         if "{body}" in html:
             html = html.replace("{body}", body_html)
         return html
