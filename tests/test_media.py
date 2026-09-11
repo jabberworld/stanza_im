@@ -196,5 +196,46 @@ check("data: navigation allowed (setHtml page load)",
       'if scheme == "data"' not in _src)
 check("reload retry guard present", "_LOAD_RETRY_LIMIT" in _src)
 
+# 13. media viewer render + geometry ------------------------------------------
+from stanza_im.ui.media_viewer import MediaViewer
+
+_mv_src = open(os.path.join(_root, "stanza_im", "ui", "media_viewer.py"),
+               encoding="utf-8").read()
+check("viewer defers initial image fit",
+      "def showEvent" in _mv_src
+      and "QtCore.QTimer.singleShot(0, self._fit_image)" in _mv_src)
+
+
+class _StubService:
+    def ensure_original_async(self, url, on_ready, on_error=None):
+        return
+
+
+check("media_viewer config default", cfg.media_viewer.width == 900
+      and cfg.media_viewer.height == 680)
+geo_cfg = {"width": 700, "height": 500, "x": 50, "y": 40, "maximized": False}
+v1 = MediaViewer("https://h/p/photo.png", "image", _StubService(),
+                 geometry_cfg=geo_cfg)
+v1.resize(700, 500)
+v1.move(50, 40)
+v1.save_geometry()
+check("viewer geometry saved",
+      geo_cfg["width"] == 700 and geo_cfg["height"] == 500
+      and abs(geo_cfg["x"] - 50) <= 4 and abs(geo_cfg["y"] - 40) <= 4)
+
+v2 = MediaViewer("https://h/p/photo.png", "image", _StubService(),
+                 geometry_cfg=dict(geo_cfg))
+g = v2.geometry()
+check("viewer geometry restored",
+      g.width() == 700 and g.height() == 500
+      and abs(g.x() - 50) <= 4 and abs(g.y() - 40) <= 4)
+
+closed = []
+v3 = MediaViewer("https://h/p/photo.png", "image", _StubService(),
+                 geometry_cfg=dict(geo_cfg))
+v3.closed.connect(lambda: closed.append(True))
+v3.close()
+check("viewer closed signal", closed == [True])
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

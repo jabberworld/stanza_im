@@ -1942,16 +1942,21 @@ class MainWindow(QtWidgets.QMainWindow):
                                  fullscreen: bool = False):
         if not url:
             return
-        viewer = MediaViewer(url, kind, self._media_service, self)
+        viewer = MediaViewer(url, kind, self._media_service, self,
+                             geometry_cfg=self._config.media_viewer)
         viewer_id = id(viewer)
         self._media_viewers[viewer_id] = viewer
         viewer.destroyed.connect(
             lambda *_, vid=viewer_id: self._media_viewers.pop(vid, None))
+        viewer.closed.connect(self._on_media_viewer_closed)
         if fullscreen and kind == "video":
             viewer.showFullScreen()
         else:
             viewer.show()
         viewer.raise_()
+
+    def _on_media_viewer_closed(self):
+        self._config.save()
 
     def _on_media_save_requested(self, url: str):
         if not url:

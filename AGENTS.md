@@ -257,7 +257,11 @@ to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the
 WebEngine `contextMenuEvent` builds the media menu (copy original link / Save
 as… / open viewer / fullscreen) from `page().contextMenuData()`. Previews are
 off when QtWebEngine is unavailable. Settings changes re-render open chats via
-`ChatWindow.rerender_messages()`. Covered by `tests/test_media.py`.
+`ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
+`showEvent` (a cached original returns before layout, so the initial fit is
+deferred) and persists its geometry/position in the shared `media_viewer`
+config section (image and video viewers share it). Covered by
+`tests/test_media.py`.
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

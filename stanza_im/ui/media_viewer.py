@@ -26,16 +26,20 @@ logger = logging.getLogger(__name__)
 class MediaViewer(QtWidgets.QMainWindow):
     """Non-modal viewer window for an image or video URL."""
 
-    def __init__(self, url: str, kind: str, service, parent=None):
+    closed = QtCore.pyqtSignal()
+
+    def __init__(self, url: str, kind: str, service, parent=None,
+                 geometry_cfg=None):
         super().__init__(parent)
         self._url = url
         self._kind = "video" if str(kind).startswith("video") else "image"
         self._service = service
+        self._geometry_cfg = geometry_cfg
         self._pixmap = QtGui.QPixmap()
         self._fullscreen_hint = str(kind) == "video_fs"
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(tr("media_viewer_title"))
-        self.resize(900, 680)
+        self.restore_geometry()
         if self._kind == "video":
             self._build_video()
         else:
@@ -60,7 +64,11 @@ class MediaViewer(QtWidgets.QMainWindow):
     def _load_image(self) -> None:
         def _ready(path):
             self._pixmap = QtGui.QPixmap(path)
-            self._fit_image()
+            # The window is usually not laid out yet when a cached original is
+            # returned synchronously; defer the fit until after the event loop
+            # has processed the show/layout (otherwise the viewport is degenerate
+            # and the image only appears on the next resize).
+            QtCore.QTimer.singleShot(0, self._fit_image)
 
         def _error(exc):
             self._label.setText(str(exc))
@@ -77,6 +85,43 @@ class MediaViewer(QtWidgets.QMainWindow):
             target, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
             QtCore.Qt.TransformationMode.SmoothTransformation)
         self._label.setPixmap(scaled)
+
+    # ── Geometry persistence ──────────────────────────────────────
+
+    def restore_geometry(self) -> None:
+        """Apply persisted window geometry/position (if any)."""
+        cfg = self._geometry_cfg
+        width, height, x, y, maximized = 900, 680, 0, 0, False
+        if cfg:
+            try:
+                width = int(cfg.get("width", width) or width)
+                height = int(cfg.get("height", height) or height)
+                x = int(cfg.get("x", 0) or 0)
+                y = int(cfg.get("y", 0) or 0)
+            except (TypeError, ValueError):
+                width, height, x, y = 900, 680, 0, 0
+            maximized = bool(cfg.get("maximized"))
+        self.resize(max(320, width), max(240, height))
+        if x or y:
+            self.move(x, y)
+        if maximized:
+            self.setWindowState(
+                self.windowState()
+                | QtCore.Qt.WindowState.WindowMaximized)
+
+    def save_geometry(self) -> None:
+        """Persist the current window geometry into the config section."""
+        cfg = self._geometry_cfg
+        if not cfg:
+            return
+        geo = (self.normalGeometry()
+               if (self.isFullScreen() or self.isMaximized())
+               else self.geometry())
+        cfg["x"] = geo.x()
+        cfg["y"] = geo.y()
+        cfg["width"] = geo.width()
+        cfg["height"] = geo.height()
+        cfg["maximized"] = self.isMaximized()
 
     # ── Video ─────────────────────────────────────────────────────
 
@@ -118,3 +163,13 @@ class MediaViewer(QtWidgets.QMainWindow):
         super().resizeEvent(event)
         if self._kind != "video":
             self._fit_image()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._kind != "video":
+            QtCore.QTimer.singleShot(0, self._fit_image)
+
+    def closeEvent(self, event):
+        self.save_geometry()
+        self.closed.emit()
+        event.accept()

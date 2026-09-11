@@ -80,6 +80,8 @@ class Config:
                  "text_scale": 1.0, "media_preview": "images"},
         "chat_window": {"width": 640, "height": 480,
                         "x": 0, "y": 0, "maximized": False},
+        "media_viewer": {"width": 900, "height": 680,
+                         "x": 0, "y": 0, "maximized": False},
         "application": {"close_to_tray": True, "history_limit": 60,
                          "tab_title_length": 30},
         "connection": {"auto_join_conferences": True,
