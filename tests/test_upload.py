@@ -194,5 +194,36 @@ url_html = theme.render_message("Me", "https://upload.example.com/get/abc123",
 check("file url renders as link",
       '<a href="https://upload.example.com/get/abc123"' in url_html)
 
+# 11. Ctrl+V pastes a clipboard image as an upload ----------------------------
+cb = QtGui.QGuiApplication.clipboard()
+canvas = QtGui.QPixmap(64, 48)
+canvas.fill(QtCore.Qt.GlobalColor.green)
+cb.setImage(canvas.toImage())
+paste_rows = []
+cw5 = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+cw5.files_upload_requested.connect(lambda *a: paste_rows.append(a))
+paste_ev = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress,
+                           QtCore.Qt.Key.Key_V,
+                           QtCore.Qt.KeyboardModifier.ControlModifier)
+cw5.eventFilter(cw5._input, paste_ev)
+pasted_path = paste_rows[0][1][0] if paste_rows else ""
+check("ctrl+v offers clipboard image",
+      bool(paste_rows) and paste_rows[0][0] == "bob@example.com"
+      and paste_rows[0][2] == "http" and os.path.exists(pasted_path))
+if pasted_path:
+    with open(pasted_path, "rb") as fh:
+        check("pasted image is a png", fh.read(4) == b"\x89PNG")
+cb.clear()
+paste_rows.clear()
+cw5.eventFilter(cw5._input, paste_ev)
+check("ctrl+v with no image falls through", not paste_rows)
+check("null image -> no temp file",
+      ChatWidget._clipboard_image_to_tempfile(QtGui.QImage()) is None)
+
+# 12. 1:1 chat header removed (name/status labels never shown) ----------------
+cw6 = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+check("1:1 name label hidden", not cw6._name_label.isVisible())
+check("1:1 status label hidden", not cw6._status_label.isVisible())
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

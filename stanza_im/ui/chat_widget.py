@@ -7,6 +7,7 @@ MUC participants in a side panel.
 """
 from __future__ import annotations
 
+import tempfile
 import time
 import webbrowser
 import logging
@@ -240,10 +241,10 @@ class ChatWidget(QtWidgets.QWidget):
         header.setSpacing(6)
         self._name_label = QtWidgets.QLabel(self.display_name)
         self._name_label.setStyleSheet("font-weight: bold;")
-        self._name_label.setVisible(not self.is_muc)
+        self._name_label.setVisible(False)
         self._status_label = QtWidgets.QLabel("")
         self._status_label.setStyleSheet("color: gray; font-size: 11px;")
-        self._status_label.setVisible(not self.is_muc)
+        self._status_label.setVisible(False)
         header.addWidget(self._name_label)
         header.addWidget(self._status_label)
 
@@ -294,7 +295,8 @@ class ChatWidget(QtWidgets.QWidget):
             lambda: self.bookmark_toggled.emit(self.jid))
         header.addWidget(self._bookmark_btn)
 
-        layout.addLayout(header)
+        if self.is_muc:
+            layout.addLayout(header)
 
         # Chat view + resizable MUC participant sidebar
         chat_col = QtWidgets.QVBoxLayout()
@@ -546,6 +548,9 @@ class ChatWidget(QtWidgets.QWidget):
                     and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
                     and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
                     and self._edit_last_sent()):
+                return True
+            if (event.key() == QtCore.Qt.Key.Key_V and has_ctrl
+                    and self._handle_pasted_image()):
                 return True
             if (event.key() in (QtCore.Qt.Key.Key_Escape,)
                     and self._editing_id):
@@ -1454,6 +1459,37 @@ class ChatWidget(QtWidgets.QWidget):
             self.files_upload_requested.emit(self.jid, paths, "http")
         event.acceptProposedAction()
 
+    def _handle_pasted_image(self) -> bool:
+        """Ctrl+V in the input: if the clipboard holds an image, offer it as
+        a chat file upload (same flow as drag-and-drop).  Returns True when
+        the paste was consumed as an image."""
+        clipboard = QtGui.QGuiApplication.clipboard()
+        mime = clipboard.mimeData()
+        if not mime or not mime.hasImage():
+            return False
+        image = clipboard.image()
+        path = self._clipboard_image_to_tempfile(image)
+        if not path:
+            return False
+        self.files_upload_requested.emit(self.jid, [path], "http")
+        return True
+
+    @staticmethod
+    def _clipboard_image_to_tempfile(image: QtGui.QImage) -> str | None:
+        """Save a clipboard image to a throwaway PNG for upload."""
+        fd, path = tempfile.mkstemp(prefix="stanza-paste-", suffix=".png")
+        os.close(fd)
+        ok = False
+        try:
+            ok = bool(image.save(path, "PNG"))
+        finally:
+            if not ok:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        return path if ok else None
+
     @staticmethod
     def _bookmark_icon():
         try:
@@ -1474,7 +1510,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_typing_notifications = bool(options.get("send_typing_notifications", True))
         self._send_activity_notifications = bool(options.get("send_activity_notifications", True))
         self._show_status = bool(options.get("show_status", True))
-        self._status_label.setVisible(self._show_status and not self.is_muc)
+        self._status_label.setVisible(False)
         self.set_show_avatars(bool(options.get("show_avatars", True)))
         self._set_input_height(int(options.get("input_height", self._input_height) or 60))
 
