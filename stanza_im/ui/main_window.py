@@ -31,6 +31,10 @@ from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.subject_dialog import SubjectDialog
 from stanza_im.ui.tray import TrayIcon
 from stanza_im.ui.osd import OsdManager
+from stanza_im.ui.chat_view import HAS_WEBENGINE
+from stanza_im.include.media import MediaCache, filename_from_url
+from stanza_im.ui.media_preview import MediaPreviewService
+from stanza_im.ui.media_viewer import MediaViewer
 
 logger = logging.getLogger(__name__)
 _HISTORY_BATCH_LIMIT = 60
@@ -77,6 +81,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self._theme_factory.set_message_styling(self._config.chat.message_styling)
         self._muc_theme_factory.set_message_styling(self._config.chat.message_styling)
 
+        # ── Media previews ────────────────────────────────────────
+        self._media_cache = MediaCache(
+            ttl_days=self._config.appearance.media_cache_days,
+            max_bytes=int(self._config.appearance.media_cache_mb) * 1024 * 1024)
+        try:
+            self._media_cache.prune()
+        except Exception:
+            logger.debug("media cache prune failed", exc_info=True)
+        self._media_service = MediaPreviewService(self._media_cache, self)
+        media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
+        media_size = self._config.appearance.media_preview_size
+        self._theme_factory.set_media_preview(
+            self._media_service, media_mode, media_size)
+        self._muc_theme_factory.set_media_preview(
+            self._media_service, media_mode, media_size)
+        self._media_service.thumbnail_ready.connect(
+            self._on_media_thumbnail_ready)
+        self._applied_media = (media_mode, media_size)
+        self._media_viewers: dict = {}
+        self._media_prune_timer = QtCore.QTimer(self)
+        self._media_prune_timer.setInterval(30 * 60 * 1000)
+        self._media_prune_timer.timeout.connect(self._prune_media_cache)
+        self._media_prune_timer.start()
+
         # ── Chat window (standalone) ─────────────────────────────
         self._chat_window = ChatWindow(self._theme_factory, self._muc_theme_factory)
         self._chat_window.set_tab_title_length(
@@ -99,6 +127,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.text_scale_changed.connect(
             self._on_text_scale_changed)
         self._chat_window.window_closed.connect(self._on_chat_window_closed)
+        self._chat_window.media_view_requested.connect(
+            self._on_media_view_requested)
+        self._chat_window.media_save_requested.connect(
+            self._on_media_save_requested)
+        self._chat_window.media_copy_requested.connect(
+            self._on_media_copy_requested)
         self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
@@ -872,6 +906,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self._theme_factory.set_message_styling(styling)
             self._muc_theme_factory.set_message_styling(styling)
             self._applied_message_styling = styling
+        media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
+        media_size = self._config.appearance.media_preview_size
+        if (media_mode, media_size) != getattr(self, "_applied_media", None):
+            self._media_service.set_mode(media_mode)
+            self._media_service.set_size(media_size)
+            self._theme_factory.set_media_preview(
+                self._media_service, media_mode, media_size)
+            self._muc_theme_factory.set_media_preview(
+                self._media_service, media_mode, media_size)
+            self._applied_media = (media_mode, media_size)
+            self._chat_window.rerender_messages()
+        self._media_cache.set_limits(
+            self._config.appearance.media_cache_days,
+            int(self._config.appearance.media_cache_mb) * 1024 * 1024)
         self._chat_window.set_chat_options(self._config.chat)
         if self._client:
             self._client.send_typing_notifications = self._config.privacy.send_typing_notifications
@@ -1875,6 +1923,55 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_chat_window_closed(self):
         self._chat_window.save_geometry(self._config.chat_window)
         self._config.save()
+
+    # ── Media previews ────────────────────────────────────────────
+
+    def _prune_media_cache(self):
+        try:
+            self._media_cache.prune()
+        except Exception:
+            logger.debug("media cache prune failed", exc_info=True)
+
+    def _on_media_thumbnail_ready(self, url: str, data_uri: str):
+        self._chat_window.set_media_thumbnail(url, data_uri)
+
+    def _on_media_copy_requested(self, url: str):
+        QtWidgets.QApplication.clipboard().setText(url or "")
+
+    def _on_media_view_requested(self, url: str, kind: str,
+                                 fullscreen: bool = False):
+        if not url:
+            return
+        viewer = MediaViewer(url, kind, self._media_service, self)
+        viewer_id = id(viewer)
+        self._media_viewers[viewer_id] = viewer
+        viewer.destroyed.connect(
+            lambda *_, vid=viewer_id: self._media_viewers.pop(vid, None))
+        if fullscreen and kind == "video":
+            viewer.showFullScreen()
+        else:
+            viewer.show()
+        viewer.raise_()
+
+    def _on_media_save_requested(self, url: str):
+        if not url:
+            return
+        suggested = filename_from_url(url)
+        path, _filter = QtWidgets.QFileDialog.getSaveFileName(
+            self, tr("media_save"), suggested)
+        if not path:
+            return
+        self._start_task(self._save_media_to(url, path))
+
+    async def _save_media_to(self, url: str, path: str):
+        import shutil
+        try:
+            local = await self._media_service.ensure_original(url)
+            if not local:
+                raise RuntimeError("could not download media")
+            await asyncio.to_thread(shutil.copyfile, local, path)
+        except Exception as exc:  # noqa: BLE001 - surfaced in the log
+            logger.warning("Could not save media %s: %s", url, exc)
 
     @staticmethod
     def _place_dialog_over(dlg, window) -> None:
