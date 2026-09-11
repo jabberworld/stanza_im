@@ -31,7 +31,7 @@ stanza_im/                      # Python package
 ├── core/
 │   ├── client.py                # JabberClient: slixmpp wrapper
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
-│   ├── history.py               # SQLite chat-history queries (dates/load_day/search)
+│   ├── history.py               # SQLite history queries; insert-time + DB-level dedup
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
 │   └── vcard_cache.py           # vCard avatar download coordination
 ├── ui/
