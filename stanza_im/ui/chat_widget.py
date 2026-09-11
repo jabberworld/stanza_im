@@ -98,7 +98,11 @@ class _ParticipantRow(QtWidgets.QWidget):
 
 
 class _InputHandle(QtWidgets.QFrame):
-    """Thin draggable bar that resizes the chat input vertically."""
+    """Thin draggable bar above the chat input that resizes it vertically.
+
+    The bar sits on the input's top edge, right below the button toolbar;
+    dragging up grows the field, dragging down shrinks it.
+    """
 
     height_changed = QtCore.pyqtSignal(int)
 
@@ -112,6 +116,14 @@ class _InputHandle(QtWidgets.QFrame):
         self._press_h = 60
         self.setMouseTracking(True)
 
+    def _resized_height(self, dy: float) -> int:
+        """New input height for a vertical drag delta *dy*.
+
+        The handle moves the input's top edge, so a downward drag shifts the
+        edge down and shrinks the field (negative delta grows it).
+        """
+        return int(self._press_h - dy)
+
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self._press_y = float(event.globalPosition().y())
@@ -123,7 +135,7 @@ class _InputHandle(QtWidgets.QFrame):
         if self._press_y is None:
             return
         dy = float(event.globalPosition().y()) - self._press_y
-        self.height_changed.emit(int(self._press_h + dy))
+        self.height_changed.emit(self._resized_height(dy))
         event.accept()
 
     def mouseReleaseEvent(self, event):
@@ -394,6 +406,12 @@ class ChatWidget(QtWidgets.QWidget):
         self._nick_complete_start = -1
         self._nick_complete_suffix = ""
 
+        # Resize handle above the input, right below the toolbar
+        self._input_handle = _InputHandle(
+            self, get_height=lambda: self._input_height)
+        self._input_handle.height_changed.connect(self._set_input_height)
+        chat_col.addWidget(self._input_handle)
+
         # Input area
         input_row = QtWidgets.QHBoxLayout()
         input_row.setContentsMargins(4, 2, 4, 2)
@@ -411,12 +429,6 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_btn.clicked.connect(self._send)
         input_row.addWidget(self._send_btn)
         chat_col.addLayout(input_row)
-
-        # Resize handle under the input
-        self._input_handle = _InputHandle(
-            self, get_height=lambda: self._input_height)
-        self._input_handle.height_changed.connect(self._set_input_height)
-        chat_col.addWidget(self._input_handle)
 
         chat_panel = QtWidgets.QWidget(self)
         chat_panel.setLayout(chat_col)

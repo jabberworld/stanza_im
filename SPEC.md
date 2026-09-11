@@ -576,10 +576,11 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 
 - A toolbar above the input offers icon buttons: Clear chat, History (moved
   from the tab header), vCard, and Send file (a menu with "P2P" and
-  "HTTP Upload"). The input is vertically resizable via a thin drag handle
-  (persisted in `chat.input_height`), and files may be dropped directly into
-  the chat window; the view and the input disable `acceptDrops` so drops
-  reach the widget and are forwarded (multi-file) as
+  "HTTP Upload"). The input is vertically resizable via a thin drag handle on
+  its top edge, just below the toolbar (dragging up grows the field, down
+  shrinks it; height persisted in `chat.input_height`), and files may be
+  dropped directly into the chat window; the view and the input disable
+  `acceptDrops` so drops reach the widget and are forwarded (multi-file) as
   `files_upload_requested(jid, [paths], method)`.
 - Dropping or picking files opens the non-modal `FileTransferDialog`: one row
   per file — image thumbnail (or a generic file icon), name + size, and a

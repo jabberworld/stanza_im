@@ -304,8 +304,10 @@ as new messages (off). History gains `message_id`/`edited` columns and
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries icon
 buttons for Clear, History (moved from the tab header), vCard and "Send file"
 (a menu with "P2P" / "HTTP Upload"); the input is vertically resizable
-(`chat.input_height`, persisted; the `_InputHandle` drag bar reads the stored
-height through a `get_height` callable because a layout reparents it away from
+(`chat.input_height`, persisted; the `_InputHandle` drag bar sits on the
+input's top edge just below the toolbar — dragging up grows the field, down
+shrinks it — and reads the stored height through a `get_height` callable
+because a layout reparents it away from
 `ChatWidget`) and files can be dropped straight into the chat (the view and the
 input disable `acceptDrops` so file drops reach `ChatWidget`, which emits
 `files_upload_requested(jid, [paths], method)`). Dropped/picked files open

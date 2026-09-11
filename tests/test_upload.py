@@ -15,6 +15,8 @@ os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import slixmpp
@@ -171,9 +173,19 @@ check("dialog ok emits caption",
       started == ["Check this out"] and not dlg._ok_btn.isEnabled())
 check("dialog preview helper", _preview_pixmap(doc_path, dlg).isNull() is False)
 
-# 9. resizable handle baseline ------------------------------------------------
+# 9. resizable handle ----------------------------------------------------------
 handle = cw3._input_handle
 check("handle height getter", handle._get_height() == cw3._input_height)
+_cw_src = open(os.path.join(_ROOT, "stanza_im", "ui", "chat_widget.py"),
+               encoding="utf-8").read()
+check("handle sits above the input (before input_row in layout)",
+      _cw_src.index("chat_col.addWidget(self._input_handle)")
+      < _cw_src.index("chat_col.addLayout(input_row)"))
+handle._press_h = 100
+check("top-handle drag shrinks down",
+      handle._resized_height(30) == 70)
+check("top-handle drag grows up",
+      handle._resized_height(-20) == 120)
 
 # 10. file-URL messages render as clickable links -----------------------------
 theme = chat_themes.ChatThemeFactory()
