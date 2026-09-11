@@ -194,6 +194,7 @@ class ChatWidget(QtWidgets.QWidget):
     vcard_requested = QtCore.pyqtSignal(str)                # jid
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
+    text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
                  is_muc: bool = False, parent=None):
@@ -308,6 +309,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._view.link_clicked.connect(self.link_clicked)
         self._view.reply_requested.connect(self._on_reply_requested)
         self._view.document_lost.connect(self._restore_after_document_lost)
+        self._view.zoom_changed.connect(
+            lambda factor: self.text_scale_changed.emit(self.jid, factor))
         chat_col.addWidget(self._view, stretch=1)
 
         # Reply context bar (XEP-0461): shown while composing a reply.
@@ -1513,6 +1516,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._status_label.setVisible(False)
         self.set_show_avatars(bool(options.get("show_avatars", True)))
         self._set_input_height(int(options.get("input_height", self._input_height) or 60))
+        self._view.set_chat_zoom(float(options.get("text_scale", 1.0) or 1.0))
 
     def mark_delivered(self, message_id: str) -> None:
         if not message_id:

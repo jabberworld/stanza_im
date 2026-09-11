@@ -151,7 +151,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             self.participant_context_requested)
         widget.vcard_requested.connect(self.vcard_requested)
         widget.files_upload_requested.connect(self.files_upload_requested)
-        widget.input_height_changed.connect(self.input_height_changed)
+        widget.input_height_changed.connect(self._on_widget_input_height_changed)
+        widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -188,7 +189,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             self.participant_context_requested)
         widget.vcard_requested.connect(self.vcard_requested)
         widget.files_upload_requested.connect(self.files_upload_requested)
-        widget.input_height_changed.connect(self.input_height_changed)
+        widget.input_height_changed.connect(self._on_widget_input_height_changed)
+        widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -244,12 +246,42 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             widget.set_chat_options(options)
 
+    def _on_widget_input_height_changed(self, jid: str, height: int):
+        """Keep the shared options snapshot fresh so new tabs apply it."""
+        self._chat_options["input_height"] = int(height)
+        self.input_height_changed.emit(jid, int(height))
+
+    def _on_widget_text_scale_changed(self, jid: str, factor: float):
+        """Keep the shared options snapshot fresh so new tabs apply it."""
+        self._chat_options["text_scale"] = float(factor)
+        self.text_scale_changed.emit(jid, float(factor))
+
     def set_tab_title_length(self, length: int):
         self._tab_title_length = max(10, int(length))
         for index in range(self._tab_widget.count()):
             widget = self._tab_widget.widget(index)
             if isinstance(widget, ChatWidget):
                 self._tab_widget.setTabText(index, self._tab_caption(widget))
+
+    def restore_geometry(self, cfg):
+        """Restore window position/size from a config section."""
+        width = max(500, int(cfg.get("width", 640) or 640))
+        height = max(400, int(cfg.get("height", 480) or 480))
+        x, y = int(cfg.get("x", 0) or 0), int(cfg.get("y", 0) or 0)
+        self.resize(width, height)
+        if x or y:
+            self.move(x, y)
+        if cfg.get("maximized"):
+            self.showMaximized()
+
+    def save_geometry(self, cfg):
+        """Persist current window geometry into a config section."""
+        geo = self.geometry()
+        cfg["x"] = geo.x()
+        cfg["y"] = geo.y()
+        cfg["width"] = geo.width()
+        cfg["height"] = geo.height()
+        cfg["maximized"] = self.isMaximized()
 
     def set_chat_title(self, jid: str, title: str):
         widget = self._tabs.get(jid)
@@ -332,6 +364,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     vcard_requested = QtCore.pyqtSignal(str)                   # jid
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
+    text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
+    window_closed = QtCore.pyqtSignal()                        # window closed
 
     # ── Internal ──────────────────────────────────────────────────
 
@@ -414,3 +448,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     def _on_groupchat_message_edit_sent(self, room: str, body: str,
                                         edit_id: str):
         self.groupchat_message_edit_to_send.emit(room, body, edit_id)
+
+    def closeEvent(self, event):
+        """The window is being closed — let the owner persist geometry."""
+        self.window_closed.emit()
+        event.accept()

@@ -96,6 +96,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 jid, paths, method, self._chat_window))
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
+        self._chat_window.text_scale_changed.connect(
+            self._on_text_scale_changed)
+        self._chat_window.window_closed.connect(self._on_chat_window_closed)
+        self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
@@ -1857,7 +1861,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._show_profile(jid)
 
     def _on_input_height_changed(self, jid: str, height: int):
-        self._config.chat.input_height = int(height)
+        self._config.chat.input_height = max(40, min(240, int(height)))
+        self._config.save()
+
+    def _on_text_scale_changed(self, jid: str, factor: float):
+        try:
+            factor = max(0.5, min(3.0, float(factor)))
+        except (TypeError, ValueError):
+            factor = 1.0
+        self._config.chat.text_scale = factor
+        self._config.save()
+
+    def _on_chat_window_closed(self):
+        self._chat_window.save_geometry(self._config.chat_window)
         self._config.save()
 
     @staticmethod

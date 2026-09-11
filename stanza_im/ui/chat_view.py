@@ -173,11 +173,13 @@ if HAS_WEBENGINE:
         near_top = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
+        zoom_changed = QtCore.pyqtSignal(float)
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
             self._theme = theme
             self.mention_senders = False
+            self._zoom = 1.0
             self._last_edit_ref = ""
             self._last_reply_ref = ""
             self._bridge = _ChatBridge()
@@ -215,6 +217,22 @@ if HAS_WEBENGINE:
 
             # Load the empty page
             self._load_empty()
+
+        def wheelEvent(self, event):
+            """Ctrl+wheel resizes the chat text instead of scrolling."""
+            if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+                    and event.angleDelta().y()):
+                step = 0.1 if event.angleDelta().y() > 0 else -0.1
+                self.set_chat_zoom(self._zoom + step)
+                self.zoom_changed.emit(self._zoom)
+                event.accept()
+                return
+            super().wheelEvent(event)
+
+        def set_chat_zoom(self, factor: float):
+            """Set a persisted text-scale factor (applied to the whole page)."""
+            self._zoom = max(0.5, min(3.0, float(factor)))
+            self.setZoomFactor(self._zoom)
 
         def _accept_navigation(self, url) -> bool:
             """Route a page navigation; return True to allow the load.
@@ -276,6 +294,8 @@ if HAS_WEBENGINE:
         def _on_load_finished(self, ok: bool):
             if ok:
                 self._ready = True
+                if self._zoom != 1.0:
+                    self.setZoomFactor(self._zoom)
                 self._install_scroll_js()
                 self._install_jump_js()
                 self._install_action_js()
@@ -901,10 +921,12 @@ else:
         near_top = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
+        zoom_changed = QtCore.pyqtSignal(float)
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
             self._theme = theme
+            self._zoom = 1.0
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -912,6 +934,27 @@ else:
             self._fraction = 1.0
             self._overflow = False
             self._create_jump_button()
+
+        def wheelEvent(self, event):
+            """Ctrl+wheel resizes the chat text instead of scrolling."""
+            if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+                    and event.angleDelta().y()):
+                step = 0.1 if event.angleDelta().y() > 0 else -0.1
+                self.set_chat_zoom(self._zoom + step)
+                self.zoom_changed.emit(self._zoom)
+                event.accept()
+                return
+            super().wheelEvent(event)
+
+        def set_chat_zoom(self, factor: float):
+            """Set a persisted text-scale factor as the document font size."""
+            factor = max(0.5, min(3.0, float(factor)))
+            if factor != self._zoom:
+                base = self.font().pointSizeF() or 10.0
+                font = QtGui.QFont(self.font())
+                font.setPointSizeF(base * factor)
+                self.document().setDefaultFont(font)
+                self._zoom = factor
 
         def scrollContentsBy(self, dx: int, dy: int) -> None:
             super().scrollContentsBy(dx, dy)
