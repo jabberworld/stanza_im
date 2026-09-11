@@ -1638,6 +1638,7 @@ class MainWindow(QtWidgets.QMainWindow):
                               timestamp=ts or _current_timestamp(),
                               sender=sender_name,
                               origin_id=reply_able_id,
+                              message_id=reply_able_id,
                               reply_to=reply_to, reply_id=reply_id)
 
         # Unread badge + tray blink (skip when conversation is on screen)
@@ -1682,7 +1683,8 @@ class MainWindow(QtWidgets.QMainWindow):
         history.store_message(
             jid, "outgoing", body,
             timestamp=ts or _current_timestamp(), sender="Me",
-            origin_id=stable_id, reply_to=reply_to, reply_id=reply_id)
+            origin_id=stable_id, message_id=stable_id,
+            reply_to=reply_to, reply_id=reply_id)
 
     def _on_mds_displayed(self, chat_jid: str):
         """Another of our devices flagged *chat_jid* as displayed (XEP-0490)."""
@@ -1715,6 +1717,7 @@ class MainWindow(QtWidgets.QMainWindow):
         history.store_message(target, "incoming", body,
                               timestamp=ts or _current_timestamp(), sender=nick,
                               origin_id=reply_able_id,
+                              message_id=reply_able_id,
                               reply_to=reply_to, reply_id=reply_id)
         self._maybe_osd_message(nick, body, target)
         if (self._client and self._chat_window.isVisible()
@@ -1736,7 +1739,7 @@ class MainWindow(QtWidgets.QMainWindow):
             history.store_message(
                 jid, "outgoing", body,
                 timestamp=_current_timestamp(), sender="Me",
-                origin_id=message_id)
+                origin_id=message_id, message_id=message_id)
             self._remember_contact(jid)
 
     # ── Groupchat ─────────────────────────────────────────────────
@@ -1775,7 +1778,9 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         history.store_message(room, "incoming", body,
                               timestamp=ts or _current_timestamp(), sender=nick,
+                              archive_id=archive_id,
                               origin_id=reply_ref_id,
+                              message_id=reply_ref_id,
                               reply_to=reply_to, reply_id=reply_id)
         self._maybe_osd_groupchat(room, nick, body)
         if (self._client and self._chat_window.isVisible()
@@ -1871,7 +1876,8 @@ class MainWindow(QtWidgets.QMainWindow):
         history.store_message(
             jid, "outgoing", body,
             timestamp=_current_timestamp(), sender="Me",
-            origin_id=message_id, reply_to=reply_to, reply_id=reply_id)
+            origin_id=message_id, message_id=message_id,
+            reply_to=reply_to, reply_id=reply_id)
         self._remember_contact(jid)
 
     def _on_groupchat_reply_send(self, room: str, body: str, reply_to: str,
@@ -2044,7 +2050,7 @@ class MainWindow(QtWidgets.QMainWindow):
         history.store_message(
             jid, "outgoing", body,
             timestamp=_current_timestamp(), sender="Me",
-            origin_id=message_id)
+            origin_id=message_id, message_id=message_id)
         self._remember_contact(jid)
 
     async def _send_caption_after(self, jid: str, caption: str, tasks):
