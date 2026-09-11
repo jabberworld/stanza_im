@@ -187,5 +187,14 @@ events.clear()
 cw._on_media_open_requested(target, "video_fs")
 check("media context menu fullscreen", events == [(target, "video", True)])
 
+# 12. navigation routing regression (WebEngine path; static check, the page
+#     cannot be instantiated in this sandbox) --------------------------------
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
+            encoding="utf-8").read()
+check("data: navigation allowed (setHtml page load)",
+      'if scheme == "data"' not in _src)
+check("reload retry guard present", "_LOAD_RETRY_LIMIT" in _src)
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

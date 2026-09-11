@@ -192,6 +192,8 @@ if HAS_WEBENGINE:
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
 
+        _LOAD_RETRY_LIMIT = 5
+
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
             self._theme = theme
@@ -226,6 +228,7 @@ if HAS_WEBENGINE:
             # no #chat node; buffer them until the load has finished.
             self._pending: list[str] = []
             self._ready = False
+            self._load_failures = 0
             self.loadFinished.connect(self._on_load_finished)
 
             self._scroll_poll = QtCore.QTimer(self)
@@ -314,20 +317,17 @@ if HAS_WEBENGINE:
 
             Clicking an anchor (link/mention/MAM) requests a navigation to its
             ``href``; we forward the URL to ``link_clicked`` and deny the load
-            inside the chat.  ``about:`` (the initial ``setHtml`` page) and
-            ``data:`` (inline resources) are allowed; a ``data:`` *navigation*
-            (e.g. a click on a raw data-URI image) is denied so it can never
-            replace the conversation.
+            inside the chat.  ``about:``/``data:`` are the mechanism
+            ``setHtml`` uses to render the page itself (the initial load and
+            reloads, with an ``about:blank`` base), so both must stay allowed —
+            denying ``data:`` would wedge the page in a reload loop.
             """
             scheme = str(url.scheme()).lower()
             if scheme in ("stanza", "mam", "http", "https", "mailto"):
                 self._schedule_content_probe()
                 self.link_clicked.emit(url.toString())
                 return False
-            if scheme == "data":
-                self._schedule_content_probe()
-                return False
-            return scheme in ("about", "") or not url.isValid()
+            return scheme in ("about", "data", "") or not url.isValid()
 
         def _schedule_content_probe(self) -> None:
             """Schedule a check that the conversation survived the click.
@@ -373,6 +373,7 @@ if HAS_WEBENGINE:
 
         def _on_load_finished(self, ok: bool):
             if ok:
+                self._load_failures = 0
                 self._ready = True
                 if self._zoom != 1.0:
                     self.setZoomFactor(self._zoom)
@@ -381,8 +382,16 @@ if HAS_WEBENGINE:
                 self._install_action_js()
                 self._scroll_poll.start()
             else:
+                self._load_failures += 1
                 logger.warning("chat page load finished with error: %s",
                                self.url().toString())
+                if self._load_failures >= self._LOAD_RETRY_LIMIT:
+                    logger.error(
+                        "chat page failed to load %d times in a row; "
+                        "stopping reload attempts", self._load_failures)
+                    self._ready = False
+                    self._pending.clear()
+                    return
                 # A denied/blocked navigation (stanza:/mam:/mailto:) can emit
                 # a spurious loadFinished(false) even though the current
                 # document (#chat) is still alive. Probe the DOM instead of
@@ -404,6 +413,11 @@ if HAS_WEBENGINE:
                         pending, self._pending = self._pending, []
                         for chunk in pending:
                             self._append_chunk(chunk)
+                elif self._load_failures >= self._LOAD_RETRY_LIMIT:
+                    logger.error("chat document repeatedly lost (%d); "
+                                 "stopping reload attempts",
+                                 self._load_failures)
+                    self._pending.clear()
                 else:
                     logger.warning("chat document lost; reloading empty page")
                     self._load_empty()
@@ -413,8 +427,12 @@ if HAS_WEBENGINE:
                     "var n = document.getElementById('chat');"
                     " n ? 'ok' : 'missing'", _handle)
             except RuntimeError:
-                self._load_empty()
-                self.document_lost.emit()
+                if self._load_failures >= self._LOAD_RETRY_LIMIT:
+                    logger.error("chat page unavailable; stopping reloads")
+                    self._pending.clear()
+                else:
+                    self._load_empty()
+                    self.document_lost.emit()
 
         def _on_js_console(self, level, message: str, line: int, source: str):
             logger.debug("chat JS [%s:%s] %s", source, line, message)
