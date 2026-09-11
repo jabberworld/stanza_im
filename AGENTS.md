@@ -238,6 +238,27 @@ not the active window on that conversation), `osd_typing`, `osd_status`
 `osd_conference` (`never`/`mention`/`all`), plus the `_notify_osd_file` entry
 point wired for future p2p file transfers.
 
+**Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
+`media_kind(url)` classifies URLs by extension (image/audio/video). The
+`chat.media_preview` selector (`none`/`images`/`images_audio`/`all`, default
+`images`) gates substitution: `ChatThemeFactory.set_media_preview(service, mode,
+size)` makes `_body_fragment` replace a media URL's `<a>` with an embed —
+`MediaPreviewService.markup()` returns an `<a class="stanza-media"
+href="stanza:view:image/<urlenc>">` wrapping an `<img>` (cached thumbnail as a
+PNG data-URI), or a native HTML5 `<audio>`/`<video controls>`. Image originals
+are downloaded in a worker (`asyncio.to_thread`/thread) and resized to
+`appearance.media_preview_size`; thumbnails and originals live in
+`MediaCache` (`$XDG_CACHE_HOME/stanza-im/media/`, `index.json`, last-access
+tracking) and are evicted by `appearance.media_cache_days` (TTL) and
+`appearance.media_cache_mb` (LRU). `thumbnail_ready` is pushed into every open
+view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
+reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
+to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the
+WebEngine `contextMenuEvent` builds the media menu (copy original link / Save
+as… / open viewer / fullscreen) from `page().contextMenuData()`. Previews are
+off when QtWebEngine is unavailable. Settings changes re-render open chats via
+`ChatWindow.rerender_messages()`. Covered by `tests/test_media.py`.
+
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via
 `ChatThemeFactory.render_action()`, branched in `chat_view.py` across live
