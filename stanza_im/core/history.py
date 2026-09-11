@@ -54,6 +54,48 @@ def _evict_expired(now: float) -> None:
         close(jid)
 
 
+def _migrate_dedup(conn: sqlite3.Connection) -> None:
+    """One-time maintenance: drop duplicate rows and add unique indexes.
+
+    Existing databases may hold rows that are identical except for the
+    autoincrement ``id`` (e.g. the same MAM/archived message stored twice).
+    Keep the oldest row of each group and create partial unique indexes so the
+    duplicates cannot come back.  Tracked via ``PRAGMA user_version``.
+    """
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    except (sqlite3.Error, TypeError):
+        version = 0
+    if version >= 1:
+        return
+    no_ids = ("(archive_id IS NULL OR archive_id = '') "
+              "AND (origin_id IS NULL OR origin_id = '') "
+              "AND (message_id IS NULL OR message_id = '')")
+    try:
+        conn.execute(
+            "DELETE FROM messages WHERE archive_id IS NOT NULL "
+            "AND archive_id <> '' AND id NOT IN ("
+            "SELECT MIN(id) FROM messages WHERE archive_id IS NOT NULL "
+            "AND archive_id <> '' GROUP BY archive_id)")
+        conn.execute(
+            "DELETE FROM messages WHERE " + no_ids + " AND id NOT IN ("
+            "SELECT MIN(id) FROM messages WHERE " + no_ids + " "
+            "GROUP BY direction, sender, body, timestamp)")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_archive_unique "
+            "ON messages(archive_id) WHERE archive_id IS NOT NULL "
+            "AND archive_id <> ''")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_content_unique "
+            "ON messages(direction, sender, body, timestamp) WHERE " + no_ids)
+    except sqlite3.Error as exc:
+        logger.warning("History dedup migration failed: %s", exc)
+    try:
+        conn.execute("PRAGMA user_version = 1")
+    except sqlite3.Error:
+        pass
+
+
 def _connection(jid: str) -> sqlite3.Connection:
     now = time.monotonic()
     _evict_expired(now)
@@ -81,6 +123,7 @@ def _connection(jid: str) -> sqlite3.Connection:
         if "edited" not in columns:
             conn.execute("ALTER TABLE messages ADD COLUMN edited "
                          "INTEGER NOT NULL DEFAULT 0")
+        _migrate_dedup(conn)
         conn.commit()
     except sqlite3.Error:
         conn.close()
@@ -113,31 +156,72 @@ def _row_to_entry(row) -> dict:
     }
 
 
+def _entry_key(entry: dict) -> tuple:
+    """Stable identity for a stored entry (stable ids preferred over content)."""
+    if entry.get("archive_id"):
+        return ("archive", entry["archive_id"])
+    if entry.get("origin_id"):
+        return ("origin", entry["origin_id"])
+    if entry.get("message_id"):
+        return ("message", entry["message_id"])
+    return ("content", entry.get("direction", ""), entry.get("sender", ""),
+            entry.get("body", ""), entry.get("timestamp", ""))
+
+
+def _dedup(entries: list[dict]) -> list[dict]:
+    """Drop entries that share the same identity (defensive read-side guard)."""
+    seen: set = set()
+    out: list[dict] = []
+    for entry in entries:
+        key = _entry_key(entry)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+    return out
+
+
 def store_message(jid: str, direction: str, body: str,
                   timestamp: str | None = None, sender: str = "",
-                  skip_existing: bool = False, archive_id: str = "",
+                  skip_existing: bool = True, archive_id: str = "",
                   origin_id: str = "", reply_to: str = "",
                   reply_id: str = "", message_id: str = "",
                   edited: bool = False) -> bool:
     """Append a message to *jid*'s history.
 
-    With ``skip_existing`` a row with the same (sender, body, timestamp)
-    is treated as already stored and is not duplicated (used when a MAM
-    query overlaps the locally cached range).
+    By default (``skip_existing``) an already stored message is not duplicated.
+    A row counts as the same when it shares any non-empty stable id
+    (``archive_id``/``origin_id``/``message_id``) or, for rows that carry no
+    ids at all, when direction/sender/body/timestamp match.  The content match
+    only ever compares against id-less rows, so two distinct archived messages
+    are never collapsed into one.  Pass ``skip_existing=False`` for an
+    unconditional insert.
     """
     try:
         conn = _connection(jid)
         ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%S")
         if skip_existing:
-            row = None
+            clauses: list[str] = []
+            params: list = []
             if archive_id:
-                row = conn.execute(
-                    "SELECT id FROM messages WHERE archive_id = ? LIMIT 1",
-                    (archive_id,)).fetchone()
-            if row is None:
-                row = conn.execute(
-                    "SELECT id FROM messages WHERE sender = ? AND body = ? "
-                    "AND timestamp = ? LIMIT 1", (sender, body, ts)).fetchone()
+                clauses.append("archive_id = ?")
+                params.append(archive_id)
+            if origin_id:
+                clauses.append("origin_id = ?")
+                params.append(origin_id)
+            if message_id:
+                clauses.append("message_id = ?")
+                params.append(message_id)
+            clauses.append(
+                "((archive_id IS NULL OR archive_id = '') "
+                "AND (origin_id IS NULL OR origin_id = '') "
+                "AND (message_id IS NULL OR message_id = '') "
+                "AND direction = ? AND sender = ? AND body = ? "
+                "AND timestamp = ?)")
+            params.extend([direction, sender, body, ts])
+            row = conn.execute(
+                "SELECT id FROM messages WHERE (" + " OR ".join(clauses)
+                + ") LIMIT 1", params).fetchone()
             if row:
                 return False
         conn.execute(
@@ -200,7 +284,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
             f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
             f"ORDER BY timestamp ASC, id ASC",
             params)
-        return [_row_to_entry(r) for r in cur.fetchall()]
+        return _dedup([_row_to_entry(r) for r in cur.fetchall()])
     except sqlite3.Error as exc:
         logger.warning("Could not read history for %s: %s", jid, exc)
         return []
@@ -219,7 +303,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
             " origin_id, reply_to, reply_id, message_id, edited FROM messages "
             "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
             (str(int(before_id)), str(int(limit))))
-        return [_row_to_entry(r) for r in cur.fetchall()]
+        return _dedup([_row_to_entry(r) for r in cur.fetchall()])
     except sqlite3.Error as exc:
         logger.warning("Could not load older history for %s: %s", jid, exc)
         return []
@@ -235,7 +319,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
             "FROM messages WHERE timestamp < ? "
             "ORDER BY timestamp DESC, id DESC LIMIT ?) "
             "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
-        return [_row_to_entry(r) for r in cur.fetchall()]
+        return _dedup([_row_to_entry(r) for r in cur.fetchall()])
     except sqlite3.Error as exc:
         logger.warning("Could not load older timestamp history for %s: %s",
                        jid, exc)
@@ -311,7 +395,7 @@ def load_day(jid: str, date: str) -> list[dict]:
             "FROM messages "
             "WHERE substr(timestamp, 1, 10) = ? "
             "ORDER BY timestamp ASC, id ASC", (date,))
-        return [_row_to_entry(r) for r in cur.fetchall()]
+        return _dedup([_row_to_entry(r) for r in cur.fetchall()])
     except sqlite3.Error as exc:
         logger.warning("Could not read history day %s for %s: %s",
                        date, jid, exc)
