@@ -382,21 +382,27 @@ being off) fall back to the plain pipeline. Supported feature is advertised as
 
 The per-message reply trigger is an anchor
 (`<a href="stanza:reply:%REPLY_TARGET%">`, placeholder filled by
-`ChatView._mark_message` via `_compose_reply_target`). Clicking it — like any
-link, MUC mention or `mam://load` marker — requests a navigation intercepted on
-the C++ side by `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`,
-which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
-schemes and denies the in-view load. `stanza`/`mam` are pre-registered as
-app-handled schemes (`QWebEngineUrlScheme.registerScheme`) so Chromium never
-starts a real load or error page; a stray `loadFinished(false)` from a blocked
-link is self-healed by `_on_load_finished`/`_probe_chat_alive` (which probes
-that `#chat` survived and un-wedges the pending buffer; a truly lost document
+`ChatView._mark_message` via `_compose_reply_target`). Clicking it never
+navigates: the `_ACTION_JS` document handler preventDefaults the anchor and
+stores its `href` in `window.__stanzaReplyRef`, and the always-running scroll
+poll delivers that `stanza:reply:` reference to Python as a `link_clicked`
+(exactly like the `window.__stanzaEditRef` edit relay) — so the chat document
+is never reset by the click. Real links, MUC mentions and the `mam://load`
+marker request a navigation intercepted on the C++ side by
+`_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which
+emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto` schemes
+and denies the in-view load. `stanza`/`mam` are pre-registered as app-handled
+schemes (`QWebEngineUrlScheme.registerScheme`) so Chromium never starts a real
+load or error page; a stray `loadFinished(false)` from a blocked link is
+self-healed by `_on_load_finished`/`_probe_chat_alive` (which probes that
+`#chat` survived and un-wedges the pending buffer; a truly lost document
 reloads the empty page and emits `document_lost`, so
 `ChatWidget._restore_after_document_lost` re-renders the whole window), and
 `refresh_avatars`
 updates avatar `<img>` elements in place rather than reloading the document.
-No QWebChannel call, console mirror or JS click handler is involved, so clicks
-reach Python even when the WebChannel transport is unavailable. `ChatWidget._handle_reply_uri` decodes the URI and
+No QWebChannel call, console mirror or WebChannel-dependent JS is involved for
+control clicks, so they reach Python even when the WebChannel transport is
+unavailable. `ChatWidget._handle_reply_uri` decodes the URI and
 inserts the referenced message into the input as an XEP-0421 quote block
 (`> Sender wrote:\n> text`) with the cursor below it; a reply banner
 (`chat_widget._reply_ctx`) stays as an indicator and `×` cancels, removing the

@@ -163,29 +163,34 @@ preferences switch both fall back to the plain pipeline. Feature advertised as
 **Message Replies** (XEP-0461): the per-message reply trigger is an anchor
 (`<a href="stanza:reply:%REPLY_TARGET%">`) whose target is filled in by
 `ChatView._mark_message` from `_compose_reply_target(reply_id, author, sender,
-body)` (each field percent-encoded, joined with `/`). Clicking it — like any
-link, MUC mention or `mam://load` marker — requests a navigation that is
-intercepted on the C++ side by `_StanzaPage.acceptNavigationRequest` →
-`ChatView._accept_navigation`, which emits `link_clicked` for the
-`stanza`/`mam`/`http`/`https`/`mailto` schemes and denies the in-view load.
-The `stanza`/`mam` schemes are pre-registered as app-handled with
-`QWebEngineUrlScheme.registerScheme` (`_register_custom_url_schemes`) so
-Chromium never starts (and errors on) a real load; a denied navigation is
-thus harmless. A stray `loadFinished(false)` from a blocked link is
-self-healed by `_on_load_finished`/`_probe_chat_alive`, which verifies that
+body)` (each field percent-encoded, joined with `/`). Clicking it never
+navigates: the `_ACTION_JS` document-level click handler preventDefaults the
+anchor and stores its `href` in `window.__stanzaReplyRef`, and the
+always-running scroll poll delivers that `stanza:reply:` reference to Python as
+a `link_clicked` — exactly like the `window.__stanzaEditRef` edit relay — so
+the chat document cannot be reset by the click. Real links, MUC mentions and
+the `mam://load` marker still request a navigation that is intercepted on the
+C++ side by `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`,
+which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
+schemes and denies the in-view load. The `stanza`/`mam` schemes are
+pre-registered as app-handled with `QWebEngineUrlScheme.registerScheme`
+(`_register_custom_url_schemes`) so Chromium never starts (and errors on) a
+real load; a denied navigation is thus harmless, and a stray
+`loadFinished(false)` from a blocked link is self-healed by
+`_on_load_finished`/`_probe_chat_alive`, which verifies that
 `#chat` survived and un-wedges the pending-message buffer; if the document was
 truly wiped it reloads the empty page and emits `document_lost`, which makes
 `ChatWidget._restore_after_document_lost` re-render the whole conversation
 instead of leaving a blank chat. `refresh_avatars`
 updates avatar `<img>` elements in place instead of clearing the whole
 document, so avatar caching can never stall live rendering.
-No QWebChannel call, console mirror or JS click handler is involved, so clicks
-reach Python even when the WebChannel transport is unavailable. The
-`qwebchannel.js` glue (Qt `:/qtwebchannel` resource, falling back to
-`resources/qwebchannel.js`) is kept only for scroll/jump reporting. Clicking
-reply inserts the referenced message into the input as an XEP-0421 quote block
-(`> Sender wrote:\n> text`) with the cursor below it; a banner remains as an
-indicator and `×` cancels (removing the inserted quote).
+No QWebChannel call, console mirror or WebChannel-dependent JS is involved for
+control clicks, so they reach Python even when the WebChannel transport is
+unavailable. The `qwebchannel.js` glue (Qt `:/qtwebchannel` resource, falling
+back to `resources/qwebchannel.js`) is kept only for scroll/jump reporting.
+Clicking reply inserts the referenced message into the input as an XEP-0421
+quote block (`> Sender wrote:\n> text`) with the cursor below it; a banner
+remains as an indicator and `×` cancels (removing the inserted quote).
 `client._attach_reply` attaches `<reply xmlns='urn:xmpp:reply:0' to='…' id='…'/>`
 as the first child of `<message>` for messages with a resolvable reference; the
 quote is already in the body, so no automatic fallback is prepended. Replyable

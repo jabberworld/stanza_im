@@ -157,6 +157,13 @@ check("reply target round trip",
       ["oid-9", "alice@example.com/res", "Alice", "hello bob/x"])
 check("ACTION_JS reply branch removed",
       "data-action" + "' === 'reply'" not in _view_src)
+check("reply button relayed by scroll poll, never navigation",
+      "a.action-reply" in _view_src
+      and "window.__stanzaReplyRef" in _view_src
+      and "preventDefault()" in _view_src
+      and "__stanzaReplyRef || ''" in _view_src
+      and "_last_reply_ref" in _view_src
+      and "_clear_reply_request" in _view_src)
 check("qwebchannel bundled",
       os.path.isfile(os.path.join(_root, "resources", "qwebchannel.js")))
 from stanza_im.ui import chat_themes as _ct

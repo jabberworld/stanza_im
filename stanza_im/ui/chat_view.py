@@ -179,6 +179,7 @@ if HAS_WEBENGINE:
             self._theme = theme
             self.mention_senders = False
             self._last_edit_ref = ""
+            self._last_reply_ref = ""
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
@@ -396,6 +397,7 @@ if HAS_WEBENGINE:
                 menu = null;
             }
             window.stanzaCloseMenu = closeMenu;
+            window.__stanzaReplyRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -497,6 +499,18 @@ if HAS_WEBENGINE:
                 var t = e.target;
                 if (t && t.closest && t.closest('.' + MENU_CLASS)) return;
                 closeMenu();
+                // Reply button: never navigate. Leave the stanza:reply target
+                // for the always-running scroll poll, which delivers it to
+                // Python (exactly like the edit reference), so the chat
+                // document is never reset by the click.
+                var rbtn = t && t.closest
+                    ? t.closest('a.action-reply') : null;
+                if (rbtn) {
+                    e.preventDefault();
+                    window.__stanzaReplyRef =
+                        rbtn.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -546,13 +560,19 @@ if HAS_WEBENGINE:
                 "var st = window.scrollY || document.documentElement.scrollTop "
                 "|| document.body.scrollTop || 0; "
                 "[st, window.innerHeight || 0, document.body.scrollHeight || 0,"
-                " window.__stanzaEditRef || '']",
+                " window.__stanzaEditRef || '', window.__stanzaReplyRef || '']",
                 self._on_scroll_position,
             )
 
         def _clear_edit_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaEditRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_reply_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaReplyRef = '';")
             except RuntimeError:
                 pass
 
@@ -573,6 +593,14 @@ if HAS_WEBENGINE:
                     self.link_clicked.emit("stanza:edit:" + requested)
             else:
                 self._last_edit_ref = ""
+            if len(value) > 4 and isinstance(value[4], str) and value[4]:
+                self._clear_reply_request()
+                requested = value[4]
+                if requested != getattr(self, "_last_reply_ref", ""):
+                    self._last_reply_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_reply_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
