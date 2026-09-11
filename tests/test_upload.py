@@ -125,6 +125,14 @@ _mw_src = open(os.path.join(
 check("roster send file menu", "ctx_send_file" in _mw_src
       and "upload_http(jid, path)" in _mw_src
       and "send_file(jid" in _mw_src)
+check("upload dialog parented to source window",
+      "_on_chat_files_upload(jid, paths, method" in _mw_src
+      and "_place_dialog_over(dlg, parent)" in _mw_src
+      and "self._chat_window))" in _mw_src)
+check("upload done renders outgoing message",
+      "_display_local_outgoing" in _mw_src
+      and "uuid.uuid4().hex" in _mw_src
+      and "groupchats.get(target)" in _mw_src)
 
 # 7. config default input_height ----------------------------------------------
 from stanza_im.core.storage import Config
@@ -166,6 +174,13 @@ check("dialog preview helper", _preview_pixmap(doc_path, dlg).isNull() is False)
 # 9. resizable handle baseline ------------------------------------------------
 handle = cw3._input_handle
 check("handle height getter", handle._get_height() == cw3._input_height)
+
+# 10. file-URL messages render as clickable links -----------------------------
+theme = chat_themes.ChatThemeFactory()
+url_html = theme.render_message("Me", "https://upload.example.com/get/abc123",
+                                "12:00:00", "outgoing")
+check("file url renders as link",
+      '<a href="https://upload.example.com/get/abc123"' in url_html)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

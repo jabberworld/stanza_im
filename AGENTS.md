@@ -308,8 +308,13 @@ input disable `acceptDrops` so file drops reach `ChatWidget`, which emits
 thumbnail or generic file icon, a per-file `QProgressBar` and one shared
 caption (`QLineEdit`); OK starts the transfers while the dialog stays open,
 `file_upload_progress` events (phases `start`/`progress`/`done`/`error`, now
-carrying the file `path`) update the bars, and the caption is sent once — as a
-separate message — after the batch finishes (`_send_caption_after`).
+carrying the file `path`) update the bars. The dialog is parented to the
+window that issued the request (`_place_dialog_over` centers it over the chat
+window or the roster), and the caption is sent once — as a separate message —
+after the batch finishes (`_send_caption_after`). File URLs and the caption are
+rendered as real outgoing messages with clickable links: in 1:1 the client
+displays them locally via `_display_local_outgoing` (no carbons echo reaches
+the sending resource), in MUC the room echo renders them.
 `client.upload_http(jid, path)` discovers the `urn:xmpp:http:upload:0` service
 (cached), requests a `<slot>` and PUTs the bytes streamed in 64 KiB chunks via
 `http.client` (Content-Length + `conn.send`), reporting the progress fraction

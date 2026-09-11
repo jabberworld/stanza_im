@@ -62,7 +62,6 @@ STRINGS = {
     "ft_p2p": "P2P",
     "ft_http_upload": "HTTP Upload",
     "ft_upload_started": "Uploading «{file}»…",
-    "ft_upload_done": "File: {url}",
     "ft_upload_failed": "Upload failed: {error}",
     "ft_upload_title": "Send files",
     "ft_upload_caption": "Message:",

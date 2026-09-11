@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import time
+import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -91,7 +92,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_groupchat_edit_send)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
-            self._on_chat_files_upload)
+            lambda jid, paths, method: self._on_chat_files_upload(
+                jid, paths, method, self._chat_window))
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
@@ -1350,7 +1352,7 @@ class MainWindow(QtWidgets.QMainWindow):
         paths, _filter = QtWidgets.QFileDialog.getOpenFileNames(self)
         paths = [p for p in (paths or []) if p]
         if paths:
-            self._on_chat_files_upload(jid, paths, method)
+            self._on_chat_files_upload(jid, paths, method, self)
 
     def _rename_contact(self, jid: str):
         current = self._roster_name(jid) or jid.split("@")[0]
@@ -1858,14 +1860,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config.chat.input_height = int(height)
         self._config.save()
 
-    def _on_chat_files_upload(self, jid: str, paths: list, method: str):
+    @staticmethod
+    def _place_dialog_over(dlg, window) -> None:
+        """Center *dlg* over *window* so it appears above the source window
+        (some WM/style combinations do not center child dialogs on show)."""
+        if window is None:
+            return
+        dlg.adjustSize()
+        geo = window.geometry()
+        dlg.move(geo.center() - dlg.rect().center())
+
+    def _on_chat_files_upload(self, jid: str, paths: list, method: str,
+                              parent=None):
         if not self._client:
             return
         paths = [str(p) for p in (paths or []) if p]
         if not paths:
             return
         from stanza_im.ui.upload_dialog import FileTransferDialog
-        dlg = FileTransferDialog(paths, self)
+        parent = parent or self
+        dlg = FileTransferDialog(paths, parent)
+        self._place_dialog_over(dlg, parent)
         dlg.upload_started.connect(
             lambda caption: self._launch_file_uploads(jid, paths, method,
                                                       caption, dlg))
@@ -1897,6 +1912,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if caption and tasks:
             self._start_task(self._send_caption_after(jid, caption, tasks))
 
+    def _display_local_outgoing(self, jid: str, body: str, message_id: str):
+        """Show our own 1:1 message locally (no carbons echo reaches the
+        sending resource, so the client renders the stanza itself)."""
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.add_message(
+                sender="Me", body=body,
+                timestamp=_current_timestamp(), direction="outgoing",
+                message_id=message_id,
+                reply_able_id=message_id, reply_author=jid)
+        from stanza_im.core import history
+        history.store_message(
+            jid, "outgoing", body,
+            timestamp=_current_timestamp(), sender="Me",
+            origin_id=message_id)
+        self._remember_contact(jid)
+
     async def _send_caption_after(self, jid: str, caption: str, tasks):
         """Send the shared caption once, after the batch finished uploading."""
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -1904,7 +1936,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client.groupchats.get(target):
             self._client.send_muc_message(target, caption)
         else:
-            self._client.send_message(target, caption)
+            message_id = self._client.send_message(target, caption)
+            self._display_local_outgoing(target, caption, message_id)
 
     def _check_uploads_finished(self, jid: str):
         batch = self._file_uploads.get(jid)
@@ -1937,9 +1970,12 @@ class MainWindow(QtWidgets.QMainWindow):
             if dlg is not None:
                 dlg.set_progress(index, 100)
                 dlg.set_row_done(index)
-            if chat:
-                chat.add_status(tr("ft_upload_done", url=detail),
-                                time.strftime("%H:%M:%S"))
+            # Show the file URL as a real outgoing message (clickable link)
+            # instead of a plain-text status line. In MUC the room echo
+            # already renders it, so only do this for 1:1.
+            target = jid.split("/")[0] if "/" in jid else jid
+            if not (self._client and self._client.groupchats.get(target)):
+                self._display_local_outgoing(target, detail, uuid.uuid4().hex)
         elif phase == "error":
             if dlg is not None:
                 dlg.set_row_failed(index, detail or "")

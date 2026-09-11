@@ -587,9 +587,14 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
   Content-Length + `conn.send`, progress fraction shared via
   `_UploadProgress`) → send the `get` URL as a 1:1 or MUC message. Progress
   is reported through `file_upload_progress(jid, start|progress|done|error,
-  detail, path)`, updating the dialog bars and chat status lines. A caption
-  typed in the dialog is sent once as a separate message after the batch
-  finishes (`_send_caption_after`).
+  detail, path)`, updating the dialog bars and chat status lines. The dialog
+  is parented to the issuing window (chat or roster) and centered over it
+  (`_place_dialog_over`). A caption typed in the dialog is sent once as a
+  separate message after the batch finishes (`_send_caption_after`). For 1:1
+  uploads the `get` URL and the caption are rendered as real outgoing
+  messages with clickable links via `_display_local_outgoing` (the sending
+  resource never sees its own carbons echo); in MUC the room echo renders
+  both.
 - "P2P" still routes to the `send_file` placeholder; the roster context menu
   also gains "Send file → P2P / HTTP Upload" for contacts (and conferences).
 

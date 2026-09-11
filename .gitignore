@@ -6,6 +6,7 @@ dist/
 .venv/
 venv/
 *.deb
+.opencode/
 
 # Original Jabbim sources (reference only)
 old/
