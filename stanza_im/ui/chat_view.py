@@ -312,17 +312,22 @@ if HAS_WEBENGINE:
         def _accept_navigation(self, url) -> bool:
             """Route a page navigation; return True to allow the load.
 
-            Clicking an anchor (link/mention/reply/MAM) requests a navigation
-            to its ``href``; we forward the URL to ``link_clicked`` and deny
-            the load inside the chat.  Everything else (initial ``setHtml``,
-            ``about:``/``data:``) is allowed so the page itself renders.
+            Clicking an anchor (link/mention/MAM) requests a navigation to its
+            ``href``; we forward the URL to ``link_clicked`` and deny the load
+            inside the chat.  ``about:`` (the initial ``setHtml`` page) and
+            ``data:`` (inline resources) are allowed; a ``data:`` *navigation*
+            (e.g. a click on a raw data-URI image) is denied so it can never
+            replace the conversation.
             """
             scheme = str(url.scheme()).lower()
             if scheme in ("stanza", "mam", "http", "https", "mailto"):
                 self._schedule_content_probe()
                 self.link_clicked.emit(url.toString())
                 return False
-            return scheme in ("about", "data", "") or not url.isValid()
+            if scheme == "data":
+                self._schedule_content_probe()
+                return False
+            return scheme in ("about", "") or not url.isValid()
 
         def _schedule_content_probe(self) -> None:
             """Schedule a check that the conversation survived the click.
@@ -493,6 +498,7 @@ if HAS_WEBENGINE:
             }
             window.stanzaCloseMenu = closeMenu;
             window.__stanzaReplyRef = '';
+            window.__stanzaMediaRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -594,6 +600,19 @@ if HAS_WEBENGINE:
                 var t = e.target;
                 if (t && t.closest && t.closest('.' + MENU_CLASS)) return;
                 closeMenu();
+                // Media preview/player links must never navigate: a custom
+                // stanza: navigation can otherwise replace the chat document
+                // (and the image click would not reach Python).  Leave the
+                // href for the always-running scroll poll, which delivers it
+                // as a link_clicked (same relay as reply/edit).
+                var media = t && t.closest
+                    ? t.closest('a.stanza-media, a.stanza-media-open') : null;
+                if (media) {
+                    e.preventDefault();
+                    window.__stanzaMediaRef =
+                        media.getAttribute('href') || '';
+                    return;
+                }
                 // Reply button: never navigate. Leave the stanza:reply target
                 // for the always-running scroll poll, which delivers it to
                 // Python (exactly like the edit reference), so the chat
@@ -655,7 +674,8 @@ if HAS_WEBENGINE:
                 "var st = window.scrollY || document.documentElement.scrollTop "
                 "|| document.body.scrollTop || 0; "
                 "[st, window.innerHeight || 0, document.body.scrollHeight || 0,"
-                " window.__stanzaEditRef || '', window.__stanzaReplyRef || '']",
+                " window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
+                " window.__stanzaMediaRef || '']",
                 self._on_scroll_position,
             )
 
@@ -668,6 +688,12 @@ if HAS_WEBENGINE:
         def _clear_reply_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaReplyRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_media_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaMediaRef = '';")
             except RuntimeError:
                 pass
 
@@ -696,6 +722,14 @@ if HAS_WEBENGINE:
                     self.link_clicked.emit(requested)
             else:
                 self._last_reply_ref = ""
+            if len(value) > 5 and isinstance(value[5], str) and value[5]:
+                self._clear_media_request()
+                requested = value[5]
+                if requested != getattr(self, "_last_media_ref", ""):
+                    self._last_media_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_media_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])

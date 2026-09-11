@@ -169,5 +169,23 @@ for key in ("media_preview", "media_preview_size",
 check("prefs media_preview default",
       dlg._controls["media_preview"].currentData() == "images")
 
+# 11. media click relay (Python side of the scroll-poll delivery) -------------
+from urllib.parse import quote
+from stanza_im.ui.chat_widget import ChatWidget
+
+cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
+events = []
+cw.media_view_requested.connect(lambda u, k, fs: events.append((u, k, fs)))
+target = "https://upload.example.com/get/a/photo.png"
+cw._handle_media_view_uri("stanza:view:image/" + quote(target, safe=""))
+check("media uri -> image viewer",
+      events == [(target, "image", False)])
+events.clear()
+cw._on_media_open_requested(target, "video")
+check("media context menu video", events == [(target, "video", False)])
+events.clear()
+cw._on_media_open_requested(target, "video_fs")
+check("media context menu fullscreen", events == [(target, "video", True)])
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
