@@ -179,6 +179,13 @@ class PreferencesDialog(QtWidgets.QDialog):
                                         tr("prefs_message_displayed_sync")))
         general_form.addRow(self._check("allow_incoming_edits",
                                         tr("prefs_allow_incoming_edits")))
+        general_form.addRow(tr("prefs_media_preview"),
+                            self._combo("media_preview", [
+                                ("media_preview_none", "none"),
+                                ("media_preview_images", "images"),
+                                ("media_preview_images_audio", "images_audio"),
+                                ("media_preview_all", "all"),
+                            ]))
 
         chat, chat_form = self._page()
         chat_form.addRow(self._check("show_status", tr("prefs_show_status")))
@@ -242,6 +249,12 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(tr("prefs_emoticon_preview"), preview_widget)
         emoticon_theme.currentIndexChanged.connect(self._update_emoticon_preview)
         self._update_emoticon_preview()
+        form.addRow(tr("prefs_media_preview_size"),
+                    self._spin("media_preview_size", 64, 512))
+        form.addRow(tr("prefs_media_cache_days"),
+                    self._spin("media_cache_days", 1, 3650))
+        form.addRow(tr("prefs_media_cache_mb"),
+                    self._spin("media_cache_mb", 16, 4096))
         return page
 
     def _update_emoticon_preview(self):
@@ -387,6 +400,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "show_receipts": chat.show_receipts, "show_mood": chat.show_mood,
             "show_music": chat.show_music, "show_avatars": chat.show_avatars,
             "message_styling": chat.message_styling,
+            "media_preview": chat.media_preview,
             "muc_show_presence": chat.muc_show_presence,
             "muc_show_status": chat.muc_show_status,
             "muc_show_status_text": chat.muc_show_status_text,
@@ -401,6 +415,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             "emoticon_theme": ("default/smileys.cfg"
                                if appearance.emoticon_theme == "default"
                                else appearance.emoticon_theme),
+            "media_preview_size": appearance.media_preview_size,
+            "media_cache_days": appearance.media_cache_days,
+            "media_cache_mb": appearance.media_cache_mb,
             "tray_blink": notifications.tray_blink, "popups": notifications.popups,
             "osd_enabled": notifications.osd_enabled,
             "osd_duration": notifications.osd_duration,
@@ -455,6 +472,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.appearance.chat_theme = cfg.chat.theme
         cfg.appearance.muc_theme = self._value("muc_theme") or ""
         cfg.appearance.emoticon_theme = self._value("emoticon_theme") or "default/smileys.cfg"
+        cfg.chat.media_preview = self._value("media_preview") or "images"
+        cfg.appearance.media_preview_size = self._value("media_preview_size")
+        cfg.appearance.media_cache_days = self._value("media_cache_days")
+        cfg.appearance.media_cache_mb = self._value("media_cache_mb")
         cfg.privacy.send_software = self._value("send_software")
         cfg.privacy.send_typing_notifications = self._value("send_typing_notifications")
         cfg.privacy.send_activity_notifications = self._value("send_activity_notifications")
