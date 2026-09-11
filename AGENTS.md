@@ -384,18 +384,47 @@ unintended files; check `git status` before committing.
 ## Session State Protocol
 
 Long sessions can overflow the context window and be compacted or reset; tool
-output may then appear duplicated or mangled. To survive this:
+output may then appear duplicated or mangled. To survive this, keep every
+non-trivial task's objective, reasoning, decisions and progress on disk:
 
-- At the start of **every** session (including after a context reset or
-  compaction), read `.opencode/work-state.md` if it exists, verify its
-  *Ground truth* against `git status --short`, `git log --oneline -2` and the
-  test exit codes, then continue from its *In progress* section.
-- After each mutating batch (edits / tests / commits), rewrite
-  `.opencode/work-state.md` (objective, completed with `file:line` anchors,
-  in progress, next steps, traps).
+- **Persist before acting.** As soon as a task's plan is being formed — before
+  the first source file is edited — write `.opencode/work-state.md` with
+  `Ground truth`, `Objective`, `Analysis` (findings and root causes with
+  `file:line` evidence), `Decisions`, `Plan (ordered)`, `In progress`,
+  `Completed`, `Next` and `Traps`.
+- **`Decisions` records the Q&A.** For every clarifying question, store the
+  question, the user's answer and the chosen trade-off as the answer arrives —
+  not only at the end.
+- **Plan-mode exception.** `.opencode/work-state.md` may be written even while
+  in read-only plan mode; it is the ONLY file that may be modified then. The
+  directory is gitignored, so this never changes the repository.
+- **After each mutating batch** (edits / tests / commits), rewrite the file,
+  updating `Completed` with `file:line` anchors and refreshing
+  `In progress` / `Next`.
+- **At the start of every session** (including after a context reset or
+  compaction), read `.opencode/work-state.md`, verify its `Ground truth` against
+  `git status --short`, `git log --oneline -2` and the test exit codes, re-read
+  `Objective` / `Analysis` / `Decisions` / `Plan`, then continue from
+  `In progress`.
 - Never trust recalled state or a printed "success": confirm with `git diff`,
   `git status`, exit codes and a `Read` of the edited region. A remembered
   commit may not exist — check `git rev-parse --verify <hash>`.
+
+State-file template:
+
+```
+# Session State
+updated: <ISO-8601>   HEAD: <hash> <subject>
+## Ground truth    # repo, git/working-tree state, test exit codes, env
+## Objective       # current task, 1-3 lines
+## Analysis        # findings + root causes, with file:line evidence
+## Decisions       # Q: <question> -> A: <answer> (chosen option)
+## Plan (ordered)
+## In progress
+## Completed       # commits + file:line anchors
+## Next
+## Traps
+```
 
 `.opencode/` is gitignored, so the state file is never committed.
 
