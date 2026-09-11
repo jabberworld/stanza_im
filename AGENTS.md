@@ -360,6 +360,24 @@ of work (one bug fix or feature = one commit). Match the commit message style of
 the existing history (short imperative summary line). Do not commit secrets or
 unintended files; check `git status` before committing.
 
+## Session State Protocol
+
+Long sessions can overflow the context window and be compacted or reset; tool
+output may then appear duplicated or mangled. To survive this:
+
+- At the start of **every** session (including after a context reset or
+  compaction), read `.opencode/work-state.md` if it exists, verify its
+  *Ground truth* against `git status --short`, `git log --oneline -2` and the
+  test exit codes, then continue from its *In progress* section.
+- After each mutating batch (edits / tests / commits), rewrite
+  `.opencode/work-state.md` (objective, completed with `file:line` anchors,
+  in progress, next steps, traps).
+- Never trust recalled state or a printed "success": confirm with `git diff`,
+  `git status`, exit codes and a `Read` of the edited region. A remembered
+  commit may not exist — check `git rev-parse --verify <hash>`.
+
+`.opencode/` is gitignored, so the state file is never committed.
+
 ## Headless Test Environment
 
 This sandbox has no root, so PyQt6's system deps (libGL, libglib, libx11, etc.)
