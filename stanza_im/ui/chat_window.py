@@ -153,6 +153,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.files_upload_requested.connect(self.files_upload_requested)
         widget.input_height_changed.connect(self._on_widget_input_height_changed)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
+        widget.media_view_requested.connect(self.media_view_requested)
+        widget.media_save_requested.connect(self.media_save_requested)
+        widget.media_copy_requested.connect(self.media_copy_requested)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -191,6 +194,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.files_upload_requested.connect(self.files_upload_requested)
         widget.input_height_changed.connect(self._on_widget_input_height_changed)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
+        widget.media_view_requested.connect(self.media_view_requested)
+        widget.media_save_requested.connect(self.media_save_requested)
+        widget.media_copy_requested.connect(self.media_copy_requested)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -255,6 +261,19 @@ class ChatWindow(QtWidgets.QMainWindow):
         """Keep the shared options snapshot fresh so new tabs apply it."""
         self._chat_options["text_scale"] = float(factor)
         self.text_scale_changed.emit(jid, float(factor))
+
+    def set_media_thumbnail(self, url: str, data_uri: str) -> None:
+        """Push a ready thumbnail into every open chat view."""
+        for widget in self._tabs.values():
+            try:
+                widget._view.set_media_thumbnail(url, data_uri)
+            except Exception:
+                pass
+
+    def rerender_messages(self) -> None:
+        """Re-render all open conversations (media preview settings)."""
+        for widget in self._tabs.values():
+            widget.rerender_messages()
 
     def set_tab_title_length(self, length: int):
         self._tab_title_length = max(10, int(length))
@@ -365,6 +384,9 @@ class ChatWindow(QtWidgets.QMainWindow):
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
+    media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen
+    media_save_requested = QtCore.pyqtSignal(str)              # url
+    media_copy_requested = QtCore.pyqtSignal(str)              # url
     window_closed = QtCore.pyqtSignal()                        # window closed
 
     # ── Internal ──────────────────────────────────────────────────

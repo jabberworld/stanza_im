@@ -151,6 +151,20 @@ if HAS_WEBENGINE:
         def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
             self.reply_requested.emit(reply_id, author, sender, snippet)
 
+    def _media_type_name(media_type) -> str:
+        """Map QWebEngineContextMenuRequest.MediaType to image/audio/video."""
+        enum = getattr(QtWebEngineCore.QWebEngineContextMenuRequest,
+                       "MediaType", None)
+        if enum is None:
+            return ""
+        for name in ("Image", "Audio", "Video"):
+            try:
+                if media_type == getattr(enum, name):
+                    return name.lower()
+            except Exception:
+                pass
+        return ""
+
     class _StanzaPage(QtWebEngineCore.QWebEnginePage):
         """QWebEnginePage that routes clicks to Python via navigation.
 
@@ -174,6 +188,9 @@ if HAS_WEBENGINE:
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
+        media_save_requested = QtCore.pyqtSignal(str)       # url
+        media_copy_requested = QtCore.pyqtSignal(str)       # url
+        media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
@@ -233,6 +250,64 @@ if HAS_WEBENGINE:
             """Set a persisted text-scale factor (applied to the whole page)."""
             self._zoom = max(0.5, min(3.0, float(factor)))
             self.setZoomFactor(self._zoom)
+
+        def set_media_thumbnail(self, url: str, data_uri: str) -> None:
+            """Swap a loading placeholder for the ready thumbnail data-URI."""
+            if not self._ready or not url:
+                return
+            safe_url = json.dumps(url)
+            safe_uri = json.dumps(data_uri or "")
+            self.page().runJavaScript(f"""
+            (function() {{
+                var target = {safe_url};
+                document.querySelectorAll('img.stanza-media-thumb').forEach(
+                    function (img) {{
+                        if (img.getAttribute('data-media-url') !== target) return;
+                        img.src = {safe_uri};
+                        var parent = img.parentNode;
+                        if (parent && parent.classList) {{
+                            parent.classList.remove('stanza-media-loading');
+                        }}
+                    }});
+            }})();
+            """)
+
+        def contextMenuEvent(self, event):
+            """Show the media menu (copy/save/view) when over media."""
+            data = None
+            try:
+                data = self.page().contextMenuData()
+            except Exception:
+                data = None
+            url = ""
+            kind = ""
+            if data is not None:
+                media_url = data.mediaUrl()
+                if media_url is not None and not media_url.isEmpty():
+                    url = media_url.toString()
+                kind = _media_type_name(data.mediaType())
+            if url and kind:
+                self._show_media_menu(event, url, kind)
+                return
+            super().contextMenuEvent(event)
+
+        def _show_media_menu(self, event, url: str, kind: str) -> None:
+            menu = QtWidgets.QMenu(self)
+            menu.addAction(tr("media_copy_link"),
+                           lambda: self.media_copy_requested.emit(url))
+            menu.addAction(tr("media_save"),
+                           lambda: self.media_save_requested.emit(url))
+            if kind in ("audio", "video"):
+                menu.addSeparator()
+                menu.addAction(
+                    tr("media_open_viewer"),
+                    lambda u=url, k=kind: self.media_open_requested.emit(u, k))
+                if kind == "video":
+                    menu.addAction(
+                        tr("media_fullscreen"),
+                        lambda u=url: self.media_open_requested.emit(
+                            u, "video_fs"))
+            menu.exec(event.globalPos())
 
         def _accept_navigation(self, url) -> bool:
             """Route a page navigation; return True to allow the load.
@@ -922,6 +997,9 @@ else:
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
+        media_save_requested = QtCore.pyqtSignal(str)       # url
+        media_copy_requested = QtCore.pyqtSignal(str)       # url
+        media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
@@ -955,6 +1033,10 @@ else:
                 font.setPointSizeF(base * factor)
                 self.document().setDefaultFont(font)
                 self._zoom = factor
+
+        def set_media_thumbnail(self, url: str, data_uri: str) -> None:
+            """No-op: media previews are disabled without QWebEngine."""
+            return
 
         def scrollContentsBy(self, dx: int, dy: int) -> None:
             super().scrollContentsBy(dx, dy)

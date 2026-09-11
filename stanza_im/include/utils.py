@@ -78,11 +78,15 @@ _URL_RE = re.compile(
 _URL_TRAILING_PUNCT = re.compile(r"[.,;:!?]+$")
 
 
-def tokenize_urls(text: str) -> tuple[str, list[str]]:
+def tokenize_urls(text: str, media_render=None) -> tuple[str, list[str]]:
     """Replace URL regions with NUL-byte tokens and return the anchor HTML.
 
     The tokenised text is safe to run through later text transforms (e.g.
     emoticon replacement) that could otherwise corrupt URL text.
+
+    When *media_render* is given, it is called with each trimmed URL and may
+    return replacement markup (an embedded preview/player); ``None`` falls
+    back to a plain ``<a>`` link.
     """
     anchors: list[str] = []
 
@@ -92,7 +96,13 @@ def tokenize_urls(text: str) -> tuple[str, list[str]]:
         if not trimmed:
             return url
         token = f"\x00{len(anchors)}\x00"
-        anchors.append(f'<a href="{trimmed}">{trimmed}</a>')
+        markup = None
+        if media_render is not None:
+            try:
+                markup = media_render(trimmed)
+            except Exception:
+                markup = None
+        anchors.append(markup or f'<a href="{trimmed}">{trimmed}</a>')
         return token + url[len(trimmed):]
 
     tmp = _URL_RE.sub(_repl, text)

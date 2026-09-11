@@ -15,6 +15,18 @@ from stanza_im.i18n import tr
 
 _logger = logging.getLogger(__name__)
 
+_MEDIA_CSS = """
+.stanza-media { display: inline-block; margin: 3px 0; vertical-align: top; }
+.stanza-media-thumb { border-radius: 6px; max-width: 100%; height: auto;
+                      cursor: pointer; background: rgba(0,0,0,.06); display: block; }
+.stanza-media-loading .stanza-media-thumb { min-width: 80px; min-height: 60px; }
+.stanza-media audio { max-width: 340px; }
+.stanza-media video { max-width: 100%; border-radius: 6px; background: #000;
+                      display: block; }
+.stanza-media-open { display: inline-block; margin-top: 2px; font-size: 11px;
+                     color: #1a73e8; }
+"""
+
 
 def _qwebchannel_js() -> str:
     """Return the ``qwebchannel.js`` glue ($undefined if unavailable).
@@ -102,6 +114,9 @@ class ChatThemeFactory:
         self._current_variant_css: str = ""
         self._emoticon_skin = emoticon_skin
         self._message_styling = True
+        self._media = None
+        self._media_mode = "none"
+        self._media_size = 200
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -145,6 +160,16 @@ class ChatThemeFactory:
         """Enable/disable XEP-0393 message styling in rendered bodies."""
         self._message_styling = bool(enabled)
 
+    def set_media_preview(self, service, mode: str = "none",
+                          size: int = 200) -> None:
+        """Attach a :class:`MediaPreviewService` and its policy."""
+        self._media = service
+        self._media_mode = mode or "none"
+        try:
+            self._media_size = int(size or 200)
+        except (TypeError, ValueError):
+            self._media_size = 200
+
     def _transform_body(self, body: str, styled: bool = True) -> str:
         """Turn a plain-text body into message HTML.
 
@@ -174,10 +199,12 @@ class ChatThemeFactory:
         emotified = smile_to_html(tokenised, self._emoticon_skin)
         return restore_url_tokens(emotified, anchors)
 
-    @staticmethod
-    def _tokenize_urls(text: str) -> tuple[str, list[str]]:
+    def _tokenize_urls(self, text: str) -> tuple[str, list[str]]:
         from stanza_im.include.utils import tokenize_urls
-        return tokenize_urls(text)
+        render = None
+        if self._media is not None and self._media_mode != "none":
+            render = self._media.markup
+        return tokenize_urls(text, render)
 
     def render_message(self, sender: str, body: str, timestamp: str,
                        direction: str, is_next: bool = False,
@@ -297,6 +324,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
                  border-left: 3px solid #bbb; background: rgba(0,0,0,.04); margin-bottom: 1px; }}
 .stanza-reply .reply-label {{ font-weight: bold; }}
 .stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
+{_MEDIA_CSS}
 </style>
 </head>
 <body>
@@ -330,6 +358,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
                  border-left: 3px solid #bbb; background: rgba(0,0,0,.04); margin-bottom: 1px; }}
 .stanza-reply .reply-label {{ font-weight: bold; }}
 .stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
+{_MEDIA_CSS}
 </style>
 </head>
 <body>

@@ -195,6 +195,9 @@ class ChatWidget(QtWidgets.QWidget):
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
+    media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
+    media_save_requested = QtCore.pyqtSignal(str)             # url
+    media_copy_requested = QtCore.pyqtSignal(str)             # url
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
                  is_muc: bool = False, parent=None):
@@ -311,6 +314,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._view.document_lost.connect(self._restore_after_document_lost)
         self._view.zoom_changed.connect(
             lambda factor: self.text_scale_changed.emit(self.jid, factor))
+        self._view.media_save_requested.connect(self.media_save_requested)
+        self._view.media_copy_requested.connect(self.media_copy_requested)
+        self._view.media_open_requested.connect(self._on_media_open_requested)
         chat_col.addWidget(self._view, stretch=1)
 
         # Reply context bar (XEP-0461): shown while composing a reply.
@@ -481,6 +487,9 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:edit:"):
             self._handle_edit_uri(url)
             return
+        if url.startswith("stanza:view:"):
+            self._handle_media_view_uri(url)
+            return
         if url == "mam://load":
             self.load_more_from_server()
             return
@@ -512,6 +521,20 @@ class ChatWidget(QtWidgets.QWidget):
         prefix = " " if before and not before[-1].isspace() else ""
         self._input.insertPlainText(prefix + nick + ": ")
         self._input.setFocus()
+
+    def _handle_media_view_uri(self, url: str) -> None:
+        """Open a ``stanza:view:<kind>/<url>`` target in the media viewer."""
+        rest = url[len("stanza:view:"):]
+        kind, _sep, encoded = rest.partition("/")
+        target = unquote(encoded) if encoded else ""
+        if target:
+            self.media_view_requested.emit(target, kind or "image", False)
+
+    def _on_media_open_requested(self, url: str, kind: str):
+        """Route a context-menu viewer request, expanding ``video_fs``."""
+        fullscreen = kind == "video_fs"
+        self.media_view_requested.emit(
+            url, "video" if fullscreen else kind, fullscreen)
 
     # ── Typing indicators ─────────────────────────────────────────
 
@@ -1608,6 +1631,10 @@ class ChatWidget(QtWidgets.QWidget):
 
     def clear_messages(self):
         self._view.clear()
+
+    def rerender_messages(self):
+        """Re-render history and messages (e.g. preview settings changed)."""
+        self._render_all()
 
     def focus_input(self):
         self._input.setFocus()
