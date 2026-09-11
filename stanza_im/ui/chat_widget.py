@@ -102,18 +102,21 @@ class _InputHandle(QtWidgets.QFrame):
 
     height_changed = QtCore.pyqtSignal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, get_height=None):
         super().__init__(parent)
         self.setFixedHeight(6)
         self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
         self.setStyleSheet("_InputHandle { background: rgba(0, 0, 0, 0.05); }")
+        self._get_height = get_height or (lambda: 60)
         self._press_y: float | None = None
         self._press_h = 60
+        self.setMouseTracking(True)
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self._press_y = float(event.globalPosition().y())
-            self._press_h = int(getattr(self.parentWidget(), "_input_height", 60))
+            self._press_h = int(self._get_height())
+            self.grabMouse()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -124,6 +127,8 @@ class _InputHandle(QtWidgets.QFrame):
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        if self._press_y is not None:
+            self.releaseMouse()
         self._press_y = None
 
 
@@ -174,7 +179,7 @@ class ChatWidget(QtWidgets.QWidget):
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)                            # room, nick, global pos
     vcard_requested = QtCore.pyqtSignal(str)                # jid
-    file_upload_requested = QtCore.pyqtSignal(str, str, str)  # jid, path, method
+    files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
@@ -408,17 +413,24 @@ class ChatWidget(QtWidgets.QWidget):
         chat_col.addLayout(input_row)
 
         # Resize handle under the input
-        self._input_handle = _InputHandle(self)
+        self._input_handle = _InputHandle(
+            self, get_height=lambda: self._input_height)
         self._input_handle.height_changed.connect(self._set_input_height)
         chat_col.addWidget(self._input_handle)
 
         chat_panel = QtWidgets.QWidget(self)
         chat_panel.setLayout(chat_col)
         self.setAcceptDrops(True)
+        # Let drops fall through to this widget: the view and input would
+        # otherwise swallow file drops (QTextBrowser/QWebEngineView and
+        # QPlainTextEdit both accept drops by default).
+        self._view.setAcceptDrops(False)
+        self._input.setAcceptDrops(False)
 
         self._users_list = QtWidgets.QListWidget()
         self._users_list.setMinimumWidth(120)
         self._users_list.setMaximumWidth(420)
+        self._users_list.setAcceptDrops(False)
         self._users_list.setVisible(self.is_muc)
         self._users_list.setContextMenuPolicy(
             QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
@@ -1409,9 +1421,11 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _choose_file_send(self, method: str):
         from PyQt6.QtWidgets import QFileDialog
-        path, _filter = QFileDialog.getOpenFileName(self, tr("chat_send_file"))
-        if path:
-            self.file_upload_requested.emit(self.jid, path, method)
+        paths, _filter = QFileDialog.getOpenFileNames(self,
+                                                      tr("chat_send_file"))
+        paths = [p for p in (paths or []) if p]
+        if paths:
+            self.files_upload_requested.emit(self.jid, paths, method)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1422,10 +1436,10 @@ class ChatWidget(QtWidgets.QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        for url in event.mimeData().urls():
-            if url.isLocalFile():
-                self.file_upload_requested.emit(self.jid, url.toLocalFile(),
-                                               "http")
+        paths = [url.toLocalFile() for url in event.mimeData().urls()
+                 if url.isLocalFile()]
+        if paths:
+            self.files_upload_requested.emit(self.jid, paths, "http")
         event.acceptProposedAction()
 
     @staticmethod

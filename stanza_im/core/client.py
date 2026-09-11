@@ -42,6 +42,17 @@ NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 
 
+class _UploadProgress:
+    """Thread-safe upload fraction shared between the PUT worker thread and
+    the polling coroutine (plain float writes/reads under the GIL)."""
+
+    def __init__(self):
+        self.pct = 0.0
+
+    def update(self, value: float) -> None:
+        self.pct = float(value)
+
+
 def _replace_reference(stanza) -> str:
     """Return the ``id`` of a XEP-0308 ``<replace/>`` on *stanza* ("" if none)."""
     xml = getattr(stanza, "xml", None)
@@ -1260,12 +1271,16 @@ class JabberClient:
 
     # ── XEP-0363 HTTP File Upload ────────────────────────────────
 
-    def upload_http(self, jid: str, path: str):
-        """Upload *path* via HTTP Upload and share the URL in *jid*'s chat."""
-        return self._http_upload_flow(jid, path)
+    def upload_http(self, jid: str, path: str, caption: str = ""):
+        """Upload *path* via HTTP Upload and share the URL in *jid*'s chat.
 
-    async def _http_upload_flow(self, jid: str, path: str) -> None:
-        self.emit("file_upload_progress", jid, "start", path)
+        *caption* (optional) is not used here — callers send it once as a
+        separate message via ``send_message``/``send_muc_message``.
+        """
+        return self._http_upload_flow(jid, path, caption)
+
+    async def _http_upload_flow(self, jid: str, path: str, caption: str = "") -> None:
+        self.emit("file_upload_progress", jid, "start", "", path)
         try:
             service = await self._http_upload_service()
             if not service:
@@ -1276,18 +1291,28 @@ class JabberClient:
                 or "application/octet-stream"
             put_url, get_url, headers = await self._http_upload_slot(
                 service, filename, size, content_type)
-            with open(str(path), "rb") as fh:
-                data = fh.read()
-            await self._http_upload_put(put_url, data, headers)
+            progress = _UploadProgress()
+            put_task = asyncio.create_task(
+                self._http_upload_put(put_url, str(path), headers, progress))
+            last = -1
+            while not put_task.done():
+                await asyncio.sleep(0.05)
+                pct = int(progress.pct * 100)
+                if pct != last:
+                    last = pct
+                    self.emit("file_upload_progress", jid, "progress",
+                              str(pct), str(path))
+            await put_task
             target = jid.split("/")[0] if "/" in jid else jid
             if self.groupchats.get(target):
                 self.send_muc_message(target, get_url)
             else:
                 self.send_message(target, get_url)
-            self.emit("file_upload_progress", jid, "done", get_url)
+            self.emit("file_upload_progress", jid, "done", get_url, str(path))
         except Exception as exc:  # noqa: BLE001 - surfaced as a status line
             logger.warning("HTTP Upload failed for %s: %s", jid, exc)
-            self.emit("file_upload_progress", jid, "error", str(exc))
+            self.emit("file_upload_progress", jid, "error", str(exc),
+                      str(path))
 
     async def _http_upload_service(self) -> str:
         cached = getattr(self, "_upload_service_cache", None)
@@ -1355,22 +1380,61 @@ class JabberClient:
         return put_url, get_url, headers
 
     @staticmethod
-    async def _http_upload_put(url: str, data: bytes,
-                               headers: dict[str, str]) -> None:
+    async def _http_upload_put(url: str, path: str,
+                               headers: dict[str, str],
+                               progress: "_UploadProgress | None" = None) -> None:
+        """PUT *path* to *url* streaming the body in chunks. ``progress`` is
+        updated by the worker thread with the upload fraction (0..1)."""
         def _upload():
-            import urllib.error as urllib_error
-            import urllib.request as urllib_request
+            import http.client as http_client
+            import ssl
+            from urllib.parse import urlsplit
+            parts = urlsplit(url)
+            scheme = parts.scheme or "https"
+            host = str(parts.hostname)
+            port = parts.port or (443 if scheme == "https" else 80)
+            target = parts.path or "/"
+            if parts.query:
+                target += "?" + parts.query
             put_headers = {
                 "Content-Type": headers.get("Content-Type")
                 or "application/octet-stream",
             }
             for name, value in headers.items():
-                if name.lower() != "content-type":
+                if name.lower() not in ("content-type", "content-length",
+                                        "transfer-encoding"):
                     put_headers[name] = value
-            request = urllib_request.Request(
-                url, data=data, method="PUT", headers=put_headers)
-            with urllib_request.urlopen(request, timeout=120) as response:
+            total = os.path.getsize(str(path))
+            put_headers["Content-Length"] = str(total)
+            if scheme == "https":
+                conn = http_client.HTTPSConnection(
+                    host, port, timeout=120,
+                    context=ssl.create_default_context())
+            else:
+                conn = http_client.HTTPConnection(host, port, timeout=120)
+            try:
+                conn.putrequest("PUT", target)
+                for name, value in put_headers.items():
+                    conn.putheader(name, value)
+                conn.endheaders()
+                sent = 0
+                with open(str(path), "rb") as fh:
+                    while True:
+                        chunk = fh.read(64 * 1024)
+                        if not chunk:
+                            break
+                        conn.send(chunk)
+                        sent += len(chunk)
+                        if progress is not None:
+                            progress.update(sent / total if total else 1.0)
+                response = conn.getresponse()
                 response.read()
+                if not 200 <= response.status < 300:
+                    raise RuntimeError(
+                        "HTTP Upload PUT failed: %s %s"
+                        % (response.status, response.reason))
+            finally:
+                conn.close()
 
         await asyncio.to_thread(_upload)
 

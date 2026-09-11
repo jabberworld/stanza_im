@@ -77,19 +77,24 @@ check("send file button menu", cw2._send_file_btn.menu() is not None)
 actions = [a.text() for a in cw2._send_file_btn.menu().actions()]
 check("send file options", "P2P" in actions and "HTTP Upload" in actions)
 
-# 4. drop file requests upload ------------------------------------------------
+# 4. drop requests upload -----------------------------------------------------
 up = []
 cw3 = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
-cw3.file_upload_requested.connect(lambda *a: up.append(a))
+cw3.files_upload_requested.connect(lambda *a: up.append(a))
 mime = QtCore.QMimeData()
-mime.setUrls([QtCore.QUrl.fromLocalFile("/tmp/example.txt")])
+mime.setUrls([QtCore.QUrl.fromLocalFile("/tmp/example.txt"),
+              QtCore.QUrl.fromLocalFile("/tmp/photo.png")])
 drop = QtGui.QDropEvent(
     QtCore.QPointF(10, 10), QtCore.Qt.DropAction.CopyAction, mime,
     QtCore.Qt.MouseButton.LeftButton,
     QtCore.Qt.KeyboardModifier.NoModifier)
 cw3.dropEvent(drop)
 check("drop requests http upload",
-      bool(up) and up[0] == ("bob@example.com", "/tmp/example.txt", "http"))
+      bool(up) and up[0] == ("bob@example.com",
+                             ["/tmp/example.txt", "/tmp/photo.png"], "http"))
+check("drop propagation enabled",
+      not cw3._view.acceptDrops() and not cw3._input.acceptDrops()
+      and cw3.acceptDrops())
 
 # 5. input height signal + chat_window forwarding -----------------------------
 heights = []
@@ -103,13 +108,15 @@ win = ChatWindow(chat_themes.ChatThemeFactory(),
                  chat_themes.ChatThemeFactory())
 fwd = []
 win.vcard_requested.connect(lambda j: fwd.append(("v", j)))
-win.file_upload_requested.connect(lambda *a: fwd.append(("f", *a)))
+win.files_upload_requested.connect(lambda *a: fwd.append(("f", *a)))
 widget = win.open_chat("carol@example.com", "Carol")
 widget.vcard_requested.emit("carol@example.com")
-widget.file_upload_requested.emit("carol@example.com", "/tmp/a.bin", "http")
+widget.files_upload_requested.emit("carol@example.com",
+                                   ["/tmp/a.bin", "/tmp/b.txt"], "http")
 check("chat window forwards vcard + upload",
       ("v", "carol@example.com") in fwd
-      and ("f", "carol@example.com", "/tmp/a.bin", "http") in fwd)
+      and ("f", "carol@example.com", ["/tmp/a.bin", "/tmp/b.txt"], "http")
+      in fwd)
 
 # 6. roster send-file menu present --------------------------------------------
 _mw_src = open(os.path.join(
@@ -117,11 +124,48 @@ _mw_src = open(os.path.join(
     "stanza_im", "ui", "main_window.py"), encoding="utf-8").read()
 check("roster send file menu", "ctx_send_file" in _mw_src
       and "upload_http(jid, path)" in _mw_src
-      and "send_file(jid, path)" in _mw_src)
+      and "send_file(jid" in _mw_src)
 
 # 7. config default input_height ----------------------------------------------
 from stanza_im.core.storage import Config
 check("config input height default", Config().chat.input_height == 60)
+
+# 8. FileTransferDialog --------------------------------------------------------
+from stanza_im.ui.upload_dialog import FileTransferDialog, format_size, \
+    _preview_pixmap
+img_path = os.path.join(_SCRATCH, "photo.png")
+canvas = QtGui.QPixmap(96, 72)
+canvas.fill(QtCore.Qt.GlobalColor.red)
+check("test image saved", canvas.save(img_path, "PNG"))
+doc_path = os.path.join(_SCRATCH, "notes.txt")
+with open(doc_path, "w", encoding="utf-8") as fh:
+    fh.write("hello")
+dlg = FileTransferDialog([img_path, doc_path])
+check("dialog rows", dlg.row_count() == 2)
+img_row, doc_row = dlg._rows[0], dlg._rows[1]
+check("dialog image thumbnail", not img_row._icon.pixmap().isNull())
+check("dialog generic icon", not doc_row._icon.pixmap().isNull())
+check("size format", format_size(0) == "0 B" and format_size(1536) == "1.5 KB")
+dlg._caption.setText("  Check this out  ")
+check("dialog caption", dlg.caption() == "Check this out")
+dlg.set_progress(1, 42)
+check("dialog per-file progress", doc_row._bar.value() == 42)
+dlg.set_progress(1, 999)
+check("dialog progress clamped", doc_row._bar.value() == 100)
+dlg.set_row_done(0)
+check("dialog row done", img_row._bar.value() == 100)
+dlg.set_row_failed(1, "boom")
+check("dialog row failed", "boom" in doc_row._bar.text())
+started = []
+dlg.upload_started.connect(started.append)
+dlg._on_ok()
+check("dialog ok emits caption",
+      started == ["Check this out"] and not dlg._ok_btn.isEnabled())
+check("dialog preview helper", _preview_pixmap(doc_path, dlg).isNull() is False)
+
+# 9. resizable handle baseline ------------------------------------------------
+handle = cw3._input_handle
+check("handle height getter", handle._get_height() == cw3._input_height)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

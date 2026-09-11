@@ -56,6 +56,8 @@ class MainWindow(QtWidgets.QMainWindow):
         populate_translations(tr)
         self._icons = init_icons()
         self._config = Config()
+        self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
+        self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
 
         from stanza_im.ui.tray import build_app_icon
         app.setWindowIcon(build_app_icon())
@@ -88,8 +90,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.groupchat_message_edit_to_send.connect(
             self._on_groupchat_edit_send)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
-        self._chat_window.file_upload_requested.connect(
-            self._on_chat_file_upload)
+        self._chat_window.files_upload_requested.connect(
+            self._on_chat_files_upload)
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
@@ -1345,13 +1347,10 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.exec(pos)
 
     def _pick_and_send_file(self, jid: str, method: str):
-        path, _filter = QtWidgets.QFileDialog.getOpenFileName(self)
-        if not path or not self._client:
-            return
-        if method == "p2p":
-            self._client.send_file(jid, path)
-        else:
-            self._start_task(self._client.upload_http(jid, path))
+        paths, _filter = QtWidgets.QFileDialog.getOpenFileNames(self)
+        paths = [p for p in (paths or []) if p]
+        if paths:
+            self._on_chat_files_upload(jid, paths, method)
 
     def _rename_contact(self, jid: str):
         current = self._roster_name(jid) or jid.split("@")[0]
@@ -1859,29 +1858,95 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config.chat.input_height = int(height)
         self._config.save()
 
-    def _on_chat_file_upload(self, jid: str, path: str, method: str):
+    def _on_chat_files_upload(self, jid: str, paths: list, method: str):
         if not self._client:
             return
-        if method == "p2p":
-            self._client.send_file(jid, path)
+        paths = [str(p) for p in (paths or []) if p]
+        if not paths:
             return
-        self._start_task(self._client.upload_http(jid, path))
+        from stanza_im.ui.upload_dialog import FileTransferDialog
+        dlg = FileTransferDialog(paths, self)
+        dlg.upload_started.connect(
+            lambda caption: self._launch_file_uploads(jid, paths, method,
+                                                      caption, dlg))
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
-    def _on_file_upload_progress(self, jid: str, phase: str, detail: str = ""):
+    def _launch_file_uploads(self, jid: str, paths: list, method: str,
+                             caption: str, dlg):
+        """Start per-file transfers and update the dialog rows."""
+
+        def _relay_p2p(index: int, path: str):
+            # P2P is still a placeholder; mark the row as failed immediately.
+            self._client.send_file(jid, str(path))
+            dlg.set_row_failed(index, tr("ft_p2p_unavailable"))
+            self._file_upload_states.pop((jid, str(path)), None)
+            self._check_uploads_finished(jid)
+
+        tasks = []
+        self._file_uploads[jid] = (dlg, list(paths))
+        for index, path in enumerate(paths):
+            path = str(path)
+            self._file_upload_states[(jid, path)] = (dlg, index)
+            if method == "p2p":
+                _relay_p2p(index, path)
+            else:
+                tasks.append(
+                    self._start_task(self._client.upload_http(jid, path)))
+        if caption and tasks:
+            self._start_task(self._send_caption_after(jid, caption, tasks))
+
+    async def _send_caption_after(self, jid: str, caption: str, tasks):
+        """Send the shared caption once, after the batch finished uploading."""
+        await asyncio.gather(*tasks, return_exceptions=True)
+        target = jid.split("/")[0] if "/" in jid else jid
+        if self._client.groupchats.get(target):
+            self._client.send_muc_message(target, caption)
+        else:
+            self._client.send_message(target, caption)
+
+    def _check_uploads_finished(self, jid: str):
+        batch = self._file_uploads.get(jid)
+        if not batch:
+            return
+        dlg, paths = batch
+        if any((jid, path) in self._file_upload_states for path in paths):
+            return
+        self._file_uploads.pop(jid, None)
+        dlg.close()
+
+    def _on_file_upload_progress(self, jid: str, phase: str, detail: str = "",
+                                 path: str = ""):
         bare = jid.split("/")[0]
         chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(jid)
-        if not chat:
+        state = self._file_upload_states.get((jid, path), (None, -1))
+        dlg, index = state if state else (None, -1)
+        if phase == "progress":
+            if dlg is not None:
+                dlg.set_progress(index, int(detail or 0))
             return
         if phase == "start":
-            chat.add_status(tr("ft_upload_started",
-                               file=os.path.basename(detail)),
-                            time.strftime("%H:%M:%S"))
-        elif phase == "done":
-            chat.add_status(tr("ft_upload_done", url=detail),
-                            time.strftime("%H:%M:%S"))
+            if chat:
+                chat.add_status(tr("ft_upload_started",
+                                   file=os.path.basename(path or detail)),
+                                time.strftime("%H:%M:%S"))
+            return
+        self._file_upload_states.pop((jid, path), None)
+        if phase == "done":
+            if dlg is not None:
+                dlg.set_progress(index, 100)
+                dlg.set_row_done(index)
+            if chat:
+                chat.add_status(tr("ft_upload_done", url=detail),
+                                time.strftime("%H:%M:%S"))
         elif phase == "error":
-            chat.add_status(tr("ft_upload_failed", error=detail or ""),
-                            time.strftime("%H:%M:%S"))
+            if dlg is not None:
+                dlg.set_row_failed(index, detail or "")
+            if chat:
+                chat.add_status(tr("ft_upload_failed", error=detail or ""),
+                                time.strftime("%H:%M:%S"))
+        self._check_uploads_finished(jid)
 
     def _show_muc_room_info(self, room: str):
         member = self._muc_users.get(room, {}).get(

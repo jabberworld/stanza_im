@@ -299,12 +299,22 @@ as new messages (off). History gains `message_id`/`edited` columns and
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries icon
 buttons for Clear, History (moved from the tab header), vCard and "Send file"
 (a menu with "P2P" / "HTTP Upload"); the input is vertically resizable
-(`chat.input_height`, persisted) and files can be dropped straight into the
-chat. `client.upload_http(jid, path)` discovers the `urn:xmpp:http:upload:0`
-service (cached), requests a `<slot>`, PUTs the bytes in a thread and sends the
-`get` URL as a 1:1/MUC message; `file_upload_progress` events surface as chat
-status lines. The roster context menu additionally offers "Send file → P2P /
-HTTP Upload".
+(`chat.input_height`, persisted; the `_InputHandle` drag bar reads the stored
+height through a `get_height` callable because a layout reparents it away from
+`ChatWidget`) and files can be dropped straight into the chat (the view and the
+input disable `acceptDrops` so file drops reach `ChatWidget`, which emits
+`files_upload_requested(jid, [paths], method)`). Dropped/picked files open
+`ui/upload_dialog.FileTransferDialog`: one row per file with an image
+thumbnail or generic file icon, a per-file `QProgressBar` and one shared
+caption (`QLineEdit`); OK starts the transfers while the dialog stays open,
+`file_upload_progress` events (phases `start`/`progress`/`done`/`error`, now
+carrying the file `path`) update the bars, and the caption is sent once — as a
+separate message — after the batch finishes (`_send_caption_after`).
+`client.upload_http(jid, path)` discovers the `urn:xmpp:http:upload:0` service
+(cached), requests a `<slot>` and PUTs the bytes streamed in 64 KiB chunks via
+`http.client` (Content-Length + `conn.send`), reporting the progress fraction
+through a shared `_UploadProgress` object polled by the flow coroutine. The
+roster context menu additionally offers "Send file → P2P / HTTP Upload".
 
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
@@ -353,7 +363,3 @@ python main.py
 Note: `QtWebEngine` cannot load here (missing `libnss3` on the local apt mirror),
 but `chat_view.py` falls back to `QTextBrowser` gracefully. All other Qt modules
 (core, gui, widgets, webchannel) work offscreen.
-
-## Test Account
-
-JID: `jabbim-test@linuxoid.in` / Password: `WyVwukeWiPr0U`

@@ -572,14 +572,24 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
   from the tab header), vCard, and Send file (a menu with "P2P" and
   "HTTP Upload"). The input is vertically resizable via a thin drag handle
   (persisted in `chat.input_height`), and files may be dropped directly into
-  the chat window.
+  the chat window; the view and the input disable `acceptDrops` so drops
+  reach the widget and are forwarded (multi-file) as
+  `files_upload_requested(jid, [paths], method)`.
+- Dropping or picking files opens the non-modal `FileTransferDialog`: one row
+  per file — image thumbnail (or a generic file icon), name + size, and a
+  per-file `QProgressBar` — plus one shared caption field and OK/Cancel. OK
+  starts the transfers while the dialog stays open and shows live progress;
+  Cancel (or Close) hides the dialog without aborting running uploads.
 - `core/client.py` implements the protocol:
   `upload_http(jid, path)` → discover the service (`urn:xmpp:http:upload:0`
   via disco items/info, cached) → request a `<slot>` (filename/size/
-  content-type) → PUT the bytes (`urllib.request` in a thread, honouring the
-  `put` headers) → send the `get` URL as a 1:1 or MUC message. Progress is
-  reported through `file_upload_progress(jid, start|done|error, detail)` and
-  shown as chat status lines.
+  content-type) → PUT the bytes streamed in 64 KiB chunks (`http.client`,
+  Content-Length + `conn.send`, progress fraction shared via
+  `_UploadProgress`) → send the `get` URL as a 1:1 or MUC message. Progress
+  is reported through `file_upload_progress(jid, start|progress|done|error,
+  detail, path)`, updating the dialog bars and chat status lines. A caption
+  typed in the dialog is sent once as a separate message after the batch
+  finishes (`_send_caption_after`).
 - "P2P" still routes to the `send_file` placeholder; the roster context menu
   also gains "Send file → P2P / HTTP Upload" for contacts (and conferences).
 
