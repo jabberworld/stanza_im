@@ -198,6 +198,7 @@ if HAS_WEBENGINE:
             super().__init__(parent)
             self._theme = theme
             self.mention_senders = False
+            self.highlight_nick = ""
             self._zoom = 1.0
             self._last_edit_ref = ""
             self._last_reply_ref = ""
@@ -821,7 +822,7 @@ if HAS_WEBENGINE:
                     direction=direction, is_next=is_next,
                     sender_color=sender_color, user_icon_path=user_icon_path,
                     unstyled=unstyled, mention=self.mention_senders,
-                    edited=edited)
+                    edited=edited, highlight_nick=self.highlight_nick)
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote
                 html = self._theme.render_reply(ref_sender, ref_snippet) + html
@@ -905,6 +906,7 @@ if HAS_WEBENGINE:
                         unstyled=entry.get("unstyled", False),
                         mention=self.mention_senders,
                         edited=entry.get("edited", False),
+                        highlight_nick=self.highlight_nick,
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -1056,6 +1058,7 @@ else:
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
             self._theme = theme
+            self.highlight_nick = ""
             self._zoom = 1.0
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(

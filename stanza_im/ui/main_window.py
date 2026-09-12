@@ -80,6 +80,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_theme_factory.set_emoticon_skin(self._config.appearance.emoticon_theme)
         self._theme_factory.set_message_styling(self._config.chat.message_styling)
         self._muc_theme_factory.set_message_styling(self._config.chat.message_styling)
+        self._theme_factory.set_highlight_mode(self._config.appearance.muc_highlight)
+        self._muc_theme_factory.set_highlight_mode(self._config.appearance.muc_highlight)
+        self._applied_highlight_mode = self._config.appearance.muc_highlight
 
         # ── Media previews ────────────────────────────────────────
         self._media_cache = MediaCache(
@@ -912,6 +915,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._theme_factory.set_message_styling(styling)
             self._muc_theme_factory.set_message_styling(styling)
             self._applied_message_styling = styling
+        highlight_mode = self._config.appearance.muc_highlight or "both"
+        if highlight_mode != getattr(self, "_applied_highlight_mode", "both"):
+            self._theme_factory.set_highlight_mode(highlight_mode)
+            self._muc_theme_factory.set_highlight_mode(highlight_mode)
+            self._applied_highlight_mode = highlight_mode
+            self._chat_window.rerender_messages()
         media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
         media_size = self._config.appearance.media_preview_size
         if (media_mode, media_size) != getattr(self, "_applied_media", None):

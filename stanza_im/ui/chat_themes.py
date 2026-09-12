@@ -15,6 +15,8 @@ from stanza_im.i18n import tr
 
 _logger = logging.getLogger(__name__)
 
+_HIGHLIGHT_COLOR = "#e53935"
+
 _MEDIA_CSS = """
 .stanza-media { display: inline-block; margin: 3px 0; vertical-align: top; }
 .stanza-media-thumb { border-radius: 6px; max-width: 100%; height: auto;
@@ -114,6 +116,7 @@ class ChatThemeFactory:
         self._current_variant_css: str = ""
         self._emoticon_skin = emoticon_skin
         self._message_styling = True
+        self._highlight_mode = "both"
         self._media = None
         self._media_mode = "none"
         self._media_size = 200
@@ -160,6 +163,10 @@ class ChatThemeFactory:
         """Enable/disable XEP-0393 message styling in rendered bodies."""
         self._message_styling = bool(enabled)
 
+    def set_highlight_mode(self, mode: str) -> None:
+        """Set the MUC mention highlight style: "bold" | "color" | "both"."""
+        self._highlight_mode = mode or "both"
+
     def set_media_preview(self, service, mode: str = "none",
                           size: int = 200) -> None:
         """Attach a :class:`MediaPreviewService` and its policy."""
@@ -170,7 +177,8 @@ class ChatThemeFactory:
         except (TypeError, ValueError):
             self._media_size = 200
 
-    def _transform_body(self, body: str, styled: bool = True) -> str:
+    def _transform_body(self, body: str, styled: bool = True,
+                        highlight_nick: str = "") -> str:
         """Turn a plain-text body into message HTML.
 
         With styling enabled the XEP-0393 parser runs first and delegates
@@ -180,12 +188,13 @@ class ChatThemeFactory:
         if self._message_styling and styled:
             from stanza_im.xmpp import message_styling
             try:
-                return message_styling.render(body, self._body_fragment)
+                return message_styling.render(
+                    body, lambda raw: self._body_fragment(raw, highlight_nick))
             except Exception:
                 pass
-        return self._body_fragment(body)
+        return self._body_fragment(body, highlight_nick)
 
-    def _body_fragment(self, raw: str) -> str:
+    def _body_fragment(self, raw: str, highlight_nick: str = "") -> str:
         """Escape plain text, then add clickable links and emoticons.
 
         Order matters: URLs are replaced with tokens first so emoticon codes
@@ -197,7 +206,26 @@ class ChatThemeFactory:
         escaped = escaped.replace("\n", "<br>")
         tokenised, anchors = self._tokenize_urls(escaped)
         emotified = smile_to_html(tokenised, self._emoticon_skin)
+        if highlight_nick and self._highlight_mode != "none":
+            emotified = self._apply_highlight(emotified, highlight_nick)
         return restore_url_tokens(emotified, anchors)
+
+    def _apply_highlight(self, text: str, nick: str) -> str:
+        """Wrap case-insensitive *nick* mentions in styled <span> tags.
+
+        A mention is bounded on both sides by a non-letter/non-digit (Unicode
+        aware), so punctuation stays allowed ("rain:", "rain?") while
+        substrings of longer words ("brain", "Ukraine") never match.
+        """
+        style = ""
+        if self._highlight_mode in ("bold", "both"):
+            style += "font-weight:bold;"
+        if self._highlight_mode in ("color", "both"):
+            style += "color:%s;" % _HIGHLIGHT_COLOR
+        pattern = re.compile(r"(?<![^\W_])(%s)(?![^\W_])"
+                             % re.escape(nick), re.IGNORECASE)
+        return pattern.sub('<span style="%s">\\1</span>' % style.rstrip(";"),
+                           text)
 
     def _tokenize_urls(self, text: str) -> tuple[str, list[str]]:
         from stanza_im.include.utils import tokenize_urls
@@ -210,18 +238,22 @@ class ChatThemeFactory:
                        direction: str, is_next: bool = False,
                        sender_color: str = "#000000",
                        user_icon_path: str = "", unstyled: bool = False,
-                       mention: bool = False, edited: bool = False) -> str:
+                       mention: bool = False, edited: bool = False,
+                       highlight_nick: str = "") -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
         ``stanza:mention:`` link (MUC nickname mentions).  With *edited* a
-        bold «✎» marker is appended right after the message phrase.
+        bold «✎» marker is appended right after the message phrase.  With
+        *highlight_nick* case-insensitive mentions of that nick in the body
+        are wrapped in a styled <span> (see :meth:`_apply_highlight`).
         """
         key = direction
         if is_next:
             key += "_next"
         template = self._templates.get(key, self._templates.get(direction, "{body}"))
-        body_html = self._transform_body(body, styled=not unstyled)
+        body_html = self._transform_body(body, styled=not unstyled,
+                                         highlight_nick=highlight_nick)
         if edited:
             body_html += ('<span class="stanza-edited" style="color:#777;'
                           'font-size:16px;font-weight:bold;margin-left:4px;'

@@ -1294,10 +1294,12 @@ class ChatWidget(QtWidgets.QWidget):
         self._users = list(users or [])
         if self_nick:
             self._self_nick = self_nick
+        self._view.highlight_nick = self._self_nick
         self._render_muc_users()
 
     def set_self_nick(self, nick: str):
         self._self_nick = nick or self._self_nick
+        self._view.highlight_nick = self._self_nick
         self._render_muc_users()
 
     def _render_muc_users(self):

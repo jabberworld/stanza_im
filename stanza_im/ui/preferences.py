@@ -294,6 +294,11 @@ class PreferencesDialog(QtWidgets.QDialog):
                     self._spin("media_cache_days", 1, 3650))
         form.addRow(tr("prefs_media_cache_mb"),
                     self._spin("media_cache_mb", 16, 4096))
+        form.addRow(tr("prefs_highlight"), self._combo("muc_highlight", [
+            ("prefs_highlight_bold", "bold"),
+            ("prefs_highlight_color", "color"),
+            ("prefs_highlight_both", "both"),
+        ]))
         return page
 
     def _update_emoticon_preview(self):
@@ -460,6 +465,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "media_preview_size": appearance.media_preview_size,
             "media_cache_days": appearance.media_cache_days,
             "media_cache_mb": appearance.media_cache_mb,
+            "muc_highlight": getattr(appearance, "muc_highlight", "both"),
             "tray_blink": notifications.tray_blink, "popups": notifications.popups,
             "osd_enabled": notifications.osd_enabled,
             "osd_duration": notifications.osd_duration,
@@ -518,6 +524,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.appearance.media_preview_size = self._value("media_preview_size")
         cfg.appearance.media_cache_days = self._value("media_cache_days")
         cfg.appearance.media_cache_mb = self._value("media_cache_mb")
+        cfg.appearance.muc_highlight = self._value("muc_highlight") or "both"
         cfg.privacy.send_software = self._value("send_software")
         cfg.privacy.send_typing_notifications = self._value("send_typing_notifications")
         cfg.privacy.send_activity_notifications = self._value("send_activity_notifications")
