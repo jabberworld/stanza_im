@@ -192,6 +192,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._history_manager: object | None = None
         self._last_activity = time.monotonic()
         self._auto_status_applied = False
+        self._roster_repaint_pending = False
+        self._roster_repaint_timer: QtCore.QTimer | None = None
         self.app.installEventFilter(self)
         self._idle_timer = QtCore.QTimer(self)
         self._idle_timer.timeout.connect(self._check_auto_status)
@@ -571,8 +573,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
-        self._recount_groups()
-        self._roster.sort_and_update()
+        self._schedule_roster_repaint()
 
     def _sync_all_conference_roster(self):
         for room in self._muc_self_nicks:
@@ -624,8 +625,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if room in self._conference_roster:
             self._roster.remove_user(room)
             self._conference_roster.discard(room)
-            self._recount_groups()
-            self._roster.sort_and_update()
+            self._schedule_roster_repaint()
         from stanza_im.core import history
         history.close(room)
 
@@ -1280,6 +1280,34 @@ class MainWindow(QtWidgets.QMainWindow):
             self._roster._groups[name].online_count = online
             self._roster._groups[name].total_count = total
 
+    def _schedule_roster_repaint(self) -> None:
+        """Debounce recount+sort+repaint so presence storms collapse into one.
+
+        Model mutations (``update_user``/``add_user``/``remove_user``) stay
+        immediate; only the O(n log n) sort and repaint are deferred.  When the
+        window is hidden (in the tray) the work is skipped entirely and flushed
+        again by ``showEvent``."""
+        self._roster_repaint_pending = True
+        if self._roster_repaint_timer is None:
+            timer = QtCore.QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._flush_roster_repaint)
+            self._roster_repaint_timer = timer
+        if not self._roster_repaint_timer.isActive():
+            self._roster_repaint_timer.start(80)
+
+    def _flush_roster_repaint(self) -> None:
+        """Apply a pending roster sort+repaint (timer fired or window shown)."""
+        if self._roster_repaint_timer is not None:
+            self._roster_repaint_timer.stop()
+        if not self._roster_repaint_pending:
+            return
+        if not self._visible:
+            return
+        self._roster_repaint_pending = False
+        self._recount_groups()
+        self._roster.sort_and_update()
+
     def _on_presence_changed(self, bare_jid: str, show: str, status: str):
         show = show or "offline"
         old_show = next((user.status for user in self._roster._users
@@ -1291,8 +1319,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.add_status(tr("status_changed", status=tr(f"status_{show}")),
                             time.strftime("%H:%M:%S"))
         self._chat_window.set_contact_status(bare_jid, show)
-        self._recount_groups()
-        self._roster.sort_and_update()
+        self._schedule_roster_repaint()
         self._maybe_osd_status(bare_jid, show, old_show)
 
     def _on_subscribed(self, jid: str):
@@ -2510,6 +2537,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._visible = True
+        self._flush_roster_repaint()
 
     def changeEvent(self, event):
         super().changeEvent(event)
