@@ -11,6 +11,6 @@ venv/
 # Original Jabbim sources (reference only)
 old/
 # Runtime junk
-core
+/core
 jabbim.log
 stanza-im.log

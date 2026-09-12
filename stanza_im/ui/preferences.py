@@ -7,6 +7,7 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core.storage import Config
+from stanza_im.core.discovery import DiscoveryCache, HAS_AIODNS
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import icons as icons_mod
@@ -64,6 +65,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._controls: dict[str, QtWidgets.QWidget] = {}
         self._build_ui()
         self._load_values()
+        self._refresh_discovery_labels()
+        if self._client is not None and hasattr(self._client, "on"):
+            self._client.on("services_discovered", self._on_services_discovered)
 
     def done(self, result):
         if self._osd_manager is not None:
@@ -188,6 +192,17 @@ class PreferencesDialog(QtWidgets.QDialog):
             return QtGui.QIcon(icons_mod.icons.get_action_icon("edit"))
         return QtGui.QIcon()
 
+    @staticmethod
+    def _row(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        """Lay widgets out side by side inside a form field."""
+        box = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        for widget in widgets:
+            layout.addWidget(widget)
+        return box
+
     def _page_connection(self):
         connection, form = self._page()
 
@@ -222,7 +237,34 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         advanced, advanced_form = self._page()
         resource = self._line("resource")
-        advanced_form.addRow(tr("prefs_resource"), resource)
+        resource_mode = self._combo("resource_mode", [
+            ("prefs_resource_hostname", "hostname"),
+            ("prefs_resource_manual", "manual"),
+        ])
+
+        def _sync_resource():
+            resource.setEnabled(resource_mode.currentData() == "manual")
+
+        resource_mode.currentIndexChanged.connect(_sync_resource)
+        _sync_resource()
+        advanced_form.addRow(tr("prefs_resource"),
+                             self._row(resource, resource_mode))
+
+        priority_mode = self._combo("priority_mode", [
+            ("prefs_priority_status", "status"),
+            ("prefs_priority_manual", "manual"),
+        ])
+        priority_value = self._spin("priority", 0, 127)
+
+        def _sync_priority():
+            priority_value.setEnabled(priority_mode.currentData() == "manual")
+
+        priority_mode.currentIndexChanged.connect(_sync_priority)
+        _sync_priority()
+        advanced_form.addRow(tr("prefs_priority"),
+                             self._row(priority_mode, priority_value))
+        advanced_form.addRow(QtWidgets.QLabel(tr("prefs_reconnect_hint")))
+
         override = self._check("override_host", tr("prefs_override_host"))
         advanced_form.addRow(override)
         host = self._line("host")
@@ -235,12 +277,124 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(tr("prefs_port"), port)
 
         proxy, proxy_form = self._page()
-        proxy_form.addRow(tr("prefs_proxy_host"), self._line("proxy_host"))
-        proxy_form.addRow(tr("prefs_proxy_port"), self._spin("proxy_port", 0, 65535))
-        proxy_form.addRow(QtWidgets.QLabel(tr("prefs_proxy_socks5_note")))
+        proxy_form.addRow(self._connection_group())
+        proxy_form.addRow(self._file_proxy_group())
+        proxy_form.addRow(self._stun_turn_group())
+        proxy_form.addRow(QtWidgets.QLabel(tr("prefs_reconnect_hint")))
         return self._tabs([(tr("prefs_connection_tab"), connection),
                            (tr("prefs_advanced"), advanced),
                            (tr("prefs_proxy"), proxy)])
+
+    def _connection_group(self) -> QtWidgets.QGroupBox:
+        group = QtWidgets.QGroupBox(tr("prefs_section_connection"))
+        form = QtWidgets.QFormLayout(group)
+        proxy_mode = self._combo("proxy_mode", [
+            ("prefs_proxy_none", "none"),
+            ("prefs_proxy_socks5", "socks5"),
+        ])
+        form.addRow(tr("prefs_proxy_type"), proxy_mode)
+        proxy_host = self._line("proxy_host")
+        proxy_port = self._spin("proxy_port", 0, 65535)
+        form.addRow(tr("prefs_host"), proxy_host)
+        form.addRow(tr("prefs_port"), proxy_port)
+
+        def _sync_proxy():
+            enabled = proxy_mode.currentData() == "socks5"
+            proxy_host.setEnabled(enabled)
+            proxy_port.setEnabled(enabled)
+
+        proxy_mode.currentIndexChanged.connect(_sync_proxy)
+        _sync_proxy()
+        return group
+
+    def _file_proxy_group(self) -> QtWidgets.QGroupBox:
+        group = QtWidgets.QGroupBox(tr("prefs_file_proxy"))
+        form = QtWidgets.QFormLayout(group)
+        mode = self._combo("file_proxy_mode", [
+            ("prefs_file_proxy_auto", "auto"),
+            ("prefs_file_proxy_manual", "manual"),
+        ])
+        self._file_proxy_auto_label = QtWidgets.QLabel("")
+        form.addRow(self._row(mode, self._file_proxy_auto_label))
+        manual = self._line("file_proxy_manual")
+        manual.setPlaceholderText(tr("prefs_file_proxy_manual_hint"))
+        form.addRow("", manual)
+
+        def _sync_file():
+            manual.setEnabled(mode.currentData() == "manual")
+
+        mode.currentIndexChanged.connect(_sync_file)
+        _sync_file()
+        return group
+
+    def _stun_turn_group(self) -> QtWidgets.QGroupBox:
+        group = QtWidgets.QGroupBox(tr("prefs_stun_turn"))
+        form = QtWidgets.QFormLayout(group)
+        mode = self._combo("stun_turn_mode", [
+            ("prefs_stun_auto", "auto"),
+            ("prefs_stun_manual", "manual"),
+        ])
+        self._stun_info = QtWidgets.QLabel()
+        info_icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.png"))
+        if not info_icon.isNull():
+            self._stun_info.setPixmap(info_icon.pixmap(16, 16))
+        self._stun_info.setToolTip(tr("prefs_stun_tip_empty"))
+        form.addRow(self._row(mode, self._stun_info))
+        manual = self._line("stun_turn_manual")
+        manual.setPlaceholderText(tr("prefs_stun_manual_hint"))
+        form.addRow("", manual)
+
+        def _sync_stun():
+            manual.setEnabled(mode.currentData() == "manual")
+
+        mode.currentIndexChanged.connect(_sync_stun)
+        _sync_stun()
+        return group
+
+    def _stun_tooltip(self) -> str:
+        data = self._discovery_data()
+        entries = (data or {}).get("stun_turn") or []
+        lines = [tr("prefs_stun_tip") + ":"]
+        if entries:
+            for entry in entries:
+                lines.append("  %s %s:%s" % (entry.get("service", ""),
+                                             entry.get("host", ""),
+                                             entry.get("port", "")))
+        else:
+            lines.append("  " + tr("prefs_stun_tip_empty"))
+        if not HAS_AIODNS:
+            lines.append(tr("prefs_stun_tip_nodep"))
+        return "\n".join(lines)
+
+    def _discovery_data(self) -> dict:
+        """Auto-detected services from the live client or the disk cache."""
+        data = None
+        if self._client is not None:
+            getter = getattr(self._client, "discovered_services", None)
+            if callable(getter):
+                data = getter()
+        if not data:
+            cache = DiscoveryCache()
+            _, proxy = cache.get("file_proxy", max_age=float("inf"))
+            _, stun = cache.get("stun_turn", max_age=float("inf"))
+            data = {"file_proxy": proxy, "stun_turn": stun}
+        return data
+
+    def _refresh_discovery_labels(self):
+        label = getattr(self, "_file_proxy_auto_label", None)
+        if label is None:
+            return
+        proxy = (self._discovery_data() or {}).get("file_proxy")
+        if isinstance(proxy, dict) and proxy.get("host"):
+            value = f"{proxy['host']}:{proxy['port']}"
+        else:
+            value = tr("prefs_file_proxy_none")
+        label.setText(tr("prefs_file_proxy_auto_fmt", value=value))
+        if hasattr(self, "_stun_info"):
+            self._stun_info.setToolTip(self._stun_tooltip())
+
+    def _on_services_discovered(self, *_args):
+        self._refresh_discovery_labels()
 
     def _page_chat(self):
         general, general_form = self._page()
@@ -470,6 +624,14 @@ class PreferencesDialog(QtWidgets.QDialog):
             "message_carbons": connection.message_carbons,
             "save_status_message": connection.save_status_message,
             "resource": connection.resource, "override_host": connection.override_host,
+            "resource_mode": getattr(connection, "resource_mode", "hostname"),
+            "priority_mode": getattr(connection, "priority_mode", "status"),
+            "priority": getattr(connection, "priority", 50),
+            "proxy_mode": getattr(connection, "proxy_mode", "none"),
+            "file_proxy_mode": getattr(connection, "file_proxy_mode", "auto"),
+            "file_proxy_manual": getattr(connection, "file_proxy_manual", ""),
+            "stun_turn_mode": getattr(connection, "stun_turn_mode", "auto"),
+            "stun_turn_manual": getattr(connection, "stun_turn_manual", ""),
             "host": connection.host, "port": connection.port,
             "proxy_host": connection.proxy_host, "proxy_port": connection.proxy_port,
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
@@ -534,8 +696,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.auto_connect = self._value("auto_connect")
         cfg.connection.auto_join_conferences = self._value("auto_join_conferences")
         cfg.connection.save_status_message = self._value("save_status_message")
-        for key in ("resource", "host", "proxy_host"):
+        for key in ("resource", "host", "proxy_host", "resource_mode",
+                    "priority_mode", "proxy_mode", "file_proxy_mode",
+                    "file_proxy_manual", "stun_turn_mode", "stun_turn_manual"):
             cfg.connection[key] = self._value(key)
+        cfg.connection.priority = self._value("priority")
         cfg.connection.message_carbons = self._value("message_carbons")
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)

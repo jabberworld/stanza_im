@@ -178,6 +178,11 @@ def _message_subjects(stanza) -> list[tuple[str, str]]:
 class JabberClient:
     """High-level XMPP client built on top of slixmpp.ClientXMPP."""
 
+    # XEP-0045 §17.1 status → resource priority used when the priority mode
+    # is "status".  "chat" (free for chat) counts as available.
+    _STATUS_PRIORITY = {"online": 50, "chat": 50, "away": 40, "xa": 30,
+                        "dnd": 0}
+
     def __init__(self, jid: str, password: str, resource: str = "jabbim",
                  host: str = "", port: int = 0,
                  auto_join_conferences: bool = True,
@@ -187,11 +192,20 @@ class JabberClient:
                  send_software: bool = True,
                  message_carbons: bool = True,
                  message_displayed_sync: bool = True,
-                 allow_incoming_edits: bool = True):
+                 allow_incoming_edits: bool = True,
+                 priority_mode: str = "status", priority: int = 50,
+                 proxy_mode: str = "none", proxy_host: str = "",
+                 proxy_port: int = 0):
         self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
         self.port = int(port or 0)
+        self.priority_mode = priority_mode
+        self.priority = int(priority or 0)
+        self.proxy_mode = proxy_mode
+        self.proxy_host = proxy_host
+        self.proxy_port = int(proxy_port or 0)
+        self._discovered: dict | None = None
         self.auto_join_conferences = auto_join_conferences
         self.autojoin_rooms: set[str] = set()
         self.message_carbons = message_carbons
@@ -242,6 +256,7 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0280")  # Message Carbons
         self.xmpp.register_plugin("xep_0163")  # PEP
         self.xmpp.register_plugin("xep_0060")  # PubSub
+        self.xmpp.register_plugin("xep_0065")  # SOCKS5 Bytestreams (file proxy)
 
         # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
@@ -249,6 +264,10 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_REPLY)
         # XEP-0490 Displayed Synchronization — advertise PEP notification support.
         self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
+
+        if (self.proxy_mode == "socks5" and self.proxy_host
+                and self.proxy_port):
+            self._install_socks_proxy(self.proxy_host, self.proxy_port)
 
         # Callbacks: list of callables keyed by event name
         self._callbacks: dict[str, list[Callable]] = {}
@@ -320,6 +339,55 @@ class JabberClient:
             await result
         elif isinstance(result, asyncio.Future):
             await result
+
+    def discovered_services(self) -> dict | None:
+        """Latest background discovery result (file proxy + STUN/TURN)."""
+        return self._discovered
+
+    async def discover_services(self) -> dict:
+        """Run/refresh file-proxy and STUN/TURN discovery and cache results."""
+        from stanza_im.core.discovery import DiscoveryCache, refresh
+        domain = self.jid_str.split("@")[-1]
+        self._discovered = await refresh(self.xmpp, domain, DiscoveryCache())
+        self.emit("services_discovered", self._discovered)
+        return self._discovered
+
+    def _install_socks_proxy(self, proxy_host: str, proxy_port: int) -> None:
+        """Route the XMPP TCP connection through a SOCKS5 proxy.
+
+        slixmpp has no native client-proxy support, so the direct
+        ``_attempt_connection`` is replaced with one that opens the socket
+        through the proxy and then hands it to slixmpp.
+        """
+        from stanza_im.xmpp import socks5
+
+        xmpp = self.xmpp
+
+        async def attempt(target_host: str, target_port: int, tls: bool,
+                          server_hostname: str | None) -> bool:
+            if xmpp._current_connection_attempt is None:
+                return False
+            xmpp.event_when_connected = "connected"
+            xmpp._connect_loop_wait += 1
+            try:
+                sock = await socks5.connect_via_socks5(
+                    xmpp.loop, proxy_host, proxy_port,
+                    target_host or xmpp.default_domain, target_port)
+                kwargs: dict = {"sock": sock}
+                if tls:
+                    kwargs["ssl"] = xmpp.get_ssl_context()
+                    kwargs["server_hostname"] = server_hostname
+                await xmpp.loop.create_connection(lambda: xmpp, **kwargs)
+                xmpp._connect_loop_wait = 0
+                return True
+            except Exception as exc:
+                logger.warning("SOCKS5 connection attempt failed: %s", exc)
+                xmpp.event("connection_failed", exc)
+                return False
+
+        xmpp._attempt_connection = attempt
+        logger.info("Routing the XMPP connection through SOCKS5 %s:%s",
+                    proxy_host, proxy_port)
 
     async def disconnect(self) -> None:
         """Gracefully disconnect."""
@@ -417,10 +485,18 @@ class JabberClient:
             p["type"] = "available"
         if status:
             p["status"] = status
+        if priority is None:
+            priority = self._effective_priority(show)
         if priority is not None:
             p["priority"] = priority
         logger.debug("Sending presence: %s", show or "available")
         p.send()
+
+    def _effective_priority(self, show: str | None) -> int:
+        """Resource priority for *show* (status map or the manual value)."""
+        if self.priority_mode == "manual":
+            return max(-128, min(127, int(self.priority)))
+        return self._STATUS_PRIORITY.get(show or "online", 50)
 
     def send_chat_state(self, jid: str, state: str) -> None:
         """Send a XEP-0085 chat state notification."""
@@ -1491,6 +1567,10 @@ class JabberClient:
         self.emit("session_started")
         loop = asyncio.get_event_loop()
         loop.create_task(self._autojoin_bookmarks())
+        # File-transfer proxy / STUN-TURN discovery is only needed for p2p
+        # transfers and calls much later, so run it in the background and
+        # never let it delay the session.
+        loop.create_task(self.discover_services())
 
     async def _autojoin_bookmarks(self) -> None:
         """Join bookmarked MUC rooms flagged for auto-join (XEP-0048).

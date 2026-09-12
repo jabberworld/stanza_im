@@ -10,6 +10,7 @@ dependencies = [
     "slixmpp>=1.8",
     "defusedxml>=0.7",
     "qasync>=0.27",
+    "aiodns>=4",
 ]
 
 [project.scripts]

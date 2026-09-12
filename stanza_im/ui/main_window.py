@@ -10,6 +10,7 @@ import asyncio
 import datetime
 import logging
 import os
+import socket
 import time
 import uuid
 
@@ -947,6 +948,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.send_chatstates = (
                 self._client.send_typing_notifications
                 or self._client.send_activity_notifications)
+            # Priority takes effect immediately by re-sending presence.
+            priority_mode = getattr(self._config.connection, "priority_mode",
+                                    "status")
+            manual_priority = int(getattr(self._config.connection, "priority",
+                                          50) or 0)
+            if ((priority_mode, manual_priority)
+                    != getattr(self, "_applied_priority", None)):
+                self._client.priority_mode = priority_mode
+                self._client.priority = manual_priority
+                self._applied_priority = (priority_mode, manual_priority)
+                if self._client.xmpp.is_connected():
+                    self._client.send_presence(show=self._config.last_status)
             plugin = self._client.xmpp.plugin.get("xep_0092", None)
             if plugin is not None:
                 plugin.software_name = (APP_NAME if self._config.privacy.send_software
@@ -976,9 +989,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         from stanza_im.core.client import JabberClient
         connection = self._config.connection
+        if getattr(connection, "resource_mode", "hostname") == "manual":
+            resource = connection.resource or socket.gethostname() or "stanza-im"
+        else:
+            resource = socket.gethostname() or connection.resource or "stanza-im"
         self._client = JabberClient(
             jid, password,
-            resource=connection.resource or "jabbim",
+            resource=resource,
             host=connection.host if connection.override_host else "",
             port=connection.port if connection.override_host else 0,
             auto_join_conferences=connection.auto_join_conferences,
@@ -988,6 +1005,11 @@ class MainWindow(QtWidgets.QMainWindow):
             message_carbons=connection.message_carbons,
             message_displayed_sync=self._config.chat.message_displayed_sync,
             allow_incoming_edits=self._config.chat.allow_incoming_edits,
+            priority_mode=getattr(connection, "priority_mode", "status"),
+            priority=getattr(connection, "priority", 50),
+            proxy_mode=getattr(connection, "proxy_mode", "none"),
+            proxy_host=getattr(connection, "proxy_host", ""),
+            proxy_port=getattr(connection, "proxy_port", 0),
         )
         self._connect_client_signals()
 
