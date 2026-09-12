@@ -1042,6 +1042,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_session_started(self):
         logger.info("Session started, roster arriving...")
         self._set_tray_status_icon(self._config.last_status)
+        self._set_status_combo(self._config.last_status)
 
     def _on_auth_failed(self):
         self._login.set_error(tr("login_auth_failed"))
@@ -2317,6 +2318,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._osd.show(QtGui.QIcon(), sender or tr("osd_file"),
                        tr("osd_file", filename=filename or ""))
 
+    def _set_status_combo(self, show: str):
+        """Sync the roster status combo without retriggering presence."""
+        idx = self._status_combo.findData(show)
+        if idx >= 0 and self._status_combo.currentIndex() != idx:
+            self._status_combo.blockSignals(True)
+            self._status_combo.setCurrentIndex(idx)
+            self._status_combo.blockSignals(False)
+
     def _on_status_change(self, index: int):
         show = self._status_combo.currentData()
         if not show:
@@ -2326,7 +2335,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.send_presence(show=show)
         self._set_tray_status_icon(show)
         self._last_activity = time.monotonic()
-        self._auto_status_applied = False
+        self._auto_status_applied = None
 
     def eventFilter(self, obj, event):
         if event.type() in (QtCore.QEvent.Type.MouseMove,
@@ -2334,10 +2343,11 @@ class MainWindow(QtWidgets.QMainWindow):
                             QtCore.QEvent.Type.KeyPress,
                             QtCore.QEvent.Type.Wheel):
             self._last_activity = time.monotonic()
-            if self._auto_status_applied and self._client:
+            if self._auto_status_applied is not None and self._client:
                 self._client.send_presence(show=self._config.last_status)
                 self._set_tray_status_icon(self._config.last_status)
-                self._auto_status_applied = False
+                self._set_status_combo(self._config.last_status)
+                self._auto_status_applied = None
         return super().eventFilter(obj, event)
 
     def _check_auto_status(self):
@@ -2349,10 +2359,11 @@ class MainWindow(QtWidgets.QMainWindow):
             status = "xa"
         elif self._config.status.auto_away and idle_minutes >= self._config.status.away_minutes:
             status = "away"
-        if status and not self._auto_status_applied:
+        if status and status != self._auto_status_applied:
             self._client.send_presence(show=status)
             self._set_tray_status_icon(status)
-            self._auto_status_applied = True
+            self._set_status_combo(status)
+            self._auto_status_applied = status
 
     def _on_search(self, text: str):
         self._roster.set_search_filter(text.lower())
