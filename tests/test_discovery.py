@@ -111,6 +111,34 @@ check("srv: query order constant",
                                  "_turn._udp", "_stun._tcp", "_stun._udp"))
 
 
+# ── resolve_client_srv: _xmpps-client lookup ──────────────────────
+
+class _ClientSrvResolver:
+    def __init__(self, loop=None, nameservers=None, **kwargs):
+        pass
+
+    async def query(self, name, rtype):
+        if name == "_xmpps-client._tcp.example.org":
+            return [Record("xmpp.example.org.", 5223)]
+        raise OSError("no such record")
+
+
+_orig_aiodns2 = discovery.aiodns
+_orig_has2 = discovery.HAS_AIODNS
+discovery.aiodns = types.SimpleNamespace(DNSResolver=_ClientSrvResolver)
+discovery.HAS_AIODNS = True
+try:
+    srv = asyncio.run(discovery.resolve_client_srv("example.org"))
+    missing = asyncio.run(discovery.resolve_client_srv("nowhere.invalid"))
+finally:
+    discovery.aiodns = _orig_aiodns2
+    discovery.HAS_AIODNS = _orig_has2
+
+check("client srv: found _xmpps-client",
+      srv and srv[0]["host"] == "xmpp.example.org" and srv[0]["port"] == 5223)
+check("client srv: missing record -> empty", missing == [])
+
+
 # ── refresh uses a fresh cache without touching the network ───────
 
 cache2 = discovery.DiscoveryCache(os.path.join(_SCRATCH, "disc2.json"))

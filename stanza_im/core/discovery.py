@@ -155,6 +155,36 @@ def _srv_to_dict(service: str, answer) -> list[dict]:
     return entries
 
 
+async def resolve_client_srv(domain: str,
+                             service: str = "xmpps-client",
+                             loop: asyncio.AbstractEventLoop | None = None
+                             ) -> list[dict]:
+    """Resolve ``_<service>._tcp.<domain>`` SRV records for client TLS.
+
+    Used by the "TLS only" / "Prefer TLS" modes to find the direct-TLS
+    (``_xmpps-client``) endpoint.  Returns a list of
+    ``{"host", "port", "priority", "weight"}`` items sorted by DNS priority
+    and weight.
+    """
+    if not domain or not HAS_AIODNS:
+        return []
+    try:
+        resolver = aiodns.DNSResolver(loop=loop)
+    except Exception as exc:
+        logger.warning("Could not create the DNS resolver: %s", exc)
+        return []
+    try:
+        answer = await resolver.query(f"_{service}._tcp.{domain}", "SRV")
+    except Exception as exc:
+        logger.debug("No %s SRV record for %s: %s", service, domain, exc)
+        return []
+    entries = _srv_to_dict(f"_{service}._tcp", answer)
+    entries.sort(key=lambda e: (e["priority"], -e["weight"]))
+    logger.info("Client SRV %s for %s: %d record(s)", service, domain,
+                len(entries))
+    return entries
+
+
 async def discover_stun_turn(domain: str,
                              loop: asyncio.AbstractEventLoop | None = None
                              ) -> list[dict]:

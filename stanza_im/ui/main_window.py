@@ -1010,6 +1010,9 @@ class MainWindow(QtWidgets.QMainWindow):
             proxy_mode=getattr(connection, "proxy_mode", "none"),
             proxy_host=getattr(connection, "proxy_host", ""),
             proxy_port=getattr(connection, "proxy_port", 0),
+            keepalive=getattr(connection, "keepalive", True),
+            tls_mode=getattr(connection, "tls_mode", "prefer"),
+            starttls_mode=getattr(connection, "starttls_mode", "always"),
         )
         self._connect_client_signals()
 
@@ -1036,8 +1039,16 @@ class MainWindow(QtWidgets.QMainWindow):
             # Switch to roster page after a brief delay
             QtCore.QTimer.singleShot(500, lambda: self._stack.setCurrentIndex(_PAGE_ROSTER))
         except Exception as e:
-            logger.exception("Connection failed")
-            self._login.set_error(tr("login_connection_error", error=str(e)))
+            from stanza_im.core.client import TLSOnlyUnavailable
+            if isinstance(e, TLSOnlyUnavailable):
+                message = tr("login_tls_only_unavailable", domain=e.domain)
+                logger.error("TLS-only mode: no _xmpps-client SRV for %s",
+                             e.domain)
+            else:
+                logger.exception("Connection failed")
+                message = tr("login_connection_error", error=str(e))
+            self._login.set_error(message)
+            self._tray.show_message(APP_NAME, message)
             self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     def _on_connect_cancel(self):
@@ -1067,6 +1078,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("groupchat_presence_details", self._on_groupchat_presence_details)
         c.on("auth_failed", self._on_auth_failed)
         c.on("disconnected", self._on_disconnected)
+        c.on("tls_required", self._on_tls_required)
         c.on("subscribed", self._on_subscribed)
         c.on("vcard_received", self._on_vcard_received)
         c.on("typing", self._on_typing)
@@ -1088,6 +1100,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_auth_failed(self):
         self._login.set_error(tr("login_auth_failed"))
+        self._stack.setCurrentIndex(_PAGE_LOGIN)
+
+    def _on_tls_required(self):
+        """The server refused to provide the mandatory STARTTLS."""
+        logger.error("Required STARTTLS is not supported by the server")
+        message = tr("login_tls_required")
+        self._login.set_error(message)
+        self._tray.show_message(APP_NAME, message)
         self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     def _on_disconnected(self):

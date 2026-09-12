@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6 import QtWidgets
 from stanza_im.core.storage import Config
-from stanza_im.core.client import JabberClient
+from stanza_im.core.client import JabberClient, tls_flags, order_tls_first
 from stanza_im.i18n import load as load_i18n
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.preferences import PreferencesDialog
@@ -59,6 +59,107 @@ check("status: default/None -> 50", priority("status", 0, None) == 50)
 check("manual: uses the value", priority("manual", 77, "away") == 77)
 check("manual: clamps high", priority("manual", 999, "online") == 127)
 check("manual: clamps low", priority("manual", -999, "online") == -128)
+
+
+# ── tls_flags: TLS / STARTTLS selector mapping ────────────────────
+
+direct = tls_flags("direct", "always")
+check("direct: only direct TLS",
+      direct == {"enable_direct_tls": True, "enable_starttls": False,
+                 "enable_plaintext": False, "require_starttls": False})
+
+prefer_always = tls_flags("prefer", "always")
+check("prefer+always: direct first, STARTTLS required",
+      prefer_always["enable_direct_tls"] and prefer_always["enable_starttls"]
+      and not prefer_always["enable_plaintext"]
+      and prefer_always["require_starttls"])
+
+prefer_if = tls_flags("prefer", "opportunistic")
+check("prefer+opportunistic: plaintext allowed",
+      prefer_if["enable_direct_tls"] and prefer_if["enable_starttls"]
+      and prefer_if["enable_plaintext"]
+      and not prefer_if["require_starttls"])
+
+prefer_never = tls_flags("prefer", "never")
+check("prefer+never: direct TLS then plaintext",
+      prefer_never["enable_direct_tls"] and not prefer_never["enable_starttls"]
+      and prefer_never["enable_plaintext"])
+
+normal = tls_flags("normal", "always")
+check("normal: no direct TLS",
+      not normal["enable_direct_tls"] and normal["enable_starttls"]
+      and not normal["enable_plaintext"] and normal["require_starttls"])
+
+normal_never = tls_flags("normal", "never")
+check("normal+never: plaintext only",
+      not normal_never["enable_direct_tls"]
+      and not normal_never["enable_starttls"]
+      and normal_never["enable_plaintext"])
+
+_records = [("xmpp-client", "h", "1.2.3.4", 5222),
+            ("xmpps-client", "h", "1.2.3.4", 5223)]
+_ordered = order_tls_first(_records, {"xmpps-client"})
+check("SRV order: direct TLS record first",
+      _ordered[0][0] == "xmpps-client" and _ordered[1][0] == "xmpp-client")
+check("SRV order: no tls services -> unchanged",
+      order_tls_first(_records, set()) == _records)
+
+
+# ── connection_info: mode / TLS / SASL / keepalive ────────────────
+
+from types import SimpleNamespace
+
+
+class _FakeXmpp:
+    def __init__(self, features, sock=None):
+        self.features = features
+        self.socket = sock
+        self.custom_address = ("xmpp.linuxoid.in", 5223)
+        self.boundjid = SimpleNamespace(domain="linuxoid.in")
+        self.default_domain = "linuxoid.in"
+        self.default_port = 5222
+        self.plugin = {"feature_mechanisms": SimpleNamespace(
+            mech=SimpleNamespace(name="SCRAM-SHA-1-PLUS"))}
+
+
+def _info(features, sock):
+    client = object.__new__(JabberClient)
+    client.xmpp = _FakeXmpp(features, sock)
+    client.keepalive = True
+    return client.connection_info()
+
+
+info_plain = _info(set(), object())
+check("info: no TLS -> plain", info_plain["mode"] == "plain")
+check("info: SASL mechanism reported", info_plain["sasl"] == "SCRAM-SHA-1-PLUS")
+check("info: keepalive reported", info_plain["keepalive"] is True)
+check("info: server reported",
+      info_plain["host"] == "xmpp.linuxoid.in" and info_plain["port"] == 5223)
+
+info_st = _info({"starttls"}, object())
+check("info: STARTTLS detected", info_st["mode"] == "starttls")
+
+
+class _FakeTlsSocket:
+    def version(self):
+        return "TLSv1.3"
+
+    def cipher(self):
+        return ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+
+
+import stanza_im.core.client as _client_mod
+_orig_is_tls = _client_mod._is_tls
+_client_mod._is_tls = lambda sock: sock is not None
+try:
+    info_direct = _info(set(), _FakeTlsSocket())
+finally:
+    _client_mod._is_tls = _orig_is_tls
+check("info: direct TLS detected", info_direct["mode"] == "direct")
+check("info: TLS version reported", info_direct["tls_version"] == "TLSv1.3")
+check("info: cipher reported",
+      info_direct["cipher"] == "TLS_AES_256_GCM_SHA384")
+
 
 
 # ── the two discover methods must not collide (regression) ────────
@@ -102,6 +203,9 @@ check("default file_proxy_mode=auto", conn.file_proxy_mode == "auto")
 check("default file_proxy_manual empty", conn.file_proxy_manual == "")
 check("default stun_turn_mode=auto", conn.stun_turn_mode == "auto")
 check("default stun_turn_manual empty", conn.stun_turn_manual == "")
+check("default keepalive=True", conn.keepalive is True)
+check("default tls_mode=prefer", conn.tls_mode == "prefer")
+check("default starttls_mode=always", conn.starttls_mode == "always")
 
 
 # ── preferences apply and preserve manual values ──────────────────
@@ -128,7 +232,21 @@ controls["proxy_mode"].setCurrentIndex(
     controls["proxy_mode"].findData("socks5"))
 controls["proxy_host"].setText("socks.example.net")
 controls["proxy_port"].setValue(1080)
+check("encrypt selector enabled in prefer mode",
+      controls["starttls_mode"].isEnabled())
+controls["tls_mode"].setCurrentIndex(controls["tls_mode"].findData("direct"))
+check("encrypt selector disabled for TLS-only",
+      not controls["starttls_mode"].isEnabled())
+controls["tls_mode"].setCurrentIndex(controls["tls_mode"].findData("normal"))
+controls["starttls_mode"].setCurrentIndex(
+    controls["starttls_mode"].findData("opportunistic"))
+controls["keepalive"].setChecked(False)
 dlg._apply_settings()
+
+check("apply: tls_mode saved", cfg.connection.tls_mode == "normal")
+check("apply: starttls_mode saved",
+      cfg.connection.starttls_mode == "opportunistic")
+check("apply: keepalive saved", cfg.connection.keepalive is False)
 
 check("apply: file_proxy_mode saved",
       cfg.connection.file_proxy_mode == "auto")
@@ -152,6 +270,10 @@ check("round-trip: proxy persisted",
 check("round-trip: manual file proxy persisted",
       reloaded.connection.file_proxy_manual == "proxy.example.org")
 check("round-trip: priority persisted", reloaded.connection.priority == 64)
+check("round-trip: tls_mode persisted",
+      reloaded.connection.tls_mode == "normal")
+check("round-trip: keepalive persisted",
+      reloaded.connection.keepalive is False)
 
 
 # ── discovery refresh button ──────────────────────────────────────

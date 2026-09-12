@@ -66,8 +66,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._build_ui()
         self._load_values()
         self._refresh_discovery_labels()
+        self._refresh_connection_info()
         if self._client is not None and hasattr(self._client, "on"):
             self._client.on("services_discovered", self._on_services_discovered)
+            self._client.on("connection_info", self._on_connection_info)
 
     def done(self, result):
         if self._osd_manager is not None:
@@ -276,6 +278,33 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(tr("prefs_host"), host)
         advanced_form.addRow(tr("prefs_port"), port)
 
+        advanced_form.addRow(self._check("keepalive", tr("prefs_keepalive")))
+        tls_mode = self._combo("tls_mode", [
+            ("conn_mode_direct", "direct"),
+            ("conn_mode_prefer", "prefer"),
+            ("conn_mode_normal", "normal"),
+        ])
+        starttls_mode = self._combo("starttls_mode", [
+            ("enc_always", "always"),
+            ("enc_opportunistic", "opportunistic"),
+            ("enc_never", "never"),
+        ])
+
+        def _sync_tls():
+            starttls_mode.setEnabled(tls_mode.currentData() != "direct")
+
+        tls_mode.currentIndexChanged.connect(_sync_tls)
+        _sync_tls()
+        advanced_form.addRow(tr("prefs_connection_mode"), tls_mode)
+
+        self._conn_info = QtWidgets.QLabel()
+        info_icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.png"))
+        if not info_icon.isNull():
+            self._conn_info.setPixmap(info_icon.pixmap(16, 16))
+        self._conn_info.setToolTip(tr("conn_info_not_connected"))
+        advanced_form.addRow(tr("prefs_encryption"),
+                             self._row(starttls_mode, self._conn_info))
+
         proxy, proxy_form = self._page()
         proxy_form.addRow(self._connection_group())
         proxy_form.addRow(self._file_proxy_group())
@@ -407,6 +436,45 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _on_services_discovered(self, *_args):
         self._refresh_discovery_labels()
+
+    def _refresh_connection_info(self):
+        label = getattr(self, "_conn_info", None)
+        if label is None:
+            return
+        info = None
+        if self._client is not None:
+            getter = getattr(self._client, "connection_info", None)
+            if callable(getter):
+                try:
+                    info = getter()
+                except Exception:
+                    info = None
+        if not info or not info.get("sasl"):
+            label.setToolTip(tr("conn_info_not_connected"))
+            return
+        mode_key = {"direct": "conn_info_direct",
+                    "starttls": "conn_info_starttls",
+                    "plain": "conn_info_plain"}.get(info.get("mode"),
+                                                    "conn_info_plain")
+        lines = [tr("conn_info_title") + ":"]
+        lines.append("  %s: %s" % (tr("conn_info_mode"), tr(mode_key)))
+        if info.get("tls_version"):
+            lines.append("  %s: %s" % (tr("conn_info_tls_version"),
+                                       info["tls_version"]))
+        if info.get("cipher"):
+            lines.append("  %s: %s" % (tr("conn_info_cipher"),
+                                       info["cipher"]))
+        lines.append("  %s: %s" % (tr("conn_info_sasl"), info.get("sasl", "")))
+        lines.append("  %s: %s" % (
+            tr("conn_info_keepalive"),
+            tr("conn_info_on") if info.get("keepalive") else tr("conn_info_off")))
+        if info.get("host"):
+            lines.append("  %s: %s:%s" % (tr("conn_info_server"),
+                                          info["host"], info.get("port", "")))
+        label.setToolTip("\n".join(lines))
+
+    def _on_connection_info(self, *_args):
+        self._refresh_connection_info()
 
     def _on_refresh_discovery(self):
         if self._client is None or not hasattr(self._client, "refresh_services"):
@@ -662,6 +730,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             "file_proxy_manual": getattr(connection, "file_proxy_manual", ""),
             "stun_turn_mode": getattr(connection, "stun_turn_mode", "auto"),
             "stun_turn_manual": getattr(connection, "stun_turn_manual", ""),
+            "keepalive": getattr(connection, "keepalive", True),
+            "tls_mode": getattr(connection, "tls_mode", "prefer"),
+            "starttls_mode": getattr(connection, "starttls_mode", "always"),
             "host": connection.host, "port": connection.port,
             "proxy_host": connection.proxy_host, "proxy_port": connection.proxy_port,
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
@@ -728,9 +799,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.connection.save_status_message = self._value("save_status_message")
         for key in ("resource", "host", "proxy_host", "resource_mode",
                     "priority_mode", "proxy_mode", "file_proxy_mode",
-                    "file_proxy_manual", "stun_turn_mode", "stun_turn_manual"):
+                    "file_proxy_manual", "stun_turn_mode", "stun_turn_manual",
+                    "tls_mode", "starttls_mode"):
             cfg.connection[key] = self._value(key)
         cfg.connection.priority = self._value("priority")
+        cfg.connection.keepalive = self._value("keepalive")
         cfg.connection.message_carbons = self._value("message_carbons")
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)

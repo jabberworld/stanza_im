@@ -11,6 +11,7 @@ import logging
 import mimetypes
 import os
 import platform
+import ssl
 import time
 import uuid
 from typing import Any, Callable
@@ -175,6 +176,69 @@ def _message_subjects(stanza) -> list[tuple[str, str]]:
     return items
 
 
+class TLSOnlyUnavailable(Exception):
+    """Raised when "TLS only" is selected but no _xmpps-client SRV record."""
+
+    def __init__(self, domain: str):
+        super().__init__(domain)
+        self.domain = domain
+
+
+def tls_flags(tls_mode: str, starttls_mode: str) -> dict:
+    """Map the UI selectors to slixmpp connection flags.
+
+    ``tls_mode``: ``direct`` | ``prefer`` | ``normal``.
+    ``starttls_mode``: ``always`` | ``opportunistic`` | ``never``.
+    """
+    direct = tls_mode in ("direct", "prefer")
+    if tls_mode == "direct":
+        return {"enable_direct_tls": True, "enable_starttls": False,
+                "enable_plaintext": False, "require_starttls": False}
+    if starttls_mode == "never":
+        return {"enable_direct_tls": direct, "enable_starttls": False,
+                "enable_plaintext": True, "require_starttls": False}
+    if starttls_mode == "opportunistic":
+        return {"enable_direct_tls": direct, "enable_starttls": True,
+                "enable_plaintext": True, "require_starttls": False}
+    return {"enable_direct_tls": direct, "enable_starttls": True,
+            "enable_plaintext": False, "require_starttls": True}
+
+
+def _is_tls(sock) -> bool:
+    return isinstance(sock, (ssl.SSLSocket, ssl.SSLObject))
+
+
+def order_tls_first(records: list, tls_services) -> list:
+    """Sort SRV records so direct-TLS services come before the rest."""
+    if not tls_services:
+        return records
+    return sorted(records, key=lambda rec: 0 if rec[0] in tls_services else 1)
+
+
+class _StanzaXMPP(slixmpp.ClientXMPP):
+    """ClientXMPP with deterministic TLS ordering and STARTTLS enforcement."""
+
+    _tls_first = False
+    _require_starttls = False
+
+    async def get_dns_records(self, domain, port=None):
+        records = await super().get_dns_records(domain, port)
+        if self._tls_first:
+            records = order_tls_first(records, self.tls_services)
+        return records
+
+    async def _handle_stream_features(self, features):
+        if (self._require_starttls and not _is_tls(getattr(self, "socket", None))
+                and 'starttls' not in features['features']):
+            logger.error(
+                "STARTTLS is required but the server does not offer it")
+            self.auto_reconnect = False
+            self.event('tls_required')
+            self.disconnect()
+            return True
+        return await super()._handle_stream_features(features)
+
+
 class JabberClient:
     """High-level XMPP client built on top of slixmpp.ClientXMPP."""
 
@@ -195,7 +259,10 @@ class JabberClient:
                  allow_incoming_edits: bool = True,
                  priority_mode: str = "status", priority: int = 50,
                  proxy_mode: str = "none", proxy_host: str = "",
-                 proxy_port: int = 0):
+                 proxy_port: int = 0,
+                 keepalive: bool = True,
+                 tls_mode: str = "prefer",
+                 starttls_mode: str = "always"):
         self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
@@ -205,6 +272,9 @@ class JabberClient:
         self.proxy_mode = proxy_mode
         self.proxy_host = proxy_host
         self.proxy_port = int(proxy_port or 0)
+        self.keepalive = bool(keepalive)
+        self.tls_mode = tls_mode
+        self.starttls_mode = starttls_mode
         self._discovered: dict | None = None
         self.auto_join_conferences = auto_join_conferences
         self.autojoin_rooms: set[str] = set()
@@ -224,10 +294,19 @@ class JabberClient:
         self.send_software = send_software
         self._full_jid = f"{self.jid_str}/{resource}"
 
-        self.xmpp = slixmpp.ClientXMPP(jid, password, sasl_mech="SCRAM-SHA-1")
+        self.xmpp = _StanzaXMPP(jid, password)
         self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")
         self.xmpp.auto_reconnect = True
         self.xmpp.reconnect_max_retries = 5
+
+        flags = tls_flags(tls_mode, starttls_mode)
+        self.xmpp.enable_direct_tls = flags["enable_direct_tls"]
+        self.xmpp.enable_starttls = flags["enable_starttls"]
+        self.xmpp.enable_plaintext = flags["enable_plaintext"]
+        self.xmpp._require_starttls = flags["require_starttls"]
+        self.xmpp._tls_first = (tls_mode == "prefer")
+        self.xmpp.whitespace_keepalive = self.keepalive
+        self.xmpp.add_event_handler("tls_required", self._on_tls_required)
 
         # Register XEP plugins
         self.xmpp.register_plugin("xep_0054")  # vCard
@@ -334,11 +413,56 @@ class JabberClient:
 
     async def connect_async(self) -> None:
         """Connect to the XMPP server and start the session."""
+        if (self.tls_mode == "direct" and not self.host):
+            domain = self.jid_str.split("@")[-1]
+            from stanza_im.core.discovery import resolve_client_srv
+            records = await resolve_client_srv(domain, "xmpps-client")
+            if not records:
+                self.xmpp.auto_reconnect = False
+                raise TLSOnlyUnavailable(domain)
         result = self.xmpp.connect(self.host or None, self.port or None)
         if asyncio.iscoroutine(result):
             await result
         elif isinstance(result, asyncio.Future):
             await result
+
+    def _on_tls_required(self, _event=None) -> None:
+        logger.error("Required STARTTLS is not supported by the server")
+        self.emit("tls_required")
+
+    def connection_info(self) -> dict:
+        """Describe the active connection (mode, TLS, SASL, keep-alive)."""
+        x = self.xmpp
+        sock = getattr(x, "socket", None)
+        features = getattr(x, "features", set())
+        if 'starttls' in features:
+            mode = "starttls"
+        elif _is_tls(sock):
+            mode = "direct"
+        else:
+            mode = "plain"
+        info = {"mode": mode, "tls_version": "", "cipher": "",
+                "sasl": "", "keepalive": self.keepalive,
+                "host": "", "port": 0}
+        if _is_tls(sock):
+            try:
+                info["tls_version"] = sock.version() or ""
+                cipher = sock.cipher()
+                info["cipher"] = cipher[0] if cipher else ""
+            except Exception:
+                pass
+        mech = getattr(x.plugin.get("feature_mechanisms", None), "mech", None)
+        if mech is not None:
+            info["sasl"] = getattr(mech, "name", "") or ""
+        custom = getattr(x, "custom_address", None)
+        if custom:
+            info["host"], info["port"] = str(custom[0]), int(custom[1])
+        else:
+            bound = getattr(x, "boundjid", None)
+            info["host"] = str(bound.domain) if bound and bound.domain \
+                else x.default_domain
+            info["port"] = x.default_port
+        return info
 
     def discovered_services(self) -> dict | None:
         """Latest background discovery result (file proxy + STUN/TURN)."""
@@ -1575,6 +1699,7 @@ class JabberClient:
             loop = asyncio.get_event_loop()
             loop.create_task(self._mds_init())
         self.emit("session_started")
+        self.emit("connection_info", self.connection_info())
         loop = asyncio.get_event_loop()
         loop.create_task(self._autojoin_bookmarks())
         # File-transfer proxy / STUN-TURN discovery is only needed for p2p
