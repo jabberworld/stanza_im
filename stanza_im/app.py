@@ -39,6 +39,16 @@ def parse_args(argv: list[str] | None = None):
     return build_parser(argv).parse_known_args(argv)
 
 
+def prepare_qt_argv(leftover: list[str]) -> list[str]:
+    """Return the argv handed to Qt, keeping the program name.
+
+    ``parse_args()`` strips the program name, but QWebEngine refuses to start
+    when the argument list is empty (``base::CommandLine``).  Re-prepend it so
+    Qt flags and positionals (``-platform``, ``-style``, …) still pass through.
+    """
+    return ([sys.argv[0]] + leftover) if sys.argv else leftover
+
+
 class _ConsoleFilter(logging.Filter):
     """Route DEBUG output to the console only for the enabled keys.
 
@@ -114,7 +124,7 @@ def run() -> int:
     global _loop
 
     args, leftover = parse_args()
-    sys.argv = leftover
+    sys.argv = prepare_qt_argv(leftover)
     debug = args.debug
     xml_dump = args.xml
     file_log = args.log

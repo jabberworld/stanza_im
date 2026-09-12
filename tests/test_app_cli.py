@@ -140,6 +140,28 @@ for (debug, xml, flog), (want_dbg, want_xml), (file_dbg, file_xml) in _CASES:
     else:
         check(f"{tag}: no file written", fl is None)
 
+
+# ── prepare_qt_argv: the program name must reach QApplication ──────
+# Regression: run() used to hand QApplication an empty argv list, so
+# QWebEngine aborted ("Argument list is empty, the program name is not
+# passed to QCoreApplication") when the first chat was opened.
+
+old_argv = sys.argv
+try:
+    sys.argv = ["main.py"]
+    check("prepare_qt_argv: empty leftover keeps program name",
+          app.prepare_qt_argv([]) == ["main.py"])
+    check("prepare_qt_argv: qt flags pass through after prog",
+          app.prepare_qt_argv(["-platform", "offscreen"]) ==
+          ["main.py", "-platform", "offscreen"])
+    sys.argv = ["stanza-im", "-d"]
+    leftover = app.parse_args()[1]
+    qt_argv = app.prepare_qt_argv(leftover)
+    check("prepare_qt_argv: real leftover becomes non-empty",
+          qt_argv == ["stanza-im"])
+finally:
+    sys.argv = old_argv
+
 print("\nAll tests passed ✓" if not FAILURES
       else f"\n{len(FAILURES)} failures")
 sys.exit(1 if FAILURES else 0)
