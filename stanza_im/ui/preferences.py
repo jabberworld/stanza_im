@@ -10,6 +10,35 @@ from stanza_im.ui import icons as icons_mod
 from stanza_im.include import emoticons
 
 
+def link_status_minutes(away: QtWidgets.QSpinBox, xa: QtWidgets.QSpinBox) -> None:
+    """Keep the xa auto-status minutes strictly above the away minutes.
+
+    Both spinners stay in the 1..1440 range; because xa must be greater than
+    away, away is capped at 1439 (so xa can reach 1440).
+    """
+
+    def clamp_away(value: int) -> None:
+        lo = value + 1
+        if lo > xa.maximum():
+            away.setValue(xa.maximum() - 1)
+            return
+        xa.setMinimum(lo)
+        if xa.value() < lo:
+            xa.setValue(lo)
+
+    def clamp_xa(value: int) -> None:
+        lo = away.value() + 1
+        if xa.minimum() < lo:
+            xa.setMinimum(lo)
+        if value < lo:
+            xa.setValue(lo)
+
+    away.valueChanged.connect(clamp_away)
+    xa.valueChanged.connect(clamp_xa)
+    clamp_away(away.value())
+    clamp_xa(xa.value())
+
+
 class PreferencesDialog(QtWidgets.QDialog):
     """Edit application settings grouped like the original Jabbim dialog."""
 
@@ -336,10 +365,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         page, form = self._page()
         away = self._check("auto_away", tr("prefs_auto_away"))
         form.addRow(away)
-        form.addRow(tr("prefs_away_minutes"), self._spin("away_minutes", 1, 1440))
+        away_spin = self._spin("away_minutes", 1, 1440)
+        form.addRow(tr("prefs_away_minutes"), away_spin)
         xa = self._check("auto_xa", tr("prefs_auto_xa"))
         form.addRow(xa)
-        form.addRow(tr("prefs_xa_minutes"), self._spin("xa_minutes", 1, 1440))
+        xa_spin = self._spin("xa_minutes", 1, 1440)
+        form.addRow(tr("prefs_xa_minutes"), xa_spin)
+        link_status_minutes(away_spin, xa_spin)
         return page
 
     def _page_shortcuts(self):
