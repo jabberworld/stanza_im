@@ -877,8 +877,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from stanza_im.ui.preferences import PreferencesDialog
         dlg = PreferencesDialog(self._config, self._theme_factory,
-                                osd_manager=self._osd, parent=self)
+                                osd_manager=self._osd, parent=self,
+                                client=self._client)
         dlg.settings_applied.connect(self._on_settings_applied)
+        dlg.password_changed.connect(self._on_password_changed)
         dlg.finished.connect(self._on_prefs_finished)
         self._prefs_dialog = dlg
         # Non-modal so the OSD preview stays interactive while it is open.
@@ -889,6 +891,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if dlg is not None:
             dlg.finished.disconnect(self._on_prefs_finished)
         self._prefs_dialog = None
+
+    def _on_password_changed(self, new_password: str):
+        """Keep the login form in sync after a successful password change."""
+        self._login._pw_edit.setText(new_password)
 
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""

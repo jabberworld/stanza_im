@@ -1,6 +1,8 @@
 """Preferences dialog with icon navigation and section tabs."""
 from __future__ import annotations
 
+import asyncio
+
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core.storage import Config
@@ -43,13 +45,16 @@ class PreferencesDialog(QtWidgets.QDialog):
     """Edit application settings grouped like the original Jabbim dialog."""
 
     settings_applied = QtCore.pyqtSignal()
+    password_changed = QtCore.pyqtSignal(str)
 
     def __init__(self, config: Config, theme_factory: ChatThemeFactory,
-                 osd_manager=None, parent=None):
+                 osd_manager=None, parent=None,
+                 client=None):
         super().__init__(parent)
         self._config = config
         self._theme_factory = theme_factory
         self._osd_manager = osd_manager
+        self._client = client
         self.setWindowTitle(tr("prefs_title"))
         self.setMinimumSize(760, 540)
         self._controls: dict[str, QtWidgets.QWidget] = {}
@@ -178,6 +183,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(self._check("auto_join_conferences", tr("prefs_auto_join_conferences")))
         form.addRow(self._check("message_carbons", tr("prefs_message_carbons")))
         form.addRow(self._check("save_status_message", tr("prefs_save_status_message")))
+        self._btn_change_password = QtWidgets.QPushButton(
+            tr("prefs_change_password"))
+        self._btn_change_password.setEnabled(self._client is not None)
+        self._btn_change_password.clicked.connect(self._on_change_password)
+        form.addRow("", self._btn_change_password)
 
         advanced, advanced_form = self._page()
         resource = self._line("resource")
@@ -526,3 +536,42 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.status[key] = self._value(key)
         cfg.save()
         self.settings_applied.emit()
+
+    # ── Change account password ──────────────────────────────────────
+
+    def _on_change_password(self):
+        if self._client is None:
+            return
+        from stanza_im.ui.change_password_dialog import ChangePasswordDialog
+        dlg = ChangePasswordDialog(self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self._btn_change_password.setEnabled(False)
+        asyncio.create_task(self._run_change_password(dlg.password()))
+
+    async def _run_change_password(self, new_password: str):
+        result = await self._do_change_password(new_password)
+        self._btn_change_password.setEnabled(self._client is not None)
+        if result == "ok":
+            QtWidgets.QMessageBox.information(
+                self, tr("change_password_title"),
+                tr("change_password_success"))
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, tr("change_password_title"),
+                tr("change_password_error", error=result))
+
+    async def _do_change_password(self, new_password: str) -> str:
+        """Submit the new password; return "ok" or an error text."""
+        client = self._client
+        if client is None:
+            return tr("change_password_not_connected")
+        try:
+            await client.change_password(new_password)
+        except Exception as exc:
+            return str(exc)
+        if self._value("save_password"):
+            self._config.password = new_password
+            self._config.save()
+        self.password_changed.emit(new_password)
+        return "ok"

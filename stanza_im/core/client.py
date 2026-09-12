@@ -776,6 +776,17 @@ class JabberClient:
         iq["register"].set_remove(True)
         await iq.send()
 
+    async def change_password(self, new_password: str,
+                              server: str | None = None) -> None:
+        """Change the account password on the server (XEP-0077).
+
+        Requires an authenticated session.  On success the in-memory password is
+        updated so that an automatic reconnect authenticates with the new one.
+        Raises on server errors (e.g. :class:`slixmpp.exceptions.IqError`).
+        """
+        await self.xmpp["xep_0077"].change_password(new_password, jid=server)
+        self.xmpp.password = new_password
+
     async def get_search_form(self, jid: str) -> dict:
         """Return the XEP-0055 search form of a service.
 
