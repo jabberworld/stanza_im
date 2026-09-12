@@ -9,6 +9,7 @@ from __future__ import annotations
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import APP_NAME
+from stanza_im.include.enumerators import show_to_icon_key
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.chat_themes import ChatThemeFactory
@@ -49,15 +50,18 @@ class ChatWindow(QtWidgets.QMainWindow):
     """
 
     def __init__(self, theme_factory: ChatThemeFactory,
-                 muc_theme_factory: ChatThemeFactory | None = None, parent=None):
+                 muc_theme_factory: ChatThemeFactory | None = None, parent=None,
+                 icons=None):
         super().__init__(parent)
         self._theme = theme_factory
         self._muc_theme = muc_theme_factory or theme_factory
+        self._icons = icons
         self._tabs: dict[str, ChatWidget] = {}  # jid -> widget
         self._tab_order: list[str] = []         # ordered jid list
         self._tab_title_length = 30
         self._active_jid: str | None = None
         self._remote_activity: dict[str, str] = {}
+        self._tab_status: dict[str, str] = {}   # jid -> latest show
         self._chat_options = {}
         self._muc_leave_confirm: Callable[[str], bool] | None = None
 
@@ -160,6 +164,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
         self._tab_order.append(jid)
+        self._apply_tab_icon(jid)
         if focus:
             self._tab_widget.setCurrentIndex(idx)
             self.show()
@@ -201,6 +206,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
         self._tab_order.append(room)
+        self._apply_tab_icon(room)
         self._tab_widget.setCurrentIndex(idx)
         self.show()
         self.raise_()
@@ -312,6 +318,29 @@ class ChatWindow(QtWidgets.QMainWindow):
         if index >= 0:
             self._tab_widget.setTabText(index, self._tab_caption(widget))
         self._update_title()
+
+    def set_contact_status(self, jid: str, show: str | None):
+        """Remember the contact's presence *show* and reflect it on the tab icon."""
+        if show:
+            self._tab_status[jid] = show
+        else:
+            self._tab_status.pop(jid, None)
+        self._apply_tab_icon(jid)
+
+    def _apply_tab_icon(self, jid: str) -> None:
+        widget = self._tabs.get(jid)
+        if widget is None:
+            return
+        index = self._tab_widget.indexOf(widget)
+        if index < 0:
+            return
+        show = self._tab_status.get(jid)
+        if show and self._icons:
+            icon = QtGui.QIcon(self._icons.get_status_icon(
+                show_to_icon_key(show)))
+        else:
+            icon = QtGui.QIcon()
+        self._tab_widget.setTabIcon(index, icon)
 
     def _tab_caption(self, widget: ChatWidget) -> str:
         title = widget.display_name

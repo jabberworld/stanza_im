@@ -109,7 +109,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._media_prune_timer.start()
 
         # ── Chat window (standalone) ─────────────────────────────
-        self._chat_window = ChatWindow(self._theme_factory, self._muc_theme_factory)
+        self._chat_window = ChatWindow(self._theme_factory,
+                                       self._muc_theme_factory,
+                                       icons=self._icons)
         self._chat_window.set_tab_title_length(
             self._config.chat.tab_title_length)
         self._chat_window.set_chat_options(self._config.chat)
@@ -565,6 +567,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ))
         self._conference_roster.add(room)
         self._roster._groups[tr("roster_group_conferences")].single_count = True
+        self._chat_window.set_contact_status(room, status)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
@@ -1287,6 +1290,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat and self._config.chat.show_status and old_show != show:
             chat.add_status(tr("status_changed", status=tr(f"status_{show}")),
                             time.strftime("%H:%M:%S"))
+        self._chat_window.set_contact_status(bare_jid, show)
         self._recount_groups()
         self._roster.sort_and_update()
         self._maybe_osd_status(bare_jid, show, old_show)
@@ -1330,6 +1334,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)
+        chat_show = next((user.status for user in self._roster._users
+                          if user.jid == jid), None)
+        self._chat_window.set_contact_status(jid, chat_show)
         if is_new:
             self._load_history(jid)
         self._reset_unread(jid)
