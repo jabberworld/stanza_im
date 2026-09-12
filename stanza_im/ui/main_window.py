@@ -153,9 +153,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.hide()
 
         # ── Tray ─────────────────────────────────────────────────
-        self._tray = TrayIcon(self)
+        self._tray = TrayIcon(self, icons=self._icons)
         self._tray.show_requested.connect(self._toggle_visibility)
         self._tray.quit_requested.connect(self._quit)
+        self._tray.settings_requested.connect(self._on_preferences)
+        self._tray.status_requested.connect(self._on_tray_status)
         self._set_tray_status_icon(self._config.last_status)
         self._tray.show()
 
@@ -1072,6 +1074,7 @@ class MainWindow(QtWidgets.QMainWindow):
         key = show if show in ("online", "chat", "away", "xa", "dnd", "offline") \
             else "offline"
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon(key)))
+        self._tray.set_current_status(key)
 
     # ── Roster management ─────────────────────────────────────────
 
@@ -2341,16 +2344,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self._status_combo.setCurrentIndex(idx)
             self._status_combo.blockSignals(False)
 
-    def _on_status_change(self, index: int):
-        show = self._status_combo.currentData()
-        if not show:
+    def _apply_status(self, show: str):
+        """Apply a status picked from the roster combo or the tray menu."""
+        if show not in ("online", "chat", "away", "xa", "dnd", "offline"):
             return
         self._config.last_status = show
+        self._set_status_combo(show)
+        self._set_tray_status_icon(show)
         if self._client:
             self._client.send_presence(show=show)
-        self._set_tray_status_icon(show)
         self._last_activity = time.monotonic()
         self._auto_status_applied = None
+
+    def _on_tray_status(self, show: str):
+        self._apply_status(show)
+
+    def _on_status_change(self, index: int):
+        self._apply_status(self._status_combo.currentData() or "")
 
     def eventFilter(self, obj, event):
         if event.type() in (QtCore.QEvent.Type.MouseMove,

@@ -7,9 +7,21 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import (
-    APP_ICON_16, APP_ICON_22, APP_ICON_32, APP_ICON_48, APP_ICON_SVG,
-    APP_NAME,
+    ACTIONS_DIR_16, APP_ICON_16, APP_ICON_22, APP_ICON_32, APP_ICON_48,
+    APP_ICON_SVG, APP_NAME, CATEGORIES_DIR_16, PLACES_DIR_22, STATUS_DIR_32,
 )
+
+_STATUS_KEYS = ("online", "chat", "away", "xa", "dnd", "offline")
+
+
+def _menu_icon(filename: str) -> QtGui.QIcon:
+    """Load an action/category/status icon for menus from resources."""
+    for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32,
+                      PLACES_DIR_22):
+        pix = QtGui.QPixmap(os.path.join(directory, filename))
+        if not pix.isNull():
+            return QtGui.QIcon(pix)
+    return QtGui.QIcon()
 
 
 def build_app_icon() -> QtGui.QIcon:
@@ -43,9 +55,14 @@ class TrayIcon(QtCore.QObject):
     quit_requested = QtCore.pyqtSignal()
     connect_requested = QtCore.pyqtSignal()
     disconnect_requested = QtCore.pyqtSignal()
+    settings_requested = QtCore.pyqtSignal()
+    status_requested = QtCore.pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, icons=None):
         super().__init__(parent)
+        self._icons = icons
+        self._current_status = "offline"
+        self._status_actions: dict[str, QtGui.QAction] = {}
         self._normal_icon = build_app_icon()
         self._tray = QtWidgets.QSystemTrayIcon(self._normal_icon)
         self._tray.setToolTip(APP_NAME)
@@ -57,6 +74,7 @@ class TrayIcon(QtCore.QObject):
         self._blink_active = False
 
         self._menu = QtWidgets.QMenu()
+        self._menu.aboutToShow.connect(self._sync_status_checks)
         self._build_menu()
 
     def show(self):
@@ -95,9 +113,30 @@ class TrayIcon(QtCore.QObject):
 
     def _build_menu(self):
         self._menu.addAction(QtGui.QIcon(), tr("tray_show"), self._on_show)
+        self._menu.addAction(_menu_icon("gtk-preferences.png"),
+                             tr("menu_preferences"), self.settings_requested.emit)
         self._menu.addSeparator()
-        self._menu.addAction(QtGui.QIcon(), tr("tray_quit"), self.quit_requested.emit)
+        for key in _STATUS_KEYS:
+            icon = QtGui.QIcon()
+            if self._icons is not None:
+                icon = QtGui.QIcon(self._icons.get_status_icon(key))
+            action = self._menu.addAction(icon, tr(f"status_{key}"))
+            action.setCheckable(True)
+            action.triggered.connect(lambda _=False, k=key:
+                                     self.status_requested.emit(k))
+            self._status_actions[key] = action
+        self._menu.addSeparator()
+        self._menu.addAction(QtGui.QIcon(), tr("tray_quit"),
+                             self.quit_requested.emit)
         self._tray.setContextMenu(self._menu)
+
+    def set_current_status(self, show: str):
+        """Remember the active presence show for the menu checkmark."""
+        self._current_status = show if show in _STATUS_KEYS else "offline"
+
+    def _sync_status_checks(self):
+        for key, action in self._status_actions.items():
+            action.setChecked(key == self._current_status)
 
     def _on_activated(self, reason):
         if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger:
