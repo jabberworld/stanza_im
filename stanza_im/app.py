@@ -1,5 +1,6 @@
 """Application entry point and asyncio+Qt event loop integration (via qasync)."""
 import asyncio
+import argparse
 import sys
 import logging
 import os
@@ -12,43 +13,88 @@ logger = logging.getLogger(__name__)
 
 _loop: asyncio.AbstractEventLoop | None = None
 
-_DEBUG_FLAGS = ("-d", "--debug")
-_XML_FLAGS = ("-x", "--xml")
-_MEMSTAT_FLAGS = ("-m", "--memstat")
-_LOG_FLAGS = ("-l", "--log")
+
+def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
+    prog = os.path.basename((argv or sys.argv)[0] or "stanza-im")
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="%s %s — XMPP/Jabber desktop client" % (APP_NAME, VERSION))
+    parser.add_argument("-d", "--debug", action="store_true",
+                        help="show debug messages in the console")
+    parser.add_argument("-x", "--xml", action="store_true",
+                        help="dump raw SEND/RECV XML to the console")
+    parser.add_argument("-l", "--log", action="store_true",
+                        help="write a full debug log (messages and XML) to a file")
+    parser.add_argument("-m", "--memstat", action="store_true",
+                        help="print periodic memory statistics to the console")
+    return parser
 
 
-def _clean_flags(found: bool, flags) -> list[str]:
-    return [] if found else [a for a in sys.argv if a not in flags]
+def parse_args(argv: list[str] | None = None):
+    """Parse the command line; returns ``(options, leftover_argv)``.
+
+    ``-h``/``--help`` prints the option list and raises ``SystemExit(0)``.
+    The leftover argv (original order, our flags removed) is meant for Qt.
+    """
+    return build_parser(argv).parse_known_args(argv)
+
+
+class _ConsoleFilter(logging.Filter):
+    """Route DEBUG output to the console only for the enabled keys.
+
+    INFO/WARNING/ERROR records are always shown (as before); DEBUG records
+    from the ``slixmpp.xmlstream`` logger (the SEND/RECV raw dump) appear
+    only with ``-x``, any other DEBUG only with ``-d``.  ``-l`` never widens
+    the console output — it only fills the log file.
+    """
+
+    def __init__(self, debug: bool, xml_dump: bool):
+        super().__init__()
+        self._debug = debug
+        self._xml_dump = xml_dump
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.WARNING or record.levelno == logging.INFO:
+            return True
+        if record.name.startswith("slixmpp.xmlstream"):
+            return self._xml_dump
+        return self._debug
 
 
 def configure_logging(debug: bool, xml_dump: bool, file_log: bool = False) -> None:
-    """Set up logging levels.
+    """Set up logging levels and destinations.
 
-    ``debug`` enables slixmpp's plugin-level debugging; ``xml_dump`` toggles
-    the raw SEND/RECV XML stream output independently (``-x/--xml``).
+    ``debug`` enables slixmpp/plugin debug output to the console; ``xml_dump``
+    enables the raw SEND/RECV XML stream output to the console.  ``file_log``
+    mirrors ALL debug output (messages and XML) into ``APP_LOG_FILE``,
+    regardless of ``debug``/``xml_dump``.
     """
-    level = logging.DEBUG if (debug or file_log) else logging.INFO
-
-    if xml_dump:
-        # Dump SEND/RECV XML regardless of the general debug level.
-        logging.getLogger("slixmpp.xmlstream").setLevel(logging.DEBUG)
+    # What gets generated: the full debug/message width needed by the file or
+    # by a console switch.  Per-logger levels gate record creation; handler
+    # filters below decide where each record is shown.
+    root_level = logging.DEBUG if (debug or file_log) else logging.INFO
     if debug or file_log:
         logging.getLogger("slixmpp").setLevel(logging.DEBUG)
-        if not xml_dump and not file_log:
-            # Debug without XML noise: keep the raw stream at INFO.
-            logging.getLogger("slixmpp.xmlstream").setLevel(logging.INFO)
+    if xml_dump or file_log:
+        logging.getLogger("slixmpp.xmlstream").setLevel(logging.DEBUG)
+    else:
+        # Keep the raw stream quiet even when slixmpp debug is on.
+        logging.getLogger("slixmpp.xmlstream").setLevel(logging.INFO)
 
-    handlers = [logging.StreamHandler()]
+    handlers: list[logging.Handler] = []
+    console = logging.StreamHandler()
+    console.addFilter(_ConsoleFilter(debug, xml_dump))
+    handlers.append(console)
+
     if file_log:
         try:
             os.unlink(APP_LOG_FILE)
         except FileNotFoundError:
             pass
         handlers.append(logging.FileHandler(APP_LOG_FILE, encoding="utf-8"))
-        logging.getLogger("slixmpp.xmlstream").setLevel(logging.DEBUG)
+
     logging.basicConfig(
-        level=level,
+        level=root_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
         force=True,
@@ -67,23 +113,16 @@ def run() -> int:
     enter the event loop.  Returns the exit code."""
     global _loop
 
-    debug = any(f in sys.argv for f in _DEBUG_FLAGS)
-    xml_dump = any(f in sys.argv for f in _XML_FLAGS)
-    memstat = any(f in sys.argv for f in _MEMSTAT_FLAGS)
-    file_log = any(f in sys.argv for f in _LOG_FLAGS)
+    args, leftover = parse_args()
+    sys.argv = leftover
+    debug = args.debug
+    xml_dump = args.xml
+    file_log = args.log
+    memstat = args.memstat
 
     from stanza_im.core import memstats
     if memstat:
         memstats.start_tracking()
-
-    if debug:
-        sys.argv = [a for a in sys.argv if a not in _DEBUG_FLAGS]
-    if xml_dump:
-        sys.argv = [a for a in sys.argv if a not in _XML_FLAGS]
-    if memstat:
-        sys.argv = [a for a in sys.argv if a not in _MEMSTAT_FLAGS]
-    if file_log:
-        sys.argv = [a for a in sys.argv if a not in _LOG_FLAGS]
 
     configure_logging(debug, xml_dump, file_log)
     if debug:
