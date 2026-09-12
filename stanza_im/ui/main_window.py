@@ -2473,6 +2473,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     logger.debug("Some background tasks did not cancel in time")
             self.app.quit()
 
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key.Key_Escape:
+            self._visible = False
+            self.hide()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event):
         if self._shutting_down:
             event.accept()

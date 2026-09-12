@@ -21,6 +21,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.ui.chat_window import ChatWindow
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.icons import init_icons
+from stanza_im.ui.main_window import MainWindow
 
 FAILURES = []
 
@@ -97,6 +98,31 @@ cw_no_icons.set_contact_status("eve@example.com", "online")
 icon = _tab_icon(cw_no_icons, "eve@example.com")
 check("no icons param: icon empty (fallback)", not _icon_non_empty(icon))
 
+# ── MainWindow Esc hides to tray ───────────────────────────────────
+
+win = MainWindow(app)
+win._idle_timer.stop()
+win._tray.hide()   # no real systray in tests
+win.show()
+
+esc = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress,
+                      QtCore.Qt.Key.Key_Escape,
+                      QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(win, esc)
+
+check("Esc: window hidden", not win.isVisible())
+check("Esc: _visible is False", win._visible is False)
+check("Esc accepted", esc.isAccepted())
+
+# non-Esc key: super() path, window stays visible
+win.show()
+non_esc = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress,
+                          QtCore.Qt.Key.Key_A,
+                          QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(win, non_esc)
+check("non-Esc: window still visible", win.isVisible())
+
+win.close()
 cw.close()
 cw2.close()
 cw3.close()
@@ -104,6 +130,6 @@ cw4.close()
 cw5.close()
 cw_no_icons.close()
 
-print("\nAll icon tests passed ✓" if not FAILURES
-      else f"\n{len(FAILURES)} failures ✓")
+print("\nAll tests passed ✓" if not FAILURES
+      else f"\n{len(FAILURES)} failures")
 sys.exit(1 if FAILURES else 0)
