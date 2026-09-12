@@ -208,6 +208,20 @@ def _is_tls(sock) -> bool:
     return isinstance(sock, (ssl.SSLSocket, ssl.SSLObject))
 
 
+def filter_plus_mechs(mechanisms, tls_version: str, binding_types) -> set:
+    """Drop ``*-PLUS`` SASL mechanisms when their channel binding is unusable.
+
+    Over TLS 1.3 the binding requires ``tls-exporter``; on Python builds
+    without it (e.g. 3.11) a SCRAM-PLUS attempt would send an invalid binding
+    and the server would reject it, causing a transient auth error.  TLS 1.2
+    uses ``tls-unique`` and is unaffected.
+    """
+    mechanisms = set(mechanisms)
+    if tls_version == "TLSv1.3" and "tls-exporter" not in binding_types:
+        return {m for m in mechanisms if not m.endswith("-PLUS")}
+    return mechanisms
+
+
 def order_tls_first(records: list, tls_services) -> list:
     """Sort SRV records so direct-TLS services come before the rest."""
     if not tls_services:
@@ -220,12 +234,40 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
 
     _tls_first = False
     _require_starttls = False
+    _dns_hosts: dict = {}
+    _connected_target: tuple | None = None
 
     async def get_dns_records(self, domain, port=None):
         records = await super().get_dns_records(domain, port)
+        # (address, port) -> SRV target host, so the actual endpoint can be
+        # reported in the connection info.
+        self._dns_hosts = {(rec[2], rec[3]): rec[1] for rec in records}
         if self._tls_first:
             records = order_tls_first(records, self.tls_services)
         return records
+
+    async def _attempt_connection(self, host, port, tls, server_hostname):
+        ok = await super()._attempt_connection(host, port, tls, server_hostname)
+        if ok:
+            target = self._dns_hosts.get((host, port), host)
+            self._connected_target = (target, port, tls)
+        return ok
+
+    def _drop_unusable_plus_mechs(self, features) -> None:
+        """Avoid a doomed SCRAM-*-PLUS attempt on TLS 1.3 without binding."""
+        sock = getattr(self, "socket", None)
+        if not _is_tls(sock) or 'mechanisms' not in features['features']:
+            return
+        try:
+            version = sock.version() or ""
+        except Exception:
+            return
+        mechs = filter_plus_mechs(features['mechanisms'], version,
+                                  ssl.CHANNEL_BINDING_TYPES)
+        if mechs != set(features['mechanisms']):
+            logger.info("SASL: disabling -PLUS without channel binding "
+                        "(TLS %s)", version)
+            self.plugin['feature_mechanisms'].use_mechs = mechs
 
     async def _handle_stream_features(self, features):
         if (self._require_starttls and not _is_tls(getattr(self, "socket", None))
@@ -236,6 +278,7 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
             self.event('tls_required')
             self.disconnect()
             return True
+        self._drop_unusable_plus_mechs(features)
         return await super()._handle_stream_features(features)
 
 
@@ -413,6 +456,7 @@ class JabberClient:
 
     async def connect_async(self) -> None:
         """Connect to the XMPP server and start the session."""
+        self.xmpp._connected_target = None
         if (self.tls_mode == "direct" and not self.host):
             domain = self.jid_str.split("@")[-1]
             from stanza_im.core.discovery import resolve_client_srv
@@ -454,8 +498,11 @@ class JabberClient:
         mech = getattr(x.plugin.get("feature_mechanisms", None), "mech", None)
         if mech is not None:
             info["sasl"] = getattr(mech, "name", "") or ""
+        target = getattr(x, "_connected_target", None)
         custom = getattr(x, "custom_address", None)
-        if custom:
+        if target:
+            info["host"], info["port"] = str(target[0]), int(target[1])
+        elif custom:
             info["host"], info["port"] = str(custom[0]), int(custom[1])
         else:
             bound = getattr(x, "boundjid", None)
@@ -513,6 +560,9 @@ class JabberClient:
                     kwargs["server_hostname"] = server_hostname
                 await xmpp.loop.create_connection(lambda: xmpp, **kwargs)
                 xmpp._connect_loop_wait = 0
+                target = getattr(xmpp, "_dns_hosts", {}).get(
+                    (target_host, target_port), target_host)
+                xmpp._connected_target = (target, target_port, tls)
                 return True
             except Exception as exc:
                 logger.warning("SOCKS5 connection attempt failed: %s", exc)

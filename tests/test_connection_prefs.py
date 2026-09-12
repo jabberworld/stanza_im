@@ -22,7 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6 import QtWidgets
 from stanza_im.core.storage import Config
-from stanza_im.core.client import JabberClient, tls_flags, order_tls_first
+from stanza_im.core.client import (JabberClient, tls_flags, order_tls_first,
+                                    filter_plus_mechs)
 from stanza_im.i18n import load as load_i18n
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.preferences import PreferencesDialog
@@ -105,6 +106,19 @@ check("SRV order: no tls services -> unchanged",
       order_tls_first(_records, set()) == _records)
 
 
+# ── filter_plus_mechs: SCRAM-*-PLUS only when binding works ───────
+
+_mechs = {"PLAIN", "SCRAM-SHA-1-PLUS", "SCRAM-SHA-1"}
+check("mechs: TLS1.3 without tls-exporter drops -PLUS",
+      filter_plus_mechs(_mechs, "TLSv1.3", ["tls-unique"])
+      == {"PLAIN", "SCRAM-SHA-1"})
+check("mechs: TLS1.3 with tls-exporter keeps -PLUS",
+      filter_plus_mechs(_mechs, "TLSv1.3", ["tls-unique", "tls-exporter"])
+      == _mechs)
+check("mechs: TLS1.2 keeps -PLUS (tls-unique)",
+      filter_plus_mechs(_mechs, "TLSv1.2", ["tls-unique"]) == _mechs)
+
+
 # ── connection_info: mode / TLS / SASL / keepalive ────────────────
 
 from types import SimpleNamespace
@@ -159,6 +173,50 @@ check("info: direct TLS detected", info_direct["mode"] == "direct")
 check("info: TLS version reported", info_direct["tls_version"] == "TLSv1.3")
 check("info: cipher reported",
       info_direct["cipher"] == "TLS_AES_256_GCM_SHA384")
+
+
+_fake = _FakeXmpp(set(), _FakeTlsSocket())
+_fake.custom_address = ("linuxoid.in", 5222)
+_fake._connected_target = ("xmpp.linuxoid.in", 5223, True)
+client = object.__new__(JabberClient)
+client.xmpp = _fake
+client.keepalive = True
+info_target = client.connection_info()
+check("info: actual SRV target preferred over default",
+      info_target["host"] == "xmpp.linuxoid.in"
+      and info_target["port"] == 5223)
+
+
+# ── _drop_unusable_plus_mechs integration ─────────────────────────
+
+from stanza_im.core.client import _StanzaXMPP
+
+
+class _Features:
+    def __init__(self):
+        self._d = {"features": {"mechanisms"},
+                   "mechanisms": ["PLAIN", "SCRAM-SHA-1-PLUS", "SCRAM-SHA-1"]}
+
+    def __getitem__(self, key):
+        return self._d[key]
+
+
+class _VersionedSock:
+    def version(self):
+        return "TLSv1.3"
+
+
+_stanza = object.__new__(_StanzaXMPP)
+_stanza.socket = _VersionedSock()
+_plugin = SimpleNamespace()
+_stanza.plugin = {"feature_mechanisms": _plugin}
+_client_mod._is_tls = lambda sock: True
+try:
+    _stanza._drop_unusable_plus_mechs(_Features())
+finally:
+    _client_mod._is_tls = _orig_is_tls
+check("mechs: -PLUS excluded via _drop_unusable_plus_mechs",
+      _plugin.use_mechs == {"PLAIN", "SCRAM-SHA-1"})
 
 
 
