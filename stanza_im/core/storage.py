@@ -94,6 +94,8 @@ class Config:
                         "file_proxy_mode": "auto", "file_proxy_manual": "",
                         "stun_turn_mode": "auto", "stun_turn_manual": "",
                         "keepalive": True,
+                        "stream_management": True,
+                        "csi": True,
                         "tls_mode": "prefer",
                         "starttls_mode": "always",
                         "message_carbons": True,

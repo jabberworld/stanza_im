@@ -140,6 +140,8 @@ def _info(features, sock):
     client = object.__new__(JabberClient)
     client.xmpp = _FakeXmpp(features, sock)
     client.keepalive = True
+    client.stream_management = False
+    client.csi = False
     return client.connection_info()
 
 
@@ -181,6 +183,8 @@ _fake._connected_target = ("xmpp.linuxoid.in", 5223, True)
 client = object.__new__(JabberClient)
 client.xmpp = _fake
 client.keepalive = True
+client.stream_management = False
+client.csi = False
 info_target = client.connection_info()
 check("info: actual SRV target preferred over default",
       info_target["host"] == "xmpp.linuxoid.in"
@@ -365,6 +369,56 @@ asyncio.run(dlg2._run_refresh_discovery())
 check("refresh button triggers discovery", fake.refreshed == 1)
 check("refresh button restored after run",
       dlg2._btn_discovery_refresh.isEnabled())
+
+
+# ── XEP-0198 / XEP-0352 support ───────────────────────────────────
+
+check("default stream_management=True", conn.stream_management is True)
+check("default csi=True", conn.csi is True)
+
+sm_client = JabberClient("u@example.org", "p",
+                         stream_management=True, csi=True)
+check("SM plugin registered", "xep_0198" in sm_client.xmpp.plugin)
+check("CSI plugin registered", "xep_0352" in sm_client.xmpp.plugin)
+
+off_client = JabberClient("u@example.org", "p",
+                          stream_management=False, csi=False)
+check("SM plugin absent when disabled", "xep_0198" not in off_client.xmpp.plugin)
+check("CSI plugin absent when disabled", "xep_0352" not in off_client.xmpp.plugin)
+
+# Event mapping slixmpp -> app.
+_events = []
+sm_client.on("sm_enabled", lambda: _events.append("sm"))
+sm_client.on("stream_resumed", lambda: _events.append("resumed"))
+sm_client.on("sm_failed", lambda: _events.append("failed"))
+sm_client.xmpp.event("sm_enabled", None)
+sm_client.xmpp.event("session_resumed", None)
+sm_client.xmpp.event("sm_failed", None)
+check("SM events mapped", _events == ["sm", "resumed", "failed"])
+
+# set_client_active drives the CSI plugin.
+_calls = []
+csi_plugin = sm_client.xmpp.plugin["xep_0352"]
+csi_plugin.enabled = True
+csi_plugin.send_active = lambda: _calls.append("active")
+csi_plugin.send_inactive = lambda: _calls.append("inactive")
+sm_client._csi_enabled = True
+sm_client._client_active = True
+sm_client.xmpp._session_started = True
+sm_client.set_client_active(False)
+check("CSI inactive sent", _calls == ["inactive"])
+check("CSI state inactive", sm_client.csi_state() == "inactive")
+sm_client.set_client_active(True)
+check("CSI active sent", _calls == ["inactive", "active"])
+check("CSI state active", sm_client.csi_state() == "active")
+
+sm_info = sm_client.connection_info()
+check("connection_info has sm/csi",
+      "sm" in sm_info and "csi" in sm_info)
+
+check("no resume expected without sm_id", not sm_client.resume_expected())
+sm_client.xmpp.plugin["xep_0198"].sm_id = "x"
+check("resume expected with sm_id", sm_client.resume_expected())
 
 
 print("\nAll tests passed ✓" if not FAILURES

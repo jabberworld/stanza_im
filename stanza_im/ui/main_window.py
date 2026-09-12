@@ -1011,6 +1011,8 @@ class MainWindow(QtWidgets.QMainWindow):
             proxy_host=getattr(connection, "proxy_host", ""),
             proxy_port=getattr(connection, "proxy_port", 0),
             keepalive=getattr(connection, "keepalive", True),
+            stream_management=getattr(connection, "stream_management", True),
+            csi=getattr(connection, "csi", True),
             tls_mode=getattr(connection, "tls_mode", "prefer"),
             starttls_mode=getattr(connection, "starttls_mode", "always"),
         )
@@ -1079,6 +1081,10 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("auth_failed", self._on_auth_failed)
         c.on("disconnected", self._on_disconnected)
         c.on("tls_required", self._on_tls_required)
+        c.on("stream_resumed", self._on_stream_resumed)
+        c.on("sm_failed", self._on_sm_failed)
+        c.on("sm_disabled", self._on_sm_disabled)
+        c.on("csi_enabled", self._on_csi_enabled)
         c.on("subscribed", self._on_subscribed)
         c.on("vcard_received", self._on_vcard_received)
         c.on("typing", self._on_typing)
@@ -1111,8 +1117,41 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     def _on_disconnected(self):
-        self._tray.show_message(APP_NAME, "Disconnected from server")
+        # With stream management a transient drop is usually resumed, so
+        # avoid a scary "Disconnected" message until resumption fails.
+        if self._client is not None and self._client.resume_expected():
+            self._resume_pending = True
+            self._tray.show_message(APP_NAME, tr("login_reconnecting"))
+        else:
+            self._resume_pending = False
+            self._tray.show_message(APP_NAME, tr("login_disconnected"))
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
+
+    def _on_stream_resumed(self):
+        logger.info("Connection restored (stream resumed)")
+        self._resume_pending = False
+        self._set_tray_status_icon(self._config.last_status)
+        if self._visible:
+            self._tray.show_message(APP_NAME, tr("login_reconnected"))
+        self._update_csi()
+
+    def _on_sm_failed(self):
+        self._resume_pending = False
+        self._tray.show_message(APP_NAME, tr("login_disconnected"))
+
+    def _on_sm_disabled(self):
+        self._resume_pending = False
+
+    def _on_csi_enabled(self):
+        self._update_csi()
+
+    def _update_csi(self):
+        """Send the current activity state (XEP-0352) to the server."""
+        if self._client is None:
+            return
+        active = (self.app.applicationState()
+                  == QtCore.Qt.ApplicationState.ApplicationActive)
+        self._client.set_client_active(active)
 
     def _set_tray_status_icon(self, show: str):
         """Use the presence status icon in the tray (right away)."""
@@ -2461,6 +2500,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._set_tray_status_icon(self._config.last_status)
                 self._set_status_combo(self._config.last_status)
                 self._auto_status_applied = None
+        elif event.type() in (QtCore.QEvent.Type.ApplicationStateChange,
+                              QtCore.QEvent.Type.WindowActivate,
+                              QtCore.QEvent.Type.WindowDeactivate):
+            self._update_csi()
         return super().eventFilter(obj, event)
 
     def _check_auto_status(self):
@@ -2521,6 +2564,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.raise_()
             self.activateWindow()
             self._visible = True
+        self._update_csi()
 
     def _quit(self):
         if self._shutting_down:
@@ -2558,6 +2602,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if event.key() == QtCore.Qt.Key.Key_Escape:
             self._visible = False
             self.hide()
+            self._update_csi()
             event.accept()
             return
         super().keyPressEvent(event)
@@ -2575,11 +2620,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._quit()
             event.accept()
             event.accept()
+        self._update_csi()
 
     def showEvent(self, event):
         super().showEvent(event)
         self._visible = True
         self._flush_roster_repaint()
+        self._update_csi()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -2588,3 +2635,4 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._visible = False
                 self._save_window_geometry()
                 QtCore.QTimer.singleShot(0, self.hide)
+                self._update_csi()

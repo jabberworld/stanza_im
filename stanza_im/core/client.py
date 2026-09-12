@@ -304,6 +304,8 @@ class JabberClient:
                  proxy_mode: str = "none", proxy_host: str = "",
                  proxy_port: int = 0,
                  keepalive: bool = True,
+                 stream_management: bool = True,
+                 csi: bool = True,
                  tls_mode: str = "prefer",
                  starttls_mode: str = "always"):
         self.jid_str = str(jid).split("/")[0]
@@ -316,6 +318,11 @@ class JabberClient:
         self.proxy_host = proxy_host
         self.proxy_port = int(proxy_port or 0)
         self.keepalive = bool(keepalive)
+        self.stream_management = bool(stream_management)
+        self.csi = bool(csi)
+        self._client_active = True
+        self._sm_resumed = False
+        self._csi_enabled = False
         self.tls_mode = tls_mode
         self.starttls_mode = starttls_mode
         self._discovered: dict | None = None
@@ -379,6 +386,10 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0163")  # PEP
         self.xmpp.register_plugin("xep_0060")  # PubSub
         self.xmpp.register_plugin("xep_0065")  # SOCKS5 Bytestreams (file proxy)
+        if self.stream_management:
+            self.xmpp.register_plugin("xep_0198")  # Stream Management
+        if self.csi:
+            self.xmpp.register_plugin("xep_0352")  # Client State Indication
 
         # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
@@ -428,6 +439,13 @@ class JabberClient:
         self.xmpp.add_event_handler("receipt_received", self._on_receipt_received)
         self.xmpp.add_event_handler("carbon_received", self._on_carbon_received)
         self.xmpp.add_event_handler("carbon_sent", self._on_carbon_sent)
+        if self.stream_management:
+            self.xmpp.add_event_handler("sm_enabled", self._on_sm_enabled)
+            self.xmpp.add_event_handler("session_resumed", self._on_session_resumed)
+            self.xmpp.add_event_handler("sm_failed", self._on_sm_failed)
+            self.xmpp.add_event_handler("sm_disabled", self._on_sm_disabled)
+        if self.csi:
+            self.xmpp.add_event_handler("csi_enabled", self._on_csi_enabled)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -487,6 +505,8 @@ class JabberClient:
             mode = "plain"
         info = {"mode": mode, "tls_version": "", "cipher": "",
                 "sasl": "", "keepalive": self.keepalive,
+                "sm": self.stream_management_state(),
+                "csi": self.csi_state(),
                 "host": "", "port": 0}
         if _is_tls(sock):
             try:
@@ -510,6 +530,42 @@ class JabberClient:
                 else x.default_domain
             info["port"] = x.default_port
         return info
+
+    def stream_management_state(self) -> str:
+        """``off`` / ``enabled`` / ``resumed`` for the info icon."""
+        if not self.stream_management or "xep_0198" not in self.xmpp.plugin:
+            return "off"
+        if getattr(self.xmpp.plugin["xep_0198"], "enabled_in", False):
+            return "resumed" if self._sm_resumed else "enabled"
+        return "off"
+
+    def csi_state(self) -> str:
+        """``off`` / ``active`` / ``inactive`` for the info icon."""
+        if not self.csi or not self._csi_enabled:
+            return "off"
+        return "active" if self._client_active else "inactive"
+
+    def set_client_active(self, active: bool) -> None:
+        """Tell the server (XEP-0352) whether the client is in use."""
+        active = bool(active)
+        if active == self._client_active and self._csi_enabled:
+            return
+        self._client_active = active
+        self._sync_csi()
+
+    def _sync_csi(self) -> None:
+        """Send the current CSI state if the server supports it."""
+        if not self.csi or "xep_0352" not in self.xmpp.plugin:
+            return
+        plugin = self.xmpp.plugin["xep_0352"]
+        if not getattr(plugin, "enabled", False):
+            return
+        if not getattr(self.xmpp, "_session_started", False):
+            return
+        if self._client_active:
+            plugin.send_active()
+        else:
+            plugin.send_inactive()
 
     def discovered_services(self) -> dict | None:
         """Latest background discovery result (file proxy + STUN/TURN)."""
@@ -1750,6 +1806,7 @@ class JabberClient:
             loop.create_task(self._mds_init())
         self.emit("session_started")
         self.emit("connection_info", self.connection_info())
+        self._sync_csi()
         loop = asyncio.get_event_loop()
         loop.create_task(self._autojoin_bookmarks())
         # File-transfer proxy / STUN-TURN discovery is only needed for p2p
@@ -2294,6 +2351,40 @@ class JabberClient:
     def _on_disconnected(self, event) -> None:
         logger.info("Disconnected from server")
         self.emit("disconnected")
+
+    def resume_expected(self) -> bool:
+        """Whether a dropped connection is likely to be resumed (XEP-0198)."""
+        if not self.stream_management or "xep_0198" not in self.xmpp.plugin:
+            return False
+        plugin = self.xmpp.plugin["xep_0198"]
+        return bool(getattr(plugin, "sm_id", None)) \
+            and bool(getattr(self.xmpp, "auto_reconnect", False))
+
+    def _on_sm_enabled(self, _event=None) -> None:
+        logger.info("Stream management enabled")
+        self._sm_resumed = False
+        self.emit("sm_enabled")
+
+    def _on_session_resumed(self, _event=None) -> None:
+        logger.info("Stream resumed (XEP-0198)")
+        self._sm_resumed = True
+        self._sync_csi()
+        self.emit("stream_resumed")
+
+    def _on_sm_failed(self, _event=None) -> None:
+        logger.warning("Stream management resumption failed")
+        self._sm_resumed = False
+        self.emit("sm_failed")
+
+    def _on_sm_disabled(self, _event=None) -> None:
+        self._sm_resumed = False
+        self.emit("sm_disabled")
+
+    def _on_csi_enabled(self, _event=None) -> None:
+        logger.info("Client state indication enabled")
+        self._csi_enabled = True
+        self._sync_csi()
+        self.emit("csi_enabled")
 
     def _on_presence_error(self, pres) -> None:
         frm = str(pres["from"])
