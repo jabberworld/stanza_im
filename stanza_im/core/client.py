@@ -1027,6 +1027,7 @@ class JabberClient:
         from stanza_im.core import history
         gi = self.groupchats.get(room)
         my_nick = gi.nick if gi else ""
+        rows: list[dict] = []
         for entry in entries:
             try:
                 forwarded = entry.get("forwarded") if hasattr(entry, "get") else None
@@ -1041,15 +1042,20 @@ class JabberClient:
                 stamp = _stanza_value(_stanza_value(msg, "delay"), "stamp")
                 if isinstance(stamp, datetime.datetime):
                     stamp = stamp.strftime("%Y-%m-%dT%H:%M:%S")
-                history.store_message(room, direction, body,
-                                      timestamp=_normalize_ts(str(stamp)) or None,
-                                      sender=sender, skip_existing=True,
-                                      origin_id=_stanza_id(msg, room) or "",
-                                      reply_to=_reply_reference(msg)[0],
-                                      reply_id=_reply_reference(msg)[1])
+                rows.append({
+                    "direction": direction,
+                    "body": body,
+                    "timestamp": _normalize_ts(str(stamp)) or None,
+                    "sender": sender,
+                    "origin_id": _stanza_id(msg, room) or "",
+                    "reply_to": _reply_reference(msg)[0],
+                    "reply_id": _reply_reference(msg)[1],
+                })
             except Exception:
                 logger.debug("Could not store MUC join history for %s",
                              room, exc_info=True)
+        if rows:
+            self._start_task(history.store_many_async(room, rows))
 
     def _muc_task_done(self, room: str, task) -> None:
         """Consume the join task's result so asyncio never warns about an
@@ -2167,6 +2173,7 @@ class JabberClient:
         skipped = 0
         duplicates = 0
         skip_reasons: dict[str, int] = {}
+        rows: list[dict] = []
         for result in results:
             try:
                 fwd = _stanza_value(result, "forwarded")
@@ -2210,23 +2217,26 @@ class JabberClient:
                     stable = _stanza_id(msg, jid) or _archive_result_id(result)
                 else:
                     stable = _origin_id(msg) or str(msg.get("id") or "")
-                inserted = history.store_message(
-                    jid, direction, body, timestamp=ts or None,
-                    sender=sender, skip_existing=True,
-                    archive_id=_archive_result_id(result),
-                    origin_id=stable,
-                    reply_to=_reply_reference(msg)[0],
-                    reply_id=_reply_reference(msg)[1])
-                if inserted:
-                    stored += 1
-                else:
-                    duplicates += 1
+                rows.append({
+                    "direction": direction,
+                    "body": body,
+                    "timestamp": ts or None,
+                    "sender": sender,
+                    "archive_id": _archive_result_id(result),
+                    "origin_id": stable,
+                    "reply_to": _reply_reference(msg)[0],
+                    "reply_id": _reply_reference(msg)[1],
+                })
             except Exception:
                 skipped += 1
                 skip_reasons["exception"] = skip_reasons.get("exception", 0) + 1
                 logger.debug("Could not parse MAM result for %s",
                              jid, exc_info=True)
                 continue
+        if rows:
+            inserted = await history.store_many_async(jid, rows)
+            stored = inserted
+            duplicates = len(rows) - inserted
         logger.info("MAM returned %d results for %s: parsed=%d skipped=%d "
                     "duplicates=%d stored=%d", len(results), jid, parsed,
                     skipped, duplicates, stored)

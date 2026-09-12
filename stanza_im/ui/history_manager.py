@@ -7,6 +7,7 @@ and day-navigation buttons.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -54,6 +55,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._match_index = -1
         self._all_days: list[str] = []
         self._message_blocks: list[int] = []
+        self._released = False
 
         self.setWindowTitle(tr("history_manager"))
         self.resize(920, 620)
@@ -62,6 +64,21 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if initial_jid:
             self._select_jid(initial_jid)
         self._search.setFocus()
+
+    def _start_task(self, coro):
+        """Schedule *coro* on the shared asyncio loop (best-effort)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return None
+        return loop.create_task(coro)
+
+    def done(self, result):
+        self._released = True
+        super().done(result)
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QHBoxLayout(self)
@@ -246,9 +263,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         contact = next((c for c in self._catalog if c["jid"] == jid), None)
         if contact is None:
             return
+        self._start_task(self._select_jid_async(jid, contact["name"]))
+
+    async def _select_jid_async(self, jid: str, name: str) -> None:
+        if self._released:
+            return
         if jid != self._jid and not os.path.isfile(history._path(jid)):
-            history.migrate_from_jsonl(jid)
-        self._set_contact(jid, contact["name"])
+            await history.migrate_from_jsonl_async(jid)
+        if self._released or jid != self._jid:
+            return
+        self._set_contact(jid, name)
         self._sync_tree_selection(jid)
 
     def _sync_tree_selection(self, jid: str) -> None:
@@ -279,9 +303,17 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._select_date("")
             return
         if history.has_history(jid):
-            self._dates = history.dates(jid)
+            self._start_task(self._set_contact_dates(jid))
         else:
             self._dates = []
+            self._select_date("")
+
+    async def _set_contact_dates(self, jid: str) -> None:
+        if self._released or jid != self._jid:
+            return
+        self._dates = await history.dates_async(jid)
+        if self._released or jid != self._jid:
+            return
         self._mark_calendar_dates()
         self._date = ""
         if self._dates:
@@ -316,6 +348,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._show_empty_day(value)
 
     def _select_date(self, date: str) -> None:
+        """Sync shim: navigation does not await the (async) day load."""
+        self._start_task(self._select_date_async(date))
+
+    async def _select_date_async(self, date: str) -> None:
+        if self._released:
+            return
         if date == self._date and date in self._dates:
             return
         self._date = date
@@ -326,7 +364,9 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 self._calendar.setSelectedDate(QtCore.QDate(y, m, d))
             except ValueError:
                 pass
-        self._load_date(date)
+        await self._load_date_async(date)
+        if self._released or date != self._date:
+            return
         self._update_nav_state()
         if not self._btn_all_time.isChecked():
             self._results.hide()
@@ -373,7 +413,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._status.setText(
                 tr("history_no_history") if self._jid else "")
             return
-        self._entries = history.load_day(self._jid, date)
+        self._start_task(self._load_date_async(date))
+
+    async def _load_date_async(self, date: str) -> None:
+        if self._released:
+            return
+        entries = await history.load_day_async(self._jid, date)
+        if self._released or date != self._date:
+            return
+        self._entries = entries
         self._render_messages()
         if not self._entries:
             self._status.setText(tr("history_no_messages"))
@@ -440,8 +488,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._run_day_search()
 
     def _run_day_search(self) -> None:
+        self._start_task(self._run_day_search_async())
+
+    async def _run_day_search_async(self) -> None:
+        if self._released:
+            return
         if self._date:
-            self._load_date(self._date)
+            await self._load_date_async(self._date)
+            if self._released:
+                return
         self._find_day_matches()
         self._results.hide()
         self._match_index = 0 if self._matches else -1
@@ -453,7 +508,14 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._search.setFocus()
 
     def _run_all_time_search(self) -> None:
-        results = history.search_dates(self._jid, self._query)
+        self._start_task(self._run_all_time_search_async())
+
+    async def _run_all_time_search_async(self) -> None:
+        if self._released:
+            return
+        results = await history.search_dates_async(self._jid, self._query)
+        if self._released or self._query != self._search.text().strip():
+            return
         ordered = list(reversed(results))
         self._all_days = [date for date, _ in ordered]
         self._results.clear()
@@ -519,14 +581,22 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._search.setFocus()
 
     def _go_to_day(self, pos: int, last_match: bool = False) -> None:
+        """Sync shim — day loads are async, so defer the match step."""
         if not (0 <= pos < len(self._all_days)):
             return
         if not self._query:
             return
-        day = self._all_days[pos]
-        query = self._query
+        self._start_task(self._go_to_day_async(
+            self._all_days[pos], self._query, pos, last_match))
+
+    async def _go_to_day_async(self, day: str, query: str, pos: int,
+                               last_match: bool) -> None:
+        if self._released:
+            return
         if day != self._date:
-            self._select_date(day)
+            await self._select_date_async(day)
+            if self._released or day != self._date:
+                return
         self._query = query
         self._find_day_matches()
         self._match_index = len(self._matches) - 1 if last_match else 0

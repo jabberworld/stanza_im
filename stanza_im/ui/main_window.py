@@ -1344,20 +1344,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_history(self, jid: str):
         """Feed previously saved messages from the SQLite history into chat."""
+        self._start_task(self._load_history_async(jid))
+
+    async def _load_history_async(self, jid: str):
         from stanza_im.core import history
         chat = self._chat_window.get_chat(jid)
         if not chat:
             return
         if not os.path.isfile(history._path(jid)):
-            history.migrate_from_jsonl(jid)
+            await history.migrate_from_jsonl_async(jid)
         try:
             limit = int(self._config.chat.history_limit)
         except (TypeError, ValueError):
             limit = _HISTORY_BATCH_LIMIT
         limit = min(limit, _HISTORY_BATCH_LIMIT)
-        entries = history.load_history(jid, limit=limit)
-        exhausted = bool(entries) and not history.older_available_timestamp(
-            jid, entries[0].get("timestamp", ""))
+        chat = self._chat_window.get_chat(jid)
+        if chat is None:
+            return
+        entries = await history.load_history_async(jid, limit=limit)
+        exhausted = bool(entries) and not await \
+            history.older_available_timestamp_async(
+                jid, entries[0].get("timestamp", ""))
         chat.set_history(entries, limit, exhausted)
 
     def _on_contact_context(self, jid: str, pos):
@@ -1660,12 +1667,13 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_to=reply_to, reply_id=reply_id)
 
         from stanza_im.core import history
-        history.store_message(bare_jid, "incoming", body,
-                              timestamp=ts or _current_timestamp(),
-                              sender=sender_name,
-                              origin_id=reply_able_id,
-                              message_id=reply_able_id,
-                              reply_to=reply_to, reply_id=reply_id)
+        self._start_task(history.store_message_async(
+            bare_jid, "incoming", body,
+            timestamp=ts or _current_timestamp(),
+            sender=sender_name,
+            origin_id=reply_able_id,
+            message_id=reply_able_id,
+            reply_to=reply_to, reply_id=reply_id))
 
         # Unread badge + tray blink (skip when conversation is on screen)
         active = (self._chat_window.isVisible()
@@ -1706,11 +1714,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 reply_to=reply_to, reply_id=reply_id)
         self._remember_contact(jid)
         from stanza_im.core import history
-        history.store_message(
+        self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=ts or _current_timestamp(), sender="Me",
             origin_id=stable_id, message_id=stable_id,
-            reply_to=reply_to, reply_id=reply_id)
+            reply_to=reply_to, reply_id=reply_id))
 
     def _on_mds_displayed(self, chat_jid: str):
         """Another of our devices flagged *chat_jid* as displayed (XEP-0490)."""
@@ -1740,11 +1748,12 @@ class MainWindow(QtWidgets.QMainWindow):
                          reply_author=reply_author or f"{room}/{nick}",
                          reply_to=reply_to, reply_id=reply_id)
         from stanza_im.core import history
-        history.store_message(target, "incoming", body,
-                              timestamp=ts or _current_timestamp(), sender=nick,
-                              origin_id=reply_able_id,
-                              message_id=reply_able_id,
-                              reply_to=reply_to, reply_id=reply_id)
+        self._start_task(history.store_message_async(
+            target, "incoming", body,
+            timestamp=ts or _current_timestamp(), sender=nick,
+            origin_id=reply_able_id,
+            message_id=reply_able_id,
+            reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_message(nick, body, target)
         if (self._client and self._chat_window.isVisible()
                 and self._chat_window.current_jid() == target):
@@ -1762,10 +1771,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                  reply_able_id=message_id,
                                  reply_author=jid)
             from stanza_im.core import history
-            history.store_message(
+            self._start_task(history.store_message_async(
                 jid, "outgoing", body,
                 timestamp=_current_timestamp(), sender="Me",
-                origin_id=message_id, message_id=message_id)
+                origin_id=message_id, message_id=message_id))
             self._remember_contact(jid)
 
     # ── Groupchat ─────────────────────────────────────────────────
@@ -1777,11 +1786,12 @@ class MainWindow(QtWidgets.QMainWindow):
                               reply_to: str = "", reply_id: str = ""):
         if archived:
             from stanza_im.core import history
-            history.store_message(room, "incoming", body,
-                                  timestamp=ts or _current_timestamp(),
-                                  sender=nick, archive_id=archive_id,
-                                  origin_id=reply_able_id,
-                                  reply_to=reply_to, reply_id=reply_id)
+            self._start_task(history.store_message_async(
+                room, "incoming", body,
+                timestamp=ts or _current_timestamp(),
+                sender=nick, archive_id=archive_id,
+                origin_id=reply_able_id,
+                reply_to=reply_to, reply_id=reply_id))
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
@@ -1802,12 +1812,13 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id)
         from stanza_im.core import history
-        history.store_message(room, "incoming", body,
-                              timestamp=ts or _current_timestamp(), sender=nick,
-                              archive_id=archive_id,
-                              origin_id=reply_ref_id,
-                              message_id=reply_ref_id,
-                              reply_to=reply_to, reply_id=reply_id)
+        self._start_task(history.store_message_async(
+            room, "incoming", body,
+            timestamp=ts or _current_timestamp(), sender=nick,
+            archive_id=archive_id,
+            origin_id=reply_ref_id,
+            message_id=reply_ref_id,
+            reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_groupchat(room, nick, body)
         if (self._client and self._chat_window.isVisible()
                 and self._chat_window.current_jid() == room):
@@ -1899,11 +1910,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 reply_able_id=message_id, reply_author=jid,
                 reply_to=reply_to, reply_id=reply_id)
         from stanza_im.core import history
-        history.store_message(
+        self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=_current_timestamp(), sender="Me",
             origin_id=message_id, message_id=message_id,
-            reply_to=reply_to, reply_id=reply_id)
+            reply_to=reply_to, reply_id=reply_id))
         self._remember_contact(jid)
 
     def _on_groupchat_reply_send(self, room: str, body: str, reply_to: str,
@@ -1924,7 +1935,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.edit_message_by_ref(edit_id, body)
         from stanza_im.core import history
-        history.replace_message(jid, edit_id, body)
+        self._start_task(history.replace_message_async(
+            jid, edit_id, body))
         self._remember_contact(jid)
 
     def _on_groupchat_edit_send(self, room: str, body: str, edit_id: str):
@@ -2073,10 +2085,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 message_id=message_id,
                 reply_able_id=message_id, reply_author=jid)
         from stanza_im.core import history
-        history.store_message(
+        self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=_current_timestamp(), sender="Me",
-            origin_id=message_id, message_id=message_id)
+            origin_id=message_id, message_id=message_id))
         self._remember_contact(jid)
 
     async def _send_caption_after(self, jid: str, caption: str, tasks):
@@ -2149,7 +2161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.edit_message_by_ref(ref_id, body)
         from stanza_im.core import history
-        history.replace_message(bare, ref_id, body)
+        self._start_task(history.replace_message_async(bare, ref_id, body))
 
     def _on_groupchat_message_corrected(self, room: str, ref_id: str,
                                         body: str, ts, unstyled: bool = False,
@@ -2161,7 +2173,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.edit_message_by_ref(ref_id, body)
         from stanza_im.core import history
-        history.replace_message(room, ref_id, body)
+        self._start_task(history.replace_message_async(room, ref_id, body))
 
     def _participant_info(self, room: str, nick: str) -> dict:
         return self._muc_users.get(room, {}).get(nick, {})

@@ -7,6 +7,7 @@ MUC participants in a side panel.
 """
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import time
 import webbrowser
@@ -228,6 +229,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._bookmarked = False
         self._bookmark_action = None
         self._subjects: list[tuple[str, str]] = []
+        self._released = False
         self._last_view_h = 0
         self._build_ui(theme)
         self._view.near_top.connect(self._on_near_top)
@@ -1071,6 +1073,21 @@ class ChatWidget(QtWidgets.QWidget):
 
     # ── History window management ─────────────────────────────────
 
+    def _start_task(self, coro):
+        """Schedule *coro* on the shared asyncio loop (best-effort)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return None
+        return loop.create_task(coro)
+
+    def detach(self):
+        """Mark the widget as torn down: pending async history pages abort."""
+        self._released = True
+
     def set_history(self, entries: list[dict], window_size: int,
                     exhausted: bool):
         """Initial window: replace history rows and re-render from bottom."""
@@ -1137,33 +1154,42 @@ class ChatWidget(QtWidgets.QWidget):
 
     def server_fetch_done(self, stored: int):
         """Add the newly fetched older messages to the current window."""
-        from stanza_im.core import history
-
         self._server_fetching = False
         if stored < 0:
             self._hist_loading = False
             return
         if stored > 0:
             self._server_exhausted = False
-            before = self.oldest_ts()
-            if before:
-                rows = history.load_older_timestamp(
-                    self.jid, before, self._window_size)
-                # These rows belong to the MAM page just stored. Do not
-                # expose the same SQLite rows through a second paging path;
-                # the next page is controlled by the MAM archive cursor.
-                self.prepend_history(rows, True)
-                self._db_exhausted = True
-            else:
-                self._history = history.load_history(
-                    self.jid, limit=self._window_size)
-                self._merge_live_history()
-                self._db_exhausted = True
-                self._anchor_bottom = True
-                self._render_all()
+            self._start_task(self._apply_server_page())
         else:
             self._hist_loading = False
             self._server_exhausted = True
+
+    async def _apply_server_page(self):
+        """Fold the SQLite rows of the fetched MAM page into the window."""
+        if self._released:
+            return
+        from stanza_im.core import history
+        before = self.oldest_ts()
+        if before:
+            rows = await history.load_older_timestamp_async(
+                self.jid, before, self._window_size)
+            if self._released:
+                return
+            # These rows belong to the MAM page just stored. Do not
+            # expose the same SQLite rows through a second paging path;
+            # the next page is controlled by the MAM archive cursor.
+            self.prepend_history(rows, True)
+            self._db_exhausted = True
+        else:
+            self._history = await history.load_history_async(
+                self.jid, limit=self._window_size)
+            if self._released:
+                return
+            self._merge_live_history()
+            self._db_exhausted = True
+            self._anchor_bottom = True
+            self._render_all()
 
     def _merge_live_history(self):
         """Fold messages received during MAM loading into the DB window."""
@@ -1187,17 +1213,24 @@ class ChatWidget(QtWidgets.QWidget):
 
     def refresh_history(self, size: int | None = None):
         """Re-read the conversation tail from the local DB."""
-        from stanza_im.core import history
         size = size or self._window_size * 2
-        entries = history.load_history(self.jid, limit=size)
+        self._start_task(self._refresh_history_async(size))
+
+    async def _refresh_history_async(self, size):
+        if self._released:
+            return
+        from stanza_im.core import history
+        entries = await history.load_history_async(self.jid, limit=size)
+        if self._released:
+            return
         self._preserve_fraction = self._view.scroll_fraction()
-        self._hist_loading = False
         self._cleared = False
         self._server_fetching = False
         self._history = entries
-        self._db_exhausted = (not entries
-                              or not history.older_available_timestamp(
-                                  self.jid, self.oldest_ts()))
+        self._db_exhausted = bool(entries) and not await \
+            history.older_available_timestamp_async(
+                self.jid, self.oldest_ts())
+        self._hist_loading = False
         self._render_all()
 
     def first_loaded_id(self):
@@ -1236,17 +1269,24 @@ class ChatWidget(QtWidgets.QWidget):
         if self._db_exhausted:
             self.load_more_from_server()
             return
-        from stanza_im.core import history
         self._hist_loading = True
-        before_ts = self.oldest_ts()
-        if before_ts and history.older_available_timestamp(self.jid, before_ts):
-            rows = history.load_older_timestamp(
+        self._start_task(self._load_older_batch_async(self.oldest_ts()))
+
+    async def _load_older_batch_async(self, before_ts):
+        if self._released:
+            return
+        from stanza_im.core import history
+        if before_ts and await history.older_available_timestamp_async(
+                self.jid, before_ts):
+            rows = await history.load_older_timestamp_async(
                 self.jid, before_ts, self._batch_size())
+            if self._released:
+                return
             exhausted = not rows
             if rows:
                 next_before = rows[0].get("timestamp", "")
                 exhausted = not (next_before and
-                                 history.older_available_timestamp(
+                                 await history.older_available_timestamp_async(
                                      self.jid, next_before))
             self.prepend_history(rows, exhausted)
         else:

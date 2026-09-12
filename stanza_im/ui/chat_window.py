@@ -221,7 +221,9 @@ class ChatWindow(QtWidgets.QMainWindow):
     def close_chat(self, jid: str) -> None:
         self._remote_activity.pop(jid, None)
         if jid in self._tabs:
-            idx = self._tab_widget.indexOf(self._tabs[jid])
+            widget = self._tabs[jid]
+            widget.detach()
+            idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.removeTab(idx)
             del self._tabs[jid]
