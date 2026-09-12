@@ -280,6 +280,16 @@ class PreferencesDialog(QtWidgets.QDialog):
         proxy_form.addRow(self._connection_group())
         proxy_form.addRow(self._file_proxy_group())
         proxy_form.addRow(self._stun_turn_group())
+        can_refresh = (self._client is not None
+                       and hasattr(self._client, "refresh_services"))
+        self._btn_discovery_refresh = QtWidgets.QPushButton(
+            tr("prefs_discovery_refresh"))
+        refresh_icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "reload.png"))
+        if not refresh_icon.isNull():
+            self._btn_discovery_refresh.setIcon(refresh_icon)
+        self._btn_discovery_refresh.setEnabled(can_refresh)
+        self._btn_discovery_refresh.clicked.connect(self._on_refresh_discovery)
+        proxy_form.addRow(self._btn_discovery_refresh)
         proxy_form.addRow(QtWidgets.QLabel(tr("prefs_reconnect_hint")))
         return self._tabs([(tr("prefs_connection_tab"), connection),
                            (tr("prefs_advanced"), advanced),
@@ -375,8 +385,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                 data = getter()
         if not data:
             cache = DiscoveryCache()
-            _, proxy = cache.get("file_proxy", max_age=float("inf"))
-            _, stun = cache.get("stun_turn", max_age=float("inf"))
+            _, proxy = cache.get("file_proxy", max_age=float("inf"),
+                                 negative_max_age=float("inf"))
+            _, stun = cache.get("stun_turn", max_age=float("inf"),
+                                negative_max_age=float("inf"))
             data = {"file_proxy": proxy, "stun_turn": stun}
         return data
 
@@ -395,6 +407,24 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _on_services_discovered(self, *_args):
         self._refresh_discovery_labels()
+
+    def _on_refresh_discovery(self):
+        if self._client is None or not hasattr(self._client, "refresh_services"):
+            return
+        self._btn_discovery_refresh.setEnabled(False)
+        self._btn_discovery_refresh.setText(tr("prefs_discovery_refreshing"))
+        asyncio.create_task(self._run_refresh_discovery())
+
+    async def _run_refresh_discovery(self):
+        try:
+            await self._client.refresh_services()
+        except Exception:
+            pass
+        finally:
+            self._btn_discovery_refresh.setText(tr("prefs_discovery_refresh"))
+            self._btn_discovery_refresh.setEnabled(
+                self._client is not None
+                and hasattr(self._client, "refresh_services"))
 
     def _page_chat(self):
         general, general_form = self._page()

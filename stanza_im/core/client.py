@@ -344,13 +344,23 @@ class JabberClient:
         """Latest background discovery result (file proxy + STUN/TURN)."""
         return self._discovered
 
-    async def discover_services(self) -> dict:
+    async def discover_services(self, force: bool = False) -> dict:
         """Run/refresh file-proxy and STUN/TURN discovery and cache results."""
         from stanza_im.core.discovery import DiscoveryCache, refresh
         domain = self.jid_str.split("@")[-1]
-        self._discovered = await refresh(self.xmpp, domain, DiscoveryCache())
+        try:
+            self._discovered = await refresh(self.xmpp, domain,
+                                             DiscoveryCache(), force=force)
+        except Exception:
+            logger.exception("Service discovery failed")
+            if self._discovered is None:
+                self._discovered = {"file_proxy": None, "stun_turn": []}
         self.emit("services_discovered", self._discovered)
         return self._discovered
+
+    async def refresh_services(self) -> dict:
+        """Force a fresh discovery run (used by the preferences button)."""
+        return await self.discover_services(force=True)
 
     def _install_socks_proxy(self, proxy_host: str, proxy_port: int) -> None:
         """Route the XMPP TCP connection through a SOCKS5 proxy.

@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = os.path.join(CACHE_DIR, "discovery.json")
 MAX_AGE = 24 * 60 * 60
+# Negative (nothing found) results are cached only briefly so a transient
+# failure or an offline start is retried on the next connection.
+NEGATIVE_MAX_AGE = 10 * 60
 
 # Query order: encrypted variants first, and TURN before STUN within each
 # encryption class (TURN can relay traffic, STUN only discovers addresses).
@@ -58,21 +61,24 @@ class DiscoveryCache:
         except (OSError, ValueError):
             self._data = {}
 
-    def get(self, key: str, max_age: float = MAX_AGE):
+    def get(self, key: str, max_age: float = MAX_AGE,
+            negative_max_age: float = NEGATIVE_MAX_AGE):
         """Return ``(True, value)`` for a fresh entry, else ``(False, None)``.
 
-        A cached negative result (``value is None``) is still considered
-        fresh, so a missing proxy is not re-discovered on every connect.
+        Positive results live for *max_age*; a cached negative result (empty)
+        expires after the shorter *negative_max_age* so it is retried sooner.
         """
         entry = self._data.get(key)
         if not isinstance(entry, dict):
             return False, None
-        if time.time() - float(entry.get("fetched_at", 0)) > max_age:
+        limit = max_age if entry.get("ok", True) else negative_max_age
+        if time.time() - float(entry.get("fetched_at", 0)) > limit:
             return False, None
         return True, entry.get("value")
 
     def put(self, key: str, value) -> None:
-        self._data[key] = {"fetched_at": time.time(), "value": value}
+        self._data[key] = {"fetched_at": time.time(), "value": value,
+                           "ok": bool(value)}
         self._save()
 
     def _save(self) -> None:
@@ -109,18 +115,26 @@ def effective_endpoint(mode: str, manual: str, auto) -> str | None:
 
 
 async def discover_file_proxy(xmpp) -> dict | None:
-    """Return ``{"jid", "host", "port"}`` for the first XEP-0065 proxy."""
+    """Return ``{"jid", "host", "port"}`` for an announced XEP-0065 proxy.
+
+    Only proxies that explicitly advertise the
+    ``category='proxy' type='bytestreams'`` identity are used.
+    """
     try:
         plugin = xmpp["xep_0065"]
         proxies = await plugin.discover_proxies()
+        if not proxies:
+            logger.info("No XEP-0065 bytestream proxy announced by the server")
+            return None
+        # slixmpp keys the mapping by JID, which is not orderable; sort by
+        # string to pick a stable entry.
+        jid = sorted(proxies, key=str)[0]
+        host, port = proxies[jid]
+        logger.info("File-transfer proxy: %s (%s:%s)", jid, host, port)
+        return {"jid": str(jid), "host": str(host), "port": int(port)}
     except Exception as exc:
-        logger.debug("File-transfer proxy discovery failed: %s", exc)
+        logger.warning("File-transfer proxy discovery failed: %s", exc)
         return None
-    if not proxies:
-        return None
-    jid = sorted(proxies)[0]
-    host, port = proxies[jid]
-    return {"jid": str(jid), "host": str(host), "port": int(port)}
 
 
 def _srv_to_dict(service: str, answer) -> list[dict]:
@@ -152,44 +166,65 @@ async def discover_stun_turn(domain: str,
     if not domain:
         return []
     if not HAS_AIODNS:
-        logger.info("aiodns is not installed; skipping STUN/TURN discovery")
+        logger.warning("aiodns is not available; skipping STUN/TURN discovery")
         return []
-    resolver = aiodns.DNSResolver(loop=loop)
+    try:
+        resolver = aiodns.DNSResolver(loop=loop)
+    except Exception as exc:
+        logger.warning("Could not create the DNS resolver: %s", exc)
+        return []
     found: list[dict] = []
     for service in SRV_SERVICES:
         try:
             answer = await resolver.query(f"{service}.{domain}", "SRV")
-        except Exception:
+        except Exception as exc:
+            logger.debug("No %s SRV record for %s: %s", service, domain, exc)
             continue
         entries = _srv_to_dict(service, answer)
         entries.sort(key=lambda e: (e["priority"], -e["weight"]))
         found.extend(entries)
+    logger.info("STUN/TURN discovery for %s: %d entr%s", domain, len(found),
+                "y" if len(found) == 1 else "ies")
     return found
 
 
 async def refresh(xmpp, domain: str, cache: DiscoveryCache,
-                  max_age: float = MAX_AGE) -> dict:
+                  max_age: float = MAX_AGE,
+                  negative_max_age: float = NEGATIVE_MAX_AGE,
+                  force: bool = False) -> dict:
     """Run the discoveries whose cache is stale and return the results.
 
-    Never raises for network errors; a failed discovery is cached as a
-    negative result so it is not retried until the TTL expires.
+    Each section is isolated so a failure in one never hides the other.
+    Successful results (including a genuine "nothing found") are cached;
+    an exception is *not* cached, so it is retried on the next connection.
+    With *force* the cache is bypassed entirely.
     """
     result: dict = {}
 
-    fresh, value = cache.get("file_proxy", max_age)
-    if not fresh:
-        value = await discover_file_proxy(xmpp)
-        cache.put("file_proxy", value)
-    result["file_proxy"] = value
-
-    fresh, value = cache.get("stun_turn", max_age)
-    if not fresh:
+    async def _section(key: str, discover) -> object:
+        if not force:
+            fresh, value = cache.get(key, max_age, negative_max_age)
+            if fresh:
+                return value
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        value = await discover_stun_turn(domain, loop=loop)
-        cache.put("stun_turn", value)
-    result["stun_turn"] = value
+            value = await discover()
+            cache.put(key, value)
+            return value
+        except Exception as exc:
+            logger.warning("Discovery of %s failed: %s", key, exc)
+            # Keep the last known result (even stale) to avoid flapping.
+            _, stale = cache.get(key, max_age=float("inf"),
+                                 negative_max_age=float("inf"))
+            return stale
+
+    result["file_proxy"] = await _section(
+        "file_proxy", lambda: discover_file_proxy(xmpp))
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    result["stun_turn"] = await _section(
+        "stun_turn", lambda: discover_stun_turn(domain, loop=loop))
 
     return result

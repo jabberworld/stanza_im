@@ -132,6 +132,95 @@ check("refresh: stun/turn from cache",
       result["stun_turn"][0]["service"] == "_stuns._tcp")
 
 
+# ── Regression: multiple JID-keyed proxies must not crash ─────────
+
+from slixmpp.jid import JID
+
+
+class MultiProxy:
+    async def discover_proxies(self):
+        return {JID("proxy.linuxoid.in"): ("proxy.linuxoid.in", 7777),
+                JID("proxy2.linuxoid.in"): ("proxy2.linuxoid.in", 7777)}
+
+
+class MultiXmpp:
+    def __getitem__(self, key):
+        return MultiProxy()
+
+
+found = asyncio.run(discovery.discover_file_proxy(MultiXmpp()))
+check("2 JID-keyed proxies: returns a proxy (no NotImplementedError)",
+      isinstance(found, dict) and found["jid"].endswith("linuxoid.in"))
+
+
+# ── refresh isolates sections: file proxy fails, STUN/TURN still runs
+
+_orig_fp = discovery.discover_file_proxy
+_orig_st = discovery.discover_stun_turn
+
+
+async def _boom(xmpp):
+    raise RuntimeError("disco down")
+
+
+async def _fake_st(domain, loop=None):
+    return [{"service": "_stuns._tcp", "host": "stun.example.org",
+             "port": 5349, "priority": 0, "weight": 0, "tls": True}]
+
+
+discovery.discover_file_proxy = _boom
+discovery.discover_stun_turn = _fake_st
+try:
+    cache3 = discovery.DiscoveryCache(os.path.join(_SCRATCH, "disc3.json"))
+    result = asyncio.run(discovery.refresh(object(), "example.org", cache3))
+finally:
+    discovery.discover_file_proxy = _orig_fp
+    discovery.discover_stun_turn = _orig_st
+
+check("isolation: failed file proxy -> None", result["file_proxy"] is None)
+check("isolation: STUN/TURN still discovered",
+      result["stun_turn"][0]["host"] == "stun.example.org")
+check("isolation: STUN/TURN cached",
+      cache3.get("stun_turn")[1][0]["host"] == "stun.example.org")
+check("isolation: failed file proxy not cached",
+      cache3.get("file_proxy") == (False, None))
+
+
+# ── Negative TTL is short; force bypasses the cache ───────────────
+
+tmp_neg = os.path.join(_SCRATCH, "neg.json")
+neg = discovery.DiscoveryCache(tmp_neg)
+neg.put("stun_turn", [])
+neg._data["stun_turn"]["fetched_at"] = time.time() - 1200  # 20 min old
+check("negative result expires after negative_max_age",
+      neg.get("stun_turn", negative_max_age=600) == (False, None))
+neg._data["stun_turn"]["fetched_at"] = time.time() - 60
+check("negative result is still fresh within the short window",
+      neg.get("stun_turn", negative_max_age=600)[0] is True)
+
+force_cache = discovery.DiscoveryCache(os.path.join(_SCRATCH, "force.json"))
+force_cache.put("file_proxy", {"jid": "old", "host": "old", "port": 1})
+
+
+async def _fake_fp(xmpp):
+    return {"jid": "new", "host": "new", "port": 2}
+
+
+discovery.discover_file_proxy = _fake_fp
+discovery.discover_stun_turn = _fake_st
+try:
+    cached_run = asyncio.run(
+        discovery.refresh(object(), "example.org", force_cache))
+    forced_run = asyncio.run(
+        discovery.refresh(object(), "example.org", force_cache, force=True))
+finally:
+    discovery.discover_file_proxy = _orig_fp
+    discovery.discover_stun_turn = _orig_st
+
+check("cache used when not forced", cached_run["file_proxy"]["host"] == "old")
+check("force=True re-runs discovery", forced_run["file_proxy"]["host"] == "new")
+
+
 print("\nAll tests passed ✓" if not FAILURES
       else f"\n{len(FAILURES)} failures")
 sys.exit(1 if FAILURES else 0)

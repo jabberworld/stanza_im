@@ -5,6 +5,7 @@ Run with:
     LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu \
     QT_QPA_PLATFORM=offscreen python3 tests/test_connection_prefs.py
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -120,6 +121,39 @@ check("round-trip: proxy persisted",
 check("round-trip: manual file proxy persisted",
       reloaded.connection.file_proxy_manual == "proxy.example.org")
 check("round-trip: priority persisted", reloaded.connection.priority == 64)
+
+
+# ── discovery refresh button ──────────────────────────────────────
+
+check("refresh button exists", hasattr(dlg, "_btn_discovery_refresh"))
+check("refresh button disabled without client",
+      not dlg._btn_discovery_refresh.isEnabled())
+
+
+class _FakeClient:
+    def __init__(self):
+        self.refreshed = 0
+
+    def discovered_services(self):
+        return None
+
+    def on(self, *_args):
+        pass
+
+    async def refresh_services(self):
+        self.refreshed += 1
+        return {}
+
+
+fake = _FakeClient()
+dlg2 = PreferencesDialog(cfg, ChatThemeFactory(), client=fake)
+check("refresh button enabled with client",
+      dlg2._btn_discovery_refresh.isEnabled())
+
+asyncio.run(dlg2._run_refresh_discovery())
+check("refresh button triggers discovery", fake.refreshed == 1)
+check("refresh button restored after run",
+      dlg2._btn_discovery_refresh.isEnabled())
 
 
 print("\nAll tests passed ✓" if not FAILURES
