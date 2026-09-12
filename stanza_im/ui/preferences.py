@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -10,6 +11,9 @@ from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import icons as icons_mod
 from stanza_im.include import emoticons
+from stanza_im.include.constants import ACTIONS_DIR_16
+
+CONNECTION_FIELD_WIDTH = 300
 
 
 def link_status_minutes(away: QtWidgets.QSpinBox, xa: QtWidgets.QSpinBox) -> None:
@@ -174,20 +178,47 @@ class PreferencesDialog(QtWidgets.QDialog):
         return self._tabs([(tr("prefs_general"), general),
                            (tr("prefs_file_transfer"), files)])
 
+    @staticmethod
+    def _change_password_icon() -> QtGui.QIcon:
+        """Key glyph for the icon-only "Change password" button."""
+        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "change-password.svg"))
+        if not icon.isNull():
+            return icon
+        if icons_mod.icons is not None:
+            return QtGui.QIcon(icons_mod.icons.get_action_icon("edit"))
+        return QtGui.QIcon()
+
     def _page_connection(self):
         connection, form = self._page()
-        form.addRow(tr("login_title"), self._line("jid"))
-        form.addRow(tr("login_password"), self._line("password", True))
+
+        jid = self._line("jid")
+        jid.setFixedWidth(CONNECTION_FIELD_WIDTH)
+        form.addRow(tr("login_title"), jid)
+
+        self._btn_change_password = QtWidgets.QPushButton()
+        self._btn_change_password.setToolTip(tr("prefs_change_password"))
+        self._btn_change_password.setAccessibleName(tr("prefs_change_password"))
+        self._btn_change_password.setIcon(self._change_password_icon())
+        self._btn_change_password.setIconSize(QtCore.QSize(16, 16))
+        self._btn_change_password.setEnabled(self._client is not None)
+        self._btn_change_password.clicked.connect(self._on_change_password)
+
+        password = self._line("password", True)
+        password.setFixedWidth(CONNECTION_FIELD_WIDTH)
+        pw_row = QtWidgets.QWidget()
+        pw_layout = QtWidgets.QHBoxLayout(pw_row)
+        pw_layout.setContentsMargins(0, 0, 0, 0)
+        pw_layout.setSpacing(6)
+        pw_layout.addWidget(password)
+        pw_layout.addWidget(self._btn_change_password)
+        pw_layout.addStretch(1)
+        form.addRow(tr("login_password"), pw_row)
+
         form.addRow(self._check("save_password", tr("prefs_save_password")))
         form.addRow(self._check("auto_connect", tr("prefs_auto_connect")))
         form.addRow(self._check("auto_join_conferences", tr("prefs_auto_join_conferences")))
         form.addRow(self._check("message_carbons", tr("prefs_message_carbons")))
         form.addRow(self._check("save_status_message", tr("prefs_save_status_message")))
-        self._btn_change_password = QtWidgets.QPushButton(
-            tr("prefs_change_password"))
-        self._btn_change_password.setEnabled(self._client is not None)
-        self._btn_change_password.clicked.connect(self._on_change_password)
-        form.addRow("", self._btn_change_password)
 
         advanced, advanced_form = self._page()
         resource = self._line("resource")
