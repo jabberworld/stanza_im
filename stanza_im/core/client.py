@@ -344,7 +344,7 @@ class JabberClient:
         """Latest background discovery result (file proxy + STUN/TURN)."""
         return self._discovered
 
-    async def discover_services(self, force: bool = False) -> dict:
+    async def discover_transfer_services(self, force: bool = False) -> dict:
         """Run/refresh file-proxy and STUN/TURN discovery and cache results."""
         from stanza_im.core.discovery import DiscoveryCache, refresh
         domain = self.jid_str.split("@")[-1]
@@ -360,7 +360,7 @@ class JabberClient:
 
     async def refresh_services(self) -> dict:
         """Force a fresh discovery run (used by the preferences button)."""
-        return await self.discover_services(force=True)
+        return await self.discover_transfer_services(force=True)
 
     def _install_socks_proxy(self, proxy_host: str, proxy_port: int) -> None:
         """Route the XMPP TCP connection through a SOCKS5 proxy.
@@ -1580,7 +1580,7 @@ class JabberClient:
         # File-transfer proxy / STUN-TURN discovery is only needed for p2p
         # transfers and calls much later, so run it in the background and
         # never let it delay the session.
-        loop.create_task(self.discover_services())
+        loop.create_task(self.discover_transfer_services())
 
     async def _autojoin_bookmarks(self) -> None:
         """Join bookmarked MUC rooms flagged for auto-join (XEP-0048).

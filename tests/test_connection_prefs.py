@@ -6,6 +6,8 @@ Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_connection_prefs.py
 """
 import asyncio
+import ast
+import inspect
 import os
 import sys
 import tempfile
@@ -57,6 +59,35 @@ check("status: default/None -> 50", priority("status", 0, None) == 50)
 check("manual: uses the value", priority("manual", 77, "away") == 77)
 check("manual: clamps high", priority("manual", 999, "online") == 127)
 check("manual: clamps low", priority("manual", -999, "online") == -128)
+
+
+# ── the two discover methods must not collide (regression) ────────
+# A duplicate `discover_services` in JabberClient shadowed the transfer
+# discovery and made the background task fail with a TypeError.
+
+check("service-browser discover_services(server) intact",
+      "server" in inspect.signature(JabberClient.discover_services).parameters)
+check("transfer discovery has a distinct name",
+      "force" in inspect.signature(
+          JabberClient.discover_transfer_services).parameters)
+check("transfer discovery is a coroutine",
+      inspect.iscoroutinefunction(JabberClient.discover_transfer_services))
+check("discover names resolve to different callables",
+      JabberClient.discover_services is not JabberClient.discover_transfer_services)
+
+_source = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "stanza_im", "core", "client.py")
+with open(_source, encoding="utf-8") as _fh:
+    _tree = ast.parse(_fh.read())
+_methods = [
+    node.name
+    for cls in ast.walk(_tree)
+    if isinstance(cls, ast.ClassDef) and cls.name == "JabberClient"
+    for node in cls.body
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+]
+_dups = sorted({name for name in _methods if _methods.count(name) > 1})
+check("no duplicate method names in JabberClient", not _dups)
 
 
 # ── config defaults ───────────────────────────────────────────────
