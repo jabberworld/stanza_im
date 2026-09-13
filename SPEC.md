@@ -366,6 +366,12 @@ Single conversation tab. Layout:
 - Input: `QPlainTextEdit`, max height 60px, placeholder "Send"
 - Send on Enter (without Shift), Shift+Enter for newline
 - Signal: `message_sent(jid, body)`
+- MUC participant sidebar (`_users_list`, a `_ParticipantList` subclass): a
+  single click selects a row (highlight only), a double-click opens the private
+  chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,
+  falling back to `room/nick`), and a left click on empty list space clears the
+  selection (`_ParticipantList.mousePressEvent`). Right-click opens the
+  participant context menu.
 
 ### 9.1 Slash Commands
 

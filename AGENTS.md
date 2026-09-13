@@ -229,7 +229,11 @@ in a MUC input
 completes the nick before the cursor and cycles the candidate list on repeat
 presses: a nick starting the line is inserted as an address (`nick: `),
 mid-line only the bare nick is completed; the previous token is replaced so the
-cycle wraps correctly (`ChatWidget._tab_complete_nick`). `Esc` in the chat
+cycle wraps correctly (`ChatWidget._tab_complete_nick`). The MUC participant
+sidebar (`ChatWidget._users_list`, a `_ParticipantList` subclass) opens the
+private chat on a double-click of a participant row (`participant_clicked`;
+single click only selects), and a left click on empty list space clears the
+selection (`_ParticipantList.mousePressEvent`). `Esc` in the chat
 window collapses a conference back to the roster without leaving the room (the
 tab is removed, the room stays joined, other tabs keep the window open); on a
 1:1 tab Esc closes it. `Ctrl+W` leaves a conference (with the optional confirm)

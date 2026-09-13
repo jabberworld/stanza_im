@@ -100,6 +100,21 @@ class _ParticipantRow(QtWidgets.QWidget):
         super().leaveEvent(event)
 
 
+class _ParticipantList(QtWidgets.QListWidget):
+    """MUC participant sidebar list.
+
+    A single click selects a row; a left click on empty space clears the
+    selection (QListWidget keeps it by default).
+    """
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if (event.button() == QtCore.Qt.MouseButton.LeftButton
+                and self.itemAt(event.position().toPoint()) is None):
+            self.clearSelection()
+            self.setCurrentItem(None)
+        super().mousePressEvent(event)
+
+
 class _InputHandle(QtWidgets.QFrame):
     """Thin draggable bar above the chat input that resizes it vertically.
 
@@ -455,14 +470,15 @@ class ChatWidget(QtWidgets.QWidget):
         self._view.setAcceptDrops(False)
         self._input.setAcceptDrops(False)
 
-        self._users_list = QtWidgets.QListWidget()
+        self._users_list = _ParticipantList()
         self._users_list.setMinimumWidth(120)
         self._users_list.setMaximumWidth(420)
         self._users_list.setAcceptDrops(False)
         self._users_list.setVisible(self.is_muc)
         self._users_list.setContextMenuPolicy(
             QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        self._users_list.itemClicked.connect(self._on_muc_user_clicked)
+        self._users_list.itemDoubleClicked.connect(
+            self._on_muc_user_double_clicked)
         self._users_list.customContextMenuRequested.connect(
             self._on_muc_context_menu)
 
@@ -1474,7 +1490,7 @@ class ChatWidget(QtWidgets.QWidget):
         tooltip_mod.hide()
         self._hovered_participant = ""
 
-    def _on_muc_user_clicked(self, item: QtWidgets.QListWidgetItem):
+    def _on_muc_user_double_clicked(self, item: QtWidgets.QListWidgetItem):
         nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
         if nick:
             self.participant_clicked.emit(self.jid, str(nick))
