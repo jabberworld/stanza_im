@@ -102,6 +102,8 @@ class Config:
                         "conference_servers": [], "service_servers": []},
         "privacy": {"send_software": True, "send_typing_notifications": True,
                      "send_activity_notifications": True, "send_chatstates": True},
+        "files": {"auto_accept": False, "download_notifications": True,
+                  "download_dir": ""},
         "appearance": {"chat_theme": "", "muc_theme": "",
                         "emoticon_theme": "default/smileys.cfg",
                         "media_preview_size": 200,

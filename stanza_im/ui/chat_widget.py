@@ -419,6 +419,8 @@ class ChatWidget(QtWidgets.QWidget):
         send_menu = QtWidgets.QMenu(self)
         send_p2p = send_menu.addAction(tr("ft_p2p"))
         send_p2p.triggered.connect(lambda: self._choose_file_send("p2p"))
+        send_p2p_ibb = send_menu.addAction(tr("ft_p2p_ibb"))
+        send_p2p_ibb.triggered.connect(lambda: self._choose_file_send("p2p-ibb"))
         send_http = send_menu.addAction(tr("ft_http_upload"))
         send_http.triggered.connect(lambda: self._choose_file_send("http"))
         self._send_file_btn = QtWidgets.QToolButton(self)

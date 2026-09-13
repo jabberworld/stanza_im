@@ -24,6 +24,8 @@ from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.include.constants import APP_NAME, VERSION
+from stanza_im.xmpp import jingle as jingle_mod
+from stanza_im.xmpp.jingle import JingleFileTransferManager
 
 logger = logging.getLogger(__name__)
 
@@ -397,6 +399,16 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_REPLY)
         # XEP-0490 Displayed Synchronization — advertise PEP notification support.
         self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
+        # Jingle file transfer (XEP-0166/0234) with SOCKS5 (XEP-0260) and
+        # In-Band (XEP-0261) transports — advertise support in disco.
+        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_JINGLE)
+        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_FT)
+        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_S5B)
+        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_IBB)
+
+        # Jingle FT manager + incoming stanza handlers.
+        self.file_transfer = JingleFileTransferManager(self)
+        self._register_jingle_handlers()
 
         if (self.proxy_mode == "socks5" and self.proxy_host
                 and self.proxy_port):
@@ -448,6 +460,31 @@ class JabberClient:
             self.xmpp.add_event_handler("csi_enabled", self._on_csi_enabled)
 
     # ── Public API ────────────────────────────────────────────────
+
+    def _register_jingle_handlers(self) -> None:
+        """Register the Jingle / IBB stanza handlers (XEP-0234/0261)."""
+        from slixmpp.xmlstream.handler import CoroutineCallback
+        from slixmpp.xmlstream.matcher.xpath import MatchXPath
+
+        manager = self.file_transfer
+        jabber = "{jabber:client}iq"
+
+        def _handler(name, path, callback):
+            self.xmpp.register_handler(CoroutineCallback(
+                name, MatchXPath("%s/%s" % (jabber, path)), callback))
+
+        _handler("Jingle FT",
+                 "{%s}jingle" % jingle_mod.NS_JINGLE,
+                 manager.handle_jingle_iq)
+        _handler("IBB Open",
+                 "{%s}open" % jingle_mod.NS_IBB_OLD,
+                 manager.handle_ibb_open)
+        _handler("IBB Close",
+                 "{%s}close" % jingle_mod.NS_IBB_OLD,
+                 manager.handle_ibb_close)
+        _handler("IBB Data",
+                 "{%s}data" % jingle_mod.NS_IBB_OLD,
+                 manager.handle_ibb_data)
 
     def _start_task(self, coro) -> None:
         """Schedule *coro* on the current event loop (best-effort)."""
@@ -631,6 +668,10 @@ class JabberClient:
 
     async def disconnect(self) -> None:
         """Gracefully disconnect."""
+        try:
+            self.file_transfer.close()
+        except Exception:
+            logger.debug("Closing file transfers failed", exc_info=True)
         if self.xmpp.is_connected():
             self.xmpp.disconnect()
 
@@ -1598,9 +1639,24 @@ class JabberClient:
         )
 
     def send_file(self, jid: str, filepath: str) -> None:
-        """Send a file via SI file transfer (XEP-0066 / XEP-0096)."""
-        # Placeholder — will be implemented in Phase 2
-        logger.info("File transfer to %s: %s (not yet implemented)", jid, filepath)
+        """Send a file over Jingle SOCKS5 with IBB fallback (XEP-0234)."""
+        self._start_task(self.send_file_p2p(jid, filepath, "p2p"))
+
+    async def send_file_p2p(self, jid: str, path: str,
+                            method: str = "p2p") -> None:
+        """Send *path* to *jid* over Jingle.
+
+        *method*: ``p2p`` (SOCKS5 with IBB fallback), ``p2p-ibb`` (IBB only).
+        """
+        await self.file_transfer.send_file(jid, path, method)
+
+    def answer_file_offer(self, offer_id: str, accept: bool,
+                          save_path: str = "") -> None:
+        """Accept/reject an incoming Jingle file offer (see ``file_offer``)."""
+        self.file_transfer.answer_offer(offer_id, accept, save_path)
+
+    def cancel_file_offer(self, sid: str) -> None:
+        self.file_transfer.cancel(sid)
 
     # ── XEP-0363 HTTP File Upload ────────────────────────────────
 
@@ -1624,6 +1680,17 @@ class JabberClient:
                 or "application/octet-stream"
             put_url, get_url, headers = await self._http_upload_slot(
                 service, filename, size, content_type)
+        except Exception as exc:  # noqa: BLE001 - size errors fall back to P2P
+            if self._is_upload_oversize(exc):
+                logger.info("HTTP Upload rejected %s for size; P2P fallback",
+                            filename)
+                self.emit("http_upload_oversize", jid, str(path))
+                return
+            logger.warning("HTTP Upload failed for %s: %s", jid, exc)
+            self.emit("file_upload_progress", jid, "error", str(exc),
+                      str(path))
+            return
+        try:
             progress = _UploadProgress()
             put_task = asyncio.create_task(
                 self._http_upload_put(put_url, str(path), headers, progress))
@@ -1702,6 +1769,20 @@ class JabberClient:
             elif el.tag == "{%s}get" % NS_UPLOAD:
                 get_url = el.get("url") or ""
         return put_url, get_url, headers
+
+    @staticmethod
+    def _is_upload_oversize(exc) -> bool:
+        """True when an HTTP Upload slot request was rejected for size/quota."""
+        condition = getattr(exc, "condition", "") or ""
+        if condition in ("not-acceptable", "resource-constraint"):
+            return True
+        iq = getattr(exc, "iq", None)
+        xml = getattr(iq, "xml", None)
+        if xml is not None:
+            for el in xml.iter():
+                if el.tag.rsplit("}", 1)[-1] == "file-too-large":
+                    return True
+        return False
 
     async def _http_upload_slot(self, service: str, filename: str,
                                 size: int, content_type: str):

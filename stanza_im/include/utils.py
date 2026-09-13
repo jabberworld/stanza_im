@@ -16,6 +16,43 @@ def get_home_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".stanza-im")
 
 
+def default_download_dir() -> str:
+    """Default directory for received files.
+
+    ``$XDG_DOWNLOAD_DIR`` when set, otherwise ``~/Downloads``.
+    """
+    xdg = os.environ.get("XDG_DOWNLOAD_DIR", "").strip()
+    if xdg:
+        return os.path.expandvars(os.path.expanduser(xdg))
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+def safe_filename(name: str) -> str:
+    """Sanitize a remote file name for local use (XEP-0234 §12).
+
+    Strips directory separators, ``..`` components and control characters so a
+    peer cannot escape the download directory.
+    """
+    name = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    name = name.replace("\x00", "").strip().strip(".")
+    cleaned = "".join(ch for ch in name
+                      if ch.isprintable() and ch not in "/\\")
+    return cleaned or "file"
+
+
+def unique_path(path: str) -> str:
+    """Return *path* or ``path (n).ext`` when the file already exists."""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    index = 1
+    while True:
+        candidate = f"{base} ({index}){ext}"
+        if not os.path.exists(candidate):
+            return candidate
+        index += 1
+
+
 def format_time(timestamp: float | None = None) -> str:
     """Return *hh:mm:ss* for *timestamp* (default: now)."""
     if timestamp is None:

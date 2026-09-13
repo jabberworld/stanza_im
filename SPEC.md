@@ -45,7 +45,8 @@ stanza_im/
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
 │   ├── media_preview.py — Inline image/audio/video previews
 │   ├── media_viewer.py — Fullscreen image/video viewer
-│   ├── upload_dialog.py — HTTP upload progress dialog
+│   ├── upload_dialog.py — HTTP upload / P2P progress dialog
+│   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── history_manager.py   — Per-contact history browser
@@ -54,6 +55,8 @@ stanza_im/
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
+│                          jingle.py = XEP-0234/0260/0261 file transfer,
+│                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
 ├── include/            — Constants (XDG paths), enumerators, utilities
@@ -145,6 +148,14 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
 | `status.auto_status_message` | `""` | Single shared status text sent with the auto Away/XA presence (`MainWindow._check_auto_status`); when empty the previous status text is kept. Returning activity resumes `status.last_status` with an empty message, so the auto text is cleared. |
+
+### 4.3 File Reception Settings (`files.*`, Preferences → Stanza IM → File Receiving)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `files.auto_accept` | `false` | Automatically accept incoming P2P file offers and save them into `files.download_dir` (unique name) without a dialog. |
+| `files.download_notifications` | `true` | Show an OSD notification when an incoming file offer is accepted. |
+| `files.download_dir` | `""` | Directory for received files; empty falls back to `$XDG_DOWNLOAD_DIR` / `~/Downloads` (`include/utils.default_download_dir`). |
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -781,10 +792,55 @@ Registers XEP plugins (conditionally where noted):
   messages with clickable links via `_display_local_outgoing` (the sending
   resource never sees its own carbons echo); in MUC the room echo renders
   both.
-- "P2P" still routes to the `send_file` placeholder; the roster context menu
-  also gains "Send file → P2P / HTTP Upload" for contacts (and conferences).
+- "P2P" routes to the Jingle file transfer (§14.5.1); the roster context menu
+  also gains "Send file → P2P / P2P IBB / HTTP Upload" for contacts (and
+  conferences).
+- When the HTTP Upload slot request is rejected for the file being too large
+  (`file-too-large`, or a `not-acceptable` / `resource-constraint` error),
+  `_http_upload_flow` emits `http_upload_oversize(jid, path)` instead of an
+  error; `MainWindow` retries that file over P2P with the SOCKS5 method.
 
 See `XEPs.md` for the full supported-extensions matrix.
+
+### 14.5.1 Jingle P2P File Transfer (XEP-0234/0260/0261, `xmpp/jingle.py`)
+
+- slixmpp has no Jingle core plugin, so `JingleFileTransferManager`
+  (`client.file_transfer`) implements the XEP-0166 signalling directly on the
+  slixmpp stanza objects. It is driven by IQ handlers registered with
+  `MatchXPath("{jabber:client}iq/…")` for `{urn:xmpp:jingle:1}jingle` and the
+  XEP-0047 `{http://jabber.org/protocol/ibb}open|close|data` elements.
+- **Sending**: `client.send_file_p2p(jid, path, method)` serializes sessions
+  with a lock. A XEP-0234 `<description><file/>` carries name, size,
+  media-type, date and a SHA-1 `<hash/>` (`urn:xmpp:hashes:2`).
+  - `method="p2p"`: XEP-0260 SOCKS5 first. The candidate list always includes
+    our `direct` listener candidates (`xmpp/bytestream.py`,
+    `listen_for_bytestream`, priority 126<<16) and, when a file proxy is
+    discovered/configured, a `proxy` candidate (priority 10<<16). The initiator
+    dials the peer's candidates in priority order with
+    `connect_bytestream` (`DST.ADDR = SHA1(SID + initiator + responder)`, port
+    0), sends `candidate-used`, activates a nominated proxy candidate
+    (`<activate/>` + `<activated/>`) and streams the file. On failure it sends
+    `transport-replace` with the IBB transport, the peer answers
+    `transport-accept`, and the file continues over IBB.
+  - `method="p2p-ibb"`: XEP-0261 In-Band Bytestreams immediately — Jingle
+    session negotiation, then XEP-0047 `<open/>`, base64 `<data seq sid/>`
+    chunks of `block-size` bytes (seq wraps at 65536) and `<close/>`.
+- **Receiving**: `file_offer(offer_id, from, meta)` is emitted for an incoming
+  `session-initiate`. With `files.auto_accept` on, `MainWindow` answers
+  immediately saving into `files.download_dir` (unique name); otherwise it
+  shows `IncomingFileDialog` (confirm, then `QFileDialog.getSaveFileName`) and
+  calls `client.answer_file_offer`. Accepted files are saved, acknowledged with
+  a XEP-0234 `session-info <received/>` and the session is terminated. Remote
+  file names are sanitized (`include/utils.safe_filename`) to prevent path
+  traversal (XEP-0234 §12).
+- **Progress**: `file_transfer_progress(jid, start|progress|done|error, detail,
+  path, out|in)` updates the shared `FileTransferDialog` rows for sends and
+  adds chat status lines for sends/receives; `file_transfer_status` reports the
+  S5B→IBB fallback. Receiving shows the OSD via `_notify_osd_file` when
+  `files.download_notifications` is on.
+- Features `urn:xmpp:jingle:1`, `urn:xmpp:jingle:apps:file-transfer:5`,
+  `urn:xmpp:jingle:transports:s5b:1` and `urn:xmpp:jingle:transports:ibb:1` are
+  advertised in disco (`core/client.py`).
 
 ### 14.6 Connection Security & Transport
 

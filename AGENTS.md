@@ -51,7 +51,8 @@ stanza_im/                      # Python package
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer
-│   ├── upload_dialog.py         # HTTP upload progress dialog
+│   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
+│   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── tray.py                  # System tray icon + blink
@@ -59,6 +60,8 @@ stanza_im/                      # Python package
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
 ├── xmpp/
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
+│   ├── jingle.py                # XEP-0234/0260/0261 Jingle FT + IBB
+│   ├── bytestream.py            # SOCKS5 bytestream client + direct listener
 │   └── socks5.py                # Dependency-free SOCKS5 CONNECT for the account proxy
 ├── include/
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
@@ -348,7 +351,8 @@ as new messages (off). History gains `message_id`/`edited` columns and
 
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries icon
 buttons for Clear, History (moved from the tab header), vCard and "Send file"
-(a menu with "P2P" / "HTTP Upload"); the input is vertically resizable
+(a menu with "P2P" / "P2P IBB" / "HTTP Upload"); the input is vertically
+resizable
 (`chat.input_height`, persisted; the `_InputHandle` drag bar sits on the
 input's top edge just below the toolbar — dragging up grows the field, down
 shrinks it — and reads the stored height through a `get_height` callable
@@ -371,7 +375,37 @@ the sending resource), in MUC the room echo renders them.
 (cached), requests a `<slot>` and PUTs the bytes streamed in 64 KiB chunks via
 `http.client` (Content-Length + `conn.send`), reporting the progress fraction
 through a shared `_UploadProgress` object polled by the flow coroutine. The
-roster context menu additionally offers "Send file → P2P / HTTP Upload".
+roster context menu additionally offers "Send file → P2P / P2P IBB / HTTP
+Upload".
+
+**P2P file transfer** (`xmpp/jingle.py`, `xmpp/bytestream.py`,
+`ui/incoming_file_dialog.py`): slixmpp has no Jingle core plugin, so the
+XEP-0166 signalling and the two transports are implemented directly on the
+slixmpp stanza objects. `JingleFileTransferManager` (`client.file_transfer`)
+owns sessions keyed by the Jingle `sid` and is driven by four stanza handlers
+registered via `MatchXPath("{jabber:client}iq/…")`: `…/{urn:xmpp:jingle:1}jingle`,
+`…/{http://jabber.org/protocol/ibb}open`, `…close` and `…data`. A file offer
+builds a XEP-0234 `<description>` (`<file>` with name/size/media-type/date and a
+SHA-1 `<hash>` in `urn:xmpp:hashes:2`) plus a transport. The `"P2P"` menu uses
+**Jingle SOCKS5 (XEP-0260)**: every candidate list contains our `direct`
+listener candidates (`bytestream.listen_for_bytestream`, priority 126) and the
+configured file proxy as a `proxy` candidate (priority 10); the initiator dials
+the peer candidates in priority order (`bytestream.connect_bytestream`, the
+SOCKS5 `DST.ADDR = SHA1(SID + initiator + responder)` calculated with port 0),
+sends `candidate-used`, activates a nominated proxy candidate and streams the
+file. `"P2P IBB"` uses **Jingle In-Band (XEP-0261/0047)** immediately; `"P2P"`
+falls back to IBB automatically when SOCKS5 fails by sending a
+`transport-replace` and continuing as IBB. `client.send_file_p2p(jid, path,
+method)` is serialized by a lock so a batch runs one session at a time.
+Progress/done/error are emitted as `file_transfer_progress(jid, phase, detail,
+path, direction)` and reused `FileTransferDialog` rows. Incoming offers are
+emitted as `file_offer(offer_id, from, meta)`; `MainWindow._on_file_offer`
+auto-accepts (saving into `files.download_dir`, unique name) when
+`files.auto_accept` is on, otherwise shows `IncomingFileDialog` (confirm →
+`QFileDialog.getSaveFileName`) and answers via `client.answer_file_offer`. When
+an HTTP Upload slot is rejected for size (`file-too-large` /
+`resource-constraint` / `not-acceptable`), `_http_upload_flow` emits
+`http_upload_oversize(jid, path)` and MainWindow retries that file over P2P.
 
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,

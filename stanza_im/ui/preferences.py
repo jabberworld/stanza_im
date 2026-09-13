@@ -17,6 +17,18 @@ from stanza_im.include.constants import ACTIONS_DIR_16
 CONNECTION_FIELD_WIDTH = 300
 
 
+def _default_download_dir() -> str:
+    """Default directory for received files (XDG Downloads or ~/Downloads)."""
+    try:
+        location = QtCore.QStandardPaths.writableLocation(
+            QtCore.QStandardPaths.StandardLocation.DownloadLocation)
+        if location:
+            return location
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
 def link_status_minutes(away: QtWidgets.QSpinBox, xa: QtWidgets.QSpinBox) -> None:
     """Keep the xa auto-status minutes strictly above the away minutes.
 
@@ -248,11 +260,25 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length", 10, 120))
 
         files, file_form = self._page()
-        file_form.addRow(self._check("file_auto_accept", tr("prefs_file_auto_accept"), False))
+        file_form.addRow(self._check("file_auto_accept",
+                                     tr("prefs_file_auto_accept")))
         file_form.addRow(self._check("file_download_notifications",
-                                     tr("prefs_file_download_notifications"), False))
+                                     tr("prefs_file_download_notifications")))
+        directory = self._line("file_download_dir")
+        directory.setMinimumWidth(260)
+        browse = QtWidgets.QPushButton(tr("prefs_file_download_dir_browse"))
+        browse.clicked.connect(self._pick_download_dir)
+        file_form.addRow(tr("prefs_file_download_dir"),
+                         self._row(directory, browse))
         return self._tabs([(tr("prefs_general"), general),
                            (tr("prefs_file_transfer"), files)])
+
+    def _pick_download_dir(self):
+        current = self._value("file_download_dir") or _default_download_dir()
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, tr("prefs_file_download_dir"), current)
+        if path:
+            self._set("file_download_dir", path)
 
     @staticmethod
     def _change_password_icon() -> QtGui.QIcon:
@@ -922,6 +948,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         appearance = cfg.appearance
         notifications = cfg.notifications
         status = cfg.status
+        files = getattr(cfg, "files", None)
         values = {
             "close_to_tray": cfg.ui.close_to_tray,
             "history_limit": app.history_limit or chat.history_limit,
@@ -1003,6 +1030,10 @@ class PreferencesDialog(QtWidgets.QDialog):
             "chat_bg_color": getattr(appearance, "chat_bg_color", "#ffffff"),
             "muc_highlight_color": getattr(appearance, "muc_highlight_color", "#e53935"),
             "colored_muc_nicks": getattr(appearance, "colored_muc_nicks", True),
+            "file_auto_accept": bool(getattr(files, "auto_accept", False)),
+            "file_download_notifications": bool(
+                getattr(files, "download_notifications", True)),
+            "file_download_dir": getattr(files, "download_dir", "") or "",
         }
         for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
             values[key] = getattr(notifications, key)
@@ -1081,6 +1112,14 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks"):
             cfg.appearance[key] = self._value(key)
+        if not hasattr(cfg, "files"):
+            cfg.set("files", {"auto_accept": False,
+                              "download_notifications": True,
+                              "download_dir": ""})
+        cfg.files.auto_accept = self._value("file_auto_accept")
+        cfg.files.download_notifications = self._value(
+            "file_download_notifications")
+        cfg.files.download_dir = self._value("file_download_dir")
         cfg.save()
         self.settings_applied.emit()
 

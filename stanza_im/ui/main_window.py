@@ -1195,6 +1195,10 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("message_corrected", self._on_message_corrected)
         c.on("groupchat_message_corrected", self._on_groupchat_message_corrected)
         c.on("file_upload_progress", self._on_file_upload_progress)
+        c.on("http_upload_oversize", self._on_http_upload_oversize)
+        c.on("file_transfer_progress", self._on_file_transfer_progress)
+        c.on("file_transfer_status", self._on_file_transfer_status)
+        c.on("file_offer", self._on_file_offer)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
@@ -1613,6 +1617,9 @@ class MainWindow(QtWidgets.QMainWindow):
             send_menu.addAction(
                 tr("ft_p2p"),
                 lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "p2p")))
+            send_menu.addAction(
+                tr("ft_p2p_ibb"),
+                lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "p2p-ibb")))
             send_menu.addAction(
                 tr("ft_http_upload"),
                 lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "http")))
@@ -2285,26 +2292,36 @@ class MainWindow(QtWidgets.QMainWindow):
     def _launch_file_uploads(self, jid: str, paths: list, method: str,
                              caption: str, dlg):
         """Start per-file transfers and update the dialog rows."""
-
-        def _relay_p2p(index: int, path: str):
-            # P2P is still a placeholder; mark the row as failed immediately.
-            self._client.send_file(jid, str(path))
-            dlg.set_row_failed(index, tr("ft_p2p_unavailable"))
-            self._file_upload_states.pop((jid, str(path)), None)
-            self._check_uploads_finished(jid)
-
         tasks = []
+        p2p_paths = []
         self._file_uploads[jid] = (dlg, list(paths))
         for index, path in enumerate(paths):
             path = str(path)
             self._file_upload_states[(jid, path)] = (dlg, index)
-            if method == "p2p":
-                _relay_p2p(index, path)
+            if method in ("p2p", "p2p-ibb"):
+                p2p_paths.append(path)
             else:
                 tasks.append(
                     self._start_task(self._client.upload_http(jid, path)))
+        if p2p_paths:
+            tasks.append(
+                self._start_task(self._run_p2p_batch(jid, p2p_paths, method)))
         if caption and tasks:
             self._start_task(self._send_caption_after(jid, caption, tasks))
+
+    async def _run_p2p_batch(self, jid: str, paths: list, method: str):
+        """Send P2P files sequentially (one Jingle session at a time)."""
+        for path in paths:
+            try:
+                await self._client.send_file_p2p(jid, str(path), method)
+            except Exception as exc:  # noqa: BLE001 - shown in the dialog row
+                logger.warning("P2P transfer failed for %s: %s", path, exc)
+                state = self._file_upload_states.get((jid, str(path)))
+                if state:
+                    dlg, index = state
+                    dlg.set_row_failed(index, tr("ft_p2p_failed", error=str(exc)))
+                self._file_upload_states.pop((jid, str(path)), None)
+                self._check_uploads_finished(jid)
 
     def _display_local_outgoing(self, jid: str, body: str, message_id: str):
         """Show our own 1:1 message locally (no carbons echo reaches the
@@ -2377,6 +2394,102 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat.add_status(tr("ft_upload_failed", error=detail or ""),
                                 time.strftime("%H:%M:%S"))
         self._check_uploads_finished(jid)
+
+    # ── P2P (Jingle) file transfer ───────────────────────────────
+
+    def _on_file_transfer_progress(self, jid: str, phase: str, detail: str = "",
+                                   path: str = "", direction: str = "out"):
+        """Progress of a Jingle file transfer (send or receive)."""
+        bare = jid.split("/")[0]
+        chat = (self._chat_window.get_chat(bare)
+                or self._chat_window.get_chat(jid))
+        state = self._file_upload_states.get((jid, path), (None, -1))
+        dlg, index = state if state else (None, -1)
+        name = os.path.basename(path or detail)
+        if phase == "progress":
+            if dlg is not None and index >= 0:
+                dlg.set_progress(index, int(detail or 0))
+            return
+        if phase == "start":
+            if chat and direction == "out":
+                chat.add_status(tr("ft_p2p_started", file=name),
+                                time.strftime("%H:%M:%S"))
+            return
+        if direction == "out":
+            self._file_upload_states.pop((jid, path), None)
+        if phase == "done":
+            if dlg is not None and index >= 0:
+                dlg.set_progress(index, 100)
+                dlg.set_row_done(index)
+            if chat:
+                key = "ft_recv_saved" if direction == "in" else "ft_p2p_done"
+                chat.add_status(tr(key, file=name), time.strftime("%H:%M:%S"))
+        elif phase == "error":
+            if dlg is not None and index >= 0:
+                dlg.set_row_failed(index, detail or "")
+            if chat:
+                chat.add_status(tr("ft_p2p_failed", error=detail or ""),
+                                time.strftime("%H:%M:%S"))
+        if direction == "out":
+            self._check_uploads_finished(jid)
+
+    def _on_file_transfer_status(self, jid: str, key: str):
+        chat = (self._chat_window.get_chat(jid.split("/")[0])
+                or self._chat_window.get_chat(jid))
+        if chat and key == "s5b_fallback":
+            chat.add_status(tr("ft_p2p_fallback"),
+                            time.strftime("%H:%M:%S"))
+
+    def _on_http_upload_oversize(self, jid: str, path: str):
+        """The HTTP Upload slot was rejected for size — retry over P2P."""
+        if not self._client:
+            return
+        self._start_task(self._client.send_file_p2p(jid, str(path), "p2p"))
+
+    def _on_file_offer(self, offer_id: str, from_jid: str, meta: dict):
+        """An incoming Jingle file offer arrived (XEP-0234)."""
+        if not self._client:
+            return
+        from stanza_im.include.utils import (
+            default_download_dir, safe_filename, unique_path)
+        files = getattr(self._config, "files", None)
+        auto_accept = bool(getattr(files, "auto_accept", False))
+        name = safe_filename(meta.get("name") or "file")
+        if auto_accept:
+            directory = (getattr(files, "download_dir", "")
+                         or default_download_dir())
+            try:
+                os.makedirs(directory, exist_ok=True)
+            except OSError:
+                directory = default_download_dir()
+            save_path = unique_path(os.path.join(directory, name))
+            self._client.answer_file_offer(offer_id, True, save_path)
+            self._notify_file_offer(from_jid, name, accepted=True)
+            return
+        from stanza_im.ui.incoming_file_dialog import IncomingFileDialog
+        dlg = IncomingFileDialog(from_jid, meta, self)
+        dlg.decision.connect(
+            lambda accept, save_path: self._on_file_offer_decision(
+                offer_id, from_jid, name, accept, save_path))
+        self._place_dialog_over(dlg, self._chat_window
+                                if self._chat_window.isVisible() else self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _on_file_offer_decision(self, offer_id: str, from_jid: str,
+                                name: str, accept: bool, save_path: str):
+        self._client.answer_file_offer(offer_id, accept, save_path)
+        if accept:
+            self._notify_file_offer(from_jid, name, accepted=True)
+
+    def _notify_file_offer(self, from_jid: str, name: str,
+                           accepted: bool) -> None:
+        files = getattr(self._config, "files", None)
+        if not bool(getattr(files, "download_notifications", True)):
+            return
+        if accepted:
+            self._notify_osd_file(from_jid, name)
 
     def _show_muc_room_info(self, room: str):
         member = self._muc_users.get(room, {}).get(
