@@ -50,6 +50,10 @@ class RosterStyle:
     Draws group headers and user items with avatar, name, status icon and
     status message.  The height of user items is dynamic: taller when a
     status message is present.
+
+    Background colors are configurable via :meth:`set_colors`; unset values
+    fall back to the previous behavior (white widget fill, palette ``Window``
+    group stripe).
     """
 
     GROUP_HEIGHT = 26
@@ -60,6 +64,29 @@ class RosterStyle:
     AVATAR_SIZE = 24
     MARGIN_LEFT = 6
     STATUS_MSG_MAX_WIDTH = 180
+
+    def __init__(self, bg_color: str = "", group_bg_color: str = ""):
+        self._bg_color: QtGui.QColor | None = None
+        self._group_bg_color: QtGui.QColor | None = None
+        self.set_colors(bg_color, group_bg_color)
+
+    @staticmethod
+    def _parse(value) -> QtGui.QColor | None:
+        color = QtGui.QColor(str(value or ""))
+        return color if color.isValid() else None
+
+    def set_colors(self, bg_color: str = "", group_bg_color: str = "") -> None:
+        """Configure the roster background and group-stripe colors."""
+        self._bg_color = self._parse(bg_color)
+        self._group_bg_color = self._parse(group_bg_color)
+
+    def bg_color(self) -> QtGui.QColor | None:
+        """The roster background color (None = keep the previous white)."""
+        return self._bg_color
+
+    def group_bg_color(self) -> QtGui.QColor | None:
+        """The group-stripe color (None = keep the palette ``Window``)."""
+        return self._group_bg_color
 
     def _palette(self) -> QtGui.QPalette:
         """Return the application default palette (available without a widget)."""
@@ -81,7 +108,7 @@ class RosterStyle:
         pal = self._palette()
 
         # Background stripe
-        bg = pal.color(QtGui.QPalette.ColorRole.Window)
+        bg = self._group_bg_color or pal.color(QtGui.QPalette.ColorRole.Window)
         painter.fillRect(rect, bg)
 
         # Expand/collapse arrow

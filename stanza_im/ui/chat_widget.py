@@ -28,6 +28,7 @@ from stanza_im.include.avatars import (
 )
 from stanza_im.ui.chat_view import ChatView
 from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
 from stanza_im.ui import tooltip as tooltip_mod
 
 logger = logging.getLogger(__name__)
@@ -226,6 +227,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._users: list[dict] = []
         self._self_nick: str = ""
         self._hovered_participant: str = ""
+        self._nick_colors = NickColorAllocator()
+        self._colored_muc_nicks: bool = True
         self._bookmarked = False
         self._bookmark_action = None
         self._subjects: list[tuple[str, str]] = []
@@ -987,6 +990,7 @@ class ChatWidget(QtWidgets.QWidget):
                 entry.get("sender", "")),
             "outgoing": self._is_mine(entry),
             "edited": bool(entry.get("edited")),
+            "sender_color": self._sender_color(entry),
         }
 
     def _render_entry(self, entry: dict):
@@ -1335,11 +1339,13 @@ class ChatWidget(QtWidgets.QWidget):
         if self_nick:
             self._self_nick = self_nick
         self._view.highlight_nick = self._self_nick
+        self._refresh_nick_colors()
         self._render_muc_users()
 
     def set_self_nick(self, nick: str):
         self._self_nick = nick or self._self_nick
         self._view.highlight_nick = self._self_nick
+        self._refresh_nick_colors()
         self._render_muc_users()
 
     def _render_muc_users(self):
@@ -1397,6 +1403,11 @@ class ChatWidget(QtWidgets.QWidget):
                          .pixmap(16, 16))
         text = QtWidgets.QLabel(label, row)
         text.setMouseTracking(True)
+        if self._colored_muc_nicks:
+            color = self._nick_colors.color_for(
+                self._user_color_key(user))
+            if color:
+                text.setStyleSheet(f"color: {color};")
         layout.addWidget(status)
         layout.addWidget(text, 1)
         avatar = QtWidgets.QLabel(row)
@@ -1583,6 +1594,47 @@ class ChatWidget(QtWidgets.QWidget):
         self._users_list.setFont(base)
         if self.is_muc:
             self._render_muc_users()
+
+    def set_colored_muc_nicks(self, enabled: bool):
+        """Toggle per-participant colorized nicknames in this MUC tab."""
+        self._colored_muc_nicks = bool(enabled)
+        if self.is_muc:
+            self._refresh_nick_colors()
+            self._render_muc_users()
+            self._render_all()
+
+    def _sender_color(self, entry: dict) -> str:
+        """Return the color for the sender nick of a message (MUC only)."""
+        if not (self.is_muc and self._colored_muc_nicks):
+            return ""
+        nick = entry.get("sender", "")
+        for user in self._users:
+            if self._same_nick(user.get("nick", ""), nick):
+                return self._nick_colors.color_for(
+                    self._user_color_key(user))
+        return self._nick_colors.color_for(self._color_key(nick))
+
+    def _color_key(self, nick: str, real_jid: str = "") -> str:
+        key = normalize_nick(nick or "")
+        if real_jid:
+            key = f"{key}|{real_jid}"
+        return key
+
+    def _user_color_key(self, user: dict) -> str:
+        return self._color_key(user.get("nick", ""),
+                               user.get("real_jid", ""))
+
+    def _refresh_nick_colors(self) -> None:
+        """Rebuild the nick color map for currently present users."""
+        active = set()
+        for user in self._users:
+            key = self._user_color_key(user)
+            active.add(key)
+            self._nick_colors.color_for(key)
+        if self._self_nick:
+            active.add(normalize_nick(self._self_nick))
+            self._nick_colors.color_for(normalize_nick(self._self_nick))
+        self._nick_colors.prune(active)
 
     def set_chat_options(self, options):
         self._send_ctrl_enter = bool(options.get("send_ctrl_enter", False))

@@ -41,6 +41,7 @@ stanza_im/
 │   ├── chat_widget.py  — Single chat tab (header + view + input)
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
+│   ├── nick_colors.py  — Session MUC nickname → color allocation
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
 │   ├── media_preview.py — Inline image/audio/video previews
 │   ├── media_viewer.py — Fullscreen image/video viewer
@@ -135,6 +136,11 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
 | `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. |
+| `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
+| `appearance.roster_group_bg_color` | `#ececec` | Roster group header stripe color, drawn by `RosterStyle.paint_group`. |
+| `appearance.chat_bg_color` | `#ffffff` | Chat background override injected as `body { background-color: … !important; background-image: none !important }` by `ChatThemeFactory.set_chat_bg_color` (clears skin tile images); applied to both 1:1 and MUC theme factories. |
+| `appearance.muc_highlight_color` | `#e53935` | MUC mention highlight color used by `ChatThemeFactory.set_highlight_color` in the XEP-0393 highlight `<span>`. |
+| `appearance.colored_muc_nicks` | `true` | Colorful MUC nicknames: per-participant colors for message senders and the participant sidebar (`NickColorAllocator`, see §9.5). |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
@@ -269,6 +275,13 @@ The roster typeface is taken live from `appearance.roster_font` /
 `roster_font_size` (empty/0 = Qt default) and applied to the same QPainter
 pass by `MainWindow._apply_roster_font` — no relayout/rebuild.
 
+The roster background and the group-header stripe colorized per
+`appearance.roster_bg_color` / `appearance.roster_group_bg_color`
+(`RosterStyle.set_colors`): `paintEvent` first fills the whole item area with
+`bg_color()` (white default), and `paint_group` draws its stripe with
+`group_bg_color()`. `MainWindow._apply_roster_colors` also colors the roster
+widget's viewport palette so the area below the last contact matches.
+
 ### 7.3 Interactions
 
 | Action | Trigger |
@@ -376,6 +389,30 @@ Single conversation tab. Layout:
   nickname reverts to the old one with a `muc_nick_busy` status (user-initiated
   changes never auto-append underscores). Other `/...` commands are not special
   and are sent as-is.
+
+### 9.5 Colorful MUC Nicknames (`appearance.colored_muc_nicks`)
+
+When enabled (default), message senders in groupchats and the participant
+sidebar rows are colored per participant. Colors are allocated by a session-only
+`NickColorAllocator` (`ui/nick_colors.py`): each participant key — the
+`normalize_nick`d nick (Unicode NFKC + whitespace collapse + case fold), bound
+to the participant's `real_jid` when present, so the same person keeps one
+color across nick spellings and renames to the same JID — gets a stable color.
+The color map is built lazily from the currently present roster, so arrivals
+receive the first free palette entry and `prune()` releases colors of
+participants who left; a re-join may therefore reuse that color. Colors start
+from a 15-shade fixed dark palette (maximally distinguishable, dark enough to
+read on light chat backgrounds) and continue with a golden-angle HSL sequence
+(hue = i·137.508°, s=0.55, l=0.30) for larger rooms.
+
+`ChatWidget._entry_view_kwargs` injects the sender color as `sender_color`,
+which `ChatThemeFactory.render_message` substitutes for `%senderColor%` (only
+`minimal-mod` uses that placeholder; other skins keep their own styling). The
+participant sidebar row label gets a matching inline `color:` stylesheet. 1:1
+chats never color senders. Toggling the setting re-renders MUC tabs
+(`ChatWindow.set_colored_muc_nicks` → `ChatWidget.set_colored_muc_nicks`, which
+re-runs `_refresh_nick_colors` and re-renders messages and the participant
+list).
 
 ## 10. Chat View (`ui/chat_view.py`)
 

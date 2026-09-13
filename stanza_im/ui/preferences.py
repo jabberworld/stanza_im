@@ -72,6 +72,41 @@ class _SnapSlider(QtWidgets.QSlider):
             self.setValue(self._snap(self.value()))
 
 
+class _ColorButton(QtWidgets.QPushButton):
+    """A color picker button showing a swatch next to the hex value.
+
+    Registered in ``self._controls`` under the config key; ``_value``/``_set``
+    dispatch on this class instead of falling through to ``widget.text()``.
+    """
+
+    def __init__(self, default: str = "#000000", parent=None):
+        super().__init__(parent)
+        self._color = default
+        self.clicked.connect(self._pick)
+        self.set_color(default)
+
+    def color(self) -> str:
+        """Return the currently stored hex color (``#rrggbb``)."""
+        return self._color
+
+    def set_color(self, value: str) -> None:
+        color = QtGui.QColor(str(value))
+        if not color.isValid():
+            color = QtGui.QColor("#000000")
+        self._color = color.name()
+        contrast = "#ffffff" if color.lightnessF() < 0.5 else "#000000"
+        self.setText(self._color)
+        self.setStyleSheet(
+            f"QPushButton {{ background-color: {self._color}; color: {contrast}; "
+            f"border: 1px solid #888; border-radius: 4px; }}")
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+
+    def _pick(self):
+        color = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._color), self)
+        if color.isValid():
+            self.set_color(color.name())
+
+
 class PreferencesDialog(QtWidgets.QDialog):
     """Edit application settings grouped like the original Jabbim dialog."""
 
@@ -291,6 +326,16 @@ class PreferencesDialog(QtWidgets.QDialog):
             size.setSpecialValueText(
                 tr("prefs_font_size_default", size=f"{default_size:g}"))
         return self._row(combo, size)
+
+    def _color_button(self, key: str, default: str = "#000000",
+                      tooltip: str = "") -> _ColorButton:
+        """A swatch button opening a QColorDialog, stored as ``#rrggbb``."""
+        button = _ColorButton(default)
+        if tooltip:
+            button.setToolTip(tooltip)
+        button.setMinimumWidth(120)
+        self._controls[key] = button
+        return button
 
     def _page_connection(self):
         connection, form = self._page()
@@ -713,8 +758,21 @@ class PreferencesDialog(QtWidgets.QDialog):
             _sync_nick_default)
         _sync_nick_default()
 
+        colors, color_form = self._page()
+        color_form.addRow(tr("prefs_color_roster_bg"),
+                          self._color_button("roster_bg_color", "#ffffff"))
+        color_form.addRow(tr("prefs_color_group_bg"),
+                          self._color_button("roster_group_bg_color", "#ececec"))
+        color_form.addRow(tr("prefs_color_chat_bg"),
+                          self._color_button("chat_bg_color", "#ffffff"))
+        color_form.addRow(tr("prefs_color_highlight"),
+                          self._color_button("muc_highlight_color", "#e53935"))
+        color_form.addRow(
+            self._check("colored_muc_nicks", tr("prefs_color_muc_nicks")))
+
         return self._tabs([(tr("prefs_appearance_themes"), themes),
-                           (tr("prefs_appearance_fonts"), fonts)])
+                           (tr("prefs_appearance_fonts"), fonts),
+                           (tr("prefs_color_tab"), colors)])
 
     def _update_emoticon_preview(self):
         while self._emoticon_preview.count():
@@ -828,6 +886,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             return widget.currentData()
         if isinstance(widget, QtWidgets.QPlainTextEdit):
             return widget.toPlainText()
+        if isinstance(widget, _ColorButton):
+            return widget.color()
         return widget.text()
 
     def _set(self, key: str, value):
@@ -843,6 +903,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             widget.setCurrentIndex(index if index >= 0 else 0)
         elif isinstance(widget, QtWidgets.QPlainTextEdit):
             widget.setPlainText(str(value or ""))
+        elif isinstance(widget, _ColorButton):
+            widget.set_color(str(value or ""))
         else:
             widget.setText(str(value or ""))
 
@@ -936,6 +998,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             "nick_font_size": getattr(appearance, "nick_font_size", 0),
             "participant_font": getattr(appearance, "participant_font", ""),
             "participant_font_size": getattr(appearance, "participant_font_size", 0),
+            "roster_bg_color": getattr(appearance, "roster_bg_color", "#ffffff"),
+            "roster_group_bg_color": getattr(appearance, "roster_group_bg_color", "#ececec"),
+            "chat_bg_color": getattr(appearance, "chat_bg_color", "#ffffff"),
+            "muc_highlight_color": getattr(appearance, "muc_highlight_color", "#e53935"),
+            "colored_muc_nicks": getattr(appearance, "colored_muc_nicks", True),
         }
         for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
             values[key] = getattr(notifications, key)
@@ -1010,7 +1077,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.chat.text_scale = self._value("text_scale")
         for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
                     "osd_font", "osd_font_size", "nick_font", "nick_font_size",
-                    "participant_font", "participant_font_size"):
+                    "participant_font", "participant_font_size",
+                    "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
+                    "muc_highlight_color", "colored_muc_nicks"):
             cfg.appearance[key] = self._value(key)
         cfg.save()
         self.settings_applied.emit()

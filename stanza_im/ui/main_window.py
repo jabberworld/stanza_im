@@ -29,6 +29,7 @@ from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.roster_widget import RosterWidget, UserItem
 from stanza_im.ui.chat_window import ChatWindow
 from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.roster_style import RosterStyle
 from stanza_im.ui.subject_dialog import SubjectDialog
 from stanza_im.ui.tray import TrayIcon
 from stanza_im.ui.osd import OsdManager
@@ -64,6 +65,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config = Config()
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
         self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
+        self._roster_style = RosterStyle()
 
         from stanza_im.ui.tray import build_app_icon
         app.setWindowIcon(build_app_icon())
@@ -115,7 +117,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_theme_factory.set_nick_font(
             self._config.appearance.nick_font,
             self._config.appearance.nick_font_size)
+        self._theme_factory.set_chat_bg_color(self._config.appearance.chat_bg_color)
+        self._muc_theme_factory.set_chat_bg_color(self._config.appearance.chat_bg_color)
+        self._theme_factory.set_highlight_color(
+            self._config.appearance.muc_highlight_color)
+        self._muc_theme_factory.set_highlight_color(
+            self._config.appearance.muc_highlight_color)
         self._applied_participant_font = ("", 0)
+        self._applied_chat_bg = self._config.appearance.chat_bg_color
+        self._applied_highlight_color = self._config.appearance.muc_highlight_color
+        self._applied_colored_nicks = bool(self._config.appearance.colored_muc_nicks)
+        self._applied_roster_colors = (
+            self._config.appearance.roster_bg_color,
+            self._config.appearance.roster_group_bg_color)
         self._media_viewers: dict = {}
         self._media_prune_timer = QtCore.QTimer(self)
         self._media_prune_timer.setInterval(30 * 60 * 1000)
@@ -132,6 +146,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if participant_font != ("", 0):
             self._chat_window.set_participant_font(*participant_font)
             self._applied_participant_font = participant_font
+        self._chat_window.set_colored_muc_nicks(
+            bool(self._config.appearance.colored_muc_nicks))
         self._chat_window.set_tab_title_length(
             self._config.chat.tab_title_length)
         self._chat_window.set_chat_options(self._config.chat)
@@ -281,12 +297,9 @@ class MainWindow(QtWidgets.QMainWindow):
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._roster)
-        viewport = scroll.viewport()
-        viewport.setAutoFillBackground(True)
-        pal = viewport.palette()
-        pal.setColor(QtGui.QPalette.ColorRole.Window,
-                     QtCore.Qt.GlobalColor.white)
-        viewport.setPalette(pal)
+        self._roster_viewport = scroll.viewport()
+        self._roster_viewport.setAutoFillBackground(True)
+        self._apply_roster_colors()
         roster_layout.addWidget(scroll, stretch=1)
 
         # Status bar at bottom
@@ -941,9 +954,51 @@ class MainWindow(QtWidgets.QMainWindow):
             roster.setFont(font)
         roster.update()
 
+    def _apply_roster_colors(self) -> None:
+        """Apply the configured roster background and group-stripe colors."""
+        bg = getattr(self._config.appearance, "roster_bg_color", "") or ""
+        group_bg = getattr(self._config.appearance, "roster_group_bg_color",
+                           "") or ""
+        self._roster_style.set_colors(bg, group_bg)
+        roster = getattr(self, "_roster", None)
+        if roster is not None:
+            roster.set_style(self._roster_style)
+        viewport = getattr(self, "_roster_viewport", None)
+        if viewport is not None:
+            fill = self._roster_style.bg_color() or QtGui.QColor(
+                QtCore.Qt.GlobalColor.white)
+            pal = viewport.palette()
+            pal.setColor(QtGui.QPalette.ColorRole.Window, fill)
+            viewport.setPalette(pal)
+
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""
         self._apply_roster_font()
+        roster_colors = (
+            getattr(self._config.appearance, "roster_bg_color", "") or "",
+            getattr(self._config.appearance, "roster_group_bg_color", "") or "")
+        if roster_colors != getattr(self, "_applied_roster_colors", ("", "")):
+            self._apply_roster_colors()
+            self._applied_roster_colors = roster_colors
+        chat_bg = getattr(self._config.appearance, "chat_bg_color", "") or ""
+        if chat_bg != getattr(self, "_applied_chat_bg", ""):
+            self._theme_factory.set_chat_bg_color(chat_bg)
+            self._muc_theme_factory.set_chat_bg_color(chat_bg)
+            self._applied_chat_bg = chat_bg
+            self._chat_window.rerender_messages()
+        highlight_color = getattr(self._config.appearance,
+                                  "muc_highlight_color", "") or ""
+        if (highlight_color
+                != getattr(self, "_applied_highlight_color", "")):
+            self._theme_factory.set_highlight_color(highlight_color)
+            self._muc_theme_factory.set_highlight_color(highlight_color)
+            self._applied_highlight_color = highlight_color
+            self._chat_window.rerender_messages()
+        colored_nicks = bool(getattr(self._config.appearance,
+                                     "colored_muc_nicks", True))
+        if colored_nicks != getattr(self, "_applied_colored_nicks", None):
+            self._chat_window.set_colored_muc_nicks(colored_nicks)
+            self._applied_colored_nicks = colored_nicks
         chat_font = (getattr(self._config.appearance, "chat_font", "") or "",
                      int(getattr(self._config.appearance, "chat_font_size", 0) or 0))
         if chat_font != getattr(self, "_applied_chat_font", ("", 0)):

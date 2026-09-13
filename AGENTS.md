@@ -47,6 +47,7 @@ stanza_im/                      # Python package
 │   ├── chat_widget.py           # Single chat tab content
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
 │   ├── chat_themes.py           # Adium-style theme HTML generator
+│   ├── nick_colors.py           # Session MUC nickname → color allocation
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer
@@ -417,6 +418,31 @@ font live) and the size spin shows «<size> pt (по умолчанию)» via
 Fonts affect text only — avatars/images scale solely with the text-scale
 slider. Changing the chat font re-renders open tabs via
 `ChatWindow.rerender_messages`.
+
+**Colors** (`appearance.{roster_bg_color,roster_group_bg_color,chat_bg_color,
+muc_highlight_color, colored_muc_nicks}`, a «Цвет» page in Appearance
+preferences): roster colors are drawn by the QPainter pass — `RosterStyle.set_colors`
+(`bg_color()` fills each item area in `RosterWidget.paintEvent`, `group_bg_color()`
+stripes the group headers) and `MainWindow._apply_roster_colors` also paints the
+viewport so empty space below the roster matches. The chat background is a CSS
+override injected by `ChatThemeFactory.set_chat_bg_color` (`body {
+background-color: … !important; background-image: none !important }`, applied
+to both 1:1 and MUC factories; it overrides the skin's tiled image); the MUC
+mention highlight color feeds `ChatThemeFactory.set_highlight_color`. Color
+changes re-render open chats via `ChatWindow.rerender_messages`.
+
+**Colorful MUC nicknames** (`appearance.colored_muc_nicks`, default on):
+`ChatWidget` keeps a `NickColorAllocator` (`ui/nick_colors.py`); keys are the
+`normalize_nick`d nick (NFKC + whitespace collapse + case fold) bound to the
+participant's `real_jid` when present. Colors are allocated on first sight from
+a 15-shade dark palette with a golden-angle HSL fallback for large rooms, are
+released by `prune()` when participants leave, and are rebuilt from the current
+roster in `update_muc_users`/`set_self_nick`. `_entry_view_kwargs` passes the
+per-sender color as `sender_color` so `render_message` fills `%senderColor%`
+(`minimal-mod`; other skins ignore it), and the participant-sidebar row label
+gets the matching inline color. 1:1 chats never color senders. `ChatWindow.
+set_colored_muc_nicks` toggles every MUC tab (and is remembered for new tabs);
+toggling re-renders messages and the participant list.
 
 **Auto-status message** (`status.auto_status_message`, default `""`): one
 shared text sent with the show when `MainWindow._check_auto_status` switches

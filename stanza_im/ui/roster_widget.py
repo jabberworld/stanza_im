@@ -226,7 +226,8 @@ class RosterWidget(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing)
 
         dirty = event.rect()
-        painter.fillRect(dirty, QtCore.Qt.GlobalColor.white)
+        painter.fillRect(dirty, self._style.bg_color()
+                         or QtGui.QColor(QtCore.Qt.GlobalColor.white))
         cy = 0
         for kind, item in self._visible_items():
             if kind == "group":

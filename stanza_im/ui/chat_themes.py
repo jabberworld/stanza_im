@@ -6,7 +6,7 @@ import os
 import re
 from urllib.parse import quote
 
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtGui
 
 from stanza_im.include.constants import CHATSKINS_DIR
 from stanza_im.include.emoticons import smile_to_html
@@ -124,6 +124,8 @@ class ChatThemeFactory:
         self._font_size_pt = 0
         self._nick_font_family = ""
         self._nick_font_size_pt = 0
+        self._chat_bg_color = ""
+        self._highlight_color = _HIGHLIGHT_COLOR
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -219,6 +221,26 @@ class ChatThemeFactory:
         """Return the current (family, size-in-points) nickname override."""
         return self._nick_font_family, self._nick_font_size_pt
 
+    def set_chat_bg_color(self, color: str = "") -> None:
+        """Set the chat background override (hex ``#rrggbb``).
+
+        Empty/invalid values keep the skin's own body background.  The color
+        is injected as a ``body`` CSS rule that also clears the skin's
+        ``background-image`` so the chosen shade actually shows (e.g. the
+        ``minimal-mod`` tiled image would otherwise still paint on top).
+        """
+        if color and QtGui.QColor(str(color)).isValid():
+            self._chat_bg_color = QtGui.QColor(str(color)).name()
+        else:
+            self._chat_bg_color = ""
+
+    def set_highlight_color(self, color: str = "") -> None:
+        """Set the MUC mention highlight color (hex ``#rrggbb``)."""
+        if color and QtGui.QColor(str(color)).isValid():
+            self._highlight_color = QtGui.QColor(str(color)).name()
+        else:
+            self._highlight_color = _HIGHLIGHT_COLOR
+
     def _font_override_css(self) -> str:
         """CSS that forces the configured family/size on the chat text."""
         css = ""
@@ -238,6 +260,9 @@ class ChatThemeFactory:
             safe_family = family.replace("\\", "\\\\").replace("'", "\\'")
             css += (f"\n.sender {{ font-family: '{safe_family}' !important; "
                     f"font-size: {size}pt !important; }}")
+        if self._chat_bg_color:
+            css += (f"\nbody {{ background-color: {self._chat_bg_color} "
+                    f"!important; background-image: none !important; }}")
         return css
 
     def _transform_body(self, body: str, styled: bool = True,
@@ -284,7 +309,7 @@ class ChatThemeFactory:
         if self._highlight_mode in ("bold", "both"):
             style += "font-weight:bold;"
         if self._highlight_mode in ("color", "both"):
-            style += "color:%s;" % _HIGHLIGHT_COLOR
+            style += "color:%s;" % self._highlight_color
         pattern = re.compile(r"(?<![^\W_])(%s)(?![^\W_])"
                              % re.escape(nick), re.IGNORECASE)
         return pattern.sub('<span style="%s">\\1</span>' % style.rstrip(";"),

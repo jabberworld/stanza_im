@@ -64,6 +64,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_status: dict[str, str] = {}   # jid -> latest show
         self._chat_options = {}
         self._participant_font = ("", 0)
+        self._colored_muc_nicks = True
         self._muc_leave_confirm: Callable[[str], bool] | None = None
 
         self.setWindowTitle(APP_NAME)
@@ -190,6 +191,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
         widget.set_participant_font(*self._participant_font)
+        widget.set_colored_muc_nicks(self._colored_muc_nicks)
         widget.message_sent.connect(self._on_groupchat_message_sent)
         widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
         widget.message_edit_sent.connect(
@@ -269,6 +271,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_participant_font(*self._participant_font)
+
+    def set_colored_muc_nicks(self, enabled: bool):
+        """Apply and remember the per-participant MUC nickname colors."""
+        self._colored_muc_nicks = bool(enabled)
+        for widget in self._tabs.values():
+            if widget.is_muc:
+                widget.set_colored_muc_nicks(bool(enabled))
 
     def set_chat_options(self, options):
         self._chat_options = dict(options)
