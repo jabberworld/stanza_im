@@ -135,9 +135,12 @@ class ChatWindow(QtWidgets.QMainWindow):
             raise ValueError("A chat target JID is required")
         jid = jid.strip()
         if jid in self._tabs:
+            widget = self._tabs[jid]
+            widget.set_text_scale(
+                float(self._chat_options.get("text_scale", 1.0) or 1.0))
             if focus:
                 self._focus_tab(jid)
-            return self._tabs[jid]
+            return widget
 
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
@@ -177,8 +180,11 @@ class ChatWindow(QtWidgets.QMainWindow):
     def open_groupchat(self, room: str, nick: str, display_name: str) -> ChatWidget:
         """Open (or focus) a MUC chat tab."""
         if room in self._tabs:
+            widget = self._tabs[room]
+            widget.set_text_scale(
+                float(self._chat_options.get("text_scale", 1.0) or 1.0))
             self._focus_tab(room)
-            return self._tabs[room]
+            return widget
 
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)

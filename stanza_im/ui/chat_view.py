@@ -376,8 +376,7 @@ if HAS_WEBENGINE:
             if ok:
                 self._load_failures = 0
                 self._ready = True
-                if self._zoom != 1.0:
-                    self.setZoomFactor(self._zoom)
+                self.setZoomFactor(self._zoom)
                 self._install_scroll_js()
                 self._install_jump_js()
                 self._install_action_js()

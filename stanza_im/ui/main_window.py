@@ -103,6 +103,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._media_service.thumbnail_ready.connect(
             self._on_media_thumbnail_ready)
         self._applied_media = (media_mode, media_size)
+        self._theme_factory.set_chat_font(
+            self._config.appearance.chat_font,
+            self._config.appearance.chat_font_size)
+        self._muc_theme_factory.set_chat_font(
+            self._config.appearance.chat_font,
+            self._config.appearance.chat_font_size)
         self._media_viewers: dict = {}
         self._media_prune_timer = QtCore.QTimer(self)
         self._media_prune_timer.setInterval(30 * 60 * 1000)
@@ -254,6 +260,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Roster widget
         self._roster = RosterWidget()
+        self._apply_roster_font()
         self._roster.set_tooltip_provider(self._roster_tooltip)
         self._show_offline_action.toggled.connect(self._roster.set_show_offline)
         self._roster.contact_double_clicked.connect(self._on_contact_open)
@@ -905,8 +912,39 @@ class MainWindow(QtWidgets.QMainWindow):
         """Keep the login form in sync after a successful password change."""
         self._login._pw_edit.setText(new_password)
 
+    def _apply_roster_font(self) -> None:
+        """Apply the configured roster font (empty family = application font)."""
+        roster = getattr(self, "_roster", None)
+        if roster is None:
+            return
+        family = getattr(self._config.appearance, "roster_font", "") or ""
+        size = int(getattr(self._config.appearance, "roster_font_size", 0) or 0)
+        if not family and not size:
+            roster.setFont(QtGui.QFont())
+        else:
+            font = QtGui.QFont(family) if family else QtGui.QFont(roster.font())
+            if size:
+                font.setPointSize(size)
+            roster.setFont(font)
+        roster.update()
+
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""
+        self._apply_roster_font()
+        chat_font = (getattr(self._config.appearance, "chat_font", "") or "",
+                     int(getattr(self._config.appearance, "chat_font_size", 0) or 0))
+        if chat_font != getattr(self, "_applied_chat_font", ("", 0)):
+            self._theme_factory.set_chat_font(*chat_font)
+            self._muc_theme_factory.set_chat_font(*chat_font)
+            self._applied_chat_font = chat_font
+            variant = self._config.appearance.chat_theme or self._config.chat.theme
+            muc_variant = self._config.appearance.muc_theme
+            self._chat_window.reload_themes(variant, muc_variant)
+        osd_font = (getattr(self._config.appearance, "osd_font", "") or "",
+                    int(getattr(self._config.appearance, "osd_font_size", 0) or 0))
+        if osd_font != getattr(self, "_applied_osd_font", ("", 0)):
+            self._osd.apply_font(*osd_font)
+            self._applied_osd_font = osd_font
         variant = self._config.appearance.chat_theme or self._config.chat.theme
         muc_variant = self._config.appearance.muc_theme
         if (variant, muc_variant) != getattr(self, "_applied_chat_themes", ("", "")):
@@ -2071,6 +2109,9 @@ class MainWindow(QtWidgets.QMainWindow):
             factor = 1.0
         self._config.chat.text_scale = factor
         self._config.save()
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.sync_scale(factor)
 
     def _on_chat_window_closed(self):
         self._chat_window.save_geometry(self._config.chat_window)
@@ -2516,7 +2557,9 @@ class MainWindow(QtWidgets.QMainWindow):
         elif self._config.status.auto_away and idle_minutes >= self._config.status.away_minutes:
             status = "away"
         if status and status != self._auto_status_applied:
-            self._client.send_presence(show=status)
+            message = (getattr(self._config.status, "auto_status_message", "")
+                       or "")
+            self._client.send_presence(show=status, status=message)
             self._set_tray_status_icon(status)
             self._set_status_combo(status)
             self._auto_status_applied = status

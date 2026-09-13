@@ -205,6 +205,48 @@ class PreferencesDialog(QtWidgets.QDialog):
             layout.addWidget(widget)
         return box
 
+    def _zoom_control(self, key: str) -> QtWidgets.QWidget:
+        """Chat text-scale slider (50-300%, step 10%, stored as a factor)."""
+        box = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        slider.setRange(50, 300)
+        slider.setSingleStep(10)
+        slider.setPageStep(10)
+        slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        slider.setTickInterval(50)
+        label = QtWidgets.QLabel()
+        label.setFixedWidth(48)
+
+        def _update_label(value: int):
+            label.setText(f"{value}%")
+
+        slider.valueChanged.connect(_update_label)
+        _update_label(slider.value())
+        layout.addWidget(slider, stretch=1)
+        layout.addWidget(label)
+        self._controls[key] = slider
+        return box
+
+    def _font_family_combo(self, key: str) -> QtWidgets.QComboBox:
+        """Combo of installed font families with a "default" first entry."""
+        combo = QtWidgets.QComboBox()
+        combo.addItem(tr("prefs_font_default"), "")
+        for family in QtGui.QFontDatabase.families():
+            combo.addItem(family, family)
+        self._controls[key] = combo
+        return combo
+
+    def _font_row(self, key: str) -> QtWidgets.QWidget:
+        """A family combo + size spin box (0 points = default)."""
+        combo = self._font_family_combo(key)
+        combo.setMinimumWidth(220)
+        size = self._spin(key + "_size", 0, 48)
+        size.setValue(0)
+        return self._row(combo, size)
+
     def _page_connection(self):
         connection, form = self._page()
 
@@ -556,7 +598,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         return page
 
     def _page_appearance(self):
-        page, form = self._page()
+        themes, form = self._page()
         theme = QtWidgets.QComboBox()
         for name in self._theme_factory.variant_names():
             theme.addItem(name, name)
@@ -591,7 +633,15 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_highlight_color", "color"),
             ("prefs_highlight_both", "both"),
         ]))
-        return page
+
+        fonts, font_form = self._page()
+        font_form.addRow(tr("prefs_zoom"), self._zoom_control("text_scale"))
+        font_form.addRow(tr("prefs_font_roster"), self._font_row("roster_font"))
+        font_form.addRow(tr("prefs_font_chat"), self._font_row("chat_font"))
+        font_form.addRow(tr("prefs_font_osd"), self._font_row("osd_font"))
+
+        return self._tabs([(tr("prefs_appearance_themes"), themes),
+                           (tr("prefs_appearance_fonts"), fonts)])
 
     def _update_emoticon_preview(self):
         while self._emoticon_preview.count():
@@ -679,6 +729,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         xa_spin = self._spin("xa_minutes", 1, 1440)
         form.addRow(tr("prefs_xa_minutes"), xa_spin)
         link_status_minutes(away_spin, xa_spin)
+        status_message = QtWidgets.QPlainTextEdit()
+        status_message.setMaximumHeight(70)
+        status_message.setPlaceholderText(tr("prefs_auto_status_message_placeholder"))
+        self._controls["auto_status_message"] = status_message
+        form.addRow(tr("prefs_auto_status_message"), status_message)
         return page
 
     def _page_shortcuts(self):
@@ -694,8 +749,12 @@ class PreferencesDialog(QtWidgets.QDialog):
             return widget.isChecked()
         if isinstance(widget, QtWidgets.QSpinBox):
             return widget.value()
+        if isinstance(widget, QtWidgets.QSlider):
+            return widget.value() / 100.0
         if isinstance(widget, QtWidgets.QComboBox):
             return widget.currentData()
+        if isinstance(widget, QtWidgets.QPlainTextEdit):
+            return widget.toPlainText()
         return widget.text()
 
     def _set(self, key: str, value):
@@ -704,11 +763,20 @@ class PreferencesDialog(QtWidgets.QDialog):
             widget.setChecked(bool(value))
         elif isinstance(widget, QtWidgets.QSpinBox):
             widget.setValue(int(value or 0))
+        elif isinstance(widget, QtWidgets.QSlider):
+            widget.setValue(int(round((float(value or 1.0)) * 100)))
         elif isinstance(widget, QtWidgets.QComboBox):
             index = widget.findData(value)
             widget.setCurrentIndex(index if index >= 0 else 0)
+        elif isinstance(widget, QtWidgets.QPlainTextEdit):
+            widget.setPlainText(str(value or ""))
         else:
             widget.setText(str(value or ""))
+
+    def sync_scale(self, factor: float) -> None:
+        """Reflect a scale changed live (e.g. Ctrl+wheel) into the slider."""
+        if "text_scale" in self._controls:
+            self._set("text_scale", factor)
 
     def _load_values(self):
         cfg = self._config
@@ -783,6 +851,14 @@ class PreferencesDialog(QtWidgets.QDialog):
             "osd_topdown": notifications.osd_topdown,
             "auto_away": status.auto_away, "away_minutes": status.away_minutes,
             "auto_xa": status.auto_xa, "xa_minutes": status.xa_minutes,
+            "auto_status_message": getattr(status, "auto_status_message", ""),
+            "text_scale": chat.text_scale,
+            "roster_font": getattr(appearance, "roster_font", ""),
+            "roster_font_size": getattr(appearance, "roster_font_size", 0),
+            "chat_font": getattr(appearance, "chat_font", ""),
+            "chat_font_size": getattr(appearance, "chat_font_size", 0),
+            "osd_font": getattr(appearance, "osd_font", ""),
+            "osd_font_size": getattr(appearance, "osd_font_size", 0),
         }
         for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
             values[key] = getattr(notifications, key)
@@ -853,6 +929,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.notifications[key] = self._value(key)
         for key in ("auto_away", "away_minutes", "auto_xa", "xa_minutes"):
             cfg.status[key] = self._value(key)
+        cfg.status.auto_status_message = self._value("auto_status_message")
+        cfg.chat.text_scale = self._value("text_scale")
+        for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
+                    "osd_font", "osd_font_size"):
+            cfg.appearance[key] = self._value(key)
         cfg.save()
         self.settings_applied.emit()
 

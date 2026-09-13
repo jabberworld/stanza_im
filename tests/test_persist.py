@@ -116,5 +116,39 @@ win.window_closed.connect(lambda: closes.append(True))
 win.close()
 check("window_closed emitted", len(closes) == 1)
 
+# 9. text-scale clamp stays within 0.5..3.0 -------------------------------------
+cw._view.set_chat_zoom(9.0)
+check("zoom clamped to max", abs(cw._view._zoom - 3.0) < 1e-6)
+cw._view.set_chat_zoom(0.01)
+check("zoom clamped to min", abs(cw._view._zoom - 0.5) < 1e-6)
+
+# 10. REOPENED tabs re-apply the zoom (the reported reset-to-100% bug) ----------
+win4 = ChatWindow(theme, theme)
+cc = win4.open_chat("bob@example.com", "Bob")
+win4._chat_options["text_scale"] = 2.2
+cc2 = win4.open_chat("bob@example.com", "Bob", focus=False)
+check("reopen 1:1 re-applies text_scale", cc2 is cc
+      and abs(cc._view._zoom - 2.2) < 1e-6)
+cm = win4.open_groupchat("room@conference.example.com", "alice", "Room")
+win4._chat_options["text_scale"] = 0.7
+cm2 = win4.open_groupchat("room@conference.example.com", "alice", "Room")
+check("reopen MUC re-applies text_scale", cm2 is cm
+      and abs(cm._view._zoom - 0.7) < 1e-6)
+
+# 11. chat font override lands in the generated page CSS ------------------------
+tf = chat_themes.ChatThemeFactory()
+plain = tf.generate_empty_page()
+check("no font override by default", "14pt" not in plain)
+tf.set_chat_font("DejaVu Sans", 14)
+page = tf.generate_empty_page()
+check("family overridden in css", "DejaVu Sans" in page)
+check("size overridden in css", "14pt" in page and "font-size: 14pt" in page)
+options = tf.chat_font()
+check("font getter roundtrip", options == ("DejaVu Sans", 14))
+page_full = tf.generate_page([{
+    "sender": "Bob", "body": "hi", "time": "12:00",
+    "direction": "incoming", "is_next": False}])
+check("page override carries into messages", "14pt" in page_full)
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

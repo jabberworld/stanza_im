@@ -31,9 +31,11 @@ def check(name, cond):
 class _FakeClient:
     def __init__(self):
         self.sent = []
+        self.statuses = []
 
     def send_presence(self, show=None, status="", priority=None):
         self.sent.append(show)
+        self.statuses.append(status)
 
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -89,6 +91,26 @@ check("last_status untouched by signal leak", win._config.last_status == "dnd")
 win._status_combo.setCurrentIndex(win._status_combo.findData("away"))
 check("manual change sends presence", client.sent[-1] == "away")
 check("manual change resets applied", win._auto_status_applied is None)
+
+# 8. the configured auto-status message rides along with the presence
+win._config.status.auto_status_message = "Auto: I am away"
+win._auto_status_applied = None
+win._last_activity = time.monotonic() - 6 * 60
+win._check_auto_status()
+check("auto message attached",
+      client.sent[-1] == "away" and client.statuses[-1] == "Auto: I am away")
+
+# 9. activity resumes with last_status and clears the auto message
+win._config.last_status = "online"
+ev2 = QtGui.QMouseEvent(QtCore.QEvent.Type.MouseButtonPress,
+                        QtCore.QPointF(2, 2), QtCore.Qt.MouseButton.LeftButton,
+                        QtCore.Qt.MouseButton.LeftButton,
+                        QtCore.Qt.KeyboardModifier.NoModifier)
+client.sent = []
+client.statuses = []
+win.eventFilter(win.app, ev2)
+check("resume clears auto message",
+      client.sent == ["online"] and client.statuses == [""])
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

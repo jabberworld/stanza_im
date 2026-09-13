@@ -107,7 +107,10 @@ class Config:
                         "media_preview_size": 200,
                         "media_cache_days": 30,
                         "media_cache_mb": 128,
-                        "muc_highlight": "both"},
+                        "muc_highlight": "both",
+                        "roster_font": "", "roster_font_size": 0,
+                        "chat_font": "", "chat_font_size": 0,
+                        "osd_font": "", "osd_font_size": 0},
         "notifications": {"tray_blink": True, "popups": True,
                            "sound_any_message": False,
                            "sound_first_message": False,
@@ -119,7 +122,8 @@ class Config:
                            "osd_topdown": True, "osd_duration": 5,
                            "osd_max": 3, "osd_x": 0, "osd_y": 0},
         "status": {"auto_away": False, "away_minutes": 5,
-                   "auto_xa": False, "xa_minutes": 15},
+                   "auto_xa": False, "xa_minutes": 15,
+                   "auto_status_message": ""},
         "ui": {"close_to_tray": True},
     }
 

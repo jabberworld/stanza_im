@@ -120,6 +120,8 @@ class ChatThemeFactory:
         self._media = None
         self._media_mode = "none"
         self._media_size = 200
+        self._font_family = ""
+        self._font_size_pt = 0
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -176,6 +178,40 @@ class ChatThemeFactory:
             self._media_size = int(size or 200)
         except (TypeError, ValueError):
             self._media_size = 200
+
+    def set_chat_font(self, family: str = "", size: int = 0) -> None:
+        """Set the chat base-font override (*family*, point size).
+
+        An empty family / zero size keeps the skin's defaults.  The override
+        is appended to the page CSS (last style block, ``!important``), so it
+        wins over themes that hard-code their own font on the message text.
+        Avatars and media are unaffected — only text.  Applies to the HTML
+        (WebEngine) rendering; the QTextBrowser fallback keeps its document
+        font scaled by the zoom factor only.
+        """
+        self._font_family = family or ""
+        try:
+            self._font_size_pt = int(size or 0)
+        except (TypeError, ValueError):
+            self._font_size_pt = 0
+
+    def chat_font(self) -> tuple[str, int]:
+        """Return the current (family, size-in-points) font override."""
+        return self._font_family, self._font_size_pt
+
+    def _font_override_css(self) -> str:
+        """CSS that forces the configured family/size on the chat text."""
+        if not (self._font_family or self._font_size_pt):
+            return ""
+        family = self._font_family or "sans-serif"
+        size = self._font_size_pt or 13
+        safe_family = family.replace("\\", "\\\\").replace("'", "\\'")
+        return (
+            f"body {{ font-family: '{safe_family}' !important; "
+            f"font-size: {size}pt !important; }}"
+            "\n.sender, .fromstatus, .next_label, .time_initial, "
+            "#chat .stanza-action, #chat .stanza-reply "
+            "{ font-family: inherit !important; }")
 
     def _transform_body(self, body: str, styled: bool = True,
                         highlight_nick: str = "") -> str:
@@ -357,6 +393,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 .stanza-reply .reply-label {{ font-weight: bold; }}
 .stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
 {_MEDIA_CSS}
+{self._font_override_css()}
 </style>
 </head>
 <body>
@@ -391,6 +428,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 .stanza-reply .reply-label {{ font-weight: bold; }}
 .stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
 {_MEDIA_CSS}
+{self._font_override_css()}
 </style>
 </head>
 <body>

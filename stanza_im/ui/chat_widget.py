@@ -1581,7 +1581,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._status_label.setVisible(False)
         self.set_show_avatars(bool(options.get("show_avatars", True)))
         self._set_input_height(int(options.get("input_height", self._input_height) or 60))
-        self._view.set_chat_zoom(float(options.get("text_scale", 1.0) or 1.0))
+        self.set_text_scale(float(options.get("text_scale", 1.0) or 1.0))
+
+    def set_text_scale(self, factor: float):
+        """Re-apply the text-scale factor (reopened tabs keep the zoom)."""
+        self._view.set_chat_zoom(factor)
 
     def mark_delivered(self, message_id: str) -> None:
         if not message_id:

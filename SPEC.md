@@ -126,6 +126,18 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `stun_turn_mode` / `stun_turn_manual` | `auto` / — | STUN/TURN (host:port list) |
 | `conference_servers` / `service_servers` | `[]` | Used discovery servers |
 
+### 4.2 Appearance, Chat & Status Settings (`appearance.*`, `chat.*`, `status.*`)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. |
+| `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
+| `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
+| `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
+| `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
+| `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
+| `status.auto_status_message` | `""` | Single shared status text sent with the auto Away/XA presence (`MainWindow._check_auto_status`); when empty the previous status text is kept. Returning activity resumes `status.last_status` with an empty message, so the auto text is cleared. |
+
 ## 5. Main Window (`ui/main_window.py`)
 
 Layout: `QMainWindow` with a `QStackedWidget` containing three pages:
@@ -150,6 +162,18 @@ Splash → (failure) → Login (with error message)
 Roster → (close) → Tray (hidden)
 Tray → (show) → Roster
 ```
+
+### 5.2 Auto-Status
+
+When `status.auto_away` / `auto_xa` are enabled, `MainWindow._check_auto_status`
+(a 30 s idle timer; activity tracked by an application-level `eventFilter`)
+sends Away / Extended Away presence once `idle_minutes` reaches
+`away_minutes` / `xa_minutes` (XA wins when both are due; the Preferences page
+forces `xa_minutes` ≥ `away_minutes`). The optional shared
+`status.auto_status_message` rides along with that presence; when empty, the
+previously stored status text is kept. Returning activity resumes
+`status.last_status` with an empty message, so the auto text is cleared and
+never sticks. Manual status changes reset the auto-applied state.
 
 ## 6. Login Form (`ui/login_widget.py`)
 
@@ -238,6 +262,10 @@ bold group name, online/total count "(3/7)" on the right.
 status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect).
 
 Dynamic height: 32px without status message, 52px with.
+
+The roster typeface is taken live from `appearance.roster_font` /
+`roster_font_size` (empty/0 = Qt default) and applied to the same QPainter
+pass by `MainWindow._apply_roster_font` — no relayout/rebuild.
 
 ### 7.3 Interactions
 
@@ -363,6 +391,13 @@ Single conversation tab. Layout:
   re-shown when composing resumes
 - Shared `QWebEngineProfile` across all views (memory optimization)
 
+Per-chat text zoom (`chat.text_scale`, default 1.0, clamped to 0.5–3.0):
+Ctrl+wheel calls `set_chat_zoom`, which is re-applied on every `loadFinished`
+(the document never resets to 100%). `ChatWindow` snapshots the value in
+`_chat_options` and re-applies it to any (re)opened 1:1 and MUC tab via
+`ChatWidget.set_text_scale`, so closed-and-reopened tabs keep their zoom. The
+Preferences slider (50–300 %) is synced bidirectionally with the live factor.
+
 ### 10.2 QTextBrowser Fallback
 
 When QWebEngine is not available, falls back to `QTextBrowser` with plain HTML
@@ -421,6 +456,15 @@ and swaps emoticons for the remaining plain spans only — never inside
 `<code>`/`<pre>`. Incoming messages that carry `<unstyled/>` (or the setting
 being off) fall back to the plain pipeline. Supported feature is advertised as
 `urn:xmpp:styling:0`.
+
+**Chat font override**: `ChatThemeFactory.set_chat_font(family, size)`
+(read from `appearance.chat_font` / `chat_font_size`, empty/0 = Qt default)
+appends a `body { font-family: '…' !important; font-size: …pt !important }`
+rule to `generate_page` / `generate_empty_page`. Message-text descendants
+`.sender`, `.fromstatus`, `.next_label`, `.time_initial`, `.stanza-action` and
+`.stanza-reply` force `font-family: inherit !important`, so the override
+reaches message text without touching avatar/emoticon `<img>` sizing (images
+scale only with `chat.text_scale`).
 
 ### 11.5 Message Replies (XEP-0461)
 

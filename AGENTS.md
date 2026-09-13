@@ -371,6 +371,34 @@ without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
 checkable group assignment and creation of new groups.
 
+**Chat text scale** (`chat.text_scale`, default `1.0`): a per-chat zoom in a
+50–300 % range (clamped to 0.5–3.0) driven by Ctrl+wheel in the chat view
+(`ChatView.set_chat_zoom`/`zoom_changed`). The value is re-applied to any
+(re)opened 1:1 and MUC tab through `ChatWidget.set_text_scale` fed by the
+`ChatWindow._chat_options` snapshot, so reopened tabs never reset to 100 %
+(and `_on_load_finished` re-sends the zoom on every document load). The
+Preferences → Appearance → Fonts «Масштаб текста чата» slider (same 50–300 %
+range) is bidirectionally synced with the live factor via
+`PreferencesDialog.sync_scale` and saved on Apply.
+
+**Widget fonts** (`appearance.{roster,chat,osd}_font` + `{...}_font_size`,
+pt; `""`/`0` = Qt default): applied live from Preferences. Roster rendering
+uses the QSS typeface via `MainWindow._apply_roster_font` (same raster pass);
+chat text sets `ChatThemeFactory.set_chat_font(family, size)`, which injects
+a `body { font-family: … !important; font-size: …pt !important }` override
+into `generate_page`/`generate_empty_page` with `font-family: inherit !important`
+for message descendants (`.sender`, `.fromstatus`, `.next_label`,
+`.time_initial`, `.stanza-action`, `.stanza-reply`); OSD notifications get
+`OsdManager.apply_font(family, size)` (re-renders visible popups). Fonts affect
+text only — avatars/images scale solely with the text-scale slider. Changing
+the chat font re-renders open tabs via `ChatWindow.rerender_messages`.
+
+**Auto-status message** (`status.auto_status_message`, default `""`): one
+shared text sent with the show when `MainWindow._check_auto_status` switches
+to `away`/`xa` after inactivity; when empty, the previously stored status
+text is kept. Returning activity (`eventFilter`) resumes
+`status.last_status` with an empty message, so the auto text never sticks.
+
 ### 8. Connection, TLS & Transport (`core/client.py`, `core/discovery.py`, `xmpp/socks5.py`)
 
 - **Resource**: `connection.resource_mode` = `hostname` (default, uses

@@ -38,8 +38,28 @@ def stack_position(index: int, base_y: int, heights,
 class _OsdWindow(QtWidgets.QWidget):
     """A single OSD bubble (optionally draggable for the preview)."""
 
+    @staticmethod
+    def _stylesheet(family: str = "", size: int = 0) -> str:
+        css = (
+            "#osd-frame { background: rgba(40, 40, 40, 235); border: 1px solid "
+            "rgba(255, 255, 255, 90); border-radius: 8px; }"
+            "#osd-frame QLabel { color: #fff; background: transparent; }"
+            "#osd-title { font-weight: bold; font-size: 13px; }"
+            "#osd-body { font-size: 12px; color: #eee; }"
+            "#osd-close { color: #fff; background: transparent; border: 0; "
+            "border-radius: 9px; font-size: 12px; font-weight: bold; }"
+            "#osd-close:hover { background: rgba(255, 255, 255, 45); }")
+        if family or size:
+            fam = (family or "sans-serif").replace("'", "\\'").replace("\\", "\\\\")
+            title_size = size or 13
+            body_size = size or 12
+            css += ("\n#osd-title {{ font-family: '{0}'; font-size: {1}pt; }}"
+                    "\n#osd-body {{ font-family: '{0}'; font-size: {2}pt; }}"
+                    .format(fam, title_size, body_size))
+        return css
+
     def __init__(self, icon, title: str, body: str, draggable: bool = False,
-                 parent=None):
+                 family: str = "", size: int = 0, parent=None):
         super().__init__(None)
         self.setWindowFlags(
             QtCore.Qt.WindowType.Tool
@@ -68,15 +88,8 @@ class _OsdWindow(QtWidgets.QWidget):
 
         frame = QtWidgets.QFrame(self)
         frame.setObjectName("osd-frame")
-        frame.setStyleSheet(
-            "#osd-frame { background: rgba(40, 40, 40, 235); border: 1px solid "
-            "rgba(255, 255, 255, 90); border-radius: 8px; }"
-            "#osd-frame QLabel { color: #fff; background: transparent; }"
-            "#osd-title { font-weight: bold; font-size: 13px; }"
-            "#osd-body { font-size: 12px; color: #eee; }"
-            "#osd-close { color: #fff; background: transparent; border: 0; "
-            "border-radius: 9px; font-size: 12px; font-weight: bold; }"
-            "#osd-close:hover { background: rgba(255, 255, 255, 45); }")
+        frame.setStyleSheet(self._stylesheet(family, size))
+        self._frame = frame
 
         row = QtWidgets.QHBoxLayout(frame)
         row.setContentsMargins(10, 8, 10, 8)
@@ -128,6 +141,12 @@ class _OsdWindow(QtWidgets.QWidget):
             else QtCore.Qt.CursorShape.PointingHandCursor)
 
     # ── Input ────────────────────────────────────────────────────
+
+    def apply_font(self, family: str = "", size: int = 0) -> None:
+        """Re-apply the configured font to a live OSD window."""
+        frame = getattr(self, "_frame", None)
+        if frame is not None:
+            frame.setStyleSheet(self._stylesheet(family, size))
 
     def _click(self) -> None:
         cb = self._on_clicked
@@ -241,6 +260,19 @@ class OsdManager:
             self._dismiss(self._preview)
             self._preview = None
 
+    def apply_font(self, family: str = "", size: int = 0) -> None:
+        """Re-apply the configured font to all live OSD windows/preview."""
+        for rec in list(self._windows):
+            rec["window"].apply_font(family, size)
+
+    @property
+    def _osd_font(self) -> tuple[str, int]:
+        appearance = getattr(self._config, "appearance", None)
+        if appearance is None:
+            return "", 0
+        return (getattr(appearance, "osd_font", "") or "",
+                int(getattr(appearance, "osd_font_size", 0) or 0))
+
     def dismiss_all(self):
         for rec in list(self._windows):
             self._dismiss(rec)
@@ -260,7 +292,9 @@ class OsdManager:
 
     def _spawn(self, icon, title: str, body: str, draggable: bool,
                preview: bool, duration: float) -> dict:
-        win = _OsdWindow(icon, title, body, draggable=draggable)
+        family, size = self._osd_font
+        win = _OsdWindow(icon, title, body, draggable=draggable,
+                         family=family, size=size)
         rec = {"window": win, "timer": None, "preview": preview,
                "on_click": None}
         win._on_close = lambda: self._dismiss(rec)
