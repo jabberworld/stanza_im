@@ -4,7 +4,9 @@
 
 Stanza IM is a lightweight XMPP/Jabber desktop client for Linux, inspired by the
 original Jabbim client (2007-2012). Written in Python 3 + PyQt6 + slixmpp.
-The supported XMPP extensions are listed in `XEPs.md`.
+The supported XMPP extensions are listed in `XEPs.md`; the detailed behavioral
+specification is `SPEC.md`. All three files are living documents — see
+[Documentation Maintenance](#documentation-maintenance).
 
 **Design goals**: lightweight, fast, low memory usage, modern XMPP standards.
 
@@ -29,11 +31,13 @@ stanza_im/                      # Python package
 ├── __main__.py                  # python -m stanza_im
 ├── app.py                       # Entry point: qasync event loop
 ├── core/
-│   ├── client.py                # JabberClient: slixmpp wrapper
+│   ├── client.py                # JabberClient: slixmpp wrapper, TLS/proxy/SM/CSI
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
-│   ├── history.py               # SQLite history queries; insert-time + DB-level dedup
+│   ├── history.py               # SQLite history; RLock + store_many + async wrappers
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
-│   └── vcard_cache.py           # vCard avatar download coordination
+│   ├── vcard_cache.py           # vCard avatar download coordination
+│   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
+│   └── memstats.py              # Periodic memory statistics (CLI -m)
 ├── ui/
 │   ├── main_window.py           # Main window: stack (login/splash/roster)
 │   ├── login_widget.py          # Login form + config prefill/save
@@ -43,24 +47,33 @@ stanza_im/                      # Python package
 │   ├── chat_widget.py           # Single chat tab content
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
 │   ├── chat_themes.py           # Adium-style theme HTML generator
+│   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
+│   ├── media_preview.py         # Inline image/audio/video previews
+│   ├── media_viewer.py          # Fullscreen image/video viewer
+│   ├── upload_dialog.py         # HTTP upload progress dialog
+│   ├── history_manager.py       # Per-contact history browser
+│   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
 ├── xmpp/
-│   └── message_styling.py       # XEP-0393 Message Styling parser
+│   ├── message_styling.py       # XEP-0393 Message Styling parser
+│   └── socks5.py                # Dependency-free SOCKS5 CONNECT for the account proxy
 ├── include/
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
 │   ├── enumerators.py           # XMPP show/icon/mood/activity maps
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
-│   ├── en.py                    # English strings (~150 keys)
+│   ├── en.py                    # English strings (~530 keys)
 │   └── ru.py                    # Russian strings
 ├── plugins/                     # (Future) Plugin system
 resources/                       # Images, chat skins, sounds, etc.
 old/                             # Original Jabbim code (reference only, gitignored)
 main.py                          # python main.py entry point
 pyproject.toml                   # Package config (distribution: stanza-im)
+AGENTS.md                        # This architecture guide (living document)
+SPEC.md                          # Detailed specification (living document)
 XEPs.md                          # Supported XEP list (living document)
 ```
 
@@ -358,6 +371,69 @@ without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
 checkable group assignment and creation of new groups.
 
+### 8. Connection, TLS & Transport (`core/client.py`, `core/discovery.py`, `xmpp/socks5.py`)
+
+- **Resource**: `connection.resource_mode` = `hostname` (default, uses
+  `socket.gethostname()`) or `manual` (`connection.resource`).
+- **Priority**: `connection.priority_mode` = `status` (default map:
+  online/chat 50, away 40, xa 30, dnd 0) or `manual`
+  (`connection.priority`, 0..127); computed in `send_presence`, re-sent live.
+- **Account SOCKS5**: `connection.proxy_mode` = `none`/`socks5`.
+  `xmpp/socks5.py` is a dependency-free RFC 1928 CONNECT connector;
+  `JabberClient._install_socks_proxy` replaces `xmpp._attempt_connection`
+  (instance attribute) to open the socket through the proxy and hand it to
+  slixmpp via `loop.create_connection(sock=..., ssl=...)`.
+- **TLS mode** `connection.tls_mode`: `direct` ("Только TLS"), `prefer`
+  (default), `normal`. `_StanzaXMPP.order_tls_first` puts `_xmpps-client._tcp`
+  records first (deterministic fallback); "TLS only" pre-resolves
+  `core/discovery.resolve_client_srv()` and raises `TLSOnlyUnavailable` when the
+  record is absent.
+- **STARTTLS mode** `connection.starttls_mode`: `always` (default,
+  `enable_plaintext=False`; `_StanzaXMPP._handle_stream_features` aborts with a
+  `tls_required` event if the server does not offer STARTTLS),
+  `opportunistic`, `never`. `tls_flags()` maps both selectors to slixmpp
+  `enable_direct_tls/enable_starttls/enable_plaintext` + `_require_starttls`.
+- **SASL**: no forced mechanism (slixmpp picks the strongest). On TLS 1.3
+  without `tls-exporter` in `ssl.CHANNEL_BINDING_TYPES` (Python < 3.12),
+  `filter_plus_mechs()` drops `*-PLUS` so SCRAM does not send an invalid
+  channel binding and trigger a transient `failed_auth`.
+- **Keep-alive**: `connection.keepalive` → `xmpp.whitespace_keepalive`.
+- `_connected_target` (via `_dns_hosts`) reports the real SRV endpoint;
+  `connection_info()` feeds the preferences info icon (mode, TLS version,
+  cipher, SASL, keep-alive, SM, CSI, server).
+
+### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
+
+- `connection.stream_management` (default on) registers `xep_0198`: slixmpp
+  enables SM after bind and resumes a dropped stream (`session_resumed`)
+  without re-auth/roster/presence, replaying unacked stanzas.
+  `JabberClient.resume_expected()` drives the UI: while resume is possible
+  MainWindow shows "Переподключение…" and then "Соединение восстановлено";
+  "Disconnected" appears only on `sm_failed`/`sm_disabled`.
+- `connection.csi` (default on) registers `xep_0352`:
+  `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
+  MainWindow derives activity from
+  `QApplication.applicationState() == ApplicationActive` through an application
+  `eventFilter` (`ApplicationStateChange`/`WindowActivate`/`WindowDeactivate`)
+  plus the show/hide/toggle/Esc/close hooks, and re-sends the state on
+  `session_start`/`session_resumed`/`csi_enabled`.
+
+### 10. Service discovery — file proxy & STUN/TURN (`core/discovery.py`)
+
+- **XEP-0065**: `discover_file_proxy()` uses slixmpp
+  `xep_0065.discover_proxies()` (server `disco#items` then
+  `category='proxy' type='bytestreams'`); the returned mapping is keyed by
+  `slixmpp.JID`, which is not orderable, so it is sorted with `key=str`.
+- **STUN/TURN**: `discover_stun_turn()` queries SRV
+  `_turns/_stuns/_turn/_stun._tcp|udp` via aiodns, encrypted first and TURN
+  before STUN.
+- `DiscoveryCache` (JSON under `$XDG_CACHE_HOME/stanza-im/discovery.json`)
+  keeps positives for 24 h and negatives for 10 min; `refresh()` isolates the
+  two sections (a file-proxy failure never hides STUN/TURN) and
+  `effective_endpoint()` implements the auto/manual choice. Discovery runs as a
+  background task after `session_start`; "Detect again" calls
+  `refresh_services()`.
+
 ## Memory Management Rules
 
 1. **IconCache**: max 200 entries, 60s TTL, auto-eviction every 30s
@@ -373,7 +449,13 @@ python main.py              # Direct
 python -m stanza_im         # Module
 ```
 
-Requires: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml.
+Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
+SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
+(periodic memory statistics), `-h/--help`. `app.prepare_qt_argv()` re-prepends
+the program name before `QApplication` — QWebEngine aborts on an empty argv.
+
+Requires: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml,
+aiodns (SRV discovery).
 System libs: libglib2.0, libgl1, libx11-6, libfontconfig1 (for PyQt6).
 Distribution name: `stanza-im` (console script `stanza-im`, legacy `jabbim`
 alias kept for compatibility).
@@ -383,7 +465,26 @@ alias kept for compatibility).
 Commit changes to the local git repository automatically after each logical unit
 of work (one bug fix or feature = one commit). Match the commit message style of
 the existing history (short imperative summary line). Do not commit secrets or
-unintended files; check `git status` before committing.
+unintended files; check `git status` before committing. Specification updates
+(see below) belong to the same commit as the change that made them stale.
+
+## Documentation Maintenance
+
+`AGENTS.md`, `SPEC.md` and `XEPs.md` are living documents and MUST be updated in
+the same logical unit of work as any change that makes them stale:
+
+- supported XEP added/removed or used differently → `XEPs.md` (+ `SPEC.md` §14);
+- configuration keys, defaults or persisted paths → `AGENTS.md` (XDG) and
+  `SPEC.md` §4;
+- new/removed modules or files → both directory-structure blocks
+  (`AGENTS.md` Directory Structure, `SPEC.md` §3);
+- architecture, UI patterns, shortcuts or dependencies → `AGENTS.md` and
+  `SPEC.md` (relevant section).
+
+Before committing, check `git status`: when a change affects any of the above,
+the corresponding spec file must appear in the same commit. `tests/test_spec_sync.py`
+guards the XEP list automatically. Record the documentation update in
+`.opencode/work-state.md` (`Completed`).
 
 ## Session State Protocol
 

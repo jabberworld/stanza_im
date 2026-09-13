@@ -25,11 +25,13 @@ event loop (`qasync.QEventLoop`), creates MainWindow, enters loop.
 stanza_im/
 ├── app.py              — QApplication + qasync event loop
 ├── core/
-│   ├── client.py       — XMPP client wrapper (slixmpp)
+│   ├── client.py       — XMPP client wrapper (slixmpp), TLS/proxy/SM/CSI
 │   ├── storage.py      — Config (TOML) + JSONL chat history (XDG)
-│   ├── history.py      — SQLite chat-history access (day/summary queries)
+│   ├── history.py      — SQLite chat-history access (day/summary + async wrappers)
 │   ├── known_contacts.py — persisted JID → name/groups/conference registry
-│   └── vcard_cache.py  — vCard avatar download/cache coordination
+│   ├── vcard_cache.py  — vCard avatar download/cache coordination
+│   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
+│   └── memstats.py     — periodic memory statistics (CLI -m)
 ├── ui/
 │   ├── main_window.py  — Main window (3-page stack), actions and menus
 │   ├── login_widget.py — Login form + config prefill/save
@@ -40,6 +42,9 @@ stanza_im/
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
+│   ├── media_preview.py — Inline image/audio/video previews
+│   ├── media_viewer.py — Fullscreen image/video viewer
+│   ├── upload_dialog.py — HTTP upload progress dialog
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── history_manager.py   — Per-contact history browser
@@ -47,7 +52,8 @@ stanza_im/
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
-├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser)
+├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
+│                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
 ├── include/            — Constants (XDG paths), enumerators, utilities
 └── plugins/            — (future)
@@ -93,10 +99,32 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/history/<bare-jid>.jsonl` |
 | Chat history (SQLite) | `$XDG_DATA_HOME/stanza-im/history/` |
 | Cache | `$XDG_CACHE_HOME/stanza-im/` |
+| Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
 
 - Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
 - Password stored **plaintext** (explicit user decision); file permissions 0600
 - History appended line-by-line as JSON, one file per bare JID
+
+### 4.1 Connection Settings (`connection.*`)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `resource_mode` | `hostname` | Resource: machine hostname, or `manual` → `resource` |
+| `resource` | `jabbim` | Manual resource string (when `resource_mode=manual`) |
+| `priority_mode` | `status` | Priority from the presence show, or `manual` → `priority` |
+| `priority` | `50` | Manual priority (0..127) |
+| `override_host` / `host` / `port` | off / — / 5222 | Skip SRV and connect to an explicit host:port |
+| `proxy_mode` | `none` | Account connection proxy: `none` or `socks5` |
+| `proxy_host` / `proxy_port` | — / 0 | SOCKS5 proxy address (used when `proxy_mode=socks5`) |
+| `tls_mode` | `prefer` | `direct` (TLS only) / `prefer` (direct TLS then fallback) / `normal` |
+| `starttls_mode` | `always` | `always` / `opportunistic` / `never` (ignored for `tls_mode=direct`) |
+| `keepalive` | `true` | Send whitespace keep-alive packets |
+| `stream_management` | `true` | XEP-0198 resumption/acks |
+| `csi` | `true` | XEP-0352 active/inactive |
+| `message_carbons` | `true` | XEP-0280 |
+| `file_proxy_mode` / `file_proxy_manual` | `auto` / — | XEP-0065 file proxy (JID) |
+| `stun_turn_mode` / `stun_turn_manual` | `auto` / — | STUN/TURN (host:port list) |
+| `conference_servers` / `service_servers` | `[]` | Used discovery servers |
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -144,7 +172,23 @@ Signal: `login_requested(jid, password, show)`
 - On connect, `_save_config()` writes lasted JID / password / status / flags
 - `should_auto_connect()` — auto-connect on launch
 
-## 6.2 Roster Events (client → UI)
+### 6.2 Connection Flow & Security
+
+On `login_requested(jid, password, show)` MainWindow builds a `JabberClient`
+from `connection.*` (resource mode, priority, TLS/STARTTLS mode, account proxy)
+and runs `connect_async()`:
+
+- "Только TLS"/"Предпочитать TLS" resolve `_xmpps-client._tcp`; "Только TLS"
+  aborts with `login_tls_only_unavailable` when the record is missing.
+- "Шифровать соединение = Всегда" aborts with `login_tls_required` when the
+  server does not offer STARTTLS.
+- Errors are shown on the login page and in the tray, and written to the
+  console / `stanza-im.log` (with `-l`).
+- With XEP-0198 enabled a dropped stream is resumed (`stream_resumed`); the UI
+  shows "Переподключение…" → "Соединение восстановлено" instead of
+  "Disconnected" while resumption is possible.
+
+### 6.3 Roster Events (client → UI)
 
 The XMPP client emits diff-based roster events:
 
@@ -497,14 +541,22 @@ LRU cache for QPixmap icons:
 
 ### 14.1 Architecture
 
-Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
+Wraps `slixmpp.ClientXMPP` through the `_StanzaXMPP` subclass (deterministic
+direct-TLS ordering, STARTTLS enforcement, unusable `-PLUS` SASL filter).
+Registers XEP plugins (conditionally where noted):
 - xep_0054 (vCard), xep_0045 (MUC), xep_0066 (OOB), xep_0085 (Chat State)
 - xep_0184 (Receipts), xep_0224 (Attention), xep_0048 (Bookmarks)
 - xep_0050 (Ad-hoc Commands), xep_0004 (Data Forms), xep_0049 (Private XML)
 - xep_0030 (Service Discovery), xep_0128 (Disco Extensions), xep_0055 (Search)
 - xep_0077 (Registration), xep_0092 (Software Version), xep_0199 (Ping)
 - xep_0202 (Entity Time), xep_0313 (MAM, pulls in xep_0059/xep_0297)
-- xep_0280 (Message Carbons)
+- xep_0280 (Message Carbons), xep_0060 (PubSub), xep_0163 (PEP)
+- xep_0065 (SOCKS5 Bytestreams — file-proxy discovery)
+- xep_0198 (Stream Management; `connection.stream_management`)
+- xep_0352 (Client State Indication; `connection.csi`)
+- SASL mechanism is **not forced**: slixmpp selects the strongest. On TLS 1.3
+  without Python `tls-exporter` support, `*-PLUS` mechanisms are dropped to
+  avoid an invalid channel binding and a transient auth failure.
 - XEP-0393 Message Styling advertised via disco feature `urn:xmpp:styling:0`
   (parsed by `xmpp/message_styling.py`; toggle in Preferences → Chat)
 - XEP-0461 Message Replies advertised via disco feature `urn:xmpp:reply:0`
@@ -607,7 +659,55 @@ Wraps `slixmpp.ClientXMPP`. Registers XEP plugins:
 
 See `XEPs.md` for the full supported-extensions matrix.
 
-### 14.2 Event System
+### 14.6 Connection Security & Transport
+
+- **Resource / priority**: `resource_mode` (`hostname`/`manual`) and
+  `priority_mode` (`status`/`manual`). Status priority map: online/chat 50,
+  away 40, xa 30, dnd 0; the manual value (0..127) is sent on every presence.
+- **Account SOCKS5** (`proxy_mode=none|socks5`): `xmpp/socks5.py` performs an
+  RFC 1928 CONNECT; `JabberClient._install_socks_proxy` replaces
+  `xmpp._attempt_connection` so the socket is opened through the proxy and
+  handed to slixmpp (`loop.create_connection(sock=..., ssl=...)`).
+- **TLS mode** `tls_mode`: `direct` ("Только TLS"), `prefer` (default),
+  `normal`. `prefer` tries `_xmpps-client._tcp` records first and falls back to
+  the normal connection. `direct` pre-resolves
+  `core/discovery.resolve_client_srv()` and raises `TLSOnlyUnavailable`
+  (`login_tls_only_unavailable`) when the record is missing.
+- **STARTTLS mode** `starttls_mode`: `always` (default; refuses to connect
+  without STARTTLS → `tls_required`/`login_tls_required`), `opportunistic`,
+  `never`. `tls_flags()` maps both selectors to the slixmpp flags.
+- **Keep-alive** `keepalive` → `xmpp.whitespace_keepalive`.
+- `connection_info()` (mode, TLS version/cipher, SASL, keep-alive, SM, CSI,
+  actual SRV endpoint) feeds the preferences info icon.
+
+### 14.7 Stream Management & Client State (XEP-0198/0352)
+
+- `connection.stream_management` (default on) registers `xep_0198`: SM is
+  enabled after bind and a dropped stream is resumed (`session_resumed`)
+  without re-auth/roster/presence; unacked stanzas are replayed by `h` counter.
+  `resume_expected()` drives MainWindow's "Переподключение…" /
+  "Соединение восстановлено"; "Disconnected" only on `sm_failed`/`sm_disabled`.
+- `connection.csi` (default on) registers `xep_0352`:
+  `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
+  MainWindow recomputes activity from `QApplication.applicationState()` via an
+  application event filter and the show/hide/toggle/Esc/close hooks, and
+  re-sends the state on `session_start`/`session_resumed`/`csi_enabled`.
+
+### 14.8 Service Discovery — File Proxy & STUN/TURN (`core/discovery.py`)
+
+- **XEP-0065**: `discover_file_proxy()` uses `xep_0065.discover_proxies()`
+  (server `disco#items` + `category='proxy' type='bytestreams'`); JID keys are
+  sorted with `key=str`.
+- **STUN/TURN**: `discover_stun_turn()` queries SRV
+  `_turns/_stuns/_turn/_stun._tcp|udp` via aiodns (encrypted first, TURN before
+  STUN).
+- `DiscoveryCache` (`$XDG_CACHE_HOME/stanza-im/discovery.json`): positives 24 h,
+  negatives 10 min; `refresh()` isolates the two sections and
+  `effective_endpoint()` implements the auto/manual choice. Runs as a
+  background task after `session_start`; "Detect again" calls
+  `refresh_services()`.
+
+### 14.9 Event System
 
 ```
 slixmpp event → handler → emit(event_name, *args) → UI callbacks
@@ -626,10 +726,20 @@ slixmpp event → handler → emit(event_name, *args) → UI callbacks
 | groupchat_presence | room, nick, show, status | MUC presence |
 | auth_failed | — | Authentication error |
 | disconnected | — | Connection lost |
+| stream_resumed | — | Stream resumed via XEP-0198 (no full re-login) |
+| sm_enabled | — | Stream management enabled |
+| sm_failed | — | Stream resumption failed (full reconnect) |
+| sm_disabled | — | Stream management disabled/reset |
+| csi_enabled | — | Server supports XEP-0352 |
+| tls_required | — | Required STARTTLS not offered by the server |
+| connection_info | dict | Endpoint/security state for the info icon |
+| services_discovered | dict | File-proxy + STUN/TURN discovery result |
+| message_corrected | jid, … | Incoming XEP-0308 correction applied |
+| groupchat_message_corrected | room, … | Incoming MUC correction applied |
 | subscribed | jid | Subscription accepted |
 | unsubscribed | jid | Unsubscribed |
 
-### 14.3 High-Level API
+### 14.10 High-Level API
 
 ```python
 client.connect_async()          # Connect to server
@@ -646,9 +756,17 @@ client.join_muc(room, nick)     # Join MUC room
 client.leave_muc(room)          # Leave MUC room
 client.send_muc_message(room, body)  # Send to MUC
 client.get_vcard(jid)           # Request vCard
+client.connection_info()        # Dict: mode/TLS/SASL/keepalive/SM/CSI/server
+client.set_client_active(bool)  # XEP-0352 active/inactive
+client.resume_expected()        # True if XEP-0198 may resume the stream
+client.discover_transfer_services()  # File proxy + STUN/TURN (cached)
+client.refresh_services()       # Force re-discovery
+client.discovered_services()    # Last discovery result
+client.upload_http(jid, path)   # XEP-0363 upload
+client.edit_message(jid, body, replace_id)  # XEP-0308 correction
 ```
 
-### 14.4 Data Classes
+### 14.11 Data Classes
 
 ```python
 class ContactInfo:       # jid, name, groups, show, status, avatar_path, resources
@@ -704,11 +822,14 @@ Copied from original Jabbim `resources/`:
 - PEP (User Tune, User Mood, User Activity publication)
 - Privacy Lists
 - Metacontacts
-- HTTP Upload (XEP-0363) — file sending
-- File transfer (SI + IBB)
+- File transfer (SI + IBB) and use of the discovered XEP-0065 proxy / STUN-TURN
+  for p2p transfers and calls
 - Plugin system (convention-based discovery)
 - Embedded chat mode (splitter in main window)
 
 Implemented since the original spec: vCard viewing/editing, ad-hoc commands,
 service discovery (browser), bookmarks management, MAM (XEP-0313),
-preferences dialog, search/registration dialogs.
+preferences dialog, search/registration dialogs, HTTP Upload (XEP-0363),
+message replies/corrections, displayed synchronization, media previews,
+connection/TLS/STARTTLS/proxy settings, stream management (XEP-0198) and
+client state indication (XEP-0352).
