@@ -63,6 +63,14 @@ def _compose_reply_target(reply_id: str, author: str, sender: str,
                     for part in (reply_id, author, sender, body))
 
 
+def clamp_zoom(factor: float) -> float:
+    """Clamp a text-scale factor to the allowed 50-300 % range."""
+    try:
+        return max(0.5, min(3.0, float(factor)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 class _JumpButtonMixin:
     """Floating 'jump to bottom' button for either chat backend."""
 
@@ -230,7 +238,13 @@ if HAS_WEBENGINE:
             self._pending: list[str] = []
             self._ready = False
             self._load_failures = 0
+            self._loading = False
             self.loadFinished.connect(self._on_load_finished)
+            self.loadStarted.connect(self._on_load_started)
+            # Chromium handles Ctrl+wheel itself once the page owns focus, so
+            # our wheelEvent is never called; this built-in signal is the only
+            # reliable relay for scroll/pinch zoom.
+            self.zoomFactorChanged.connect(self._on_zoom_factor_changed)
 
             self._scroll_poll = QtCore.QTimer(self)
             self._scroll_poll.setInterval(250)
@@ -244,15 +258,28 @@ if HAS_WEBENGINE:
             if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
                     and event.angleDelta().y()):
                 step = 0.1 if event.angleDelta().y() > 0 else -0.1
-                self.set_chat_zoom(self._zoom + step)
+                self.set_chat_zoom(clamp_zoom(self._zoom + step))
                 self.zoom_changed.emit(self._zoom)
                 event.accept()
                 return
             super().wheelEvent(event)
 
+        def _on_load_started(self):
+            self._loading = True
+
+        def _on_zoom_factor_changed(self, factor: float):
+            """Relay scroll/pinch zoom that bypasses our ``wheelEvent``."""
+            if self._loading:
+                return
+            zoom = clamp_zoom(factor)
+            if abs(zoom - self._zoom) < 1e-9:
+                return
+            self._zoom = zoom
+            self.zoom_changed.emit(zoom)
+
         def set_chat_zoom(self, factor: float):
             """Set a persisted text-scale factor (applied to the whole page)."""
-            self._zoom = max(0.5, min(3.0, float(factor)))
+            self._zoom = clamp_zoom(factor)
             self.setZoomFactor(self._zoom)
 
         def set_media_thumbnail(self, url: str, data_uri: str) -> None:
@@ -373,6 +400,7 @@ if HAS_WEBENGINE:
                 pass
 
         def _on_load_finished(self, ok: bool):
+            self._loading = False
             if ok:
                 self._load_failures = 0
                 self._ready = True
@@ -1072,7 +1100,7 @@ else:
             if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
                     and event.angleDelta().y()):
                 step = 0.1 if event.angleDelta().y() > 0 else -0.1
-                self.set_chat_zoom(self._zoom + step)
+                self.set_chat_zoom(clamp_zoom(self._zoom + step))
                 self.zoom_changed.emit(self._zoom)
                 event.accept()
                 return
@@ -1080,7 +1108,7 @@ else:
 
         def set_chat_zoom(self, factor: float):
             """Set a persisted text-scale factor as the document font size."""
-            factor = max(0.5, min(3.0, float(factor)))
+            factor = clamp_zoom(factor)
             if factor != self._zoom:
                 base = self.font().pointSizeF() or 10.0
                 font = QtGui.QFont(self.font())

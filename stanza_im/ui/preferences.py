@@ -46,6 +46,32 @@ def link_status_minutes(away: QtWidgets.QSpinBox, xa: QtWidgets.QSpinBox) -> Non
     clamp_xa(xa.value())
 
 
+class _SnapSlider(QtWidgets.QSlider):
+    """Slider that snaps user drags/clicks to a value grid.
+
+    Programmatic ``setValue`` calls (settings load, live zoom sync) are left
+    untouched so the indicator shows the exact current scale; only real user
+    interactions snap to the nearest multiple of ``grid``.
+    """
+
+    def __init__(self, *args, grid: int = 10, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._grid = grid
+
+    def _snap(self, value: int) -> int:
+        return int(round(value / self._grid)) * self._grid
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.setValue(self._snap(self.value()))
+
+    def keyReleaseEvent(self, event):
+        super().keyReleaseEvent(event)
+        if self.value() % self._grid:
+            self.setValue(self._snap(self.value()))
+
+
 class PreferencesDialog(QtWidgets.QDialog):
     """Edit application settings grouped like the original Jabbim dialog."""
 
@@ -138,6 +164,15 @@ class PreferencesDialog(QtWidgets.QDialog):
             QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         return page, form
 
+    @staticmethod
+    def _default_app_font() -> tuple[str, float]:
+        """Resolve the de-facto widget font Qt applies (system default)."""
+        font = QtWidgets.QApplication.font()
+        size = float(font.pointSizeF() or 0)
+        if size <= 0:
+            size = 10.0
+        return font.family(), size
+
     def _tabs(self, pages: list[tuple[str, QtWidgets.QWidget]]) -> QtWidgets.QWidget:
         tabs = QtWidgets.QTabWidget()
         for title, page in pages:
@@ -211,7 +246,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         layout = QtWidgets.QHBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        slider = _SnapSlider(QtCore.Qt.Orientation.Horizontal, grid=10)
         slider.setRange(50, 300)
         slider.setSingleStep(10)
         slider.setPageStep(10)
@@ -230,21 +265,31 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._controls[key] = slider
         return box
 
-    def _font_family_combo(self, key: str) -> QtWidgets.QComboBox:
+    def _font_family_combo(self, key: str,
+                           default_family: str) -> QtWidgets.QComboBox:
         """Combo of installed font families with a "default" first entry."""
         combo = QtWidgets.QComboBox()
-        combo.addItem(tr("prefs_font_default"), "")
+        combo.addItem(tr("prefs_font_default", family=default_family), "")
         for family in QtGui.QFontDatabase.families():
             combo.addItem(family, family)
         self._controls[key] = combo
         return combo
 
-    def _font_row(self, key: str) -> QtWidgets.QWidget:
-        """A family combo + size spin box (0 points = default)."""
-        combo = self._font_family_combo(key)
+    def _font_row(self, key: str, default_family: str = "",
+                  default_size: float = 0) -> QtWidgets.QWidget:
+        """A family combo + size spin box (0 points = default).
+
+        When the stored value is empty/0 the controls show the *real* font
+        Qt would use instead — ``default_family``/``default_size``.
+        """
+        combo = self._font_family_combo(key, default_family)
         combo.setMinimumWidth(220)
         size = self._spin(key + "_size", 0, 48)
         size.setValue(0)
+        size.setSuffix(tr("prefs_font_pt"))
+        if default_size > 0:
+            size.setSpecialValueText(
+                tr("prefs_font_size_default", size=f"{default_size:g}"))
         return self._row(combo, size)
 
     def _page_connection(self):
@@ -636,9 +681,37 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         fonts, font_form = self._page()
         font_form.addRow(tr("prefs_zoom"), self._zoom_control("text_scale"))
-        font_form.addRow(tr("prefs_font_roster"), self._font_row("roster_font"))
-        font_form.addRow(tr("prefs_font_chat"), self._font_row("chat_font"))
-        font_form.addRow(tr("prefs_font_osd"), self._font_row("osd_font"))
+        default_family, default_size = self._default_app_font()
+        font_form.addRow(tr("prefs_font_roster"),
+                         self._font_row("roster_font", default_family, default_size))
+        font_form.addRow(tr("prefs_font_chat"),
+                         self._font_row("chat_font", default_family, default_size))
+        font_form.addRow(tr("prefs_font_nicks"),
+                         self._font_row("nick_font", default_family, default_size))
+        font_form.addRow(tr("prefs_font_participants"),
+                         self._font_row("participant_font", default_family,
+                                        default_size))
+        font_form.addRow(tr("prefs_font_osd"),
+                         self._font_row("osd_font", default_family, default_size))
+
+        # The nickname "default" follows the chat font (a real value picks
+        # the chat family/size; an empty one falls through to the system
+        # font), so its default label tracks the chat row live.
+        def _sync_nick_default():
+            nick_combo = self._controls["nick_font"]
+            family = self._controls["chat_font"].currentData() or default_family
+            size = (self._controls["chat_font_size"].value()
+                    or default_size)
+            nick_combo.setItemText(
+                0, tr("prefs_font_default", family=family))
+            self._controls["nick_font_size"].setSpecialValueText(
+                tr("prefs_font_size_default", size=f"{size:g}"))
+
+        self._controls["chat_font"].currentIndexChanged.connect(
+            _sync_nick_default)
+        self._controls["chat_font_size"].valueChanged.connect(
+            _sync_nick_default)
+        _sync_nick_default()
 
         return self._tabs([(tr("prefs_appearance_themes"), themes),
                            (tr("prefs_appearance_fonts"), fonts)])
@@ -859,6 +932,10 @@ class PreferencesDialog(QtWidgets.QDialog):
             "chat_font_size": getattr(appearance, "chat_font_size", 0),
             "osd_font": getattr(appearance, "osd_font", ""),
             "osd_font_size": getattr(appearance, "osd_font_size", 0),
+            "nick_font": getattr(appearance, "nick_font", ""),
+            "nick_font_size": getattr(appearance, "nick_font_size", 0),
+            "participant_font": getattr(appearance, "participant_font", ""),
+            "participant_font_size": getattr(appearance, "participant_font_size", 0),
         }
         for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
             values[key] = getattr(notifications, key)
@@ -932,7 +1009,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.status.auto_status_message = self._value("auto_status_message")
         cfg.chat.text_scale = self._value("text_scale")
         for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
-                    "osd_font", "osd_font_size"):
+                    "osd_font", "osd_font_size", "nick_font", "nick_font_size",
+                    "participant_font", "participant_font_size"):
             cfg.appearance[key] = self._value(key)
         cfg.save()
         self.settings_applied.emit()

@@ -1573,6 +1573,17 @@ class ChatWidget(QtWidgets.QWidget):
     def set_show_avatars(self, show: bool):
         self._show_avatars = show
 
+    def set_participant_font(self, family: str = "", size: int = 0):
+        """Set the MUC participant sidebar font (empty = system default)."""
+        base = QtGui.QFont(QtWidgets.QApplication.font())
+        if family:
+            base.setFamily(family)
+        if size > 0:
+            base.setPointSize(int(size))
+        self._users_list.setFont(base)
+        if self.is_muc:
+            self._render_muc_users()
+
     def set_chat_options(self, options):
         self._send_ctrl_enter = bool(options.get("send_ctrl_enter", False))
         self._send_typing_notifications = bool(options.get("send_typing_notifications", True))

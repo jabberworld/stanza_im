@@ -372,26 +372,48 @@ Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
 checkable group assignment and creation of new groups.
 
 **Chat text scale** (`chat.text_scale`, default `1.0`): a per-chat zoom in a
-50–300 % range (clamped to 0.5–3.0) driven by Ctrl+wheel in the chat view
-(`ChatView.set_chat_zoom`/`zoom_changed`). The value is re-applied to any
+50–300 % range (clamped to 0.5–3.0 by `chat_view.clamp_zoom`, which also
+guards non-numeric input) driven by Ctrl+wheel in the chat view
+(`ChatView.set_chat_zoom`/`zoom_changed`). Chromium handles Ctrl+wheel itself
+once the page owns focus, so the WebEngine view additionally follows the
+built-in `QWebEngineView.zoomFactorChanged` signal (`_on_zoom_factor_changed`,
+guarded by a `_loading` flag and a self-zoom equality check to avoid loops and
+load-time resets) — both paths feed the same `zoom_changed → text_scale_changed
+→ config.save() + _chat_options` chain. The value is re-applied to any
 (re)opened 1:1 and MUC tab through `ChatWidget.set_text_scale` fed by the
 `ChatWindow._chat_options` snapshot, so reopened tabs never reset to 100 %
 (and `_on_load_finished` re-sends the zoom on every document load). The
 Preferences → Appearance → Fonts «Масштаб текста чата» slider (same 50–300 %
 range) is bidirectionally synced with the live factor via
-`PreferencesDialog.sync_scale` and saved on Apply.
+`PreferencesDialog.sync_scale` and saved on Apply; it is a `_SnapSlider`
+that snaps user drags/clicks/keys to the 10 % grid without touching
+programmatic `setValue` (zoom sync from the wheel stays exact).
 
-**Widget fonts** (`appearance.{roster,chat,osd}_font` + `{...}_font_size`,
-pt; `""`/`0` = Qt default): applied live from Preferences. Roster rendering
-uses the QSS typeface via `MainWindow._apply_roster_font` (same raster pass);
-chat text sets `ChatThemeFactory.set_chat_font(family, size)`, which injects
-a `body { font-family: … !important; font-size: …pt !important }` override
-into `generate_page`/`generate_empty_page` with `font-family: inherit !important`
-for message descendants (`.sender`, `.fromstatus`, `.next_label`,
-`.time_initial`, `.stanza-action`, `.stanza-reply`); OSD notifications get
-`OsdManager.apply_font(family, size)` (re-renders visible popups). Fonts affect
-text only — avatars/images scale solely with the text-scale slider. Changing
-the chat font re-renders open tabs via `ChatWindow.rerender_messages`.
+**Widget fonts** (`appearance.{roster,chat,osd,nick,participant}_font` +
+`{...}_font_size`, pt; `""`/`0` = Qt default): applied live from Preferences.
+Roster rendering uses the QSS typeface via `MainWindow._apply_roster_font`
+(same raster pass); chat text sets `ChatThemeFactory.set_chat_font(family,
+size)`, which injects a `body { font-family: … !important; font-size: …pt
+!important }` override into `generate_page`/`generate_empty_page` with
+`font-family: inherit !important` for message descendants (`.sender`,
+`.fromstatus`, `.next_label`, `.time_initial`, `.stanza-action`,
+`.stanza-reply`); `ChatThemeFactory.set_nick_font(family, size)` adds a
+`.sender { … } !important` rule and, when the skin packs no
+`class="sender"` (e.g. `candy`), wraps the `%sender%` placeholder in a
+`<span class="sender">` so the nickname font applies everywhere (skins with
+their own sender class, e.g. `minimal-mod`, are never double-wrapped); OSD
+notifications get `OsdManager.apply_font(family, size)` (re-renders visible
+popups); the MUC participant sidebar gets `ChatWidget.set_participant_font`
+(hosted by `ChatWindow.set_participant_font`, remembered for new MUC tabs via
+`ChatWindow._participant_font`). In the preferences «Шрифты» tab, empty/zero
+values show the *real* font Qt would use instead: the family combo's first
+entry reads «По умолчанию — <family>» (for nicknames following the chat
+font live) and the size spin shows «<size> pt (по умолчанию)» via
+`setSpecialValueText`, both resolved from `QApplication.font()` by
+`PreferencesDialog._default_app_font` while the stored value stays `""`/`0`.
+Fonts affect text only — avatars/images scale solely with the text-scale
+slider. Changing the chat font re-renders open tabs via
+`ChatWindow.rerender_messages`.
 
 **Auto-status message** (`status.auto_status_message`, default `""`): one
 shared text sent with the show when `MainWindow._check_auto_status` switches

@@ -130,9 +130,11 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. |
+| `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed through the built-in `QWebEngineView.zoomFactorChanged` and saved the same way. |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
+| `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
+| `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
@@ -391,12 +393,21 @@ Single conversation tab. Layout:
   re-shown when composing resumes
 - Shared `QWebEngineProfile` across all views (memory optimization)
 
-Per-chat text zoom (`chat.text_scale`, default 1.0, clamped to 0.5–3.0):
-Ctrl+wheel calls `set_chat_zoom`, which is re-applied on every `loadFinished`
-(the document never resets to 100%). `ChatWindow` snapshots the value in
-`_chat_options` and re-applies it to any (re)opened 1:1 and MUC tab via
-`ChatWidget.set_text_scale`, so closed-and-reopened tabs keep their zoom. The
-Preferences slider (50–300 %) is synced bidirectionally with the live factor.
+Per-chat text zoom (`chat.text_scale`, default 1.0, clamped to 0.5–3.0 by
+`chat_view.clamp_zoom`): Ctrl+wheel calls `set_chat_zoom`, which is re-applied
+on every `loadFinished` (the document never resets to 100%). `ChatWindow`
+snapshots the value in `_chat_options` and re-applies it to any (re)opened 1:1
+and MUC tab via `ChatWidget.set_text_scale`, so closed-and-reopened tabs keep
+their zoom. The Preferences slider (50–300 %) is synced bidirectionally with
+the live factor. Because Chromium handles Ctrl+wheel itself once the page
+owns focus (the widget's `wheelEvent` is never invoked), the WebEngine view
+also listens to the built-in `QWebEngineView.zoomFactorChanged` signal
+(`_on_zoom_factor_changed`): values are clamped, ignored while a document is
+loading, and only relayed when they differ from `self._zoom` (no feedback
+loop); the same `zoom_changed → text_scale_changed → config.save() + snapshot`
+chain runs, so wheel/pinch zoom persists. The 50–300 % slider is a
+`_SnapSlider`: user drags, clicks and keys snap to the 10 % grid, while
+programmatic `setValue` (zoom sync from the wheel) stays exact.
 
 ### 10.2 QTextBrowser Fallback
 
@@ -465,6 +476,31 @@ rule to `generate_page` / `generate_empty_page`. Message-text descendants
 `.stanza-reply` force `font-family: inherit !important`, so the override
 reaches message text without touching avatar/emoticon `<img>` sizing (images
 scale only with `chat.text_scale`).
+
+**Nickname font override**: `ChatThemeFactory.set_nick_font(family, size)`
+(read from `appearance.nick_font` / `nick_font_size`, empty/0 = inherit the
+chat font) appends a `.sender { font-family: '…' !important; font-size: …pt
+!important }` rule to the page. When the chosen skin packs no
+`class="sender"` on its sender element (e.g. `candy`), `render_message`
+wraps the `%sender%` expansion in `<span class="sender">` so the selector
+applies; skins with their own sender class (e.g. `minimal-mod`) are never
+double-wrapped. The nickname font follows the chat font for its "default"
+label in Preferences (a real chat font wins, otherwise the system font).
+
+**MUC participant font**: `ChatWidget.set_participant_font(family, size)`
+(from `appearance.participant_font` / `participant_font_size`) sets the font of
+`ChatWidget._users_list`, which the participant row widgets and labels inherit;
+`ChatWindow.set_participant_font` remembers it in `_participant_font` and
+applies it to every new MUC tab (so the sidebar keeps the stored typeface
+across reconnects). Re-renders the participant list (`_render_muc_users`) so
+section headers pick up the family too.
+
+**Preferences defaults**: on the «Шрифты» tab, empty/zero values display the
+*real* font that would be used: the family combo's first entry reads
+«По умолчанию — <family>» and the size spin shows «<size> pt (по умолчанию)»
+via `setSpecialValueText`, both resolved by
+`PreferencesDialog._default_app_font` from `QApplication.font()`; the stored
+value stays `""`/`0`.
 
 ### 11.5 Message Replies (XEP-0461)
 

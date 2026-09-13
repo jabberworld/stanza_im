@@ -19,8 +19,10 @@ from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui import chat_themes
+from stanza_im.ui.chat_view import clamp_zoom
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.chat_window import ChatWindow
+from stanza_im.ui.preferences import PreferencesDialog, _SnapSlider
 from stanza_im.core.storage import Config
 
 i18n_load("en")
@@ -149,6 +151,82 @@ page_full = tf.generate_page([{
     "sender": "Bob", "body": "hi", "time": "12:00",
     "direction": "incoming", "is_next": False}])
 check("page override carries into messages", "14pt" in page_full)
+
+page_full = tf.generate_page([{
+    "sender": "Bob", "body": "hi", "time": "12:00",
+    "direction": "incoming", "is_next": False}])
+check("page override carries into messages", "14pt" in page_full)
+
+# 12. clamp_zoom bounds ----------------------------------------------------------
+check("clamp_zoom max", abs(clamp_zoom(9.0) - 3.0) < 1e-9)
+check("clamp_zoom min", abs(clamp_zoom(0.01) - 0.5) < 1e-9)
+check("clamp_zoom passthrough", abs(clamp_zoom(1.4) - 1.4) < 1e-9)
+check("clamp_zoom garbage", clamp_zoom("boom") == 1.0 and clamp_zoom(None) == 1.0)
+
+# 13. the 50-300% slider snaps to a 10% grid on user release ---------------------
+slider = _SnapSlider(QtCore.Qt.Orientation.Horizontal, grid=10)
+slider.setRange(50, 300)
+slider.setValue(137)
+check("snap does not touch programmatic setValue", slider.value() == 137)
+from PyQt6.QtTest import QTest
+QTest.mousePress(slider, QtCore.Qt.MouseButton.LeftButton,
+                 pos=slider.rect().center())
+QTest.mouseRelease(slider, QtCore.Qt.MouseButton.LeftButton,
+                   pos=slider.rect().center())
+check("release snaps to the grid", slider.value() % 10 == 0)
+
+# 14. nickname font override lands in CSS and wraps bare senders -----------------
+tfn = chat_themes.ChatThemeFactory()
+page0 = tfn.generate_empty_page()
+check("no nick font override by default",
+      "Comic Sans" not in page0
+      and "font-family: 'Comic" not in page0)
+tfn.set_nick_font("Comic Sans", 12)
+page = tfn.generate_empty_page()
+check("nick family in css", "Comic Sans" in page)
+check("nick size in css", "font-size: 12pt" in page)
+check("nick selector in css", ".sender {" in page
+      and "font-family: 'Comic Sans' !important" in page)
+from stanza_im.include.constants import CHATSKINS_DIR
+import os
+candy = chat_themes.ChatThemeFactory(
+    skin_dir=os.path.join(CHATSKINS_DIR, "candy"))
+candy.set_nick_font("Comic Sans", 12)
+msg_candy = candy.render_message(
+    "Alice", "hello", "12:00", "incoming", sender_color="#123456")
+check("bare sender wrapped", '<span class="sender">Alice</span>' in msg_candy)
+check("candy sender not double wrapped",
+      msg_candy.count('class="sender') == 1)
+tfn_min = chat_themes.ChatThemeFactory()
+tfn_min.set_nick_font("Comic Sans", 12)
+msg_min = tfn_min.render_message("Alice", "hello", "12:00", "incoming")
+check("minimal-mod sender not double wrapped",
+      msg_min.count('class="sender') == 1)
+
+# 15. participant sidebar font ----------------------------------------------------
+win.set_participant_font("DejaVu Sans", 13)
+muc = win.open_groupchat("room@conference.example.com", "alice", "Room")
+pf = muc._users_list.font()
+check("participant font family applied", pf.family() == "DejaVu Sans")
+check("participant font size applied", pf.pointSize() == 13)
+
+# 16. preferences show the real font default when the value is 0 ------------------
+prefs = PreferencesDialog(Config(), chat_themes.ChatThemeFactory())
+nick_combo = prefs._controls["nick_font"]
+nick_size = prefs._controls["nick_font_size"]
+check("default family label shows a real face",
+      "Default" in nick_combo.itemText(0)
+      and nick_combo.itemText(0) != "Default")
+check("default size label is a real pt default",
+      "pt" in nick_size.specialValueText())
+app_family = QtWidgets.QApplication.font().family()
+check("default label names the real system font", app_family in nick_combo.itemText(0))
+chat_combo = prefs._controls["chat_font"]
+target_idx = chat_combo.findData(app_family)
+if target_idx > 0:
+    chat_combo.setCurrentIndex(target_idx)
+    check("nick default label tracks the chat font",
+          app_family in nick_combo.itemText(0))
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

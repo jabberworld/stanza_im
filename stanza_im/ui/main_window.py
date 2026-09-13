@@ -109,6 +109,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_theme_factory.set_chat_font(
             self._config.appearance.chat_font,
             self._config.appearance.chat_font_size)
+        self._theme_factory.set_nick_font(
+            self._config.appearance.nick_font,
+            self._config.appearance.nick_font_size)
+        self._muc_theme_factory.set_nick_font(
+            self._config.appearance.nick_font,
+            self._config.appearance.nick_font_size)
+        self._applied_participant_font = ("", 0)
         self._media_viewers: dict = {}
         self._media_prune_timer = QtCore.QTimer(self)
         self._media_prune_timer.setInterval(30 * 60 * 1000)
@@ -119,6 +126,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window = ChatWindow(self._theme_factory,
                                        self._muc_theme_factory,
                                        icons=self._icons)
+        participant_font = (
+            self._config.appearance.participant_font or "",
+            int(self._config.appearance.participant_font_size or 0))
+        if participant_font != ("", 0):
+            self._chat_window.set_participant_font(*participant_font)
+            self._applied_participant_font = participant_font
         self._chat_window.set_tab_title_length(
             self._config.chat.tab_title_length)
         self._chat_window.set_chat_options(self._config.chat)
@@ -940,6 +953,21 @@ class MainWindow(QtWidgets.QMainWindow):
             variant = self._config.appearance.chat_theme or self._config.chat.theme
             muc_variant = self._config.appearance.muc_theme
             self._chat_window.reload_themes(variant, muc_variant)
+        nick_font = (getattr(self._config.appearance, "nick_font", "") or "",
+                     int(getattr(self._config.appearance, "nick_font_size", 0) or 0))
+        if nick_font != getattr(self, "_applied_nick_font", ("", 0)):
+            self._theme_factory.set_nick_font(*nick_font)
+            self._muc_theme_factory.set_nick_font(*nick_font)
+            self._applied_nick_font = nick_font
+            variant = self._config.appearance.chat_theme or self._config.chat.theme
+            muc_variant = self._config.appearance.muc_theme
+            self._chat_window.reload_themes(variant, muc_variant)
+        participant_font = (
+            getattr(self._config.appearance, "participant_font", "") or "",
+            int(getattr(self._config.appearance, "participant_font_size", 0) or 0))
+        if participant_font != getattr(self, "_applied_participant_font", ("", 0)):
+            self._chat_window.set_participant_font(*participant_font)
+            self._applied_participant_font = participant_font
         osd_font = (getattr(self._config.appearance, "osd_font", "") or "",
                     int(getattr(self._config.appearance, "osd_font_size", 0) or 0))
         if osd_font != getattr(self, "_applied_osd_font", ("", 0)):

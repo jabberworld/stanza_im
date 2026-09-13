@@ -122,6 +122,8 @@ class ChatThemeFactory:
         self._media_size = 200
         self._font_family = ""
         self._font_size_pt = 0
+        self._nick_font_family = ""
+        self._nick_font_size_pt = 0
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -199,19 +201,44 @@ class ChatThemeFactory:
         """Return the current (family, size-in-points) font override."""
         return self._font_family, self._font_size_pt
 
+    def set_nick_font(self, family: str = "", size: int = 0) -> None:
+        """Set the chat nickname font override (*family*, point size).
+
+        Applies to the message sender label only: ``.sender`` in the generated
+        CSS, which is injected into the theme's own ``%sender%`` position when
+        the skin packs no ``class="sender"`` on its sender element.  An empty
+        family / zero size makes nicknames simply inherit the chat font.
+        """
+        self._nick_font_family = family or ""
+        try:
+            self._nick_font_size_pt = int(size or 0)
+        except (TypeError, ValueError):
+            self._nick_font_size_pt = 0
+
+    def nick_font(self) -> tuple[str, int]:
+        """Return the current (family, size-in-points) nickname override."""
+        return self._nick_font_family, self._nick_font_size_pt
+
     def _font_override_css(self) -> str:
         """CSS that forces the configured family/size on the chat text."""
-        if not (self._font_family or self._font_size_pt):
-            return ""
-        family = self._font_family or "sans-serif"
-        size = self._font_size_pt or 13
-        safe_family = family.replace("\\", "\\\\").replace("'", "\\'")
-        return (
-            f"body {{ font-family: '{safe_family}' !important; "
-            f"font-size: {size}pt !important; }}"
-            "\n.sender, .fromstatus, .next_label, .time_initial, "
-            "#chat .stanza-action, #chat .stanza-reply "
-            "{ font-family: inherit !important; }")
+        css = ""
+        if self._font_family or self._font_size_pt:
+            family = self._font_family or "sans-serif"
+            size = self._font_size_pt or 13
+            safe_family = family.replace("\\", "\\\\").replace("'", "\\'")
+            css += (
+                f"body {{ font-family: '{safe_family}' !important; "
+                f"font-size: {size}pt !important; }}"
+                "\n.sender, .fromstatus, .next_label, .time_initial, "
+                "#chat .stanza-action, #chat .stanza-reply "
+                "{ font-family: inherit !important; }")
+        if self._nick_font_family or self._nick_font_size_pt:
+            family = self._nick_font_family or self._font_family or "sans-serif"
+            size = (self._nick_font_size_pt or self._font_size_pt or 13)
+            safe_family = family.replace("\\", "\\\\").replace("'", "\\'")
+            css += (f"\n.sender {{ font-family: '{safe_family}' !important; "
+                    f"font-size: {size}pt !important; }}")
+        return css
 
     def _transform_body(self, body: str, styled: bool = True,
                         highlight_nick: str = "") -> str:
@@ -302,6 +329,9 @@ class ChatThemeFactory:
             sender_html = (f'<a class="mention" href="{dst}" '
                            f'title="{escape_html(tr("muc_mention_sender"))}">'
                            f'{sender_html}</a>')
+        if (self._nick_font_family or self._nick_font_size_pt) \
+                and 'class="sender' not in template:
+            sender_html = f'<span class="sender">{sender_html}</span>'
 
         html = template.replace("%sender%", sender_html) \
                        .replace("%message%", body_html) \
