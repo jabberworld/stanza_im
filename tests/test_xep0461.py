@@ -164,6 +164,13 @@ check("reply button relayed by scroll poll, never navigation",
       and "__stanzaReplyRef || ''" in _view_src
       and "_last_reply_ref" in _view_src
       and "_clear_reply_request" in _view_src)
+check("MUC mention relayed by scroll poll, never navigation",
+      "a.mention" in _view_src
+      and "window.__stanzaMentionRef" in _view_src
+      and "preventDefault()" in _view_src
+      and "__stanzaMentionRef || ''" in _view_src
+      and "_last_mention_ref" in _view_src
+      and "_clear_mention_request" in _view_src)
 check("qwebchannel bundled",
       os.path.isfile(os.path.join(_root, "resources", "qwebchannel.js")))
 from stanza_im.ui import chat_themes as _ct

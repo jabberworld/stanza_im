@@ -210,6 +210,7 @@ if HAS_WEBENGINE:
             self._zoom = 1.0
             self._last_edit_ref = ""
             self._last_reply_ref = ""
+            self._last_mention_ref = ""
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
@@ -355,13 +356,14 @@ if HAS_WEBENGINE:
             the loadFinished probe would miss.  If messages vanished, restore
             through ``document_lost``.
             """
+            self._pre_click_messages = None  # unknown until measured
             def _count(result):
                 if result is None:
                     return
                 try:
                     self._pre_click_messages = int(result)
                 except (TypeError, ValueError):
-                    self._pre_click_messages = 0
+                    self._pre_click_messages = None
             try:
                 self._page.runJavaScript(
                     "document.querySelectorAll('#chat .stanza-message').length",
@@ -377,8 +379,8 @@ if HAS_WEBENGINE:
                     after = int(result) if result is not None else 0
                 except (TypeError, ValueError):
                     return
-                if int(getattr(self, "_pre_click_messages", 0) or 0) > 0 \
-                        and after == 0:
+                pre = getattr(self, "_pre_click_messages", None)
+                if after == 0 and (pre is None or pre > 0):
                     logger.warning(
                         "chat contents vanished after a click; restoring")
                     self.document_lost.emit()
@@ -535,6 +537,7 @@ if HAS_WEBENGINE:
             window.stanzaCloseMenu = closeMenu;
             window.__stanzaReplyRef = '';
             window.__stanzaMediaRef = '';
+            window.__stanzaMentionRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -661,6 +664,17 @@ if HAS_WEBENGINE:
                         rbtn.getAttribute('href') || '';
                     return;
                 }
+                // MUC mention: never navigate. A stanza: navigation can
+                // otherwise replace the chat document and blank the whole
+                // conversation.  Leave the href for the always-running scroll
+                // poll, which delivers it to Python like the reply/edit refs.
+                var m = t && t.closest ? t.closest('a.mention') : null;
+                if (m) {
+                    e.preventDefault();
+                    window.__stanzaMentionRef =
+                        m.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -718,8 +732,9 @@ if HAS_WEBENGINE:
                 "var st = window.scrollY || document.documentElement.scrollTop "
                 "|| document.body.scrollTop || 0; "
                 "[st, window.innerHeight || 0, document.body.scrollHeight || 0,"
-                " window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
-                " window.__stanzaMediaRef || '']",
+                "window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
+                " window.__stanzaMediaRef || '',"
+                " window.__stanzaMentionRef || '']",
                 self._on_scroll_position,
             )
 
@@ -738,6 +753,12 @@ if HAS_WEBENGINE:
         def _clear_media_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaMediaRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_mention_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaMentionRef = '';")
             except RuntimeError:
                 pass
 
@@ -774,6 +795,14 @@ if HAS_WEBENGINE:
                     self.link_clicked.emit(requested)
             else:
                 self._last_media_ref = ""
+            if len(value) > 6 and isinstance(value[6], str) and value[6]:
+                self._clear_mention_request()
+                requested = value[6]
+                if requested != getattr(self, "_last_mention_ref", ""):
+                    self._last_mention_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_mention_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])

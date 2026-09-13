@@ -550,7 +550,7 @@ navigates: the `_ACTION_JS` document handler preventDefaults the anchor and
 stores its `href` in `window.__stanzaReplyRef`, and the always-running scroll
 poll delivers that `stanza:reply:` reference to Python as a `link_clicked`
 (exactly like the `window.__stanzaEditRef` edit relay) — so the chat document
-is never reset by the click. Real links, MUC mentions and the `mam://load`
+is never reset by the click. Real links and the `mam://load`
 marker request a navigation intercepted on the C++ side by
 `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which
 emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto` schemes
@@ -596,8 +596,10 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   enabled per view via `ChatView.mention_senders`). Clicking it inserts
   `nick: ` at the cursor and focuses the input
   (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats. Like
-  reply and ordinary links the mention is a plain anchor whose click reaches
-  Python through the `acceptNavigationRequest` interception (no JS/bridge).
+  reply/edit the mention is a plain anchor whose click is preventDefaulted by
+  the `_ACTION_JS` document handler and relayed through
+  `window.__stanzaMentionRef` by the always-running scroll poll (never a
+  navigation), so a nick click can never reset the chat document.
 - `Tab` / `Shift+Tab` in a MUC input completes the nick before the cursor and
   cycles the candidate list with wrap-around on repeat presses. A nick that is
   the first token of the line is inserted as an address (`nick: ` with a
