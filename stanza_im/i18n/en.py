@@ -69,6 +69,7 @@ STRINGS = {
     "ft_upload_caption_placeholder": "Optional message sent with the files…",
     "ft_upload_in_progress": "Sending…",
     "ft_upload_done_row": "Sent",
+    "ft_eta": "ETA {eta}",
     "ft_upload_error_row": "Failed",
     "ft_p2p_unavailable": "P2P transfer is not available yet",
     "ft_p2p_started": "Sending «{file}» over P2P…",

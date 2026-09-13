@@ -69,6 +69,7 @@ STRINGS = {
     "ft_upload_caption_placeholder": "Дополнительное сообщение к файлам…",
     "ft_upload_in_progress": "Отправка…",
     "ft_upload_done_row": "Отправлено",
+    "ft_eta": "осталось {eta}",
     "ft_upload_error_row": "Ошибка",
     "ft_p2p_unavailable": "P2P-передача пока недоступна",
     "ft_p2p_started": "Отправка «{file}» через P2P…",

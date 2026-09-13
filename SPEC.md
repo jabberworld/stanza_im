@@ -776,7 +776,11 @@ Registers XEP plugins (conditionally where noted):
   per file — image thumbnail (or a generic file icon), name + size, and a
   per-file `QProgressBar` — plus one shared caption field and OK/Cancel. OK
   starts the transfers while the dialog stays open and shows live progress;
-  Cancel (or Close) hides the dialog without aborting running uploads.
+  Cancel (or Close) hides the dialog without aborting running uploads. Each
+  row also shows live stats — transferred / total, the current speed (EMA over
+  samples ≥ 0.3 s, `format_speed`) and an ETA (`format_eta`) — and the average
+  speed on completion; the numbers are derived from the integer progress
+  percentage and the file size, so no extra protocol data is needed.
 - `core/client.py` implements the protocol:
   `upload_http(jid, path)` → discover the service (`urn:xmpp:http:upload:0`
   via disco items/info, cached) → request a `<slot>` (filename/size/

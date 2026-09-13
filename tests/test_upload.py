@@ -142,7 +142,7 @@ check("config input height default", Config().chat.input_height == 60)
 
 # 8. FileTransferDialog --------------------------------------------------------
 from stanza_im.ui.upload_dialog import FileTransferDialog, format_size, \
-    _preview_pixmap
+    format_speed, format_eta, _FileRow, _preview_pixmap
 img_path = os.path.join(_SCRATCH, "photo.png")
 canvas = QtGui.QPixmap(96, 72)
 canvas.fill(QtCore.Qt.GlobalColor.red)
@@ -172,6 +172,26 @@ dlg._on_ok()
 check("dialog ok emits caption",
       started == ["Check this out"] and not dlg._ok_btn.isEnabled())
 check("dialog preview helper", _preview_pixmap(doc_path, dlg).isNull() is False)
+
+# 8a. transfer speed + ETA -----------------------------------------------------
+check("speed format", format_speed(1536) == "1.5 KB/s"
+      and format_speed(0) == "" and format_speed(-5) == "")
+check("eta format", format_eta(12) == "12s" and format_eta(125) == "2:05"
+      and format_eta(0) == "" and format_eta(3725) == "1:02:05")
+speed_path = os.path.join(_SCRATCH, "speed.bin")
+with open(speed_path, "wb") as fh:
+    fh.write(b"x" * 4096)
+speed_row = _FileRow(speed_path)
+speed_row.set_progress(25, now=0.0)
+check("stats show transferred volume", "/" in speed_row._stats_label.text())
+speed_row.set_progress(75, now=1.0)      # +2048 B in 1 s
+stats = speed_row._stats_label.text()
+check("stats show speed", "/s" in stats and speed_row._speed > 0)
+check("stats show eta", "ETA" in stats)
+speed_row.finish(now=2.0)
+check("finish shows average speed", "/s" in speed_row._stats_label.text())
+speed_row.fail("boom")
+check("fail clears stats", speed_row._stats_label.text() == "")
 
 # 9. resizable handle ----------------------------------------------------------
 handle = cw3._input_handle

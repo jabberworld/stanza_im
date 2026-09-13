@@ -362,7 +362,9 @@ input disable `acceptDrops` so file drops reach `ChatWidget`, which emits
 `files_upload_requested(jid, [paths], method)`). Dropped/picked files open
 `ui/upload_dialog.FileTransferDialog`: one row per file with an image
 thumbnail or generic file icon, a per-file `QProgressBar` and one shared
-caption (`QLineEdit`); OK starts the transfers while the dialog stays open,
+caption (`QLineEdit`); each row also shows live transfer stats — transferred /
+total, speed (EMA) and ETA (`format_speed`/`format_eta`) and the average speed
+when finished. OK starts the transfers while the dialog stays open,
 `file_upload_progress` events (phases `start`/`progress`/`done`/`error`, now
 carrying the file `path`) update the bars. The dialog is parented to the
 window that issued the request (`_place_dialog_over` centers it over the chat
