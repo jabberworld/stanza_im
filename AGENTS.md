@@ -375,10 +375,13 @@ checkable group assignment and creation of new groups.
 50–300 % range (clamped to 0.5–3.0 by `chat_view.clamp_zoom`, which also
 guards non-numeric input) driven by Ctrl+wheel in the chat view
 (`ChatView.set_chat_zoom`/`zoom_changed`). Chromium handles Ctrl+wheel itself
-once the page owns focus, so the WebEngine view additionally follows the
-built-in `QWebEngineView.zoomFactorChanged` signal (`_on_zoom_factor_changed`,
-guarded by a `_loading` flag and a self-zoom equality check to avoid loops and
-load-time resets) — both paths feed the same `zoom_changed → text_scale_changed
+once the page owns focus, so our `wheelEvent` is never called; the WebEngine
+view's always-running 250 ms scroll poll instead compares
+`QWebEngineView.zoomFactor()` against the tracked `self._zoom` (guarded by a
+`_loading` flag and a tolerance check to avoid loops and load-time resets) and
+relays any Chromium-initiated zoom to `zoom_changed` — Qt 6 has no
+`zoomFactorChanged` signal, so polling the property is the only reliable relay.
+Both paths feed the same `zoom_changed → text_scale_changed
 → config.save() + _chat_options` chain. The value is re-applied to any
 (re)opened 1:1 and MUC tab through `ChatWidget.set_text_scale` fed by the
 `ChatWindow._chat_options` snapshot, so reopened tabs never reset to 100 %

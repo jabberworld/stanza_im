@@ -242,9 +242,9 @@ if HAS_WEBENGINE:
             self.loadFinished.connect(self._on_load_finished)
             self.loadStarted.connect(self._on_load_started)
             # Chromium handles Ctrl+wheel itself once the page owns focus, so
-            # our wheelEvent is never called; this built-in signal is the only
-            # reliable relay for scroll/pinch zoom.
-            self.zoomFactorChanged.connect(self._on_zoom_factor_changed)
+            # our wheelEvent is never called; the scroll poll below also
+            # relays scroll/pinch zoom by comparing QWebEngineView.zoomFactor()
+            # against the tracked value (Qt 6 has no zoomFactorChanged signal).
 
             self._scroll_poll = QtCore.QTimer(self)
             self._scroll_poll.setInterval(250)
@@ -266,16 +266,6 @@ if HAS_WEBENGINE:
 
         def _on_load_started(self):
             self._loading = True
-
-        def _on_zoom_factor_changed(self, factor: float):
-            """Relay scroll/pinch zoom that bypasses our ``wheelEvent``."""
-            if self._loading:
-                return
-            zoom = clamp_zoom(factor)
-            if abs(zoom - self._zoom) < 1e-9:
-                return
-            self._zoom = zoom
-            self.zoom_changed.emit(zoom)
 
         def set_chat_zoom(self, factor: float):
             """Set a persisted text-scale factor (applied to the whole page)."""
@@ -716,6 +706,14 @@ if HAS_WEBENGINE:
         def _poll_scroll_position(self):
             if not self._ready:
                 return
+            # Detect Chromium-initiated zoom (Ctrl+wheel, pinch, Ctrl+/-) that
+            # bypasses our wheelEvent.  Qt 6 removed the zoomFactorChanged
+            # signal, so poll the property instead.
+            if not self._loading:
+                zoom = clamp_zoom(self.zoomFactor())
+                if abs(zoom - self._zoom) > 1e-9:
+                    self._zoom = zoom
+                    self.zoom_changed.emit(zoom)
             self.page().runJavaScript(
                 "var st = window.scrollY || document.documentElement.scrollTop "
                 "|| document.body.scrollTop || 0; "

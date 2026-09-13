@@ -130,7 +130,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed through the built-in `QWebEngineView.zoomFactorChanged` and saved the same way. |
+| `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
@@ -401,10 +401,12 @@ and MUC tab via `ChatWidget.set_text_scale`, so closed-and-reopened tabs keep
 their zoom. The Preferences slider (50–300 %) is synced bidirectionally with
 the live factor. Because Chromium handles Ctrl+wheel itself once the page
 owns focus (the widget's `wheelEvent` is never invoked), the WebEngine view
-also listens to the built-in `QWebEngineView.zoomFactorChanged` signal
-(`_on_zoom_factor_changed`): values are clamped, ignored while a document is
-loading, and only relayed when they differ from `self._zoom` (no feedback
-loop); the same `zoom_changed → text_scale_changed → config.save() + snapshot`
+relays the factor through its always-running 250 ms scroll poll: it compares
+`QWebEngineView.zoomFactor()` with `self._zoom`, clamps the change, ignores it
+while a document is loading, and only relays values that differ from
+`self._zoom` (no feedback loop) — Qt 6 dropped the `zoomFactorChanged` signal,
+so property polling is the only reliable relay. The same
+`zoom_changed → text_scale_changed → config.save() + snapshot`
 chain runs, so wheel/pinch zoom persists. The 50–300 % slider is a
 `_SnapSlider`: user drags, clicks and keys snap to the 10 % grid, while
 programmatic `setValue` (zoom sync from the wheel) stays exact.
