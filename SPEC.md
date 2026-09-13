@@ -59,7 +59,7 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, utilities
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities
 └── plugins/            — (future)
 ```
 
@@ -148,6 +148,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
 | `status.auto_status_message` | `""` | Single shared status text sent with the auto Away/XA presence (`MainWindow._check_auto_status`); when empty the previous status text is kept. Returning activity resumes `status.last_status` with an empty message, so the auto text is cleared. |
+| `status.message` | `""` | User's presence status message; sent with every presence (`MainWindow._send_presence`) and edited from the roster bottom bar. |
+| `status.mood` | `""` | Last published XEP-0107 mood key (cleared with `""`); republished on `session_started`. |
+| `status.activity` | `""` | Last published XEP-0108 activity, stored as `group` or `group/sub`; republished on `session_started`. |
 
 ### 4.3 File Reception Settings (`files.*`, Preferences → Stanza IM → File Receiving)
 
@@ -951,7 +954,33 @@ client.refresh_services()       # Force re-discovery
 client.discovered_services()    # Last discovery result
 client.upload_http(jid, path)   # XEP-0363 upload
 client.edit_message(jid, body, replace_id)  # XEP-0308 correction
+client.publish_mood(key, text="")      # XEP-0107 PEP publish
+client.publish_activity(group, sub="") # XEP-0108 PEP publish
+client.fetch_pep(jid)           # XEP-0080/0107/0108/0118 items → contact_pep_updated
 ```
+
+### 14.10.1 Extended Presence (XEP-0080/0107/0108/0118)
+
+- The four PEP nodes (`http://jabber.org/protocol/{geoloc,mood,activity,tune}`)
+  are advertised with `+notify`; incoming headline PEP events are parsed by
+  `JabberClient._maybe_pep_event` into `client.pep_data[bare_jid][kind]` and
+  re-emitted as `contact_pep_updated(jid, kind, data)`. `fetch_pep(bare)` pulls
+  the current nodes (`pubsub/items`, `max_items=1`) when a profile opens.
+- `include/pep.py` builds/parses mood (`<mood><key/><text/>`), activity
+  (`<activity><group><sub/></group><text/></activity>`), tune and geoloc
+  payloads, parses the bundled Jabbim icon packs
+  (`resources/moods/<pack>/*.cfg`, `resources/activities/<pack>/*.cfg`) and
+  formats a summary (`format_summary`).
+- The roster bottom bar has two icon-only buttons: a smiley menu
+  ("Mood" + nested "Activity" groups/sub-activities + "None", with pack icons)
+  that publishes via `publish_mood`/`publish_activity` and persists
+  `status.mood`/`status.activity` (republished on `session_started`), and an
+  `edit.png` button opening `StatusMessageDialog` (multiline, preloaded from
+  `status.message`); the edited text is sent with presence.
+- Contacts' mood/activity/tune/location are shown in the roster tooltip
+  (`MainWindow._roster_tooltip`) and on the vCard "Status" tab
+  (`mood`/`activity`/`tune`/`location`), updated live via
+  `_on_contact_pep_updated`.
 
 ### 14.11 Data Classes
 

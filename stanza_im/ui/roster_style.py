@@ -36,6 +36,9 @@ class UserItem:
     is_hidden: bool = False
     unread_count: int = 0
     mood: str = ""
+    activity: str = ""
+    tune: str = ""
+    location: str = ""
     meta_parent_jid: str | None = None
     meta_children: list | None = None
 

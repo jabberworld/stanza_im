@@ -21,6 +21,7 @@ whenever a new XEP is implemented or its usage changes.
 | XEP-0065 | SOCKS5 Bytestreams | Registered plugin; `discover_proxies()` autodetects the account's bytestream proxy (`category='proxy' type='bytestreams'`, see `core/discovery.py`). Its SOCKS5 data path is driven by the Jingle SOCKS5 transport (see XEP-0260) via `xmpp/bytestream.py`. |
 | XEP-0066 | Out of Band Data | Plugin registered; file sharing is done over Jingle (XEP-0234) and HTTP Upload (XEP-0363). |
 | XEP-0077 | In-Band Registration | `RegistrationDialog` fetches and submits service registration forms. |
+| XEP-0080 | User Location | Geolocation PEP payload (`http://jabber.org/protocol/geoloc`) parsed from contact events and shown in the roster tooltip and the profile "Status" tab. |
 | XEP-0082 | XMPP Date and Time Profiles | Normalizes server timestamps to canonical UTC ISO-8601 (`_normalize_ts`). |
 | XEP-0085 | Chat State Notifications | Sends typing/composing states and shows the remote activity suffix in the chat window title. |
 | XEP-0280 | Message Carbons | Copies of 1:1 messages sent/received by other of our resources are shown in the matching chats (`carbon_received`/`carbon_sent` in `core/client.py`, config `connection.message_carbons`) and stored in history. |
@@ -30,10 +31,11 @@ whenever a new XEP is implemented or its usage changes.
 | XEP-0368 | SRV records for XMPP over TLS | Direct-TLS connections through `_xmpps-client._tcp.<domain>` (ports 5223 etc.) for the "TLS only"/"Prefer TLS" connection modes (`core/discovery.resolve_client_srv`, `_StanzaXMPP.order_tls_first`). |
 | XEP-0092 | Software Version | Contact and MUC participant tooltips show the remote client (`plugin["xep_0092"]`). |
 | XEP-0096 | SI File Transfer | Superseded by Jingle File Transfer (XEP-0234); not used by the client. |
-| XEP-0107 | User Mood | Mood/activity name tables used for UI labels; publishing is not implemented yet. |
-| XEP-0108 | User Activity | Activity group/sub-activity tables for UI labels; publishing is not implemented yet. |
+| XEP-0107 | User Mood | Receives/parses `http://jabber.org/protocol/mood` PEP events; the roster bottom-bar smiley menu publishes the user's mood (with icons from `resources/moods`), and contacts' moods appear in the tooltip and the profile "Status" tab (`include/pep.py`). |
+| XEP-0108 | User Activity | Receives/parses `http://jabber.org/protocol/activity` PEP events (general group + specific sub-activity); the smiley menu publishes an activity (icons from `resources/activities`), and contacts' activities appear in the tooltip and the profile "Status" tab. |
+| XEP-0118 | User Tune | Parses `http://jabber.org/protocol/tune` PEP events (artist/title/source/…) and shows "Now playing" in the roster tooltip and the profile "Status" tab. |
 | XEP-0128 | Service Discovery Extensions | Registers the disco identity/features extensions advertised to other clients. |
-| XEP-0163 | Personal Eventing Protocol | Publishes/subscribes the private `urn:xmpp:mds:displayed:0` node used by XEP-0490. |
+| XEP-0163 | Personal Eventing Protocol | Publishes/subscribes the private `urn:xmpp:mds:displayed:0` node used by XEP-0490 and the extended-presence nodes for XEP-0080/0107/0108/0118 (advertised with `+notify`). |
 | XEP-0166 | Jingle | Session signalling for P2P file transfer (`xmpp/jingle.py`): `session-initiate`/`accept`/`terminate`, `transport-info`/`replace`/`accept` and `session-info`, advertised as `urn:xmpp:jingle:1`. |
 | XEP-0184 | Message Delivery Receipts | Marks delivered messages with a ✓ and requests receipts on sent stanzas. |
 | XEP-0198 | Stream Management | Enabled by default (`connection.stream_management`); resumes a dropped stream (`<resume/>`) without re-auth/roster/presence and acks stanzas by `h` counter. |

@@ -114,18 +114,38 @@ MOODS: dict[str, str] = {
     "worried": "worried",
 }
 
-# XMPP activity groups and sub-activities (XEP-0108)
+# XMPP activity groups and sub-activities (XEP-0108 §3, authoritative tree)
 ACTIVITY_GROUPS: dict[str, list[str]] = {
-    "doing_chores": ["groceries", "cooking", "maintenance", "dishes", "laundry", "gardening", "errand", "dog_walking"],
-    "drinking": ["beer", "coffee", "tea"],
-    "eating": ["snack", "breakfast", "dinner", "lunch"],
-    "exercising": ["cycling", "dancing", "hiking", "jogging", "sports", "running", "skiing", "swimming", "workout"],
-    "grooming": ["spa", "teeth", "haircut", "shaving", "bath", "shower"],
-    "inactive": ["appointment", "day_off", "hanging_out", "hiding", "vacation", "praying", "holiday", "sleeping"],
-    "thinking": ["fishing", "gaming", "going_out", "partying", "reading", "rehearsing", "shopping", "smoking", "socializing", "sunbathing", "tv", "movie", "talking", "real_life", "phone", "video_phone"],
-    "traveling": ["commuting", "driving", "car", "bus", "plane", "train", "trip", "walking"],
-    "working": ["coding", "meeting", "studying", "writing"],
+    "doing_chores": ["buying_groceries", "cleaning", "cooking",
+                     "doing_maintenance", "doing_the_dishes",
+                     "doing_the_laundry", "gardening", "running_an_errand",
+                     "walking_the_dog"],
+    "drinking": ["having_a_beer", "having_coffee", "having_tea"],
+    "eating": ["having_a_snack", "having_breakfast", "having_dinner",
+               "having_lunch"],
+    "exercising": ["cycling", "dancing", "hiking", "jogging",
+                   "playing_sports", "running", "skiing", "swimming",
+                   "working_out"],
+    "grooming": ["at_the_spa", "brushing_teeth", "getting_a_haircut",
+                 "shaving", "taking_a_bath", "taking_a_shower"],
+    "having_appointment": [],
+    "inactive": ["day_off", "hanging_out", "hiding", "on_vacation",
+                 "praying", "scheduled_holiday", "sleeping", "thinking"],
+    "relaxing": ["fishing", "gaming", "going_out", "partying", "reading",
+                 "rehearsing", "shopping", "smoking", "socializing",
+                 "sunbathing", "watching_tv", "watching_a_movie"],
+    "talking": ["in_real_life", "on_the_phone", "on_video_phone"],
+    "traveling": ["commuting", "cycling", "driving", "in_a_car", "on_a_bus",
+                  "on_a_plane", "on_a_train", "on_a_trip", "walking"],
+    "working": ["coding", "in_a_meeting", "studying", "writing"],
 }
+
+# Menu order of the activity groups (XEP-0108 §3).
+ACTIVITY_ORDER: list[str] = [
+    "doing_chores", "drinking", "eating", "exercising", "grooming",
+    "having_appointment", "inactive", "relaxing", "talking", "traveling",
+    "working",
+]
 
 
 def populate_translations(tr_func):

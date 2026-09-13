@@ -26,6 +26,7 @@ from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.include.constants import APP_NAME, VERSION
 from stanza_im.xmpp import jingle as jingle_mod
 from stanza_im.xmpp.jingle import JingleFileTransferManager
+from stanza_im.include import pep
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +407,11 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(jingle_mod.NS_S5B)
         self.xmpp["xep_0030"].add_feature(jingle_mod.NS_IBB)
 
+        # Extended presence PEP nodes (XEP-0080/0107/0108/0118) — advertise the
+        # "+notify" variants so the server pushes contact updates.
+        for _node in (pep.NS_MOOD, pep.NS_ACTIVITY, pep.NS_TUNE, pep.NS_GEOLOC):
+            self.xmpp["xep_0030"].add_feature(_node + "+notify")
+
         # Jingle FT manager + incoming stanza handlers.
         self.file_transfer = JingleFileTransferManager(self)
         self._register_jingle_handlers()
@@ -422,6 +428,9 @@ class JabberClient:
         self.contacts: dict[str, ContactInfo] = {}
         self.groupchats: dict[str, GroupChatInfo] = {}
         self.presences: dict[str, dict] = {}  # {full_jid: {show, status, ...}}
+        # Extended presence (XEP-0080/0107/0108/0118): bare JID -> parsed kinds
+        self.pep_data: dict[str, dict] = {}
+        self._pep_fetched: set[str] = set()
         self._muc_subjects: dict[str, list[tuple[str, str]]] = {}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
         self._mam_cursors: dict[str, str] = {}
@@ -2097,9 +2106,103 @@ class JabberClient:
         logger.debug("MDS: %s displayed up to %s", chat_jid, sid)
         self.emit("mds_displayed", chat_jid)
 
+    # ── Extended presence: XEP-0080/0107/0108/0118 ────────────────
+
+    def _maybe_pep_event(self, msg) -> None:
+        """Handle a PEP notification for mood/activity/tune/geoloc."""
+        frm = str(msg["from"]).split("/")[0]
+        for el in msg.xml:
+            if el.tag != "{%s}event" % NS_PUBSUB_EVENT:
+                continue
+            items = el.find("{%s}items" % NS_PUBSUB_EVENT)
+            if items is None:
+                continue
+            node = items.get("node") or ""
+            kind = pep.PEP_NODES.get(node)
+            if not kind:
+                continue
+            for item in items:
+                if item.tag != "{%s}item" % NS_PUBSUB_EVENT:
+                    continue
+                payload = next(iter(item), None)
+                if payload is None:
+                    continue
+                self._store_pep(frm, kind, pep.parse_payload(node, payload))
+
+    def _store_pep(self, jid: str, kind: str, data: dict) -> None:
+        jid = str(jid or "").split("/")[0]
+        if not jid:
+            return
+        entry = self.pep_data.setdefault(jid, {})
+        entry[kind] = data
+        self.emit("contact_pep_updated", jid, kind, data)
+
+    def publish_pep(self, node: str, payload) -> None:
+        """Publish *payload* to the private PEP *node* (XEP-0163)."""
+        self._start_task(self._publish_pep(node, payload))
+
+    async def _publish_pep(self, node: str, payload) -> None:
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = ""
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        publish = ET.SubElement(pubsub, "{%s}publish" % NS_PUBSUB)
+        publish.set("node", node)
+        item = ET.SubElement(publish, "{%s}item" % NS_PUBSUB)
+        item.set("id", "current")
+        item.append(payload)
+        try:
+            await iq.send()
+        except Exception as exc:  # noqa: BLE001 - best-effort PEP
+            logger.warning("PEP publish to %s failed: %s", node, exc)
+            self.emit("pep_publish_failed", node, str(exc))
+
+    def publish_mood(self, key: str, text: str = "") -> None:
+        self.publish_pep(pep.NS_MOOD, pep.build_mood(key, text))
+
+    def publish_activity(self, group: str, sub: str = "") -> None:
+        self.publish_pep(pep.NS_ACTIVITY, pep.build_activity(group, sub))
+
+    def fetch_pep(self, jid: str) -> None:
+        """Fetch the current mood/activity/tune/geoloc of *jid* (PEP items)."""
+        self._start_task(self._fetch_pep(jid))
+
+    async def _fetch_pep(self, jid: str) -> None:
+        bare = str(jid or "").split("/")[0]
+        if not bare:
+            return
+        for node, kind in pep.PEP_NODES.items():
+            try:
+                payload = await self._pep_items(bare, node)
+            except Exception:
+                continue
+            if payload is not None:
+                self._store_pep(bare, kind, payload)
+
+    async def _pep_items(self, jid: str, node: str):
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        items = ET.SubElement(pubsub, "{%s}items" % NS_PUBSUB)
+        items.set("node", node)
+        items.set("max_items", "1")
+        result = await iq.send()
+        for items_el in result.xml.iter("{%s}items" % NS_PUBSUB):
+            if (items_el.get("node") or "") != node:
+                continue
+            for item in items_el:
+                if item.tag != "{%s}item" % NS_PUBSUB:
+                    continue
+                child = next(iter(item), None)
+                if child is not None:
+                    return pep.parse_payload(node, child)
+        return None
+
     def _on_message(self, msg) -> None:
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
+            self._maybe_pep_event(msg)
             return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])

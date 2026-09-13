@@ -18,11 +18,14 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr, load as load_i18n
 from stanza_im.include.avatars import save_avatar
-from stanza_im.include.enumerators import populate_translations, show_to_icon_key
+from stanza_im.include.enumerators import (populate_translations,
+                                           show_to_icon_key, MOODS,
+                                           ACTIVITY_GROUPS, ACTIVITY_ORDER)
 from stanza_im.include.constants import (APP_NAME, VERSION,
                                       ACTIONS_DIR_16, CATEGORIES_DIR_16,
                                       STATUS_DIR_32,
-                                      PLACES_DIR_22)
+                                      PLACES_DIR_22, IMAGES_DIR)
+from stanza_im.include import pep
 from stanza_im.core.storage import Config
 from stanza_im.ui.icons import init_icons
 from stanza_im.ui.login_widget import LoginWidget
@@ -310,6 +313,24 @@ class MainWindow(QtWidgets.QMainWindow):
             self._status_combo.addItem(icon, tr(f"status_{key}"), key)
         self._status_combo.currentIndexChanged.connect(self._on_status_change)
         status_bar.addWidget(self._status_combo, stretch=1)
+
+        # Mood/activity picker (icon-only) + status-message editor (icon-only).
+        self._pep_btn = QtWidgets.QToolButton()
+        self._pep_btn.setAutoRaise(True)
+        self._pep_btn.setIcon(self._pep_button_icon())
+        self._pep_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._pep_btn.setMenu(self._build_pep_menu())
+        self._pep_btn.setToolTip(tr("pep_button_tooltip"))
+        status_bar.addWidget(self._pep_btn)
+
+        self._status_msg_btn = QtWidgets.QToolButton()
+        self._status_msg_btn.setAutoRaise(True)
+        self._status_msg_btn.setIcon(self._menu_icon("edit.png"))
+        self._status_msg_btn.setToolTip(tr("status_message_title"))
+        self._status_msg_btn.clicked.connect(self._on_edit_status_message)
+        status_bar.addWidget(self._status_msg_btn)
+
         roster_layout.addLayout(status_bar)
 
         self._stack.addWidget(roster_page)
@@ -909,6 +930,15 @@ class MainWindow(QtWidgets.QMainWindow):
             lines.append("<i>"
                          + escape_html(contact.status).replace("\n", "<br>")
                          + "</i>")
+        if self._client:
+            summary = pep.format_summary(self._client.pep_data.get(jid, {}))
+            for kind, label in (("mood", tr("pep_mood")),
+                                ("activity", tr("pep_activity")),
+                                ("tune", tr("pep_now_playing")),
+                                ("location", tr("pep_location"))):
+                value = summary.get(kind)
+                if value:
+                    lines.append(f"{label}: {escape_html(value)}")
         return "<br>".join(lines), contact.avatar_path
 
     def _on_preferences(self):
@@ -1080,7 +1110,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.priority = manual_priority
                 self._applied_priority = (priority_mode, manual_priority)
                 if self._client.xmpp.is_connected():
-                    self._client.send_presence(show=self._config.last_status)
+                    self._send_presence(self._config.last_status)
             plugin = self._client.xmpp.plugin.get("xep_0092", None)
             if plugin is not None:
                 plugin.software_name = (APP_NAME if self._config.privacy.send_software
@@ -1155,7 +1185,9 @@ class MainWindow(QtWidgets.QMainWindow):
     async def _connect_async(self, jid: str, show: str):
         try:
             await self._client.connect_async()
-            self._client.send_presence(show=show)
+            self._client.send_presence(
+                show=show,
+                status=getattr(self._config.status, "message", "") or "")
             self._splash_label.setText(tr("login_connected"))
             self._splash_progress.setRange(0, 100)
             self._splash_progress.setValue(100)
@@ -1219,6 +1251,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muc_subject_changed", self._on_muc_subject_changed)
         c.on("muc_info_received", self._on_muc_info_received)
         c.on("entity_info_received", self._on_entity_info_received)
+        c.on("contact_pep_updated", self._on_contact_pep_updated)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("mam_unavailable", self._on_mam_unavailable)
         c.on("mam_parse_error", self._on_mam_parse_error)
@@ -1228,6 +1261,7 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("Session started, roster arriving...")
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
+        self._republish_pep()
 
     def _on_auth_failed(self):
         self._login.set_error(tr("login_auth_failed"))
@@ -1415,6 +1449,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     status["status_message"] = info.get("status", "")
                     status["resource"] = nick
                     status["status_updated"] = info.get("status_updated", "")
+        bare = jid.split("/", 1)[0]
+        if self._client:
+            summary = pep.format_summary(self._client.pep_data.get(bare, {}))
+            for key in ("mood", "activity", "tune", "location"):
+                if summary.get(key):
+                    status[key] = summary[key]
+            self._client.fetch_pep(bare)
         dlg = VCardInfoDialog(jid, card, status=status)
         self._vcard_dialogs[jid] = dlg
         dlg.finished.connect(lambda _result, key=jid:
@@ -1427,6 +1468,19 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = self._vcard_dialogs.get(jid)
         if dialog is not None:
             dialog.update_status(info)
+
+    def _on_contact_pep_updated(self, jid: str, kind: str, data: dict):
+        """A contact's mood/activity/tune/location changed (XEP-0163 PEP)."""
+        if not self._client:
+            return
+        bare = str(jid).split("/", 1)[0]
+        summary = pep.format_summary(self._client.pep_data.get(bare, {}))
+        value = summary.get(kind)
+        if not value:
+            return
+        for key, dialog in list(self._vcard_dialogs.items()):
+            if key.split("/", 1)[0] == bare:
+                dialog.update_status({kind: value})
 
     def _show_profile(self, jid: str):
         """Show the contact's vCard (fetching it if not yet known)."""
@@ -2708,6 +2762,110 @@ class MainWindow(QtWidgets.QMainWindow):
             self._status_combo.setCurrentIndex(idx)
             self._status_combo.blockSignals(False)
 
+    # ── Extended presence (mood / activity) + status message ──────
+
+    def _send_presence(self, show: str) -> None:
+        """Send presence including the stored status message."""
+        if not self._client:
+            return
+        message = getattr(self._config.status, "message", "") or ""
+        self._client.send_presence(show=show, status=message)
+
+    def _pep_button_icon(self) -> QtGui.QIcon:
+        path = pep.default_icon("mood")
+        if path:
+            return QtGui.QIcon(path)
+        return self._menu_icon("edit.png")
+
+    @staticmethod
+    def _pep_icon(mapping: dict, key: str, kind: str) -> QtGui.QIcon:
+        path = mapping.get(key) or pep.default_icon(kind)
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
+
+    def _build_pep_menu(self) -> QtWidgets.QMenu:
+        menu = QtWidgets.QMenu(self)
+        mood_icons = pep.mood_icons()
+        activity_icons = pep.activity_icons()
+
+        mood_menu = menu.addMenu(self._pep_icon({}, "", "mood"), tr("pep_mood"))
+        clear = mood_menu.addAction(self._pep_icon({}, "", "mood"),
+                                    tr("pep_none"))
+        clear.triggered.connect(lambda: self._on_set_mood(""))
+        mood_menu.addSeparator()
+        for key in MOODS:
+            if key == "none":
+                continue
+            action = mood_menu.addAction(
+                self._pep_icon(mood_icons, key, "mood"), tr("mood_%s" % key))
+            action.triggered.connect(
+                lambda checked=False, k=key: self._on_set_mood(k))
+
+        activity_menu = menu.addMenu(
+            self._pep_icon({}, "", "activity"), tr("pep_activity"))
+        clear_act = activity_menu.addAction(
+            self._pep_icon({}, "", "activity"), tr("pep_none"))
+        clear_act.triggered.connect(lambda: self._on_set_activity("", ""))
+        activity_menu.addSeparator()
+        for group in ACTIVITY_ORDER:
+            submenu = activity_menu.addMenu(
+                self._pep_icon(activity_icons, group, "activity"),
+                tr("activity_group_%s" % group))
+            group_action = submenu.addAction(
+                self._pep_icon(activity_icons, group, "activity"),
+                tr("activity_group_%s" % group))
+            group_action.triggered.connect(
+                lambda checked=False, g=group: self._on_set_activity(g, ""))
+            subs = ACTIVITY_GROUPS.get(group, [])
+            if subs:
+                submenu.addSeparator()
+            for sub in subs:
+                action = submenu.addAction(
+                    self._pep_icon(activity_icons, sub, "activity"),
+                    tr("activity_%s" % sub))
+                action.triggered.connect(
+                    lambda checked=False, g=group, s=sub:
+                    self._on_set_activity(g, s))
+        return menu
+
+    def _rebuild_pep_menu(self) -> None:
+        if getattr(self, "_pep_btn", None) is not None:
+            self._pep_btn.setMenu(self._build_pep_menu())
+
+    def _on_set_mood(self, key: str) -> None:
+        self._config.status.mood = key or ""
+        self._config.save()
+        if self._client:
+            self._client.publish_mood(key or "")
+
+    def _on_set_activity(self, group: str, sub: str = "") -> None:
+        value = f"{group}/{sub}" if group and sub else (group or "")
+        self._config.status.activity = value
+        self._config.save()
+        if self._client:
+            self._client.publish_activity(group or "", sub or "")
+
+    def _on_edit_status_message(self) -> None:
+        from stanza_im.ui.status_message_dialog import StatusMessageDialog
+        current = getattr(self._config.status, "message", "") or ""
+        dlg = StatusMessageDialog(current, self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self._config.status.message = dlg.text()
+        self._config.save()
+        self._send_presence(self._config.last_status)
+
+    def _republish_pep(self) -> None:
+        """Re-publish the stored mood/activity after a (re)connect."""
+        if not self._client:
+            return
+        mood = getattr(self._config.status, "mood", "") or ""
+        if mood:
+            self._client.publish_mood(mood)
+        activity = getattr(self._config.status, "activity", "") or ""
+        if activity:
+            group, _, sub = activity.partition("/")
+            self._client.publish_activity(group, sub)
+
     def _apply_status(self, show: str):
         """Apply a status picked from the roster combo or the tray menu."""
         if show not in ("online", "chat", "away", "xa", "dnd", "offline"):
@@ -2715,8 +2873,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config.last_status = show
         self._set_status_combo(show)
         self._set_tray_status_icon(show)
-        if self._client:
-            self._client.send_presence(show=show)
+        self._send_presence(show)
         self._last_activity = time.monotonic()
         self._auto_status_applied = None
 
@@ -2733,7 +2890,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             QtCore.QEvent.Type.Wheel):
             self._last_activity = time.monotonic()
             if self._auto_status_applied is not None and self._client:
-                self._client.send_presence(show=self._config.last_status)
+                self._send_presence(self._config.last_status)
                 self._set_tray_status_icon(self._config.last_status)
                 self._set_status_combo(self._config.last_status)
                 self._auto_status_applied = None

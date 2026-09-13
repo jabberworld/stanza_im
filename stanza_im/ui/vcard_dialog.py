@@ -80,7 +80,8 @@ class VCardInfoDialog(QtWidgets.QDialog):
         status_data.setdefault("vcard_updated", card.get("fetched_at", ""))
         self._status_data = status_data
         self._status_index = tabs.addTab(self._fields_page(status_data, (
-            "jid", "presence", "status_message", "resource",
+            "jid", "presence", "status_message", "mood", "activity",
+            "tune", "location", "resource",
             "status_updated", "vcard_updated", "client_time", "software",
             "software_version", "os", "ping"), hide_empty=True),
             tr("vcard_tab_status"))
@@ -98,7 +99,8 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._status_data.update({key: value for key, value in values.items()
                                   if value not in (None, "")})
         page = self._fields_page(self._status_data, (
-            "jid", "presence", "status_message", "resource",
+            "jid", "presence", "status_message", "mood", "activity",
+            "tune", "location", "resource",
             "status_updated", "vcard_updated", "client_time", "software",
             "software_version", "os", "ping"), hide_empty=True)
         self._tabs.removeTab(self._status_index)

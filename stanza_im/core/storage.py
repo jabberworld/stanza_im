@@ -132,7 +132,8 @@ class Config:
                            "osd_max": 3, "osd_x": 0, "osd_y": 0},
         "status": {"auto_away": False, "away_minutes": 5,
                    "auto_xa": False, "xa_minutes": 15,
-                   "auto_status_message": ""},
+                   "auto_status_message": "",
+                   "message": "", "mood": "", "activity": ""},
         "ui": {"close_to_tray": True},
     }
 

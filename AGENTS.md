@@ -53,6 +53,7 @@ stanza_im/                      # Python package
 │   ├── media_viewer.py          # Fullscreen image/video viewer
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
+│   ├── status_message_dialog.py # Multiline presence status editor
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── tray.py                  # System tray icon + blink
@@ -66,6 +67,7 @@ stanza_im/                      # Python package
 ├── include/
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
 │   ├── enumerators.py           # XMPP show/icon/mood/activity maps
+│   ├── pep.py                   # XEP-0080/0107/0108/0118 payloads + icon packs
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -408,6 +410,27 @@ auto-accepts (saving into `files.download_dir`, unique name) when
 an HTTP Upload slot is rejected for size (`file-too-large` /
 `resource-constraint` / `not-acceptable`), `_http_upload_flow` emits
 `http_upload_oversize(jid, path)` and MainWindow retries that file over P2P.
+
+**Extended presence (XEP-0080/0107/0108/0118)** (`include/pep.py`,
+`core/client.py`): the four PEP nodes (`geoloc`, `mood`, `activity`, `tune`)
+are advertised with `+notify` in disco. Incoming headline events are parsed in
+`JabberClient._maybe_pep_event` (alongside MDS) into
+`client.pep_data[bare_jid][kind]` and re-emitted as
+`contact_pep_updated(jid, kind, data)`; `client.fetch_pep(bare)` pulls the
+current nodes with `pubsub/items max_items=1` (called when a profile opens).
+`include/pep.py` builds/parses the payloads, parses the bundled Jabbim icon
+packs (`resources/moods|activities/<pack>/*.cfg`, `"key"=File.png`) and
+formats a human summary (`format_summary`). The roster bottom bar gains two
+icon-only `QToolButton`s right of the status combo: a smiley with a menu
+("Mood" + nested "Activity" groups/subs, icons from the packs, plus a "None"
+clear entry) that calls `client.publish_mood`/`publish_activity` and persists
+to `status.mood` / `status.activity` (republished on `session_started` via
+`MainWindow._republish_pep`), and an `edit.png` button opening
+`ui/status_message_dialog.StatusMessageDialog` (multiline, preloaded from
+`status.message`) whose result is sent with presence (`MainWindow._send_presence`).
+Contacts' mood/activity/tune/location are shown in the roster tooltip
+(`_roster_tooltip`) and on the vCard "Status" tab (`mood`/`activity`/`tune`/
+`location` fields, updated live through `_on_contact_pep_updated`).
 
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
