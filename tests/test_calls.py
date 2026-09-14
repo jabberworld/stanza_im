@@ -242,6 +242,32 @@ if media_mod.HAS_AIORTC and media_mod.av is not None:
           _stereo_ok)
     check("Opus encoder accepts captured frames", _encode_ok)
 
+    async def _recv_after_stop():
+        track = media_mod._AudioCaptureTrack("")
+        track.stop()
+        frame = await track.recv()   # must not touch the stopped device
+        return frame is not None and frame.pts is not None
+
+    try:
+        _stopped_ok = asyncio.run(_recv_after_stop())
+    except Exception as exc:
+        _stopped_ok = False
+        print("  recv-after-stop error:", exc)
+    check("recv after stop returns a frame (no teardown traceback)", _stopped_ok)
+
+    async def _video_recv_after_stop():
+        track = media_mod._VideoCaptureTrack("/dev/video_does_not_exist_xyz")
+        track.stop()
+        frame = await track.recv()
+        return frame is not None and frame.pts is not None
+
+    try:
+        _vstopped_ok = asyncio.run(_video_recv_after_stop())
+    except Exception as exc:
+        _vstopped_ok = False
+        print("  video recv-after-stop error:", exc)
+    check("video recv after stop returns a frame", _vstopped_ok)
+
 # ── 4. XEP-0215 normalisation ---------------------------------------------
 servers = discovery.ice_servers_from_services([
     {"type": "stun", "host": "s.example", "port": 3478, "transport": "udp"},

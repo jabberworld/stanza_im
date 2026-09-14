@@ -91,6 +91,7 @@ if HAS_AIORTC:
             self._source = None
             self._io = None
             self._pts = 0
+            self._stopped = False
             self._frame_bytes = AUDIO_SAMPLES_PER_FRAME * AUDIO_CHANNELS * 2
             self.kind = "audio"
             if not HAS_QTMM:
@@ -112,17 +113,27 @@ if HAS_AIORTC:
                 self._source = None
 
         async def recv(self):
-            if self._io is None:
-                await asyncio.sleep(0.02)
+            def _silent():
                 return self._stamp(_silence(AUDIO_SAMPLES_PER_FRAME,
                                             AUDIO_CHANNELS))
+
+            io = self._io
+            if self._stopped or io is None:
+                await asyncio.sleep(0.02)
+                return _silent()
             deadline = asyncio.get_event_loop().time() + 0.25
-            while self._io.bytesAvailable() < self._frame_bytes:
-                if asyncio.get_event_loop().time() > deadline:
-                    return self._stamp(_silence(AUDIO_SAMPLES_PER_FRAME,
-                                                AUDIO_CHANNELS))
-                await asyncio.sleep(0.005)
-            data = bytes(self._io.read(self._frame_bytes))
+            try:
+                while io.bytesAvailable() < self._frame_bytes:
+                    if self._stopped:
+                        return _silent()
+                    if asyncio.get_event_loop().time() > deadline:
+                        return _silent()
+                    await asyncio.sleep(0.005)
+                data = bytes(io.read(self._frame_bytes))
+            except RuntimeError:
+                # The Qt device was deleted by stop() while we were reading.
+                self._stopped = True
+                return _silent()
             samples = len(data) // (AUDIO_CHANNELS * 2)
             frame = av.AudioFrame(format=AUDIO_FORMAT, layout="stereo",
                                   samples=samples)
@@ -138,6 +149,10 @@ if HAS_AIORTC:
             return frame
 
         def stop(self):
+            # Mark stopped and detach the device *before* stopping the Qt
+            # source, so an in-flight recv() cannot touch a deleted QIODevice.
+            self._stopped = True
+            self._io = None
             try:
                 if self._source is not None:
                     self._source.stop()
@@ -190,6 +205,7 @@ if HAS_AIORTC:
             self.kind = "video"
             self._container = None
             self._stream = None
+            self._stopped = False
             self._device_id = device_id or ""
             self._start()
 
@@ -217,21 +233,29 @@ if HAS_AIORTC:
                 self._container = None
 
         async def recv(self):
-            pts = self.next_timestamp()
-            if self._container is None or self._stream is None:
-                await asyncio.sleep(0.05)
+            # aiortc >= 1.10: next_timestamp() is async and returns
+            # (pts, time_base) in the video clock rate.
+            pts, time_base = await self.next_timestamp()
+
+            def _black():
                 frame = _black_frame()
                 frame.pts = pts
-                frame.time_base = Fraction(1, 30)
+                frame.time_base = time_base
                 return frame
+
+            if self._stopped or self._container is None or self._stream is None:
+                await asyncio.sleep(0.05)
+                return _black()
             loop = asyncio.get_event_loop()
-            frame = await loop.run_in_executor(None, self._next_frame)
+            try:
+                frame = await loop.run_in_executor(None, self._next_frame)
+            except RuntimeError:
+                self._stopped = True
+                return _black()
             if frame is None:
                 frame = _black_frame()
-                frame.time_base = Fraction(1, 30)
             frame.pts = pts
-            if frame.time_base is None:
-                frame.time_base = Fraction(1, 30)
+            frame.time_base = time_base
             return frame
 
         def _next_frame(self):
@@ -243,6 +267,7 @@ if HAS_AIORTC:
             return None
 
         def stop(self):
+            self._stopped = True
             try:
                 if self._container is not None:
                     self._container.close()
