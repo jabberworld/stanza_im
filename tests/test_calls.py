@@ -141,6 +141,44 @@ ft = ET.Element("{%s}jingle" % jr.NS_JINGLE)
 ET.SubElement(ft, "{%s}s5b" % "urn:xmpp:jingle:transports:s5b:1")
 check("is_rtp_jingle ignores file transfer", not jr.is_rtp_jingle(ft))
 
+# ── 3a. multi-content SDP: ICE/DTLS per media section ---------------------
+_shared = jr.IceTransport(
+    ufrag="uf", pwd="pw",
+    fingerprints=[jr.DtlsFingerprint("sha-256", "AA:BB", "actpass")])
+_multi = jr.sdp_from_jingle(
+    [("0", jr.RtpDescription("video", [jr.PayloadType(97, "VP8", 90000, 0)]),
+      _shared),
+     ("1", jr.RtpDescription("audio", [jr.PayloadType(111, "opus", 48000, 2)]),
+      _shared)], "sid")
+_sections = _multi.split("m=")[1:]
+check("ICE credentials in every media section",
+      len(_sections) == 2 and all("a=ice-ufrag:uf" in ("m=" + s)
+                                  for s in _sections))
+if HAS_AIORTC:
+    async def _multi_accept():
+        pc = RTCPeerConnection()
+        try:
+            await pc.setRemoteDescription(RTCSessionDescription(_multi, "offer"))
+            await pc.createAnswer()
+            return True
+        finally:
+            await pc.close()
+
+    try:
+        _multi_ok = asyncio.run(_multi_accept())
+    except Exception as exc:
+        _multi_ok = False
+        print("  multi-content sdp error:", exc)
+    check("multi-content SDP accepted by aiortc", _multi_ok)
+
+# ── 3b. camera failure degrades gracefully (no traceback) -----------------
+from stanza_im.xmpp import media as media_mod
+if media_mod.HAS_AIORTC and media_mod.av is not None:
+    _cam = media_mod._VideoCaptureTrack("/dev/video_does_not_exist_xyz")
+    check("camera open failure degrades to black frames",
+          _cam._container is None)
+    _cam.stop()
+
 # ── 4. XEP-0215 normalisation ---------------------------------------------
 servers = discovery.ice_servers_from_services([
     {"type": "stun", "host": "s.example", "port": 3478, "transport": "udp"},

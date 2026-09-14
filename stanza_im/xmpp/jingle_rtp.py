@@ -221,17 +221,18 @@ def _candidate_to_sdp(cand: IceCandidate) -> str:
 def sdp_from_jingle(contents: list, session_id: str = "") -> str:
     """Build an SDP offer/answer string from Jingle contents.
 
-    *contents* is a list of ``(name, RtpDescription, IceTransport)``.
-    All contents share the first content's ICE credentials (BUNDLE), which is
-    what aiortc expects.
+    *contents* is a list of ``(name, RtpDescription, IceTransport)``.  The ICE
+    and DTLS attributes (and candidates) are emitted **inside every media
+    section** — aiortc validates each ``m=`` line for ice-ufrag/ice-pwd, so a
+    single session-level block would leave the earlier sections invalid.  For a
+    BUNDLE session the first content's transport is reused where a content has
+    none of its own.
     """
     if not contents:
         raise ValueError("no contents")
     session_id = session_id or uuid.uuid4().hex
     mids = [name or str(i) for i, (name, _d, _t) in enumerate(contents)]
     first_transport = contents[0][2]
-    fingerprint = first_transport.fingerprints[0] if first_transport.fingerprints else DtlsFingerprint()
-    setup = fingerprint.setup or "actpass"
     lines = [
         "v=0",
         "o=- %d 2 IN IP4 0.0.0.0" % (abs(hash(session_id)) % 1000000000),
@@ -257,14 +258,19 @@ def sdp_from_jingle(contents: list, session_id: str = "") -> str:
         for source in desc.sources:
             cname = source.parameters.get("cname", session_id)
             lines.append("a=ssrc:%d cname:%s" % (source.ssrc, cname))
+        # ICE/DTLS are media-level (aiortc validates each m-section).
+        if not transport.ufrag and transport is not first_transport:
+            transport = first_transport
+        fingerprint = (transport.fingerprints[0] if transport.fingerprints
+                       else DtlsFingerprint())
+        lines.append("a=ice-ufrag:%s" % transport.ufrag)
+        lines.append("a=ice-pwd:%s" % transport.pwd)
+        lines.append("a=fingerprint:%s %s" % (fingerprint.hash,
+                                              fingerprint.value))
+        lines.append("a=setup:%s" % (fingerprint.setup or "actpass"))
         for cand in transport.candidates:
             lines.append(_candidate_to_sdp(cand))
         lines.append("a=end-of-candidates")
-    # ICE/DTLS attributes are shared (BUNDLE) — take them from the first one.
-    lines.append("a=ice-ufrag:%s" % first_transport.ufrag)
-    lines.append("a=ice-pwd:%s" % first_transport.pwd)
-    lines.append("a=fingerprint:%s %s" % (fingerprint.hash, fingerprint.value))
-    lines.append("a=setup:%s" % setup)
     sdp = "\r\n".join(lines) + "\r\n"
     logger.debug("CALL built SDP from Jingle:\n%s", sdp)
     return sdp

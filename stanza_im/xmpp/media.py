@@ -180,22 +180,27 @@ if HAS_AIORTC:
             self._device_id = device_id or ""
             self._start()
 
-        def _open_args(self):
+        def _device_path(self) -> str:
             dev = self._device_id
-            if dev.startswith("/dev/video") or dev.isdigit():
-                path = dev if dev.startswith("/dev/") else "/dev/video%s" % dev
-                return dict(url=path, format="v4l2")
-            return dict(url=dev, format="v4l2")
+            if not dev:
+                return "/dev/video0"
+            if dev.startswith("/dev/"):
+                return dev
+            if dev.isdigit():
+                return "/dev/video%s" % dev
+            return dev
 
         def _start(self):
             if av is None:
                 return
+            path = self._device_path()
             try:
-                self._container = av.open(**self._open_args())
+                # PyAV takes the file/device as a positional argument.
+                self._container = av.open(path, format="v4l2")
                 self._stream = self._container.streams.video[0]
-                logger.info("CALL camera opened: %s", self._device_id or "default")
-            except Exception:
-                logger.exception("CALL camera open failed (%s)", self._device_id)
+                logger.info("CALL camera opened: %s", path)
+            except Exception as exc:  # noqa: BLE001 - degrade to black frames
+                logger.warning("CALL camera open failed for %s: %s", path, exc)
                 self._container = None
 
         async def recv(self):
