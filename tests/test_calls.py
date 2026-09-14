@@ -86,7 +86,8 @@ check("parse_sdp setup", _parsed.fingerprints[0].setup == "actpass")
 
 # ── 2. SDP ↔ Jingle bridge with real aiortc peers -------------------------
 try:
-    from aiortc import RTCPeerConnection, RTCSessionDescription
+    from aiortc import (RTCPeerConnection, RTCSessionDescription,
+                        RTCIceCandidate)
     from aiortc.mediastreams import AudioStreamTrack
     HAS_AIORTC = True
 except Exception:
@@ -154,6 +155,8 @@ _sections = _multi.split("m=")[1:]
 check("ICE credentials in every media section",
       len(_sections) == 2 and all("a=ice-ufrag:uf" in ("m=" + s)
                                   for s in _sections))
+check("no premature a=end-of-candidates (trickle)",
+      "end-of-candidates" not in _multi)
 if HAS_AIORTC:
     async def _multi_accept():
         pc = RTCPeerConnection()
@@ -170,6 +173,34 @@ if HAS_AIORTC:
         _multi_ok = False
         print("  multi-content sdp error:", exc)
     check("multi-content SDP accepted by aiortc", _multi_ok)
+
+    async def _trickle_after_offer():
+        pc = RTCPeerConnection()
+        try:
+            _tr = jr.IceTransport(
+                ufrag="uf", pwd="pw",
+                fingerprints=[jr.DtlsFingerprint("sha-256", "AA:BB",
+                                                "actpass")])
+            _desc = jr.RtpDescription(
+                "audio", [jr.PayloadType(111, "opus", 48000, 2)])
+            _offer = jr.sdp_from_jingle([("0", _desc, _tr)], "sid")
+            await pc.setRemoteDescription(RTCSessionDescription(_offer, "offer"))
+            await pc.createAnswer()
+            cand = RTCIceCandidate(
+                component=1, foundation="1", ip="127.0.0.1", port=5000,
+                priority=1, protocol="udp", type="host", sdpMid="0",
+                sdpMLineIndex=0)
+            await pc.addIceCandidate(cand)
+            return True
+        finally:
+            await pc.close()
+
+    try:
+        _trickle_ok = asyncio.run(_trickle_after_offer())
+    except Exception as exc:
+        _trickle_ok = False
+        print("  trickle error:", exc)
+    check("trickled candidate accepted after setRemoteDescription", _trickle_ok)
 
 # ── 3b. camera failure degrades gracefully (no traceback) -----------------
 from stanza_im.xmpp import media as media_mod

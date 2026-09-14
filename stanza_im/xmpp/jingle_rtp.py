@@ -270,7 +270,11 @@ def sdp_from_jingle(contents: list, session_id: str = "") -> str:
         lines.append("a=setup:%s" % (fingerprint.setup or "actpass"))
         for cand in transport.candidates:
             lines.append(_candidate_to_sdp(cand))
-        lines.append("a=end-of-candidates")
+        # NOTE: we deliberately do NOT emit "a=end-of-candidates" here.  Jingle
+        # ICE-UDP peers (Conversations/libwebrtc) trickle candidates via
+        # transport-info; signalling end-of-candidates with an empty candidate
+        # list makes aioice prune the component and fail ICE immediately, and
+        # rejects the candidates that arrive afterwards.
     sdp = "\r\n".join(lines) + "\r\n"
     logger.debug("CALL built SDP from Jingle:\n%s", sdp)
     return sdp
@@ -793,6 +797,11 @@ class JingleRtpManager:
         transport = parse_transport(tel)
         logger.debug("CALL transport-info: %d candidate(s)",
                      len(transport.candidates))
+        # BUNDLE shares one ICE transport: aiortc's addIceCandidate ignores
+        # candidates whose sdpMid belongs to a bundled transceiver, so route
+        # every trickled candidate to the primary (first) content.
+        mid = (session.contents[0][0] if session.contents
+               else self._mid(session, content))
         for cand in transport.candidates:
             await session.call.add_ice({
                 "component": cand.component,
@@ -802,7 +811,7 @@ class JingleRtpManager:
                 "type": cand.type,
                 "relatedAddress": cand.rel_addr or None,
                 "relatedPort": cand.rel_port or None,
-            }, sdp_mid=self._mid(session, content), sdp_mline_index=0)
+            }, sdp_mid=mid, sdp_mline_index=0)
 
     @staticmethod
     def _mid(session: CallSession, content: ET.Element) -> str:
