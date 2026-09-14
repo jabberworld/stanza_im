@@ -18,6 +18,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PyQt6 import QtWidgets
+
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+
 FAILURES = []
 
 
@@ -31,6 +35,14 @@ def check(name, cond):
 class _FakeFormat:
     class SampleFormat:
         Int16 = "int16"
+        Int32 = "int32"
+        Float = "float"
+        UInt8 = "uint8"
+
+    def __init__(self):
+        self.sample_rate = 0
+        self.channels = 0
+        self.sample_format = self.SampleFormat.Int16
 
     def setSampleRate(self, value):
         self.sample_rate = value
@@ -40,6 +52,15 @@ class _FakeFormat:
 
     def setSampleFormat(self, value):
         self.sample_format = value
+
+    def sampleRate(self):
+        return self.sample_rate
+
+    def channelCount(self):
+        return self.channels
+
+    def sampleFormat(self):
+        return self.sample_format
 
 
 class _FakeIO:
@@ -63,6 +84,9 @@ class _FakeSource:
     def stop(self):
         pass
 
+    def error(self):
+        return None
+
 
 class _FakeSink:
     def __init__(self, *args, **kwargs):
@@ -74,6 +98,9 @@ class _FakeSink:
     def stop(self):
         pass
 
+    def error(self):
+        return None
+
 
 class _FakeCamera:
     pass
@@ -83,18 +110,43 @@ class _FakeVideoSink:
     pass
 
 
+class _FakeVideoWidget:
+    pass
+
+
+class _FakeDevice:
+    def __init__(self, name):
+        self._name = name
+
+    def id(self):
+        return self._name.encode()
+
+    def description(self):
+        return self._name
+
+    def isFormatSupported(self, fmt):
+        return True
+
+    def preferredFormat(self):
+        fmt = _FakeFormat()
+        fmt.setSampleRate(48000)
+        fmt.setChannelCount(2)
+        fmt.setSampleFormat(_FakeFormat.SampleFormat.Int16)
+        return fmt
+
+
 class _FakeMediaDevices:
     @staticmethod
     def audioInputs():
-        return []
+        return [_FakeDevice("Fake Mic")]
 
     @staticmethod
     def audioOutputs():
-        return []
+        return [_FakeDevice("Fake Speaker")]
 
     @staticmethod
     def videoInputs():
-        return []
+        return [_FakeDevice("Fake Camera")]
 
 
 _fake = types.ModuleType("PyQt6.QtMultimedia")
@@ -142,6 +194,26 @@ if imported:
               and image.width() == 320)
     else:
         check("audio capture track constructs (QtMM)", True)
+
+    # ── format helpers used by the Devices self-tests ─────────────────────
+    fmt = media.select_audio_format(None)
+    check("select_audio_format returns a format", fmt is not None)
+    check("peak_level detects full-scale signal",
+          abs(media.peak_level(b"\xff\x7f" * 480, fmt) - 1.0) < 0.01)
+    check("peak_level silence is zero",
+          media.peak_level(b"\x00" * 3840, fmt) == 0.0)
+    tone = media.tone_pcm(0.05, fmt=fmt)
+    check("tone_pcm produces s16 stereo bytes",
+          len(tone) == int(48000 * 0.05) * 2 * 2)
+
+    from stanza_im.ui import device_test
+    mic = device_test.MicrophoneTester()
+    check("microphone tester starts", mic.start("") and mic.is_running())
+    mic.stop()
+    check("microphone tester stops", not mic.is_running())
+    speaker = device_test.SpeakerTester()
+    check("speaker tester plays a tone", speaker.play(""))
+    speaker.stop()
 
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")

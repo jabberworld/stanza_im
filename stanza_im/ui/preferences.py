@@ -145,6 +145,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._client.on("connection_info", self._on_connection_info)
 
     def done(self, result):
+        self._stop_device_tests()
         if self._osd_manager is not None:
             self._osd_manager.hide_preview()
         super().done(result)
@@ -282,10 +283,20 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._set("file_download_dir", path)
 
     def _page_devices(self):
-        """Audio/video device selectors for calls (Qt Multimedia)."""
+        """Audio/video device selectors and self-tests (Qt Multimedia)."""
         from stanza_im.xmpp import media
+        from stanza_im.ui import device_test
         page, form = self._page()
         devices = media.enumerate_devices()
+        self._mic_tester = device_test.MicrophoneTester(self)
+        self._mic_tester.level.connect(self._on_mic_level)
+        self._mic_tester.failed.connect(self._on_device_test_failed)
+        self._mic_tester.running_changed.connect(self._on_mic_running)
+        self._speaker_tester = device_test.SpeakerTester(self)
+        self._speaker_tester.failed.connect(self._on_device_test_failed)
+        self._mic_test_button = None
+        self._speaker_test_button = None
+        self._camera_test_button = None
         for key, label_key, kind in (
                 ("devices_audio_input", "prefs_device_mic", "audio_input"),
                 ("devices_audio_output", "prefs_device_speaker", "audio_output"),
@@ -294,10 +305,102 @@ class PreferencesDialog(QtWidgets.QDialog):
             for dev_id, name in devices.get(kind, []):
                 combo.addItem(name or dev_id, dev_id)
             form.addRow(tr(label_key), combo)
+            if kind == "audio_input":
+                level = QtWidgets.QProgressBar()
+                level.setRange(0, 100)
+                level.setTextVisible(False)
+                level.setMinimumWidth(120)
+                self._mic_level = level
+                button = QtWidgets.QPushButton(tr("prefs_device_mic_test"))
+                button.setCheckable(True)
+                button.toggled.connect(self._on_mic_toggled)
+                self._mic_test_button = button
+                form.addRow("", self._row(button, level))
+            elif kind == "audio_output":
+                button = QtWidgets.QPushButton(tr("prefs_device_speaker_test"))
+                button.clicked.connect(self._on_speaker_test)
+                self._speaker_test_button = button
+                form.addRow("", self._row(button))
+            elif kind == "video_input":
+                button = QtWidgets.QPushButton(tr("prefs_device_camera_test"))
+                button.clicked.connect(self._on_camera_test)
+                self._camera_test_button = button
+                form.addRow("", self._row(button))
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
+        self._update_device_tests()
         return page
+
+    def _call_active(self) -> bool:
+        rtp = getattr(self._client, "rtp_calls", None)
+        return bool(getattr(rtp, "sessions", None))
+
+    def _update_device_tests(self) -> None:
+        enabled = not self._call_active()
+        for name in ("_mic_test_button", "_speaker_test_button",
+                     "_camera_test_button"):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setEnabled(enabled)
+
+    def _guard_device_test(self) -> bool:
+        """False (and warn) while a call owns the devices."""
+        if self._call_active():
+            QtWidgets.QMessageBox.warning(
+                self, tr("prefs_devices"), tr("prefs_device_test_busy"))
+            return False
+        return True
+
+    def _on_mic_toggled(self, checked: bool) -> None:
+        if checked:
+            if not self._guard_device_test():
+                self._mic_test_button.setChecked(False)
+                return
+            device_id = self._value("devices_audio_input") or ""
+            if not self._mic_tester.start(device_id):
+                self._mic_test_button.setChecked(False)
+        else:
+            self._mic_tester.stop()
+
+    def _on_mic_level(self, value: float) -> None:
+        bar = getattr(self, "_mic_level", None)
+        if bar is not None:
+            bar.setValue(int(max(0.0, min(1.0, value)) * 100.0))
+
+    def _on_mic_running(self, running: bool) -> None:
+        button = getattr(self, "_mic_test_button", None)
+        if button is not None and button.isChecked() != running:
+            button.blockSignals(True)
+            button.setChecked(running)
+            button.blockSignals(False)
+
+    def _on_speaker_test(self) -> None:
+        if not self._guard_device_test():
+            return
+        self._speaker_tester.play(self._value("devices_audio_output") or "")
+
+    def _on_camera_test(self) -> None:
+        if not self._guard_device_test():
+            return
+        from stanza_im.ui import device_test
+        dialog = device_test.CameraPreviewDialog(
+            self._value("devices_video_input") or "", self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
+
+    def _on_device_test_failed(self, message: str) -> None:
+        QtWidgets.QMessageBox.warning(
+            self, tr("prefs_devices"),
+            tr("prefs_device_test_failed", error=message))
+
+    def _stop_device_tests(self) -> None:
+        tester = getattr(self, "_mic_tester", None)
+        if tester is not None:
+            tester.stop()
+        speaker = getattr(self, "_speaker_tester", None)
+        if speaker is not None:
+            speaker.stop()
 
     @staticmethod
     def _change_password_icon() -> QtGui.QIcon:

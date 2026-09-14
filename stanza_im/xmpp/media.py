@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from fractions import Fraction
 
 logger = logging.getLogger("stanza_im.call.media")
@@ -82,6 +83,196 @@ def _find_device(devices, device_id):
     return None
 
 
+_AV_SAMPLE_FORMATS = {"UInt8": "u8", "Int16": "s16", "Int32": "s32",
+                      "Float": "flt"}
+_BYTES_PER_SAMPLE = {"u8": 1, "s16": 2, "s32": 4, "flt": 4}
+
+
+def _fmt_profile(fmt):
+    """Return ``(sample_rate, channels, av_format)`` of a ``QAudioFormat``."""
+    rate, channels, av_fmt = 0, 0, AUDIO_FORMAT
+    try:
+        if hasattr(fmt, "sampleRate"):
+            rate = int(fmt.sampleRate())
+        if hasattr(fmt, "channelCount"):
+            channels = int(fmt.channelCount())
+        sample_format = (fmt.sampleFormat() if hasattr(fmt, "sampleFormat")
+                         else None)
+        av_fmt = _AV_SAMPLE_FORMATS.get(getattr(sample_format, "name", ""),
+                                        AUDIO_FORMAT)
+    except Exception:
+        logger.debug("CALL could not inspect audio format", exc_info=True)
+    return rate, channels, av_fmt
+
+
+def audio_format_info(fmt) -> str:
+    rate, channels, av_fmt = _fmt_profile(fmt)
+    return "%s Hz, %s ch, %s" % (rate or "?", channels or "?", av_fmt)
+
+
+def _format_supported(device, fmt) -> bool:
+    checker = getattr(device, "isFormatSupported", None)
+    if not callable(checker):
+        return True
+    try:
+        return bool(checker(fmt))
+    except Exception:
+        return True
+
+
+def select_audio_format(device=None):
+    """s16/stereo/48 kHz when the device supports it, else its preferred one."""
+    if not HAS_QTMM:
+        return None
+    fmt = QAudioFormat()
+    fmt.setSampleRate(AUDIO_RATE)
+    fmt.setChannelCount(AUDIO_CHANNELS)
+    fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+    if device is not None and not _format_supported(device, fmt):
+        preferred = getattr(device, "preferredFormat", None)
+        if callable(preferred):
+            try:
+                chosen = preferred()
+                if chosen is not None:
+                    logger.info("CALL device prefers %s", audio_format_info(chosen))
+                    return chosen
+            except Exception:
+                logger.debug("CALL preferredFormat failed", exc_info=True)
+    return fmt
+
+
+def _audio_error(obj) -> str:
+    """Human-readable error of a ``QAudioSource``/``QAudioSink`` ("" = none)."""
+    getter = getattr(obj, "error", None)
+    if not callable(getter):
+        return ""
+    try:
+        error = getter()
+    except Exception:
+        return ""
+    if error is None:
+        return ""
+    name = getattr(error, "name", None) or str(error)
+    return "" if name in ("NoError", "0") else name
+
+
+def open_audio_source(device_id: str = ""):
+    """Open the selected microphone.
+
+    Returns ``(source, io, fmt, name, error)``; *io* is ``None`` when the device
+    could not be started and *error* carries the reason.
+    """
+    if not HAS_QTMM:
+        return None, None, None, "", "Qt Multimedia unavailable"
+    device = _find_device(QMediaDevices.audioInputs(), device_id)
+    name = device.description() if device else "default"
+    try:
+        fmt = select_audio_format(device)
+        source = QAudioSource(device, fmt) if device else QAudioSource(fmt)
+        io = source.start()
+        error = _audio_error(source)
+        if io is None or error:
+            logger.warning("CALL microphone error (%s): %s", name,
+                           error or "no stream")
+            return source, None, fmt, name, error or "no stream"
+        logger.info("CALL microphone opened: %s (%s)", name,
+                    audio_format_info(fmt))
+        return source, io, fmt, name, ""
+    except Exception as exc:
+        logger.exception("CALL microphone open failed")
+        return None, None, None, name, str(exc)
+
+
+def open_audio_sink(device_id: str = ""):
+    """Open the selected speaker.  Returns ``(sink, io, fmt, name, error)``."""
+    if not HAS_QTMM:
+        return None, None, None, "", "Qt Multimedia unavailable"
+    device = _find_device(QMediaDevices.audioOutputs(), device_id)
+    name = device.description() if device else "default"
+    try:
+        fmt = select_audio_format(device)
+        sink = QAudioSink(device, fmt) if device else QAudioSink(fmt)
+        io = sink.start()
+        error = _audio_error(sink)
+        if io is None or error:
+            logger.warning("CALL speaker error (%s): %s", name,
+                           error or "no stream")
+            return sink, None, fmt, name, error or "no stream"
+        logger.info("CALL speaker opened: %s (%s)", name,
+                    audio_format_info(fmt))
+        return sink, io, fmt, name, ""
+    except Exception as exc:
+        logger.exception("CALL speaker open failed")
+        return None, None, None, name, str(exc)
+
+
+def peak_level(data: bytes, fmt) -> float:
+    """Peak amplitude (0.0–1.0) of raw PCM *data* for the given format."""
+    rate, channels, av_fmt = _fmt_profile(fmt)  # noqa: F841 - rate unused
+    if not data:
+        return 0.0
+    try:
+        import array
+        if av_fmt == "s16":
+            samples = array.array("h")
+            samples.frombytes(data[:len(data) - (len(data) % 2)])
+            peak = max((abs(s) for s in samples), default=0) / 32768.0
+        elif av_fmt == "u8":
+            peak = max((abs(b - 128) for b in data), default=0) / 128.0
+        elif av_fmt == "s32":
+            samples = array.array("i")
+            samples.frombytes(data[:len(data) - (len(data) % 4)])
+            peak = max((abs(s) for s in samples), default=0) / 2147483648.0
+        elif av_fmt == "flt":
+            samples = array.array("f")
+            samples.frombytes(data[:len(data) - (len(data) % 4)])
+            peak = max((abs(s) for s in samples), default=0.0)
+        else:
+            peak = 0.0
+    except Exception:
+        peak = 0.0
+    return min(1.0, max(0.0, peak))
+
+
+def tone_pcm(seconds: float = 1.2, freq: float = 440.0,
+             amplitude: float = 0.28, fmt=None) -> bytes:
+    """Generate a sine tone as raw PCM matching *fmt* (default s16/stereo/48k)."""
+    if fmt is not None:
+        rate, channels, av_fmt = _fmt_profile(fmt)
+    else:
+        rate, channels, av_fmt = AUDIO_RATE, AUDIO_CHANNELS, AUDIO_FORMAT
+    rate = rate or AUDIO_RATE
+    channels = channels or AUDIO_CHANNELS
+    samples = int(rate * max(0.05, seconds))
+    two_pi = 2.0 * math.pi
+    if av_fmt == "u8":
+        out = bytearray()
+        for i in range(samples):
+            value = int(128 + amplitude * 127 * math.sin(two_pi * freq * i / rate))
+            out.extend(bytes([max(0, min(255, value))]) * channels)
+        return bytes(out)
+    if av_fmt == "s32":
+        import struct
+        out = bytearray()
+        for i in range(samples):
+            value = int(amplitude * 2147483647 * math.sin(two_pi * freq * i / rate))
+            out.extend(struct.pack("<i", value) * channels)
+        return bytes(out)
+    if av_fmt == "flt":
+        import struct
+        out = bytearray()
+        for i in range(samples):
+            value = amplitude * math.sin(two_pi * freq * i / rate)
+            out.extend(struct.pack("<f", value) * channels)
+        return bytes(out)
+    import array
+    tone = array.array("h")
+    for i in range(samples):
+        value = int(amplitude * 32767 * math.sin(two_pi * freq * i / rate))
+        tone.extend([value] * channels)
+    return tone.tobytes()
+
+
 if HAS_AIORTC:
     class _AudioCaptureTrack(AudioStreamTrack):
         """Microphone capture via QAudioSource → ``av.AudioFrame``."""
@@ -92,25 +283,47 @@ if HAS_AIORTC:
             self._io = None
             self._pts = 0
             self._stopped = False
-            self._frame_bytes = AUDIO_SAMPLES_PER_FRAME * AUDIO_CHANNELS * 2
             self.kind = "audio"
+            self._rate, self._channels = AUDIO_RATE, AUDIO_CHANNELS
+            self._av_fmt = AUDIO_FORMAT
+            self._resampler = None
+            self._frame_bytes = AUDIO_SAMPLES_PER_FRAME * AUDIO_CHANNELS * 2
             if not HAS_QTMM:
                 logger.warning("CALL audio capture unavailable (no Qt MM)")
                 return
+            self._source, self._io, fmt, name, error = open_audio_source(
+                device_id)
+            if fmt is not None:
+                rate, channels, av_fmt = _fmt_profile(fmt)
+                self._rate = rate or AUDIO_RATE
+                self._channels = channels or AUDIO_CHANNELS
+                self._av_fmt = av_fmt or AUDIO_FORMAT
+                self._frame_bytes = max(2, self._input_bytes())
+            if self._io is None:
+                logger.warning("CALL microphone not streaming (%s): %s",
+                               name, error or "unknown")
+
+        def _input_bytes(self) -> int:
+            rate = self._rate or AUDIO_RATE
+            channels = self._channels or AUDIO_CHANNELS
+            per_sample = _BYTES_PER_SAMPLE.get(self._av_fmt, 2)
+            return int(rate * 0.02) * channels * per_sample
+
+        def _to_encoder_format(self, frame):
+            """Convert a device-format frame to the encoder's s16/stereo/48k."""
+            if (self._av_fmt == AUDIO_FORMAT
+                    and self._channels == AUDIO_CHANNELS
+                    and self._rate in (0, AUDIO_RATE)):
+                return frame
             try:
-                fmt = QAudioFormat()
-                fmt.setSampleRate(AUDIO_RATE)
-                fmt.setChannelCount(AUDIO_CHANNELS)
-                fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
-                device = _find_device(QMediaDevices.audioInputs(), device_id)
-                self._source = (QAudioSource(device, fmt) if device
-                                else QAudioSource(fmt))
-                self._io = self._source.start()
-                logger.info("CALL microphone opened: %s",
-                            device.description() if device else "default")
+                if self._resampler is None:
+                    self._resampler = av.AudioResampler(
+                        format=AUDIO_FORMAT, layout="stereo", rate=AUDIO_RATE)
+                frames = self._resampler.resample(frame)
             except Exception:
-                logger.exception("CALL microphone open failed")
-                self._source = None
+                logger.warning("CALL microphone resample failed", exc_info=True)
+                return None
+            return frames[0] if frames else None
 
         async def recv(self):
             def _silent():
@@ -134,12 +347,19 @@ if HAS_AIORTC:
                 # The Qt device was deleted by stop() while we were reading.
                 self._stopped = True
                 return _silent()
-            samples = len(data) // (AUDIO_CHANNELS * 2)
-            frame = av.AudioFrame(format=AUDIO_FORMAT, layout="stereo",
+            per_sample = _BYTES_PER_SAMPLE.get(self._av_fmt, 2)
+            samples = len(data) // max(1, (self._channels or 1) * per_sample)
+            if samples <= 0:
+                return _silent()
+            layout = "stereo" if self._channels == 2 else "mono"
+            frame = av.AudioFrame(format=self._av_fmt, layout=layout,
                                   samples=samples)
-            frame.sample_rate = AUDIO_RATE
+            frame.sample_rate = self._rate or AUDIO_RATE
             frame.planes[0].update(data)
-            return self._stamp(frame)
+            converted = self._to_encoder_format(frame)
+            if converted is None:
+                return _silent()
+            return self._stamp(converted)
 
         def _stamp(self, frame):
             """Give the frame a monotonic sample timestamp (aiortc requires it)."""
@@ -166,27 +386,46 @@ if HAS_AIORTC:
         def __init__(self, device_id: str = ""):
             self._sink = None
             self._io = None
+            self._rate, self._channels = AUDIO_RATE, AUDIO_CHANNELS
+            self._av_fmt = AUDIO_FORMAT
+            self._resampler = None
             if not HAS_QTMM:
                 return
+            self._sink, self._io, fmt, name, error = open_audio_sink(device_id)
+            if fmt is not None:
+                rate, channels, av_fmt = _fmt_profile(fmt)
+                self._rate = rate or AUDIO_RATE
+                self._channels = channels or AUDIO_CHANNELS
+                self._av_fmt = av_fmt or AUDIO_FORMAT
+            if self._io is None:
+                logger.warning("CALL speaker not streaming (%s): %s",
+                               name, error or "unknown")
+
+        def _to_device_format(self, frame):
+            if (self._av_fmt == AUDIO_FORMAT
+                    and self._channels == AUDIO_CHANNELS
+                    and self._rate in (0, AUDIO_RATE)):
+                return frame
             try:
-                fmt = QAudioFormat()
-                fmt.setSampleRate(AUDIO_RATE)
-                fmt.setChannelCount(AUDIO_CHANNELS)
-                fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
-                device = _find_device(QMediaDevices.audioOutputs(), device_id)
-                self._sink = QAudioSink(device, fmt) if device else QAudioSink(fmt)
-                self._io = self._sink.start()
-                logger.info("CALL speaker opened: %s",
-                            device.description() if device else "default")
+                if self._resampler is None:
+                    layout = "stereo" if self._channels == 2 else "mono"
+                    self._resampler = av.AudioResampler(
+                        format=self._av_fmt, layout=layout,
+                        rate=self._rate or AUDIO_RATE)
+                frames = self._resampler.resample(frame)
             except Exception:
-                logger.exception("CALL speaker open failed")
+                logger.debug("CALL speaker resample failed", exc_info=True)
+                return None
+            return frames[0] if frames else None
 
         def write(self, frame):
             if self._io is None:
                 return
             try:
-                data = bytes(frame.planes[0])
-                self._io.write(data)
+                out = self._to_device_format(frame)
+                if out is None:
+                    return
+                self._io.write(bytes(out.planes[0]))
             except Exception:
                 logger.debug("CALL speaker write failed", exc_info=True)
 

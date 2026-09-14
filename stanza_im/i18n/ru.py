@@ -755,6 +755,13 @@ STRINGS = {
     'prefs_device_speaker': 'Динамик:',
     'prefs_device_camera': 'Камера:',
     'prefs_device_default': 'Системное по умолчанию',
+    'prefs_device_mic_test': 'Проверить микрофон',
+    'prefs_device_speaker_test': 'Проверить звук',
+    'prefs_device_camera_test': 'Проверить камеру',
+    'prefs_device_test_busy': 'Остановите активный звонок, чтобы проверить устройства.',
+    'prefs_device_test_failed': 'Не удалось открыть устройство: %(error)s',
+    'prefs_device_test_camera_title': 'Проверка камеры',
+    'prefs_device_test_unavailable': 'Предпросмотр камеры недоступен.',
     # Muji (XEP-0272)
     'muji_button': 'Конференц-звонок',
     'muji_window_title': 'Конференция {room}',

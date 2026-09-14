@@ -169,6 +169,17 @@ for key in ("media_preview", "media_preview_size",
 check("prefs media_preview default",
       dlg._controls["media_preview"].currentData() == "images")
 
+# 10a. Devices tab self-test controls ----------------------------------------
+check("devices mic test control present",
+      getattr(dlg, "_mic_test_button", None) is not None
+      and getattr(dlg, "_mic_level", None) is not None)
+check("devices speaker/camera test controls present",
+      getattr(dlg, "_speaker_test_button", None) is not None
+      and getattr(dlg, "_camera_test_button", None) is not None)
+check("device tests enabled without a call", not dlg._call_active()
+      and dlg._mic_test_button.isEnabled())
+dlg._stop_device_tests()
+
 # 11. media click relay (Python side of the scroll-poll delivery) -------------
 from urllib.parse import quote
 from stanza_im.ui.chat_widget import ChatWidget
