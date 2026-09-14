@@ -165,6 +165,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
+        widget.call_requested.connect(self.call_requested)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -278,6 +279,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_colored_muc_nicks(bool(enabled))
+
+    def set_call_support(self, jid: str, audio: bool = True,
+                         video: bool = True) -> None:
+        """Enable/disable the call menu of a 1:1 tab (peer capabilities)."""
+        widget = self._tabs.get(jid)
+        if widget is not None and not widget.is_muc:
+            widget.set_call_support(audio, video)
 
     def set_chat_options(self, options):
         self._chat_options = dict(options)
@@ -437,6 +445,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         str, str, QtCore.QPoint)
     vcard_requested = QtCore.pyqtSignal(str)                   # jid
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
+    call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen

@@ -21,7 +21,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 from stanza_im.include.constants import (
     ACTIONS_DIR_16, ACTIONS_DIR_22, CATEGORIES_DIR_16, STATUS_DIR_32,
-    PLACES_DIR_22,
+    PLACES_DIR_22, IMAGES_DIR,
 )
 from stanza_im.include.avatars import (
     avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
@@ -210,6 +210,7 @@ class ChatWidget(QtWidgets.QWidget):
         str, str, QtCore.QPoint)                            # room, nick, global pos
     vcard_requested = QtCore.pyqtSignal(str)                # jid
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
+    call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
@@ -430,6 +431,23 @@ class ChatWidget(QtWidgets.QWidget):
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         self._send_file_btn.setMenu(send_menu)
         actions_row.addWidget(self._send_file_btn)
+
+        # Call button (audio/video) — enabled only when the peer supports it.
+        call_menu = QtWidgets.QMenu(self)
+        self._call_audio_action = call_menu.addAction(tr("call_audio"))
+        self._call_audio_action.triggered.connect(
+            lambda: self.call_requested.emit(self.jid, False))
+        self._call_video_action = call_menu.addAction(tr("call_video"))
+        self._call_video_action.triggered.connect(
+            lambda: self.call_requested.emit(self.jid, True))
+        self._call_btn = QtWidgets.QToolButton(self)
+        self._call_btn.setIcon(self._call_icon())
+        self._call_btn.setToolTip(tr("call_button"))
+        self._call_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._call_btn.setMenu(call_menu)
+        self._call_btn.setEnabled(False)
+        actions_row.addWidget(self._call_btn)
         actions_row.addStretch(1)
         chat_col.addLayout(actions_row)
 
@@ -1525,6 +1543,24 @@ class ChatWidget(QtWidgets.QWidget):
             if not pix.isNull():
                 return QtGui.QIcon(pix)
         return QtGui.QIcon()
+
+    @staticmethod
+    def _call_icon() -> QtGui.QIcon:
+        for candidate in (os.path.join(IMAGES_DIR, "22x22", "emotes",
+                                       "phone.png"),
+                          os.path.join(IMAGES_DIR, "16x16", "emotes",
+                                       "phone.png"),
+                          os.path.join(ACTIONS_DIR_22, "message.png")):
+            pix = QtGui.QPixmap(candidate)
+            if not pix.isNull():
+                return QtGui.QIcon(pix)
+        return QtGui.QIcon()
+
+    def set_call_support(self, audio: bool, video: bool) -> None:
+        """Enable the call menu according to the peer's capabilities."""
+        self._call_btn.setEnabled(bool(audio or video))
+        self._call_audio_action.setEnabled(bool(audio))
+        self._call_video_action.setEnabled(bool(video))
 
     def _set_input_height(self, height: int):
         height = max(40, min(240, int(height)))

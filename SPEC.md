@@ -47,6 +47,7 @@ stanza_im/
 │   ├── media_viewer.py — Fullscreen image/video viewer
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
+│   ├── call_window.py  — Incoming call prompt, active call + Muji window
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── history_manager.py   — Per-contact history browser
@@ -56,6 +57,9 @@ stanza_im/
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
 │                          jingle.py = XEP-0234/0260/0261 file transfer,
+│                          jingle_rtp.py = XEP-0167/0176 A/V calls,
+│                          muji.py = XEP-0272 conferences,
+│                          media.py = aiortc media engine,
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
@@ -159,6 +163,20 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `files.auto_accept` | `false` | Automatically accept incoming P2P file offers and save them into `files.download_dir` (unique name) without a dialog. |
 | `files.download_notifications` | `true` | Show an OSD notification when an incoming file offer is accepted. |
 | `files.download_dir` | `""` | Directory for received files; empty falls back to `$XDG_DOWNLOAD_DIR` / `~/Downloads` (`include/utils.default_download_dir`). |
+
+### 4.4 Call Settings (`devices.*`, `calls.*`, Preferences → Devices)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `devices.audio_input` | `""` | Microphone device id (Qt Multimedia); empty = system default. |
+| `devices.audio_output` | `""` | Speaker device id; empty = system default. |
+| `devices.video_input` | `""` | Camera device id; empty = system default. |
+| `calls.auto_accept` | `false` | Automatically accept incoming 1:1 calls (no prompt). |
+
+Calling requires the optional `calls` extra (`aiortc`); without it the call
+menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
+`client.ice_servers()` from XEP-0215, then the connection settings' STUN/TURN
+endpoint, then DNS SRV.
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -957,6 +975,13 @@ client.edit_message(jid, body, replace_id)  # XEP-0308 correction
 client.publish_mood(key, text="")      # XEP-0107 PEP publish
 client.publish_activity(group, sub="") # XEP-0108 PEP publish
 client.fetch_pep(jid)           # XEP-0080/0107/0108/0118 items → contact_pep_updated
+client.supports_calls(bare, video=False)  # XEP-0115 caps check for call gating
+client.ice_servers()            # STUN/TURN (XEP-0215 → settings → SRV)
+client.start_call(jid, video=False)   # XEP-0167/0176 A/V call
+client.answer_call(sid, accept, video=False)
+client.end_call(sid)
+client.join_muji(room, nick, video=False)  # XEP-0272 conference
+client.leave_muji(room)
 ```
 
 ### 14.10.1 Extended Presence (XEP-0080/0107/0108/0118)
@@ -981,6 +1006,33 @@ client.fetch_pep(jid)           # XEP-0080/0107/0108/0118 items → contact_pep_
   (`MainWindow._roster_tooltip`) and on the vCard "Status" tab
   (`mood`/`activity`/`tune`/`location`), updated live via
   `_on_contact_pep_updated`.
+
+### 14.10.2 Jingle RTP Calls & Muji (XEP-0167/0176/0215/0272/0353/0482)
+
+- 1:1 calls live in `xmpp/jingle_rtp.py` (`client.rtp_calls`). The single
+  Jingle IQ handler (`JingleRtpManager`) is routed by `JabberClient._dispatch_jingle_iq`
+  (RTP/ICE content or a known call `sid` → calls, otherwise file transfer). The
+  RTP `<description>` (Opus/telephone-event/VP8/H264, SSRCs), ICE-UDP
+  `<transport>` (ufrag/pwd/candidates) and DTLS `<fingerprint>` are built from /
+  converted to SDP so `aiortc` (`xmpp/media.py`) provides ICE, DTLS-SRTP and RTP.
+  Candidates are offered in `session-initiate`/`accept` and trickled via
+  `transport-info`. Peers advertising `urn:xmpp:jingle-message:0` are rung with
+  XEP-0353 propose/proceed first.
+- Capability gating mirrors Conversations: `client.supports_calls(bare, video)`
+  checks the peer's XEP-0115 caps (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 +
+  rtp:audio [+ rtp:video]`). The roster contact context menu and the chat
+  toolbar show a "Call → Audio/Video" menu enabled only for capable contacts.
+- STUN/TURN: `client.ice_servers()` merges XEP-0215 `urn:xmpp:extdisco:2`
+  services (with credentials) with `connection.stun_turn_*` and SRV discovery.
+- `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
+  remote video frames are painted by `VideoView`; Preferences → Devices selects
+  the microphone/speaker/camera (`devices.*`, Qt Multimedia).
+- Muji (`xmpp/muji.py`, `client.muji`): participants advertise a `<muji>`
+  contents map in MUC presence; the joiner opens a Jingle session with every
+  other participant's real JID tagged `<muji room='…'/>`, handles content
+  add/remove and leaving, and parses XEP-0482 invites. `MujiCallWindow` lists
+  participants. All call/Muji code logs via `stanza_im.call*` with `CALL[…]` /
+  `MUJI[…]` markers.
 
 ### 14.11 Data Classes
 

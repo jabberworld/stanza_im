@@ -1,0 +1,212 @@
+"""Offscreen tests for Jingle RTP calls, XEP-0215 and Muji.
+
+Run with:
+    QT_QPA_PLATFORM=offscreen python3 tests/test_calls.py
+"""
+import asyncio
+import os
+import sys
+import tempfile
+from xml.etree import ElementTree as ET
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+_SCRATCH = tempfile.mkdtemp(prefix="stanza_calls_")
+os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
+os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
+os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from PyQt6 import QtWidgets
+
+import slixmpp
+
+from stanza_im.core import discovery
+from stanza_im.core.client import JabberClient
+from stanza_im.core.storage import Config
+from stanza_im.i18n import load as i18n_load
+from stanza_im.ui import chat_themes
+from stanza_im.ui.chat_widget import ChatWidget
+from stanza_im.xmpp import jingle_rtp as jr
+from stanza_im.xmpp import muji
+
+i18n_load("en")
+
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+
+FAILURES = []
+
+
+def check(name, cond):
+    print(("PASS" if cond else "FAIL") + ": " + name)
+    if not cond:
+        FAILURES.append(name)
+
+
+# ── 1. RTP/ICE/DTLS XML round-trip ----------------------------------------
+desc = jr.RtpDescription("audio", [
+    jr.PayloadType(111, "opus", 48000, 2),
+    jr.PayloadType(101, "telephone-event", 8000, 0)])
+desc.sources.append(jr.RtpSource(12345, {"cname": "abc"}))
+parsed = jr.parse_description(jr.build_description(desc))
+check("rtp description round-trip",
+      parsed.media == "audio" and parsed.payloads[0].name == "opus"
+      and parsed.payloads[0].channels == 2
+      and parsed.sources[0].ssrc == 12345)
+
+transport = jr.IceTransport(
+    ufrag="uf", pwd="pw",
+    fingerprints=[jr.DtlsFingerprint("sha-256", "AA:BB", "actpass")],
+    candidates=[jr.IceCandidate("f1", 1, "udp", 123, "10.0.0.1", 5000,
+                                "host")])
+tp = jr.parse_transport(jr.build_transport(transport))
+check("ice transport round-trip",
+      tp.ufrag == "uf" and tp.pwd == "pw"
+      and tp.fingerprints[0].value == "AA:BB"
+      and tp.candidates[0].ip == "10.0.0.1"
+      and tp.candidates[0].type == "host")
+
+# ── 2. SDP ↔ Jingle bridge with real aiortc peers -------------------------
+try:
+    from aiortc import RTCPeerConnection, RTCSessionDescription
+    from aiortc.mediastreams import AudioStreamTrack
+    HAS_AIORTC = True
+except Exception:
+    HAS_AIORTC = False
+
+
+async def _sdp_roundtrip():
+    pc1 = RTCPeerConnection()
+    pc1.addTrack(AudioStreamTrack())
+    await pc1.setLocalDescription(await pc1.createOffer())
+    contents = jr.jingle_contents_from_sdp(pc1.localDescription.sdp)
+    rebuilt = jr.sdp_from_jingle(contents, "sid1")
+    pc2 = RTCPeerConnection()
+    await pc2.setRemoteDescription(RTCSessionDescription(rebuilt, "offer"))
+    pc2.addTrack(AudioStreamTrack())
+    await pc2.setLocalDescription(await pc2.createAnswer())
+    contents2 = jr.jingle_contents_from_sdp(pc2.localDescription.sdp)
+    rebuilt2 = jr.sdp_from_jingle(contents2, "sid2")
+    await pc1.setRemoteDescription(RTCSessionDescription(rebuilt2, "answer"))
+    await pc1.close()
+    await pc2.close()
+    return contents[0]
+
+
+if HAS_AIORTC:
+    ok = False
+    try:
+        c0 = asyncio.run(_sdp_roundtrip())
+        ok = True
+    except Exception as exc:
+        print("  sdp roundtrip error:", exc)
+    check("SDP<->Jingle round-trip accepted by aiortc", ok)
+else:
+    check("SDP<->Jingle round-trip accepted by aiortc (skipped)", True)
+
+# ── 3. is_rtp_jingle ------------------------------------------------------
+j = ET.Element("{%s}jingle" % jr.NS_JINGLE)
+content = ET.SubElement(j, "{%s}content" % jr.NS_JINGLE)
+ET.SubElement(content, "{%s}description" % jr.NS_RTP)
+check("is_rtp_jingle detects RTP", jr.is_rtp_jingle(j))
+ft = ET.Element("{%s}jingle" % jr.NS_JINGLE)
+ET.SubElement(ft, "{%s}s5b" % "urn:xmpp:jingle:transports:s5b:1")
+check("is_rtp_jingle ignores file transfer", not jr.is_rtp_jingle(ft))
+
+# ── 4. XEP-0215 normalisation ---------------------------------------------
+servers = discovery.ice_servers_from_services([
+    {"type": "stun", "host": "s.example", "port": 3478, "transport": "udp"},
+    {"type": "turn", "host": "t.example", "port": 443, "transport": "udp",
+     "username": "u", "password": "p"},
+    {"type": "turn", "host": "t.example", "port": 443, "transport": "tcp",
+     "username": "u", "password": "p"},
+])
+check("extdisco normalisation",
+      servers[0]["urls"] == "stun:s.example:3478"
+      and servers[1]["urls"] == "turn:t.example:443?transport=udp"
+      and servers[1]["username"] == "u"
+      and servers[2]["urls"] == "turn:t.example:443?transport=tcp")
+
+# ── 5. client.ice_servers() priority --------------------------------------
+client = JabberClient("me@example.com/res", "pw")
+client._discovered = {"ice_services": [
+    {"type": "turn", "host": "relay.example", "port": 3478,
+     "transport": "udp", "username": "x", "password": "y"}]}
+check("ice_servers uses XEP-0215",
+      client.ice_servers()[0]["urls"] == "turn:relay.example:3478?transport=udp")
+client._discovered = {"ice_services": [], "stun_turn": []}
+client.stun_turn_mode = "manual"
+client.stun_turn_manual = "stun.example:3478"
+check("ice_servers falls back to manual",
+      client.ice_servers()[0]["urls"] == "stun:stun.example:3478")
+
+# ── 6. call gating (XEP-0115 caps) ----------------------------------------
+features = {"urn:xmpp:jingle:1", "urn:xmpp:jingle:transports:ice-udp:1",
+            "urn:xmpp:jingle:apps:rtp:1", "urn:xmpp:jingle:apps:dtls:0",
+            "urn:xmpp:jingle:apps:rtp:audio"}
+client.contact_features = {"bob@example.com/phone": set(features)}
+check("supports audio calls", client.supports_calls("bob@example.com"))
+check("no video without feature",
+      not client.supports_calls("bob@example.com", video=True))
+check("unknown contact unsupported",
+      not client.supports_calls("alice@example.com"))
+
+# ── 7. chat widget call menu gating ---------------------------------------
+cw = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+check("call menu present",
+      cw._call_btn is not None and not cw._call_btn.isEnabled())
+cw.set_call_support(True, True)
+actions = [a.text() for a in cw._call_btn.menu().actions()]
+check("call menu items", cw._call_btn.isEnabled()
+      and any(a.startswith("Audio") for a in actions)
+      and any(a.startswith("Video") for a in actions))
+cw.set_call_support(False, False)
+check("call menu disabled again", not cw._call_btn.isEnabled())
+
+# ── 8. call window + incoming dialog --------------------------------------
+from stanza_im.ui.call_window import CallWindow, IncomingCallDialog
+win = CallWindow("sid1", "bob@example.com", video=True)
+check("call window", win.sid == "sid1" and win._video_view is not None)
+win.close()
+dlg = IncomingCallDialog("bob@example.com", "video")
+decisions = []
+dlg.decision.connect(lambda a, v: decisions.append((a, v)))
+dlg._on_accept()
+check("incoming dialog accept", decisions == [(True, True)])
+dlg.close()
+
+# ── 9. Muji presence + invites --------------------------------------------
+pres = slixmpp.Presence()
+pres["from"] = "room@conf.example/Alice"
+pres["to"] = "me@example.com/res"
+pres["type"] = "available"
+muji_el = ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+content = ET.SubElement(muji_el, "{%s}content" % muji.NS_MUJI)
+content.set("name", "voice")
+desc_el = ET.SubElement(content, "{%s}description" % muji.NS_RTP)
+desc_el.set("media", "audio")
+client.muji.handle_presence(pres)
+conf = client.muji.conferences.get("room@conf.example")
+check("muji presence parsed",
+      conf is not None and conf.participants["Alice"].contents == {"voice": "audio"})
+
+inv = slixmpp.Message()
+inv["from"] = "bob@example.com/phone"
+inv["type"] = "chat"
+invitel = ET.SubElement(inv.xml, "{%s}invite" % muji.NS_CALL_INVITES)
+muji_inv = ET.SubElement(invitel, "{%s}muji" % muji.NS_MUJI)
+muji_inv.set("room", "room@conf.example")
+captured = []
+client.on("muji_invite", lambda *a: captured.append(a))
+check("muji invite parsed", client.muji.handle_invite_message(inv)
+      and captured == [("bob@example.com", "room@conf.example")])
+
+# ── 10. config defaults ---------------------------------------------------
+cfg = Config()
+check("devices defaults",
+      cfg.devices.audio_input == "" and cfg.devices.video_input == ""
+      and cfg.calls.auto_accept is False)
+
+print("\nAll tests passed" if not FAILURES
+      else f"\n{len(FAILURES)} failures")
+sys.exit(1 if FAILURES else 0)

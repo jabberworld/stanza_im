@@ -53,6 +53,7 @@ stanza_im/                      # Python package
 │   ├── media_viewer.py          # Fullscreen image/video viewer
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
+│   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
 │   ├── status_message_dialog.py # Multiline presence status editor
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
@@ -62,6 +63,9 @@ stanza_im/                      # Python package
 ├── xmpp/
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
 │   ├── jingle.py                # XEP-0234/0260/0261 Jingle FT + IBB
+│   ├── jingle_rtp.py            # XEP-0167/0176 Jingle RTP calls + SDP bridge
+│   ├── muji.py                  # XEP-0272 multiparty Jingle coordination
+│   ├── media.py                 # aiortc media engine (capture/playback)
 │   ├── bytestream.py            # SOCKS5 bytestream client + direct listener
 │   └── socks5.py                # Dependency-free SOCKS5 CONNECT for the account proxy
 ├── include/
@@ -431,6 +435,36 @@ to `status.mood` / `status.activity` (republished on `session_started` via
 Contacts' mood/activity/tune/location are shown in the roster tooltip
 (`_roster_tooltip`) and on the vCard "Status" tab (`mood`/`activity`/`tune`/
 `location` fields, updated live through `_on_contact_pep_updated`).
+
+**A/V calls & Muji** (`xmpp/jingle_rtp.py`, `xmpp/media.py`,
+`xmpp/muji.py`, `ui/call_window.py`): 1:1 audio/video calls use Jingle RTP
+(XEP-0167) over ICE-UDP (XEP-0176) with DTLS-SRTP. `JingleRtpManager`
+(`client.rtp_calls`) shares the single Jingle IQ router with the file-transfer
+manager (`_dispatch_jingle_iq` routes by RTP/ICE content or known `sid`), builds
+the RTP `<description>`/ICE `<transport>`/DTLS `<fingerprint>` elements and
+converts them to/from an SDP offer/answer that `aiortc` understands
+(`sdp_from_jingle`/`jingle_contents_from_sdp`); aiortc provides the actual
+ICE/DTLS/SRTP/RTP path. Candidates are sent in `session-initiate`/`accept` and
+trickled via `transport-info`. When the peer advertises `urn:xmpp:jingle-message:0`
+the call is announced with XEP-0353 propose/proceed before `session-initiate`.
+`client.supports_calls(bare, video)` gates the UI on the peer's XEP-0115 caps
+(`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 + rtp:audio [+ rtp:video]`, fetched
+per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
+(XEP-0215 `urn:xmpp:extdisco:2` → the connection settings' STUN/TURN endpoint →
+SRV discovery). The call menu is a submenu in the roster contact context menu
+and an icon-only button in the chat toolbar (both enabled only for capable
+contacts). `ui/call_window.CallWindow` shows the active call and
+`IncomingCallDialog` prompts for incoming offers; remote video frames are
+painted by `VideoView`. Preferences gains a **Devices** page
+(`devices.audio_input/audio_output/video_input`, enumerated with Qt
+Multimedia). Muji (XEP-0272) coordinates conference calls inside a MUC: the
+`<muji>` contents map is advertised in MUC presence (`MujiManager.handle_presence`),
+the joiner opens a Jingle session with every other participant's real JID
+tagged `<muji room=…/>` (`start_call(..., muji_room=rook)`), and content
+add/remove, leaving and XEP-0482 invites are handled; `MujiCallWindow` lists
+the participants. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
+markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
+without it the engine is a `NullMediaEngine` and calling is disabled.
 
 Preferences use icon navigation and nested tabs. `Apply` applies settings
 without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,

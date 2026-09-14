@@ -68,6 +68,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config = Config()
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
         self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
+        self._call_windows: dict[str, object] = {}      # sid -> CallWindow
+        self._incoming_calls: dict[str, object] = {}    # sid -> IncomingCallDialog
+        self._call_targets: dict[str, str] = {}         # sid -> peer jid
+        self._muji_windows: dict[str, object] = {}      # room -> MujiCallWindow
         self._roster_style = RosterStyle()
 
         from stanza_im.ui.tray import build_app_icon
@@ -166,6 +170,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
                 jid, paths, method, self._chat_window))
+        self._chat_window.call_requested.connect(self._on_call_requested)
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
         self._chat_window.text_scale_changed.connect(
@@ -1003,6 +1008,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""
+        if self._client is not None:
+            self._client.call_devices = self._call_device_config()
+            self._client.call_auto_accept = bool(getattr(
+                getattr(self._config, "calls", None), "auto_accept", False))
         self._apply_roster_font()
         roster_colors = (
             getattr(self._config.appearance, "roster_bg_color", "") or "",
@@ -1167,6 +1176,13 @@ class MainWindow(QtWidgets.QMainWindow):
             tls_mode=getattr(connection, "tls_mode", "prefer"),
             starttls_mode=getattr(connection, "starttls_mode", "always"),
         )
+        self._client.stun_turn_mode = getattr(connection, "stun_turn_mode",
+                                              "auto")
+        self._client.stun_turn_manual = getattr(connection, "stun_turn_manual",
+                                                "")
+        self._client.call_devices = self._call_device_config()
+        self._client.call_auto_accept = bool(getattr(
+            getattr(self._config, "calls", None), "auto_accept", False))
         self._connect_client_signals()
 
         self._start_task(self._connect_async(jid, show))
@@ -1252,6 +1268,16 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muc_info_received", self._on_muc_info_received)
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("contact_pep_updated", self._on_contact_pep_updated)
+        c.on("contact_caps", self._on_contact_caps)
+        c.on("call_incoming", self._on_call_incoming)
+        c.on("call_state", self._on_call_state)
+        c.on("call_video_frame", self._on_call_video_frame)
+        c.on("call_ended", self._on_call_ended)
+        c.on("call_failed", self._on_call_failed)
+        c.on("muji_joined", self._on_muji_joined)
+        c.on("muji_updated", self._on_muji_updated)
+        c.on("muji_left", self._on_muji_left)
+        c.on("muji_invite", self._on_muji_invite)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("mam_unavailable", self._on_mam_unavailable)
         c.on("mam_parse_error", self._on_mam_parse_error)
@@ -1482,6 +1508,141 @@ class MainWindow(QtWidgets.QMainWindow):
             if key.split("/", 1)[0] == bare:
                 dialog.update_status({kind: value})
 
+    # ── Jingle RTP calls ─────────────────────────────────────────
+
+    def _call_device_config(self) -> dict:
+        dev = getattr(self._config, "devices", None)
+        return {
+            "audio_input": getattr(dev, "audio_input", "") or "",
+            "audio_output": getattr(dev, "audio_output", "") or "",
+            "video_input": getattr(dev, "video_input", "") or "",
+        }
+
+    def _on_call_requested(self, jid: str, video: bool = False) -> None:
+        if not self._client:
+            return
+        if not self._client.rtp_calls.available:
+            self._tray.show_message(APP_NAME, tr("call_unavailable"))
+            return
+        self._client.call_devices = self._call_device_config()
+        logger.info("CALL request to %s (video=%s)", jid, video)
+        self._client.start_call(jid, video)
+
+    def _on_contact_caps(self, bare: str) -> None:
+        """A contact's capabilities arrived — refresh the call menu."""
+        if not self._client:
+            return
+        audio = self._client.supports_calls(bare)
+        video = self._client.supports_calls(bare, video=True)
+        logger.debug("CALL caps %s: audio=%s video=%s", bare, audio, video)
+        self._chat_window.set_call_support(bare, audio, video)
+
+    def _on_call_incoming(self, sid: str, peer: str, kind: str) -> None:
+        if not self._client:
+            return
+        self._client.call_devices = self._call_device_config()
+        if self._client.call_auto_accept:
+            self._client.answer_call(sid, True, kind == "video")
+            return
+        from stanza_im.ui.call_window import IncomingCallDialog
+        dlg = IncomingCallDialog(peer, kind, self)
+        dlg.decision.connect(
+            lambda accept, video: self._client.answer_call(sid, accept, video))
+        self._incoming_calls[sid] = dlg
+        dlg.finished.connect(lambda _r, s=sid: self._incoming_calls.pop(s, None))
+        self._place_dialog_over(dlg, self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _open_call_window(self, sid: str, peer: str, video: bool = False):
+        window = self._call_windows.get(sid)
+        if window is not None:
+            return window
+        from stanza_im.ui.call_window import CallWindow
+        window = CallWindow(sid, peer, video, parent=self)
+        window.hangup.connect(self._on_call_hangup)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self._call_windows[sid] = window
+        return window
+
+    def _on_call_state(self, sid: str, peer: str, state: str) -> None:
+        if state == "ringing":
+            self._open_call_window(sid, peer, False)
+            return
+        window = self._call_windows.get(sid)
+        if state == "active":
+            if window is None:
+                session = (self._client.rtp_calls.sessions.get(sid)
+                           if self._client else None)
+                window = self._open_call_window(
+                    sid, peer, bool(getattr(session, "video", False)))
+            window.set_state(tr("call_active"))
+
+    def _on_call_video_frame(self, sid: str, image) -> None:
+        window = self._call_windows.get(sid)
+        if window is not None:
+            window.set_frame(image)
+
+    def _on_call_ended(self, sid: str, peer: str, reason: str) -> None:
+        logger.info("CALL ended %s (%s)", sid, reason)
+        window = self._call_windows.pop(sid, None)
+        if window is not None:
+            window.set_state(tr("call_ended"))
+            window.close()
+        dlg = self._incoming_calls.pop(sid, None)
+        if dlg is not None:
+            dlg.close()
+
+    def _on_call_failed(self, peer: str, error: str) -> None:
+        logger.warning("CALL failed for %s: %s", peer, error)
+        self._tray.show_message(
+            APP_NAME, tr("call_failed", peer=peer, error=error))
+
+    def _on_call_hangup(self, sid: str) -> None:
+        if self._client:
+            self._client.end_call(sid)
+
+    # ── Muji conference ──────────────────────────────────────────
+
+    def _join_muji(self, room: str, video: bool) -> None:
+        if not self._client:
+            return
+        if not self._client.rtp_calls.available:
+            self._tray.show_message(APP_NAME, tr("call_unavailable"))
+            return
+        self._client.call_devices = self._call_device_config()
+        nick = self._muc_self_nicks.get(room, "")
+        logger.info("MUJI join %s (video=%s)", room, video)
+        self._client.join_muji(room, nick, video)
+
+    def _on_muji_joined(self, room: str) -> None:
+        from stanza_im.ui.call_window import MujiCallWindow
+        window = self._muji_windows.get(room)
+        if window is None:
+            window = MujiCallWindow(room, parent=self)
+            window.leave.connect(self._client.leave_muji)
+            window.show()
+            self._muji_windows[room] = window
+        self._on_muji_updated(room)
+
+    def _on_muji_updated(self, room: str) -> None:
+        window = self._muji_windows.get(room)
+        conf = self._client.muji.conferences.get(room) if self._client else None
+        if window is not None and conf is not None:
+            window.set_participants(sorted(conf.participants))
+
+    def _on_muji_left(self, room: str) -> None:
+        window = self._muji_windows.pop(room, None)
+        if window is not None:
+            window.close()
+
+    def _on_muji_invite(self, frm: str, room: str) -> None:
+        logger.info("MUJI invite from %s to %s", frm, room)
+        self._tray.show_message(APP_NAME, tr("muji_invite", room=room))
+
     def _show_profile(self, jid: str):
         """Show the contact's vCard (fetching it if not yet known)."""
         if not self._client:
@@ -1677,6 +1838,19 @@ class MainWindow(QtWidgets.QMainWindow):
             send_menu.addAction(
                 tr("ft_http_upload"),
                 lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "http")))
+            call_menu = menu.addMenu(self._menu_icon("phone.png"),
+                                     tr("call_button"))
+            can_audio = self._client.supports_calls(jid)
+            can_video = self._client.supports_calls(jid, video=True)
+            audio_action = call_menu.addAction(tr("call_audio"))
+            video_action = call_menu.addAction(tr("call_video"))
+            audio_action.setEnabled(can_audio)
+            video_action.setEnabled(can_video)
+            call_menu.setEnabled(can_audio or can_video)
+            audio_action.triggered.connect(
+                lambda checked=False: defer(lambda: self._on_call_requested(jid, False)))
+            video_action.triggered.connect(
+                lambda checked=False: defer(lambda: self._on_call_requested(jid, True)))
         menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
                        lambda checked=False: defer(lambda: self._on_history_contact(jid)))
         if not is_conf:
@@ -1715,6 +1889,17 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addAction(self._menu_icon("process-stop.png"),
                        tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
         if is_conf:
+            if self._client:
+                muji_menu = menu.addMenu(self._menu_icon("phone.png"),
+                                         tr("muji_button"))
+                muji_menu.addAction(
+                    tr("call_audio"),
+                    lambda checked=False: defer(
+                        lambda: self._join_muji(jid, False)))
+                muji_menu.addAction(
+                    tr("call_video"),
+                    lambda checked=False: defer(
+                        lambda: self._join_muji(jid, True)))
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_leave_conference"),
                            lambda: defer(lambda: self._on_leave_conference(jid)))

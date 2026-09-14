@@ -13,6 +13,11 @@ dependencies = [
     "aiodns>=4",
 ]
 
+[project.optional-dependencies]
+# A/V calling (XEP-0167/0176 + DTLS-SRTP).  Pulls PyAV (FFmpeg), pylibsrtp,
+# pyopenssl and aioice.  Without it the call UI stays disabled.
+calls = ["aiortc>=1.9"]
+
 [project.scripts]
 stanza-im = "stanza_im.app:run"
 jabbim = "stanza_im.app:run"

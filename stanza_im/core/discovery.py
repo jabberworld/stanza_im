@@ -14,6 +14,7 @@ import logging
 import os
 import tempfile
 import time
+from xml.etree import ElementTree as ET
 
 from stanza_im.include.constants import CACHE_DIR
 
@@ -31,6 +32,10 @@ MAX_AGE = 24 * 60 * 60
 # Negative (nothing found) results are cached only briefly so a transient
 # failure or an offline start is retried on the next connection.
 NEGATIVE_MAX_AGE = 10 * 60
+
+# XEP-0215 External Service Discovery.
+NS_EXTDISCO2 = "urn:xmpp:extdisco:2"
+NS_EXTDISCO1 = "urn:xmpp:extdisco:1"
 
 # Query order: encrypted variants first, and TURN before STUN within each
 # encryption class (TURN can relay traffic, STUN only discovers addresses).
@@ -185,6 +190,71 @@ async def resolve_client_srv(domain: str,
     return entries
 
 
+async def discover_external_services(xmpp, domain: str,
+                                     timeout: float = 20.0) -> list[dict]:
+    """XEP-0215: query the server for STUN/TURN services (with credentials)."""
+    if not domain:
+        return []
+    for ns in (NS_EXTDISCO2, NS_EXTDISCO1):
+        try:
+            iq = xmpp.Iq()
+            iq["type"] = "get"
+            iq["to"] = domain
+            ET.SubElement(iq.xml, "{%s}services" % ns)
+            result = await iq.send(timeout=timeout)
+        except Exception as exc:
+            logger.debug("extdisco %s query failed for %s: %s", ns, domain, exc)
+            continue
+        services: list[dict] = []
+        for svc in result.xml.iter("{%s}service" % ns):
+            service_type = (svc.get("type") or "").lower()
+            if service_type not in ("stun", "turn"):
+                continue
+            host = svc.get("host") or ""
+            if not host:
+                continue
+            entry = {
+                "type": service_type,
+                "host": host,
+                "port": int(svc.get("port") or 0),
+                "transport": (svc.get("transport") or "udp").lower(),
+                "username": svc.get("username") or "",
+                "password": svc.get("password") or "",
+                "expires": svc.get("expires") or "",
+                "restricted": (svc.get("restricted") or "").lower() == "true",
+            }
+            services.append(entry)
+        logger.info("extdisco (%s) for %s: %d service(s)", ns, domain,
+                    len(services))
+        for entry in services:
+            logger.debug("  extdisco service: %s", entry)
+        return services
+    return []
+
+
+def ice_servers_from_services(services: list[dict]) -> list[dict]:
+    """Normalize STUN/TURN service dicts into ``aiortc`` ICE server dicts."""
+    servers: list[dict] = []
+    for entry in services or []:
+        host = entry.get("host") or ""
+        if not host:
+            continue
+        stype = (entry.get("type") or "stun").lower()
+        transport = (entry.get("transport") or "udp").lower()
+        url = "%s:%s:%s" % (stype, host, int(entry.get("port") or 0))
+        if stype == "stun":
+            if transport == "tcp":
+                url += "?transport=tcp"
+        else:  # turn
+            url += "?transport=%s" % transport
+        server: dict = {"urls": url}
+        if stype == "turn" and entry.get("username"):
+            server["username"] = entry["username"]
+            server["credential"] = entry.get("password") or ""
+        servers.append(server)
+    return servers
+
+
 async def discover_stun_turn(domain: str,
                              loop: asyncio.AbstractEventLoop | None = None
                              ) -> list[dict]:
@@ -249,6 +319,9 @@ async def refresh(xmpp, domain: str, cache: DiscoveryCache,
 
     result["file_proxy"] = await _section(
         "file_proxy", lambda: discover_file_proxy(xmpp))
+
+    result["ice_services"] = await _section(
+        "ice_services", lambda: discover_external_services(xmpp, domain))
 
     try:
         loop = asyncio.get_running_loop()

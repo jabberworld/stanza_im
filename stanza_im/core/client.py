@@ -25,7 +25,10 @@ from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as 
 from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.include.constants import APP_NAME, VERSION
 from stanza_im.xmpp import jingle as jingle_mod
+from stanza_im.xmpp import jingle_rtp
 from stanza_im.xmpp.jingle import JingleFileTransferManager
+from stanza_im.xmpp.jingle_rtp import JingleRtpManager
+from stanza_im.xmpp.muji import MujiManager
 from stanza_im.include import pep
 
 logger = logging.getLogger(__name__)
@@ -320,6 +323,10 @@ class JabberClient:
         self.proxy_mode = proxy_mode
         self.proxy_host = proxy_host
         self.proxy_port = int(proxy_port or 0)
+        # STUN/TURN settings (set by MainWindow from connection.*); used by
+        # ice_servers() as a fallback when XEP-0215 yields nothing.
+        self.stun_turn_mode = "auto"
+        self.stun_turn_manual = ""
         self.keepalive = bool(keepalive)
         self.stream_management = bool(stream_management)
         self.csi = bool(csi)
@@ -414,7 +421,22 @@ class JabberClient:
 
         # Jingle FT manager + incoming stanza handlers.
         self.file_transfer = JingleFileTransferManager(self)
+        # Jingle RTP calls (XEP-0167/0176, DTLS) + XEP-0353 jingle-message.
+        self.rtp_calls = JingleRtpManager(self)
+        # Multiparty Jingle (Muji, XEP-0272).
+        self.muji = MujiManager(self)
+        # Call settings populated by MainWindow from config.
+        self.call_devices: dict = {}
+        self.call_auto_accept = False
         self._register_jingle_handlers()
+
+        # Advertise our calling capabilities in disco (XEP-0115 picks these up).
+        for _feature in (
+                jingle_rtp.NS_RTP, jingle_rtp.NS_RTP_AUDIO,
+                jingle_rtp.NS_RTP_VIDEO, jingle_rtp.NS_DTLS,
+                jingle_rtp.NS_ICE, jingle_rtp.NS_JINGLE_MSG,
+                jingle_rtp.NS_MUJI, "urn:xmpp:extdisco:2"):
+            self.xmpp["xep_0030"].add_feature(_feature)
 
         if (self.proxy_mode == "socks5" and self.proxy_host
                 and self.proxy_port):
@@ -431,6 +453,8 @@ class JabberClient:
         # Extended presence (XEP-0080/0107/0108/0118): bare JID -> parsed kinds
         self.pep_data: dict[str, dict] = {}
         self._pep_fetched: set[str] = set()
+        # XEP-0115 features per full JID (for call-capability gating)
+        self.contact_features: dict[str, set] = {}
         self._muc_subjects: dict[str, list[tuple[str, str]]] = {}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
         self._mam_cursors: dict[str, str] = {}
@@ -482,9 +506,10 @@ class JabberClient:
             self.xmpp.register_handler(CoroutineCallback(
                 name, MatchXPath("%s/%s" % (jabber, path)), callback))
 
-        _handler("Jingle FT",
-                 "{%s}jingle" % jingle_mod.NS_JINGLE,
-                 manager.handle_jingle_iq)
+        # One router for all Jingle IQs: it acks once and dispatches to the
+        # file-transfer or the RTP (call) manager.
+        _handler("Jingle", "{%s}jingle" % jingle_mod.NS_JINGLE,
+                 self._dispatch_jingle_iq)
         _handler("IBB Open",
                  "{%s}open" % jingle_mod.NS_IBB_OLD,
                  manager.handle_ibb_open)
@@ -494,6 +519,24 @@ class JabberClient:
         _handler("IBB Data",
                  "{%s}data" % jingle_mod.NS_IBB_OLD,
                  manager.handle_ibb_data)
+
+    async def _dispatch_jingle_iq(self, iq) -> None:
+        """Ack a Jingle IQ once and route it to FT or RTP."""
+        jingle = iq.xml.find("{%s}jingle" % jingle_mod.NS_JINGLE)
+        if jingle is None:
+            return
+        action = (jingle.get("action") or "").strip()
+        sid = jingle.get("sid", "")
+        is_rtp = jingle_rtp.is_rtp_jingle(jingle) or sid in self.rtp_calls.sessions
+        logger.debug("JINGLE action=%s sid=%s rtp=%s", action, sid, is_rtp)
+        try:
+            self.xmpp.send(iq.reply())
+        except Exception:
+            logger.debug("Could not ack Jingle IQ", exc_info=True)
+        if is_rtp:
+            self._start_task(self.rtp_calls.dispatch(action, jingle, iq))
+        else:
+            self._start_task(self.file_transfer._dispatch(action, jingle, iq))
 
     def _start_task(self, coro) -> None:
         """Schedule *coro* on the current event loop (best-effort)."""
@@ -627,13 +670,51 @@ class JabberClient:
         except Exception:
             logger.exception("Service discovery failed")
             if self._discovered is None:
-                self._discovered = {"file_proxy": None, "stun_turn": []}
+                self._discovered = {"file_proxy": None, "stun_turn": [],
+                                    "ice_services": []}
         self.emit("services_discovered", self._discovered)
         return self._discovered
 
     async def refresh_services(self) -> dict:
         """Force a fresh discovery run (used by the preferences button)."""
         return await self.discover_transfer_services(force=True)
+
+    def ice_servers(self) -> list[dict]:
+        """Effective STUN/TURN list for Jingle ICE (aiortc RTCIceServer dicts).
+
+        Priority: XEP-0215 credentials from the server, then the manually
+        configured endpoint, then the SRV-derived auto endpoint.  The address
+        comes from the connection settings' STUN/TURN section, as requested.
+        """
+        from stanza_im.core.discovery import (
+            ice_servers_from_services, effective_endpoint)
+        data = self._discovered or {}
+        services = list(data.get("ice_services") or [])
+        if services:
+            servers = ice_servers_from_services(services)
+            if servers:
+                logger.info("CALL ICE servers from XEP-0215: %s",
+                            [s.get("urls") for s in servers])
+                return servers
+        # Fallback: manual / auto settings (host:port), STUN only.
+        mode = getattr(self, "stun_turn_mode", "auto")
+        manual = getattr(self, "stun_turn_manual", "")
+        auto = None
+        for entry in (data.get("stun_turn") or []):
+            if isinstance(entry, dict) and entry.get("host"):
+                auto = {"host": entry.get("host"), "port": entry.get("port")}
+                break
+        endpoint = effective_endpoint(mode, manual, auto)
+        if endpoint:
+            host, _, port = endpoint.rpartition(":")
+            try:
+                port = int(port)
+            except ValueError:
+                port = 3478
+            logger.info("CALL ICE server from settings: %s:%s", host, port)
+            return [{"urls": "stun:%s:%s" % (host, port)}]
+        logger.warning("CALL no STUN/TURN configured (direct/ICE host only)")
+        return []
 
     def _install_socks_proxy(self, proxy_host: str, proxy_port: int) -> None:
         """Route the XMPP TCP connection through a SOCKS5 proxy.
@@ -2200,6 +2281,12 @@ class JabberClient:
         return None
 
     def _on_message(self, msg) -> None:
+        # XEP-0482 call invites (Muji conference invitations).
+        if self.muji.handle_invite_message(msg):
+            return
+        # XEP-0353 Jingle Message Initiation (ring / proceed / reject / …).
+        if self.rtp_calls.handle_message(msg):
+            return
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
@@ -2388,6 +2475,8 @@ class JabberClient:
             if resource and frm not in self._version_probed:
                 self._version_probed.add(frm)
                 self._start_task(self._prefetch_version(frm))
+            if resource:
+                self._start_task(self._load_caps(frm))
 
         # Aggregate presence across all resources of the same contact.
         best_show = "offline"
@@ -2423,6 +2512,74 @@ class JabberClient:
         if resource and resource in contact.resources:
             contact.resources[resource]["client"] = software
 
+    # ── Capabilities (XEP-0115) for call gating ───────────────────
+
+    async def _load_caps(self, full_jid: str) -> None:
+        """Fetch and cache the entity-capabilities features for a resource."""
+        try:
+            caps = await self.xmpp.plugin["xep_0115"].get_caps(full_jid)
+        except Exception as exc:
+            logger.debug("caps lookup failed for %s: %s", full_jid, exc)
+            return
+        features: set[str] = set()
+        if caps is not None:
+            try:
+                features = set(caps.get_features())
+            except AttributeError:
+                features = set(caps.get("features") or [])
+        if not features:
+            return
+        self.contact_features[full_jid] = features
+        bare = full_jid.split("/")[0]
+        logger.debug("CAPS %s: %d features", full_jid, len(features))
+        self.emit("contact_caps", bare)
+
+    def supports_feature(self, bare: str, feature: str,
+                         full_jid: str = "") -> bool:
+        """True when any resource of *bare* advertises *feature* (XEP-0115)."""
+        if full_jid and feature in self.contact_features.get(full_jid, set()):
+            return True
+        for jid, features in self.contact_features.items():
+            if jid.split("/")[0] == bare and feature in features:
+                return True
+        return False
+
+    CALL_FEATURES = ("urn:xmpp:jingle:1", "urn:xmpp:jingle:transports:ice-udp:1",
+                     "urn:xmpp:jingle:apps:rtp:1",
+                     "urn:xmpp:jingle:apps:dtls:0",
+                     "urn:xmpp:jingle:apps:rtp:audio")
+
+    def supports_calls(self, bare: str, video: bool = False) -> bool:
+        """Conversations-compatible check: does *bare* support A/V calls?"""
+        required = list(self.CALL_FEATURES)
+        if video:
+            required.append("urn:xmpp:jingle:apps:rtp:video")
+        for jid, features in self.contact_features.items():
+            if jid.split("/")[0] != bare:
+                continue
+            if all(feature in features for feature in required):
+                return True
+        return False
+
+    # ── Jingle RTP call API ───────────────────────────────────────
+
+    def start_call(self, jid: str, video: bool = False) -> None:
+        self._start_task(self.rtp_calls.start_call(jid, video))
+
+    def answer_call(self, sid: str, accept: bool, video: bool = False) -> None:
+        self._start_task(self.rtp_calls.answer_call(sid, accept, video))
+
+    def end_call(self, sid: str) -> None:
+        self._start_task(self.rtp_calls.end_call(sid))
+
+    # ── Muji conference API (XEP-0272) ────────────────────────────
+
+    def join_muji(self, room: str, nick: str, video: bool = False) -> None:
+        self.muji.join(room, nick, video)
+
+    def leave_muji(self, room: str) -> None:
+        self.muji.leave(room)
+
     def _on_roster_update(self, iq) -> None:
         """A roster push or full roster response arrived.  slixmpp's internal
         handler has already updated ``client_roster`` by the time we run."""
@@ -2453,6 +2610,11 @@ class JabberClient:
         if ptype == "error":
             self.emit("groupchat_presence_error", room, str(room), ptype, "")
             return
+        # Muji conference coordination (XEP-0272) piggybacks on MUC presence.
+        try:
+            self.muji.handle_presence(pres)
+        except Exception:
+            logger.debug("Muji presence handling failed", exc_info=True)
         if ptype == "unavailable":
             show = "unavailable"
         else:

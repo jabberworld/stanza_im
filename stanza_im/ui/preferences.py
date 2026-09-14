@@ -185,6 +185,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         sections = (
             ("prefs_application", "gtk-preferences", self._page_application),
             ("prefs_connection", "transports", self._page_connection),
+            ("prefs_devices", "camera-web", self._page_devices),
             ("prefs_chat", "muc", self._page_chat),
             ("prefs_privacy", "system-users", self._page_privacy),
             ("prefs_appearance", "gtk-preferences", self._page_appearance),
@@ -279,6 +280,24 @@ class PreferencesDialog(QtWidgets.QDialog):
             self, tr("prefs_file_download_dir"), current)
         if path:
             self._set("file_download_dir", path)
+
+    def _page_devices(self):
+        """Audio/video device selectors for calls (Qt Multimedia)."""
+        from stanza_im.xmpp import media
+        page, form = self._page()
+        devices = media.enumerate_devices()
+        for key, label_key, kind in (
+                ("devices_audio_input", "prefs_device_mic", "audio_input"),
+                ("devices_audio_output", "prefs_device_speaker", "audio_output"),
+                ("devices_video_input", "prefs_device_camera", "video_input")):
+            combo = self._combo(key, [("prefs_device_default", "")])
+            for dev_id, name in devices.get(kind, []):
+                combo.addItem(name or dev_id, dev_id)
+            form.addRow(tr(label_key), combo)
+        form.addItem(QtWidgets.QSpacerItem(
+            1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Expanding))
+        return page
 
     @staticmethod
     def _change_password_icon() -> QtGui.QIcon:
@@ -1034,6 +1053,12 @@ class PreferencesDialog(QtWidgets.QDialog):
             "file_download_notifications": bool(
                 getattr(files, "download_notifications", True)),
             "file_download_dir": getattr(files, "download_dir", "") or "",
+            "devices_audio_input": getattr(
+                getattr(cfg, "devices", None), "audio_input", "") or "",
+            "devices_audio_output": getattr(
+                getattr(cfg, "devices", None), "audio_output", "") or "",
+            "devices_video_input": getattr(
+                getattr(cfg, "devices", None), "video_input", "") or "",
         }
         for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
             values[key] = getattr(notifications, key)
@@ -1120,6 +1145,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.files.download_notifications = self._value(
             "file_download_notifications")
         cfg.files.download_dir = self._value("file_download_dir")
+        if not hasattr(cfg, "devices"):
+            cfg.set("devices", {"audio_input": "", "audio_output": "",
+                                "video_input": ""})
+        for key in ("audio_input", "audio_output", "video_input"):
+            cfg.devices[key] = self._value("devices_" + key) or ""
         cfg.save()
         self.settings_applied.emit()
 

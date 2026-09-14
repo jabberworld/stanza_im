@@ -104,6 +104,8 @@ class Config:
                      "send_activity_notifications": True, "send_chatstates": True},
         "files": {"auto_accept": False, "download_notifications": True,
                   "download_dir": ""},
+        "devices": {"audio_input": "", "audio_output": "", "video_input": ""},
+        "calls": {"auto_accept": False},
         "appearance": {"chat_theme": "", "muc_theme": "",
                         "emoticon_theme": "default/smileys.cfg",
                         "media_preview_size": 200,
