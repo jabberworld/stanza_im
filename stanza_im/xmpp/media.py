@@ -14,6 +14,7 @@ Everything is import-guarded: without ``aiortc`` (or Qt Multimedia) the
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import math
 from fractions import Fraction
@@ -570,6 +571,13 @@ def decode_ffmpeg_error(exc) -> str:
     return str(exc)
 
 
+class _PassthroughResampler:
+    """Stand-in for ``av.AudioResampler`` yielding already-matching frames."""
+
+    def resample(self, frame):
+        return [frame]
+
+
 def _frame_matches_resampler(frame, resampler) -> bool:
     fmt = getattr(getattr(resampler, "format", None), "name", None)
     layout = getattr(getattr(resampler, "layout", None), "name", None)
@@ -591,36 +599,56 @@ def _frame_matches_resampler(frame, resampler) -> bool:
     return True
 
 
-def _install_audio_resampler_compat() -> None:
-    """Make audio resampling resilient on older PyAV/FFmpeg builds.
+def _patch_audio_encoder(encoder_cls) -> None:
+    """Make an aiortc audio encoder survive its own resampler.
 
-    aiortc's audio encoders always push each frame through an
-    ``av.AudioResampler``.  When the captured frame already matches the encoder
-    format (s16/stereo/48 kHz, 20 ms) that resample is a no-op — but some PyAV
-    builds raise ``EINVAL`` from the FFmpeg filter graph, and a non-UTF-8 locale
-    turns it into an opaque ``UnicodeDecodeError`` that kills the RTP sender.
-    Bypass the resampler for already-matching frames and swallow a failing
-    resample (logging the *real* error) instead of dying.
+    aiortc's encoders push each frame through an ``av.AudioResampler``.  When
+    the frame already matches the encoder format (s16/stereo/48 kHz, 20 ms)
+    that resample is a no-op — but some PyAV builds raise ``EINVAL`` from the
+    FFmpeg filter graph, and a non-UTF-8 locale turns it into an opaque
+    ``UnicodeDecodeError`` that kills the RTP sender.  Encoder instances are
+    ordinary Python objects (unlike the immutable PyAV ``AudioResampler``), so
+    temporarily installing a passthrough resampler is safe; any remaining
+    resample failure is logged (with the real FFmpeg error) and swallowed.
     """
-    if av is None:
+    if encoder_cls is None or getattr(encoder_cls, "_stanza_patched", False):
         return
-    resampler_cls = getattr(av, "AudioResampler", None)
-    if resampler_cls is None or getattr(resampler_cls, "_stanza_patched", False):
-        return
-    original_resample = resampler_cls.resample
+    original_encode = encoder_cls.encode
 
-    def resample(self, frame):
-        if _frame_matches_resampler(frame, self):
-            return [frame]
+    def encode(self, frame, force_keyframe=False):
+        resampler = getattr(self, "resampler", None)
+        if resampler is not None and _frame_matches_resampler(frame, resampler):
+            self.resampler = _PassthroughResampler()
+            try:
+                return original_encode(self, frame, force_keyframe)
+            finally:
+                self.resampler = resampler
         try:
-            return original_resample(self, frame)
+            return original_encode(self, frame, force_keyframe)
         except Exception as exc:
-            logger.warning("CALL audio resample failed: %s",
+            logger.warning("CALL audio encode failed: %s",
                            decode_ffmpeg_error(exc))
-            return []
+            return [], None
 
-    resampler_cls.resample = resample
-    resampler_cls._stanza_patched = True
+    encoder_cls.encode = encode
+    encoder_cls._stanza_patched = True
+
+
+def _install_audio_resampler_compat() -> None:
+    """Patch aiortc's audio encoders (never the immutable PyAV classes)."""
+    if not HAS_AIORTC:
+        return
+    for module_name, class_names in (
+            ("aiortc.codecs.opus", ("OpusEncoder",)),
+            ("aiortc.codecs.g711", ("PcmEncoder",)),
+            ("aiortc.codecs.g722", ("G722Encoder",))):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            logger.debug("CALL could not patch %s", module_name, exc_info=True)
+            continue
+        for class_name in class_names:
+            _patch_audio_encoder(getattr(module, class_name, None))
 
 
 _install_audio_resampler_compat()

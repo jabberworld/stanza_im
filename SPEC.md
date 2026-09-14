@@ -1050,8 +1050,9 @@ client.leave_muji(room)
   the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
   speaker/camera self-tests (`ui/device_test.py`, disabled during a call).
   Capture/playback pick a device-supported format and feed aiortc s16/stereo/
-  48 kHz 20 ms frames; matching frames bypass aiortc's audio resampler (PyAV/
-  FFmpeg compatibility shim). If the *controlled* ICE agent stalls (a peer that
+  48 kHz 20 ms frames; matching frames bypass aiortc's audio resampler (the
+  compatibility shim patches the aiortc encoder classes, never the immutable
+  PyAV `AudioResampler`, to survive an FFmpeg `EINVAL`). If the *controlled* ICE agent stalls (a peer that
   never sends `USE-CANDIDATE`, e.g. Conversations), `_nomination_fallback`
   switches aioice to controlling and nominates; `AiortcCall.close()` cancels the
   pending aioice checks to stop STUN retry tracebacks.

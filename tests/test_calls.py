@@ -290,16 +290,44 @@ if not _enc_ok:
 if media_mod.HAS_AIORTC:
     from fractions import Fraction
     from aiortc.codecs.opus import OpusEncoder as _OpusEncoder
+    from aiortc.codecs.g711 import PcmEncoder as _PcmEncoder
+    from aiortc.codecs.g722 import G722Encoder as _G722Encoder
     _enc = _OpusEncoder()
     _f = media_mod._silence(media_mod.AUDIO_SAMPLES_PER_FRAME, 2)
     _f.pts = 0
     _f.time_base = Fraction(1, media_mod.AUDIO_RATE)
-    check("matching audio frame bypasses the resampler",
+    check("matching audio frame matches the encoder resampler",
           media_mod._frame_matches_resampler(_f, _enc.resampler))
     check("decode_ffmpeg_error unwraps UnicodeDecodeError",
           media_mod.decode_ffmpeg_error(
               UnicodeDecodeError("ascii", b"\xd0\x9d", 0, 1, "bad")
           ).startswith("\u041d"))
+    check("PyAV AudioResampler is left untouched",
+          not getattr(media_mod.av.AudioResampler, "_stanza_patched", False))
+    check("aiortc audio encoders patched",
+          _OpusEncoder._stanza_patched and _PcmEncoder._stanza_patched
+          and _G722Encoder._stanza_patched)
+    check("passthrough resampler yields the frame",
+          media_mod._PassthroughResampler().resample(_f) == [_f])
+
+    class _SpyResampler:
+        def __init__(self, target):
+            self._target = target
+            self.calls = 0
+
+        def __getattr__(self, name):
+            if name in ("format", "layout", "rate", "frame_size"):
+                return getattr(self._target, name)
+            raise AttributeError(name)
+
+        def resample(self, frame):
+            self.calls += 1
+            return [frame]
+
+    _spy = _SpyResampler(_enc.resampler)
+    _enc.resampler = _spy
+    _enc.encode(_f)
+    check("matching frame skips the encoder resampler", _spy.calls == 0)
 
 # ── 3b. camera failure degrades gracefully (no traceback) -----------------
 from stanza_im.xmpp import media as media_mod

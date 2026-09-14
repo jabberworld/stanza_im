@@ -482,9 +482,10 @@ microphone peak meter, a speaker test tone and a camera preview window,
 disabled while a call owns the devices. Capture/playback negotiate a
 device-supported format (`isFormatSupported` → `preferredFormat`) and convert
 to the encoder's s16/stereo/48 kHz 20 ms frames; frames that already match
-bypass aiortc's `av.AudioResampler` (a compatibility shim in `media.py` avoids
-an FFmpeg `EINVAL` whose non-ASCII message some PyAV builds turn into a fatal
-`UnicodeDecodeError`, killing the RTP sender). For the *controlled* ICE role,
+bypass aiortc's `av.AudioResampler` (a compatibility shim wraps the aiortc
+encoder classes — never the immutable PyAV type — to avoid an FFmpeg `EINVAL`
+whose non-ASCII message some PyAV builds turn into a fatal `UnicodeDecodeError`,
+killing the RTP sender). For the *controlled* ICE role,
 `JingleRtpManager._nomination_fallback` switches aioice to controlling and
 nominates if a peer (Conversations) never sends `USE-CANDIDATE`, and
 `AiortcCall.close()` cancels the aioice checks so their STUN retry timers stop
