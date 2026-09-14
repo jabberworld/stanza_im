@@ -869,13 +869,16 @@ if HAS_AIORTC:
             return getattr(self.pc, "iceConnectionState", "")
 
         def force_ice_controlling(self) -> bool:
-            """Ask aioice to nominate (fallback when a peer never does).
+            """Nominate ourselves (fallback when a controlled peer never does).
 
-            Some libwebrtc peers (Conversations) leave the controlled role
-            without ever sending ``USE-CANDIDATE``; switching to controlling
-            makes aioice perform regular nomination, while a compliant
-            controlling peer resolves the resulting role conflict via the RFC
-            5245 tie-breaker.
+            aioice performs regular nomination only inside a fresh
+            connectivity check, so a bare role flip is a no-op on an already
+            checked list and only clashes with a late peer nomination into a
+            487 role-conflict deadlock.  We therefore switch to controlling
+            *and* re-run the best succeeded, not-yet-nominated pair's check:
+            that check is sent with ``USE-CANDIDATE`` and, on success,
+            completes ICE.  A compliant controlling peer resolves the role
+            conflict via the RFC 5245 tie-breaker.
             """
             switched = False
             for ice in self._ice_transports():
@@ -886,9 +889,25 @@ if HAS_AIORTC:
                     if not connection.ice_controlling:
                         connection.switch_role(True)
                         switched = True
+                    self._nominate_best_pair(connection)
                 except Exception:
                     logger.debug("CALL ICE role switch failed", exc_info=True)
             return switched
+
+        @staticmethod
+        def _nominate_best_pair(connection) -> None:
+            """Send USE-CANDIDATE for the best succeeded, non-nominated pair."""
+            nominating = set(connection._nominating)
+            nominated = dict(connection._nominated)
+            for pair in connection._check_list:
+                if pair.component in nominating or pair.component in nominated:
+                    continue
+                if pair.state != getattr(pair.State, "SUCCEEDED"):
+                    continue
+                if pair.task is not None and not pair.task.done():
+                    continue
+                pair.task = asyncio.create_task(connection.check_start(pair))
+                return
 
         def _cancel_ice_checks(self) -> None:
             """Cancel pending aioice checks so their STUN retry timers stop.

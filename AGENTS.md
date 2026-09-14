@@ -493,8 +493,13 @@ bypass aiortc's `av.AudioResampler` (a compatibility shim wraps the aiortc
 encoder classes — never the immutable PyAV type — to avoid an FFmpeg `EINVAL`
 whose non-ASCII message some PyAV builds turn into a fatal `UnicodeDecodeError`,
 killing the RTP sender). For the *controlled* ICE role,
-`JingleRtpManager._nomination_fallback` switches aioice to controlling and
-nominates if a peer (Conversations) never sends `USE-CANDIDATE`, and
+`JingleRtpManager._nomination_fallback` waits 12 s for the peer's own
+`USE-CANDIDATE` nomination (Conversations sends it ~5 s after accepting, via a
+TURN relay when a shared-NAT srflx hairpin fails) and only then switches aioice
+to controlling, additionally re-running the best succeeded pair's check via
+`AiortcCall._nominate_best_pair` so a real `USE-CANDIDATE` is sent — a bare role
+flip would answer a late peer nomination with a 487 role conflict and deadlock
+ICE; and
 `AiortcCall.close()` cancels the aioice checks so their STUN retry timers stop
 spamming tracebacks after a hang-up. Muji (XEP-0272) coordinates conference calls inside a MUC: the
 `<muji>` contents map is advertised in MUC presence (`MujiManager.handle_presence`),

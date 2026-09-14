@@ -622,6 +622,70 @@ check("connected ICE is left alone",
       asyncio.run(_run_fallback(states=["connected"])).forced == 0)
 check("controlling role is left alone",
       asyncio.run(_run_fallback(role="controlling")).forced == 0)
+check("fallback default delay leaves room for peer nomination",
+      jr.JingleRtpManager._nomination_fallback.__defaults__ is not None
+      and jr.JingleRtpManager._nomination_fallback.__defaults__[0] >= 10.0)
+
+# ── 10b. forced nomination really re-runs the best succeeded pair ----------
+_PairState = type("State", (), {"SUCCEEDED": "succeeded"})
+
+
+class _FakePair:
+    State = _PairState
+
+    def __init__(self, component, state, inflight=False):
+        self.component = component
+        self.state = state
+        self.inflight = inflight
+        self.task = None
+        self.started = False
+
+
+class _FakeConnection:
+    def __init__(self, pairs, nominating=(), nominated=()):
+        self._check_list = list(pairs)
+        self._nominating = set(nominating)
+        self._nominated = dict(nominated)
+
+    async def check_start(self, pair):
+        pair.started = True
+
+
+async def _run_nominate(pairs, nominating=(), nominated=()):
+    conn = _FakeConnection(pairs, nominating, nominated)
+    for p in pairs:
+        if p.inflight:
+            p.task = asyncio.ensure_future(asyncio.sleep(10))
+    if media_mod.HAS_AIORTC:
+        media_mod.AiortcCall._nominate_best_pair(conn)
+    for p in pairs:
+        if p.task is None or p.task.done():
+            continue
+        if p.inflight:
+            p.task.cancel()
+            try:
+                await p.task
+            except asyncio.CancelledError:
+                pass
+        else:
+            await p.task
+    return [(p.state, p.started) for p in pairs]
+
+
+check("forced nomination starts the best succeeded pair",
+      asyncio.run(_run_nominate(
+          [_FakePair(1, "succeeded")])) == [("succeeded", True)])
+check("already nominating components are skipped",
+      asyncio.run(_run_nominate(
+          [_FakePair(1, "succeeded")], nominating=(1,))) == [("succeeded", False)])
+check("in-flight pair tasks are skipped",
+      asyncio.run(_run_nominate(
+          [_FakePair(1, "succeeded", inflight=True),
+           _FakePair(1, "succeeded")])) == [("succeeded", False),
+                                            ("succeeded", True)])
+check("unchecked pairs are not nominated",
+      asyncio.run(_run_nominate(
+          [_FakePair(1, "frozen")])) == [("frozen", False)])
 
 # ── 11. config defaults ---------------------------------------------------
 cfg = Config()

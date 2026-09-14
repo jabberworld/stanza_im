@@ -912,13 +912,20 @@ class JingleRtpManager:
         self.client._start_task(self._nomination_fallback(session))
 
     async def _nomination_fallback(self, session: CallSession,
-                                   delay: float = 3.0) -> None:
-        """Nominate ourselves when a controlled peer never does.
+                                   delay: float = 12.0) -> None:
+        """Nominate ourselves when a controlled peer never nominates.
 
-        Conversations/libwebrtc can leave us in the *controlled* ICE role
-        without ever sending ``USE-CANDIDATE``; the check list then succeeds
-        but ``iceConnectionState`` stays ``checking``.  After *delay* seconds
-        still checking we switch aioice to controlling and nominate.
+        In the *controlled* ICE role the peer is expected to send
+        ``USE-CANDIDATE``.  Conversations does, but only ~5 s after the
+        answer (it relies on a TURN relay when a shared-NAT srflx hairpin
+        fails).  Flipping to controlling before that makes us answer the
+        peer's nomination with a 487 role conflict, and since a bare role
+        flip never starts a fresh connectivity check, aioice nominates
+        nothing: both ends wait on each other and ICE stays ``checking``.
+        So after *delay* seconds (well past any compliant peer deadline)
+        still checking we switch aioice to controlling and actually
+        re-run the best succeeded pair's check so ``USE-CANDIDATE`` is
+        sent and ICE can complete.
         """
         call = session.call
         if call is None or call.ice_role() != "controlled":

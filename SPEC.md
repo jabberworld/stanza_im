@@ -1063,9 +1063,14 @@ client.leave_muji(room)
   Capture/playback pick a device-supported format and feed aiortc s16/stereo/
   48 kHz 20 ms frames; matching frames bypass aiortc's audio resampler (the
   compatibility shim patches the aiortc encoder classes, never the immutable
-  PyAV `AudioResampler`, to survive an FFmpeg `EINVAL`). If the *controlled* ICE agent stalls (a peer that
-  never sends `USE-CANDIDATE`, e.g. Conversations), `_nomination_fallback`
-  switches aioice to controlling and nominates; `AiortcCall.close()` cancels the
+  PyAV `AudioResampler`, to survive an FFmpeg `EINVAL`). If the *controlled* ICE
+  agent stalls, `_nomination_fallback` waits 12 s for the peer's own
+  `USE-CANDIDATE` (Conversations nominates ~5 s after accepting, via a TURN
+  relay when a shared-NAT srflx hairpin fails) and only then switches aioice to
+  controlling, re-running the best succeeded pair's check so a real
+  `USE-CANDIDATE` is sent — a bare role flip would answer the peer's late
+  nomination with a 487 role conflict and deadlock ICE;
+  `AiortcCall.close()` cancels the
   pending aioice checks to stop STUN retry tracebacks.
 - Muji (`xmpp/muji.py`, `client.muji`): participants advertise a `<muji>`
   contents map in MUC presence; the joiner opens a Jingle session with every
