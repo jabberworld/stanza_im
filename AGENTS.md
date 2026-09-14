@@ -167,6 +167,17 @@ flat lists and sorted dicts. Hit-testing iterates items by accumulated Y offset.
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.
 
+**Mood/activity icons**: a roster row can carry the contact's PEP mood (XEP-0107)
+and activity (XEP-0108) icons, drawn at 16px between the name and the unread
+badge/avatar from the same icon set as the bottom-bar mood/activity picker
+(`pep.mood_icon_path`/`pep.activity_icon_path`). `UserItem.mood`/`activity` are
+seeded by `MainWindow._add_roster_item` from `client.pep_data` and kept live by
+`MainWindow._on_contact_pep_updated`. Each element (avatar/activity/mood) is
+togglable from Preferences → Appearance → «Ростер» via
+`appearance.roster_show_avatars`/`roster_show_activity`/`roster_show_mood`
+(default all `true`): `MainWindow._apply_roster_options` → `RosterStyle.set_options`
+gates rendering live, no relayout.
+
 ### 4. Chat Rendering via QWebEngineView (`chat_view.py`)
 
 Messages are rendered as HTML/CSS using Adium-compatible chat skins from
@@ -518,8 +529,11 @@ the participants. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[�
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled.
 
-Preferences use icon navigation and nested tabs. `Apply` applies settings
-without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
+Preferences use icon navigation and nested tabs. The Appearance page is split
+into «Темы», «Ростер», «Шрифты», «Цвет» and «Разное» («Ростер» toggles the
+roster avatars/activity/mood, see §3; «Разное» holds the media-preview size,
+the preview cache TTL/limit and the MUC mention highlight mode). `Apply` applies
+settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
 checkable group assignment and creation of new groups.
 

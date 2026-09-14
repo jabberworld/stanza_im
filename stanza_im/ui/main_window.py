@@ -73,6 +73,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._call_targets: dict[str, str] = {}         # sid -> peer jid
         self._muji_windows: dict[str, object] = {}      # room -> MujiCallWindow
         self._roster_style = RosterStyle()
+        self._apply_roster_options()
 
         from stanza_im.ui.tray import build_app_icon
         app.setWindowIcon(build_app_icon())
@@ -989,6 +990,18 @@ class MainWindow(QtWidgets.QMainWindow):
             roster.setFont(font)
         roster.update()
 
+    def _apply_roster_options(self) -> None:
+        """Apply the roster element toggles (avatars / activity / mood)."""
+        opts = (
+            bool(getattr(self._config.appearance, "roster_show_avatars", True)),
+            bool(getattr(self._config.appearance, "roster_show_activity", True)),
+            bool(getattr(self._config.appearance, "roster_show_mood", True)))
+        self._roster_style.set_options(*opts)
+        self._applied_roster_options = opts
+        roster = getattr(self, "_roster", None)
+        if roster is not None:
+            roster.update()
+
     def _apply_roster_colors(self) -> None:
         """Apply the configured roster background and group-stripe colors."""
         bg = getattr(self._config.appearance, "roster_bg_color", "") or ""
@@ -1013,6 +1026,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.call_auto_accept = bool(getattr(
                 getattr(self._config, "calls", None), "auto_accept", False))
         self._apply_roster_font()
+        roster_opts = (
+            bool(getattr(self._config.appearance, "roster_show_avatars", True)),
+            bool(getattr(self._config.appearance, "roster_show_activity", True)),
+            bool(getattr(self._config.appearance, "roster_show_mood", True)))
+        if roster_opts != getattr(self, "_applied_roster_options", None):
+            self._apply_roster_options()
         roster_colors = (
             getattr(self._config.appearance, "roster_bg_color", "") or "",
             getattr(self._config.appearance, "roster_group_bg_color", "") or "")
@@ -1381,6 +1400,9 @@ class MainWindow(QtWidgets.QMainWindow):
         contact = self._client.get_contact(jid) if self._client else None
         show = contact.show if contact else "offline"
         status = contact.status if contact else ""
+        pep_entry = self._client.pep_data.get(jid, {}) if self._client else {}
+        mood_data = pep_entry.get("mood") or {}
+        activity_data = pep_entry.get("activity") or {}
         self._remember_contact(jid, name=name, groups=groups,
                                is_conference=False)
         for group in groups:
@@ -1391,6 +1413,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 status=show,
                 status_message=status,
                 icon_key=show_to_icon_key(show),
+                mood=mood_data.get("key") or "",
+                activity=((activity_data.get("sub")
+                           or activity_data.get("group")) or ""),
             )
             self._roster.add_user(user)
         self._request_vcard(jid)
@@ -1502,7 +1527,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         bare = str(jid).split("/", 1)[0]
-        summary = pep.format_summary(self._client.pep_data.get(bare, {}))
+        entry = self._client.pep_data.get(bare, {})
+        if kind in ("mood", "activity"):
+            mood_data = entry.get("mood") or {}
+            activity_data = entry.get("activity") or {}
+            mood = mood_data.get("key") or ""
+            activity = ((activity_data.get("sub")
+                         or activity_data.get("group")) or "")
+            self._roster.update_user(bare, mood=mood, activity=activity)
+        summary = pep.format_summary(entry)
         value = summary.get(kind)
         if not value:
             return

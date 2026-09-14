@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.include import pep
 from stanza_im.ui import icons as icons_mod
 
 
@@ -65,13 +66,27 @@ class RosterStyle:
     ICON_SIZE = 16
     STATUS_ICON_DRAW = 24        # rendered status icon size (source 32x32)
     AVATAR_SIZE = 24
+    MOOD_ACTIVITY_SIZE = 16
     MARGIN_LEFT = 6
     STATUS_MSG_MAX_WIDTH = 180
 
-    def __init__(self, bg_color: str = "", group_bg_color: str = ""):
+    def __init__(self, bg_color: str = "", group_bg_color: str = "",
+                 show_avatars: bool = True, show_activity: bool = True,
+                 show_mood: bool = True):
         self._bg_color: QtGui.QColor | None = None
         self._group_bg_color: QtGui.QColor | None = None
+        self._show_avatars = bool(show_avatars)
+        self._show_activity = bool(show_activity)
+        self._show_mood = bool(show_mood)
         self.set_colors(bg_color, group_bg_color)
+
+    def set_options(self, show_avatars: bool = True,
+                    show_activity: bool = True, show_mood: bool = True) -> None:
+        """Configure which roster elements are rendered:
+        vCard avatar, PEP activity and mood icons."""
+        self._show_avatars = bool(show_avatars)
+        self._show_activity = bool(show_activity)
+        self._show_mood = bool(show_mood)
 
     @staticmethod
     def _parse(value) -> QtGui.QColor | None:
@@ -192,7 +207,7 @@ class RosterStyle:
         # Text block (name + status message) between status icon and avatar.
         name_x = x + self.STATUS_ICON_DRAW + 8
         avail_right = rect.right() - 8
-        if item.avatar_path and icons:
+        if self._show_avatars and item.avatar_path and icons:
             ipix = icons.get(item.avatar_path)
             if not ipix.isNull():
                 scaled = ipix.scaled(self.AVATAR_SIZE, self.AVATAR_SIZE,
@@ -218,6 +233,25 @@ class RosterStyle:
             painter.drawRoundedRect(badge_rect, 7, 7)
             painter.drawText(badge_rect, QtCore.Qt.AlignmentFlag.AlignCenter, badge_text)
             avail_right -= badge_w + 6
+
+        # PEP activity/mood icons: drawn between the text and the badge/avatar
+        # (visible order: name, mood, activity, badge, avatar).
+        for enabled, value, path_getter in (
+                (self._show_activity, item.activity, pep.activity_icon_path),
+                (self._show_mood, item.mood, pep.mood_icon_path)):
+            if enabled and value and icons:
+                el_path = path_getter(value)
+                if el_path:
+                    el_pix = icons.get(el_path)
+                    if not el_pix.isNull():
+                        scaled = el_pix.scaled(
+                            self.MOOD_ACTIVITY_SIZE, self.MOOD_ACTIVITY_SIZE,
+                            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                            QtCore.Qt.TransformationMode.SmoothTransformation)
+                        ex = avail_right - self.MOOD_ACTIVITY_SIZE
+                        ey = y + (rect.height() - self.MOOD_ACTIVITY_SIZE) // 2
+                        painter.drawPixmap(ex, ey, scaled)
+                        avail_right -= self.MOOD_ACTIVITY_SIZE + 4
 
         name_rect = QtCore.QRect(name_x, y + 2, avail_right - name_x, 16)
         painter.setPen(text_color)

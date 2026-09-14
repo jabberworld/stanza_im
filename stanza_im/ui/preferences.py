@@ -882,17 +882,14 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(tr("prefs_emoticon_preview"), preview_widget)
         emoticon_theme.currentIndexChanged.connect(self._update_emoticon_preview)
         self._update_emoticon_preview()
-        form.addRow(tr("prefs_media_preview_size"),
-                    self._spin("media_preview_size", 64, 512))
-        form.addRow(tr("prefs_media_cache_days"),
-                    self._spin("media_cache_days", 1, 3650))
-        form.addRow(tr("prefs_media_cache_mb"),
-                    self._spin("media_cache_mb", 16, 4096))
-        form.addRow(tr("prefs_highlight"), self._combo("muc_highlight", [
-            ("prefs_highlight_bold", "bold"),
-            ("prefs_highlight_color", "color"),
-            ("prefs_highlight_both", "both"),
-        ]))
+
+        roster, roster_form = self._page()
+        roster_form.addRow(self._check("roster_show_avatars",
+                                       tr("prefs_roster_show_avatars")))
+        roster_form.addRow(self._check("roster_show_activity",
+                                       tr("prefs_roster_show_activity")))
+        roster_form.addRow(self._check("roster_show_mood",
+                                       tr("prefs_roster_show_mood")))
 
         fonts, font_form = self._page()
         font_form.addRow(tr("prefs_zoom"), self._zoom_control("text_scale"))
@@ -940,9 +937,24 @@ class PreferencesDialog(QtWidgets.QDialog):
         color_form.addRow(
             self._check("colored_muc_nicks", tr("prefs_color_muc_nicks")))
 
+        misc, misc_form = self._page()
+        misc_form.addRow(tr("prefs_media_preview_size"),
+                         self._spin("media_preview_size", 64, 512))
+        misc_form.addRow(tr("prefs_media_cache_days"),
+                         self._spin("media_cache_days", 1, 3650))
+        misc_form.addRow(tr("prefs_media_cache_mb"),
+                         self._spin("media_cache_mb", 16, 4096))
+        misc_form.addRow(tr("prefs_highlight"), self._combo("muc_highlight", [
+            ("prefs_highlight_bold", "bold"),
+            ("prefs_highlight_color", "color"),
+            ("prefs_highlight_both", "both"),
+        ]))
+
         return self._tabs([(tr("prefs_appearance_themes"), themes),
+                           (tr("prefs_appearance_roster"), roster),
                            (tr("prefs_appearance_fonts"), fonts),
-                           (tr("prefs_color_tab"), colors)])
+                           (tr("prefs_color_tab"), colors),
+                           (tr("prefs_appearance_misc"), misc)])
 
     def _update_emoticon_preview(self):
         while self._emoticon_preview.count():
@@ -1174,6 +1186,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             "chat_bg_color": getattr(appearance, "chat_bg_color", "#ffffff"),
             "muc_highlight_color": getattr(appearance, "muc_highlight_color", "#e53935"),
             "colored_muc_nicks": getattr(appearance, "colored_muc_nicks", True),
+            "roster_show_avatars": getattr(
+                appearance, "roster_show_avatars", True),
+            "roster_show_activity": getattr(
+                appearance, "roster_show_activity", True),
+            "roster_show_mood": getattr(appearance, "roster_show_mood", True),
             "file_auto_accept": bool(getattr(files, "auto_accept", False)),
             "file_download_notifications": bool(
                 getattr(files, "download_notifications", True)),
@@ -1260,7 +1277,9 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "osd_font", "osd_font_size", "nick_font", "nick_font_size",
                     "participant_font", "participant_font_size",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
-                    "muc_highlight_color", "colored_muc_nicks"):
+                    "muc_highlight_color", "colored_muc_nicks",
+                    "roster_show_avatars", "roster_show_activity",
+                    "roster_show_mood"):
             cfg.appearance[key] = self._value(key)
         if not hasattr(cfg, "files"):
             cfg.set("files", {"auto_accept": False,

@@ -77,7 +77,10 @@ The conference browser consumes room names and metadata directly from
 `disco#items`; it does not probe every room individually. Contact and room
 vCard dialogs are opened asynchronously without nested modal event loops.
 Appearance settings support independent ordinary-chat and conference theme
-variants. Emoticon sets are discovered from cfg files under
+variants, arranged in the «Темы», «Ростер», «Шрифты», «Цвет» and «Разное» tabs
+(«Разное» holds the media-preview size, the preview cache TTL/limit and the MUC
+mention highlight mode; «Ростер» toggles avatars/activity/mood in the roster).
+Emoticon sets are discovered from cfg files under
 `resources/emoticons`, and the settings dialog previews up to ten images from
 the selected set.
 The service browser uses XEP-0030 discovery, groups identities by category and
@@ -149,6 +152,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.chat_bg_color` | `#ffffff` | Chat background override injected as `body { background-color: … !important; background-image: none !important }` by `ChatThemeFactory.set_chat_bg_color` (clears skin tile images); applied to both 1:1 and MUC theme factories. |
 | `appearance.muc_highlight_color` | `#e53935` | MUC mention highlight color used by `ChatThemeFactory.set_highlight_color` in the XEP-0393 highlight `<span>`. |
 | `appearance.colored_muc_nicks` | `true` | Colorful MUC nicknames: per-participant colors for message senders and the participant sidebar (`NickColorAllocator`, see §9.5). |
+| `appearance.roster_show_avatars` | `true` | Show/hide vCard avatars in roster rows. Applied live via `MainWindow._apply_roster_options` → `RosterStyle.set_options`; gated in `RosterStyle.paint_user`. |
+| `appearance.roster_show_activity` | `true` | Show/hide the PEP activity icon (XEP-0108) in roster rows, drawn from the same icon set as the mood/activity picker (`pep.activity_icon_path`). |
+| `appearance.roster_show_mood` | `true` | Show/hide the PEP mood icon (XEP-0107) in roster rows (`pep.mood_icon_path`). |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
@@ -314,7 +320,17 @@ Custom `paintEvent()` draws all items. No child widgets.
 bold group name, online/total count "(3/7)" on the right.
 
 **User item**: Status icon (16×16) + avatar placeholder (24×24) + name (bold) +
-status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect).
+status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect)
++ PEP mood/activity icons (16×16 each). The icons appear between the name and the
+badge (visible order: name, mood, activity, badge, avatar) when the contact has a
+current XEP-0107 mood / XEP-0108 activity (`UserItem.mood`/`activity`, fed by
+`MainWindow._on_contact_pep_updated` and seeded in `_add_roster_item` from
+`client.pep_data`). Their artwork is the same icon set as the bottom-bar
+mood/activity picker (`pep.mood_icon_path`/`pep.activity_icon_path`).
+Each element is togglable from Preferences → Appearance → Roster
+(`appearance.roster_show_avatars` / `roster_show_activity` / `roster_show_mood`,
+all default `true`): `MainWindow._apply_roster_options` → `RosterStyle.set_options`
+gates the avatar and the two icons live without relayout.
 
 Dynamic height: 32px without status message, 52px with.
 

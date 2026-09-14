@@ -201,6 +201,20 @@ def default_icon(kind: str) -> str:
     return candidate if os.path.isfile(candidate) else ""
 
 
+def mood_icon_path(key: str) -> str:
+    """Absolute icon path for a mood ``key`` ('' when unset)."""
+    if not key or key == "none":
+        return ""
+    return mood_icons().get(key) or default_icon("mood")
+
+
+def activity_icon_path(key: str) -> str:
+    """Absolute icon path for an activity leaf ``key`` ('' when unset)."""
+    if not key:
+        return ""
+    return activity_icons().get(key) or default_icon("activity")
+
+
 def clear_cache() -> None:
     _ICON_CACHE.clear()
 

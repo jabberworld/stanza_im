@@ -202,6 +202,88 @@ sm._edit.setPlainText("new text")
 check("status dialog returns text", sm.text() == "new text")
 sm.close()
 
+# ── 7. roster mood/activity icons + appearance prefs tabs ----------------
+from PyQt6 import QtCore, QtGui
+from stanza_im.ui.roster_style import UserItem, RosterStyle
+from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.preferences import PreferencesDialog
+from stanza_im.core.storage import Config
+
+win._roster.clear()
+win._client.pep_data["bob@example.com"] = {
+    "mood": {"key": "happy", "text": ""},
+    "activity": {"group": "working", "sub": "coding"},
+}
+win._roster.add_user(UserItem(
+    jid="bob@example.com", name="Bob",
+    group=tr("roster_group_ungrouped")))
+win._on_contact_pep_updated(
+    "bob@example.com/resource", "mood",
+    {"key": "happy", "text": ""})
+check("roster mood icon set", win._roster._users[0].mood == "happy")
+check("roster activity icon set",
+      win._roster._users[0].activity == "coding")
+win._client.pep_data["bob@example.com"]["activity"] = {
+    "group": "relaxing", "sub": ""}
+win._on_contact_pep_updated(
+    "bob@example.com", "activity",
+    {"group": "relaxing", "sub": ""})
+check("roster activity group fallback",
+      win._roster._users[0].activity == "relaxing")
+win._client.pep_data["bob@example.com"]["mood"] = {
+    "key": "", "text": ""}
+win._on_contact_pep_updated(
+    "bob@example.com", "mood", {"key": "", "text": ""})
+check("roster mood icon cleared", win._roster._users[0].mood == "")
+win._roster.clear()
+
+style = RosterStyle(show_mood=True, show_activity=True)
+img = QtGui.QPixmap(200, 40)
+pt = QtGui.QPainter(img)
+u = UserItem(jid="bob@example.com", name="Bob",
+             group=tr("roster_group_ungrouped"),
+             mood="happy", activity="coding")
+style.paint_user(pt, u, QtCore.QRect(0, 0, 200, 40), False)
+pt.end()
+check("roster paint with pep icons ok", not img.isNull())
+style.set_options(show_avatars=False, show_activity=False,
+                  show_mood=False)
+check("roster options toggle off",
+      style._show_avatars is False
+      and style._show_activity is False
+      and style._show_mood is False)
+img2 = QtGui.QPixmap(200, 40)
+pt2 = QtGui.QPainter(img2)
+style.paint_user(pt2, u, QtCore.QRect(0, 0, 200, 40), False)
+pt2.end()
+check("roster paint without pep icons ok", not img2.isNull())
+
+cfg2 = Config()
+p_dlg = PreferencesDialog(cfg2, ChatThemeFactory())
+for key in ("roster_show_avatars", "roster_show_activity",
+            "roster_show_mood"):
+    check(f"prefs roster control {key}", key in p_dlg._controls)
+check("prefs roster options default on",
+      p_dlg._controls["roster_show_mood"].isChecked()
+      and p_dlg._controls["roster_show_avatars"].isChecked())
+appearance_tabs = [w for w in p_dlg.findChildren(QtWidgets.QTabWidget)
+                   if w.count() >= 3
+                   and w.tabText(0) == tr("prefs_appearance_themes")]
+check("appearance has roster tab",
+      appearance_tabs
+      and appearance_tabs[0].tabText(1) == tr("prefs_appearance_roster"))
+check("misc tab lasts", appearance_tabs
+      and appearance_tabs[0].tabText(
+          appearance_tabs[0].count() - 1) == tr("prefs_appearance_misc"))
+p_dlg._controls["roster_show_mood"].setChecked(False)
+p_dlg._controls["roster_show_avatars"].setChecked(False)
+p_dlg._apply_settings()
+check("roster prefs applied",
+      cfg2.appearance.roster_show_mood is False
+      and cfg2.appearance.roster_show_avatars is False
+      and cfg2.appearance.roster_show_activity is True)
+p_dlg.close()
+
 win.close()
 
 print("\nAll tests passed" if not FAILURES
