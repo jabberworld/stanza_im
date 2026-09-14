@@ -453,6 +453,24 @@ class JingleRtpManager:
                 best, best_show = full, show
         return best or bare
 
+    def _best_call_resource(self, bare: str) -> str:
+        """Prefer a resource whose XEP-0115 caps announce Jingle RTP."""
+        required = ("urn:xmpp:jingle:1",
+                    "urn:xmpp:jingle:transports:ice-udp:1",
+                    "urn:xmpp:jingle:apps:rtp:1")
+        from stanza_im.include.enumerators import SHOW_ORDER
+        best, best_show = "", 99
+        for full, features in (self.client.contact_features or {}).items():
+            if full.split("/")[0] != bare:
+                continue
+            if not all(f in features for f in required):
+                continue
+            info = (self.client.presences or {}).get(full, {})
+            show = SHOW_ORDER.get(info.get("show", "online"), 99)
+            if not best or show < best_show:
+                best, best_show = full, show
+        return best
+
     def _content_name(self, media_type: str) -> str:
         return "voice" if media_type == "audio" else "video"
 
@@ -465,18 +483,20 @@ class JingleRtpManager:
             return
         peer_bare = str(jid).split("/")[0]
         sid = uuid.uuid4().hex
+        use_jmi = use_message and self._peer_supports_messages(peer_bare)
         session = CallSession(
             sid=sid, peer_bare=peer_bare,
-            peer_full=self._best_full_jid(peer_bare),
+            peer_full=(self._best_full_jid(peer_bare) if use_jmi
+                       else (self._best_call_resource(peer_bare)
+                             or self._best_full_jid(peer_bare))),
             self_full=self._full_jid(), initiator=True, video=video,
             muji_room=muji_room)
         self.sessions[sid] = session
-        logger.info("CALL start to %s (sid=%s video=%s muji=%s)",
-                    session.peer_full, sid, video, muji_room)
+        logger.info("CALL start to %s (sid=%s video=%s muji=%s jmi=%s)",
+                    session.peer_full, sid, video, muji_room, use_jmi)
         self.client.emit("call_state", sid, session.peer_full, "ringing")
         try:
-            if (use_message and not muji_room
-                    and self._peer_supports_messages(peer_bare)):
+            if use_message and not muji_room and use_jmi:
                 await self._send_jingle_message("propose", session)
                 session.ringed = True
                 await self._wait_proceed(session, timeout=30)
@@ -519,15 +539,23 @@ class JingleRtpManager:
 
     async def _send_jingle_message(self, action: str, session: CallSession,
                                    extra: ET.Element | None = None) -> None:
-        await self._send_message_action(action, session.peer_bare, session.sid,
+        # propose goes to the bare JID; responses to the full JID (XEP-0353).
+        target = (session.peer_bare if action == "propose"
+                  else (session.peer_full or session.peer_bare))
+        await self._send_message_action(action, target, session.sid,
                                         session.video, extra)
 
-    async def _send_message_action(self, action: str, to_bare: str, sid: str,
+    async def _send_message_action(self, action: str, to_jid: str, sid: str,
                                    video: bool = False,
                                    extra: ET.Element | None = None) -> None:
-        """Send a XEP-0353 ``<propose|proceed|reject|retract|accept>`` message."""
+        """Send a XEP-0353 ``<propose|proceed|reject|retract|accept>`` message.
+
+        Per XEP-0353 ``propose`` goes to the bare JID while the responses
+        (``ringing``/``proceed``/``reject``/``retract``/``finish``) MUST go to
+        the full JID of the other party.
+        """
         msg = self.client.xmpp.Message()
-        msg["to"] = to_bare
+        msg["to"] = to_jid
         msg["type"] = "chat"
         el = ET.SubElement(msg.xml, _q(NS_JINGLE_MSG, action))
         el.set("id", sid)
@@ -541,9 +569,11 @@ class JingleRtpManager:
                 desc_v.set("media", "video")
         if extra is not None:
             el.append(extra)
+        # XEP-0353 §3 mandates the XEP-0334 <store/> hint on every JMI message.
+        ET.SubElement(msg.xml, "{urn:xmpp:hints}store")
         msg.send()
         logger.info("CALL sent jingle-message %s to %s (sid=%s)", action,
-                    to_bare, sid)
+                    to_jid, sid)
 
     async def _send_session_initiate(self, session: CallSession) -> None:
         call = self.engine.create_call(
@@ -802,6 +832,13 @@ class JingleRtpManager:
                 future = self._proceed_futures.pop(sid, None)
                 if future is not None and not future.done():
                     future.set_result(True)
+                # The session-initiate MUST go to the resource that accepted
+                # (XEP-0353 §3.4/§3.6), not to the pre-chosen best resource.
+                session = self.sessions.get(sid)
+                if session is not None and "/" in frm_full:
+                    session.peer_full = frm_full
+                    logger.info("CALL %s selects resource %s for session %s",
+                                action, frm_full, sid)
                 logger.info("CALL %s for outgoing call %s", action, sid)
             elif action in ("reject", "retract"):
                 self._pending_proposals.pop(sid, None)
@@ -821,17 +858,19 @@ class JingleRtpManager:
         if proposal is None:
             logger.warning("CALL no pending proposal for %s", sid)
             return
-        bare = str(proposal.get("from", "")).split("/")[0]
+        # XEP-0353: proceed/reject go to the full JID that sent the propose.
+        target = str(proposal.get("from", ""))
         if accept:
             self._proceeded.add(sid)
             self.client._start_task(self._send_message_action(
-                "proceed", bare, sid))
+                "proceed", target, sid))
             self.client._start_task(self._proceed_session_timeout(sid))
-            logger.info("CALL proceeded proposal %s (video=%s)", sid, video)
+            logger.info("CALL proceeded proposal %s (video=%s) -> %s", sid,
+                        video, target)
         else:
             self.client._start_task(self._send_message_action(
-                "reject", bare, sid))
-            logger.info("CALL rejected proposal %s", sid)
+                "reject", target, sid))
+            logger.info("CALL rejected proposal %s -> %s", sid, target)
 
     async def _proceed_session_timeout(self, sid: str) -> None:
         await asyncio.sleep(30)

@@ -447,6 +447,10 @@ converts them to/from an SDP offer/answer that `aiortc` understands
 ICE/DTLS/SRTP/RTP path. Candidates are sent in `session-initiate`/`accept` and
 trickled via `transport-info`. When the peer advertises `urn:xmpp:jingle-message:0`
 the call is announced with XEP-0353 propose/proceed before `session-initiate`.
+Per XEP-0353 the `propose` targets the peer's **bare** JID while the responses
+(`proceed`/`reject`/`retract`) and the `session-initiate` are addressed to the
+**full** JID of the resource that accepted (the `proceed` sender) — a peer with
+several resources must not receive the Jingle IQ on a non-call resource.
 Bodyless `<message>` stanzas (propose/retract and XEP-0482 invites) never reach
 the core `message` event — slixmpp registers its IM handler as
 `message/body` — so they have dedicated `MatchXPath` handlers

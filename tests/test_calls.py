@@ -253,8 +253,8 @@ check("incoming propose handled",
 proceeded = []
 
 
-async def _fake_action(action, to_bare, sid, video=False, extra=None):
-    proceeded.append((action, to_bare, sid))
+async def _fake_action(action, to_jid, sid, video=False, extra=None):
+    proceeded.append((action, to_jid, sid))
 
 
 async def _noop(_sid):
@@ -271,8 +271,8 @@ async def _answer():
 
 
 asyncio.run(_answer())
-check("proceed sent on accept",
-      proceeded == [("proceed", "bob@example.com", "sid42")])
+check("proceed sent to full JID on accept",
+      proceeded == [("proceed", "bob@example.com/phone", "sid42")])
 check("session marked proceeded",
       "sid42" in call_client.rtp_calls._proceeded)
 
@@ -308,6 +308,29 @@ descs = [(el.get("media"), el.tag)
 check("propose uses rtp ns with audio+video",
       descs == [("audio", "{%s}description" % jr.NS_RTP),
                 ("video", "{%s}description" % jr.NS_RTP)])
+check("jingle-message carries XEP-0334 store hint",
+      captured_xml[0].find("{urn:xmpp:hints}store") is not None)
+
+
+# proceed updates the outgoing session's target resource ------------------
+async def _proceed_session():
+    session = jr.CallSession(
+        sid="sidP", peer_bare="bob@example.com",
+        peer_full="bob@example.com/wrong", self_full="me@example.com/res",
+        initiator=True, content_name="voice")
+    client2 = JabberClient("me@example.com/res", "pw")
+    client2.rtp_calls.sessions["sidP"] = session
+    msg = slixmpp.Message()
+    msg["from"] = "bob@example.com/phone"
+    msg["type"] = "chat"
+    el = ET.SubElement(msg.xml, "{%s}proceed" % jr.NS_JINGLE_MSG)
+    el.set("id", "sidP")
+    client2.rtp_calls.handle_message(msg)
+    return session.peer_full
+
+
+check("proceed selects the accepting resource",
+      asyncio.run(_proceed_session()) == "bob@example.com/phone")
 
 # ── 11. config defaults ---------------------------------------------------
 cfg = Config()
