@@ -280,6 +280,27 @@ if HAS_AIORTC:
     check("aiortc offer -> opus payload has fmtp",
           _opus_p is not None and bool(_opus_p.parameters))
 
+# ── 3e. audio encode pipeline / resampler compatibility -------------------
+from stanza_im.xmpp import media as media_mod
+_enc_ok, _enc_detail = media_mod.audio_encode_selftest()
+check("audio encode self-test passes", _enc_ok)
+if not _enc_ok:
+    print("  audio encode error:", _enc_detail)
+
+if media_mod.HAS_AIORTC:
+    from fractions import Fraction
+    from aiortc.codecs.opus import OpusEncoder as _OpusEncoder
+    _enc = _OpusEncoder()
+    _f = media_mod._silence(media_mod.AUDIO_SAMPLES_PER_FRAME, 2)
+    _f.pts = 0
+    _f.time_base = Fraction(1, media_mod.AUDIO_RATE)
+    check("matching audio frame bypasses the resampler",
+          media_mod._frame_matches_resampler(_f, _enc.resampler))
+    check("decode_ffmpeg_error unwraps UnicodeDecodeError",
+          media_mod.decode_ffmpeg_error(
+              UnicodeDecodeError("ascii", b"\xd0\x9d", 0, 1, "bad")
+          ).startswith("\u041d"))
+
 # ── 3b. camera failure degrades gracefully (no traceback) -----------------
 from stanza_im.xmpp import media as media_mod
 if media_mod.HAS_AIORTC and media_mod.av is not None:

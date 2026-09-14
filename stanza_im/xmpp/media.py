@@ -557,6 +557,94 @@ def _valid_ice_servers(ice_servers):
     return valid
 
 
+def decode_ffmpeg_error(exc) -> str:
+    """Best-effort message for an FFmpeg/PyAV exception.
+
+    On non-UTF-8/locale setups PyAV decodes the libav error text as ASCII and
+    raises ``UnicodeDecodeError`` instead of the real ``FFmpegError``; the raw
+    bytes live in ``exc.object``.
+    """
+    obj = getattr(exc, "object", None)
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", "replace")
+    return str(exc)
+
+
+def _frame_matches_resampler(frame, resampler) -> bool:
+    fmt = getattr(getattr(resampler, "format", None), "name", None)
+    layout = getattr(getattr(resampler, "layout", None), "name", None)
+    rate = getattr(resampler, "rate", None)
+    frame_size = getattr(resampler, "frame_size", None)
+    if fmt is None and layout is None and rate is None:
+        return False
+    try:
+        if fmt and frame.format.name != fmt:
+            return False
+        if layout and frame.layout.name != layout:
+            return False
+        if rate and frame.sample_rate != rate:
+            return False
+        if frame_size and frame.samples != frame_size:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def _install_audio_resampler_compat() -> None:
+    """Make audio resampling resilient on older PyAV/FFmpeg builds.
+
+    aiortc's audio encoders always push each frame through an
+    ``av.AudioResampler``.  When the captured frame already matches the encoder
+    format (s16/stereo/48 kHz, 20 ms) that resample is a no-op — but some PyAV
+    builds raise ``EINVAL`` from the FFmpeg filter graph, and a non-UTF-8 locale
+    turns it into an opaque ``UnicodeDecodeError`` that kills the RTP sender.
+    Bypass the resampler for already-matching frames and swallow a failing
+    resample (logging the *real* error) instead of dying.
+    """
+    if av is None:
+        return
+    resampler_cls = getattr(av, "AudioResampler", None)
+    if resampler_cls is None or getattr(resampler_cls, "_stanza_patched", False):
+        return
+    original_resample = resampler_cls.resample
+
+    def resample(self, frame):
+        if _frame_matches_resampler(frame, self):
+            return [frame]
+        try:
+            return original_resample(self, frame)
+        except Exception as exc:
+            logger.warning("CALL audio resample failed: %s",
+                           decode_ffmpeg_error(exc))
+            return []
+
+    resampler_cls.resample = resample
+    resampler_cls._stanza_patched = True
+
+
+_install_audio_resampler_compat()
+
+
+def audio_encode_selftest() -> tuple[bool, str]:
+    """Encode one 20 ms silence frame through aiortc's Opus encoder.
+
+    Returns ``(ok, detail)``; used by the test suite and to diagnose a broken
+    local audio pipeline without placing a call.
+    """
+    if not HAS_AIORTC:
+        return False, "aiortc unavailable"
+    try:
+        from aiortc.codecs.opus import OpusEncoder
+        frame = _silence(AUDIO_SAMPLES_PER_FRAME, AUDIO_CHANNELS)
+        frame.pts = 0
+        frame.time_base = Fraction(1, AUDIO_RATE)
+        packets, _timestamp = OpusEncoder().encode(frame)
+        return True, "%d packet(s)" % len(packets)
+    except Exception as exc:
+        return False, decode_ffmpeg_error(exc)
+
+
 class MediaEngine:
     """Base media engine interface."""
 
