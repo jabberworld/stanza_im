@@ -6,7 +6,7 @@ translated to/from SDP in :mod:`stanza_im.xmpp.jingle_rtp`.
 
 Capture/playback use Qt Multimedia (``QAudioSource``/``QAudioSink``/``QCamera``)
 because the device selection in Preferences is Qt-based; decoded remote video
-frames are painted by :class:`VideoWidget` (no gstreamer dependency).
+frames are painted by ``ui/call_window.VideoView`` (no gstreamer dependency).
 
 Everything is import-guarded: without ``aiortc`` (or Qt Multimedia) the
 :class:`NullMediaEngine` is used and the UI disables calling.
@@ -78,44 +78,6 @@ def _find_device(devices, device_id):
         if bytes(dev.id()).decode("utf-8", "replace") == device_id:
             return dev
     return None
-
-
-class VideoWidget:
-    """Minimal mixin/interface used by the call window to show frames."""
-
-    def set_frame(self, image):  # pragma: no cover - UI implemented in call_window
-        raise NotImplementedError
-
-
-if HAS_QTMM:
-    class QtVideoWidget(QtGui.QLabel):
-        """Paints decoded remote video frames (QImage) scaled to the label."""
-
-        def __init__(self, parent=None):
-            super().__init__(parent)
-            self.setMinimumSize(320, 240)
-            self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.setStyleSheet("background:#101010; color:#888;")
-            self.setText("video")
-            self._image = None
-
-        def set_frame(self, image):
-            self._image = image
-            self.update()
-
-        def paintEvent(self, event):
-            super().paintEvent(event)
-            if self._image is None:
-                return
-            painter = QtGui.QPainter(self)
-            scaled = self._image.scaled(
-                self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation)
-            x = (self.width() - scaled.width()) // 2
-            y = (self.height() - scaled.height()) // 2
-            painter.drawImage(x, y, scaled)
-else:
-    QtVideoWidget = None  # type: ignore
 
 
 if HAS_AIORTC:
