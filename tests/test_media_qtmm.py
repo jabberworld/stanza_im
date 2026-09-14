@@ -65,10 +65,16 @@ class _FakeFormat:
 
 class _FakeIO:
     def bytesAvailable(self):
+        # Regression pin: the app must NOT gate reads on the QIODevice's
+        # bytesAvailable() (it can be 0 while audio is streaming).
         return 0
 
     def read(self, count):
-        return b"\x00" * count
+        out = bytearray()
+        while len(out) < count:
+            out.append(0xFF)
+            out.append(0x7F)
+        return bytes(out[:count])
 
     def write(self, data):
         return len(data)
@@ -182,6 +188,12 @@ if imported:
         check("audio capture track constructs (QtMM)", track._io is not None)
         player = media._AudioPlayback("")
         check("audio playback constructs (QtMM)", player._io is not None)
+
+        import asyncio
+        frame = asyncio.run(track.recv())
+        check("mic capture reads live frames without bytesAvailable",
+              frame is not None
+              and media.peak_level(bytes(frame.planes[0]), frame) > 0.9)
         track.stop()
         player.stop()
 
@@ -209,6 +221,11 @@ if imported:
     from stanza_im.ui import device_test
     mic = device_test.MicrophoneTester()
     check("microphone tester starts", mic.start("") and mic.is_running())
+    levels = []
+    mic.level.connect(levels.append)
+    mic._poll()
+    check("mic meter reads live audio",
+          bool(levels) and levels[-1] > 0.9)
     mic.stop()
     check("microphone tester stops", not mic.is_running())
     speaker = device_test.SpeakerTester()

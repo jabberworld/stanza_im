@@ -321,8 +321,9 @@ if HAS_AIORTC:
                     self._resampler = av.AudioResampler(
                         format=AUDIO_FORMAT, layout="stereo", rate=AUDIO_RATE)
                 frames = self._resampler.resample(frame)
-            except Exception:
-                logger.warning("CALL microphone resample failed", exc_info=True)
+            except Exception as exc:
+                logger.warning("CALL microphone resample failed: %s",
+                               decode_ffmpeg_error(exc))
                 return None
             return frames[0] if frames else None
 
@@ -336,18 +337,26 @@ if HAS_AIORTC:
                 await asyncio.sleep(0.02)
                 return _silent()
             deadline = asyncio.get_event_loop().time() + 0.25
+            chunks = bytearray()
             try:
-                while io.bytesAvailable() < self._frame_bytes:
+                # Read directly instead of waiting for io.bytesAvailable():
+                # the QIODevice from QAudioSource.start() may report 0 while
+                # audio is actually streaming, which made us send silence.
+                while len(chunks) < self._frame_bytes:
                     if self._stopped:
                         return _silent()
                     if asyncio.get_event_loop().time() > deadline:
                         return _silent()
-                    await asyncio.sleep(0.005)
-                data = bytes(io.read(self._frame_bytes))
+                    chunk = io.read(self._frame_bytes - len(chunks))
+                    if not chunk:
+                        await asyncio.sleep(0.005)
+                        continue
+                    chunks.extend(chunk)
             except RuntimeError:
                 # The Qt device was deleted by stop() while we were reading.
                 self._stopped = True
                 return _silent()
+            data = bytes(chunks[:self._frame_bytes])
             per_sample = _BYTES_PER_SAMPLE.get(self._av_fmt, 2)
             samples = len(data) // max(1, (self._channels or 1) * per_sample)
             if samples <= 0:
@@ -414,8 +423,9 @@ if HAS_AIORTC:
                         format=self._av_fmt, layout=layout,
                         rate=self._rate or AUDIO_RATE)
                 frames = self._resampler.resample(frame)
-            except Exception:
-                logger.debug("CALL speaker resample failed", exc_info=True)
+            except Exception as exc:
+                logger.debug("CALL speaker resample failed: %s",
+                             decode_ffmpeg_error(exc))
                 return None
             return frames[0] if frames else None
 

@@ -59,6 +59,10 @@ class MicrophoneTester(QtCore.QObject):
             self.failed.emit(error or "unknown")
             return False
         self._source, self._io, self._fmt = source, io, fmt
+        try:
+            io.readyRead.connect(self._poll)
+        except Exception:
+            logger.debug("mic test io has no readyRead", exc_info=True)
         self._timer.start()
         self.running_changed.emit(True)
         return True
@@ -82,15 +86,24 @@ class MicrophoneTester(QtCore.QObject):
         io = self._io
         if io is None:
             return
-        try:
-            available = io.bytesAvailable()
-            if available <= 0:
+        source = self._source
+        if source is not None:
+            error = media._audio_error(source)
+            if error:
+                logger.warning("CALL mic test error: %s", error)
+                self.failed.emit(error)
+                self.stop()
                 return
-            data = bytes(io.read(min(available, 16384)))
+        try:
+            # Never gate on io.bytesAvailable(): the QIODevice returned by
+            # QAudioSource.start() can report 0 even while audio is being
+            # captured, which froze the meter (and the call's mic track).
+            data = bytes(io.read(16384))
         except RuntimeError:
             self.stop()
             return
-        self.level.emit(media.peak_level(data, self._fmt))
+        if data:
+            self.level.emit(media.peak_level(data, self._fmt))
 
 
 class SpeakerTester(QtCore.QObject):

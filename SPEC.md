@@ -181,7 +181,11 @@ endpoint, then DNS SRV.
 
 The Devices page also provides hardware **self-tests** (disabled while a call
 owns the devices): a live microphone peak meter, a speaker test tone and a
-camera preview window (`ui/device_test.py`). Capture/playback negotiate a
+camera preview window (`ui/device_test.py`). The mic meter and the call's
+capture track read the `QAudioSource` stream directly (`io.read()`/`readyRead`)
+and never gate on the QIODevice's `bytesAvailable()` — it can report 0 while
+audio is streaming, which froze the meter and made calls one-way — so a live
+PulseAudio capture always reaches the app. Capture/playback negotiate a
 device-supported format (`isFormatSupported`, falling back to
 `preferredFormat`) and convert to the encoder's s16/stereo/48 kHz 20 ms frames;
 already-matching frames bypass aiortc's audio resampler (a PyAV/FFmpeg
@@ -1048,7 +1052,11 @@ client.leave_muji(room)
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
   remote video frames are painted by `VideoView`; Preferences → Devices selects
   the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
-  speaker/camera self-tests (`ui/device_test.py`, disabled during a call).
+  speaker/camera self-tests (`ui/device_test.py`, disabled during a call). The
+  mic meter and the capture track read the `QAudioSource` stream directly
+  (`io.read()`/`readyRead`) instead of waiting on the QIODevice's
+  `bytesAvailable()` (which can report 0 while audio streams, freezing the
+  meter and sending call silence).
   Capture/playback pick a device-supported format and feed aiortc s16/stereo/
   48 kHz 20 ms frames; matching frames bypass aiortc's audio resampler (the
   compatibility shim patches the aiortc encoder classes, never the immutable
