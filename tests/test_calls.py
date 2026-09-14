@@ -210,6 +210,34 @@ if media_mod.HAS_AIORTC and media_mod.av is not None:
           _cam._container is None)
     _cam.stop()
 
+# ── 3c. captured audio frames carry a usable pts --------------------------
+if media_mod.HAS_AIORTC and media_mod.av is not None:
+    async def _audio_frames():
+        track = media_mod._AudioCaptureTrack("")
+        try:
+            from aiortc.codecs.opus import OpusEncoder
+            encoder = OpusEncoder()
+        except Exception:
+            encoder = None
+        first = await track.recv()
+        second = await track.recv()
+        monotonic = (first.pts is not None and second.pts is not None
+                     and second.pts > first.pts)
+        encode_ok = True
+        if encoder is not None:
+            try:
+                encoder.encode(first)
+                encoder.encode(second)
+            except Exception as exc:
+                encode_ok = False
+                print("  opus encode error:", exc)
+        track.stop()
+        return monotonic, encode_ok
+
+    _mono_ok, _encode_ok = asyncio.run(_audio_frames())
+    check("captured audio frames have monotonic pts", _mono_ok)
+    check("Opus encoder accepts captured frames", _encode_ok)
+
 # ── 4. XEP-0215 normalisation ---------------------------------------------
 servers = discovery.ice_servers_from_services([
     {"type": "stun", "host": "s.example", "port": 3478, "transport": "udp"},

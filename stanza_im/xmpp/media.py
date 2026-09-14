@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from fractions import Fraction
 
 logger = logging.getLogger("stanza_im.call.media")
 
@@ -88,6 +89,7 @@ if HAS_AIORTC:
             super().__init__()
             self._source = None
             self._io = None
+            self._pts = 0
             self._frame_bytes = int(AUDIO_RATE * 0.02) * 2  # 20 ms s16 mono
             self.kind = "audio"
             if not HAS_QTMM:
@@ -111,17 +113,24 @@ if HAS_AIORTC:
         async def recv(self):
             if self._io is None:
                 await asyncio.sleep(0.02)
-                return _silence(self._frame_bytes)
+                return self._stamp(_silence(self._frame_bytes))
             deadline = asyncio.get_event_loop().time() + 0.25
             while self._io.bytesAvailable() < self._frame_bytes:
                 if asyncio.get_event_loop().time() > deadline:
-                    return _silence(self._frame_bytes)
+                    return self._stamp(_silence(self._frame_bytes))
                 await asyncio.sleep(0.005)
             data = bytes(self._io.read(self._frame_bytes))
             frame = av.AudioFrame(format=AUDIO_FORMAT, layout="mono",
                                   samples=len(data) // 2)
             frame.sample_rate = AUDIO_RATE
             frame.planes[0].update(data)
+            return self._stamp(frame)
+
+        def _stamp(self, frame):
+            """Give the frame a monotonic sample timestamp (aiortc requires it)."""
+            frame.pts = self._pts
+            frame.time_base = Fraction(1, AUDIO_RATE)
+            self._pts += frame.samples
             return frame
 
         def stop(self):
@@ -204,16 +213,21 @@ if HAS_AIORTC:
                 self._container = None
 
         async def recv(self):
+            pts = self.next_timestamp()
             if self._container is None or self._stream is None:
                 await asyncio.sleep(0.05)
-                return _black_frame()
+                frame = _black_frame()
+                frame.pts = pts
+                frame.time_base = Fraction(1, 30)
+                return frame
             loop = asyncio.get_event_loop()
-            pts = self.next_timestamp()
             frame = await loop.run_in_executor(None, self._next_frame)
             if frame is None:
-                return _black_frame()
+                frame = _black_frame()
+                frame.time_base = Fraction(1, 30)
             frame.pts = pts
-            frame.time_base = self._stream.time_base
+            if frame.time_base is None:
+                frame.time_base = Fraction(1, 30)
             return frame
 
         def _next_frame(self):
@@ -370,7 +384,8 @@ if HAS_AIORTC:
                     if self._audio_play:
                         self._audio_play.write(frame)
             except Exception:
-                logger.debug("CALL audio track ended", exc_info=True)
+                # Normal at call end (MediaStreamError) — no traceback.
+                logger.debug("CALL audio track ended")
 
         async def _consume_video(self, track):
             while True:
