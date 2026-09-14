@@ -54,6 +54,7 @@ stanza_im/                      # Python package
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
+│   ├── device_test.py           # Devices self-tests (mic meter/tone/camera)
 │   ├── status_message_dialog.py # Multiline presence status editor
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
@@ -476,7 +477,18 @@ top-level windows** (never children of the main window, which would embed them
 over the roster); remote video frames are painted by `VideoView`. Preferences
 gains a **Devices** page
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
-Multimedia). Muji (XEP-0272) coordinates conference calls inside a MUC: the
+Multimedia). The page also hosts **self-tests** (`ui/device_test.py`): a live
+microphone peak meter, a speaker test tone and a camera preview window,
+disabled while a call owns the devices. Capture/playback negotiate a
+device-supported format (`isFormatSupported` → `preferredFormat`) and convert
+to the encoder's s16/stereo/48 kHz 20 ms frames; frames that already match
+bypass aiortc's `av.AudioResampler` (a compatibility shim in `media.py` avoids
+an FFmpeg `EINVAL` whose non-ASCII message some PyAV builds turn into a fatal
+`UnicodeDecodeError`, killing the RTP sender). For the *controlled* ICE role,
+`JingleRtpManager._nomination_fallback` switches aioice to controlling and
+nominates if a peer (Conversations) never sends `USE-CANDIDATE`, and
+`AiortcCall.close()` cancels the aioice checks so their STUN retry timers stop
+spamming tracebacks after a hang-up. Muji (XEP-0272) coordinates conference calls inside a MUC: the
 `<muji>` contents map is advertised in MUC presence (`MujiManager.handle_presence`),
 the joiner opens a Jingle session with every other participant's real JID
 tagged `<muji room=…/>` (`start_call(..., muji_room=rook)`), and content

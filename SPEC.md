@@ -48,6 +48,7 @@ stanza_im/
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
+│   ├── device_test.py  — Devices self-tests (mic meter/tone/camera)
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── history_manager.py   — Per-contact history browser
@@ -177,6 +178,14 @@ Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
 `client.ice_servers()` from XEP-0215, then the connection settings' STUN/TURN
 endpoint, then DNS SRV.
+
+The Devices page also provides hardware **self-tests** (disabled while a call
+owns the devices): a live microphone peak meter, a speaker test tone and a
+camera preview window (`ui/device_test.py`). Capture/playback negotiate a
+device-supported format (`isFormatSupported`, falling back to
+`preferredFormat`) and convert to the encoder's s16/stereo/48 kHz 20 ms frames;
+already-matching frames bypass aiortc's audio resampler (a PyAV/FFmpeg
+compatibility shim in `xmpp/media.py`).
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -1038,7 +1047,14 @@ client.leave_muji(room)
   services (with credentials) with `connection.stun_turn_*` and SRV discovery.
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
   remote video frames are painted by `VideoView`; Preferences → Devices selects
-  the microphone/speaker/camera (`devices.*`, Qt Multimedia).
+  the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
+  speaker/camera self-tests (`ui/device_test.py`, disabled during a call).
+  Capture/playback pick a device-supported format and feed aiortc s16/stereo/
+  48 kHz 20 ms frames; matching frames bypass aiortc's audio resampler (PyAV/
+  FFmpeg compatibility shim). If the *controlled* ICE agent stalls (a peer that
+  never sends `USE-CANDIDATE`, e.g. Conversations), `_nomination_fallback`
+  switches aioice to controlling and nominates; `AiortcCall.close()` cancels the
+  pending aioice checks to stop STUN retry tracebacks.
 - Muji (`xmpp/muji.py`, `client.muji`): participants advertise a `<muji>`
   contents map in MUC presence; the joiner opens a Jingle session with every
   other participant's real JID tagged `<muji room='…'/>`, handles content
