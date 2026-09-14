@@ -156,8 +156,6 @@ def build_transport(transport: IceTransport) -> ET.Element:
     el = ET.Element(_q(NS_ICE, "transport"))
     el.set("ufrag", transport.ufrag)
     el.set("pwd", transport.pwd)
-    if transport.mode:
-        el.set("mode", transport.mode)
     for fp in transport.fingerprints:
         fel = ET.SubElement(el, _q(NS_DTLS, "fingerprint"))
         fel.set("hash", fp.hash)
@@ -301,9 +299,9 @@ def parse_sdp(sdp: str) -> list:
         if line.startswith("a=mid:"):
             current["name"] = line[6:] or current["name"]
         elif line.startswith("a=ice-ufrag:"):
-            transport.ufrag = line[11:]
+            transport.ufrag = line[12:]
         elif line.startswith("a=ice-pwd:"):
-            transport.pwd = line[9:]
+            transport.pwd = line[10:]
         elif line.startswith("a=setup:"):
             setup = line[8:]
             if transport.fingerprints:
@@ -483,10 +481,21 @@ class JingleRtpManager:
                 session.ringed = True
                 await self._wait_proceed(session, timeout=30)
             await self._send_session_initiate(session)
+            self.client._start_task(self._session_timeout(session.sid))
         except Exception as exc:
             logger.exception("CALL start failed")
             self.client.emit("call_failed", session.peer_full, str(exc))
             self._terminate(session, "connectivity-error", send=True)
+
+    async def _session_timeout(self, sid: str, timeout: float = 45.0) -> None:
+        """Fail an outgoing call that never received a session-accept."""
+        await asyncio.sleep(timeout)
+        session = self.sessions.get(sid)
+        if session is not None and session.state not in ("accepted", "active"):
+            logger.warning("CALL no session-accept for %s, failing", sid)
+            self.client.emit("call_failed", session.peer_full, "no answer")
+            self._terminate(session, "timeout", send=True)
+            self._close_session(session, "ended", "timeout")
 
     def _peer_supports_messages(self, bare: str) -> bool:
         support = getattr(self.client, "supports_feature", None)
@@ -562,7 +571,7 @@ class JingleRtpManager:
             content.append(build_transport(transport))
             jingle.append(content)
         logger.debug("CALL session-initiate -> %s", session.peer_full)
-        await iq.send(timeout=CALL_TIMEOUT)
+        self.client.xmpp.send(iq)
         session.state = "initiating"
         session.contents = contents
         session.my_transport = contents[0][2] if contents else None
@@ -598,7 +607,7 @@ class JingleRtpManager:
             fingerprints=session.my_transport.fingerprints,
             candidates=[line])))
         try:
-            await iq.send(timeout=CALL_TIMEOUT)
+            self.client.xmpp.send(iq)
         except Exception:
             logger.debug("CALL transport-info failed", exc_info=True)
 
@@ -711,7 +720,7 @@ class JingleRtpManager:
         session.state = "accepted"
         session.my_transport = contents[0][2] if contents else None
         logger.info("CALL session-accept -> %s", session.peer_full)
-        await iq.send(timeout=CALL_TIMEOUT)
+        self.client.xmpp.send(iq)
         self.client.emit("call_state", session.sid, session.peer_full,
                          "active")
 
@@ -896,7 +905,7 @@ class JingleRtpManager:
             rel = ET.SubElement(jingle, _q(NS_JINGLE, "reason"))
             ET.SubElement(rel, _q(NS_JINGLE, reason or "success"))
             try:
-                iq.send()
+                self.client.xmpp.send(iq)
             except Exception:
                 logger.debug("CALL session-terminate send failed", exc_info=True)
         session.state = "ended"
@@ -952,7 +961,7 @@ class JingleRtpManager:
             desc = ET.SubElement(content, _q(NS_RTP, "description"))
             desc.set("media", media)
         try:
-            await iq.send(timeout=CALL_TIMEOUT)
+            self.client.xmpp.send(iq)
         except Exception:
             logger.debug("MUJI %s failed", action, exc_info=True)
 

@@ -65,6 +65,24 @@ check("ice transport round-trip",
       and tp.fingerprints[0].value == "AA:BB"
       and tp.candidates[0].ip == "10.0.0.1"
       and tp.candidates[0].type == "host")
+check("ice transport xml has no mode attr",
+      "mode" not in jr.build_transport(transport).attrib)
+
+# parse_sdp must strip the attribute prefix exactly (off-by-one regression:
+# the credentials must not keep a leading ':').
+_sample_sdp = (
+    "v=0\r\n"
+    "m=audio 9 UDP/TLS/RTP/SAVPF 96\r\n"
+    "a=mid:0\r\n"
+    "a=ice-ufrag:abc123\r\n"
+    "a=ice-pwd:secretpwd\r\n"
+    "a=setup:actpass\r\n"
+    "a=fingerprint:sha-256 AA:BB:CC\r\n"
+)
+_parsed = jr.parse_sdp(_sample_sdp)[0]["transport"]
+check("parse_sdp ufrag/pwd without leading colon",
+      _parsed.ufrag == "abc123" and _parsed.pwd == "secretpwd")
+check("parse_sdp setup", _parsed.fingerprints[0].setup == "actpass")
 
 # ── 2. SDP ↔ Jingle bridge with real aiortc peers -------------------------
 try:
@@ -79,7 +97,14 @@ async def _sdp_roundtrip():
     pc1 = RTCPeerConnection()
     pc1.addTrack(AudioStreamTrack())
     await pc1.setLocalDescription(await pc1.createOffer())
-    contents = jr.jingle_contents_from_sdp(pc1.localDescription.sdp)
+    offer_sdp = pc1.localDescription.sdp
+    contents = jr.jingle_contents_from_sdp(offer_sdp)
+    # Credentials must survive parse→build without a leading ':'
+    import re as _re
+    orig_ufrag = _re.search(r"a=ice-ufrag:(\S+)", offer_sdp).group(1)
+    if contents[0][2].ufrag != orig_ufrag:
+        raise AssertionError("ufrag corrupted: %r != %r"
+                             % (contents[0][2].ufrag, orig_ufrag))
     rebuilt = jr.sdp_from_jingle(contents, "sid1")
     pc2 = RTCPeerConnection()
     await pc2.setRemoteDescription(RTCSessionDescription(rebuilt, "offer"))
@@ -101,6 +126,9 @@ if HAS_AIORTC:
     except Exception as exc:
         print("  sdp roundtrip error:", exc)
     check("SDP<->Jingle round-trip accepted by aiortc", ok)
+    if ok:
+        check("round-trip keeps ICE credentials",
+              ":" not in c0[2].ufrag and ":" not in c0[2].pwd)
 else:
     check("SDP<->Jingle round-trip accepted by aiortc (skipped)", True)
 
