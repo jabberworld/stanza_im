@@ -877,8 +877,7 @@ if HAS_AIORTC:
             487 role-conflict deadlock.  We therefore switch to controlling
             *and* re-run the best succeeded, not-yet-nominated pair's check:
             that check is sent with ``USE-CANDIDATE`` and, on success,
-            completes ICE.  A compliant controlling peer resolves the role
-            conflict via the RFC 5245 tie-breaker.
+            completes ICE.
             """
             switched = False
             for ice in self._ice_transports():
@@ -886,13 +885,32 @@ if HAS_AIORTC:
                 if connection is None:
                     continue
                 try:
-                    if not connection.ice_controlling:
-                        connection.switch_role(True)
+                    if self._force_controlling(connection):
                         switched = True
                     self._nominate_best_pair(connection)
                 except Exception:
                     logger.debug("CALL ICE role switch failed", exc_info=True)
             return switched
+
+        @staticmethod
+        def _force_controlling(connection) -> bool:
+            """Claim the controlling role and win any role conflict.
+
+            A compliant controlling peer resolves a ``ICE-CONTROLLING``
+            request against its own tie-breaker (RFC 8445 §7.3.1.1): the
+            higher one stays controlling, the other becomes controlled.
+            Since aioice's tie-breaker is a random 64-bit value we would lose
+            ~50 % of the time and the peer would reject our ``USE-CANDIDATE``
+            with 487, leaving ICE stuck in ``checking``.  Bumping the
+            tie-breaker to its maximum before the role switch makes us win
+            deterministically, so the peer backs down and accepts the
+            nomination.
+            """
+            if connection.ice_controlling:
+                return False
+            connection._tie_breaker = (1 << 64) - 1
+            connection.switch_role(True)
+            return True
 
         @staticmethod
         def _nominate_best_pair(connection) -> None:

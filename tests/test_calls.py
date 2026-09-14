@@ -622,9 +622,9 @@ check("connected ICE is left alone",
       asyncio.run(_run_fallback(states=["connected"])).forced == 0)
 check("controlling role is left alone",
       asyncio.run(_run_fallback(role="controlling")).forced == 0)
-check("fallback default delay leaves room for peer nomination",
+check("fallback default delay rescues stalled peers quickly",
       jr.JingleRtpManager._nomination_fallback.__defaults__ is not None
-      and jr.JingleRtpManager._nomination_fallback.__defaults__[0] >= 10.0)
+      and 4.0 <= jr.JingleRtpManager._nomination_fallback.__defaults__[0] < 8.0)
 
 # ── 10b. forced nomination really re-runs the best succeeded pair ----------
 _PairState = type("State", (), {"SUCCEEDED": "succeeded"})
@@ -686,6 +686,38 @@ check("in-flight pair tasks are skipped",
 check("unchecked pairs are not nominated",
       asyncio.run(_run_nominate(
           [_FakePair(1, "frozen")])) == [("frozen", False)])
+
+# ── 10c. forced controlling wins role conflicts via max tie-breaker --------
+_MAX_TB = (1 << 64) - 1
+
+
+class _FakeRoleConn:
+    def __init__(self, controlling=False, tie_breaker=123):
+        self.ice_controlling = controlling
+        self._tie_breaker = tie_breaker
+        self.switched = 0
+
+    def switch_role(self, value):
+        self.ice_controlling = value
+        self.switched += 1
+
+
+def _force_on(conn):
+    if not media_mod.HAS_AIORTC:
+        return False
+    return media_mod.AiortcCall._force_controlling(conn)
+
+
+def _force_result(controlling, tie_breaker):
+    conn = _FakeRoleConn(controlling, tie_breaker)
+    forced = _force_on(conn)
+    return (forced, conn.ice_controlling, conn._tie_breaker, conn.switched)
+
+
+check("forcing a controlled agent maximizes its tie-breaker",
+      _force_result(False, 123) == (True, True, _MAX_TB, 1))
+check("an already controlling agent is left untouched",
+      _force_result(True, 999) == (False, True, 999, 0))
 
 # ── 11. config defaults ---------------------------------------------------
 cfg = Config()

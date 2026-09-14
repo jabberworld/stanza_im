@@ -1064,12 +1064,13 @@ client.leave_muji(room)
   48 kHz 20 ms frames; matching frames bypass aiortc's audio resampler (the
   compatibility shim patches the aiortc encoder classes, never the immutable
   PyAV `AudioResampler`, to survive an FFmpeg `EINVAL`). If the *controlled* ICE
-  agent stalls, `_nomination_fallback` waits 12 s for the peer's own
-  `USE-CANDIDATE` (Conversations nominates ~5 s after accepting, via a TURN
-  relay when a shared-NAT srflx hairpin fails) and only then switches aioice to
-  controlling, re-running the best succeeded pair's check so a real
-  `USE-CANDIDATE` is sent — a bare role flip would answer the peer's late
-  nomination with a 487 role conflict and deadlock ICE;
+  agent stalls, `_nomination_fallback` waits 5 s for the peer's own
+  `USE-CANDIDATE` (Conversations, the Jingle initiator, never sends one, so ICE
+  stays `checking`) and only then switches aioice to controlling — with the
+  tie-breaker forced to its 64-bit maximum so we deterministically win any
+  RFC 8445 §7.3.1.1 role conflict instead of caving to a peer's 487 — and
+  re-runs the best succeeded pair's check so a real `USE-CANDIDATE` is sent
+  and ICE completes;
   `AiortcCall.close()` cancels the
   pending aioice checks to stop STUN retry tracebacks.
 - Muji (`xmpp/muji.py`, `client.muji`): participants advertise a `<muji>`
