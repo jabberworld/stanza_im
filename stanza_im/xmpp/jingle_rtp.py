@@ -885,10 +885,10 @@ class JingleRtpManager:
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
             on_state=lambda *a: None)
         session.call = call
-        await call.set_remote(offer, "offer")
         call.add_audio()
         if session.video:
             call.add_video()
+        await call.set_remote(offer, "offer")
         answer = await call.create_answer()
         contents = jingle_contents_from_sdp(answer)
         iq = self.client.xmpp.Iq()
@@ -904,10 +904,39 @@ class JingleRtpManager:
         self._append_bundle(jingle, contents)
         session.state = "accepted"
         session.my_transport = contents[0][2] if contents else None
-        logger.info("CALL session-accept -> %s", session.peer_full)
+        logger.info("CALL session-accept -> %s (ICE role=%s)",
+                    session.peer_full, call.ice_role())
         self.client.xmpp.send(iq)
         self.client.emit("call_state", session.sid, session.peer_full,
                          "active")
+        self.client._start_task(self._nomination_fallback(session))
+
+    async def _nomination_fallback(self, session: CallSession,
+                                   delay: float = 3.0) -> None:
+        """Nominate ourselves when a controlled peer never does.
+
+        Conversations/libwebrtc can leave us in the *controlled* ICE role
+        without ever sending ``USE-CANDIDATE``; the check list then succeeds
+        but ``iceConnectionState`` stays ``checking``.  After *delay* seconds
+        still checking we switch aioice to controlling and nominate.
+        """
+        call = session.call
+        if call is None or call.ice_role() != "controlled":
+            return
+        steps = max(1, int(delay / 0.1))
+        for _ in range(steps):
+            await asyncio.sleep(0.1)
+            if session.sid not in self.sessions or session.call is not call:
+                return
+            if call.ice_state() not in ("checking", "new"):
+                return
+        if session.sid not in self.sessions or session.call is not call:
+            return
+        if call.ice_state() not in ("checking", "new"):
+            return
+        if call.force_ice_controlling():
+            logger.info("CALL controlled ICE stalled, forcing nomination (%s)",
+                        session.sid)
 
     async def _decline(self, session: CallSession) -> None:
         session.state = "declined"
@@ -927,6 +956,9 @@ class JingleRtpManager:
                 await session.call.set_remote(answer, "answer")
             except Exception:
                 logger.exception("CALL set_remote(answer) failed")
+        role = session.call.ice_role() if session.call is not None else ""
+        logger.info("CALL session-accept from %s (ICE role=%s)",
+                    session.peer_full, role)
         self.client.emit("call_state", session.sid, session.peer_full, "active")
 
     async def _on_transport_info(self, jingle: ET.Element) -> None:

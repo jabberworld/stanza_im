@@ -558,6 +558,43 @@ async def _proceed_session():
 check("proceed selects the accepting resource",
       asyncio.run(_proceed_session()) == "bob@example.com/phone")
 
+# ── 10a. controlled ICE nomination fallback -------------------------------
+class _StubIceCall:
+    def __init__(self, role="controlled", states=None):
+        self._role = role
+        self._states = list(states or ["checking"] * 50)
+        self.forced = 0
+
+    def ice_role(self):
+        return self._role
+
+    def ice_state(self):
+        return self._states.pop(0) if self._states else "checking"
+
+    def force_ice_controlling(self):
+        self.forced += 1
+        return True
+
+
+async def _run_fallback(role="controlled", states=None):
+    mgr = jr.JingleRtpManager(call_client)
+    session = jr.CallSession(
+        sid="sidF", peer_bare="bob@example.com", peer_full="bob@example.com/x",
+        self_full="me@example.com/res", initiator=False)
+    call = _StubIceCall(role, states)
+    session.call = call
+    mgr.sessions["sidF"] = session
+    await mgr._nomination_fallback(session, delay=0.2)
+    return call
+
+
+check("controlled stalled ICE is forced to nominate",
+      asyncio.run(_run_fallback()).forced == 1)
+check("connected ICE is left alone",
+      asyncio.run(_run_fallback(states=["connected"])).forced == 0)
+check("controlling role is left alone",
+      asyncio.run(_run_fallback(role="controlling")).forced == 0)
+
 # ── 11. config defaults ---------------------------------------------------
 cfg = Config()
 check("devices defaults",

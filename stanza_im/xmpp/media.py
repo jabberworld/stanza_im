@@ -806,6 +806,69 @@ if HAS_AIORTC:
             except Exception:
                 logger.exception("CALL addIceCandidate failed (%s)", cand)
 
+        # ── ICE role / nomination fallback ────────────────────────
+        def _ice_transports(self):
+            try:
+                transceivers = list(self.pc.getTransceivers())
+            except Exception:
+                return
+            for transceiver in transceivers:
+                dtls = getattr(getattr(transceiver, "receiver", None),
+                               "transport", None)
+                ice = getattr(dtls, "transport", None)
+                if ice is not None:
+                    yield ice
+
+        def ice_role(self) -> str:
+            for ice in self._ice_transports():
+                return getattr(ice, "role", "") or ""
+            return ""
+
+        def connection_state(self) -> str:
+            return getattr(self.pc, "connectionState", "")
+
+        def ice_state(self) -> str:
+            return getattr(self.pc, "iceConnectionState", "")
+
+        def force_ice_controlling(self) -> bool:
+            """Ask aioice to nominate (fallback when a peer never does).
+
+            Some libwebrtc peers (Conversations) leave the controlled role
+            without ever sending ``USE-CANDIDATE``; switching to controlling
+            makes aioice perform regular nomination, while a compliant
+            controlling peer resolves the resulting role conflict via the RFC
+            5245 tie-breaker.
+            """
+            switched = False
+            for ice in self._ice_transports():
+                connection = getattr(ice, "_connection", None)
+                if connection is None:
+                    continue
+                try:
+                    if not connection.ice_controlling:
+                        connection.switch_role(True)
+                        switched = True
+                except Exception:
+                    logger.debug("CALL ICE role switch failed", exc_info=True)
+            return switched
+
+        def _cancel_ice_checks(self) -> None:
+            """Cancel pending aioice checks so their STUN retry timers stop.
+
+            aioice's ``Connection.close`` does not cancel the in-flight check
+            tasks, so their ``Transaction`` retransmit timers fire on a closed
+            transport and spam tracebacks after a hang-up.
+            """
+            for ice in self._ice_transports():
+                connection = getattr(ice, "_connection", None)
+                for check in list(getattr(connection, "_check_list", []) or []):
+                    task = getattr(check, "task", None)
+                    if task is not None and not task.done():
+                        try:
+                            task.cancel()
+                        except Exception:
+                            pass
+
         def close(self):
             logger.info("CALL closing peer connection")
             for task in self._tasks:
@@ -818,6 +881,7 @@ if HAS_AIORTC:
                         obj.stop()
                 except Exception:
                     pass
+            self._cancel_ice_checks()
             try:
                 asyncio.ensure_future(self.pc.close())
             except Exception:
