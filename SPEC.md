@@ -1009,7 +1009,7 @@ client.leave_muji(room)
   (`mood`/`activity`/`tune`/`location`), updated live via
   `_on_contact_pep_updated`.
 
-### 14.10.2 Jingle RTP Calls & Muji (XEP-0167/0176/0215/0272/0353/0482)
+### 14.10.2 Jingle RTP Calls & Muji (XEP-0167/0176/0215/0272/0293/0294/0339/0353/0482)
 
 - 1:1 calls live in `xmpp/jingle_rtp.py` (`client.rtp_calls`). The single
   Jingle IQ handler (`JingleRtpManager`) is routed by `JabberClient._dispatch_jingle_iq`
@@ -1018,7 +1018,13 @@ client.leave_muji(room)
   `<transport>` (ufrag/pwd/candidates) and DTLS `<fingerprint>` are built from /
   converted to SDP so `aiortc` (`xmpp/media.py`) provides ICE, DTLS-SRTP and RTP.
   Candidates are offered in `session-initiate`/`accept` and trickled via
-  `transport-info`. Peers advertising `urn:xmpp:jingle-message:0` are rung with
+  `transport-info`. The SDP↔Jingle conversion preserves `rtcp-mux` (always
+  advertised in our `<description>`), codec fmtp `<parameter>`, `<rtcp-fb>`
+  (XEP-0293), `<rtp-hdrext>` (XEP-0294), `<source>`/`<ssrc-group>`/`msid`
+  (XEP-0339) and the `senders` direction, groups the contents with a BUNDLE
+  `<group>` and echoes the peer's `<trickle/>`/`<renomination/>` transport
+  options, so libwebrtc peers (Conversations) leave their *connecting* state.
+  Peers advertising `urn:xmpp:jingle-message:0` are rung with
   XEP-0353 propose/proceed first. slixmpp only fires the `message` event for
   stanzas with a `<body>`, so bodyless propose/retract and XEP-0482 invites have
   dedicated `MatchXPath` handlers; proposals are answered with

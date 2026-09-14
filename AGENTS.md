@@ -444,8 +444,15 @@ manager (`_dispatch_jingle_iq` routes by RTP/ICE content or known `sid`), builds
 the RTP `<description>`/ICE `<transport>`/DTLS `<fingerprint>` elements and
 converts them to/from an SDP offer/answer that `aiortc` understands
 (`sdp_from_jingle`/`jingle_contents_from_sdp`); aiortc provides the actual
-ICE/DTLS/SRTP/RTP path. Candidates are sent in `session-initiate`/`accept` and
-trickled via `transport-info`. When the peer advertises `urn:xmpp:jingle-message:0`
+ ICE/DTLS/SRTP/RTP path. Candidates are sent in `session-initiate`/`accept` and
+trickled via `transport-info`. The SDP↔Jingle bridge preserves the attributes
+libwebrtc needs to leave its *connecting* state: `rtcp-mux` (always advertised
+in our `<description>`), codec fmtp `<parameter>`, `<rtcp-fb>` (XEP-0293),
+`<rtp-hdrext>` (XEP-0294), `<source>`/`<ssrc-group>`/`msid` (XEP-0339) and the
+content `senders` direction; a BUNDLE `<group>` (XEP-0166 grouping) ties the
+contents to one transport and the peer's `<trickle/>`/`<renomination/>`
+transport options are echoed.
+When the peer advertises `urn:xmpp:jingle-message:0`
 the call is announced with XEP-0353 propose/proceed before `session-initiate`.
 Per XEP-0353 the `propose` targets the peer's **bare** JID while the responses
 (`proceed`/`reject`/`retract`) and the `session-initiate` are addressed to the

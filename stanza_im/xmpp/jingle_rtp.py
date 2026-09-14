@@ -31,6 +31,10 @@ NS_DTLS = "urn:xmpp:jingle:apps:dtls:0"
 NS_ICE = "urn:xmpp:jingle:transports:ice-udp:1"
 NS_JINGLE_MSG = "urn:xmpp:jingle-message:0"
 NS_MUJI = "urn:xmpp:jingle:muji:0"
+NS_RTP_FB = "urn:xmpp:jingle:apps:rtp:rtcp-fb:0"
+NS_RTP_HDREXT = "urn:xmpp:jingle:apps:rtp:rtp-hdrext:0"
+NS_GROUPING = "urn:xmpp:jingle:apps:grouping:0"
+NS_ICE_OPTION = "http://gultsch.de/xmpp/drafts/jingle/transports/ice-udp/option"
 
 CALL_TIMEOUT = 45.0
 
@@ -48,12 +52,14 @@ class PayloadType:
     clockrate: int = 0
     channels: int = 0
     parameters: dict = field(default_factory=dict)
+    rtcp_fb: list = field(default_factory=list)   # [(type, subtype), …]
 
 
 @dataclass
 class RtpSource:
     ssrc: int
     parameters: dict = field(default_factory=dict)
+    msid: str = ""
 
 
 @dataclass
@@ -61,6 +67,11 @@ class RtpDescription:
     media: str = "audio"
     payloads: list = field(default_factory=list)
     sources: list = field(default_factory=list)
+    rtcp_mux: bool = False
+    rtp_hdrext: list = field(default_factory=list)   # [(id, uri), …]
+    ssrc_groups: list = field(default_factory=list)  # [(semantics, [ssrc]), …]
+    senders: str = "both"
+    msid: str = ""
 
 
 @dataclass
@@ -100,10 +111,13 @@ def build_description(desc: RtpDescription) -> ET.Element:
     el = ET.Element(_q(NS_RTP, "description"))
     el.set("media", desc.media)
     for payload in desc.payloads:
+        # A payload-type without a name (e.g. an unmapped/RTX id) cannot be
+        # negotiated; emitting it would produce invalid Jingle.
+        if not payload.name:
+            continue
         pel = ET.SubElement(el, _q(NS_RTP, "payload-type"))
         pel.set("id", str(payload.id))
-        if payload.name:
-            pel.set("name", payload.name)
+        pel.set("name", payload.name)
         if payload.clockrate:
             pel.set("clockrate", str(payload.clockrate))
         if payload.channels:
@@ -112,6 +126,13 @@ def build_description(desc: RtpDescription) -> ET.Element:
             par = ET.SubElement(pel, _q(NS_RTP, "parameter"))
             par.set("name", key)
             par.set("value", value)
+        for fb_type, fb_subtype in payload.rtcp_fb:
+            fel = ET.SubElement(pel, _q(NS_RTP_FB, "rtcp-fb"))
+            fel.set("type", fb_type)
+            if fb_subtype:
+                fel.set("subtype", fb_subtype)
+    if desc.rtcp_mux:
+        ET.SubElement(el, _q(NS_RTP, "rtcp-mux"))
     for source in desc.sources:
         sel = ET.SubElement(el, _q(NS_RTP_SSMA, "source"))
         sel.set("ssrc", str(source.ssrc))
@@ -119,6 +140,16 @@ def build_description(desc: RtpDescription) -> ET.Element:
             par = ET.SubElement(sel, _q(NS_RTP_SSMA, "parameter"))
             par.set("name", key)
             par.set("value", value)
+    for semantics, ssrcs in desc.ssrc_groups:
+        gel = ET.SubElement(el, _q(NS_RTP_SSMA, "ssrc-group"))
+        gel.set("semantics", semantics)
+        for ssrc in ssrcs:
+            csel = ET.SubElement(gel, _q(NS_RTP_SSMA, "source"))
+            csel.set("ssrc", str(ssrc))
+    for ext_id, uri in desc.rtp_hdrext:
+        hel = ET.SubElement(el, _q(NS_RTP_HDREXT, "rtp-hdrext"))
+        hel.set("id", str(ext_id))
+        hel.set("uri", uri)
     return el
 
 
@@ -134,11 +165,16 @@ def parse_description(el: ET.Element) -> RtpDescription:
             except ValueError:
                 continue
             params = {}
+            rtcp_fb = []
             for par in child:
-                if par.tag.rsplit("}", 1)[-1] == "parameter":
+                ptag = par.tag.rsplit("}", 1)[-1]
+                if ptag == "parameter":
                     params[par.get("name", "")] = par.get("value", "")
+                elif ptag == "rtcp-fb":
+                    rtcp_fb.append((par.get("type", ""),
+                                    par.get("subtype", "")))
             desc.payloads.append(PayloadType(
-                pid, child.get("name", ""), clock, channels, params))
+                pid, child.get("name", ""), clock, channels, params, rtcp_fb))
         elif tag == "source":
             try:
                 ssrc = int(child.get("ssrc", "0") or 0)
@@ -149,6 +185,25 @@ def parse_description(el: ET.Element) -> RtpDescription:
                 if par.tag.rsplit("}", 1)[-1] == "parameter":
                     params[par.get("name", "")] = par.get("value", "")
             desc.sources.append(RtpSource(ssrc, params))
+        elif tag == "ssrc-group":
+            ssrcs = []
+            for src in child:
+                if src.tag.rsplit("}", 1)[-1] != "source":
+                    continue
+                try:
+                    ssrcs.append(int(src.get("ssrc", "0") or 0))
+                except ValueError:
+                    pass
+            if ssrcs:
+                desc.ssrc_groups.append((child.get("semantics", ""), ssrcs))
+        elif tag == "rtp-hdrext":
+            try:
+                ext_id = int(child.get("id", "0") or 0)
+            except ValueError:
+                continue
+            desc.rtp_hdrext.append((ext_id, child.get("uri", "")))
+        elif tag == "rtcp-mux":
+            desc.rtcp_mux = True
     return desc
 
 
@@ -175,6 +230,10 @@ def build_transport(transport: IceTransport) -> ET.Element:
             cel.set("rel-port", str(int(cand.rel_port)))
         if cand.generation:
             cel.set("generation", str(cand.generation))
+    # XEP-0176 option elements: advertise trickle-ICE and ICE renomination
+    # support (Conversations/libwebrtc send the same options).
+    ET.SubElement(el, _q(NS_ICE_OPTION, "trickle"))
+    ET.SubElement(el, _q(NS_ICE_OPTION, "renomination"))
     return el
 
 
@@ -246,7 +305,10 @@ def sdp_from_jingle(contents: list, session_id: str = "") -> str:
         pts = " ".join(str(p.id) for p in desc.payloads)
         lines.append("m=%s 9 UDP/TLS/RTP/SAVPF %s" % (desc.media, pts))
         lines.append("c=IN IP4 0.0.0.0")
-        lines.append("a=sendrecv")
+        senders = {"both": "sendrecv", "initiator": "sendonly",
+                   "responder": "recvonly", "none": "inactive"}.get(
+                       desc.senders, "sendrecv")
+        lines.append("a=%s" % senders)
         lines.append("a=mid:%s" % mid)
         lines.append("a=rtcp:9 IN IP4 0.0.0.0")
         lines.append("a=rtcp-mux")
@@ -255,9 +317,25 @@ def sdp_from_jingle(contents: list, session_id: str = "") -> str:
             if payload.channels:
                 rtpmap += "/%d" % payload.channels
             lines.append("a=rtpmap:%d %s" % (payload.id, rtpmap))
+            if payload.parameters:
+                fmtp = ";".join("%s=%s" % (key, value)
+                                for key, value in payload.parameters.items())
+                lines.append("a=fmtp:%d %s" % (payload.id, fmtp))
+            for fb_type, fb_subtype in payload.rtcp_fb:
+                fb = ("%s %s" % (fb_type, fb_subtype)).strip()
+                lines.append("a=rtcp-fb:%d %s" % (payload.id, fb))
+        for ext_id, uri in desc.rtp_hdrext:
+            lines.append("a=extmap:%d %s" % (ext_id, uri))
         for source in desc.sources:
             cname = source.parameters.get("cname", session_id)
             lines.append("a=ssrc:%d cname:%s" % (source.ssrc, cname))
+            if source.msid:
+                lines.append("a=msid:%s" % source.msid)
+        for semantics, ssrcs in desc.ssrc_groups:
+            lines.append("a=ssrc-group:%s %s"
+                         % (semantics, " ".join(str(s) for s in ssrcs)))
+        if desc.msid:
+            lines.append("a=msid:%s" % desc.msid)
         # ICE/DTLS are media-level (aiortc validates each m-section).
         if not transport.ufrag and transport is not first_transport:
             transport = first_transport
@@ -324,6 +402,64 @@ def parse_sdp(sdp: str) -> list:
             if len(parts) == 2:
                 transport.fingerprints.append(
                     DtlsFingerprint(parts[0], parts[1].strip(), "actpass"))
+        elif line.startswith("a=rtcp-mux"):
+            desc.rtcp_mux = True
+        elif line.startswith("a=fmtp:"):
+            rest = line[7:]
+            try:
+                pid_s, fmtp = rest.split(" ", 1)
+                pid = int(pid_s)
+            except ValueError:
+                continue
+            for payload in desc.payloads:
+                if payload.id != pid:
+                    continue
+                for pair in fmtp.split(";"):
+                    pair = pair.strip()
+                    if not pair:
+                        continue
+                    key, _, value = pair.partition("=")
+                    payload.parameters[key.strip()] = value.strip()
+        elif line.startswith("a=rtcp-fb:"):
+            rest = line[10:]
+            try:
+                pt_s, fb = rest.split(" ", 1)
+            except ValueError:
+                continue
+            bits = fb.split()
+            entry = (bits[0], bits[1] if len(bits) > 1 else "")
+            for payload in desc.payloads:
+                if pt_s == "*" or str(payload.id) == pt_s:
+                    payload.rtcp_fb.append(entry)
+        elif line.startswith("a=extmap:"):
+            rest = line[9:]
+            try:
+                ext_id_s, uri = rest.split(" ", 1)
+            except ValueError:
+                continue
+            try:
+                ext_id = int(ext_id_s.split("/")[0])
+            except ValueError:
+                continue
+            desc.rtp_hdrext.append((ext_id, uri.strip()))
+        elif line.startswith("a=ssrc-group:"):
+            rest = line[13:]
+            bits = rest.split()
+            semantics = bits[0] if bits else ""
+            ssrcs = []
+            for token in bits[1:]:
+                if token.isdigit():
+                    ssrcs.append(int(token))
+            if ssrcs:
+                desc.ssrc_groups.append((semantics, ssrcs))
+        elif line.startswith("a=msid:"):
+            desc.msid = line[7:]
+            if desc.sources:
+                desc.sources[-1].msid = desc.msid
+        elif line in ("a=sendrecv", "a=sendonly", "a=recvonly", "a=inactive"):
+            desc.senders = {"sendrecv": "both", "sendonly": "initiator",
+                            "recvonly": "responder",
+                            "inactive": "none"}[line[2:]]
         elif line.startswith("a=rtpmap:"):
             rest = line[9:]
             try:
@@ -387,6 +523,13 @@ def jingle_contents_from_sdp(sdp: str) -> list:
         return []
     shared = parsed[0]["transport"]
     for item in parsed:
+        desc = item["desc"]
+        # aiortc always uses rtcp-mux; make sure our Jingle advertises it (RFC
+        # 5761) even if the SDP attribute was not recognised.
+        desc.rtcp_mux = True
+        for payload in desc.payloads:
+            if payload.name == "opus" and not payload.parameters:
+                payload.parameters = {"minptime": "10", "useinbandfec": "1"}
         transport = item["transport"]
         if not transport.ufrag and shared.ufrag:
             transport.ufrag = shared.ufrag
@@ -610,6 +753,7 @@ class JingleRtpManager:
             content = self._content_el(name, desc)
             content.append(build_transport(transport))
             jingle.append(content)
+        self._append_bundle(jingle, contents)
         logger.debug("CALL session-initiate -> %s", session.peer_full)
         self.client.xmpp.send(iq)
         session.state = "initiating"
@@ -757,6 +901,7 @@ class JingleRtpManager:
             content = self._content_el(name, desc)
             content.append(build_transport(transport))
             jingle.append(content)
+        self._append_bundle(jingle, contents)
         session.state = "accepted"
         session.my_transport = contents[0][2] if contents else None
         logger.info("CALL session-accept -> %s", session.peer_full)
@@ -912,6 +1057,7 @@ class JingleRtpManager:
             if desc_el is None:
                 continue
             desc = parse_description(desc_el)
+            desc.senders = content.get("senders", "both") or "both"
             transport = parse_transport(transport_el) if transport_el is not None else IceTransport()
             contents.append((name, desc, transport))
         return contents
@@ -926,13 +1072,24 @@ class JingleRtpManager:
         el = ET.Element(_q(NS_JINGLE, "content"))
         el.set("creator", "initiator")
         el.set("name", name)
-        el.set("senders", "both")
+        el.set("senders", desc.senders or "both")
         el.append(build_description(desc))
         return el
 
     def _new_jingle(self, action: str, session: CallSession) -> ET.Element:
         return ET.Element(_q(NS_JINGLE, "jingle"),
                           {"action": action, "sid": session.sid})
+
+    @staticmethod
+    def _append_bundle(jingle: ET.Element, contents: list) -> None:
+        """Advertise BUNDLE grouping so audio+video share one transport."""
+        names = [name for name, _desc, _transport in contents if name]
+        if not names:
+            return
+        group = ET.SubElement(jingle, _q(NS_GROUPING, "group"))
+        group.set("semantics", "BUNDLE")
+        for name in names:
+            ET.SubElement(group, _q(NS_GROUPING, "content")).set("name", name)
 
     @staticmethod
     def _reason(jingle: ET.Element) -> str:

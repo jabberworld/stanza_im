@@ -202,6 +202,84 @@ if HAS_AIORTC:
         print("  trickle error:", exc)
     check("trickled candidate accepted after setRemoteDescription", _trickle_ok)
 
+# ── 3d. media-description fidelity (rtcp-mux/trickle/fmtp/fb/hdrext) ------
+_fid_sdp = (
+    "v=0\r\n"
+    "m=audio 9 UDP/TLS/RTP/SAVPF 96 97\r\n"
+    "a=mid:0\r\n"
+    "a=rtcp-mux\r\n"
+    "a=rtpmap:96 opus/48000/2\r\n"
+    "a=fmtp:96 minptime=10;useinbandfec=1\r\n"
+    "a=rtcp-fb:96 nack\r\n"
+    "a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level\r\n"
+    "a=ssrc:1111 cname:abc\r\n"
+    "a=ssrc:2222 cname:abc\r\n"
+    "a=ssrc-group:FID 1111 2222\r\n"
+    "a=msid:stream1 track1\r\n"
+)
+_fid = jr.parse_sdp(_fid_sdp)[0]["desc"]
+check("parse_sdp rtcp-mux", _fid.rtcp_mux)
+_fid_opus = next(p for p in _fid.payloads if p.id == 96)
+check("parse_sdp fmtp parameters",
+      _fid_opus.parameters.get("minptime") == "10"
+      and _fid_opus.parameters.get("useinbandfec") == "1")
+check("parse_sdp rtcp-fb", ("nack", "") in _fid_opus.rtcp_fb)
+check("parse_sdp extmap", _fid.rtp_hdrext == [
+    (1, "urn:ietf:params:rtp-hdrext:ssrc-audio-level")])
+check("parse_sdp ssrc-group", _fid.ssrc_groups == [("FID", [1111, 2222])])
+check("parse_sdp msid", _fid.msid == "stream1 track1")
+
+_bd = jr.RtpDescription(
+    "audio",
+    [jr.PayloadType(96, "opus", 48000, 2, {"minptime": "10"},
+                    [("nack", "pli")])],
+    [jr.RtpSource(1111, {"cname": "abc"})],
+    rtcp_mux=True, ssrc_groups=[("FID", [1111, 2222])],
+    rtp_hdrext=[(1, "urn:ietf:params:rtp-hdrext:ssrc-audio-level")])
+_bd_el = jr.build_description(_bd)
+check("build_description emits rtcp-mux",
+      _bd_el.find("{%s}rtcp-mux" % jr.NS_RTP) is not None)
+check("build_description emits rtcp-fb",
+      _bd_el.find(".//{%s}rtcp-fb" % jr.NS_RTP_FB) is not None)
+check("build_description emits rtp-hdrext",
+      _bd_el.find("{%s}rtp-hdrext" % jr.NS_RTP_HDREXT) is not None)
+check("build_description emits ssrc-group",
+      _bd_el.find("{%s}ssrc-group" % jr.NS_RTP_SSMA) is not None)
+_bd_rt = jr.parse_description(_bd_el)
+check("rtcp-mux/fb/hdrext/ssrc-group round-trip",
+      _bd_rt.rtcp_mux
+      and _bd_rt.payloads[0].rtcp_fb == [("nack", "pli")]
+      and _bd_rt.rtp_hdrext == [(1, "urn:ietf:params:rtp-hdrext:ssrc-audio-level")]
+      and _bd_rt.ssrc_groups == [("FID", [1111, 2222])])
+
+check("transport advertises trickle option",
+      jr.build_transport(transport).find(
+          "{%s}trickle" % jr.NS_ICE_OPTION) is not None)
+
+_bj = ET.Element("{%s}jingle" % jr.NS_JINGLE)
+jr.JingleRtpManager._append_bundle(_bj, [("0", None, None), ("1", None, None)])
+_grp = _bj.find("{%s}group" % jr.NS_GROUPING)
+check("BUNDLE group advertised",
+      _grp is not None and _grp.get("semantics") == "BUNDLE"
+      and [c.get("name") for c in _grp] == ["0", "1"])
+
+if HAS_AIORTC:
+    async def _offer_contents():
+        pc = RTCPeerConnection()
+        try:
+            pc.addTrack(AudioStreamTrack())
+            await pc.setLocalDescription(await pc.createOffer())
+            return jr.jingle_contents_from_sdp(pc.localDescription.sdp)
+        finally:
+            await pc.close()
+
+    _oc = asyncio.run(_offer_contents())
+    check("aiortc offer -> Jingle advertises rtcp-mux",
+          bool(_oc) and _oc[0][1].rtcp_mux)
+    _opus_p = next((p for p in _oc[0][1].payloads if p.name == "opus"), None)
+    check("aiortc offer -> opus payload has fmtp",
+          _opus_p is not None and bool(_opus_p.parameters))
+
 # ── 3b. camera failure degrades gracefully (no traceback) -----------------
 from stanza_im.xmpp import media as media_mod
 if media_mod.HAS_AIORTC and media_mod.av is not None:
