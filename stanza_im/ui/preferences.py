@@ -304,28 +304,41 @@ class PreferencesDialog(QtWidgets.QDialog):
             combo = self._combo(key, [("prefs_device_default", "")])
             for dev_id, name in devices.get(kind, []):
                 combo.addItem(name or dev_id, dev_id)
-            form.addRow(tr(label_key), combo)
+            controls = [combo]
             if kind == "audio_input":
                 level = QtWidgets.QProgressBar()
                 level.setRange(0, 100)
                 level.setTextVisible(False)
                 level.setMinimumWidth(120)
                 self._mic_level = level
-                button = QtWidgets.QPushButton(tr("prefs_device_mic_test"))
+                button = QtWidgets.QToolButton()
                 button.setCheckable(True)
+                button.setAutoRaise(True)
+                button.setIcon(self._device_test_icon("mic"))
+                button.setIconSize(QtCore.QSize(16, 16))
+                button.setToolTip(tr("prefs_device_mic_test_tip"))
                 button.toggled.connect(self._on_mic_toggled)
                 self._mic_test_button = button
-                form.addRow("", self._row(button, level))
+                controls += [level, button]
             elif kind == "audio_output":
-                button = QtWidgets.QPushButton(tr("prefs_device_speaker_test"))
+                button = QtWidgets.QToolButton()
+                button.setAutoRaise(True)
+                button.setIcon(self._device_test_icon("speaker"))
+                button.setIconSize(QtCore.QSize(16, 16))
+                button.setToolTip(tr("prefs_device_speaker_test_tip"))
                 button.clicked.connect(self._on_speaker_test)
                 self._speaker_test_button = button
-                form.addRow("", self._row(button))
+                controls.append(button)
             elif kind == "video_input":
-                button = QtWidgets.QPushButton(tr("prefs_device_camera_test"))
+                button = QtWidgets.QToolButton()
+                button.setAutoRaise(True)
+                button.setIcon(self._device_test_icon("camera"))
+                button.setIconSize(QtCore.QSize(16, 16))
+                button.setToolTip(tr("prefs_device_camera_test_tip"))
                 button.clicked.connect(self._on_camera_test)
                 self._camera_test_button = button
-                form.addRow("", self._row(button))
+                controls.append(button)
+            form.addRow(tr(label_key), self._row(*controls))
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
@@ -401,6 +414,15 @@ class PreferencesDialog(QtWidgets.QDialog):
         speaker = getattr(self, "_speaker_tester", None)
         if speaker is not None:
             speaker.stop()
+
+    @staticmethod
+    def _device_test_icon(name: str) -> QtGui.QIcon:
+        """16px glyph for the icon-only device self-test buttons."""
+        for ext in ("png", "svg"):
+            icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, f"{name}.{ext}"))
+            if not icon.isNull():
+                return icon
+        return QtGui.QIcon()
 
     @staticmethod
     def _change_password_icon() -> QtGui.QIcon:

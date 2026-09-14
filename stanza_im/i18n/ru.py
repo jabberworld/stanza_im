@@ -755,9 +755,12 @@ STRINGS = {
     'prefs_device_speaker': 'Динамик:',
     'prefs_device_camera': 'Камера:',
     'prefs_device_default': 'Системное по умолчанию',
-    'prefs_device_mic_test': 'Проверить микрофон',
-    'prefs_device_speaker_test': 'Проверить звук',
-    'prefs_device_camera_test': 'Проверить камеру',
+    'prefs_device_mic_test_tip': 'Говорите в микрофон — уровень виден на '
+                                 'индикаторе. Повторный клик останавливает.',
+    'prefs_device_speaker_test_tip': 'Проигрывает короткий звуковой сигнал '
+                                     'на выбранном динамике.',
+    'prefs_device_camera_test_tip': 'Показывает живое изображение с '
+                                    'выбранной камеры.',
     'prefs_device_test_busy': 'Остановите активный звонок, чтобы проверить устройства.',
     'prefs_device_test_failed': 'Не удалось открыть устройство: %(error)s',
     'prefs_device_test_camera_title': 'Проверка камеры',

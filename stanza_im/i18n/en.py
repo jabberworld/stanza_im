@@ -755,9 +755,12 @@ STRINGS = {
     'prefs_device_speaker': 'Speaker:',
     'prefs_device_camera': 'Camera:',
     'prefs_device_default': 'System default',
-    'prefs_device_mic_test': 'Test microphone',
-    'prefs_device_speaker_test': 'Play test sound',
-    'prefs_device_camera_test': 'Test camera',
+    'prefs_device_mic_test_tip': 'Speak into the microphone — the level is '
+                                 'shown on the indicator. Click again to stop.',
+    'prefs_device_speaker_test_tip': 'Plays a short beep on the selected '
+                                     'speaker.',
+    'prefs_device_camera_test_tip': 'Opens a live preview from the selected '
+                                    'camera.',
     'prefs_device_test_busy': 'Stop the active call before testing devices.',
     'prefs_device_test_failed': 'Could not open the device: %(error)s',
     'prefs_device_test_camera_title': 'Camera test',

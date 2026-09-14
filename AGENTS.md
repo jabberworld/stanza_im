@@ -479,8 +479,11 @@ gains a **Devices** page
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
 Multimedia). The page also hosts **self-tests** (`ui/device_test.py`): a live
 microphone peak meter, a speaker test tone and a camera preview window,
-disabled while a call owns the devices. The mic meter and the call's capture
-track read the `QAudioSource` stream directly (`io.read()`/`readyRead`) and
+disabled while a call owns the devices. The self-test controls are icon-only
+buttons on the same row as the device selector; the mic control toggles
+(checkable) the meter, whose level bar sits on the same row. The mic meter and
+the call's capture track read the `QAudioSource` stream directly
+(`io.read()`/`readyRead`) and
 never gate on the QIODevice's `bytesAvailable()` (it can report 0 while audio
 is streaming, which froze the meter and turned calls one-way), so a live
 PulseAudio capture always reaches the app. Capture/playback negotiate a

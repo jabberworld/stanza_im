@@ -181,9 +181,11 @@ endpoint, then DNS SRV.
 
 The Devices page also provides hardware **self-tests** (disabled while a call
 owns the devices): a live microphone peak meter, a speaker test tone and a
-camera preview window (`ui/device_test.py`). The mic meter and the call's
-capture track read the `QAudioSource` stream directly (`io.read()`/`readyRead`)
-and never gate on the QIODevice's `bytesAvailable()` — it can report 0 while
+camera preview window (`ui/device_test.py`). The self-test controls are
+icon-only buttons on the same row as the device selector (the mic control
+toggles the meter, whose level bar sits on the same row). The mic meter and the
+call's capture track read the `QAudioSource` stream directly (`io.read()`/
+`readyRead`) and never gate on the QIODevice's `bytesAvailable()` — it can report 0 while
 audio is streaming, which froze the meter and made calls one-way — so a live
 PulseAudio capture always reaches the app. Capture/playback negotiate a
 device-supported format (`isFormatSupported`, falling back to
@@ -1052,7 +1054,8 @@ client.leave_muji(room)
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
   remote video frames are painted by `VideoView`; Preferences → Devices selects
   the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
-  speaker/camera self-tests (`ui/device_test.py`, disabled during a call). The
+  speaker/camera self-tests (icon-only buttons on the same row as the device
+  selector, `ui/device_test.py`, disabled during a call). The
   mic meter and the capture track read the `QAudioSource` stream directly
   (`io.read()`/`readyRead`) instead of waiting on the QIODevice's
   `bytesAvailable()` (which can report 0 while audio streams, freezing the
