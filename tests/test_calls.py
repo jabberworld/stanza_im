@@ -395,6 +395,88 @@ if media_mod.HAS_AIORTC and media_mod.av is not None:
         print("  video recv-after-stop error:", exc)
     check("video recv after stop returns a frame", _vstopped_ok)
 
+# ── 3d. mute/camera toggles mute capture (silence/black) -------------------
+if media_mod.HAS_AIORTC and media_mod.av is not None:
+    class _FakeIO:
+        def __init__(self, payload: bytes):
+            self.payload = payload
+            self.read_calls = 0
+
+        def read(self, n):
+            self.read_calls += 1
+            if not self.payload:
+                return b""
+            chunk, self.payload = self.payload[:n], self.payload[n:]
+            return chunk
+
+    _AUDIO_BYTES = (media_mod.AUDIO_SAMPLES_PER_FRAME
+                    * media_mod.AUDIO_CHANNELS * 2)
+
+    async def _muted_audio_never_reads_io():
+        track = media_mod._AudioCaptureTrack("")
+        track._io = _FakeIO(b"\x00" * _AUDIO_BYTES)
+        track._enabled = False
+        frame = await track.recv()
+        return (track._io.read_calls == 0
+                and frame is not None and frame.pts is not None)
+
+    check("muted microphone sends silence without reading the device",
+          asyncio.run(_muted_audio_never_reads_io()))
+
+    async def _enabled_audio_reads_io():
+        track = media_mod._AudioCaptureTrack("")
+        io = _FakeIO(b"\x55" * _AUDIO_BYTES)
+        track._io = io
+        track._enabled = True
+        frame = await track.recv()
+        return io.read_calls > 0 and frame is not None
+
+    check("unmuted microphone reads the device again",
+          asyncio.run(_enabled_audio_reads_io()))
+
+    class _FakeStream:
+        pass
+
+    class _FakeVideoContainer:
+        streams = type("_S", (), {"video": [_FakeStream()]})()
+
+        def __init__(self):
+            self.decode_calls = 0
+
+        def decode(self, stream):
+            self.decode_calls += 1
+            frame = media_mod.av.VideoFrame(160, 120, "yuv420p")
+            for plane in frame.planes:
+                plane.update(b"\x55" * plane.buffer_size)
+            yield frame
+
+        def close(self):
+            pass
+
+    async def _video_toggle_behavior():
+        track = media_mod._VideoCaptureTrack("/dev/video_does_not_exist_xyz")
+        container = _FakeVideoContainer()
+        track._container = container
+        track._stream = container.streams.video[0]
+        track._enabled = False
+        off_frame = await track.recv()
+        off_ok = (off_frame is not None and off_frame.pts is not None
+                  and container.decode_calls == 0)
+        track._enabled = True
+        on_frame = await track.recv()
+        on_ok = (on_frame is not None and on_frame.pts is not None
+                 and container.decode_calls > 0)
+        return off_ok, on_ok
+
+    try:
+        _vb = asyncio.run(_video_toggle_behavior())
+    except Exception as exc:
+        _vb = (False, False)
+        print("  video toggle error:", exc)
+    check("camera off sends a muted frame without touching the device",
+          _vb[0])
+    check("camera on resumes real capture", _vb[1])
+
 # ── 4. XEP-0215 normalisation ---------------------------------------------
 servers = discovery.ice_servers_from_services([
     {"type": "stun", "host": "s.example", "port": 3478, "transport": "udp"},
@@ -783,6 +865,125 @@ check("outgoing audio call preview keeps the video surface hidden",
       _ringing_video(False) == [False])
 check("ringing with unknown session defaults to audio",
       _ringing_video(None) == [False])
+
+# ── 10f. audio/camera toggles reach the media engine ------------------------
+if media_mod.HAS_AIORTC:
+    class _FakeLocalTrack:
+        def __init__(self):
+            self.calls = []
+
+        def set_enabled(self, enabled):
+            self.calls.append(enabled)
+
+    def _engine_toggle_result(attr, method, values):
+        call = media_mod.AiortcCall.__new__(media_mod.AiortcCall)
+        track = _FakeLocalTrack()
+        setattr(call, attr, track)
+        for v in values:
+            getattr(call, method)(v)
+        return track.calls
+
+    check("set_audio_enabled forwards to the local audio track",
+          _engine_toggle_result("_local_audio", "set_audio_enabled",
+                                [False, True]) == [False, True])
+    check("set_video_enabled forwards to the local video track",
+          _engine_toggle_result("_local_video", "set_video_enabled",
+                                [True, False]) == [True, False])
+
+    _bare_call = media_mod.AiortcCall.__new__(media_mod.AiortcCall)
+    _bare_call._local_audio = None
+    _bare_call._local_video = None
+    _bare_call.set_audio_enabled(False)
+    _bare_call.set_video_enabled(False)
+    check("engine toggles tolerate missing tracks", True)
+
+
+class _FakeEngineCall:
+    def __init__(self):
+        self.calls = []
+
+    def set_audio_enabled(self, v):
+        self.calls.append(("audio", v))
+
+    def set_video_enabled(self, v):
+        self.calls.append(("video", v))
+
+
+def _manager_toggle_result():
+    mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
+    mgr.sessions = {"s1": type("_S", (), {"call": _FakeEngineCall()})()}
+    mgr.set_call_audio("s1", False)
+    mgr.set_call_video("s1", True)
+    return mgr.sessions["s1"].call.calls
+
+
+check("manager routes audio/camera toggles to the session engine",
+      _manager_toggle_result() == [("audio", False), ("video", True)])
+
+_mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
+_mgr.sessions = {}
+_mgr.set_call_audio("none", False)
+_mgr.set_call_video("none", True)
+check("manager toggles tolerate unknown sessions", True)
+
+
+class _FakeRtpCallApi:
+    def __init__(self):
+        self.calls = []
+
+    def set_call_audio(self, sid, enabled):
+        self.calls.append(("a", sid, enabled))
+
+    def set_call_video(self, sid, enabled):
+        self.calls.append(("v", sid, enabled))
+
+
+def _client_toggle_result():
+    c = JabberClient.__new__(JabberClient)
+    c.rtp_calls = _FakeRtpCallApi()
+    c.set_call_audio("s1", False)
+    c.set_call_video("s1", True)
+    return c.rtp_calls.calls
+
+
+check("client audio/camera toggles proxy to rtp_calls",
+      _client_toggle_result() == [("a", "s1", False), ("v", "s1", True)])
+
+# ── 10g. call-window controls toggle sending, not the remote view -----------
+from stanza_im.i18n import tr
+
+
+def _call_window_toggle_result():
+    win = CallWindow("s1", "peer", video=True)
+    seen_a, seen_c = [], []
+    win.audio_toggled.connect(lambda sid, en: seen_a.append((sid, en)))
+    win.camera_toggled.connect(lambda sid, en: seen_c.append((sid, en)))
+    win._on_mute(True)
+    win._on_camera(False)
+    off_text = win._cam_btn.text()
+    win._on_mute(False)
+    win._on_camera(True)
+    return (seen_a, seen_c,
+            win._video_view.isVisibleTo(win), off_text)
+
+
+_aw, _cw, _view_visible, _cam_text = _call_window_toggle_result()
+check("mute emits audio_toggled for both ways",
+      _aw == [("s1", False), ("s1", True)])
+check("camera emits camera_toggled for both ways",
+      _cw == [("s1", False), ("s1", True)])
+check("turning the camera off keeps the remote video visible", _view_visible)
+check("camera off relabels the button", _cam_text == tr("call_camera_off"))
+
+_vw = CallWindow("s1", "peer", video=True)
+_aw = CallWindow("s1", "peer", video=False)
+check("video-call window shows the camera and remote video",
+      _vw._cam_btn.isVisibleTo(_vw) and _vw._video_view.isVisibleTo(_vw))
+check("audio-call window hides the camera and remote video",
+      not _aw._cam_btn.isVisibleTo(_aw)
+      and not _aw._video_view.isVisibleTo(_aw))
+_vw.close()
+_aw.close()
 
 # ── 11. config defaults ---------------------------------------------------
 cfg = Config()

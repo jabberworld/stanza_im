@@ -2724,6 +2724,14 @@ class JabberClient:
     def end_call(self, sid: str) -> None:
         self._start_task(self.rtp_calls.end_call(sid))
 
+    def set_call_audio(self, sid: str, enabled: bool) -> None:
+        """Mute/unmute the outgoing microphone (silence frames)."""
+        self.rtp_calls.set_call_audio(sid, enabled)
+
+    def set_call_video(self, sid: str, enabled: bool) -> None:
+        """Turn the local camera on/off (black frames to the peer)."""
+        self.rtp_calls.set_call_video(sid, enabled)
+
     # ── Muji conference API (XEP-0272) ────────────────────────────
 
     def join_muji(self, room: str, nick: str, video: bool = False) -> None:

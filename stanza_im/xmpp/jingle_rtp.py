@@ -1143,6 +1143,26 @@ class JingleRtpManager:
             self._terminate(session, "success", send=True)
             self._close_session(session, "ended", "hangup")
 
+    def set_call_audio(self, sid: str, enabled: bool) -> None:
+        """Mute/unmute outgoing audio (silence frames, no renegotiation)."""
+        self._set_track_enabled(sid, "set_audio_enabled", enabled)
+
+    def set_call_video(self, sid: str, enabled: bool) -> None:
+        """Turn the local camera on/off (black frames, no renegotiation)."""
+        self._set_track_enabled(sid, "set_video_enabled", enabled)
+
+    def _set_track_enabled(self, sid: str, method: str,
+                           enabled: bool) -> None:
+        session = self.sessions.get(sid)
+        call = getattr(session, "call", None) if session else None
+        fn = getattr(call, method, None)
+        if callable(fn):
+            try:
+                fn(enabled)
+                logger.info("CALL %s(%s) sid=%s", method, enabled, sid)
+            except Exception:
+                logger.exception("CALL %s failed for sid=%s", method, sid)
+
     def _terminate(self, session: CallSession, reason: str,
                    send: bool = False) -> None:
         if send and session.sid in self.sessions:

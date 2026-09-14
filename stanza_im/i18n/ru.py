@@ -741,6 +741,7 @@ STRINGS = {
     'call_mute': 'Без звука',
     'call_unmute': 'Со звуком',
     'call_camera': 'Камера',
+    'call_camera_off': 'Камера выкл.',
     'call_connecting': 'Соединение…',
     'call_active': 'В звонке',
     'call_ended': 'Звонок завершён',

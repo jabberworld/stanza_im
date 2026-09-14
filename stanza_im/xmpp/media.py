@@ -284,6 +284,7 @@ if HAS_AIORTC:
             self._io = None
             self._pts = 0
             self._stopped = False
+            self._enabled = True
             self.kind = "audio"
             self._rate, self._channels = AUDIO_RATE, AUDIO_CHANNELS
             self._av_fmt = AUDIO_FORMAT
@@ -327,13 +328,16 @@ if HAS_AIORTC:
                 return None
             return frames[0] if frames else None
 
+        def set_enabled(self, enabled: bool) -> None:
+            self._enabled = enabled
+
         async def recv(self):
             def _silent():
                 return self._stamp(_silence(AUDIO_SAMPLES_PER_FRAME,
                                             AUDIO_CHANNELS))
 
             io = self._io
-            if self._stopped or io is None:
+            if self._stopped or not self._enabled or io is None:
                 await asyncio.sleep(0.02)
                 return _silent()
             deadline = asyncio.get_event_loop().time() + 0.25
@@ -456,6 +460,7 @@ if HAS_AIORTC:
             self._container = None
             self._stream = None
             self._stopped = False
+            self._enabled = True
             self._device_id = device_id or ""
             self._start()
 
@@ -482,6 +487,9 @@ if HAS_AIORTC:
                 logger.warning("CALL camera open failed for %s: %s", path, exc)
                 self._container = None
 
+        def set_enabled(self, enabled: bool) -> None:
+            self._enabled = enabled
+
         async def recv(self):
             # aiortc >= 1.10: next_timestamp() is async and returns
             # (pts, time_base) in the video clock rate.
@@ -493,7 +501,8 @@ if HAS_AIORTC:
                 frame.time_base = time_base
                 return frame
 
-            if self._stopped or self._container is None or self._stream is None:
+            if (self._stopped or not self._enabled
+                or self._container is None or self._stream is None):
                 await asyncio.sleep(0.05)
                 return _black()
             loop = asyncio.get_event_loop()
@@ -804,6 +813,14 @@ if HAS_AIORTC:
                 self.devices.get("video_input", ""))
             self.pc.addTrack(self._local_video)
             logger.info("CALL added local video track")
+
+        def set_audio_enabled(self, enabled: bool) -> None:
+            if self._local_audio is not None:
+                self._local_audio.set_enabled(enabled)
+
+        def set_video_enabled(self, enabled: bool) -> None:
+            if self._local_video is not None:
+                self._local_video.set_enabled(enabled)
 
         # ── SDP ───────────────────────────────────────────────────
         async def create_offer(self) -> str:

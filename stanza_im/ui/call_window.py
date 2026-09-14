@@ -84,8 +84,8 @@ class CallWindow(QtWidgets.QWidget):
     """Active call window with remote video and controls."""
 
     hangup = QtCore.pyqtSignal(str)          # sid
-    mute_toggled = QtCore.pyqtSignal(str, bool)
-    video_toggled = QtCore.pyqtSignal(str, bool)
+    audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
+    camera_toggled = QtCore.pyqtSignal(str, bool)   # outgoing video enabled
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None):
         super().__init__(parent)
@@ -95,7 +95,7 @@ class CallWindow(QtWidgets.QWidget):
         self.setWindowTitle(tr("call_window_title", peer=peer))
         self.setMinimumSize(420, 340)
         self._muted = False
-        self._video_on = video
+        self._camera_on = video
 
         layout = QtWidgets.QVBoxLayout(self)
         self._title = QtWidgets.QLabel(peer, self)
@@ -123,7 +123,7 @@ class CallWindow(QtWidgets.QWidget):
         self._cam_btn.setCheckable(True)
         self._cam_btn.setChecked(video)
         self._cam_btn.setVisible(video)
-        self._cam_btn.toggled.connect(self._on_video)
+        self._cam_btn.toggled.connect(self._on_camera)
         controls.addWidget(self._cam_btn)
         controls.addStretch(1)
 
@@ -141,12 +141,13 @@ class CallWindow(QtWidgets.QWidget):
     def _on_mute(self, checked):
         self._muted = checked
         self._mute_btn.setText(tr("call_unmute") if checked else tr("call_mute"))
-        self.mute_toggled.emit(self.sid, checked)
+        self.audio_toggled.emit(self.sid, not checked)
 
-    def _on_video(self, checked):
-        self._video_on = checked
-        self._video_view.setVisible(checked)
-        self.video_toggled.emit(self.sid, checked)
+    def _on_camera(self, checked):
+        self._camera_on = checked
+        self._cam_btn.setText(tr("call_camera_off") if not checked
+                              else tr("call_camera"))
+        self.camera_toggled.emit(self.sid, checked)
 
     def closeEvent(self, event):
         # Closing the window also ends the call.

@@ -1054,7 +1054,11 @@ client.leave_muji(room)
 - STUN/TURN: `client.ice_servers()` merges XEP-0215 `urn:xmpp:extdisco:2`
   services (with credentials) with `connection.stun_turn_*` and SRV discovery.
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
-  remote video frames are painted by `VideoView`; Preferences → Devices selects
+  remote video frames are painted by `VideoView`; the call-window "Mute" and
+  "Camera" buttons toggle the **outgoing** capture (silence / black frames via
+  `set_audio_enabled`/`set_video_enabled`, no SDP renegotiation) and never
+  affect the received stream — the remote view stays visible. Preferences →
+  Devices selects
   the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
   speaker/camera self-tests (icon-only buttons on the same row as the device
   selector, `ui/device_test.py`, disabled during a call). The

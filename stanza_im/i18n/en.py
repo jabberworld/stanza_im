@@ -741,6 +741,7 @@ STRINGS = {
     'call_mute': 'Mute',
     'call_unmute': 'Unmute',
     'call_camera': 'Camera',
+    'call_camera_off': 'Camera off',
     'call_connecting': 'Connecting…',
     'call_active': 'In call',
     'call_ended': 'Call ended',

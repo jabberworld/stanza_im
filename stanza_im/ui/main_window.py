@@ -1592,6 +1592,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # would embed it over the roster).
         window = CallWindow(sid, peer, video)
         window.hangup.connect(self._on_call_hangup)
+        window.audio_toggled.connect(self._on_call_audio_toggled)
+        window.camera_toggled.connect(self._on_call_camera_toggled)
         self._place_window_near_main(window)
         window.show()
         window.raise_()
@@ -1645,6 +1647,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_call_hangup(self, sid: str) -> None:
         if self._client:
             self._client.end_call(sid)
+
+    def _on_call_audio_toggled(self, sid: str, enabled: bool) -> None:
+        if self._client:
+            self._client.set_call_audio(sid, enabled)
+
+    def _on_call_camera_toggled(self, sid: str, enabled: bool) -> None:
+        if self._client:
+            self._client.set_call_video(sid, enabled)
 
     # ── Muji conference ──────────────────────────────────────────
 

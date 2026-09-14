@@ -476,7 +476,12 @@ and an icon-only button in the chat toolbar (both enabled only for capable
 contacts). `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
-over the roster); remote video frames are painted by `VideoView`. Preferences
+over the roster); remote video frames are painted by `VideoView`. Its
+"Мute"/"Camera" buttons toggle the **outgoing** capture — the muted
+microphone sends silence and the switched-off camera sends black frames
+(`set_audio_enabled`/`set_video_enabled`, no renegotiation, tracks stay
+attached), while received audio/video keeps playing and the remote view is
+never hidden. Preferences
 gains a **Devices** page
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
 Multimedia). The page also hosts **self-tests** (`ui/device_test.py`): a live
