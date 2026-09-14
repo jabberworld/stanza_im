@@ -1270,6 +1270,8 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("contact_pep_updated", self._on_contact_pep_updated)
         c.on("contact_caps", self._on_contact_caps)
         c.on("call_incoming", self._on_call_incoming)
+        c.on("call_proposed", self._on_call_proposed)
+        c.on("call_proposal_ended", self._on_call_proposal_ended)
         c.on("call_state", self._on_call_state)
         c.on("call_video_frame", self._on_call_video_frame)
         c.on("call_ended", self._on_call_ended)
@@ -1555,18 +1557,54 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.raise_()
         dlg.activateWindow()
 
+    def _on_call_proposed(self, sid: str, peer: str, kind: str) -> None:
+        """An incoming XEP-0353 proposal (ring) before the Jingle session."""
+        if not self._client:
+            return
+        self._client.call_devices = self._call_device_config()
+        logger.info("CALL proposed by %s (sid=%s kind=%s)", peer, sid, kind)
+        if self._client.call_auto_accept:
+            self._client.answer_proposal(sid, True, kind == "video")
+            return
+        from stanza_im.ui.call_window import IncomingCallDialog
+        dlg = IncomingCallDialog(peer, kind, self)
+        dlg.decision.connect(
+            lambda accept, video: self._client.answer_proposal(
+                sid, accept, video))
+        self._incoming_calls[sid] = dlg
+        dlg.finished.connect(lambda _r, s=sid: self._incoming_calls.pop(s, None))
+        self._place_dialog_over(dlg, self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _on_call_proposal_ended(self, sid: str, reason: str) -> None:
+        dlg = self._incoming_calls.pop(sid, None)
+        if dlg is not None:
+            dlg.close()
+
     def _open_call_window(self, sid: str, peer: str, video: bool = False):
         window = self._call_windows.get(sid)
         if window is not None:
             return window
         from stanza_im.ui.call_window import CallWindow
-        window = CallWindow(sid, peer, video, parent=self)
+        # A separate top-level window (never a child of the main window, which
+        # would embed it over the roster).
+        window = CallWindow(sid, peer, video)
         window.hangup.connect(self._on_call_hangup)
+        self._place_window_near_main(window)
         window.show()
         window.raise_()
         window.activateWindow()
         self._call_windows[sid] = window
         return window
+
+    def _place_window_near_main(self, window) -> None:
+        try:
+            geo = self.geometry()
+            window.move(geo.right() + 20, geo.top() + 40)
+        except Exception:
+            pass
 
     def _on_call_state(self, sid: str, peer: str, state: str) -> None:
         if state == "ringing":
@@ -1622,8 +1660,9 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.call_window import MujiCallWindow
         window = self._muji_windows.get(room)
         if window is None:
-            window = MujiCallWindow(room, parent=self)
+            window = MujiCallWindow(room)
             window.leave.connect(self._client.leave_muji)
+            self._place_window_near_main(window)
             window.show()
             self._muji_windows[room] = window
         self._on_muji_updated(room)
@@ -1821,6 +1860,8 @@ class MainWindow(QtWidgets.QMainWindow):
             menu.close()
             QtCore.QTimer.singleShot(0, callback)
 
+        if self._client:
+            self._client.ensure_caps(jid)
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))

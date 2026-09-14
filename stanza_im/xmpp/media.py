@@ -242,6 +242,34 @@ def _black_frame():
     return frame
 
 
+def _valid_ice_servers(ice_servers):
+    """Drop ICE server entries aiortc's URI parser rejects (defensive)."""
+    if not HAS_AIORTC:
+        return []
+    from aiortc.rtcicetransport import parse_stun_turn_uri
+    valid: list[dict] = []
+    seen: set[str] = set()
+    for server in ice_servers or []:
+        urls = server.get("urls")
+        candidates = urls if isinstance(urls, (list, tuple)) else [urls]
+        ok: list[str] = []
+        for url in candidates:
+            try:
+                parse_stun_turn_uri(url)
+            except Exception as exc:
+                logger.warning("CALL dropping malformed ICE server %r: %s",
+                               url, exc)
+                continue
+            if url not in seen:
+                seen.add(url)
+                ok.append(url)
+        if ok:
+            entry = dict(server)
+            entry["urls"] = ok[0] if len(ok) == 1 else ok
+            valid.append(entry)
+    return valid
+
+
 class MediaEngine:
     """Base media engine interface."""
 
@@ -276,10 +304,11 @@ if HAS_AIORTC:
             self._tasks: list[asyncio.Task] = []
             self._local_audio = None
             self._local_video = None
-            cfg = RTCConfiguration(iceServers=[
-                RTCIceServer(**s) for s in (ice_servers or [])])
+            servers = _valid_ice_servers(ice_servers)
             logger.info("CALL creating RTCPeerConnection, ICE servers=%s",
-                        [s.get("urls") for s in (ice_servers or [])])
+                        [s.get("urls") for s in servers])
+            cfg = RTCConfiguration(iceServers=[
+                RTCIceServer(**s) for s in servers])
             self.pc = RTCPeerConnection(cfg)
             self.pc.on("icecandidate", self._on_ice_candidate)
             self.pc.on("track", self._on_track)
@@ -379,22 +408,27 @@ if HAS_AIORTC:
             logger.debug("CALL remote %s SDP:\n%s", kind, sdp)
             await self.pc.setRemoteDescription(RTCSessionDescription(sdp, kind))
 
-        async def add_ice(self, line: str, sdp_mid: str = "",
+        async def add_ice(self, cand: dict, sdp_mid: str = "",
                           sdp_mline_index: int = 0) -> None:
+            """Add a remote ICE candidate described by a plain dict."""
             try:
-                cand = RTCIceCandidate(
-                    component=1, foundation="0", ip=line.split(" ")[4]
-                    if len(line.split(" ")) > 5 else "",
-                    port=int(line.split(" ")[5]) if len(line.split(" ")) > 5
-                    else 0, priority=0, protocol="udp", type="host",
+                candidate = RTCIceCandidate(
+                    component=int(cand.get("component", 1)),
+                    foundation=str(cand.get("foundation", "0") or "0"),
+                    ip=str(cand.get("ip", "")),
+                    port=int(cand.get("port", 0)),
+                    priority=int(cand.get("priority", 0)),
+                    protocol=str(cand.get("protocol", "udp") or "udp"),
+                    type=str(cand.get("type", "host") or "host"),
+                    relatedAddress=cand.get("relatedAddress") or None,
+                    relatedPort=cand.get("relatedPort") or None,
                     sdpMid=sdp_mid, sdpMLineIndex=sdp_mline_index)
+                await self.pc.addIceCandidate(candidate)
+                logger.debug("CALL added remote candidate %s:%s typ=%s mid=%s",
+                             candidate.ip, candidate.port, candidate.type,
+                             sdp_mid)
             except Exception:
-                cand = None
-            if cand is not None:
-                try:
-                    await self.pc.addIceCandidate(cand)
-                except Exception:
-                    logger.debug("CALL addIceCandidate failed", exc_info=True)
+                logger.exception("CALL addIceCandidate failed (%s)", cand)
 
         def close(self):
             logger.info("CALL closing peer connection")

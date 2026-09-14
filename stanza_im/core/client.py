@@ -28,6 +28,7 @@ from stanza_im.xmpp import jingle as jingle_mod
 from stanza_im.xmpp import jingle_rtp
 from stanza_im.xmpp.jingle import JingleFileTransferManager
 from stanza_im.xmpp.jingle_rtp import JingleRtpManager
+from stanza_im.xmpp import muji as muji_mod
 from stanza_im.xmpp.muji import MujiManager
 from stanza_im.include import pep
 
@@ -459,6 +460,7 @@ class JabberClient:
         self._pep_fetched: set[str] = set()
         # XEP-0115 features per full JID (for call-capability gating)
         self.contact_features: dict[str, set] = {}
+        self._caps_inflight: set[str] = set()
         self._muc_subjects: dict[str, list[tuple[str, str]]] = {}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
         self._mam_cursors: dict[str, str] = {}
@@ -485,6 +487,7 @@ class JabberClient:
         self.xmpp.add_event_handler("presence_error", self._on_presence_error)
         self.xmpp.add_event_handler("roster_update", self._on_roster_update)
         self.xmpp.add_event_handler("chatstate", self._on_chatstate)
+        self.xmpp.add_event_handler("entity_caps", self._on_entity_caps)
         self.xmpp.add_event_handler("receipt_received", self._on_receipt_received)
         self.xmpp.add_event_handler("carbon_received", self._on_carbon_received)
         self.xmpp.add_event_handler("carbon_sent", self._on_carbon_sent)
@@ -523,6 +526,32 @@ class JabberClient:
         _handler("IBB Data",
                  "{%s}data" % jingle_mod.NS_IBB_OLD,
                  manager.handle_ibb_data)
+
+        # slixmpp only fires the `message` event for messages that carry a
+        # <body> (basexmpp registers the IM handler as message/body), so
+        # bodyless XEP-0353 proposals and XEP-0482 invites need their own
+        # matchers.
+        msg_ns = "{jabber:client}message"
+        self.xmpp.register_handler(CoroutineCallback(
+            "Jingle Message",
+            MatchXPath("%s/{%s}*" % (msg_ns, jingle_rtp.NS_JINGLE_MSG)),
+            self._on_jingle_message_stanza))
+        self.xmpp.register_handler(CoroutineCallback(
+            "Call Invite",
+            MatchXPath("%s/{%s}*" % (msg_ns, muji_mod.NS_CALL_INVITES)),
+            self._on_call_invite_stanza))
+
+    async def _on_jingle_message_stanza(self, msg) -> None:
+        try:
+            self.rtp_calls.handle_message(msg)
+        except Exception:
+            logger.exception("CALL jingle-message handling failed")
+
+    async def _on_call_invite_stanza(self, msg) -> None:
+        try:
+            self.muji.handle_invite_message(msg)
+        except Exception:
+            logger.exception("MUJI invite handling failed")
 
     async def _dispatch_jingle_iq(self, iq) -> None:
         """Ack a Jingle IQ once and route it to FT or RTP."""
@@ -2341,12 +2370,6 @@ class JabberClient:
         return None
 
     def _on_message(self, msg) -> None:
-        # XEP-0482 call invites (Muji conference invitations).
-        if self.muji.handle_invite_message(msg):
-            return
-        # XEP-0353 Jingle Message Initiation (ring / proceed / reject / …).
-        if self.rtp_calls.handle_message(msg):
-            return
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
@@ -2575,24 +2598,88 @@ class JabberClient:
     # ── Capabilities (XEP-0115) for call gating ───────────────────
 
     async def _load_caps(self, full_jid: str) -> None:
-        """Fetch and cache the entity-capabilities features for a resource."""
+        """Fetch and cache the entity-capabilities features for a resource.
+
+        slixmpp resolves a presence's ``<c ver/>`` asynchronously (disco#info
+        to the caps node), so ``get_caps`` can return nothing for a while after
+        the presence arrives; retry with backoff until it resolves.
+        """
+        if not full_jid or full_jid in self._caps_inflight:
+            return
+        self._caps_inflight.add(full_jid)
         try:
-            caps = await self.xmpp.plugin["xep_0115"].get_caps(full_jid)
-        except Exception as exc:
-            logger.debug("caps lookup failed for %s: %s", full_jid, exc)
+            features: set[str] = set()
+            for delay in (0.0, 0.5, 1.0, 2.0, 4.0):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    caps = await self.xmpp.plugin["xep_0115"].get_caps(full_jid)
+                except Exception as exc:
+                    logger.debug("caps lookup failed for %s: %s", full_jid, exc)
+                    caps = None
+                features = self._features_from_caps(caps)
+                if features:
+                    break
+            if not features:
+                logger.debug("CAPS %s: no features resolved", full_jid)
+                return
+            self.contact_features[full_jid] = features
+            bare = full_jid.split("/")[0]
+            logger.debug("CAPS %s: %d features", full_jid, len(features))
+            self.emit("contact_caps", bare)
+        finally:
+            self._caps_inflight.discard(full_jid)
+
+    @staticmethod
+    def _features_from_caps(caps) -> set[str]:
+        if caps is None:
+            return set()
+        try:
+            return set(caps.get_features())
+        except AttributeError:
+            try:
+                return set(caps.get("features") or [])
+            except Exception:
+                return set()
+
+    def _on_entity_caps(self, pres) -> None:
+        """slixmpp processed a caps presence — resolve our feature cache."""
+        try:
+            full_jid = str(pres["from"])
+        except Exception:
+            return
+        if "/" not in full_jid:
+            return
+        self._start_task(self._load_caps(full_jid))
+
+    def ensure_caps(self, bare: str) -> None:
+        """Fallback: query a resource's disco#info if caps are still unknown."""
+        if any(jid.split("/")[0] == bare for jid in self.contact_features):
+            return
+        best = ""
+        for candidate, info in (self.presences or {}).items():
+            if (candidate.split("/")[0] == bare
+                    and info.get("type") == "available"):
+                best = candidate
+                break
+        if best:
+            self._start_task(self._load_caps_from_disco(best))
+
+    async def _load_caps_from_disco(self, full_jid: str) -> None:
+        try:
+            info = await self.xmpp.plugin["xep_0030"].get_info(full_jid)
+        except Exception:
+            logger.debug("disco#info failed for %s", full_jid)
             return
         features: set[str] = set()
-        if caps is not None:
-            try:
-                features = set(caps.get_features())
-            except AttributeError:
-                features = set(caps.get("features") or [])
-        if not features:
-            return
-        self.contact_features[full_jid] = features
-        bare = full_jid.split("/")[0]
-        logger.debug("CAPS %s: %d features", full_jid, len(features))
-        self.emit("contact_caps", bare)
+        xml = getattr(info, "xml", None)
+        if xml is not None:
+            features = {el.get("var") or "" for el in xml.iter(
+                "{%s}feature" % NS_DISCO_INFO)}
+        if features:
+            self.contact_features[full_jid] = features
+            logger.debug("CAPS(disco) %s: %d features", full_jid, len(features))
+            self.emit("contact_caps", full_jid.split("/")[0])
 
     def supports_feature(self, bare: str, feature: str,
                          full_jid: str = "") -> bool:
@@ -2628,6 +2715,11 @@ class JabberClient:
 
     def answer_call(self, sid: str, accept: bool, video: bool = False) -> None:
         self._start_task(self.rtp_calls.answer_call(sid, accept, video))
+
+    def answer_proposal(self, sid: str, accept: bool,
+                        video: bool = False) -> None:
+        """Accept/reject a XEP-0353 proposal (sends proceed/reject)."""
+        self.rtp_calls.answer_proposal(sid, accept, video)
 
     def end_call(self, sid: str) -> None:
         self._start_task(self.rtp_calls.end_call(sid))

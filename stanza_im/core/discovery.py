@@ -233,24 +233,46 @@ async def discover_external_services(xmpp, domain: str,
 
 
 def ice_servers_from_services(services: list[dict]) -> list[dict]:
-    """Normalize STUN/TURN service dicts into ``aiortc`` ICE server dicts."""
+    """Normalize STUN/TURN service dicts into ``aiortc`` ICE server dicts.
+
+    aiortc's URI parser only accepts IPv4/hostname hosts, forbids a
+    ``?transport=`` on ``stun:`` URIs and only reliably handles STUN over UDP
+    and TURN over UDP here, so IPv6 hosts, STUN-with-transport and non-UDP
+    entries are dropped (with a debug log).
+    """
     servers: list[dict] = []
+    seen: set[str] = set()
     for entry in services or []:
-        host = entry.get("host") or ""
+        host = (entry.get("host") or "").strip()
         if not host:
+            continue
+        if ":" in host:  # IPv6 literal — unsupported by aiortc's parser
+            logger.debug("ICE: skipping IPv6 service host %s", host)
             continue
         stype = (entry.get("type") or "stun").lower()
         transport = (entry.get("transport") or "udp").lower()
-        url = "%s:%s:%s" % (stype, host, int(entry.get("port") or 0))
+        port = int(entry.get("port") or 0)
         if stype == "stun":
-            if transport == "tcp":
-                url += "?transport=tcp"
-        else:  # turn
-            url += "?transport=%s" % transport
-        server: dict = {"urls": url}
-        if stype == "turn" and entry.get("username"):
-            server["username"] = entry["username"]
-            server["credential"] = entry.get("password") or ""
+            if transport != "udp":
+                logger.debug("ICE: skipping STUN/%s (aiortc forbids transport)",
+                             transport)
+                continue
+            url = "stun:%s:%s" % (host, port)
+            server: dict = {"urls": url}
+        elif stype == "turn":
+            if transport != "udp":
+                logger.debug("ICE: skipping TURN/%s (unsupported)", transport)
+                continue
+            url = "turn:%s:%s?transport=udp" % (host, port)
+            server = {"urls": url}
+            if entry.get("username"):
+                server["username"] = entry["username"]
+                server["credential"] = entry.get("password") or ""
+        else:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
         servers.append(server)
     return servers
 

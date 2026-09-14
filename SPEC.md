@@ -1019,7 +1019,11 @@ client.leave_muji(room)
   converted to SDP so `aiortc` (`xmpp/media.py`) provides ICE, DTLS-SRTP and RTP.
   Candidates are offered in `session-initiate`/`accept` and trickled via
   `transport-info`. Peers advertising `urn:xmpp:jingle-message:0` are rung with
-  XEP-0353 propose/proceed first.
+  XEP-0353 propose/proceed first. slixmpp only fires the `message` event for
+  stanzas with a `<body>`, so bodyless propose/retract and XEP-0482 invites have
+  dedicated `MatchXPath` handlers; proposals are answered with
+  `client.answer_proposal` (`proceed`/`reject`) and the following
+  session-initiate is auto-accepted.
 - Capability gating mirrors Conversations: `client.supports_calls(bare, video)`
   checks the peer's XEP-0115 caps (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 +
   rtp:audio [+ rtp:video]`). The roster contact context menu and the chat

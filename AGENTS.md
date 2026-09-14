@@ -447,6 +447,12 @@ converts them to/from an SDP offer/answer that `aiortc` understands
 ICE/DTLS/SRTP/RTP path. Candidates are sent in `session-initiate`/`accept` and
 trickled via `transport-info`. When the peer advertises `urn:xmpp:jingle-message:0`
 the call is announced with XEP-0353 propose/proceed before `session-initiate`.
+Bodyless `<message>` stanzas (propose/retract and XEP-0482 invites) never reach
+the core `message` event — slixmpp registers its IM handler as
+`message/body` — so they have dedicated `MatchXPath` handlers
+(`_on_jingle_message_stanza`/`_on_call_invite_stanza`). Incoming proposals are
+answered via `client.answer_proposal(sid, accept)` (sends `proceed`/`reject`);
+the session-initiate that follows a `proceed` is auto-accepted.
 `client.supports_calls(bare, video)` gates the UI on the peer's XEP-0115 caps
 (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 + rtp:audio [+ rtp:video]`, fetched
 per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
@@ -454,8 +460,10 @@ per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
 SRV discovery). The call menu is a submenu in the roster contact context menu
 and an icon-only button in the chat toolbar (both enabled only for capable
 contacts). `ui/call_window.CallWindow` shows the active call and
-`IncomingCallDialog` prompts for incoming offers; remote video frames are
-painted by `VideoView`. Preferences gains a **Devices** page
+`IncomingCallDialog` prompts for incoming offers; both are **separate
+top-level windows** (never children of the main window, which would embed them
+over the roster); remote video frames are painted by `VideoView`. Preferences
+gains a **Devices** page
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
 Multimedia). Muji (XEP-0272) coordinates conference calls inside a MUC: the
 `<muji>` contents map is advertised in MUC presence (`MujiManager.handle_presence`),

@@ -417,6 +417,10 @@ class JingleRtpManager:
         self.client = client
         self.sessions: dict[str, CallSession] = {}
         self.engine = media.get_engine()
+        self._proceed_futures: dict[str, object] = {}
+        self._pending_proposals: dict[str, dict] = {}
+        self._proceeded: set[str] = set()
+        self._proceed_timers: dict[str, object] = {}
         logger.info("CALL manager ready, engine=%s", self.engine.name)
 
     @property
@@ -506,18 +510,31 @@ class JingleRtpManager:
 
     async def _send_jingle_message(self, action: str, session: CallSession,
                                    extra: ET.Element | None = None) -> None:
+        await self._send_message_action(action, session.peer_bare, session.sid,
+                                        session.video, extra)
+
+    async def _send_message_action(self, action: str, to_bare: str, sid: str,
+                                   video: bool = False,
+                                   extra: ET.Element | None = None) -> None:
+        """Send a XEP-0353 ``<propose|proceed|reject|retract|accept>`` message."""
         msg = self.client.xmpp.Message()
-        msg["to"] = session.peer_bare
+        msg["to"] = to_bare
         msg["type"] = "chat"
         el = ET.SubElement(msg.xml, _q(NS_JINGLE_MSG, action))
-        el.set("id", session.sid)
+        el.set("id", sid)
         if action == "propose":
-            desc = ET.SubElement(el, _q(NS_JINGLE, "description"))
-            desc.set("media", "video" if session.video else "audio")
+            # Conversations expects the same RTP descriptions as the upcoming
+            # session-initiate (XEP-0353 §4.2), not the Jingle core namespace.
+            desc = ET.SubElement(el, _q(NS_RTP, "description"))
+            desc.set("media", "audio")
+            if video:
+                desc_v = ET.SubElement(el, _q(NS_RTP, "description"))
+                desc_v.set("media", "video")
         if extra is not None:
             el.append(extra)
         msg.send()
-        logger.debug("CALL sent jingle-message %s (%s)", action, session.sid)
+        logger.info("CALL sent jingle-message %s to %s (sid=%s)", action,
+                    to_bare, sid)
 
     async def _send_session_initiate(self, session: CallSession) -> None:
         call = self.engine.create_call(
@@ -636,6 +653,12 @@ class JingleRtpManager:
                              session.muji_room)
             self.client._start_task(self.answer_call(sid, True, video))
             return
+        if sid in self._proceeded:
+            # The user already accepted the XEP-0353 proposal (rang first).
+            self._proceeded.discard(sid)
+            logger.info("CALL auto-answering proceeded session %s", sid)
+            self.client._start_task(self.answer_call(sid, True, video))
+            return
         self.client.emit("call_incoming", sid, peer_full,
                          "video" if video else "audio")
 
@@ -723,9 +746,22 @@ class JingleRtpManager:
         if tel is None:
             return
         transport = parse_transport(tel)
+        logger.debug("CALL transport-info: %d candidate(s)",
+                     len(transport.candidates))
         for cand in transport.candidates:
-            await session.call.add_ice(_candidate_to_sdp(cand))
-        logger.debug("CALL transport-info: %d candidate(s)", len(transport.candidates))
+            await session.call.add_ice({
+                "component": cand.component,
+                "foundation": cand.foundation,
+                "ip": cand.ip, "port": cand.port,
+                "priority": cand.priority, "protocol": cand.protocol,
+                "type": cand.type,
+                "relatedAddress": cand.rel_addr or None,
+                "relatedPort": cand.rel_port or None,
+            }, sdp_mid=self._mid(session, content), sdp_mline_index=0)
+
+    @staticmethod
+    def _mid(session: CallSession, content: ET.Element) -> str:
+        return content.get("name", "") or "0"
 
     async def _on_session_terminate(self, jingle: ET.Element) -> None:
         session = self.sessions.get(jingle.get("sid", ""))
@@ -742,28 +778,65 @@ class JingleRtpManager:
             if el is None:
                 continue
             sid = el.get("id", "")
-            frm = str(msg["from"]).split("/")[0]
-            logger.info("CALL jingle-message %s from %s (sid=%s)", action, frm,
-                        sid)
+            frm_full = str(msg["from"])
+            frm = frm_full.split("/")[0]
+            logger.info("CALL jingle-message %s from %s (sid=%s)", action,
+                        frm_full, sid)
+            logger.debug("CALL jingle-message raw: %s",
+                         ET.tostring(msg.xml).decode("utf-8", "replace"))
             if action == "propose":
-                self.client.emit("call_proposed", sid, frm,
-                                 self._propose_media(el))
-            elif action == "proceed":
-                future = getattr(self, "_proceed_futures", {}).pop(sid, None)
+                media = self._propose_media(el)
+                self._pending_proposals[sid] = {"from": frm_full,
+                                                "media": media}
+                self.client.emit("call_proposed", sid, frm_full, media)
+            elif action in ("proceed", "accept"):
+                future = self._proceed_futures.pop(sid, None)
                 if future is not None and not future.done():
                     future.set_result(True)
+                logger.info("CALL %s for outgoing call %s", action, sid)
             elif action in ("reject", "retract"):
+                self._pending_proposals.pop(sid, None)
+                self._proceeded.discard(sid)
                 session = self.sessions.get(sid)
                 if session is not None:
                     self._close_session(session, "ended", action)
+                else:
+                    self.client.emit("call_proposal_ended", sid, action)
             return True
         return False
 
+    def answer_proposal(self, sid: str, accept: bool,
+                        video: bool = False) -> None:
+        """Accept/reject an incoming XEP-0353 proposal (ring)."""
+        proposal = self._pending_proposals.pop(sid, None)
+        if proposal is None:
+            logger.warning("CALL no pending proposal for %s", sid)
+            return
+        bare = str(proposal.get("from", "")).split("/")[0]
+        if accept:
+            self._proceeded.add(sid)
+            self.client._start_task(self._send_message_action(
+                "proceed", bare, sid))
+            self.client._start_task(self._proceed_session_timeout(sid))
+            logger.info("CALL proceeded proposal %s (video=%s)", sid, video)
+        else:
+            self.client._start_task(self._send_message_action(
+                "reject", bare, sid))
+            logger.info("CALL rejected proposal %s", sid)
+
+    async def _proceed_session_timeout(self, sid: str) -> None:
+        await asyncio.sleep(30)
+        if sid in self._proceeded:
+            self._proceeded.discard(sid)
+            logger.warning("CALL no session-initiate after proceed (%s)", sid)
+            self.client.emit("call_ended", sid, "", "timeout")
+
     @staticmethod
     def _propose_media(el: ET.Element) -> str:
-        desc = el.find(_q(NS_JINGLE, "description"))
-        if desc is not None and desc.get("media") == "video":
-            return "video"
+        for ns in (NS_RTP, NS_JINGLE):
+            desc = el.find(_q(ns, "description"))
+            if desc is not None and desc.get("media") == "video":
+                return "video"
         return "audio"
 
     # ── parse/build helpers ───────────────────────────────────────

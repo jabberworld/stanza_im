@@ -120,12 +120,13 @@ servers = discovery.ice_servers_from_services([
      "username": "u", "password": "p"},
     {"type": "turn", "host": "t.example", "port": 443, "transport": "tcp",
      "username": "u", "password": "p"},
+    {"type": "stun", "host": "s.example", "port": 3478, "transport": "tcp"},
+    {"type": "stun", "host": "2a07:c801::", "port": 3478, "transport": "udp"},
 ])
-check("extdisco normalisation",
-      servers[0]["urls"] == "stun:s.example:3478"
-      and servers[1]["urls"] == "turn:t.example:443?transport=udp"
-      and servers[1]["username"] == "u"
-      and servers[2]["urls"] == "turn:t.example:443?transport=tcp")
+check("extdisco normalisation (IPv6/transport filtered)",
+      servers == [{"urls": "stun:s.example:3478"},
+                  {"urls": "turn:t.example:443?transport=udp",
+                   "username": "u", "credential": "p"}])
 
 # ── 5. client.ice_servers() priority --------------------------------------
 client = JabberClient("me@example.com/res", "pw")
@@ -201,7 +202,86 @@ client.on("muji_invite", lambda *a: captured.append(a))
 check("muji invite parsed", client.muji.handle_invite_message(inv)
       and captured == [("bob@example.com", "room@conf.example")])
 
-# ── 10. config defaults ---------------------------------------------------
+# ── 10. XEP-0353 bodyless messages ---------------------------------------
+from slixmpp.xmlstream.matcher.xpath import MatchXPath
+
+propose_msg = slixmpp.Message()
+propose_msg["from"] = "bob@example.com/phone"
+propose_msg["type"] = "chat"
+propose_el = ET.SubElement(
+    propose_msg.xml, "{%s}propose" % jr.NS_JINGLE_MSG)
+propose_el.set("id", "sid42")
+ET.SubElement(propose_el, "{%s}description" % jr.NS_RTP).set("media", "audio")
+matcher = MatchXPath("{jabber:client}message/{urn:xmpp:jingle-message:0}*")
+check("bodyless jingle-message matcher", matcher.match(propose_msg))
+
+call_client = JabberClient("me@example.com/res", "pw")
+proposed = []
+call_client.on("call_proposed", lambda *a: proposed.append(a))
+call_client.rtp_calls.handle_message(propose_msg)
+check("incoming propose handled",
+      proposed == [("sid42", "bob@example.com/phone", "audio")])
+
+proceeded = []
+
+
+async def _fake_action(action, to_bare, sid, video=False, extra=None):
+    proceeded.append((action, to_bare, sid))
+
+
+async def _noop(_sid):
+    return None
+
+
+call_client.rtp_calls._send_message_action = _fake_action
+call_client.rtp_calls._proceed_session_timeout = _noop
+
+
+async def _answer():
+    call_client.rtp_calls.answer_proposal("sid42", True, False)
+    await asyncio.sleep(0)
+
+
+asyncio.run(_answer())
+check("proceed sent on accept",
+      proceeded == [("proceed", "bob@example.com", "sid42")])
+check("session marked proceeded",
+      "sid42" in call_client.rtp_calls._proceeded)
+
+
+# propose builder uses the RTP namespace + both media
+captured_xml = []
+
+
+class _FakeMessage:
+    def __init__(self):
+        self.xml = ET.Element("{jabber:client}message")
+
+    def __setitem__(self, key, value):
+        pass
+
+    def send(self):
+        captured_xml.append(self.xml)
+
+
+call_client.xmpp.Message = _FakeMessage
+builder_client = JabberClient("me@example.com/res", "pw")
+builder_client.xmpp.Message = _FakeMessage
+
+
+async def _send_propose():
+    await builder_client.rtp_calls._send_message_action(
+        "propose", "bob@example.com", "sidX", video=True)
+
+
+asyncio.run(_send_propose())
+descs = [(el.get("media"), el.tag)
+         for el in captured_xml[0].iter("{%s}description" % jr.NS_RTP)]
+check("propose uses rtp ns with audio+video",
+      descs == [("audio", "{%s}description" % jr.NS_RTP),
+                ("video", "{%s}description" % jr.NS_RTP)])
+
+# ── 11. config defaults ---------------------------------------------------
 cfg = Config()
 check("devices defaults",
       cfg.devices.audio_input == "" and cfg.devices.video_input == ""
