@@ -464,7 +464,9 @@ the core `message` event — slixmpp registers its IM handler as
 `message/body` — so they have dedicated `MatchXPath` handlers
 (`_on_jingle_message_stanza`/`_on_call_invite_stanza`). Incoming proposals are
 answered via `client.answer_proposal(sid, accept)` (sends `proceed`/`reject`);
-the session-initiate that follows a `proceed` is auto-accepted.
+the proposed media kind (`_propose_media`) is read from **all** `<description>`
+elements (video wins; nested or not), and the session-initiate that follows a
+`proceed` is auto-accepted.
 `client.supports_calls(bare, video)` gates the UI on the peer's XEP-0115 caps
 (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 + rtp:audio [+ rtp:video]`, fetched
 per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`

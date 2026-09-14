@@ -719,6 +719,71 @@ check("forcing a controlled agent maximizes its tie-breaker",
 check("an already controlling agent is left untouched",
       _force_result(True, 999) == (False, True, 999, 0))
 
+# ── 10d. propose media is detected across all <description> children --------
+def _propose_el(*media):
+    el = ET.Element(f"{{{jr.NS_JINGLE_MSG}}}propose")
+    for kind in media:
+        desc = ET.SubElement(el, f"{{{jr.NS_RTP}}}description")
+        desc.set("media", kind)
+    return el
+
+
+check("audio+video proposal is detected as video",
+      jr.JingleRtpManager._propose_media(
+          _propose_el("audio", "video")) == "video")
+check("video-only proposal is detected as video",
+      jr.JingleRtpManager._propose_media(
+          _propose_el("video")) == "video")
+check("audio-only proposal is detected as audio",
+      jr.JingleRtpManager._propose_media(
+          _propose_el("audio")) == "audio")
+
+
+def _propose_content_el():
+    el = ET.Element(f"{{{jr.NS_JINGLE_MSG}}}propose")
+    content = ET.SubElement(el, f"{{{jr.NS_JINGLE}}}content")
+    ET.SubElement(content, f"{{{jr.NS_RTP}}}description").set(
+        "media", "video")
+    return el
+
+
+check("description nested in content is detected as video",
+      jr.JingleRtpManager._propose_media(
+          _propose_content_el()) == "video")
+
+# ── 10e. ringing windows carry the session video flag -----------------------
+from stanza_im.ui.main_window import MainWindow
+
+
+def _ringing_video(session_video):
+    class _FakeSession:
+        video = session_video
+
+    class _FakeRtpCalls:
+        sessions = {}
+
+    if session_video is not None:
+        _FakeRtpCalls.sessions["s1"] = _FakeSession()
+
+    class _FakeClient:
+        rtp_calls = _FakeRtpCalls()
+
+    seen = []
+    mw = MainWindow.__new__(MainWindow)
+    mw._call_windows = {}
+    mw._client = _FakeClient()
+    mw._open_call_window = lambda sid, peer, video: seen.append(video)
+    mw._on_call_state("s1", "peer", "ringing")
+    return seen
+
+
+check("outgoing video call preview shows the video surface",
+      _ringing_video(True) == [True])
+check("outgoing audio call preview keeps the video surface hidden",
+      _ringing_video(False) == [False])
+check("ringing with unknown session defaults to audio",
+      _ringing_video(None) == [False])
+
 # ── 11. config defaults ---------------------------------------------------
 cfg = Config()
 check("devices defaults",

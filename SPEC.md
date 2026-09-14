@@ -1043,7 +1043,9 @@ client.leave_muji(room)
   XEP-0353 propose/proceed first. slixmpp only fires the `message` event for
   stanzas with a `<body>`, so bodyless propose/retract and XEP-0482 invites have
   dedicated `MatchXPath` handlers; proposals are answered with
-  `client.answer_proposal` (`proceed`/`reject`) and the following
+  `client.answer_proposal` (`proceed`/`reject`), the proposed media kind comes
+  from all `<description>` elements (`_propose_media` returns video when any of
+  them is a video m-line), and the following
   session-initiate is auto-accepted.
 - Capability gating mirrors Conversations: `client.supports_calls(bare, video)`
   checks the peer's XEP-0115 caps (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 +

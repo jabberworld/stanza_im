@@ -1080,9 +1080,9 @@ class JingleRtpManager:
     @staticmethod
     def _propose_media(el: ET.Element) -> str:
         for ns in (NS_RTP, NS_JINGLE):
-            desc = el.find(_q(ns, "description"))
-            if desc is not None and desc.get("media") == "video":
-                return "video"
+            for desc in el.iter(_q(ns, "description")):
+                if desc.get("media") == "video":
+                    return "video"
         return "audio"
 
     # ── parse/build helpers ───────────────────────────────────────
