@@ -223,6 +223,8 @@ if media_mod.HAS_AIORTC and media_mod.av is not None:
         second = await track.recv()
         monotonic = (first.pts is not None and second.pts is not None
                      and second.pts > first.pts)
+        stereo = (first.layout.name == "stereo"
+                  and first.samples == media_mod.AUDIO_SAMPLES_PER_FRAME)
         encode_ok = True
         if encoder is not None:
             try:
@@ -232,10 +234,12 @@ if media_mod.HAS_AIORTC and media_mod.av is not None:
                 encode_ok = False
                 print("  opus encode error:", exc)
         track.stop()
-        return monotonic, encode_ok
+        return monotonic, stereo, encode_ok
 
-    _mono_ok, _encode_ok = asyncio.run(_audio_frames())
+    _mono_ok, _stereo_ok, _encode_ok = asyncio.run(_audio_frames())
     check("captured audio frames have monotonic pts", _mono_ok)
+    check("captured audio frames are stereo 20ms",
+          _stereo_ok)
     check("Opus encoder accepts captured frames", _encode_ok)
 
 # ── 4. XEP-0215 normalisation ---------------------------------------------

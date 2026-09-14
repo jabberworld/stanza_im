@@ -45,8 +45,9 @@ except Exception as exc:  # pragma: no cover - import guard
 
 
 AUDIO_RATE = 48000
-AUDIO_CHANNELS = 1
+AUDIO_CHANNELS = 2                       # stereo matches the Opus encoder input
 AUDIO_FORMAT = "s16"
+AUDIO_SAMPLES_PER_FRAME = int(AUDIO_RATE * 0.02)   # 20 ms
 
 
 def enumerate_devices() -> dict:
@@ -90,7 +91,7 @@ if HAS_AIORTC:
             self._source = None
             self._io = None
             self._pts = 0
-            self._frame_bytes = int(AUDIO_RATE * 0.02) * 2  # 20 ms s16 mono
+            self._frame_bytes = AUDIO_SAMPLES_PER_FRAME * AUDIO_CHANNELS * 2
             self.kind = "audio"
             if not HAS_QTMM:
                 logger.warning("CALL audio capture unavailable (no Qt MM)")
@@ -113,15 +114,18 @@ if HAS_AIORTC:
         async def recv(self):
             if self._io is None:
                 await asyncio.sleep(0.02)
-                return self._stamp(_silence(self._frame_bytes))
+                return self._stamp(_silence(AUDIO_SAMPLES_PER_FRAME,
+                                            AUDIO_CHANNELS))
             deadline = asyncio.get_event_loop().time() + 0.25
             while self._io.bytesAvailable() < self._frame_bytes:
                 if asyncio.get_event_loop().time() > deadline:
-                    return self._stamp(_silence(self._frame_bytes))
+                    return self._stamp(_silence(AUDIO_SAMPLES_PER_FRAME,
+                                                AUDIO_CHANNELS))
                 await asyncio.sleep(0.005)
             data = bytes(self._io.read(self._frame_bytes))
-            frame = av.AudioFrame(format=AUDIO_FORMAT, layout="mono",
-                                  samples=len(data) // 2)
+            samples = len(data) // (AUDIO_CHANNELS * 2)
+            frame = av.AudioFrame(format=AUDIO_FORMAT, layout="stereo",
+                                  samples=samples)
             frame.sample_rate = AUDIO_RATE
             frame.planes[0].update(data)
             return self._stamp(frame)
@@ -246,11 +250,11 @@ if HAS_AIORTC:
                 pass
 
 
-def _silence(frame_bytes: int):
-    frame = av.AudioFrame(format=AUDIO_FORMAT, layout="mono",
-                          samples=frame_bytes // 2)
+def _silence(samples: int, channels: int = AUDIO_CHANNELS):
+    layout = "stereo" if channels == 2 else "mono"
+    frame = av.AudioFrame(format=AUDIO_FORMAT, layout=layout, samples=samples)
     frame.sample_rate = AUDIO_RATE
-    frame.planes[0].update(b"\x00" * frame_bytes)
+    frame.planes[0].update(b"\x00" * (samples * channels * 2))
     return frame
 
 
