@@ -45,7 +45,7 @@ whenever a new XEP is implemented or its usage changes.
 | XEP-0184 | Message Delivery Receipts | Marks delivered messages with a ✓ and requests receipts on sent stanzas. |
 | XEP-0198 | Stream Management | Enabled by default (`connection.stream_management`); resumes a dropped stream (`<resume/>`) without re-auth/roster/presence and acks stanzas by `h` counter. |
 | XEP-0199 | XMPP Ping | Pings contacts/participants (`plugin["xep_0199"].ping`) for the connection diagnostics. |
-| XEP-0202 | Entity Time | Displays the remote entity's time in contact diagnostics. |
+| XEP-0202 | Entity Time | Answers `<time/>` requests with a correct `utc`/`tzo` reply (`JabberClient._on_time_request`, replacing slixmpp 1.17's broken responder) and queries contacts' local time for the vCard "Status" tab (`_get_entity_time`). |
 | XEP-0203 | Delayed Delivery | Reads `<delay>` stamps for the original message time in MAM results and offline messages. |
 | XEP-0223 | Persistent Storage | Conference bookmarks persist via pubsub storage (`plugin.storage_method == "xep_0223"`). |
 | XEP-0224 | Attention | Support for attention requests ("nudge") between users. |

@@ -708,7 +708,9 @@ Registers XEP plugins (conditionally where noted):
 - xep_0050 (Ad-hoc Commands), xep_0004 (Data Forms), xep_0049 (Private XML)
 - xep_0030 (Service Discovery), xep_0128 (Disco Extensions), xep_0055 (Search)
 - xep_0077 (Registration), xep_0092 (Software Version), xep_0199 (Ping)
-- xep_0202 (Entity Time), xep_0313 (MAM, pulls in xep_0059/xep_0297)
+- xep_0202 (Entity Time; the plugin's broken 1.17 responder is replaced by
+  `JabberClient._on_time_request`/`_get_entity_time`)
+- xep_0313 (MAM, pulls in xep_0059/xep_0297)
 - xep_0280 (Message Carbons), xep_0060 (PubSub), xep_0163 (PEP)
 - xep_0065 (SOCKS5 Bytestreams — file-proxy discovery)
 - xep_0198 (Stream Management; `connection.stream_management`)

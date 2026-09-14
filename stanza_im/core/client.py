@@ -47,6 +47,7 @@ NS_DISCO_ITEMS = "http://jabber.org/protocol/disco#items"
 NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
+NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 
 
 class _UploadProgress:
@@ -390,6 +391,9 @@ class JabberClient:
         })
         self.xmpp.register_plugin("xep_0199")  # Ping
         self.xmpp.register_plugin("xep_0202")  # Entity time
+        # slixmpp's XEP-0202 responder is broken in 1.17 (it feeds a time-only
+        # string to xep_0082.parse); replace it with a correct one.
+        self._register_time_handler()
         self.xmpp.register_plugin("xep_0313")  # Message Archive Management (MAM)
         # xep_0313 pulls in xep_0059 (RSM) and xep_0297 (Forward) automatically
         self.xmpp.register_plugin("xep_0280")  # Message Carbons
@@ -537,6 +541,59 @@ class JabberClient:
             self._start_task(self.rtp_calls.dispatch(action, jingle, iq))
         else:
             self._start_task(self.file_transfer._dispatch(action, jingle, iq))
+
+    # ── XEP-0202 Entity Time ──────────────────────────────────────
+
+    def _register_time_handler(self) -> None:
+        """Answer ``<time/>`` requests without slixmpp's broken set_tzo."""
+        from slixmpp.xmlstream.handler import Callback
+        from slixmpp.xmlstream.matcher import StanzaPath
+
+        try:
+            self.xmpp.remove_handler("Entity Time")
+        except Exception:
+            logger.debug("Could not remove slixmpp Entity Time handler",
+                         exc_info=True)
+        self.xmpp.register_handler(Callback(
+            "Entity Time", StanzaPath("iq@type=get/entity_time"),
+            self._on_time_request))
+
+    def _on_time_request(self, iq) -> None:
+        """Reply to a XEP-0202 time request with a correct utc/tzo child."""
+        try:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            offset = datetime.datetime.now().astimezone().utcoffset()
+            seconds = int((offset or datetime.timedelta(0)).total_seconds())
+            sign = "+" if seconds >= 0 else "-"
+            seconds = abs(seconds)
+            tzo = "%s%02d:%02d" % (sign, seconds // 3600,
+                                   (seconds % 3600) // 60)
+            reply = iq.reply()
+            time_el = ET.SubElement(reply.xml, "{%s}time" % NS_TIME)
+            ET.SubElement(time_el, "{%s}utc" % NS_TIME).text = now.strftime(
+                "%Y-%m-%dT%H:%M:%SZ")
+            ET.SubElement(time_el, "{%s}tzo" % NS_TIME).text = tzo
+            self.xmpp.send(reply)
+            logger.debug("XEP-0202 time reply to %s (tzo=%s)", iq["from"], tzo)
+        except Exception:
+            logger.exception("XEP-0202 time reply failed")
+
+    async def _get_entity_time(self, jid: str) -> dict:
+        """Query *jid* for its local time; returns ``{utc, tzo}``."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        ET.SubElement(iq.xml, "{%s}time" % NS_TIME)
+        result = await iq.send(timeout=8)
+        utc = tzo = ""
+        for el in result.xml.iter("{%s}time" % NS_TIME):
+            utc_el = el.find("{%s}utc" % NS_TIME)
+            tzo_el = el.find("{%s}tzo" % NS_TIME)
+            if utc_el is not None and utc_el.text:
+                utc = utc_el.text.strip()
+            if tzo_el is not None and tzo_el.text:
+                tzo = tzo_el.text.strip()
+        return {"utc": utc, "tzo": tzo}
 
     def _start_task(self, coro) -> None:
         """Schedule *coro* on the current event loop (best-effort)."""
@@ -1461,8 +1518,11 @@ class JabberClient:
         except Exception:
             logger.debug("Ping unavailable for %s", jid)
         try:
-            result = await self.xmpp.plugin["xep_0202"].get_entity_time(jid)
-            info["client_time"] = str(result.get("time", "") or result.get("utc", ""))
+            result = await self._get_entity_time(jid)
+            utc = result.get("utc", "")
+            tzo = result.get("tzo", "")
+            info["client_time"] = (f"{utc} ({tzo})".strip()
+                                   if tzo else utc)
         except Exception:
             logger.debug("Entity time unavailable for %s", jid)
         self.emit("entity_info_received", jid, info)
