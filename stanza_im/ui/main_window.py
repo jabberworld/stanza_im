@@ -1608,7 +1608,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_call_state(self, sid: str, peer: str, state: str) -> None:
         if state == "ringing":
-            self._open_call_window(sid, peer, False)
+            session = (self._client.rtp_calls.sessions.get(sid)
+                       if self._client else None)
+            self._open_call_window(sid, peer,
+                                   bool(getattr(session, "video", False)))
             return
         window = self._call_windows.get(sid)
         if state == "active":
