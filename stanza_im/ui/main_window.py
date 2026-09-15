@@ -665,6 +665,17 @@ class MainWindow(QtWidgets.QMainWindow):
         for room in self._muc_self_nicks:
             self._sync_conference_roster(room)
 
+    def _apply_muji_support(self, room: str) -> None:
+        """Enable the MUC tab's call menu when aiortc is available.
+
+        Called on every path that opens a MUC tab (manual join, server
+        auto-join, roster open) so an auto-joined room's call button is never
+        left disabled.
+        """
+        available = bool(getattr(getattr(self._client, "rtp_calls", None),
+                                 "available", False))
+        self._chat_window.set_muji_support(room, available)
+
     def _join_muc(self, room: str, nick: str, password: str = "",
                    save_bookmark: bool = False, bookmark_name: str = "",
                    autojoin: bool = False, server: str = ""):
@@ -684,9 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "role": "", "affiliation": "",
         }
         self._client.join_muc(room, nick, password=password, save_bookmark=False)
-        self._chat_window.set_muji_support(
-            room, bool(getattr(getattr(self._client, "rtp_calls", None),
-                               "available", False)))
+        self._apply_muji_support(room)
         if save_bookmark:
             self._start_task(self._client.save_bookmark(
                 room, nick, password, autojoin=autojoin, name=bookmark_name))
@@ -767,6 +776,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._muc_display_name(room))
             self._load_history(room)
             self._request_vcard(room, force=True)
+        self._apply_muji_support(room)
         users = self._muc_users.setdefault(room, {})
         for occ in occupants or []:
             if isinstance(occ, str):
@@ -1325,6 +1335,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("call_state", self._on_call_state)
         c.on("call_video_frame", self._on_call_video_frame)
         c.on("call_local_video_frame", self._on_call_local_video_frame)
+        c.on("muji_local_video_frame", self._on_muji_local_video_frame)
         c.on("call_ended", self._on_call_ended)
         c.on("call_failed", self._on_call_failed)
         c.on("muji_joined", self._on_muji_joined)
@@ -1714,6 +1725,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if window is not None:
             window.set_local_frame(image)
 
+    def _on_muji_local_video_frame(self, room: str, image) -> None:
+        """Own-camera frame from a conference's standalone self-preview."""
+        window = self._muji_windows.get(room)
+        if window is not None:
+            window.set_local_frame(image)
+
     def _on_call_ended(self, sid: str, peer: str, reason: str) -> None:
         logger.info("CALL ended %s (%s)", sid, reason)
         window = self._call_windows.pop(sid, None)
@@ -1798,19 +1815,42 @@ class MainWindow(QtWidgets.QMainWindow):
                 return sid
         return ""
 
+    def _muji_has_video(self, room: str) -> bool:
+        """True when our conference (or a peer) advertises a video content."""
+        conf = self._client.muji.conferences.get(room) if self._client else None
+        if conf is None:
+            return False
+        return ("video" in (conf.contents or {}).values()
+                or any("video" in (p.contents or {}).values()
+                       for p in conf.participants.values()))
+
     def _sync_muji_preview(self, room: str) -> None:
-        """Keep exactly one conference session feeding our self-preview."""
+        """Keep exactly one own-video source feeding the conference self tile.
+
+        Prefers a peer video session's local track; while no such session
+        exists it falls back to a standalone camera capture so our own video
+        is visible even alone in the room.
+        """
         if not self._client:
             return
         want = self._muji_preview_sid(room)
         current = self._muji_preview_sids.get(room, "")
-        if want == current:
+        if want:
+            self._client.stop_muji_preview(room)
+            if want == current:
+                return
+            if current:
+                self._client.set_call_local_preview(current, False)
+            self._muji_preview_sids[room] = want
+            self._client.set_call_local_preview(want, True)
             return
         if current:
             self._client.set_call_local_preview(current, False)
-        self._muji_preview_sids[room] = want
-        if want:
-            self._client.set_call_local_preview(want, True)
+            self._muji_preview_sids[room] = ""
+        if self._muji_has_video(room):
+            self._client.start_muji_preview(room)
+        else:
+            self._client.stop_muji_preview(room)
 
     def _on_muji_session(self, sid: str, peer_full: str, room: str) -> None:
         """An incoming Muji session-initiate — record the peer participant."""
@@ -1871,6 +1911,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if "/" in str(session.peer_full) else session.peer_bare
 
     def _on_muji_left(self, room: str) -> None:
+        if self._client:
+            self._client.stop_muji_preview(room)
         sid = self._muji_preview_sids.pop(room, "")
         if sid and self._client:
             self._client.set_call_local_preview(sid, False)
@@ -2018,6 +2060,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat = self._chat_window.open_groupchat(
                 jid, self._muc_self_nicks[jid], display_name)
             self._seed_muc_chat(jid, chat, title=display_name, is_new=is_new)
+            self._apply_muji_support(jid)
             return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)

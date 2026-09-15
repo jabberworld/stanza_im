@@ -569,6 +569,7 @@ class JingleRtpManager:
         self.client = client
         self.sessions: dict[str, CallSession] = {}
         self.engine = media.get_engine()
+        self._muji_local_previews: dict[str, object] = {}   # room -> capture
         self._proceed_futures: dict[str, object] = {}
         self._pending_proposals: dict[str, dict] = {}
         self._proceeded: set[str] = set()
@@ -829,6 +830,9 @@ class JingleRtpManager:
         engine call (and its local video track) is created, so the preview
         flag has to be pushed onto the call on bind as well.
         """
+        if session.muji_room:
+            # Free the camera for this session's own capture.
+            self.stop_local_preview(session.muji_room)
         session.call = call
         fn = getattr(call, "set_local_preview", None)
         if callable(fn):
@@ -837,6 +841,41 @@ class JingleRtpManager:
             except Exception:
                 logger.debug("CALL set_local_preview on bind failed",
                              exc_info=True)
+
+    def start_local_preview(self, room: str) -> None:
+        """Open a standalone camera capture for a conference self tile.
+
+        Only used while no peer video session exists; the frames are emitted
+        as ``muji_local_video_frame(room, image)``.
+        """
+        if room in self._muji_local_previews:
+            return
+        factory = getattr(self.engine, "create_local_preview", None)
+        if not callable(factory):
+            return
+        try:
+            preview = factory(
+                self._devices(),
+                on_frame=lambda image, r=room: self.client.emit(
+                    "muji_local_video_frame", r, image))
+        except Exception:
+            logger.debug("CALL local preview creation failed", exc_info=True)
+            return
+        if preview is None:
+            return
+        preview.start()
+        self._muji_local_previews[room] = preview
+        logger.info("CALL local preview capture started for %s", room)
+
+    def stop_local_preview(self, room: str) -> None:
+        """Stop a standalone conference self-preview capture, if any."""
+        preview = self._muji_local_previews.pop(room, None)
+        if preview is not None:
+            try:
+                preview.stop()
+            except Exception:
+                logger.debug("CALL local preview stop failed", exc_info=True)
+            logger.info("CALL local preview capture stopped for %s", room)
 
     # ── incoming ──────────────────────────────────────────────────
     async def dispatch(self, action: str, jingle: ET.Element, iq) -> None:
@@ -1236,6 +1275,7 @@ class JingleRtpManager:
 
     # ── Muji (XEP-0272) helpers ───────────────────────────────────
     def end_muji(self, room: str) -> None:
+        self.stop_local_preview(room)
         for session in list(self.sessions.values()):
             if session.muji_room == room:
                 logger.info("MUJI ending session %s", session.sid)

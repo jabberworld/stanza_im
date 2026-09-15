@@ -1198,13 +1198,18 @@ client.leave_muji(room)
   `call_local_video_frame`, only for the session marked via `set_local_preview`
   by `MainWindow._sync_muji_preview`, re-applied by `_bind_call` when the engine
   call is created) and painted by `MujiCallWindow
-  .set_local_frame`. In a MUC chat tab the
+  .set_local_frame`. While no peer video session exists (e.g. alone in the
+  room) `_sync_muji_preview` starts a standalone camera capture
+  (`media._LocalPreviewCapture`, `JingleRtpManager.start_local_preview`) fed to
+  the window as `muji_local_video_frame`; `_bind_call` stops it before a
+  session's own capture opens the device. In a MUC chat tab the
   toolbar call button starts a Muji
   conference: `ChatWidget` emits `muji_call_requested(room, video)` (never
   `call_requested`) which `ChatWindow.open_groupchat` forwards and
   `MainWindow._on_muji_call_requested` routes to `_join_muji`. The button is
   enabled only when aiortc is available (`ChatWindow.set_muji_support`, applied
-  by `_join_muc` right after `open_groupchat` from `rtp_calls.available`); it
+  by `MainWindow._apply_muji_support` on every MUC-tab open — `_join_muc`,
+  `_on_muc_joined` for auto-joined rooms and `_on_contact_open`); it
   is a no-op on 1:1 tabs. All call/Muji code logs via `stanza_im.call*` with
   `CALL[…]` / `MUJI[…]` markers.
 

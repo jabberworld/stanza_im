@@ -2929,6 +2929,14 @@ class JabberClient:
         """Mark a session as the source of own-video preview frames."""
         self.rtp_calls.set_local_preview(sid, enabled)
 
+    def start_muji_preview(self, room: str) -> None:
+        """Open a standalone self-preview capture for a conference."""
+        self.rtp_calls.start_local_preview(room)
+
+    def stop_muji_preview(self, room: str) -> None:
+        """Stop a conference's standalone self-preview capture."""
+        self.rtp_calls.stop_local_preview(room)
+
     # ── Muji conference API (XEP-0272) ────────────────────────────
 
     def join_muji(self, room: str, nick: str, video: bool = False) -> None:

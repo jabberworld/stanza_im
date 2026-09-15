@@ -726,6 +726,10 @@ class MediaEngine:
                     on_remote_track=None, on_state=None, on_local_frame=None):
         raise RuntimeError("calling is not available")
 
+    def create_local_preview(self, devices=None, on_frame=None):
+        """A standalone camera capture that only feeds the UI (no peer)."""
+        return None
+
 
 class NullMediaEngine(MediaEngine):
     name = "null"
@@ -1045,6 +1049,42 @@ if HAS_AIORTC:
             return None
 
 
+    class _LocalPreviewCapture:
+        """Standalone camera capture that only feeds the UI self tile.
+
+        Used for a Muji conference while no peer Jingle session (and thus no
+        shared local video track) exists yet.  The capture is pumped by its own
+        task; real camera frames reach *on_frame* through the track's
+        ``_emit_local`` (black frames are skipped).
+        """
+
+        def __init__(self, device_id: str = "", on_frame=None):
+            self._track = _VideoCaptureTrack(device_id, on_frame=on_frame)
+            self._task = None
+            self._closed = False
+
+        def start(self) -> None:
+            if self._task is None and not self._closed:
+                self._task = asyncio.ensure_future(self._run())
+
+        async def _run(self) -> None:
+            try:
+                while not self._closed and not self._track._stopped:
+                    await self._track.recv()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("CALL local preview capture ended",
+                             exc_info=True)
+
+        def stop(self) -> None:
+            self._closed = True
+            self._track.stop()
+            if self._task is not None:
+                self._task.cancel()
+                self._task = None
+
+
     class AiortcMediaEngine(MediaEngine):
         name = "aiortc"
         available = True
@@ -1057,6 +1097,11 @@ if HAS_AIORTC:
                         on_state=None, on_local_frame=None) -> "AiortcCall":
             return AiortcCall(ice_servers, devices, on_ice_candidate,
                               on_remote_track, on_state, on_local_frame)
+
+        def create_local_preview(self, devices=None,
+                                 on_frame=None) -> "_LocalPreviewCapture":
+            return _LocalPreviewCapture(
+                (devices or {}).get("video_input", ""), on_frame)
 
 
 _engine: MediaEngine | None = None

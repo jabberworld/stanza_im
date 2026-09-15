@@ -987,7 +987,8 @@ check("manager toggles tolerate unknown sessions", True)
 
 def _bind_call_preview_result():
     mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
-    session = type("_S", (), {"local_preview": True, "call": None})()
+    session = type("_S", (), {"local_preview": True, "call": None,
+                              "muji_room": ""})()
     call = _FakeEngineCall()
     mgr._bind_call(session, call)
     return session.call is call and call.calls == [("preview", True)]
@@ -1107,6 +1108,7 @@ check("MUC call button blocked without aiortc", _blocked)
 class _FakeMujiRtpSessions:
     def __init__(self):
         self.sessions = {}
+        self.available = False
 
 
 class _FakeMujiConfClient:
@@ -1120,6 +1122,8 @@ class _FakeMujiConfClient:
         self.sent_receive = []
         self.sent_video = []
         self.local_preview = []
+        self.preview_started = []
+        self.preview_stopped = []
         self.started = []
 
     def emit(self, *args):
@@ -1149,7 +1153,16 @@ class _FakeMujiConfClient:
     def set_call_local_preview(self, sid, enabled=True):
         self.local_preview.append((sid, enabled))
 
+    def start_muji_preview(self, room):
+        self.preview_started.append(room)
+
+    def stop_muji_preview(self, room):
+        self.preview_stopped.append(room)
+
     def set_client_active(self, active=True):
+        pass
+
+    def mds_mark_displayed(self, *args):
         pass
 
 
@@ -1306,6 +1319,70 @@ check("a session peer already seen via MUC presence is not duplicated",
       _p_first)
 check("a session-only peer is a virtual placeholder", _p_placeholder)
 check("the MUC presence merges the virtual placeholder", _p_merged)
+
+
+def _muji_standalone_preview_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    conf = muji.MujiConference(room="room@conf")
+    conf.contents = {"voice": "audio", "video": "video"}
+    client.muji.conferences["room@conf"] = conf
+    # alone: no video session -> standalone capture
+    mw._sync_muji_preview("room@conf")
+    started_alone = client.preview_started == ["room@conf"]
+    # a peer video session takes over and the standalone capture stops
+    video = _MujiFakeSession("sv", "alice@host", muji_room="room@conf")
+    video.video = True
+    client.rtp_calls.sessions["sv"] = video
+    mw._sync_muji_preview("room@conf")
+    handoff = (client.preview_stopped == ["room@conf"]
+               and client.local_preview == [("sv", True)])
+    mw.close()
+    return started_alone, handoff
+
+
+_standalone, _handoff = _muji_standalone_preview_result()
+check("an alone video conference starts a standalone self-preview capture",
+      _standalone)
+check("a peer video session takes over the self-preview", _handoff)
+
+
+def _muji_local_frame_routing_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    mw._client = _FakeMujiConfClient()
+    window = _RecordingMujiWindow()
+    mw._muji_windows["room@conf"] = window
+    img = QtGui.QImage(8, 8, QtGui.QImage.Format.Format_RGB888)
+    mw._on_muji_local_video_frame("room@conf", img)
+    mw.close()
+    return window.frames == [img]
+
+
+check("standalone self-preview frames route to the conference window",
+      _muji_local_frame_routing_result())
+
+
+def _muji_support_gate_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    client.rtp_calls.available = True
+    mw._client = client
+    mw._chat_window.open_groupchat("room@conf", "me", "room")
+    before = mw._chat_window.get_chat("room@conf")._call_btn.isEnabled()
+    mw._apply_muji_support("room@conf")
+    after = mw._chat_window.get_chat("room@conf")._call_btn.isEnabled()
+    mw.close()
+    return before, after
+
+
+_gate_before, _gate_after = _muji_support_gate_result()
+check("opening a MUC tab leaves the call button disabled until support is set",
+      _gate_before is False)
+check("_apply_muji_support enables the MUC call button", _gate_after is True)
 
 
 def _muji_window_ui_result():

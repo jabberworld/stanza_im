@@ -542,8 +542,10 @@ conference call: `ChatWidget._call_btn`'s Audio/Video menu actions emit
 `muji_call_requested(room, video)` (never `call_requested`), which
 `ChatWindow.open_groupchat` forwards and `MainWindow._on_muji_call_requested`
 routes to `_join_muji`. The MUC button is gated solely on aiortc availability
-(`set_muji_support`, fed by `_join_muc` after `open_groupchat` from
-`client.rtp_calls.available`) and is a no-op on 1:1 tabs. `ui/call_window.CallWindow` shows the active call and
+(`set_muji_support` via `MainWindow._apply_muji_support`, called on every path
+that opens a MUC tab — manual join, server auto-join in `_on_muc_joined`, roster
+open in `_on_contact_open` — so an auto-joined room's button is never left
+disabled) and is a no-op on 1:1 tabs. `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
 over the roster); remote video frames are painted by `VideoView`, which draws a
@@ -616,7 +618,11 @@ the single session marked via `set_local_preview` (chosen by
 can pick it before the engine call exists, `_bind_call` re-applies the flag to
 the call when it is created), and
 `MainWindow._on_call_local_video_frame` pushes it into `MujiCallWindow
-.set_local_frame`. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
+.set_local_frame`. While the room has **no** peer video session (e.g. we are
+alone) `_sync_muji_preview` instead starts a standalone camera capture
+(`media._LocalPreviewCapture` via `JingleRtpManager.start_local_preview`),
+emitted as `muji_local_video_frame`; `_bind_call` stops it before a session's
+own capture opens the device. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled.
 
