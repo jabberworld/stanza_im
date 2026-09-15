@@ -1046,6 +1046,50 @@ check("camera emits camera_toggled for both ways",
 check("turning the camera off keeps the remote video visible", _view_visible)
 check("camera off relabels the button", _cam_text == tr("call_camera_off"))
 
+
+def _video_view_frame_guard_result():
+    from stanza_im.ui.call_window import VideoView
+    view = VideoView()
+    view.set_frame(object())            # a raw PyAV frame must be ignored
+    ignored = view._image is None
+    img = QtGui.QImage(4, 4, QtGui.QImage.Format.Format_RGB888)
+    view.set_frame(img)
+    stored = view._image is img
+    view.set_frame(None)
+    cleared = view._image is None
+    view.deleteLater()
+    return ignored, stored, cleared
+
+
+_vv_ignored, _vv_stored, _vv_cleared = _video_view_frame_guard_result()
+check("VideoView ignores a non-QImage frame", _vv_ignored)
+check("VideoView stores a QImage frame", _vv_stored)
+check("VideoView clears on a None frame", _vv_cleared)
+
+
+def _local_preview_conversion_result():
+    from stanza_im.xmpp import media
+    if not media.HAS_AIORTC:
+        return True, True   # nothing to verify without aiortc
+    received = []
+    preview = media._LocalPreviewCapture.__new__(media._LocalPreviewCapture)
+    preview._on_image = received.append
+    original = media._frame_to_qimage
+    media._frame_to_qimage = lambda frame: "IMG" if frame == "raw" else None
+    try:
+        preview._emit("raw")
+        converted = received == ["IMG"]
+        preview._emit("other")
+        skipped = received == ["IMG"]
+    finally:
+        media._frame_to_qimage = original
+    return converted, skipped
+
+
+_lp_converted, _lp_skipped = _local_preview_conversion_result()
+check("standalone local preview converts frames to QImage", _lp_converted)
+check("standalone local preview drops unconvertible frames", _lp_skipped)
+
 _vw = CallWindow("s1", "peer", video=True)
 _aw = CallWindow("s1", "peer", video=False)
 check("video-call window shows the camera and remote video",

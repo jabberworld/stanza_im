@@ -54,6 +54,12 @@ class VideoView(QtWidgets.QLabel):
         self._caption_font.setBold(True)
 
     def set_frame(self, image):
+        # Only real QImage frames are paintable; a stray value (e.g. a raw
+        # PyAV frame) must never reach paintEvent, which would abort Qt.
+        if image is not None and not isinstance(image, QtGui.QImage):
+            logger.debug("CALL ignoring non-QImage video frame: %r",
+                         type(image).__name__)
+            return
         self._image = image
         self.update()
 

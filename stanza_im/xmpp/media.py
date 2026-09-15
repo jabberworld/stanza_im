@@ -1059,9 +1059,19 @@ if HAS_AIORTC:
         """
 
         def __init__(self, device_id: str = "", on_frame=None):
-            self._track = _VideoCaptureTrack(device_id, on_frame=on_frame)
+            # The UI expects QImage frames; the track emits raw PyAV frames,
+            # so convert here (the AiortcCall path does the same).
+            self._on_image = on_frame
+            self._track = _VideoCaptureTrack(device_id, on_frame=self._emit)
             self._task = None
             self._closed = False
+
+        def _emit(self, frame) -> None:
+            if self._on_image is None:
+                return
+            image = _frame_to_qimage(frame)
+            if image is not None:
+                self._on_image(image)
 
         def start(self) -> None:
             if self._task is None and not self._closed:
