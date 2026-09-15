@@ -1030,9 +1030,13 @@ client.leave_muji(room)
   `_register_jingle_handlers` routes them (together with XEP-0490 MDS events) to
   `JabberClient._maybe_mds_event`/`_maybe_pep_event`, which parse them into
   `client.pep_data[bare_jid][kind]` and re-emit them as
-  `contact_pep_updated(jid, kind, data)` — so roster mood/activity icons and the
-  tooltip refresh live without a vCard fetch. `fetch_pep(bare)` pulls
-  the current nodes (`pubsub/items`, `max_items=1`) when a profile opens.
+`contact_pep_updated(jid, kind, data)` — so roster mood/activity icons and the
+   tooltip refresh live without a vCard fetch. `fetch_pep(bare)` pulls
+   the current nodes (`pubsub/items`, `max_items=1`) when a profile opens and
+   on presence (`_maybe_refresh_pep`, gated by an in-flight guard plus a
+   per-contact 15 s `time.monotonic` cooldown): a contact's online presence
+   triggers a pull even though the server never pushed a XEP-0163 event, and a
+   burst of presences collapses to a single fetch.
 - `include/pep.py` builds/parses mood (`<mood><key/><text/>`), activity
   (`<activity><group><sub/></group><text/></activity>`), tune and geoloc
   payloads, parses the bundled Jabbim icon packs

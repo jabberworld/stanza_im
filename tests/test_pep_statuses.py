@@ -159,6 +159,91 @@ _sid.set("by", "me@example.com")
 check("bodyless PEP handler matches MDS event",
       _handlers["PEP Event"].match(_mds_msg))
 
+# ── 4b. presence-driven PEP refresh --------------------------------------
+# Live updates must not depend on the server pushing XEP-0163 notifications:
+# a contact's online presence triggers a rate-limited _fetch_pep pull.
+_fetch_calls: list[str] = []
+
+
+async def _async_noop(*_a, **_k):
+    return None
+
+
+async def _record_fetch(bare: str):
+    _fetch_calls.append(bare)
+
+
+def _presence(frm: str, ptype: str = "available",
+              show: str = "", status: str = ""):
+    xml = f"<presence from='{frm}' type='{ptype}'><priority>0</priority>"
+    if show:
+        xml += f"<show>{show}</show>"
+    if status:
+        xml += f"<status>{status}</status>"
+    xml += "</presence>"
+    return slixmpp.Presence(xml=ET.fromstring(xml))
+
+
+async def _presence_drive():
+    c3 = JabberClient("me@example.com/res", "pw")
+    c3._prefetch_version = _async_noop
+    c3._load_caps = _async_noop
+    c3._fetch_pep = _record_fetch
+    c3._pep_refresh_interval = 0.0          # change-gating on, no cooldown
+    c3._on_presence(_presence("bob@example.com/phone", status="hello"))
+    await asyncio.sleep(0.01)               # let the first fetch complete
+    c3._on_presence(_presence("bob@example.com/laptop", show="dnd",
+                              status="busy"))
+    await asyncio.sleep(0.01)               # different presence -> refetch
+    c3._on_presence(_presence("bob@example.com/phone", ptype="unavailable"))
+    await asyncio.sleep(0.01)               # (aggregate still online -> noop)
+    c3._on_presence(_presence("me@example.com/desk"))
+    await asyncio.sleep(0.01)               # own JID -> no fetch
+    c3._on_presence(_presence("dave@example.com/1", ptype="unavailable"))
+    await asyncio.sleep(0.01)               # never online -> no fetch
+    c3._on_presence(_presence("carol@example.com/phone", status="hi"))
+    await asyncio.sleep(0.01)               # new online contact -> one fetch
+    return _fetch_calls.copy()
+
+
+async def _cooldown():
+    c3 = JabberClient("me@example.com/res", "pw")
+    c3._prefetch_version = _async_noop
+    c3._load_caps = _async_noop
+    c3._fetch_pep = _record_fetch
+    c3._pep_refresh_interval = 60.0         # cooldown on
+    c3._on_presence(_presence("erin@example.com/phone", status="a"))
+    await asyncio.sleep(0.01)
+    c3._on_presence(_presence("erin@example.com/laptop", status="b"))
+    await asyncio.sleep(0.01)
+    c3._on_presence(_presence("erin@example.com/phone", status="a"))
+    await asyncio.sleep(0.01)
+    return _fetch_calls.count("erin@example.com")
+
+
+async def _inflight_dedupe():
+    c3 = JabberClient("me@example.com/res", "pw")
+    c3._fetch_pep = _record_fetch
+    c3._pep_refresh("dave@example.com")
+    c3._pep_refresh("dave@example.com")     # still in flight -> skipped
+    await asyncio.sleep(0.1)
+    return _fetch_calls.count("dave@example.com")
+
+
+_fetch_calls = asyncio.run(_presence_drive())
+check("every online presence change fetches PEP",
+      _fetch_calls.count("bob@example.com") == 3)
+check("fetches are only for online contacts",
+      _fetch_calls == ["bob@example.com", "bob@example.com",
+                       "bob@example.com", "carol@example.com"])
+check("offline-only and own presence do not fetch",
+      "dave@example.com" not in _fetch_calls
+      and not any(c == "me@example.com" for c in _fetch_calls))
+check("presence cooldown collapses bursts",
+      asyncio.run(_cooldown()) == 1)
+check("in-flight PEP refresh deduplicated",
+      asyncio.run(_inflight_dedupe()) == 1)
+
 # ── 5. publishing ---------------------------------------------------------
 published = []
 

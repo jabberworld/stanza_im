@@ -438,7 +438,12 @@ registered in `_register_jingle_handlers`) routes them to
 `JabberClient._maybe_pep_event` (alongside `_maybe_mds_event` for XEP-0490) into
 `client.pep_data[bare_jid][kind]` and re-emits them as
 `contact_pep_updated(jid, kind, data)`; `client.fetch_pep(bare)` pulls the
-current nodes with `pubsub/items max_items=1` (called when a profile opens).
+current nodes with `pubsub/items max_items=1` (called when a profile opens and
+on presence via `JabberClient._maybe_refresh_pep` — the presence-driven pull
+does not depend on the server pushing XEP-0163 notifications, and is bounded
+per bare JID by an in-flight guard plus a 15 s cooldown
+(`time.monotonic`-based `_pep_last_refresh`), so a burst of online presences
+collapses to one fetch).
 `include/pep.py` builds/parses the payloads, parses the bundled Jabbim icon
 packs (`resources/moods|activities/<pack>/*.cfg`, `"key"=File.png`) and
 formats a human summary (`format_summary`). The roster bottom bar gains two

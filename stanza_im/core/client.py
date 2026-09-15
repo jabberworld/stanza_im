@@ -458,6 +458,10 @@ class JabberClient:
         # Extended presence (XEP-0080/0107/0108/0118): bare JID -> parsed kinds
         self.pep_data: dict[str, dict] = {}
         self._pep_fetched: set[str] = set()
+        self._pep_inflight: set[str] = set()   # bare JIDs being PEP-fetched
+        # Last presence-driven PEP pull per bare JID (monotonic timestamp).
+        self._pep_last_refresh: dict[str, float] = {}
+        self._pep_refresh_interval = 15.0      # s between pulls per contact
         # XEP-0115 features per full JID (for call-capability gating)
         self.contact_features: dict[str, set] = {}
         self._caps_inflight: set[str] = set()
@@ -547,6 +551,7 @@ class JabberClient:
 
     async def _on_pubsub_event_stanza(self, msg) -> None:
         """Route bodyless pubsub#event messages (PEP, MDS) to their handlers."""
+        logger.debug("PEP/MDS event stanza from %s", msg["from"])
         try:
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
@@ -2318,6 +2323,7 @@ class JabberClient:
         entry = self.pep_data.setdefault(jid, {})
         entry[kind] = data
         self.emit("contact_pep_updated", jid, kind, data)
+        logger.debug("PEP %s for %s = %r", kind, jid, data)
 
     def publish_pep(self, node: str, payload) -> None:
         """Publish *payload* to the private PEP *node* (XEP-0163)."""
@@ -2348,6 +2354,28 @@ class JabberClient:
     def fetch_pep(self, jid: str) -> None:
         """Fetch the current mood/activity/tune/geoloc of *jid* (PEP items)."""
         self._start_task(self._fetch_pep(jid))
+
+    def _pep_refresh(self, bare: str) -> None:
+        """Pull the PEP nodes of a newly-present contact (presence-driven).
+
+        A single in-flight fetch per bare JID is guaranteed; callers may fire
+        this on every presence change without risking a fetch backlog. The
+        pull never depends on the server pushing XEP-0163 notifications.
+        """
+        if bare in self._pep_inflight:
+            logger.debug("PEP refresh for %s already in flight", bare)
+            return
+        self._pep_inflight.add(bare)
+        self._start_task(self._pep_refresh_guard(bare))
+
+    async def _pep_refresh_guard(self, bare: str) -> None:
+        try:
+            logger.debug("PEP refresh for %s", bare)
+            await self._fetch_pep(bare)
+        except Exception:
+            logger.exception("PEP refresh failed for %s", bare)
+        finally:
+            self._pep_inflight.discard(bare)
 
     async def _fetch_pep(self, jid: str) -> None:
         bare = str(jid or "").split("/")[0]
@@ -2589,6 +2617,29 @@ class JabberClient:
         contact.show = best_show
         contact.status = best_status
         self.emit("presence_changed", bare, best_show, best_status)
+        self._maybe_refresh_pep(bare, best_show)
+
+    def _maybe_refresh_pep(self, bare: str, show: str) -> None:
+        """Rate-limited PEP pull when a contact's presence arrives online.
+
+        Mood/activity changes in other clients are usually accompanied by a
+        (possibly byte-identical) presence re-send, so refreshing on any
+        online presence — whatever the previous show/status tuple was — keeps
+        the roster icons/tooltip fresh even when the server never pushes
+        XEP-0163 notifications (the "PEP Event" matcher remains the fast push
+        path). In-flight dedupe (one fetch per bare) plus a per-contact
+        cooldown keep the fetch volume bounded.
+        """
+        if not bare or show == "offline":
+            return
+        if self.jid_str and bare == self.jid_str.split("/", 1)[0]:
+            return
+        now = time.monotonic()
+        if now - self._pep_last_refresh.get(bare, 0.0) \
+                < self._pep_refresh_interval:
+            return
+        self._pep_last_refresh[bare] = now
+        self._pep_refresh(bare)
 
     async def _prefetch_version(self, full_jid: str) -> None:
         """Best-effort XEP-0092 lookup for a contact resource (for tooltips)."""
