@@ -3140,6 +3140,43 @@ class JabberClient:
         finally:
             self._mam_inflight.discard(jid)
 
+    @staticmethod
+    def _mam_query_modes(is_muc: bool, end) -> list[tuple[bool, object]]:
+        """Return the ordered list of ``(use_archive_jid, query_end)`` pairs
+        for :meth:`_fetch_history_mam_impl`.
+
+        For 1:1 chats ``use_archive_jid`` is always ``False`` — the query
+        is sent to the *user's own* archive with ``<with>jid</with>``.
+        Sending the IQ ``to`` a 1:1 contact (``jid`` mode, ``use_archive_jid``
+        ``True``) returns the *contact's* full archive, mixing other
+        contacts' messages into the local history.  For MUC rooms ``jid``
+        mode is correct (the room archive lives on the room's JID).
+        """
+        modes: list[tuple[bool, object]] = [(is_muc, end)]
+        if is_muc:
+            if end is not None:
+                modes.append((True, None))
+        else:
+            if end is not None:
+                modes.append((False, None))
+        return modes
+
+    @staticmethod
+    def _mam_belongs_to(jid: str, frm: str, is_muc: bool,
+                        own_jid: str) -> bool:
+        """True when a MAM result stanza belongs to the *jid* conversation.
+
+        For 1:1 chats only the two parties are accepted: the contact (its
+        bare JID must equal ``jid``) and our own bare JID (outgoing copies).
+        Anything else — a server that ignored the ``<with>`` filter or
+        returned another account's archive — is rejected.  MUC results are
+        accepted as-is because their senders are room nicks.
+        """
+        if is_muc:
+            return True
+        bare = frm.split("/", 1)[0].lower()
+        return bare == jid.lower() or bare == own_jid.lower()
+
     async def _fetch_history_mam_impl(self, jid: str, since: str | None,
                                        limit: int) -> int:
         mam = self.xmpp.plugin["xep_0313"]
@@ -3163,13 +3200,7 @@ class JabberClient:
             # slixmpp serializes True as an empty <before/> element. An empty
             # string is omitted, which makes ejabberd return the oldest page.
             rsm["before"] = True
-        modes = [(jid in self.groupchats, end)]
-        if end is not None:
-            modes.append((not (jid in self.groupchats), end))
-            modes.append((jid in self.groupchats, None))
-            modes.append((not (jid in self.groupchats), None))
-        else:
-            modes.append((not (jid in self.groupchats), None))
+        modes = self._mam_query_modes(jid in self.groupchats, end)
         results = []
         last_error = None
         for index, (use_archive_jid, query_end) in enumerate(modes, 1):
@@ -3266,10 +3297,21 @@ class JabberClient:
                         direction = "outgoing"
                         sender = "Me"
                 else:
-                    sender = frm.split("/")[0]
-                    if frm.split("/")[0] == self.jid_str:
+                    sender = frm.split("/", 1)[0]
+                    if sender == self.jid_str:
                         direction = "outgoing"
                         sender = "Me"
+                    elif not self._mam_belongs_to(jid, frm, False,
+                                                  self.jid_str):
+                        # A misbehaving server (e.g. one that ignores the
+                        # <with> filter and returns another account's whole
+                        # archive) can yield stanzas addressed to other
+                        # contacts.  Never let them pollute this chat's
+                        # local history.
+                        skipped += 1
+                        skip_reasons["wrong_sender"] = (
+                            skip_reasons.get("wrong_sender", 0) + 1)
+                        continue
                 from stanza_im.core import history
                 if jid in self.groupchats:
                     stable = _stanza_id(msg, jid) or _archive_result_id(result)
