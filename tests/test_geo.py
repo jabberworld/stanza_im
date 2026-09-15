@@ -146,6 +146,86 @@ px = widget._to_screen(lat, lon)
 check("screen inverse round-trip",
       abs(px.x() - 160) < 1e-6 and abs(px.y() - 120) < 1e-6)
 
+# 8b. TileLoader: fetch failures must never kill the worker thread ------------
+import urllib.error
+
+
+class _FailingLoader(TileLoader):
+    """TileLoader whose every fetch raises the configured error."""
+
+    def __init__(self, error, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._error = error
+
+    def _fetch(self, z, x, y):
+        raise self._error
+
+
+def _drain_loader(loader, z=15, x=1, y=2):
+    received = []
+    loader.tile_ready.connect(
+        lambda zz, xx, yy, path: received.append((zz, xx, yy, path)),
+        QtCore.Qt.ConnectionType.DirectConnection)
+    loader.request(z, x, y)
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not received:
+        time.sleep(0.005)
+    return received
+
+
+failing = _FailingLoader(
+    urllib.error.HTTPError("http://invalid.invalid/15/1/2.png", 400,
+                           "Bad Request", {}, None),
+    "https://invalid.invalid/0/0/0.png", None)
+failing.start()
+recv = _drain_loader(failing)
+check("permanent 400 emits empty path",
+      recv == [(15, 1, 2, "")] and failing.isRunning())
+check("permanent 400 goes to failed, not retry",
+      (15, 1, 2) in failing._failed and (15, 1, 2) not in failing._retry)
+failing.request(15, 1, 2)
+time.sleep(0.05)
+check("permanent 400 not re-requested", len(recv) == 1)
+failing.stop()
+failing.wait(3000)
+check("loader thread stopped cleanly", not failing.isRunning())
+
+
+failing503 = _FailingLoader(
+    urllib.error.HTTPError("http://invalid.invalid/15/1/2.png", 503,
+                           "Service Unavailable", {}, None),
+    "https://invalid.invalid/0/0/0.png", None)
+failing503.start()
+recv503 = _drain_loader(failing503)
+check("transient 503 emits empty path", recv503 == [(15, 1, 2, "")])
+with failing503._lock:
+    ts = failing503._retry.get((15, 1, 2), 0.0)
+check("transient 503 schedules retry",
+      ts > time.monotonic() - 0.1 and (15, 1, 2) not in failing503._failed)
+failing503.stop()
+failing503.wait(3000)
+
+
+failing_net = _FailingLoader(urllib.error.URLError("connection refused"),
+                             "https://invalid.invalid/0/0/0.png", None)
+failing_net.start()
+recv_net = _drain_loader(failing_net)
+check("URLError survives and retries",
+      recv_net == [(15, 1, 2, "")] and failing_net.isRunning()
+      and (15, 1, 2) in failing_net._retry)
+failing_net.stop()
+failing_net.wait(3000)
+
+
+failing_any = _FailingLoader(RuntimeError("boom"),
+                             "https://invalid.invalid/0/0/0.png", None)
+failing_any.start()
+recv_any = _drain_loader(failing_any)
+check("generic error survives", recv_any == [(15, 1, 2, "")]
+      and failing_any.isRunning() and (15, 1, 2) in failing_any._retry)
+failing_any.stop()
+failing_any.wait(3000)
+
 # 9. window-level smoke --------------------------------------------------------
 win = GeoMapWindow("", None, geometry_cfg=None)
 win.resize(400, 300)

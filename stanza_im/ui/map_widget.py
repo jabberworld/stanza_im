@@ -21,6 +21,7 @@ import logging
 import queue
 import threading
 import time
+import urllib.error
 import urllib.request
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -39,6 +40,8 @@ _USER_AGENT = ("StanzaIM/0.1 (XMPP desktop client / OpenStreetMap tiles, "
 _REQUEST_PACING_S = 0.5        # OSM tile policy: stay far below 2 req/s
 _RETRY_PACING_S = 10.0         # re-request a failed tile after this delay
 _MEM_PIXMAP_MAX = 512          # in-memory QPixmap LRU cap
+# HTTP codes worth a retry (429 rate-limit, 5xx, temporary server states).
+_TRANSIENT_HTTP_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
 class TileLoader(QtCore.QThread):
@@ -52,6 +55,7 @@ class TileLoader(QtCore.QThread):
         self._cache = cache
         self._queue: queue.Queue = queue.Queue()
         self._inflight: set[tuple[int, int, int]] = set()
+        self._failed: set[tuple[int, int, int]] = set()  # permanent errors
         self._lock = threading.Lock()
         self._stopped = False
         self._retry: dict[tuple[int, int, int], float] = {}
@@ -61,7 +65,7 @@ class TileLoader(QtCore.QThread):
             return
         key = (z, x, y)
         with self._lock:
-            if key in self._inflight or self._stopped:
+            if key in self._inflight or key in self._failed or self._stopped:
                 return
             now = time.monotonic()
             if self._retry.get(key, 0.0) > now:
@@ -80,14 +84,21 @@ class TileLoader(QtCore.QThread):
             if item is None:
                 break
             z, x, y = item
-            path = self._fetch(z, x, y)
-            if path:
-                self.tile_ready.emit(z, x, y, path)
-            else:
-                self._retry[(z, x, y)] = time.monotonic() + _RETRY_PACING_S
-                self.tile_ready.emit(z, x, y, "")
+            path, permanent = "", False
+            try:
+                path = self._fetch(z, x, y)
+            except urllib.error.HTTPError as exc:
+                permanent = exc.code not in _TRANSIENT_HTTP_CODES
+                logger.debug("tile %d/%d/%d HTTP %d", z, x, y, exc.code)
+            except Exception as exc:
+                logger.debug("tile %d/%d/%d fetch failed: %s", z, x, y, exc)
             with self._lock:
+                if permanent:
+                    self._failed.add((z, x, y))
+                elif not path:
+                    self._retry[(z, x, y)] = time.monotonic() + _RETRY_PACING_S
                 self._inflight.discard((z, x, y))
+            self.tile_ready.emit(z, x, y, path or "")
             time.sleep(_REQUEST_PACING_S)
 
     def _fetch(self, z: int, x: int, y: int) -> str:
@@ -166,6 +177,8 @@ class GeoMapWidget(QtWidgets.QWidget):
     def clear_retries(self) -> None:
         if hasattr(self._loader, "_retry"):
             self._loader._retry.clear()
+        if hasattr(self._loader, "_failed"):
+            self._loader._failed.clear()
 
     def stop_loading(self) -> None:
         self._loader.stop()
@@ -321,7 +334,7 @@ class GeoMapWidget(QtWidgets.QWidget):
         steps = delta / 120.0
         pos = event.position()
         anchor = self._lat_lon_under(pos)
-        self._zoom = clamp_zoom(self._zoom + steps)
+        self._zoom = clamp_zoom(round(self._zoom + steps))
         # Keep the point under the cursor fixed on screen while zooming.
         wx, wy = self._world_px(*anchor)
         self._center = world_to_lat_lon(
