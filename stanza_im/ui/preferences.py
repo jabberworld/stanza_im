@@ -584,6 +584,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(self._check(
             "stream_management", tr("prefs_stream_management")))
         advanced_form.addRow(self._check("csi", tr("prefs_csi")))
+        pep_interval = self._spin("pep_sweep_interval", 0, 3600)
+        pep_interval.setSpecialValueText(tr("prefs_pep_sweep_off"))
+        advanced_form.addRow(tr("prefs_pep_sweep"), pep_interval)
         tls_mode = self._combo("tls_mode", [
             ("conn_mode_direct", "direct"),
             ("conn_mode_prefer", "prefer"),
@@ -1126,6 +1129,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "stun_turn_mode": getattr(connection, "stun_turn_mode", "auto"),
             "stun_turn_manual": getattr(connection, "stun_turn_manual", ""),
             "keepalive": getattr(connection, "keepalive", True),
+            "pep_sweep_interval": getattr(connection, "pep_sweep_interval", 0),
             "stream_management": getattr(connection, "stream_management", True),
             "csi": getattr(connection, "csi", True),
             "tls_mode": getattr(connection, "tls_mode", "prefer"),
@@ -1233,6 +1237,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.connection[key] = self._value(key)
         cfg.connection.priority = self._value("priority")
         cfg.connection.keepalive = self._value("keepalive")
+        cfg.connection.pep_sweep_interval = self._value("pep_sweep_interval")
         cfg.connection.stream_management = self._value("stream_management")
         cfg.connection.csi = self._value("csi")
         cfg.connection.message_carbons = self._value("message_carbons")

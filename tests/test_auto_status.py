@@ -37,6 +37,9 @@ class _FakeClient:
         self.sent.append(show)
         self.statuses.append(status)
 
+    def set_pep_sweep_paused(self, paused):
+        pass
+
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 win = MainWindow(app)

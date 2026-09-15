@@ -134,6 +134,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `keepalive` | `true` | Send whitespace keep-alive packets |
 | `stream_management` | `true` | XEP-0198 resumption/acks |
 | `csi` | `true` | XEP-0352 active/inactive |
+| `pep_sweep_interval` | `0` | Periodic XEP-0080/0107/0108/0118 sweep (s); `0` = off |
 | `message_carbons` | `true` | XEP-0280 |
 | `file_proxy_mode` / `file_proxy_manual` | `auto` / — | XEP-0065 file proxy (JID) |
 | `stun_turn_mode` / `stun_turn_manual` | `auto` / — | STUN/TURN (host:port list) |
@@ -1082,6 +1083,18 @@ client.leave_muji(room)
    per-contact 15 s `time.monotonic` cooldown): a contact's online presence
    triggers a pull even though the server never pushed a XEP-0163 event, and a
    burst of presences collapses to a single fetch.
+- Contacts are additionally **subscribed** to the four nodes (XEP-0163) on
+  online presence and roster add (`_ensure_pep_subscription`,
+  `xep_0060.subscribe`, in-flight guard, 300 s retry cooldown on failure),
+  re-subscribed on every `session_started`/`stream_resumed` (servers drop
+  subscriptions on session end) and unsubscribed on roster removal
+  (`_unsubscribe_pep`); a `pending`/error subscription state counts as a
+  failure. The `connection.pep_sweep_interval` setting (seconds, `0` = off)
+  arms a periodic fallback sweep that re-pulls online contacts' nodes through
+  the same `_maybe_refresh_pep` guards for servers that never forward PEP
+  events; the sweep pauses while the user is idle
+  (`client.set_pep_sweep_paused`, tied to the auto-status inactivity timer)
+  and stops on disconnect.
 - `include/pep.py` builds/parses mood (`<mood><key/><text/>`), activity
   (`<activity><group><sub/></group><text/></activity>`), tune and geoloc
   payloads, parses the bundled Jabbim icon packs

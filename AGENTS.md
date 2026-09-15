@@ -470,6 +470,19 @@ does not depend on the server pushing XEP-0163 notifications, and is bounded
 per bare JID by an in-flight guard plus a 15 s cooldown
 (`time.monotonic`-based `_pep_last_refresh`), so a burst of online presences
 collapses to one fetch).
+Contacts the server can push to are also **subscribed** to the four nodes
+(XEP-0163) on presence/roster add (`JabberClient._ensure_pep_subscription`,
+best-effort via `xep_0060.subscribe`, in-flight guard, 300 s retry cooldown on
+failure), re-subscribed on every `session_started`/`stream_resumed` (servers
+drop subscriptions on session end) and unsubscribed on roster removal
+(`_unsubscribe_pep`); a terminal subscription state (e.g. `pending`, error)
+counts as a failure. As a fallback for servers that never forward PEP
+events, an optional periodic sweep polls online contacts' nodes every
+`connection.pep_sweep_interval` seconds (`0` = off, the default; Preferences →
+Connection → «Периодический опрос PEP») via the same `_maybe_refresh_pep`
+guards; the sweep is paused while the user is idle
+(`client.set_pep_sweep_paused`, driven by `MainWindow._sync_pep_sweep_pause`
+alongside the auto-status inactivity timer) and stopped on disconnect.
 `include/pep.py` builds/parses the payloads, parses the bundled Jabbim icon
 packs (`resources/moods|activities/<pack>/*.cfg`, `"key"=File.png`) and
 formats a human summary (`format_summary`). The roster bottom bar gains two

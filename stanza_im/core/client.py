@@ -314,6 +314,7 @@ class JabberClient:
                  keepalive: bool = True,
                  stream_management: bool = True,
                  csi: bool = True,
+                 pep_sweep_interval: int = 0,
                  tls_mode: str = "prefer",
                  starttls_mode: str = "always"):
         self.jid_str = str(jid).split("/")[0]
@@ -332,6 +333,7 @@ class JabberClient:
         self.keepalive = bool(keepalive)
         self.stream_management = bool(stream_management)
         self.csi = bool(csi)
+        self.pep_sweep_interval = int(pep_sweep_interval or 0)
         self._client_active = True
         self._sm_resumed = False
         self._csi_enabled = False
@@ -462,6 +464,13 @@ class JabberClient:
         # Last presence-driven PEP pull per bare JID (monotonic timestamp).
         self._pep_last_refresh: dict[str, float] = {}
         self._pep_refresh_interval = 15.0      # s between pulls per contact
+        # XEP-0163 subscriptions per contact: bare JID -> set of PEP nodes.
+        self._pep_subscribed: dict[str, set[str]] = {}
+        self._pep_subscribe_inflight: set[tuple[str, str]] = set()
+        self._pep_subscribe_failed: dict[str, float] = {}  # bare -> last ts
+        self._pep_subscribe_cooldown = 300.0               # s before a retry
+        self._pep_sweep_task: asyncio.Task | None = None
+        self._pep_sweep_paused = False
         # XEP-0115 features per full JID (for call-capability gating)
         self.contact_features: dict[str, set] = {}
         self._caps_inflight: set[str] = set()
@@ -2081,6 +2090,11 @@ class JabberClient:
         if self.message_displayed_sync:
             loop = asyncio.get_event_loop()
             loop.create_task(self._mds_init())
+        # PEP subscriptions survive a reconnect, so re-subscribe to the
+        # currently known contacts (servers typically drop them on session end).
+        for bare in self.contacts:
+            self._ensure_pep_subscription(bare)
+        self._start_pep_sweep()
         self.emit("session_started")
         self.emit("connection_info", self.connection_info())
         self._sync_csi()
@@ -2324,6 +2338,116 @@ class JabberClient:
         entry[kind] = data
         self.emit("contact_pep_updated", jid, kind, data)
         logger.debug("PEP %s for %s = %r", kind, jid, data)
+
+    # ── XEP-0163 subscriptions to contact PEP nodes ───────────────
+
+    def _ensure_pep_subscription(self, bare: str) -> None:
+        """Subscribe (XEP-0163) to the PEP nodes of *bare*, best-effort.
+
+        The server only pushes ``<message type='headline'><event>``
+        notifications to entities subscribed to the publisher's PEP nodes, so a
+        pull-based client never sees live mood/activity/tune/geoloc changes.
+        Like the pull path this is fire-and-forget with an in-flight guard;
+        failures are cooldown-limited so an unsupported server is not spammed.
+        """
+        if not bare or not self.xmpp.is_connected():
+            return
+        if self.jid_str and self.jid_str == bare:
+            return
+        now = time.monotonic()
+        last_fail = self._pep_subscribe_failed.get(bare, 0.0)
+        if now - last_fail < self._pep_subscribe_cooldown:
+            return
+        for node in pep.PEP_NODES:
+            key = (bare, node)
+            if key in self._pep_subscribe_inflight:
+                continue
+            if node in self._pep_subscribed.get(bare, ()):
+                continue
+            self._pep_subscribe_inflight.add(key)
+            self._start_task(self._pep_subscribe(key))
+
+    async def _pep_subscribe(self, key: tuple[str, str]) -> None:
+        bare, node = key
+        try:
+            result = await asyncio.wait_for(
+                self.xmpp["xep_0060"].subscribe(bare, node, bare=True),
+                timeout=8)
+            status = ""
+            for sub in result.xml.iter("{%s}subscription" % NS_PUBSUB):
+                status = sub.get("subscription", "")
+                break
+            if status == "subscribed":
+                self._pep_subscribed.setdefault(bare, set()).add(node)
+                logger.debug("PEP subscription to %s %s", bare, node)
+            elif status == "pending":
+                logger.debug("PEP subscription to %s %s pending", bare, node)
+            else:
+                self._note_pep_subscribe_fail(bare, node,
+                                              "state=%r" % status)
+        except Exception as exc:  # noqa: BLE001 - best-effort subscription
+            self._note_pep_subscribe_fail(bare, node, str(exc))
+        finally:
+            self._pep_subscribe_inflight.discard(key)
+
+    def _note_pep_subscribe_fail(self, bare: str, node: str, detail: str) -> None:
+        self._pep_subscribe_failed[bare] = time.monotonic()
+        logger.debug("PEP subscription to %s %s failed (%s)",
+                     bare, node, detail)
+
+    def _unsubscribe_pep(self, bare: str) -> None:
+        """Drop XEP-0163 subscriptions when a contact leaves the roster."""
+        nodes = self._pep_subscribed.pop(bare, set())
+        self._pep_subscribe_failed.pop(bare, None)
+        if not nodes or not self.xmpp.is_connected():
+            return
+        for node in nodes:
+            self._start_task(self._pep_unsubscribe(bare, node))
+
+    async def _pep_unsubscribe(self, bare: str, node: str) -> None:
+        try:
+            await asyncio.wait_for(
+                self.xmpp["xep_0060"].unsubscribe(bare, node, bare=True),
+                timeout=8)
+            logger.debug("PEP unsubscribed from %s %s", bare, node)
+        except Exception:  # noqa: BLE001 - best-effort unsubscribe
+            logger.debug("PEP unsubscribe from %s %s failed", bare, node,
+                         exc_info=True)
+
+    # ── Periodic PEP sweep (fallback when subscriptions are absent) ─
+
+    def set_pep_sweep_paused(self, paused: bool) -> None:
+        """Pause the periodic PEP sweep while the user is inactive."""
+        self._pep_sweep_paused = bool(paused)
+
+    def _start_pep_sweep(self) -> None:
+        """Start/resume the periodic PEP sweep task (asyncio, no Qt).
+
+        Only active when ``pep_sweep_interval > 0``; the sweep is a fallback
+        for servers that do not forward XEP-0163 notifications, reusing the
+        existing ``_maybe_refresh_pep`` rate-limit guards.
+        """
+        interval = self.pep_sweep_interval
+        if interval <= 0:
+            return
+        self._stop_pep_sweep()
+        self._pep_sweep_paused = False
+
+        async def _loop() -> None:
+            while True:
+                await asyncio.sleep(interval)
+                if self._pep_sweep_paused:
+                    continue
+                for contact in list(self.contacts.values()):
+                    if contact.show != "offline":
+                        self._maybe_refresh_pep(contact.jid, contact.show)
+
+        self._pep_sweep_task = asyncio.get_event_loop().create_task(_loop())
+
+    def _stop_pep_sweep(self) -> None:
+        if self._pep_sweep_task is not None:
+            self._pep_sweep_task.cancel()
+            self._pep_sweep_task = None
 
     def publish_pep(self, node: str, payload) -> None:
         """Publish *payload* to the private PEP *node* (XEP-0163)."""
@@ -2617,6 +2741,8 @@ class JabberClient:
         contact.show = best_show
         contact.status = best_status
         self.emit("presence_changed", bare, best_show, best_status)
+        if best_show != "offline":
+            self._ensure_pep_subscription(bare)
         self._maybe_refresh_pep(bare, best_show)
 
     def _maybe_refresh_pep(self, bare: str, show: str) -> None:
@@ -2817,8 +2943,10 @@ class JabberClient:
 
         for item in added:
             self.emit("roster_item_added", item)
+            self._ensure_pep_subscription(str(item["jid"]))
         for jid in removed:
             self.emit("roster_item_removed", jid)
+            self._unsubscribe_pep(jid)
         self.emit("roster_received", items)
 
     def _on_groupchat_presence(self, pres) -> None:
@@ -2919,6 +3047,8 @@ class JabberClient:
 
     def _on_disconnected(self, event) -> None:
         logger.info("Disconnected from server")
+        self._stop_pep_sweep()
+        self._pep_subscribed.clear()
         self.emit("disconnected")
 
     def resume_expected(self) -> bool:
@@ -2938,6 +3068,9 @@ class JabberClient:
         logger.info("Stream resumed (XEP-0198)")
         self._sm_resumed = True
         self._sync_csi()
+        for bare in self.contacts:
+            self._ensure_pep_subscription(bare)
+        self._start_pep_sweep()
         self.emit("stream_resumed")
 
     def _on_sm_failed(self, _event=None) -> None:

@@ -63,6 +63,7 @@ MOODS: dict[str, str] = {
     "calm": "calm",
     "cold": "cold",
     "confused": "confused",
+    "contemplative": "contemplative",
     "contented": "contented",
     "cranky": "cranky",
     "curious": "curious",
