@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import logging
 import mimetypes
 import os
@@ -214,6 +215,68 @@ def tls_flags(tls_mode: str, starttls_mode: str) -> dict:
 
 def _is_tls(sock) -> bool:
     return isinstance(sock, (ssl.SSLSocket, ssl.SSLObject))
+
+
+def _name_parts(sequence) -> dict:
+    """Flatten an ``ssl`` certificate name sequence into a field dict."""
+    parts: dict = {}
+    for rdn in sequence or ():
+        for key, value in rdn:
+            parts.setdefault(key, value)
+    return parts
+
+
+def _format_fingerprint(der: bytes) -> str:
+    """Colon-separated uppercase SHA-256 fingerprint of DER bytes."""
+    digest = hashlib.sha256(der).hexdigest().upper()
+    return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
+
+
+def _peer_certificate(sock) -> dict:
+    """Extract the peer (server) TLS certificate of the live connection.
+
+    ``getpeercert()`` needs a verifying context; when only the DER form is
+    available (e.g. verification disabled) the fingerprint is still reported.
+    """
+    cert: dict = {}
+    der = None
+    try:
+        der = sock.getpeercert(binary_form=True)
+    except Exception:
+        der = None
+    try:
+        cert = sock.getpeercert() or {}
+    except Exception:
+        cert = {}
+    data = {
+        "available": bool(cert or der),
+        "verified": bool(cert),
+        "subject_cn": "", "subject_o": "",
+        "issuer_cn": "", "issuer_o": "",
+        "not_before": cert.get("notBefore", "") or "",
+        "not_after": cert.get("notAfter", "") or "",
+        "serial": cert.get("serialNumber", "") or "",
+        "sans": [value for (kind, value) in cert.get("subjectAltName", ())
+                 if kind == "DNS"],
+        "fingerprint": _format_fingerprint(der) if der else "",
+        "expired": False,
+        "days_left": None,
+    }
+    subject = _name_parts(cert.get("subject"))
+    data["subject_cn"] = subject.get("commonName", "")
+    data["subject_o"] = subject.get("organizationName", "")
+    issuer = _name_parts(cert.get("issuer"))
+    data["issuer_cn"] = issuer.get("commonName", "")
+    data["issuer_o"] = issuer.get("organizationName", "")
+    if data["not_after"]:
+        try:
+            end = ssl.cert_time_to_seconds(data["not_after"])
+            remaining = end - time.time()
+            data["expired"] = remaining < 0
+            data["days_left"] = int(remaining // 86400)
+        except Exception:
+            pass
+    return data
 
 
 def filter_plus_mechs(mechanisms, tls_version: str, binding_types) -> set:
@@ -708,7 +771,7 @@ class JabberClient:
                 "sasl": "", "keepalive": self.keepalive,
                 "sm": self.stream_management_state(),
                 "csi": self.csi_state(),
-                "host": "", "port": 0}
+                "host": "", "port": 0, "cert": {}}
         if _is_tls(sock):
             try:
                 info["tls_version"] = sock.version() or ""
@@ -716,6 +779,7 @@ class JabberClient:
                 info["cipher"] = cipher[0] if cipher else ""
             except Exception:
                 pass
+            info["cert"] = _peer_certificate(sock)
         mech = getattr(x.plugin.get("feature_mechanisms", None), "mech", None)
         if mech is not None:
             info["sasl"] = getattr(mech, "name", "") or ""

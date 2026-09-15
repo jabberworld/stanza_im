@@ -59,6 +59,7 @@ stanza_im/                      # Python package
 │   ├── status_message_dialog.py # Multiline presence status editor
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
+│   ├── certificate_dialog.py    # Server TLS certificate details dialog
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
@@ -747,7 +748,12 @@ text is kept. Returning activity (`eventFilter`) resumes
 - **Keep-alive**: `connection.keepalive` → `xmpp.whitespace_keepalive`.
 - `_connected_target` (via `_dns_hosts`) reports the real SRV endpoint;
   `connection_info()` feeds the preferences info icon (mode, TLS version,
-  cipher, SASL, keep-alive, SM, CSI, server).
+  cipher, SASL, keep-alive, SM, CSI, server) and carries `cert` — the peer TLS
+  certificate (`_peer_certificate(sock)`: subject/issuer CN+O, validity with
+  days left/expired, serial, DNS SANs, SHA-256 fingerprint of the DER,
+  `verified`). The Connection page's separate info icon (row «Сертификат»)
+  opens `ui/certificate_dialog.CertificateDialog` non-modally with the same
+  `certificate_lines()`; it is disabled when no certificate is available.
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
 

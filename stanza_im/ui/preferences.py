@@ -11,6 +11,7 @@ from stanza_im.core.discovery import DiscoveryCache, HAS_AIODNS
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import icons as icons_mod
+from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
 from stanza_im.include import emoticons
 from stanza_im.include.constants import ACTIONS_DIR_16
 
@@ -613,6 +614,18 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(tr("prefs_encryption"),
                              self._row(starttls_mode, self._conn_info))
 
+        self._cert_data: dict = {}
+        self._conn_host = ""
+        self._cert_btn = QtWidgets.QToolButton()
+        if not info_icon.isNull():
+            self._cert_btn.setIcon(info_icon)
+        self._cert_btn.setIconSize(QtCore.QSize(16, 16))
+        self._cert_btn.setAutoRaise(True)
+        self._cert_btn.setEnabled(False)
+        self._cert_btn.setToolTip(tr("conn_info_cert_none"))
+        self._cert_btn.clicked.connect(self._on_show_certificate)
+        advanced_form.addRow(tr("conn_info_cert"), self._cert_btn)
+
         proxy, proxy_form = self._page()
         proxy_form.addRow(self._connection_group())
         proxy_form.addRow(self._file_proxy_group())
@@ -758,8 +771,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                 except Exception:
                     info = None
         if not info or not info.get("sasl"):
+            self._set_certificate(info)
             label.setToolTip(tr("conn_info_not_connected"))
             return
+        self._set_certificate(info)
         mode_key = {"direct": "conn_info_direct",
                     "starttls": "conn_info_starttls",
                     "plain": "conn_info_plain"}.get(info.get("mode"),
@@ -786,6 +801,29 @@ class PreferencesDialog(QtWidgets.QDialog):
             lines.append("  %s: %s:%s" % (tr("conn_info_server"),
                                           info["host"], info.get("port", "")))
         label.setToolTip("\n".join(lines))
+
+    def _set_certificate(self, info) -> None:
+        """Cache the peer certificate and update the certificate info icon."""
+        button = getattr(self, "_cert_btn", None)
+        cert = (info or {}).get("cert") or {}
+        self._cert_data = cert
+        self._conn_host = (info or {}).get("host", "") or ""
+        if button is None:
+            return
+        if cert.get("available"):
+            button.setToolTip("\n".join(certificate_lines(cert)))
+            button.setEnabled(True)
+        else:
+            button.setToolTip(tr("conn_info_cert_none"))
+            button.setEnabled(False)
+
+    def _on_show_certificate(self) -> None:
+        if not self._cert_data or not self._cert_data.get("available"):
+            return
+        dialog = CertificateDialog(self._conn_host, self._cert_data, self)
+        dialog.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
 
     def _on_connection_info(self, *_args):
         self._refresh_connection_info()

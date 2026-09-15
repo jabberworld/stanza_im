@@ -52,6 +52,7 @@ stanza_im/
 │   ├── device_test.py  — Devices self-tests (mic meter/tone/camera)
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
 │   ├── service_browser.py   — XEP-0030 service discovery browser
+│   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── history_manager.py   — Per-contact history browser
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py
@@ -971,7 +972,11 @@ See `XEPs.md` for the full supported-extensions matrix.
   `never`. `tls_flags()` maps both selectors to the slixmpp flags.
 - **Keep-alive** `keepalive` → `xmpp.whitespace_keepalive`.
 - `connection_info()` (mode, TLS version/cipher, SASL, keep-alive, SM, CSI,
-  actual SRV endpoint) feeds the preferences info icon.
+  actual SRV endpoint, and `cert` — the peer certificate: subject/issuer CN+O,
+  validity with days left/expired, serial, DNS SANs, SHA-256 fingerprint,
+  `verified`) feeds the preferences info icon; the separate «Сертификат» icon
+  opens `ui/certificate_dialog.CertificateDialog` non-modally with the shared
+  `certificate_lines()`.
 
 ### 14.7 Stream Management & Client State (XEP-0198/0352)
 
@@ -1049,7 +1054,7 @@ client.join_muc(room, nick)     # Join MUC room
 client.leave_muc(room)          # Leave MUC room
 client.send_muc_message(room, body)  # Send to MUC
 client.get_vcard(jid)           # Request vCard
-client.connection_info()        # Dict: mode/TLS/SASL/keepalive/SM/CSI/server
+client.connection_info()        # Dict: mode/TLS/SASL/keepalive/SM/CSI/server/cert
 client.set_client_active(bool)  # XEP-0352 active/inactive
 client.resume_expected()        # True if XEP-0198 may resume the stream
 client.discover_transfer_services()  # File proxy + STUN/TURN (cached)

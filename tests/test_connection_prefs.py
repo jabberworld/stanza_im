@@ -7,6 +7,7 @@ Run with:
 """
 import asyncio
 import ast
+import hashlib
 import inspect
 import os
 import sys
@@ -25,8 +26,10 @@ from stanza_im.core.storage import Config
 from stanza_im.core.client import (JabberClient, tls_flags, order_tls_first,
                                     filter_plus_mechs)
 from stanza_im.i18n import load as load_i18n
+from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.preferences import PreferencesDialog
+from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
 
 load_i18n("en")
 
@@ -157,11 +160,28 @@ check("info: STARTTLS detected", info_st["mode"] == "starttls")
 
 
 class _FakeTlsSocket:
+    _CERT = {
+        "subject": ((("commonName", "xmpp.linuxoid.in"),),
+                    (("organizationName", "Linuxoid"),)),
+        "issuer": ((("commonName", "Test CA"),),
+                   (("organizationName", "CA Org"),)),
+        "notBefore": "Jan  1 00:00:00 2020 GMT",
+        "notAfter": "Jan  1 00:00:00 2030 GMT",
+        "serialNumber": "0A1B2C",
+        "subjectAltName": (("DNS", "xmpp.linuxoid.in"),
+                           ("DNS", "linuxoid.in")),
+    }
+
     def version(self):
         return "TLSv1.3"
 
     def cipher(self):
         return ("TLS_AES_256_GCM_SHA384", "TLSv1.3", 256)
+
+    def getpeercert(self, binary_form=False):
+        if binary_form:
+            return b"DERBYTES"
+        return self._CERT
 
 
 import stanza_im.core.client as _client_mod
@@ -175,6 +195,38 @@ check("info: direct TLS detected", info_direct["mode"] == "direct")
 check("info: TLS version reported", info_direct["tls_version"] == "TLSv1.3")
 check("info: cipher reported",
       info_direct["cipher"] == "TLS_AES_256_GCM_SHA384")
+
+_cert = info_direct["cert"]
+_expected_fp = ":".join(
+    hashlib.sha256(b"DERBYTES").hexdigest().upper()[i:i + 2]
+    for i in range(0, 64, 2))
+check("info: cert available and verified",
+      _cert["available"] and _cert["verified"])
+check("info: cert subject CN/O",
+      _cert["subject_cn"] == "xmpp.linuxoid.in"
+      and _cert["subject_o"] == "Linuxoid")
+check("info: cert issuer CN", _cert["issuer_cn"] == "Test CA")
+check("info: cert serial", _cert["serial"] == "0A1B2C")
+check("info: cert SANs",
+      _cert["sans"] == ["xmpp.linuxoid.in", "linuxoid.in"])
+check("info: cert SHA-256 fingerprint",
+      _cert["fingerprint"] == _expected_fp)
+check("info: cert validity window",
+      _cert["expired"] is False and _cert["days_left"] > 0)
+check("info: plain connection has no certificate", info_plain["cert"] == {})
+
+_lines = certificate_lines(_cert)
+check("certificate lines include the subject",
+      any("xmpp.linuxoid.in" in line for line in _lines))
+check("certificate lines include the fingerprint",
+      any(_expected_fp in line for line in _lines))
+check("certificate lines report absence",
+      certificate_lines({}) == [tr("conn_info_cert_none")])
+
+_cert_dialog = CertificateDialog("xmpp.linuxoid.in", _cert)
+check("certificate dialog shows the fingerprint",
+      _expected_fp in _cert_dialog._text.toPlainText())
+_cert_dialog.close()
 
 
 _fake = _FakeXmpp(set(), _FakeTlsSocket())
@@ -369,6 +421,39 @@ asyncio.run(dlg2._run_refresh_discovery())
 check("refresh button triggers discovery", fake.refreshed == 1)
 check("refresh button restored after run",
       dlg2._btn_discovery_refresh.isEnabled())
+
+
+# ── certificate info icon in the connection page ──────────────────
+
+class _CertClient:
+    def __init__(self, info):
+        self._info = info
+
+    def connection_info(self):
+        return self._info
+
+    def discovered_services(self):
+        return None
+
+    def on(self, *_args):
+        pass
+
+
+check("cert button disabled without a client",
+      not PreferencesDialog(cfg, ChatThemeFactory(), client=None)
+      ._cert_btn.isEnabled())
+dlg3 = PreferencesDialog(cfg, ChatThemeFactory(),
+                         client=_CertClient(info_direct))
+check("cert button enabled with certificate data",
+      dlg3._cert_btn.isEnabled())
+check("cert button tooltip shows the subject",
+      "xmpp.linuxoid.in" in dlg3._cert_btn.toolTip())
+check("cert button caches the certificate",
+      dlg3._cert_data.get("subject_cn") == "xmpp.linuxoid.in")
+
+dlg4 = PreferencesDialog(cfg, ChatThemeFactory(),
+                         client=_CertClient(info_st))
+check("cert button disabled without TLS", not dlg4._cert_btn.isEnabled())
 
 
 # ── XEP-0198 / XEP-0352 support ───────────────────────────────────
