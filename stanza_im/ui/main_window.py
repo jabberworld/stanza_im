@@ -188,6 +188,7 @@ class MainWindow(QtWidgets.QMainWindow):
             lambda jid, paths, method: self._on_chat_files_upload(
                 jid, paths, method, self._chat_window))
         self._chat_window.call_requested.connect(self._on_call_requested)
+        self._chat_window.muji_call_requested.connect(self._on_muji_call_requested)
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
         self._chat_window.text_scale_changed.connect(
@@ -682,6 +683,9 @@ class MainWindow(QtWidgets.QMainWindow):
             "role": "", "affiliation": "",
         }
         self._client.join_muc(room, nick, password=password, save_bookmark=False)
+        self._chat_window.set_muji_support(
+            room, bool(getattr(getattr(self._client, "rtp_calls", None),
+                               "available", False)))
         if save_bookmark:
             self._start_task(self._client.save_bookmark(
                 room, nick, password, autojoin=autojoin, name=bookmark_name))
@@ -1716,6 +1720,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.set_call_video(sid, enabled)
 
     # ── Muji conference ──────────────────────────────────────────
+
+    def _on_muji_call_requested(self, room: str, video: bool = False) -> None:
+        """A MUC chat tab's call button was clicked — start a Muji call."""
+        self._join_muji(room, video)
 
     def _join_muji(self, room: str, video: bool) -> None:
         if not self._client:

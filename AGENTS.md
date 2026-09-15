@@ -537,7 +537,13 @@ per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
 (XEP-0215 `urn:xmpp:extdisco:2` → the connection settings' STUN/TURN endpoint →
 SRV discovery). The call menu is a submenu in the roster contact context menu
 and an icon-only button in the chat toolbar (both enabled only for capable
-contacts). `ui/call_window.CallWindow` shows the active call and
+contacts). The toolbar button on a **MUC** tab instead starts a Muji
+conference call: `ChatWidget._call_btn`'s Audio/Video menu actions emit
+`muji_call_requested(room, video)` (never `call_requested`), which
+`ChatWindow.open_groupchat` forwards and `MainWindow._on_muji_call_requested`
+routes to `_join_muji`. The MUC button is gated solely on aiortc availability
+(`set_muji_support`, fed by `_join_muc` after `open_groupchat` from
+`client.rtp_calls.available`) and is a no-op on 1:1 tabs. `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
 over the roster); remote video frames are painted by `VideoView`. Its

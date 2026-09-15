@@ -211,6 +211,7 @@ class ChatWidget(QtWidgets.QWidget):
     vcard_requested = QtCore.pyqtSignal(str)                # jid
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
+    muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
@@ -434,17 +435,27 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_file_btn.setMenu(send_menu)
         actions_row.addWidget(self._send_file_btn)
 
-        # Call button (audio/video) — enabled only when the peer supports it.
+        # Call button — 1:1 chats ring a peer (call_requested), MUC tabs
+        # start a Muji (XEP-0272) conference call instead.
         call_menu = QtWidgets.QMenu(self)
         self._call_audio_action = call_menu.addAction(tr("call_audio"))
-        self._call_audio_action.triggered.connect(
-            lambda: self.call_requested.emit(self.jid, False))
         self._call_video_action = call_menu.addAction(tr("call_video"))
-        self._call_video_action.triggered.connect(
-            lambda: self.call_requested.emit(self.jid, True))
-        self._call_btn = QtWidgets.QToolButton(self)
-        self._call_btn.setIcon(self._call_icon())
-        self._call_btn.setToolTip(tr("call_button"))
+        if self.is_muc:
+            self._call_audio_action.triggered.connect(
+                lambda: self.muji_call_requested.emit(self.jid, False))
+            self._call_video_action.triggered.connect(
+                lambda: self.muji_call_requested.emit(self.jid, True))
+            self._call_btn = QtWidgets.QToolButton(self)
+            self._call_btn.setIcon(self._call_icon())
+            self._call_btn.setToolTip(tr("muji_button"))
+        else:
+            self._call_audio_action.triggered.connect(
+                lambda: self.call_requested.emit(self.jid, False))
+            self._call_video_action.triggered.connect(
+                lambda: self.call_requested.emit(self.jid, True))
+            self._call_btn = QtWidgets.QToolButton(self)
+            self._call_btn.setIcon(self._call_icon())
+            self._call_btn.setToolTip(tr("call_button"))
         self._call_btn.setPopupMode(
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         self._call_btn.setMenu(call_menu)
@@ -1585,6 +1596,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_btn.setEnabled(bool(audio or video))
         self._call_audio_action.setEnabled(bool(audio))
         self._call_video_action.setEnabled(bool(video))
+
+    def set_muji_support(self, enabled: bool) -> None:
+        """Enable the Muji call menu on a MUC tab (aiortc availability)."""
+        if not self.is_muc:
+            return
+        self._call_btn.setEnabled(bool(enabled))
+        self._call_audio_action.setEnabled(bool(enabled))
+        self._call_video_action.setEnabled(bool(enabled))
 
     def _set_input_height(self, height: int):
         height = max(40, min(240, int(height)))

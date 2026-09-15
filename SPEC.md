@@ -1173,8 +1173,14 @@ client.leave_muji(room)
   contents map in MUC presence; the joiner opens a Jingle session with every
   other participant's real JID tagged `<muji room='…'/>`, handles content
   add/remove and leaving, and parses XEP-0482 invites. `MujiCallWindow` lists
-  participants. All call/Muji code logs via `stanza_im.call*` with `CALL[…]` /
-  `MUJI[…]` markers.
+  participants. In a MUC chat tab the toolbar call button starts a Muji
+  conference: `ChatWidget` emits `muji_call_requested(room, video)` (never
+  `call_requested`) which `ChatWindow.open_groupchat` forwards and
+  `MainWindow._on_muji_call_requested` routes to `_join_muji`. The button is
+  enabled only when aiortc is available (`ChatWindow.set_muji_support`, applied
+  by `_join_muc` right after `open_groupchat` from `rtp_calls.available`); it
+  is a no-op on 1:1 tabs. All call/Muji code logs via `stanza_im.call*` with
+  `CALL[…]` / `MUJI[…]` markers.
 
 ### 14.11 Data Classes
 

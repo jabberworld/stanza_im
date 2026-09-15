@@ -27,6 +27,7 @@ from stanza_im.core.storage import Config
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_widget import ChatWidget
+from stanza_im.ui.main_window import MainWindow
 from stanza_im.xmpp import jingle_rtp as jr
 from stanza_im.xmpp import muji
 
@@ -528,6 +529,57 @@ check("call menu items", cw._call_btn.isEnabled()
 cw.set_call_support(False, False)
 check("call menu disabled again", not cw._call_btn.isEnabled())
 
+# ── 7b. MUC chat widget Muji call menu gating ------------------------------
+cmuc = ChatWidget("room@conf.example", "Room", chat_themes.ChatThemeFactory(),
+                  is_muc=True)
+check("muc muji button gated off by default",
+      cmuc._call_btn is not None and not cmuc._call_btn.isEnabled()
+      and cmuc._call_btn.toolTip() == "Conference call")
+# Muji support is a single aiortc-enabled switch, not per-capability.
+cmuc.set_muji_support(True)
+check("muc muji menu enabled by support switch",
+      cmuc._call_btn.isEnabled()
+      and cmuc._call_audio_action.isEnabled()
+      and cmuc._call_video_action.isEnabled())
+# On a MUC tab the call menu emits muji_call_requested, never call_requested.
+muji_requests, call_requests = [], []
+cmuc.muji_call_requested.connect(
+    lambda jid, video: muji_requests.append((jid, video)))
+cmuc.call_requested.connect(lambda jid, video: call_requests.append((jid, video)))
+cmuc._call_audio_action.trigger()
+check("muc audio menu emits muji_call_requested",
+      muji_requests == [("room@conf.example", False)] and not call_requests)
+cmuc._call_video_action.trigger()
+check("muc video menu emits muji_call_requested",
+      muji_requests == [("room@conf.example", False),
+                        ("room@conf.example", True)] and not call_requests)
+cmuc.set_muji_support(False)
+check("muc muji menu disabled again", not cmuc._call_btn.isEnabled())
+# set_muji_support is a no-op on 1:1 widgets.
+cw.set_muji_support(True)
+check("muji support ignored on 1:1 widget", not cw._call_btn.isEnabled())
+
+from stanza_im.ui.chat_window import ChatWindow
+
+
+def _chat_window_muji_result():
+    cw6 = ChatWindow(chat_themes.ChatThemeFactory())
+    muc_tab = cw6.open_groupchat("room@conf.example", "me", "Room")
+    cw6.set_muji_support("room@conf.example", True)
+    enabled = muc_tab._call_btn.isEnabled()
+    reqs = []
+    cw6.muji_call_requested.connect(
+        lambda jid, video: reqs.append((jid, video)))
+    muc_tab._call_video_action.trigger()
+    cw6.close_chat("room@conf.example")
+    return enabled, reqs
+
+
+_support_ok, _cw_reqs = _chat_window_muji_result()
+check("chat window muji support reaches muc tab", _support_ok)
+check("chat window forwards muji_call_requested",
+      _cw_reqs == [("room@conf.example", True)])
+
 # ── 8. call window + incoming dialog --------------------------------------
 from stanza_im.ui.call_window import CallWindow, IncomingCallDialog
 win = CallWindow("sid1", "bob@example.com", video=True)
@@ -990,6 +1042,48 @@ cfg = Config()
 check("devices defaults",
       cfg.devices.audio_input == "" and cfg.devices.video_input == ""
       and cfg.calls.auto_accept is False)
+
+# ── 12. MUC call button → Muji conference routing ---------------------------
+class _FakeMujiClient:
+    def __init__(self):
+        self.joins = []
+
+        class _Rtp:
+            available = True
+
+        self.rtp_calls = _Rtp()
+
+    def join_muji(self, room, nick, video):
+        self.joins.append((room, nick, video))
+
+    def set_client_active(self, active=True):
+        pass
+
+
+def _muji_routing_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    mw._client = _FakeMujiClient()
+    mw._muc_self_nicks["room@conf"] = "me"
+    mw._on_muji_call_requested("room@conf", True)
+    video_join = list(mw._client.joins)
+    mw._on_muji_call_requested("room@conf", False)
+    both_joins = list(mw._client.joins)
+    mw._client.rtp_calls.available = False
+    mw._client.joins.clear()
+    mw._on_muji_call_requested("room@conf", True)
+    blocked = not mw._client.joins
+    mw.close()
+    return video_join, both_joins, blocked
+
+
+_video_route, _both_routes, _blocked = _muji_routing_result()
+check("main window routes MUC call button to join_muji",
+      _video_route == [("room@conf", "me", True)])
+check("audio variant routed too",
+      _both_routes == [("room@conf", "me", True),
+                       ("room@conf", "me", False)])
+check("MUC call button blocked without aiortc", _blocked)
 
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")

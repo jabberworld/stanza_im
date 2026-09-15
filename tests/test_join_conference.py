@@ -66,6 +66,9 @@ class _FakeChatWindow:
     def open_groupchat(self, jid, nick, display_name):
         self.open_jids.append(jid)
 
+    def set_muji_support(self, room, enabled):
+        pass
+
 
 class _FakeClient:
     def __init__(self):
