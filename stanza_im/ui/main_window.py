@@ -491,7 +491,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._join_muc(data["room"], data["nick"], data["password"],
                            save_bookmark=data["save"],
                            bookmark_name=data["name"],
-                           autojoin=data["autojoin"])
+                           autojoin=data["autojoin"],
+                           server=data["server"])
         dlg.finished.connect(finished)
         dlg.open()
 
@@ -524,7 +525,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._join_muc(data["room"], data["nick"], data["password"],
                            save_bookmark=data["save"],
                            bookmark_name=data["name"],
-                           autojoin=data["autojoin"])
+                           autojoin=data["autojoin"],
+                           server=data["server"])
         dlg.finished.connect(finished)
         dlg.open()
 
@@ -662,10 +664,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sync_conference_roster(room)
 
     def _join_muc(self, room: str, nick: str, password: str = "",
-                  save_bookmark: bool = False, bookmark_name: str = "",
-                  autojoin: bool = False):
+                   save_bookmark: bool = False, bookmark_name: str = "",
+                   autojoin: bool = False, server: str = ""):
         if not self._client:
             return
+        if server and "@" not in room:
+            room = f"{room}@{server}"
         display_name = self._muc_display_name(room)
         is_new = not self._chat_window.has_chat(room)
         if is_new:

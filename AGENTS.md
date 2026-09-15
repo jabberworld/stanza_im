@@ -116,6 +116,10 @@ self-referencing loops. `Автообзор` recursively pre-loads the tree (bou
 depth, cycle-safe). Used servers are persisted in `connection.service_servers`.
 Double-clicking a conference fills both room and server in `JoinConferenceDialog`
 and runs the full join flow (server persistence, bookmark support).
+`MainWindow._join_muc(..., server=…)` accepts the room localpart and server
+separately and assembles `room@server` when the room carries no `@` — both
+dialog callers pass `data["server"]`, so a join never sends a bare localpart
+or a `remote-server-not-found` disco to the room name alone.
 Chat avatar `<img>` elements carry `class="avatar"`; `ChatView.update_sender_avatar`
 updates only `img.avatar`, never emoticon images in the same message.
 `HistoryManagerDialog` (opened from the roster contact context menu and the

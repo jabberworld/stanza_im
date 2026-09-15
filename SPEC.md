@@ -97,7 +97,10 @@ dropped to avoid self-referencing loops.
 `Автообзор` recursively browses the whole tree with a bounded depth. Used
 servers are stored in `connection.service_servers`. Double-clicking a
 conference pre-fills both room and server in the join dialog, which completes
-the standard join flow (server persistence and bookmark support). Emoticon
+the standard join flow (server persistence and bookmark support); the join
+assembles `room@server` (`MainWindow._join_muc(..., server=)`) when the room
+carries no `@`, so a bare localpart never reaches the XMPP layer as a JID.
+Emoticon
 replacement uses one non-overlapping match pass so generated image HTML is not
 processed again as text. Chat avatar images are tagged `class="avatar"` so
 avatar updates never overwrite emoticon images inside a message.
