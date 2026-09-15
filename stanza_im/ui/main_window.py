@@ -1710,9 +1710,14 @@ class MainWindow(QtWidgets.QMainWindow):
                    if self._client else None)
         room = getattr(session, "muji_room", "")
         if room:
-            muji = self._muji_windows.get(room)
-            if muji is not None:
-                muji.set_frame(self._muji_nick_for_sid(room, sid), image)
+            nick = self._muji_nick_for_sid(room, sid)
+            conf = self._client.muji.conferences.get(room)
+            # Ignore a frame whose sender already left the call (avoids a
+            # phantom tile after a leave).
+            if nick and conf is not None and nick in conf.participants:
+                muji = self._muji_windows.get(room)
+                if muji is not None:
+                    muji.set_frame(nick, image)
 
     def _on_call_local_video_frame(self, sid: str, image) -> None:
         """Own-camera frame from the conference self-preview session."""

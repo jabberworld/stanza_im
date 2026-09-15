@@ -494,6 +494,9 @@ class _MosaicVideo(QtWidgets.QWidget):
         if tile is not None:
             tile.setParent(None)
             tile.deleteLater()
+        if self._zoomed == nick:
+            # The enlarged participant left — fall back to the grid.
+            self._show_grid()
         self._relayout()
 
     # ── layout ───────────────────────────────────────────────────

@@ -1182,7 +1182,11 @@ client.leave_muji(room)
   participants via the `muji_session` event → `MujiManager.note_session`, which
   matches by bare real JID (a session-only entry is a `virtual` placeholder that
   `handle_presence` merges into the real MUC nick, so one person never appears
-  under both its room nick and its Jingle resource).
+  under both its room nick and its Jingle resource). A presence from a tracked
+  participant without the `<muji/>` element (or `type="unavailable"`) means the
+  peer left the call: the participant and its mosaic tile are dropped,
+  `muji_updated` fires and `JingleRtpManager.end_muji_peer` /
+  `MujiManager.forget_session` close our session and drop the placeholder;
   `MujiCallWindow` splits horizontally (video mosaic / status on the left,
   participant list on the right, like the MUC chat sidebar) with a red
   `call-hangup` "leave" button and **three** icon-only per-row toggles ("send my

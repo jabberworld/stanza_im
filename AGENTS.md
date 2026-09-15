@@ -598,7 +598,13 @@ whose MUC presence we missed is still listed). `note_session` matches peers by
 **bare real JID**, and a session-only entry is a `virtual` placeholder that
 `handle_presence` merges into the real MUC nickname once the occupant's presence
 arrives — so a peer (e.g. Monocles mod) never appears twice, once under its room
-nick and once under its Jingle resource. The single `MujiCallWindow`
+nick and once under its Jingle resource. A presence from a tracked participant
+that carries no `<muji/>` (or `type="unavailable"`) means the peer left the call
+(XEP-0272 §6): the participant and its mosaic tile are dropped, `muji_updated`
+fires and `JingleRtpManager.end_muji_peer` closes our session to that peer
+(`_close_session` also calls `MujiManager.forget_session` to drop a virtual
+placeholder); `_MosaicVideo.remove_nick` resets the zoom to the grid when the
+enlarged participant leaves. The single `MujiCallWindow`
 splits horizontally: the video mosaic / status on the left and the participant
 list on the right (the same style as the MUC chat participant sidebar), with a
 red `call-hangup` "leave" button. Each participant row carries **three

@@ -1267,6 +1267,12 @@ class JingleRtpManager:
                 logger.debug("CALL close failed", exc_info=True)
             session.call = None
         self.sessions.pop(session.sid, None)
+        if session.muji_room:
+            try:
+                self.client.muji.forget_session(session.muji_room,
+                                                session.peer_full)
+            except Exception:
+                logger.debug("MUJI forget_session failed", exc_info=True)
         self.client.emit("call_ended", session.sid, session.peer_full, reason)
 
     def close(self) -> None:
@@ -1281,6 +1287,15 @@ class JingleRtpManager:
                 logger.info("MUJI ending session %s", session.sid)
                 self._terminate(session, "success", send=True)
                 self._close_session(session, "ended", "muji-leave")
+
+    def end_muji_peer(self, room: str, peer_bare: str) -> None:
+        """Close our conference session(s) with a peer who left the call."""
+        for session in list(self.sessions.values()):
+            if session.muji_room == room and session.peer_bare == peer_bare:
+                logger.info("MUJI ending session %s (peer %s left)",
+                            session.sid, peer_bare)
+                self._terminate(session, "success", send=True)
+                self._close_session(session, "ended", "peer-left")
 
     def add_muji_content(self, room: str, name: str, media: str) -> None:
         for session in list(self.sessions.values()):

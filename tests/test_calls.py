@@ -1153,6 +1153,10 @@ class _FakeMujiRtpSessions:
     def __init__(self):
         self.sessions = {}
         self.available = False
+        self.ended_peers = []
+
+    def end_muji_peer(self, room, peer_bare):
+        self.ended_peers.append((room, peer_bare))
 
 
 class _FakeMujiConfClient:
@@ -1363,6 +1367,124 @@ check("a session peer already seen via MUC presence is not duplicated",
       _p_first)
 check("a session-only peer is a virtual placeholder", _p_placeholder)
 check("the MUC presence merges the virtual placeholder", _p_merged)
+
+
+def _muji_presence(room_nick, real_jid="", with_muji=True,
+                   ptype="available"):
+    pres = slixmpp.Presence()
+    pres["from"] = "room@conf/" + room_nick
+    if ptype != "available":
+        pres["type"] = ptype
+    if with_muji:
+        ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+    user = ET.SubElement(pres.xml, "{http://jabber.org/protocol/muc#user}x")
+    item = ET.SubElement(user, "{http://jabber.org/protocol/muc#user}item")
+    if real_jid:
+        item.set("jid", real_jid)
+    return pres
+
+
+def _muji_leave_result():
+    c = _FakeMujiConfClient()
+    conf = muji.MujiConference(room="room@conf")
+    conf.participants["rain"] = muji.MujiParticipant(
+        nick="rain", real_jid="rain@host/monocles res")
+    c.muji.conferences["room@conf"] = conf
+    removed = c.muji.handle_presence(
+        _muji_presence("rain", "rain@host/monocles res", with_muji=False))
+    left = "rain" not in conf.participants
+    updated = ("muji_updated", "room@conf") in c.events
+    ended = c.rtp_calls.ended_peers == [("room@conf", "rain@host")]
+    # a plain status presence of a non-participant is ignored
+    ignored = not c.muji.handle_presence(
+        _muji_presence("ghost", with_muji=False))
+    # an unavailable presence also removes the participant
+    conf.participants["bob"] = muji.MujiParticipant(
+        nick="bob", real_jid="bob@host/x")
+    c.muji.handle_presence(
+        _muji_presence("bob", "bob@host/x", with_muji=False,
+                       ptype="unavailable"))
+    unavailable = "bob" not in conf.participants
+    return removed, left, updated, ended, ignored, unavailable
+
+
+_le_removed, _le_left, _le_updated, _le_ended, _le_ignored, _le_unavail = \
+    _muji_leave_result()
+check("a presence without <muji> removes the participant", _le_left)
+check("leaving the call marks the presence as handled", _le_removed)
+check("leaving the call emits muji_updated", _le_updated)
+check("leaving the call closes our session to the peer", _le_ended)
+check("a status presence of a non-participant is ignored", _le_ignored)
+check("an unavailable presence removes the participant", _le_unavail)
+
+
+def _muji_forget_session_result():
+    c = _FakeMujiConfClient()
+    conf = muji.MujiConference(room="room@conf")
+    conf.participants["res"] = muji.MujiParticipant(
+        nick="res", real_jid="p@host", virtual=True)
+    conf.participants["real"] = muji.MujiParticipant(
+        nick="real", real_jid="q@host")
+    c.muji.conferences["room@conf"] = conf
+    c.muji.forget_session("room@conf", "p@host/res")
+    return "res" not in conf.participants, "real" in conf.participants
+
+
+_fs_gone, _fs_kept = _muji_forget_session_result()
+check("forget_session drops the virtual placeholder", _fs_gone)
+check("forget_session keeps real MUC participants", _fs_kept)
+
+
+def _muji_mosaic_removal_result():
+    from stanza_im.ui.call_window import MujiCallWindow
+    w = MujiCallWindow("room@conf", self_nick="me")
+    w.set_video(True)
+    w.set_participants(["alice", "bob"])
+    img = QtGui.QImage(64, 48, QtGui.QImage.Format.Format_RGB888)
+    img.fill(0)
+    w.set_frame("alice", img)
+    w.set_frame("bob", img)
+    mosaic = w._video
+    mosaic._zoom_to("bob")
+    w.set_participants(["alice"])          # bob left the call
+    tile_gone = "bob" not in mosaic._tiles
+    grid = mosaic._grid_holder.currentIndex() == 0 and mosaic._zoomed is None
+    w.close()
+    return tile_gone, grid
+
+
+_mr_gone, _mr_grid = _muji_mosaic_removal_result()
+check("a departed participant's mosaic tile is removed", _mr_gone)
+check("zooming a departed participant falls back to the grid", _mr_grid)
+
+
+def _end_muji_peer_result():
+    mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
+    session = jr.CallSession(sid="s1", peer_bare="p@host",
+                             peer_full="p@host/res", self_full="me@host/x",
+                             initiator=True, muji_room="room@conf")
+    mgr.sessions = {"s1": session}
+    terminated = []
+    mgr._terminate = lambda s, r, send=False: terminated.append(s.sid)
+
+    class _Muji:
+        def forget_session(self, *args):
+            pass
+
+    class _Client:
+        muji = _Muji()
+
+        def emit(self, *args):
+            pass
+
+    mgr.client = _Client()
+    mgr.end_muji_peer("room@conf", "p@host")
+    return not mgr.sessions, terminated == ["s1"]
+
+
+_e2_no_session, _e2_terminated = _end_muji_peer_result()
+check("end_muji_peer closes the matching conference session", _e2_no_session)
+check("end_muji_peer terminates the session", _e2_terminated)
 
 
 def _muji_standalone_preview_result():

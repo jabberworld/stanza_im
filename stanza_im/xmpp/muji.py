@@ -56,23 +56,29 @@ class MujiManager:
 
     # ── MUC presence (XEP-0272 §3/§5/§6) ──────────────────────────
     def handle_presence(self, pres) -> bool:
-        """Parse a MUC presence <muji/> element.  Returns True if handled."""
-        muji = pres.xml.find(_q(NS_MUJI, "muji"))
-        if muji is None:
-            return False
+        """Parse a MUC presence <muji/> element.  Returns True if handled.
+
+        A presence from a tracked participant that carries no ``<muji/>``
+        element (or ``type="unavailable"``) means the peer left the call
+        (XEP-0272 §6) — the participant is dropped and our session to that peer
+        is closed.
+        """
         frm = str(pres["from"])
         room, _, nick = frm.partition("/")
+        if not nick:
+            return False
+        muji = pres.xml.find(_q(NS_MUJI, "muji"))
+        if muji is None or str(pres["type"]) == "unavailable":
+            return self._leave_call(room, nick, pres)
         conf = self.conferences.get(room)
         if conf is None:
             conf = MujiConference(room=room)
             self.conferences[room] = conf
         participant = conf.participants.setdefault(nick, MujiParticipant(nick))
         participant.virtual = False
-        item = pres.xml.find(
-            "{http://jabber.org/protocol/muc#user}x/"
-            "{http://jabber.org/protocol/muc#user}item")
-        if item is not None and item.get("jid"):
-            participant.real_jid = item.get("jid", "")
+        item_jid = self._item_jid(pres)
+        if item_jid:
+            participant.real_jid = item_jid
         participant.preparing = muji.find(_q(NS_MUJI, "preparing")) is not None
         contents = {}
         for content in muji.findall(_q(NS_MUJI, "content")):
@@ -90,6 +96,72 @@ class MujiManager:
                      room, nick, participant.preparing, contents)
         self.client.emit("muji_updated", room)
         return True
+
+    @staticmethod
+    def _item_jid(pres) -> str:
+        item = pres.xml.find(
+            "{http://jabber.org/protocol/muc#user}x/"
+            "{http://jabber.org/protocol/muc#user}item")
+        if item is not None and item.get("jid"):
+            return item.get("jid", "")
+        return ""
+
+    def _leave_call(self, room: str, nick: str, pres) -> bool:
+        """Drop a participant that left the call; closes our session to it."""
+        conf = self.conferences.get(room)
+        if conf is None:
+            return False
+        participant = conf.participants.pop(nick, None)
+        bare = ""
+        if participant is not None and participant.real_jid:
+            bare = participant.real_jid.split("/", 1)[0]
+        item_jid = self._item_jid(pres)
+        if item_jid and not bare:
+            bare = item_jid.split("/", 1)[0]
+        removed = participant is not None
+        # Also drop a session placeholder for the same real JID.
+        if bare:
+            for other_nick, other in list(conf.participants.items()):
+                if (other.virtual and other.real_jid
+                        and other.real_jid.split("/", 1)[0] == bare):
+                    conf.participants.pop(other_nick, None)
+                    removed = True
+        if not removed:
+            return False
+        if nick == conf.self_nick:
+            conf.joined = False
+            conf.contents = {}
+        logger.info("MUJI %s left the call in %s", nick, room)
+        if bare:
+            try:
+                self.client.rtp_calls.end_muji_peer(room, bare)
+            except Exception:
+                logger.debug("MUJI end_muji_peer failed", exc_info=True)
+        self.client.emit("muji_updated", room)
+        return True
+
+    def forget_session(self, room: str, peer_full_jid: str) -> None:
+        """Drop a session-only participant whose Jingle session ended."""
+        conf = self.conferences.get(room)
+        if conf is None:
+            return
+        peer = str(peer_full_jid)
+        bare = peer.split("/", 1)[0]
+        resource = peer.split("/", 1)[1] if "/" in peer else bare
+        removed = False
+        placeholder = conf.participants.get(resource)
+        if placeholder is not None and placeholder.virtual:
+            conf.participants.pop(resource, None)
+            removed = True
+        for other_nick, other in list(conf.participants.items()):
+            if (other.virtual and other.real_jid
+                    and other.real_jid.split("/", 1)[0] == bare):
+                conf.participants.pop(other_nick, None)
+                removed = True
+        if removed:
+            logger.debug("MUJI forgot session-only peer %s in %s",
+                         peer_full_jid, room)
+            self.client.emit("muji_updated", room)
 
     def note_session(self, room: str, peer_full_jid: str) -> None:
         """Record a peer seen through an incoming Jingle session.
