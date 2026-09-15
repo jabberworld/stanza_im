@@ -45,6 +45,7 @@ stanza_im/
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
 │   ├── media_preview.py — Inline image/audio/video previews
 │   ├── media_viewer.py — Fullscreen image/video viewer
+│   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
@@ -64,7 +65,7 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870)
 └── plugins/            — (future)
 ```
 
@@ -198,6 +199,19 @@ device-supported format (`isFormatSupported`, falling back to
 `preferredFormat`) and convert to the encoder's s16/stereo/48 kHz 20 ms frames;
 already-matching frames bypass aiortc's audio resampler (a PyAV/FFmpeg
 compatibility shim in `xmpp/media.py`).
+
+### 4.5 Map Settings (`map.*`)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `map.tiles_url` | `https://tile.openstreetmap.org` | OSM tile server (``.../{z}/{x}/{y}.png``); empty disables fetch |
+| `map.tile_cache_mb` | `64` | Tile cache size cap (LRU, `TileCache.prune`) |
+| `map.tile_cache_days` | `14.0` | Tile TTL before pruning |
+| `map.follow` | `true` | Auto-recenter the map on a new fix (toolbar toggle) |
+| `map.window` | 700×520 | Map window geometry (`{width, height, x, y, maximized}`) |
+
+The tile cache lives under `$XDG_CACHE_HOME/stanza-im/tiles/` (mirrors the
+media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -716,6 +730,37 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   - `osd_conference`: `never` / `mention` (own nick in the body) / `all`.
   - `osd_file`: `_notify_osd_file(sender, filename)` entry point reserved for
     incoming p2p file transfers.
+
+## 12B. Map window & geo: URIs (`ui/map_widget.py`, `include/geo.py`)
+
+- **geo: links**: `geo:lat,lon;u=accuracy` URIs (RFC 5870) inside message
+  bodies are linkified (`include/utils.tokenize_urls` → `geo_render` in
+  `ChatThemeFactory._tokenize_urls`). With a resolvable message id the anchor
+  carries it as `stanza:geo:<ref>/<urlenc>` (XEP-0308 corrections then update
+  the already-open map in place); without one the href stays plain `geo:`.
+  Both styles are intercepted like every other `stanza:` control link — the
+  document-level click handler preventDefaults the anchor and the always-running
+  scroll poll relays the reference as a `link_clicked`, so a geo click never
+  resets the chat document. The QTextBrowser fallback linkifies geo: via
+  `escape_body_with_geo`.
+- **`GeoMapWindow`** (top-level `QMainWindow`, geometry persisted in
+  `map.window`): a `GeoMapWidget` paints OSM raster tiles with a hand-rolled
+  Web-Mercator projection (no WebEngine required) over a `QPainter` pass, then
+  draws the accuracy zone (radius from `;u=` scaled by `meters_per_pixel`), the
+  track polyline, a green start marker and a red current-position marker.
+  Drag pans, wheel/double-click zooms (clamped 2–18, keep-anchor zooming),
+  and a follow toggle re-centers on new fixes.
+- **Live tracking**: clicking a geo: link seeds the window per
+  `(chat, ref)`; `MainWindow._on_geo_message_corrected` feeds XEP-0308
+  corrections whose bodies carry a geo: URI into the matching window
+  (`update_position` → `Track.add_fix`, gap- and duplicate-filtered), and a
+  correction without coordinates calls `mark_track_final()` (status-bar note,
+  tracking stops). Speed = great-circle distance over time delta.
+- **Tiles**: `TileLoader` (worker thread) fetches `{z}/{x}/{y}.png` with a
+  browser-style `User-Agent`, ≤2 req/s pacing and retry backoff, into the
+  on-disk LRU `TileCache` (`map.tile_cache_mb`/`tile_cache_days`, pruned
+  30 min + startup). No tiles / empty `map.tiles_url`: the window still paints
+  the markers, track, coordinates and status.
 
 ## 13. Icon Cache (`ui/icons.py`)
 

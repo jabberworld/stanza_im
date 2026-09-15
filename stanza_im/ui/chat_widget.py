@@ -216,6 +216,8 @@ class ChatWidget(QtWidgets.QWidget):
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)             # url
     media_copy_requested = QtCore.pyqtSignal(str)             # url
+    geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
+    geo_message_corrected = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, new_body
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
                  is_muc: bool = False, parent=None):
@@ -531,6 +533,12 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:view:"):
             self._handle_media_view_uri(url)
             return
+        if url.startswith("stanza:geo:"):
+            self._handle_geo_uri(url)
+            return
+        if url.startswith("geo:"):
+            self._handle_geo_uri(url)
+            return
         if url == "mam://load":
             self.load_more_from_server()
             return
@@ -570,6 +578,20 @@ class ChatWidget(QtWidgets.QWidget):
         target = unquote(encoded) if encoded else ""
         if target:
             self.media_view_requested.emit(target, kind or "image", False)
+
+    def _handle_geo_uri(self, url: str) -> None:
+        """Open the map window for a ``stanza:geo:<ref>/<uri>`` or plain geo:."""
+        from stanza_im.include.geo import parse_geo_uri
+        ref = ""
+        uri = url
+        if url.startswith("stanza:geo:"):
+            body = url[len("stanza:geo:"):]
+            ref, _sep, uri = body.partition("/")
+            ref = unquote(ref)
+            uri = unquote(uri)
+        if not parse_geo_uri(uri):
+            return
+        self.geo_view_requested.emit(self.jid, ref, uri)
 
     def _on_media_open_requested(self, url: str, kind: str):
         """Route a context-menu viewer request, expanding ``video_fs``."""
@@ -947,6 +969,8 @@ class ChatWidget(QtWidgets.QWidget):
                 html = self._view.render_message_html(
                     **self._entry_view_kwargs(entry))
                 self._view.replace_message_ref(dom_ref, html)
+                self.geo_message_corrected.emit(
+                    self.jid, str(ref_id or ""), new_body)
                 return True
         return False
 

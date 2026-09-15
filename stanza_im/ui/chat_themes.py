@@ -266,23 +266,28 @@ class ChatThemeFactory:
         return css
 
     def _transform_body(self, body: str, styled: bool = True,
-                        highlight_nick: str = "") -> str:
+                        highlight_nick: str = "", geo_ref: str = "") -> str:
         """Turn a plain-text body into message HTML.
 
         With styling enabled the XEP-0393 parser runs first and delegates
         plain-text regions to :meth:`_body_fragment`, so URLs/emoticons still
         apply inside styled spans but never inside ``<code>``/``<pre>``.
+        *geo_ref* is the message id used by XEP-0308 corrections, embedded in
+        the ``stanza:geo:`` link so an open map window can follow the fixes.
         """
         if self._message_styling and styled:
             from stanza_im.xmpp import message_styling
             try:
                 return message_styling.render(
-                    body, lambda raw: self._body_fragment(raw, highlight_nick))
+                    body,
+                    lambda raw: self._body_fragment(raw, highlight_nick,
+                                                    geo_ref))
             except Exception:
                 pass
-        return self._body_fragment(body, highlight_nick)
+        return self._body_fragment(body, highlight_nick, geo_ref)
 
-    def _body_fragment(self, raw: str, highlight_nick: str = "") -> str:
+    def _body_fragment(self, raw: str, highlight_nick: str = "",
+                       geo_ref: str = "") -> str:
         """Escape plain text, then add clickable links and emoticons.
 
         Order matters: URLs are replaced with tokens first so emoticon codes
@@ -292,7 +297,7 @@ class ChatThemeFactory:
         escaped = escape_html(raw)
         escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
         escaped = escaped.replace("\n", "<br>")
-        tokenised, anchors = self._tokenize_urls(escaped)
+        tokenised, anchors = self._tokenize_urls(escaped, geo_ref)
         emotified = smile_to_html(tokenised, self._emoticon_skin)
         if highlight_nick and self._highlight_mode != "none":
             emotified = self._apply_highlight(emotified, highlight_nick)
@@ -315,33 +320,46 @@ class ChatThemeFactory:
         return pattern.sub('<span style="%s">\\1</span>' % style.rstrip(";"),
                            text)
 
-    def _tokenize_urls(self, text: str) -> tuple[str, list[str]]:
+    def _tokenize_urls(self, text: str, geo_ref: str = ""
+                       ) -> tuple[str, list[str]]:
         from stanza_im.include.utils import tokenize_urls
         render = None
         if self._media is not None and self._media_mode != "none":
             render = self._media.markup
-        return tokenize_urls(text, render)
+
+        def geo_render(uri: str) -> str:
+            if not geo_ref:
+                return f'<a href="{uri}">{uri}</a>'
+            from urllib.parse import quote
+            href = "stanza:geo:%s/%s" % (quote(str(geo_ref), safe=""),
+                                         quote(uri, safe=""))
+            return f'<a class="stanza-geo" href="{href}">{uri}</a>'
+
+        return tokenize_urls(text, render, geo_render)
 
     def render_message(self, sender: str, body: str, timestamp: str,
                        direction: str, is_next: bool = False,
                        sender_color: str = "#000000",
                        user_icon_path: str = "", unstyled: bool = False,
                        mention: bool = False, edited: bool = False,
-                       highlight_nick: str = "") -> str:
+                       highlight_nick: str = "", geo_ref: str = "") -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
         ``stanza:mention:`` link (MUC nickname mentions).  With *edited* a
         bold «✎» marker is appended right after the message phrase.  With
         *highlight_nick* case-insensitive mentions of that nick in the body
-        are wrapped in a styled <span> (see :meth:`_apply_highlight`).
+        are wrapped in a styled <span> (see :meth:`_apply_highlight`).  With
+        *geo_ref* geo: URIs in the body become ``stanza:geo:`` links carrying
+        the message id (used to live-update the map window on corrections).
         """
         key = direction
         if is_next:
             key += "_next"
         template = self._templates.get(key, self._templates.get(direction, "{body}"))
         body_html = self._transform_body(body, styled=not unstyled,
-                                         highlight_nick=highlight_nick)
+                                         highlight_nick=highlight_nick,
+                                         geo_ref=geo_ref)
         if edited:
             body_html += ('<span class="stanza-edited" style="color:#777;'
                           'font-size:16px;font-weight:bold;margin-left:4px;'

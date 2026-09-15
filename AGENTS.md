@@ -51,6 +51,7 @@ stanza_im/                      # Python package
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer
+│   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
@@ -73,6 +74,7 @@ stanza_im/                      # Python package
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
 │   ├── enumerators.py           # XMPP show/icon/mood/activity maps
 │   ├── pep.py                   # XEP-0080/0107/0108/0118 payloads + icon packs
+│   ├── geo.py                   # RFC 5870 geo: URIs, Mercator math, track, tile cache
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -367,6 +369,30 @@ replace (edited flag + a large bold «✎» appended right after the edited phra
 via `render_message(edited=True)`, `chat.allow_incoming_edits` on) or arrive
 as new messages (off). History gains `message_id`/`edited` columns and
 `replace_message()`.
+
+**geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
+`geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside
+`tokenize_urls` — with a resolvable message id the anchor becomes
+`stanza:geo:<ref>/<urlenc>` (so XEP-0308 corrections update the open map in
+place), otherwise it stays plain `geo:`. Like every other `stanza:` control
+link the click is preventDefaulted by the `_ACTION_JS` document handler and
+relayed through the always-running scroll poll, so it never resets the chat
+document; the QTextBrowser fallback linkifies geo: via
+`geo.escape_body_with_geo`. `MainWindow._on_geo_view_requested` opens a
+`GeoMapWindow` (custom-QPainter OSM tiles, no WebEngine) keyed by
+`(chat, ref)`: `GeoMapWidget` projects the Web-Mercator raster with the pure
+math in `include/geo.py`, draws the `;u=` accuracy zone scaled by
+`meters_per_pixel`, the start marker, the track polyline and the current
+position, and supports drag-pan / zoom (clamped 2–18) / follow. Corrections
+carrying coordinates are fed to the matching window by
+`MainWindow._on_geo_message_corrected` (`Track.add_fix`, duplicate/gap
+filtered, haversine speed in km/h on the status bar); a corrected body without
+coordinates calls `mark_track_final()`. OSM tiles are fetched by the paced
+`TileLoader` worker (browser `User-Agent`, ≤2 req/s, retry backoff) into the
+LRU disk `TileCache` (`map.tile_cache_mb`/`tile_cache_days`, pruned on
+startup and every 30 min, `$XDG_CACHE_HOME/stanza-im/tiles/`); offline or with
+a tiled URL unset the window still paints markers/status. Window geometry is
+persisted under `map.window`.
 
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries icon
 buttons for Clear, History (moved from the tab header), vCard and "Send file"

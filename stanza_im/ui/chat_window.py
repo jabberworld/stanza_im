@@ -165,6 +165,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
+        widget.geo_view_requested.connect(self.geo_view_requested)
+        widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.call_requested.connect(self.call_requested)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
@@ -213,6 +215,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
+        widget.geo_view_requested.connect(self.geo_view_requested)
+        widget.geo_message_corrected.connect(self.geo_message_corrected)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -451,6 +455,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)              # url
     media_copy_requested = QtCore.pyqtSignal(str)              # url
+    geo_view_requested = QtCore.pyqtSignal(str, str, str)      # chat, ref, geo_uri
+    geo_message_corrected = QtCore.pyqtSignal(str, str, str)    # chat, ref, new_body
     window_closed = QtCore.pyqtSignal()                        # window closed
 
     # ── Internal ──────────────────────────────────────────────────

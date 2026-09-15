@@ -537,7 +537,8 @@ if HAS_WEBENGINE:
             window.stanzaCloseMenu = closeMenu;
             window.__stanzaReplyRef = '';
             window.__stanzaMediaRef = '';
-            window.__stanzaMentionRef = '';
+window.__stanzaMentionRef = '';
+            window.__stanzaGeoRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -675,6 +676,16 @@ if HAS_WEBENGINE:
                         m.getAttribute('href') || '';
                     return;
                 }
+                var g = t && t.closest ? t.closest('a.stanza-geo') : null;
+                if (g) {
+                    // geo: link — hand the stanza:geo: target to the scroll
+                    // poll exactly like reply/edit/mention, so the chat
+                    // document is never reset by the click.
+                    e.preventDefault();
+                    window.__stanzaGeoRef =
+                        g.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -734,7 +745,7 @@ if HAS_WEBENGINE:
                 "[st, window.innerHeight || 0, document.body.scrollHeight || 0,"
                 "window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
                 " window.__stanzaMediaRef || '',"
-                " window.__stanzaMentionRef || '']",
+                " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '']",
                 self._on_scroll_position,
             )
 
@@ -759,6 +770,12 @@ if HAS_WEBENGINE:
         def _clear_mention_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaMentionRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_geo_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaGeoRef = '';")
             except RuntimeError:
                 pass
 
@@ -803,6 +820,14 @@ if HAS_WEBENGINE:
                     self.link_clicked.emit(requested)
             else:
                 self._last_mention_ref = ""
+            if len(value) > 7 and isinstance(value[7], str) and value[7]:
+                self._clear_geo_request()
+                requested = value[7]
+                if requested != getattr(self, "_last_geo_ref", ""):
+                    self._last_geo_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_geo_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -876,7 +901,8 @@ if HAS_WEBENGINE:
                     direction=direction, is_next=is_next,
                     sender_color=sender_color, user_icon_path=user_icon_path,
                     unstyled=unstyled, mention=self.mention_senders,
-                    edited=edited, highlight_nick=self.highlight_nick)
+                    edited=edited, highlight_nick=self.highlight_nick,
+                    geo_ref=reply_able_id or "")
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote
                 html = self._theme.render_reply(ref_sender, ref_snippet) + html
@@ -1224,12 +1250,20 @@ else:
             elif direction == "incoming":
                 self._append_before_typing(
                     reply_line +
-                    f"<b>{sender}</b> <i>({timestamp})</i>: {body}{edited_suffix}")
+                    f"<b>{sender}</b> <i>({timestamp})</i>: "
+                    f"{self._escape_body_for_fallback(body)}{edited_suffix}")
             else:
                 self._append_before_typing(
                     reply_line +
                     f"<b style='color:#0066cc'>{sender}</b> "
-                    f"<i>({timestamp})</i>: {body}{edited_suffix}")
+                    f"<i>({timestamp})</i>: "
+                    f"{self._escape_body_for_fallback(body)}{edited_suffix}")
+
+        @staticmethod
+        def _escape_body_for_fallback(body) -> str:
+            """Escape the fallback body and linkify geo: coordinates."""
+            from stanza_im.include.geo import escape_body_with_geo
+            return escape_body_with_geo(body)
 
         def render_message_html(self, *args, **kwargs) -> str:
             return ""

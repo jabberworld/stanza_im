@@ -115,15 +115,21 @@ _URL_RE = re.compile(
 _URL_TRAILING_PUNCT = re.compile(r"[.,;:!?]+$")
 
 
-def tokenize_urls(text: str, media_render=None) -> tuple[str, list[str]]:
-    """Replace URL regions with NUL-byte tokens and return the anchor HTML.
+def tokenize_urls(text: str, media_render=None, geo_render=None
+                  ) -> tuple[str, list[str]]:
+    """Replace URL and geo: regions with NUL-byte tokens, return anchor HTML.
 
     The tokenised text is safe to run through later text transforms (e.g.
     emoticon replacement) that could otherwise corrupt URL text.
 
-    When *media_render* is given, it is called with each trimmed URL and may
-    return replacement markup (an embedded preview/player); ``None`` falls
-    back to a plain ``<a>`` link.
+    When *media_render* is given, it is called with each trimmed http(s) URL
+    and may return replacement markup (an embedded preview/player); ``None``
+    falls back to a plain ``<a>`` link.
+
+    When *geo_render* is given, it is called with each RFC 5870 ``geo:`` URI
+    substring (e.g. ``geo:lat,lon;u=acc``) and may return replacement markup;
+    ``None`` renders a plain (non-clickable-in-the-app) ``<a href="geo:..">``
+    link.  The geo pass runs after URL tokenization so tokens stay valid.
     """
     anchors: list[str] = []
 
@@ -142,7 +148,22 @@ def tokenize_urls(text: str, media_render=None) -> tuple[str, list[str]]:
         anchors.append(markup or f'<a href="{trimmed}">{trimmed}</a>')
         return token + url[len(trimmed):]
 
+    def _geo_repl(match):
+        uri = match.group(0)
+        token = f"\x00{len(anchors)}\x00"
+        markup = None
+        if geo_render is not None:
+            try:
+                markup = geo_render(uri)
+            except Exception:
+                markup = None
+        anchors.append(markup or f'<a href="{uri}">{uri}</a>')
+        return token
+
+    from stanza_im.include.geo import _GEO_IN_TEXT_RE
     tmp = _URL_RE.sub(_repl, text)
+    if geo_render is not None or _GEO_IN_TEXT_RE.search(tmp):
+        tmp = _GEO_IN_TEXT_RE.sub(_geo_repl, tmp)
     return tmp, anchors
 
 

@@ -82,6 +82,11 @@ class Config:
                         "x": 0, "y": 0, "maximized": False},
         "media_viewer": {"width": 900, "height": 680,
                          "x": 0, "y": 0, "maximized": False},
+        "map": {"tiles_url": "https://tile.openstreetmap.org",
+                "tile_cache_mb": 64, "tile_cache_days": 14.0,
+                "follow": True,
+                "window": {"width": 700, "height": 520,
+                           "x": 0, "y": 0, "maximized": False}},
         "application": {"close_to_tray": True, "history_limit": 60,
                          "tab_title_length": 30},
         "connection": {"auto_join_conferences": True,
@@ -98,6 +103,7 @@ class Config:
                         "csi": True,
                         "tls_mode": "prefer",
                         "starttls_mode": "always",
+                        "pep_sweep_interval": 0,
                         "message_carbons": True,
                         "conference_servers": [], "service_servers": []},
         "privacy": {"send_software": True, "send_typing_notifications": True,
@@ -186,15 +192,21 @@ class Config:
 
     @staticmethod
     def _write_toml(fh, data: dict) -> None:
-        """Minimal TOML writer (nested dicts as tables, scalars as keys)."""
-        for key, value in data.items():
-            if isinstance(value, dict):
-                fh.write(f"[{key}]\n")
-                for k, v in value.items():
-                    fh.write(f"{k} = {json.dumps(v)}\n")
+        """Minimal recursive TOML writer (nested dicts as dot-tables)."""
+
+        def _write(fh, data: dict, prefix: str) -> None:
+            scalars = {k: v for k, v in data.items() if not isinstance(v, dict)}
+            tables = {k: v for k, v in data.items() if isinstance(v, dict)}
+            if scalars:
+                if prefix:
+                    fh.write(f"[{prefix}]\n")
+                for key, value in scalars.items():
+                    fh.write(f"{key} = {json.dumps(value)}\n")
                 fh.write("\n")
-            else:
-                fh.write(f"{key} = {json.dumps(value)}\n")
+            for key, value in tables.items():
+                _write(fh, value, f"{prefix}.{key}" if prefix else key)
+
+        _write(fh, data, "")
 
     # ── Attribute access ──────────────────────────────────────────
 

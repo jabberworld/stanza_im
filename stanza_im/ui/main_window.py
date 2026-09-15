@@ -40,6 +40,8 @@ from stanza_im.ui.chat_view import HAS_WEBENGINE
 from stanza_im.include.media import MediaCache, filename_from_url
 from stanza_im.ui.media_preview import MediaPreviewService
 from stanza_im.ui.media_viewer import MediaViewer
+from stanza_im.include.geo import extract_geo_uris, parse_geo_uri, TileCache
+from stanza_im.ui.map_widget import GeoMapWindow
 
 logger = logging.getLogger(__name__)
 _HISTORY_BATCH_LIMIT = 60
@@ -144,6 +146,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._media_prune_timer.timeout.connect(self._prune_media_cache)
         self._media_prune_timer.start()
 
+        # ── Map windows (geo: links) ──────────────────────────────
+        self._geo_windows: dict = {}
+        self._tile_cache = TileCache(
+            ttl_days=float(self._config.map.tile_cache_days or 14.0),
+            max_bytes=int(self._config.map.tile_cache_mb or 64) * 1024 * 1024)
+        try:
+            self._tile_cache.prune()
+        except Exception:
+            logger.debug("tile cache prune failed", exc_info=True)
+        self._tile_prune_timer = QtCore.QTimer(self)
+        self._tile_prune_timer.setInterval(30 * 60 * 1000)
+        self._tile_prune_timer.timeout.connect(self._prune_tile_cache)
+        self._tile_prune_timer.start()
+
         # ── Chat window (standalone) ─────────────────────────────
         self._chat_window = ChatWindow(self._theme_factory,
                                        self._muc_theme_factory,
@@ -183,6 +199,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_media_save_requested)
         self._chat_window.media_copy_requested.connect(
             self._on_media_copy_requested)
+        self._chat_window.geo_view_requested.connect(
+            self._on_geo_view_requested)
+        self._chat_window.geo_message_corrected.connect(
+            self._on_geo_message_corrected)
         self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
@@ -237,6 +257,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._history_manager: object | None = None
         self._last_activity = time.monotonic()
         self._auto_status_applied = False
+        self._pep_sweep_active = True
         self._roster_repaint_pending = False
         self._roster_repaint_timer: QtCore.QTimer | None = None
         self.app.installEventFilter(self)
@@ -1192,6 +1213,7 @@ class MainWindow(QtWidgets.QMainWindow):
             keepalive=getattr(connection, "keepalive", True),
             stream_management=getattr(connection, "stream_management", True),
             csi=getattr(connection, "csi", True),
+            pep_sweep_interval=getattr(connection, "pep_sweep_interval", 0),
             tls_mode=getattr(connection, "tls_mode", "prefer"),
             starttls_mode=getattr(connection, "starttls_mode", "always"),
         )
@@ -2547,6 +2569,56 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_media_copy_requested(self, url: str):
         QtWidgets.QApplication.clipboard().setText(url or "")
 
+    def _prune_tile_cache(self):
+        try:
+            self._tile_cache.prune()
+        except Exception:
+            logger.debug("tile cache prune failed", exc_info=True)
+
+    def _tile_url(self) -> str:
+        url = (self._config.map.tiles_url or "").strip()
+        if url and not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        return url
+
+    def _on_geo_view_requested(self, chat: str, ref: str, uri: str) -> None:
+        """Open (or update) the map window for a ``geo:`` click."""
+        parsed = parse_geo_uri(uri)
+        if not parsed:
+            return
+        key = (chat or "", ref or "")
+        win = self._geo_windows.get(key)
+        if win is None:
+            win = GeoMapWindow(
+                self._tile_url(), self._tile_cache,
+                geometry_cfg=self._config.map.window,
+                parent=self,
+                follow=bool(getattr(self._config.map, "follow", True)))
+            self._geo_windows[key] = win
+            win.closed.connect(
+                lambda *_, k=key: (self._geo_windows.pop(k, None),
+                                   self._config.save()))
+        win.update_position(parsed["lat"], parsed["lon"], parsed["accuracy"])
+        win.show()
+        win.raise_()
+        win.activateWindow()
+
+    def _on_geo_message_corrected(self, chat: str, ref: str,
+                                  new_body: str) -> None:
+        """Live-track a XEP-0308 correction that carries geo: coordinates."""
+        if not ref:
+            return
+        uris = extract_geo_uris(new_body or "")
+        parsed = parse_geo_uri(uris[0]) if uris else None
+        for (chat_key, ref_key), win in list(self._geo_windows.items()):
+            if (chat_key, ref_key) != (chat or "", ref or ""):
+                continue
+            if parsed:
+                win.update_position(parsed["lat"], parsed["lon"],
+                                    parsed["accuracy"])
+            else:
+                win.mark_track_final()
+
     def _on_media_view_requested(self, url: str, kind: str,
                                  fullscreen: bool = False):
         if not url:
@@ -3161,6 +3233,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             QtCore.QEvent.Type.KeyPress,
                             QtCore.QEvent.Type.Wheel):
             self._last_activity = time.monotonic()
+            self._sync_pep_sweep_pause(0)
             if self._auto_status_applied is not None and self._client:
                 self._send_presence(self._config.last_status)
                 self._set_tray_status_icon(self._config.last_status)
@@ -3176,6 +3249,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         idle_minutes = (time.monotonic() - self._last_activity) / 60
+        self._sync_pep_sweep_pause(idle_minutes)
         status = ""
         if self._config.status.auto_xa and idle_minutes >= self._config.status.xa_minutes:
             status = "xa"
@@ -3188,6 +3262,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_tray_status_icon(status)
             self._set_status_combo(status)
             self._auto_status_applied = status
+
+    def _sync_pep_sweep_pause(self, idle_minutes: float):
+        """Pause the PEP sweep while idle, so traffic stays thrifty."""
+        client = self._client
+        if client is None:
+            return
+        threshold = getattr(self._config.status, "away_minutes", 0) or 0
+        self._pep_sweep_active = bool(idle_minutes < threshold)
+        client.set_pep_sweep_paused(not self._pep_sweep_active)
 
     def _on_search(self, text: str):
         self._roster.set_search_filter(text.lower())
