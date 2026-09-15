@@ -592,7 +592,11 @@ add/remove, leaving and XEP-0482 invites are handled. Muji sessions never open
 a 1:1 `CallWindow` — `MainWindow._on_call_state` skips windows whose session
 carries `muji_room` — and incoming session-initiates are recorded as
 participants via the `muji_session` event → `MujiManager.note_session` (a peer
-whose MUC presence we missed is still listed). The single `MujiCallWindow`
+whose MUC presence we missed is still listed). `note_session` matches peers by
+**bare real JID**, and a session-only entry is a `virtual` placeholder that
+`handle_presence` merges into the real MUC nickname once the occupant's presence
+arrives — so a peer (e.g. Monocles mod) never appears twice, once under its room
+nick and once under its Jingle resource. The single `MujiCallWindow`
 splits horizontally: the video mosaic / status on the left and the participant
 list on the right (the same style as the MUC chat participant sidebar), with a
 red `call-hangup` "leave" button. Each participant row carries **three
@@ -608,7 +612,9 @@ grid" button. Own video is fed by tapping the local capture: `_VideoCaptureTrack
 invokes an `on_local_frame` callback (only for real camera frames),
 `JingleRtpManager._forward_local` re-emits it as `call_local_video_frame` for
 the single session marked via `set_local_preview` (chosen by
-`MainWindow._sync_muji_preview` as the room's first video session), and
+`MainWindow._sync_muji_preview` as the room's first video session; since the UI
+can pick it before the engine call exists, `_bind_call` re-applies the flag to
+the call when it is created), and
 `MainWindow._on_call_local_video_frame` pushes it into `MujiCallWindow
 .set_local_frame`. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;

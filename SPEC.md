@@ -1179,7 +1179,10 @@ client.leave_muji(room)
   add/remove and leaving, and parses XEP-0482 invites. Muji sessions never open
   a 1:1 `CallWindow` — `MainWindow._on_call_state` skips sessions whose
   `muji_room` is set — and incoming session-initiates are recorded as
-  participants via the `muji_session` event → `MujiManager.note_session`.
+  participants via the `muji_session` event → `MujiManager.note_session`, which
+  matches by bare real JID (a session-only entry is a `virtual` placeholder that
+  `handle_presence` merges into the real MUC nick, so one person never appears
+  under both its room nick and its Jingle resource).
   `MujiCallWindow` splits horizontally (video mosaic / status on the left,
   participant list on the right, like the MUC chat sidebar) with a red
   `call-hangup` "leave" button and **three** icon-only per-row toggles ("send my
@@ -1193,7 +1196,8 @@ client.leave_muji(room)
   grid" button restores the grid. Own video is tapped from the local capture
   (`_VideoCaptureTrack.on_local_frame` → `JingleRtpManager._forward_local` →
   `call_local_video_frame`, only for the session marked via `set_local_preview`
-  by `MainWindow._sync_muji_preview`) and painted by `MujiCallWindow
+  by `MainWindow._sync_muji_preview`, re-applied by `_bind_call` when the engine
+  call is created) and painted by `MujiCallWindow
   .set_local_frame`. In a MUC chat tab the
   toolbar call button starts a Muji
   conference: `ChatWidget` emits `muji_call_requested(room, video)` (never

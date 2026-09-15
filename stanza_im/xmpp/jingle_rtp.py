@@ -736,7 +736,7 @@ class JingleRtpManager:
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
             on_state=lambda *a: None,
             on_local_frame=lambda frame: self._forward_local(session, frame))
-        session.call = call
+        self._bind_call(session, call)
         call.add_audio()
         if session.video:
             call.add_video()
@@ -822,6 +822,22 @@ class JingleRtpManager:
                 fn(enabled)
             logger.debug("CALL local preview sid=%s enabled=%s", sid, enabled)
 
+    def _bind_call(self, session: CallSession, call) -> None:
+        """Attach the engine call and re-apply state set before it existed.
+
+        The UI may pick a session as the self-preview source before the
+        engine call (and its local video track) is created, so the preview
+        flag has to be pushed onto the call on bind as well.
+        """
+        session.call = call
+        fn = getattr(call, "set_local_preview", None)
+        if callable(fn):
+            try:
+                fn(session.local_preview)
+            except Exception:
+                logger.debug("CALL set_local_preview on bind failed",
+                             exc_info=True)
+
     # ── incoming ──────────────────────────────────────────────────
     async def dispatch(self, action: str, jingle: ET.Element, iq) -> None:
         sid = jingle.get("sid", "")
@@ -904,7 +920,7 @@ class JingleRtpManager:
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
             on_state=lambda *a: None,
             on_local_frame=lambda frame: self._forward_local(session, frame))
-        session.call = call
+        self._bind_call(session, call)
         call.add_audio()
         if session.video:
             call.add_video()

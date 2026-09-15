@@ -33,6 +33,7 @@ class MujiParticipant:
     real_jid: str = ""
     preparing: bool = False
     contents: dict = field(default_factory=dict)   # name -> media type
+    virtual: bool = False   # only a session placeholder, no MUC presence yet
 
 
 @dataclass
@@ -66,6 +67,7 @@ class MujiManager:
             conf = MujiConference(room=room)
             self.conferences[room] = conf
         participant = conf.participants.setdefault(nick, MujiParticipant(nick))
+        participant.virtual = False
         item = pres.xml.find(
             "{http://jabber.org/protocol/muc#user}x/"
             "{http://jabber.org/protocol/muc#user}item")
@@ -79,6 +81,7 @@ class MujiManager:
             media = desc.get("media", "audio") if desc is not None else "audio"
             contents[name] = media
         participant.contents = contents
+        self._merge_virtual(conf, nick, participant)
         if nick == conf.self_nick:
             conf.contents = contents
             conf.joined = bool(contents)
@@ -93,7 +96,9 @@ class MujiManager:
 
         MUC presence sometimes arrives late or without the peer's <muji/>
         advertisement (late joiners, reduced-functionality clients), so a
-        session-initiate may be our only record of a conference member.
+        session-initiate may be our only record of a conference member.  The
+        peer is matched by its bare real JID so it never shows up twice (once
+        under its MUC nick and once under the Jingle resource).
         """
         peer_bare = str(peer_full_jid).split("/", 1)[0]
         nick = (str(peer_full_jid).split("/", 1)[1]
@@ -101,13 +106,46 @@ class MujiManager:
         conf = self.conferences.get(room)
         if conf is None:
             return
+        known = self._participant_for_bare(conf, peer_bare)
+        if known is not None:
+            if not known.real_jid:
+                known.real_jid = peer_bare
+            return
         participant = conf.participants.setdefault(
             nick, MujiParticipant(nick))
+        participant.virtual = True
         if not participant.real_jid:
             participant.real_jid = peer_bare
         logger.info("MUJI session peer %s (%s) recorded in %s",
                     peer_full_jid, nick, room)
         self.client.emit("muji_updated", room)
+
+    @staticmethod
+    def _participant_for_bare(conf: MujiConference, bare: str):
+        """The conference participant whose real JID matches *bare*."""
+        for participant in conf.participants.values():
+            if participant.real_jid and \
+                    participant.real_jid.split("/", 1)[0] == bare:
+                return participant
+        return None
+
+    def _merge_virtual(self, conf: MujiConference, nick: str,
+                       participant: MujiParticipant) -> None:
+        """Drop a session placeholder once the MUC presence names the peer.
+
+        A placeholder is only ever created by :meth:`note_session`; merging it
+        into the real MUC nickname keeps one row per person while leaving two
+        genuinely different nicks for the same JID untouched.
+        """
+        if not participant.real_jid:
+            return
+        bare = participant.real_jid.split("/", 1)[0]
+        for other_nick, other in list(conf.participants.items()):
+            if (other_nick != nick and other.virtual and other.real_jid
+                    and other.real_jid.split("/", 1)[0] == bare):
+                logger.debug("MUJI merging session placeholder %s into %s",
+                             other_nick, nick)
+                conf.participants.pop(other_nick, None)
 
     # ── join / leave ──────────────────────────────────────────────
     def join(self, room: str, self_nick: str, video: bool = False) -> None:

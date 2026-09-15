@@ -820,7 +820,8 @@ if HAS_AIORTC:
                 try:
                     frame = await track.recv()
                 except Exception:
-                    logger.debug("CALL video track ended", exc_info=True)
+                    # Normal at call end (MediaStreamError) — no traceback.
+                    logger.debug("CALL video track ended")
                     return
                 image = _frame_to_qimage(frame)
                 if image is not None and self.on_remote_track:

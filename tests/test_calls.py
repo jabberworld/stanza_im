@@ -985,6 +985,18 @@ _mgr.set_local_preview("none", True)
 check("manager toggles tolerate unknown sessions", True)
 
 
+def _bind_call_preview_result():
+    mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
+    session = type("_S", (), {"local_preview": True, "call": None})()
+    call = _FakeEngineCall()
+    mgr._bind_call(session, call)
+    return session.call is call and call.calls == [("preview", True)]
+
+
+check("binding a call applies the pending self-preview flag",
+      _bind_call_preview_result())
+
+
 class _FakeRtpCallApi:
     def __init__(self):
         self.calls = []
@@ -1257,6 +1269,43 @@ check("muji participant camera toggle proxies to the matching session",
       _cam_ok)
 check("the first video session becomes the self-preview source", _prev_ok)
 check("self-preview frames route to the conference window", _frame_ok)
+
+
+def _muji_participant_dedup_result():
+    def _presence(room_nick, real_jid):
+        pres = slixmpp.Presence()
+        pres["from"] = "room@conf/" + room_nick
+        ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+        user = ET.SubElement(
+            pres.xml, "{http://jabber.org/protocol/muc#user}x")
+        item = ET.SubElement(
+            user, "{http://jabber.org/protocol/muc#user}item")
+        item.set("jid", real_jid)
+        return pres
+
+    # MUC presence first, then the Jingle session peer — no duplicate.
+    c1 = _FakeMujiConfClient()
+    c1.muji.handle_presence(_presence("rain", "rain@host/monocles res"))
+    c1.muji.note_session("room@conf", "rain@host/monocles res")
+    conf1 = c1.muji.conferences["room@conf"]
+    presence_first = sorted(conf1.participants) == ["rain"]
+
+    # Session placeholder first, then the MUC presence merges it in.
+    c2 = _FakeMujiConfClient()
+    c2.muji.conferences["room@conf"] = muji.MujiConference(room="room@conf")
+    c2.muji.note_session("room@conf", "bob@host/phone res")
+    conf2 = c2.muji.conferences["room@conf"]
+    placeholder = sorted(conf2.participants) == ["phone res"]
+    c2.muji.handle_presence(_presence("bobby", "bob@host/phone res"))
+    merged = sorted(conf2.participants) == ["bobby"]
+    return presence_first, placeholder, merged
+
+
+_p_first, _p_placeholder, _p_merged = _muji_participant_dedup_result()
+check("a session peer already seen via MUC presence is not duplicated",
+      _p_first)
+check("a session-only peer is a virtual placeholder", _p_placeholder)
+check("the MUC presence merges the virtual placeholder", _p_merged)
 
 
 def _muji_window_ui_result():
