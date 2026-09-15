@@ -35,6 +35,12 @@ from stanza_im.include.geo import (
 
 logger = logging.getLogger(__name__)
 
+# Loaders whose thread was still busy (e.g. a tile fetch in flight) when their
+# widget was closed.  A QThread object must never be destroyed while the thread
+# runs — that aborts the process — so a parked loader lives here until its
+# `finished` signal releases it and schedules deleteLater.
+_ORPHANED_LOADERS: list["TileLoader"] = []
+
 _USER_AGENT = ("StanzaIM/0.1 (XMPP desktop client / OpenStreetMap tiles, "
                "https://www.openstreetmap.org/copyright)")
 _REQUEST_PACING_S = 0.5        # OSM tile policy: stay far below 2 req/s
@@ -79,27 +85,37 @@ class TileLoader(QtCore.QThread):
         self._queue.put(None)
 
     def run(self) -> None:
-        while True:
-            item = self._queue.get()
-            if item is None:
-                break
-            z, x, y = item
-            path, permanent = "", False
-            try:
-                path = self._fetch(z, x, y)
-            except urllib.error.HTTPError as exc:
-                permanent = exc.code not in _TRANSIENT_HTTP_CODES
-                logger.debug("tile %d/%d/%d HTTP %d", z, x, y, exc.code)
-            except Exception as exc:
-                logger.debug("tile %d/%d/%d fetch failed: %s", z, x, y, exc)
-            with self._lock:
-                if permanent:
-                    self._failed.add((z, x, y))
-                elif not path:
-                    self._retry[(z, x, y)] = time.monotonic() + _RETRY_PACING_S
-                self._inflight.discard((z, x, y))
-            self.tile_ready.emit(z, x, y, path or "")
-            time.sleep(_REQUEST_PACING_S)
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None or self._stopped:
+                    return
+                z, x, y = item
+                path, permanent = "", False
+                try:
+                    path = self._fetch(z, x, y)
+                except urllib.error.HTTPError as exc:
+                    permanent = exc.code not in _TRANSIENT_HTTP_CODES
+                    logger.debug("tile %d/%d/%d HTTP %d", z, x, y, exc.code)
+                except Exception as exc:
+                    logger.debug("tile %d/%d/%d fetch failed: %s",
+                                 z, x, y, exc)
+                if self._stopped:
+                    return
+                with self._lock:
+                    if permanent:
+                        self._failed.add((z, x, y))
+                    elif not path:
+                        self._retry[(z, x, y)] = time.monotonic() + _RETRY_PACING_S
+                    self._inflight.discard((z, x, y))
+                self.tile_ready.emit(z, x, y, path or "")
+                time.sleep(_REQUEST_PACING_S)
+        finally:
+            # Release a parked loader the moment its thread quits, in the
+            # thread itself.  The `finished` signal is delivered to Python
+            # slots queued to the GUI thread and so depends on a running event
+            # loop, which must not gate the orphan bookkeeping.
+            _release_orphaned_loader(self)
 
     def _fetch(self, z: int, x: int, y: int) -> str:
         cached = self._cache.get(z, x, y) if self._cache else None
@@ -115,6 +131,14 @@ class TileLoader(QtCore.QThread):
         if self._cache:
             return self._cache.put(z, x, y, data) or ""
         return ""
+
+
+def _release_orphaned_loader(loader: "TileLoader") -> None:
+    """Drop a parked loader from the orphan list once its thread has quit."""
+    try:
+        _ORPHANED_LOADERS.remove(loader)
+    except ValueError:
+        pass
 
 
 class GeoMapWidget(QtWidgets.QWidget):
@@ -133,7 +157,9 @@ class GeoMapWidget(QtWidgets.QWidget):
         self._pixmaps: dict[tuple[int, int, int], QtGui.QPixmap] = {}
         self._pending: set[tuple[int, int, int]] = set()
         self._drag: QtCore.QPointF | None = None
-        self._loader = TileLoader(self._tile_url, cache, self)
+        # No C++ parent on purpose: the loader must survive the widget's
+        # deletion until its thread finishes (see _ORPHANED_LOADERS).
+        self._loader = TileLoader(self._tile_url, cache)
         self._loader.tile_ready.connect(self._on_tile_ready)
         self._loader.start()
         self.setMouseTracking(True)
@@ -181,8 +207,15 @@ class GeoMapWidget(QtWidgets.QWidget):
             self._loader._failed.clear()
 
     def stop_loading(self) -> None:
-        self._loader.stop()
-        self._loader.wait(2000)
+        loader = self._loader
+        loader.stop()
+        if loader.wait(200):
+            return
+        # The thread is still busy (typically a fetch in flight, which can take
+        # up to its 15 s timeout).  Never let the QThread be destroyed while it
+        # runs; park it here.  run()'s finally block releases it once the
+        # thread quits, so the QThread object outlives the running thread.
+        _ORPHANED_LOADERS.append(loader)
 
     # ── Projection helpers ─────────────────────────────────────────
 
@@ -254,10 +287,9 @@ class GeoMapWidget(QtWidgets.QWidget):
         y0 = int(top // TILE_SIZE)
         x1 = int((left + rect.width()) // TILE_SIZE)
         y1 = int((top + rect.height()) // TILE_SIZE)
-        for ty in range(y0, y1 + 1):
-            for tx in range(x0, x1 + 1):
-                if ty < 0:
-                    continue
+        max_idx = (1 << int(self._zoom)) - 1
+        for ty in range(max(0, y0), min(y1, max_idx) + 1):
+            for tx in range(max(0, x0), min(x1, max_idx) + 1):
                 pm = self._tile_pixmap(int(self._zoom), tx, ty)
                 painter.drawPixmap(
                     QtCore.QPoint(int(tx * TILE_SIZE - left),

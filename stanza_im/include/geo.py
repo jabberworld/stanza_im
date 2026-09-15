@@ -118,9 +118,15 @@ def clamp_zoom(zoom: float) -> float:
 
 def lat_lon_to_world(lat: float, lon: float, zoom: float
                      ) -> tuple[float, float]:
-    """Map (lat, lon) to world pixel coordinates at *zoom* (tiles of 256 px)."""
+    """Map (lat, lon) to Slip-map tile coordinates at *zoom*.
+
+    Returns fractional tile units in ``0..2**zoom`` on both axes (a whole tile
+    is ``1.0``); multiply by :data:`TILE_SIZE` to get pixel coordinates.  These
+    are the standard OpenStreetMap indices, so ``int(x), int(y)`` address a
+    real ``{z}/{x}/{y}.png`` tile.
+    """
     lat = max(-MAX_LATITUDE, min(MAX_LATITUDE, float(lat)))
-    n = math.pi * 2.0 ** clamp_zoom(zoom)
+    n = 2.0 ** clamp_zoom(zoom)
     x = (float(lon) + 180.0) / 360.0 * n
     y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n
     return x, y
@@ -128,8 +134,8 @@ def lat_lon_to_world(lat: float, lon: float, zoom: float
 
 def world_to_lat_lon(x: float, y: float, zoom: float
                      ) -> tuple[float, float]:
-    """Inverse of :func:`lat_lon_to_world`."""
-    n = math.pi * 2.0 ** clamp_zoom(zoom)
+    """Inverse of :func:`lat_lon_to_world` (fractional tile units)."""
+    n = 2.0 ** clamp_zoom(zoom)
     lon = x / n * 360.0 - 180.0
     lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y / n))))
     return lat, lon

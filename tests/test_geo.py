@@ -75,6 +75,10 @@ for lat, lon in [(55.7558, 37.6173), (-33.86, 151.2), (85.0, 0.0),
 check("mercator lat clamp",
       lat_lon_to_world(91, 0, 15) == lat_lon_to_world(MAX_LATITUDE, 0, 15))
 check("zoom clamp", lat_lon_to_world(0, 0, 99) == lat_lon_to_world(0, 0, 18))
+fx, fy = lat_lon_to_world(-12.0406923, -77.05920091666667, 15)
+check("real OSM tile indices (Lima z15)",
+      9369 <= int(fx) <= 9371 and 17480 <= int(fy) <= 17495
+      and int(fx) < 2**15 and int(fy) < 2**15)
 check("meters_per_pixel sanity", 0 < meters_per_pixel(55, 15) < 40)
 
 # 4. Track -------------------------------------------------------------------
@@ -225,6 +229,73 @@ check("generic error survives", recv_any == [(15, 1, 2, "")]
       and failing_any.isRunning() and (15, 1, 2) in failing_any._retry)
 failing_any.stop()
 failing_any.wait(3000)
+
+# 8c. closing a widget with a stuck fetch parks its loader --------------------
+import threading
+import stanza_im.ui.map_widget as mw_mod
+
+_hold = threading.Event()
+_release = threading.Event()
+
+
+class _BlockingLoader(TileLoader):
+    def _fetch(self, z, x, y):
+        _hold.set()
+        _release.wait(5)
+        raise urllib.error.URLError("teardown")
+
+
+_orig_loader_cls = mw_mod.TileLoader
+mw_mod.TileLoader = _BlockingLoader
+stuck = GeoMapWidget("https://invalid.invalid/0/0/0.png", None)
+mw_mod.TileLoader = _orig_loader_cls
+stuck._loader.request(15, 1, 2)
+check("stuck fetch started", _hold.wait(3.0))
+stuck.stop_loading()
+core_loader = stuck._loader
+check("busy loader parked, thread alive",
+      core_loader in mw_mod._ORPHANED_LOADERS and core_loader.isRunning())
+_release.set()
+deadline = time.monotonic() + 4.0
+while (time.monotonic() < deadline and core_loader.isRunning()
+       and core_loader in mw_mod._ORPHANED_LOADERS):
+    time.sleep(0.02)
+check("parked loader finishes and is released",
+      not core_loader.isRunning()
+      and core_loader not in mw_mod._ORPHANED_LOADERS)
+stuck._loader = None
+check("orphan list empty", not mw_mod._ORPHANED_LOADERS)
+
+# 8d. tile requests never exceed the real OSM index range ---------------------
+_recorded = []
+_orig_tile_pixmap = GeoMapWidget._tile_pixmap
+
+
+def _recording_pixmap(self, z, x, y):
+    _recorded.append((z, x, y))
+    return None
+
+
+GeoMapWidget._tile_pixmap = _recording_pixmap
+try:
+    grid = GeoMapWidget("", None)
+    grid.resize(600, 400)
+    for label, center in [("moscow", (55.7558, 37.6173)),
+                          ("polar corner", (85.0, 179.9))]:
+        _recorded.clear()
+        grid._center = center
+        buf = QtGui.QImage(grid.size(), QtGui.QImage.Format.Format_RGB32)
+        painter = QtGui.QPainter(buf)
+        grid.render(painter)
+        painter.end()
+        check(f"tile requests in range ({label})",
+              bool(_recorded)
+              and all(z == 15 and 0 <= x < 2**15 and 0 <= y < 2**15
+                      for z, x, y in _recorded))
+    grid.stop_loading()
+    grid._loader = None
+finally:
+    GeoMapWidget._tile_pixmap = _orig_tile_pixmap
 
 # 9. window-level smoke --------------------------------------------------------
 win = GeoMapWindow("", None, geometry_cfg=None)
