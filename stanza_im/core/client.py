@@ -529,8 +529,8 @@ class JabberClient:
 
         # slixmpp only fires the `message` event for messages that carry a
         # <body> (basexmpp registers the IM handler as message/body), so
-        # bodyless XEP-0353 proposals and XEP-0482 invites need their own
-        # matchers.
+        # bodyless XEP-0353 proposals, XEP-0482 invites and XEP-0163 PEP /
+        # XEP-0490 MDS `pubsub#event` notifications need their own matchers.
         msg_ns = "{jabber:client}message"
         self.xmpp.register_handler(CoroutineCallback(
             "Jingle Message",
@@ -540,6 +540,18 @@ class JabberClient:
             "Call Invite",
             MatchXPath("%s/{%s}*" % (msg_ns, muji_mod.NS_CALL_INVITES)),
             self._on_call_invite_stanza))
+        self.xmpp.register_handler(CoroutineCallback(
+            "PEP Event",
+            MatchXPath("%s/{%s}event" % (msg_ns, NS_PUBSUB_EVENT)),
+            self._on_pubsub_event_stanza))
+
+    async def _on_pubsub_event_stanza(self, msg) -> None:
+        """Route bodyless pubsub#event messages (PEP, MDS) to their handlers."""
+        try:
+            self._maybe_mds_event(msg)
+            self._maybe_pep_event(msg)
+        except Exception:
+            logger.exception("PEP/MDS event handling failed")
 
     async def _on_jingle_message_stanza(self, msg) -> None:
         try:

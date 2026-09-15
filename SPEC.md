@@ -786,8 +786,11 @@ Registers XEP plugins (conditionally where noted):
   to be an otherwise-empty message); otherwise plain PEP publication is used.
 - Triggered from `MainWindow` when a chat becomes the focused tab
   (`_on_tab_focused`) or receives a message while active.
-- Incoming PEP events (`type=headline`, `from` = own bare JID) and a catch-up
-  fetch after bind apply remote displayed states (`mds_displayed` event):
+- Incoming PEP events (`type=headline`, `from` = own bare JID, bodyless) are
+  delivered through the shared "PEP Event" `MatchXPath` stanza handler (same
+  routing as the extended-presence notifications, §14.10.1 — slixmpp's
+  `message` event requires a `<body>`); a catch-up fetch after bind also
+  applies remote displayed states (`mds_displayed` event):
   unread is cleared and an "Displayed on another device" status line is added
   to an open chat. Config `chat.message_displayed_sync` (default on).
 
@@ -1020,9 +1023,15 @@ client.leave_muji(room)
 ### 14.10.1 Extended Presence (XEP-0080/0107/0108/0118)
 
 - The four PEP nodes (`http://jabber.org/protocol/{geoloc,mood,activity,tune}`)
-  are advertised with `+notify`; incoming headline PEP events are parsed by
-  `JabberClient._maybe_pep_event` into `client.pep_data[bare_jid][kind]` and
-  re-emitted as `contact_pep_updated(jid, kind, data)`. `fetch_pep(bare)` pulls
+  are advertised with `+notify`. PEP notifications are bodyless
+  `<message type='headline'><event xmlns='http://jabber.org/protocol/pubsub#event'>`
+  stanzas, so they never reach slixmpp's `message` event (which requires a
+  `<body>`); a "PEP Event" `MatchXPath` stanza handler registered in
+  `_register_jingle_handlers` routes them (together with XEP-0490 MDS events) to
+  `JabberClient._maybe_mds_event`/`_maybe_pep_event`, which parse them into
+  `client.pep_data[bare_jid][kind]` and re-emit them as
+  `contact_pep_updated(jid, kind, data)` — so roster mood/activity icons and the
+  tooltip refresh live without a vCard fetch. `fetch_pep(bare)` pulls
   the current nodes (`pubsub/items`, `max_items=1`) when a profile opens.
 - `include/pep.py` builds/parses mood (`<mood><key/><text/>`), activity
   (`<activity><group><sub/></group><text/></activity>`), tune and geoloc

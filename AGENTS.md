@@ -348,7 +348,8 @@ Message Displayed Synchronization (XEP-0490, `chat.message_displayed_sync`,
 default on): the latest server `stanza-id` per chat is tracked on receive and
 published to the private PEP node `urn:xmpp:mds:displayed:0` when the chat is
 focused/active (server-assist via a companion XEP-0333 marker when the server
-announces `urn:xmpp:mds:server-assist:0`); incoming PEP events and a catch-up
+announces `urn:xmpp:mds:server-assist:0`); incoming PEP events (routed like the
+extended-presence notifications, see below) and a catch-up
 fetch apply remote displayed states — unread is cleared and an open chat gets
 an "Displayed on another device" status line.
 
@@ -429,9 +430,13 @@ an HTTP Upload slot is rejected for size (`file-too-large` /
 
 **Extended presence (XEP-0080/0107/0108/0118)** (`include/pep.py`,
 `core/client.py`): the four PEP nodes (`geoloc`, `mood`, `activity`, `tune`)
-are advertised with `+notify` in disco. Incoming headline events are parsed in
-`JabberClient._maybe_pep_event` (alongside MDS) into
-`client.pep_data[bare_jid][kind]` and re-emitted as
+are advertised with `+notify` in disco. PEP notifications are bodyless
+`<message type='headline'><event xmlns='http://jabber.org/protocol/pubsub#event'>`
+stanzas, so slixmpp's `message` event (which requires a `<body>`) never delivers
+them; a dedicated stanza handler ("PEP Event", `MatchXPath("{jabber:client}message/…{http://jabber.org/protocol/pubsub#event}event")`
+registered in `_register_jingle_handlers`) routes them to
+`JabberClient._maybe_pep_event` (alongside `_maybe_mds_event` for XEP-0490) into
+`client.pep_data[bare_jid][kind]` and re-emits them as
 `contact_pep_updated(jid, kind, data)`; `client.fetch_pep(bare)` pulls the
 current nodes with `pubsub/items max_items=1` (called when a profile opens).
 `include/pep.py` builds/parses the payloads, parses the bundled Jabbim icon

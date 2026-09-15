@@ -113,6 +113,52 @@ check("pep event emitted",
       events == [("bob@example.com", "mood",
                   {"key": "happy", "text": ""})])
 
+# ── 4a. bodyless pubsub#event routing (live PEP/MDS delivery) ------------
+# slixmpp only fires the `message` event for stanzas with a <body>, so live
+# PEP notifications (bodyless <message><event/>) are dropped unless a stanza
+# handler routes them. Verify the registered "PEP Event" matcher does this.
+from slixmpp.xmlstream.handler import CoroutineCallback
+
+_client2 = JabberClient("me@example.com/res", "pw")
+_handlers = {getattr(h, "name", ""): h for h in
+             _client2.xmpp._XMLStream__handlers}
+check("bodyless PEP handler registered",
+      isinstance(_handlers.get("PEP Event"), CoroutineCallback))
+check("bodyless PEP handler matches PEP event",
+      _handlers["PEP Event"].match(msg))
+check("IM handler ignores bodyless PEP event",
+      not _handlers["IM"].match(msg))
+_events2 = []
+_client2.on("contact_pep_updated", lambda *a: _events2.append(a))
+
+
+async def _run_pep_handler():
+    await _handlers["PEP Event"]._pointer(msg)
+
+
+asyncio.run(_run_pep_handler())
+check("routed PEP event stored",
+      _client2.pep_data.get("bob@example.com", {}).get("mood", {}).get("key")
+      == "happy")
+check("routed PEP event emitted",
+      _events2 == [("bob@example.com", "mood",
+                    {"key": "happy", "text": ""})])
+_mds_msg = slixmpp.Message()
+_mds_msg["type"] = "headline"
+_mds_msg["from"] = "me@example.com/other"
+_ev2 = ET.SubElement(_mds_msg.xml,
+                     "{http://jabber.org/protocol/pubsub#event}event")
+_it2 = ET.SubElement(_ev2,
+                     "{http://jabber.org/protocol/pubsub#event}items")
+_it2.set("node", "urn:xmpp:mds:displayed:0")
+_item2 = ET.SubElement(_it2,
+                       "{http://jabber.org/protocol/pubsub#event}item")
+_sid = ET.SubElement(_item2, "{urn:xmpp:sid:0}stanza-id")
+_sid.set("id", "abc123")
+_sid.set("by", "me@example.com")
+check("bodyless PEP handler matches MDS event",
+      _handlers["PEP Event"].match(_mds_msg))
+
 # ── 5. publishing ---------------------------------------------------------
 published = []
 
