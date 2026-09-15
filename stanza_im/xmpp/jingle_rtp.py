@@ -816,6 +816,10 @@ class JingleRtpManager:
         session = self.sessions.get(sid)
         if session is not None:
             session.local_preview = bool(enabled)
+            fn = getattr(getattr(session, "call", None), "set_local_preview",
+                         None)
+            if callable(fn):
+                fn(enabled)
             logger.debug("CALL local preview sid=%s enabled=%s", sid, enabled)
 
     # ── incoming ──────────────────────────────────────────────────

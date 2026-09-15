@@ -744,6 +744,7 @@ if HAS_AIORTC:
             self.on_remote_track = on_remote_track
             self.on_state = on_state
             self.on_local_frame = on_local_frame
+            self.local_preview_enabled = False
             self._audio_play = None
             self._video_widget = None
             self._tasks: list[asyncio.Task] = []
@@ -841,7 +842,7 @@ if HAS_AIORTC:
 
         def _forward_local_frame(self, frame):
             """Relay one own-camera frame to the UI (self-preview)."""
-            if self.on_local_frame is None:
+            if self.on_local_frame is None or not self.local_preview_enabled:
                 return
             try:
                 image = _frame_to_qimage(frame)
@@ -851,6 +852,10 @@ if HAS_AIORTC:
                 return
             if image is not None:
                 self.on_local_frame(image)
+
+        def set_local_preview(self, enabled: bool) -> None:
+            """Toggle own-frame conversion for the UI self-preview."""
+            self.local_preview_enabled = bool(enabled)
 
         def set_audio_enabled(self, enabled: bool) -> None:
             if self._local_audio is not None:

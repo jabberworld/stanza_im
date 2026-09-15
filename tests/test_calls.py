@@ -960,22 +960,28 @@ class _FakeEngineCall:
     def set_video_enabled(self, v):
         self.calls.append(("video", v))
 
+    def set_local_preview(self, v):
+        self.calls.append(("preview", v))
+
 
 def _manager_toggle_result():
     mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
     mgr.sessions = {"s1": type("_S", (), {"call": _FakeEngineCall()})()}
     mgr.set_call_audio("s1", False)
     mgr.set_call_video("s1", True)
+    mgr.set_local_preview("s1", True)
     return mgr.sessions["s1"].call.calls
 
 
 check("manager routes audio/camera toggles to the session engine",
-      _manager_toggle_result() == [("audio", False), ("video", True)])
+      _manager_toggle_result() == [("audio", False), ("video", True),
+                                   ("preview", True)])
 
 _mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
 _mgr.sessions = {}
 _mgr.set_call_audio("none", False)
 _mgr.set_call_video("none", True)
+_mgr.set_local_preview("none", True)
 check("manager toggles tolerate unknown sessions", True)
 
 
