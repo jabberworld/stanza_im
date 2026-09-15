@@ -1012,7 +1012,7 @@ def _call_window_toggle_result():
     win.camera_toggled.connect(lambda sid, en: seen_c.append((sid, en)))
     win._on_mute(True)
     win._on_camera(False)
-    off_text = win._cam_btn.text()
+    off_text = win._cam_btn.toolTip()
     win._on_mute(False)
     win._on_camera(True)
     return (seen_a, seen_c,
@@ -1100,6 +1100,8 @@ class _FakeMujiConfClient:
         self.muji = muji.MujiManager(self)
         self.sent_audio = []
         self.sent_receive = []
+        self.sent_video = []
+        self.local_preview = []
         self.started = []
 
     def emit(self, *args):
@@ -1122,6 +1124,12 @@ class _FakeMujiConfClient:
 
     def set_call_audio_receive(self, sid, enabled):
         self.sent_receive.append((sid, enabled))
+
+    def set_call_video(self, sid, enabled):
+        self.sent_video.append((sid, enabled))
+
+    def set_call_local_preview(self, sid, enabled=True):
+        self.local_preview.append((sid, enabled))
 
     def set_client_active(self, active=True):
         pass
@@ -1203,30 +1211,77 @@ check("muji participant audio toggles proxy to the matching session",
       _muji_audio_proxy_result())
 
 
+def _muji_camera_and_preview_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    conf = muji.MujiConference(room="room@conf")
+    conf.participants["alice"] = muji.MujiParticipant(
+        nick="alice", real_jid="alice@host")
+    client.muji.conferences["room@conf"] = conf
+    video = _MujiFakeSession("sv", "alice@host", muji_room="room@conf")
+    video.video = True
+    client.rtp_calls.sessions["sv"] = video
+    mw._on_muji_participant_camera("room@conf", "alice", False)
+    cam_ok = client.sent_video == [("sv", False)]
+    # the first video session becomes the self-preview source
+    mw._sync_muji_preview("room@conf")
+    preview_ok = client.local_preview == [("sv", True)]
+    # own-camera frames from the preview session reach the window
+    window = _RecordingMujiWindow()
+    mw._muji_windows["room@conf"] = window
+    img = QtGui.QImage(8, 8, QtGui.QImage.Format.Format_RGB888)
+    mw._on_call_local_video_frame("sv", img)
+    frame_ok = window.frames == [img]
+    mw.close()
+    return cam_ok, preview_ok, frame_ok
+
+
+class _RecordingMujiWindow:
+    def __init__(self):
+        self.frames = []
+
+    def set_local_frame(self, image):
+        self.frames.append(image)
+
+
+_cam_ok, _prev_ok, _frame_ok = _muji_camera_and_preview_result()
+check("muji participant camera toggle proxies to the matching session",
+      _cam_ok)
+check("the first video session becomes the self-preview source", _prev_ok)
+check("self-preview frames route to the conference window", _frame_ok)
+
+
 def _muji_window_ui_result():
     from stanza_im.ui.call_window import MujiCallWindow
-    w = MujiCallWindow("room@conf")
+    w = MujiCallWindow("room@conf", self_nick="me")
     w.set_video(True)
-    sent_audio, sent_recv = [], []
+    sent_audio, sent_recv, sent_cam = [], [], []
     w.participant_audio.connect(lambda *a: sent_audio.append(a))
     w.participant_receive.connect(lambda *a: sent_recv.append(a))
+    w.participant_camera.connect(lambda *a: sent_cam.append(a))
     w.set_participants(["alice", "bob"])
     item = w._rows["alice"]
     row = w._list.itemWidget(item)
     row_btns = row.findChildren(QtWidgets.QPushButton)
     row_btns[0].setChecked(False)   # mute mic toward alice
     row_btns[1].setChecked(False)   # stop hearing alice
+    row_btns[2].setChecked(False)   # stop sending video to alice
     toggles_ok = (sent_audio == [("room@conf", "alice", False)]
                   and sent_recv == [("room@conf", "alice", False)]
+                  and sent_cam == [("room@conf", "alice", False)]
                   and w._mic_state["alice"] is False
-                  and w._recv_state["alice"] is False)
+                  and w._recv_state["alice"] is False
+                  and w._cam_state["alice"] is False)
     # rebuild against the same set keeps the toggle states
     w.set_participants(["alice", "bob"])
     item = w._rows["alice"]
     row = w._list.itemWidget(item)
     row_btns = row.findChildren(QtWidgets.QPushButton)
     preserve = (row_btns[0].isChecked() is False
-                and row_btns[1].isChecked() is False)
+                and row_btns[1].isChecked() is False
+                and row_btns[2].isChecked() is False)
 
     img = QtGui.QImage(64, 48, QtGui.QImage.Format.Format_RGB888)
     img.fill(0)
@@ -1237,7 +1292,7 @@ def _muji_window_ui_result():
     mosaic._zoom_to("bob")
     zoom_ok = (mosaic._grid_holder.currentIndex() == 1
                and mosaic._big.nick == "bob"
-               and set(mosaic._strip_tiles) == {"alice"})
+               and set(mosaic._strip_tiles) == {"alice", "me"})
     mosaic._show_grid()
     back_ok = mosaic._grid_holder.currentIndex() == 0
     w.close()
@@ -1250,6 +1305,36 @@ check("muji participant toggle state survives list rebuild", _pres)
 check("muji mosaic starts in grid mode", _grid)
 check("muji mosaic zooms one participant with a strip for the rest", _zoom)
 check("muji mosaic back button restores the grid", _back)
+
+
+def _muji_self_tile_result():
+    from stanza_im.ui.call_window import MujiCallWindow
+    w = MujiCallWindow("room@conf", self_nick="me")
+    w.set_video(True)
+    w.set_participants(["alice"])
+    self_present = "me" in w._video._tiles
+    self_mirrored = w._video._tiles["me"]._mirrored
+
+    img = QtGui.QImage(64, 48, QtGui.QImage.Format.Format_RGB888)
+    img.fill(0)
+    w.set_local_frame(img)
+    self_frame = w._video._tiles["me"]._image is not None
+    # our own tile must survive participant churn
+    w._video.remove_nick("me")
+    self_kept = "me" in w._video._tiles
+    # every tile carries the participant nick as a caption
+    w.set_frame("bob", img)
+    caption = w._video._tiles["bob"]._caption
+    w.close()
+    return self_present, self_mirrored, self_frame, self_kept, caption
+
+
+_self_p, _self_m, _self_f, _self_k, _cap = _muji_self_tile_result()
+check("muji mosaic always carries our own self tile", _self_p)
+check("our own self tile is mirrored", _self_m)
+check("self-preview frames fill our own tile", _self_f)
+check("participant churn never drops our own tile", _self_k)
+check("video tiles are captioned with the sender nick", _cap == "bob")
 
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")

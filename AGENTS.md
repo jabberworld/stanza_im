@@ -546,8 +546,13 @@ routes to `_join_muji`. The MUC button is gated solely on aiortc availability
 `client.rtp_calls.available`) and is a no-op on 1:1 tabs. `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
-over the roster); remote video frames are painted by `VideoView`. Its
-"Мute"/"Camera" buttons toggle the **outgoing** capture — the muted
+over the roster); remote video frames are painted by `VideoView`, which draws a
+translucent nickname caption over the image. Every call control is **icon-only**
+(tooltips instead of labels) using the 16px glyphs in
+`resources/images/16x16/actions/` via `call_window._icon`: `mic`/`mic-off`,
+`camera`/`camera-off` (the camera is a webcam glyph), `speaker`/`speaker-off`,
+a red `call-hangup` and a green `call-accept`. The mute/camera buttons toggle
+the **outgoing** capture — the muted
 microphone sends silence and the switched-off camera sends black frames
 (`set_audio_enabled`/`set_video_enabled`, no renegotiation, tracks stay
 attached), while received audio/video keeps playing and the remote view is
@@ -588,13 +593,24 @@ a 1:1 `CallWindow` — `MainWindow._on_call_state` skips windows whose session
 carries `muji_room` — and incoming session-initiates are recorded as
 participants via the `muji_session` event → `MujiManager.note_session` (a peer
 whose MUC presence we missed is still listed). The single `MujiCallWindow`
-shows the participant list with two per-row toggles — "send my mic to this
-participant" (`set_call_audio`, per-session silence) and "hear this
-participant" (`set_call_audio_receive` → `AiortcCall.set_remote_audio_enabled`
-→ per-session playback mute, no renegotiation) — and, when the conference
-carries video, a video mosaic (`_MosaicVideo`, tiles per participant) where
-clicking a tile enlarges that participant with the rest as a bottom strip and
-a "back to grid" button. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
+splits horizontally: the video mosaic / status on the left and the participant
+list on the right (the same style as the MUC chat participant sidebar), with a
+red `call-hangup` "leave" button. Each participant row carries **three
+icon-only** toggles that swap their glyph on state — "send my mic to this
+participant" (`set_call_audio`, per-session silence), "hear this participant"
+(`set_call_audio_receive` → `AiortcCall.set_remote_audio_enabled` →
+per-session playback mute, no renegotiation) and "send my video to this
+participant" (`set_call_video`, per-session black frames). When the conference
+carries video the mosaic (`_MosaicVideo`) shows one captioned tile per video
+participant **plus a mirrored self tile** labelled with our own nick; clicking
+a tile enlarges that participant with the rest as a bottom strip and a "back to
+grid" button. Own video is fed by tapping the local capture: `_VideoCaptureTrack`
+invokes an `on_local_frame` callback (only for real camera frames),
+`JingleRtpManager._forward_local` re-emits it as `call_local_video_frame` for
+the single session marked via `set_local_preview` (chosen by
+`MainWindow._sync_muji_preview` as the room's first video session), and
+`MainWindow._on_call_local_video_frame` pushes it into `MujiCallWindow
+.set_local_frame`. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled.
 

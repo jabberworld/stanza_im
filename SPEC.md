@@ -1144,8 +1144,12 @@ client.leave_muji(room)
 - STUN/TURN: `client.ice_servers()` merges XEP-0215 `urn:xmpp:extdisco:2`
   services (with credentials) with `connection.stun_turn_*` and SRV discovery.
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
-  remote video frames are painted by `VideoView`; the call-window "Mute" and
-  "Camera" buttons toggle the **outgoing** capture (silence / black frames via
+  remote video frames are painted by `VideoView` with a translucent nickname
+  caption over the image, and every control is **icon-only** (tooltips, no
+  labels) using `resources/images/16x16/actions/` via `call_window._icon`:
+  `mic`/`mic-off`, `camera`/`camera-off` (webcam glyph), `speaker`/`speaker-off`,
+  red `call-hangup` and green `call-accept`. The call-window mute/camera buttons
+  toggle the **outgoing** capture (silence / black frames via
   `set_audio_enabled`/`set_video_enabled`, no SDP renegotiation) and never
   affect the received stream — the remote view stays visible. Preferences →
   Devices selects
@@ -1176,12 +1180,21 @@ client.leave_muji(room)
   a 1:1 `CallWindow` — `MainWindow._on_call_state` skips sessions whose
   `muji_room` is set — and incoming session-initiates are recorded as
   participants via the `muji_session` event → `MujiManager.note_session`.
-  `MujiCallWindow` shows the participant list with two per-row toggles ("send
-  my mic to this participant" via `set_call_audio`, "hear this participant"
-  via `set_call_audio_receive`/`AiortcCall.set_remote_audio_enabled`, both
-  local-only, no renegotiation) and, for video conferences, a `_MosaicVideo`
-  mosaic: clicking a tile enlarges that participant (the rest become a bottom
-  strip) and a "back to grid" button restores the grid. In a MUC chat tab the
+  `MujiCallWindow` splits horizontally (video mosaic / status on the left,
+  participant list on the right, like the MUC chat sidebar) with a red
+  `call-hangup` "leave" button and **three** icon-only per-row toggles ("send my
+  mic to this participant" via `set_call_audio`, "hear this participant" via
+  `set_call_audio_receive`/`AiortcCall.set_remote_audio_enabled`, "send my video
+  to this participant" via `set_call_video`, all local-only, no renegotiation);
+  glyphs swap between the plain and crossed variants on state. For video
+  conferences `_MosaicVideo` shows one captioned tile per video participant
+  **plus a mirrored self tile** labelled with our own nick: clicking a tile
+  enlarges that participant (the rest become a bottom strip) and a "back to
+  grid" button restores the grid. Own video is tapped from the local capture
+  (`_VideoCaptureTrack.on_local_frame` → `JingleRtpManager._forward_local` →
+  `call_local_video_frame`, only for the session marked via `set_local_preview`
+  by `MainWindow._sync_muji_preview`) and painted by `MujiCallWindow
+  .set_local_frame`. In a MUC chat tab the
   toolbar call button starts a Muji
   conference: `ChatWidget` emits `muji_call_requested(room, video)` (never
   `call_requested`) which `ChatWindow.open_groupchat` forwards and

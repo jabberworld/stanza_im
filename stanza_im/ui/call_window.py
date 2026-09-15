@@ -1,7 +1,7 @@
 """Call UI: incoming-call prompt and the active-call window.
 
 The window paints decoded remote video frames (QImage from
-:mod:`stanza_im.xmpp.media`) and exposes simple controls (mute, camera,
+:mod:`stanza_im.xmpp.media`) and exposes icon-only controls (mute, camera,
 hang up).  It is deliberately free of Qt Multimedia imports so it also works
 where Qt Multimedia cannot load.
 """
@@ -9,16 +9,36 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import ACTIONS_DIR_16
 
 logger = logging.getLogger("stanza_im.call.ui")
 
+_ICON_CACHE: dict[str, QtGui.QIcon] = {}
+
+
+def _icon(name: str) -> QtGui.QIcon:
+    """Load a 16px action glyph (SVG preferred) for the call controls."""
+    icon = _ICON_CACHE.get(name)
+    if icon is None:
+        icon = QtGui.QIcon()
+        for ext in ("svg", "png"):
+            path = os.path.join(ACTIONS_DIR_16, f"{name}.{ext}")
+            if os.path.exists(path):
+                candidate = QtGui.QIcon(path)
+                if not candidate.isNull():
+                    icon = candidate
+                    break
+        _ICON_CACHE[name] = icon
+    return icon
+
 
 class VideoView(QtWidgets.QLabel):
-    """Paints decoded remote video frames."""
+    """Paints decoded video frames with an overlay nickname caption."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,26 +47,59 @@ class VideoView(QtWidgets.QLabel):
         self.setStyleSheet("background:#101010; color:#888;")
         self.setText(tr("call_no_video"))
         self._image = None
+        self._caption = ""
+        self._mirrored = False
+        self._caption_font = QtGui.QFont()
+        self._caption_font.setPointSize(9)
+        self._caption_font.setBold(True)
 
     def set_frame(self, image):
         self._image = image
         self.update()
 
+    def set_caption(self, text: str) -> None:
+        self._caption = text or ""
+        self.update()
+
+    def set_mirrored(self, mirrored: bool) -> None:
+        self._mirrored = bool(mirrored)
+        self.update()
+
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self._image is None:
-            return
-        painter = QtGui.QPainter(self)
-        scaled = self._image.scaled(
-            self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-            QtCore.Qt.TransformationMode.SmoothTransformation)
-        x = (self.width() - scaled.width()) // 2
-        y = (self.height() - scaled.height()) // 2
-        painter.drawImage(x, y, scaled)
+        painter = None
+        if self._image is not None:
+            painter = QtGui.QPainter(self)
+            scaled = self._image.scaled(
+                self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            if self._mirrored:
+                painter.translate(self.width(), 0)
+                painter.scale(-1, 1)
+            painter.drawImage(x, y, scaled)
+            if self._mirrored:
+                painter.resetTransform()
+        if self._caption:
+            if painter is None:
+                painter = QtGui.QPainter(self)
+            painter.setFont(self._caption_font)
+            metrics = painter.fontMetrics()
+            pad = 4
+            rect = QtCore.QRect(
+                6, 6, metrics.horizontalAdvance(self._caption) + pad * 2,
+                metrics.height() + pad)
+            painter.fillRect(rect, QtGui.QColor(0, 0, 0, 150))
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter,
+                             self._caption)
+        if painter is not None:
+            painter.end()
 
 
 class IncomingCallDialog(QtWidgets.QDialog):
-    """Prompt shown for an incoming call offer."""
+    """Prompt shown for an incoming call offer (icon-only accept/reject)."""
 
     decision = QtCore.pyqtSignal(bool, bool)   # accept, video
 
@@ -63,9 +116,15 @@ class IncomingCallDialog(QtWidgets.QDialog):
 
         buttons = QtWidgets.QHBoxLayout()
         buttons.addStretch(1)
-        self._accept = QtWidgets.QPushButton(tr("call_accept"), self)
-        self._reject = QtWidgets.QPushButton(tr("call_reject"), self)
+        self._accept = QtWidgets.QPushButton(self)
+        self._accept.setIcon(_icon("call-accept"))
+        self._accept.setIconSize(QtCore.QSize(22, 22))
+        self._accept.setToolTip(tr("call_accept"))
         self._accept.setDefault(True)
+        self._reject = QtWidgets.QPushButton(self)
+        self._reject.setIcon(_icon("call-hangup"))
+        self._reject.setIconSize(QtCore.QSize(22, 22))
+        self._reject.setToolTip(tr("call_reject"))
         buttons.addWidget(self._accept)
         buttons.addWidget(self._reject)
         layout.addLayout(buttons)
@@ -82,7 +141,7 @@ class IncomingCallDialog(QtWidgets.QDialog):
 
 
 class CallWindow(QtWidgets.QWidget):
-    """Active call window with remote video and controls."""
+    """Active call window with remote video and icon-only controls."""
 
     hangup = QtCore.pyqtSignal(str)          # sid
     audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
@@ -108,19 +167,24 @@ class CallWindow(QtWidgets.QWidget):
         layout.addWidget(self._state)
 
         self._video_view = VideoView(self)
+        self._video_view.set_caption(peer)
         layout.addWidget(self._video_view, stretch=1)
         if not video:
             self._video_view.setVisible(False)
 
         controls = QtWidgets.QHBoxLayout()
         self._mute_btn = QtWidgets.QToolButton(self)
-        self._mute_btn.setText(tr("call_mute"))
+        self._mute_btn.setIcon(_icon("mic"))
+        self._mute_btn.setIconSize(QtCore.QSize(20, 20))
+        self._mute_btn.setToolTip(tr("call_mute"))
         self._mute_btn.setCheckable(True)
         self._mute_btn.toggled.connect(self._on_mute)
         controls.addWidget(self._mute_btn)
 
         self._cam_btn = QtWidgets.QToolButton(self)
-        self._cam_btn.setText(tr("call_camera"))
+        self._cam_btn.setIcon(_icon("camera"))
+        self._cam_btn.setIconSize(QtCore.QSize(20, 20))
+        self._cam_btn.setToolTip(tr("call_camera"))
         self._cam_btn.setCheckable(True)
         self._cam_btn.setChecked(video)
         self._cam_btn.setVisible(video)
@@ -128,7 +192,10 @@ class CallWindow(QtWidgets.QWidget):
         controls.addWidget(self._cam_btn)
         controls.addStretch(1)
 
-        self._hangup_btn = QtWidgets.QPushButton(tr("call_hangup"), self)
+        self._hangup_btn = QtWidgets.QToolButton(self)
+        self._hangup_btn.setIcon(_icon("call-hangup"))
+        self._hangup_btn.setIconSize(QtCore.QSize(20, 20))
+        self._hangup_btn.setToolTip(tr("call_hangup"))
         self._hangup_btn.clicked.connect(lambda: self.hangup.emit(self.sid))
         controls.addWidget(self._hangup_btn)
         layout.addLayout(controls)
@@ -141,13 +208,16 @@ class CallWindow(QtWidgets.QWidget):
 
     def _on_mute(self, checked):
         self._muted = checked
-        self._mute_btn.setText(tr("call_unmute") if checked else tr("call_mute"))
+        self._mute_btn.setIcon(_icon("mic-off" if checked else "mic"))
+        self._mute_btn.setToolTip(
+            tr("call_unmute") if checked else tr("call_mute"))
         self.audio_toggled.emit(self.sid, not checked)
 
     def _on_camera(self, checked):
         self._camera_on = checked
-        self._cam_btn.setText(tr("call_camera_off") if not checked
-                              else tr("call_camera"))
+        self._cam_btn.setIcon(_icon("camera" if checked else "camera-off"))
+        self._cam_btn.setToolTip(
+            tr("call_camera") if checked else tr("call_camera_off"))
         self.camera_toggled.emit(self.sid, checked)
 
     def closeEvent(self, event):
@@ -157,26 +227,30 @@ class CallWindow(QtWidgets.QWidget):
 
 
 class MujiCallWindow(QtWidgets.QWidget):
-    """Conference (Muji) window: video mosaic + participant list + per-party
-    audio toggles.
+    """Conference (Muji) window: video mosaic (left) + participant list
+    (right) with per-party audio/camera toggles.
 
     One window serves both audio and video conferences: the video mosaic is
-    visible only when the conference carries a video content, the participant
-    list always carries two per-row toggles — "send my microphone to this
-    participant" and "hear this participant".
+    visible only when the conference carries a video content.  The participant
+    list carries three per-row icon toggles — "send my microphone to this
+    participant", "hear this participant" and "send my video to this
+    participant".
     """
 
     leave = QtCore.pyqtSignal(str)                      # room
     participant_audio = QtCore.pyqtSignal(str, str, bool)    # room, nick, send-enabled
     participant_receive = QtCore.pyqtSignal(str, str, bool)  # room, nick, receive-enabled
+    participant_camera = QtCore.pyqtSignal(str, str, bool)   # room, nick, video-enabled
 
-    def __init__(self, room: str, parent=None):
+    def __init__(self, room: str, self_nick: str = "", parent=None):
         super().__init__(parent)
         self.room = room
+        self.self_nick = self_nick or ""
         self.setWindowTitle(tr("muji_window_title", room=room))
-        self.setMinimumSize(520, 400)
+        self.setMinimumSize(560, 400)
         self._mic_state: dict[str, bool] = {}
         self._recv_state: dict[str, bool] = {}
+        self._cam_state: dict[str, bool] = {}
         self._rows: dict[str, QtWidgets.QListWidgetItem] = {}
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -184,23 +258,48 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._title.setStyleSheet("font-weight: bold;")
         layout.addWidget(self._title)
 
-        self._video = _MosaicVideo(self)
-        layout.addWidget(self._video, stretch=1)
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal, self)
+
+        left = QtWidgets.QWidget(splitter)
+        left_layout = QtWidgets.QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        self._video = _MosaicVideo(left)
+        self._video.set_self_nick(self.self_nick)
+        left_layout.addWidget(self._video, stretch=1)
         self._video.setVisible(False)
 
-        self._state = QtWidgets.QLabel(tr("call_connecting"), self)
+        self._state = QtWidgets.QLabel(tr("call_connecting"), left)
         self._state.setStyleSheet("color: gray;")
-        layout.addWidget(self._state)
+        left_layout.addWidget(self._state)
 
-        self._list = QtWidgets.QListWidget(self)
-        layout.addWidget(self._list, stretch=1)
+        right = QtWidgets.QWidget(splitter)
+        right_layout = QtWidgets.QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        self._list = QtWidgets.QListWidget(right)
+        right_layout.addWidget(self._list, stretch=1)
 
-        self._leave_btn = QtWidgets.QPushButton(tr("muji_leave"), self)
+        self._leave_btn = QtWidgets.QToolButton(right)
+        self._leave_btn.setIcon(_icon("call-hangup"))
+        self._leave_btn.setIconSize(QtCore.QSize(20, 20))
+        self._leave_btn.setToolTip(tr("muji_leave"))
         self._leave_btn.clicked.connect(lambda: self.leave.emit(self.room))
-        layout.addWidget(self._leave_btn)
+        right_layout.addWidget(
+            self._leave_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+
+        splitter.addWidget(left)
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([self.width() - 200, 200])
+        layout.addWidget(splitter, stretch=1)
 
     def set_video(self, enabled: bool) -> None:
         self._video.setVisible(enabled)
+
+    def set_self_nick(self, nick: str) -> None:
+        """Update our own conference nick (labels the mirrored self tile)."""
+        self.self_nick = nick or ""
+        self._video.set_self_nick(self.self_nick)
 
     def set_participants(self, participants: list):
         current = {self._list.item(i).data(256)
@@ -225,6 +324,11 @@ class MujiCallWindow(QtWidgets.QWidget):
     def set_frame(self, nick: str, image) -> None:
         self._video.set_frame(nick, image)
 
+    def set_local_frame(self, image) -> None:
+        """Feed this conference's own camera preview (mirrored self tile)."""
+        if self.self_nick:
+            self._video.set_frame(self.self_nick, image)
+
     def _make_row(self, nick: str) -> QtWidgets.QWidget:
         row = QtWidgets.QWidget(self._list)
         layout = QtWidgets.QHBoxLayout(row)
@@ -234,42 +338,48 @@ class MujiCallWindow(QtWidgets.QWidget):
         layout.addWidget(name)
         layout.addStretch(1)
 
-        mic = QtWidgets.QPushButton(
-            tr("muji_party_mic_off"), row) \
-            if self._mic_state.get(nick, True) is False \
-            else QtWidgets.QPushButton(tr("muji_party_mic"), row)
-        mic.setCheckable(True)
-        mic.setChecked(self._mic_state.get(nick, True))
-        mic.setToolTip(tr("muji_party_mic_tip"))
-        mic.toggled.connect(
-            lambda on, n=nick, b=mic: self._on_mic_toggle(n, on, b))
-        layout.addWidget(mic)
-
-        recv = QtWidgets.QPushButton(
-            tr("muji_party_hear_off"), row) \
-            if self._recv_state.get(nick, True) is False \
-            else QtWidgets.QPushButton(tr("muji_party_hear"), row)
-        recv.setCheckable(True)
-        recv.setChecked(self._recv_state.get(nick, True))
-        recv.setToolTip(tr("muji_party_hear_tip"))
-        recv.toggled.connect(
-            lambda on, n=nick, b=recv: self._on_recv_toggle(n, on, b))
-        layout.addWidget(recv)
+        layout.addWidget(self._icon_toggle(
+            row, "mic", "mic-off", self._mic_state.get(nick, True),
+            tr("muji_party_mic_tip"),
+            lambda on, n=nick: self._on_mic_toggle(n, on)))
+        layout.addWidget(self._icon_toggle(
+            row, "speaker", "speaker-off", self._recv_state.get(nick, True),
+            tr("muji_party_hear_tip"),
+            lambda on, n=nick: self._on_recv_toggle(n, on)))
+        layout.addWidget(self._icon_toggle(
+            row, "camera", "camera-off", self._cam_state.get(nick, True),
+            tr("muji_party_cam_tip"),
+            lambda on, n=nick: self._on_cam_toggle(n, on)))
         return row
 
-    def _on_mic_toggle(self, nick: str, enabled: bool,
-                       button: QtWidgets.QPushButton) -> None:
+    @staticmethod
+    def _icon_toggle(parent, on_name: str, off_name: str, checked: bool,
+                     tip: str, handler) -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(parent)
+        button.setCheckable(True)
+        button.setChecked(checked)
+        button.setIcon(_icon(on_name if checked else off_name))
+        button.setIconSize(QtCore.QSize(16, 16))
+        button.setToolTip(tip)
+
+        def _toggled(on: bool, b=button, a=on_name, o=off_name):
+            b.setIcon(_icon(a if on else o))
+            handler(on)
+
+        button.toggled.connect(_toggled)
+        return button
+
+    def _on_mic_toggle(self, nick: str, enabled: bool) -> None:
         self._mic_state[nick] = enabled
-        button.setText(tr("muji_party_mic" if enabled
-                          else "muji_party_mic_off"))
         self.participant_audio.emit(self.room, nick, enabled)
 
-    def _on_recv_toggle(self, nick: str, enabled: bool,
-                        button: QtWidgets.QPushButton) -> None:
+    def _on_recv_toggle(self, nick: str, enabled: bool) -> None:
         self._recv_state[nick] = enabled
-        button.setText(tr("muji_party_hear" if enabled
-                          else "muji_party_hear_off"))
         self.participant_receive.emit(self.room, nick, enabled)
+
+    def _on_cam_toggle(self, nick: str, enabled: bool) -> None:
+        self._cam_state[nick] = enabled
+        self.participant_camera.emit(self.room, nick, enabled)
 
     def closeEvent(self, event):
         self.leave.emit(self.room)
@@ -287,6 +397,7 @@ class _MujiTile(VideoView):
         self.nick = nick
         self._clickable = clickable
         self.setMinimumSize(*min_size)
+        self.set_caption(nick)
 
     def mousePressEvent(self, event):
         if self._clickable:
@@ -297,14 +408,15 @@ class _MujiTile(VideoView):
 class _MosaicVideo(QtWidgets.QWidget):
     """Video mosaic for a Muji conference.
 
-    Grid mode shows one tile per video participant.  Clicking a tile switches
-    to single-participant mode: the clicked participant fills the widget while
-    the others shrink into a strip at the bottom; the "back" button returns to
-    the grid.
+    Grid mode shows one tile per video participant (including our own mirrored
+    tile).  Clicking a tile switches to single-participant mode: the clicked
+    participant fills the widget while the others shrink into a strip at the
+    bottom; the "back" button returns to the grid.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._self_nick = ""
         self._grid_holder = QtWidgets.QStackedWidget(self)
         grid_page = QtWidgets.QWidget(self._grid_holder)
         self._grid = QtWidgets.QGridLayout(grid_page)
@@ -337,23 +449,40 @@ class _MosaicVideo(QtWidgets.QWidget):
         self._latest: dict[str, object] = {}
         self._zoomed: str | None = None
 
+    # ── tiles ────────────────────────────────────────────────────
+    def _make_tile(self, nick: str, min_size=(128, 96), parent=None,
+                   clickable=True) -> _MujiTile:
+        tile = _MujiTile(nick, min_size=min_size, clickable=clickable,
+                         parent=parent or self._grid_holder.widget(0))
+        tile.set_mirrored(nick == self._self_nick)
+        tile.activated.connect(self._zoom_to)
+        return tile
+
+    def set_self_nick(self, nick: str) -> None:
+        self._self_nick = nick or ""
+        if self._self_nick and self._self_nick not in self._tiles:
+            self._tiles[self._self_nick] = self._make_tile(self._self_nick)
+            self._relayout()
+
     # ── frames ───────────────────────────────────────────────────
     def set_frame(self, nick: str, image) -> None:
         if nick not in self._latest:
             self._latest[nick] = image
         if nick not in self._tiles:
-            tile = _MujiTile(nick, parent=self._grid_holder.widget(0))
-            tile.activated.connect(self._zoom_to)
-            self._tiles[nick] = tile
+            self._tiles[nick] = self._make_tile(nick)
             self._relayout()
+        self._tiles[nick].set_caption(nick)
         self._tiles[nick].set_frame(image)
         if self._zoomed == nick:
+            self._big.set_caption(nick)
             self._big.set_frame(image)
         strip = self._strip_tiles.get(nick)
         if strip is not None:
             strip.set_frame(image)
 
     def remove_nick(self, nick: str) -> None:
+        if nick == self._self_nick:
+            return
         self._latest.pop(nick, None)
         tile = self._tiles.pop(nick, None)
         if tile is not None:
@@ -387,12 +516,14 @@ class _MosaicVideo(QtWidgets.QWidget):
         for other in sorted(self._tiles):
             if other == nick:
                 continue
-            tile = _MujiTile(other, min_size=(80, 60), parent=self._strip)
-            tile.activated.connect(self._zoom_to)
+            tile = self._make_tile(other, min_size=(80, 60),
+                                   parent=self._strip)
             tile.set_frame(self._latest.get(other))
             self._strip_layout.addWidget(tile)
             self._strip_tiles[other] = tile
         self._big.nick = nick
+        self._big.set_caption(nick)
+        self._big.set_mirrored(nick == self._self_nick)
         self._big.set_frame(self._latest.get(nick))
         self._grid_holder.setCurrentIndex(1)
 

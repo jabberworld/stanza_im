@@ -1581,7 +1581,9 @@ class ChatWidget(QtWidgets.QWidget):
 
     @staticmethod
     def _call_icon() -> QtGui.QIcon:
-        for candidate in (os.path.join(IMAGES_DIR, "22x22", "emotes",
+        for candidate in (os.path.join(ACTIONS_DIR_16, "call.svg"),
+                          os.path.join(ACTIONS_DIR_16, "call.png"),
+                          os.path.join(IMAGES_DIR, "22x22", "emotes",
                                        "phone.png"),
                           os.path.join(IMAGES_DIR, "16x16", "emotes",
                                        "phone.png"),

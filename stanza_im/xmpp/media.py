@@ -462,7 +462,7 @@ if HAS_AIORTC:
     class _VideoCaptureTrack(VideoStreamTrack):
         """Camera capture via PyAV (v4l2/avfoundation/dshow)."""
 
-        def __init__(self, device_id: str = ""):
+        def __init__(self, device_id: str = "", on_frame=None):
             super().__init__()
             self.kind = "video"
             self._container = None
@@ -470,6 +470,7 @@ if HAS_AIORTC:
             self._stopped = False
             self._enabled = True
             self._device_id = device_id or ""
+            self._on_frame = on_frame
             self._start()
 
         def _device_path(self) -> str:
@@ -521,9 +522,21 @@ if HAS_AIORTC:
                 return _black()
             if frame is None:
                 frame = _black_frame()
+            else:
+                # Surface the real camera frame for the local self-preview
+                # (black frames are not mirrored to the UI).
+                self._emit_local(frame)
             frame.pts = pts
             frame.time_base = time_base
             return frame
+
+        def _emit_local(self, frame) -> None:
+            if self._on_frame is None:
+                return
+            try:
+                self._on_frame(frame)
+            except Exception:
+                logger.debug("CALL local frame relay failed", exc_info=True)
 
         def _next_frame(self):
             try:
@@ -709,7 +722,8 @@ class MediaEngine:
     def enumerate_devices(self) -> dict:
         return {"audio_input": [], "audio_output": [], "video_input": []}
 
-    def create_call(self, ice_servers, devices=None):
+    def create_call(self, ice_servers, devices=None, on_ice_candidate=None,
+                    on_remote_track=None, on_state=None, on_local_frame=None):
         raise RuntimeError("calling is not available")
 
 
@@ -724,11 +738,12 @@ if HAS_AIORTC:
 
         def __init__(self, ice_servers, devices=None,
                      on_ice_candidate=None, on_remote_track=None,
-                     on_state=None):
+                     on_state=None, on_local_frame=None):
             self.devices = devices or {}
             self.on_ice_candidate = on_ice_candidate
             self.on_remote_track = on_remote_track
             self.on_state = on_state
+            self.on_local_frame = on_local_frame
             self._audio_play = None
             self._video_widget = None
             self._tasks: list[asyncio.Task] = []
@@ -819,9 +834,23 @@ if HAS_AIORTC:
 
         def add_video(self):
             self._local_video = _VideoCaptureTrack(
-                self.devices.get("video_input", ""))
+                self.devices.get("video_input", ""),
+                on_frame=self._forward_local_frame)
             self.pc.addTrack(self._local_video)
             logger.info("CALL added local video track")
+
+        def _forward_local_frame(self, frame):
+            """Relay one own-camera frame to the UI (self-preview)."""
+            if self.on_local_frame is None:
+                return
+            try:
+                image = _frame_to_qimage(frame)
+            except Exception:
+                logger.debug("CALL local frame conversion failed",
+                             exc_info=True)
+                return
+            if image is not None:
+                self.on_local_frame(image)
 
         def set_audio_enabled(self, enabled: bool) -> None:
             if self._local_audio is not None:
@@ -1019,9 +1048,9 @@ if HAS_AIORTC:
 
         def create_call(self, ice_servers, devices=None,
                         on_ice_candidate=None, on_remote_track=None,
-                        on_state=None) -> "AiortcCall":
+                        on_state=None, on_local_frame=None) -> "AiortcCall":
             return AiortcCall(ice_servers, devices, on_ice_candidate,
-                              on_remote_track, on_state)
+                              on_remote_track, on_state, on_local_frame)
 
 
 _engine: MediaEngine | None = None

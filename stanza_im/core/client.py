@@ -2925,6 +2925,10 @@ class JabberClient:
         """Turn the local camera on/off (black frames to the peer)."""
         self.rtp_calls.set_call_video(sid, enabled)
 
+    def set_call_local_preview(self, sid: str, enabled: bool = True) -> None:
+        """Mark a session as the source of own-video preview frames."""
+        self.rtp_calls.set_local_preview(sid, enabled)
+
     # ── Muji conference API (XEP-0272) ────────────────────────────
 
     def join_muji(self, room: str, nick: str, video: bool = False) -> None:

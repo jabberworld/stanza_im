@@ -559,6 +559,7 @@ class CallSession:
     video_content: str = "video"
     ringed: bool = False
     muji_room: str = ""
+    local_preview: bool = False
 
 
 class JingleRtpManager:
@@ -733,7 +734,8 @@ class JingleRtpManager:
             self._ice_servers(), self._devices(),
             on_ice_candidate=lambda cand: self._on_local_candidate(session, cand),
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
-            on_state=lambda *a: None)
+            on_state=lambda *a: None,
+            on_local_frame=lambda frame: self._forward_local(session, frame))
         session.call = call
         call.add_audio()
         if session.video:
@@ -802,6 +804,19 @@ class JingleRtpManager:
             self.client.emit("call_remote_track", session.sid, kind)
         elif kind == "frame":
             self.client.emit("call_video_frame", session.sid, image)
+
+    def _forward_local(self, session: CallSession, image) -> None:
+        """Relay our own camera frame — only for the session the UI picked as
+        the conference self-preview source."""
+        if session.local_preview:
+            self.client.emit("call_local_video_frame", session.sid, image)
+
+    def set_local_preview(self, sid: str, enabled: bool = True) -> None:
+        """Mark (or unmark) a session as the self-preview frame source."""
+        session = self.sessions.get(sid)
+        if session is not None:
+            session.local_preview = bool(enabled)
+            logger.debug("CALL local preview sid=%s enabled=%s", sid, enabled)
 
     # ── incoming ──────────────────────────────────────────────────
     async def dispatch(self, action: str, jingle: ET.Element, iq) -> None:
@@ -883,7 +898,8 @@ class JingleRtpManager:
             self._ice_servers(), self._devices(),
             on_ice_candidate=lambda cand: self._on_local_candidate(session, cand),
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
-            on_state=lambda *a: None)
+            on_state=lambda *a: None,
+            on_local_frame=lambda frame: self._forward_local(session, frame))
         session.call = call
         call.add_audio()
         if session.video:

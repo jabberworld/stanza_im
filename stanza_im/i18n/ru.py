@@ -787,6 +787,9 @@ STRINGS = {
     'muji_party_hear': 'Слышать',
     'muji_party_hear_off': 'Не слышать',
     'muji_party_hear_tip': 'Слышать этого участника',
+    'muji_party_cam': 'Камера',
+    'muji_party_cam_off': 'Камера выкл',
+    'muji_party_cam_tip': 'Отправлять моё видео этому участнику',
     # Карта (RFC 5870 geo:)
     'map_window_title': 'Карта',
     'map_follow': 'Следить',

@@ -74,6 +74,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._incoming_calls: dict[str, object] = {}    # sid -> IncomingCallDialog
         self._call_targets: dict[str, str] = {}         # sid -> peer jid
         self._muji_windows: dict[str, object] = {}      # room -> MujiCallWindow
+        self._muji_preview_sids: dict[str, str] = {}    # room -> self-preview sid
         self._roster_style = RosterStyle()
         self._apply_roster_options()
 
@@ -1323,6 +1324,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("call_proposal_ended", self._on_call_proposal_ended)
         c.on("call_state", self._on_call_state)
         c.on("call_video_frame", self._on_call_video_frame)
+        c.on("call_local_video_frame", self._on_call_local_video_frame)
         c.on("call_ended", self._on_call_ended)
         c.on("call_failed", self._on_call_failed)
         c.on("muji_joined", self._on_muji_joined)
@@ -1676,6 +1678,7 @@ class MainWindow(QtWidgets.QMainWindow):
         session = (self._client.rtp_calls.sessions.get(sid)
                    if self._client else None)
         if getattr(session, "muji_room", ""):
+            self._sync_muji_preview(session.muji_room)
             return
         if state == "ringing":
             self._open_call_window(sid, peer,
@@ -1699,6 +1702,17 @@ class MainWindow(QtWidgets.QMainWindow):
             muji = self._muji_windows.get(room)
             if muji is not None:
                 muji.set_frame(self._muji_nick_for_sid(room, sid), image)
+
+    def _on_call_local_video_frame(self, sid: str, image) -> None:
+        """Own-camera frame from the conference self-preview session."""
+        session = (self._client.rtp_calls.sessions.get(sid)
+                   if self._client else None)
+        room = getattr(session, "muji_room", "")
+        if not room or self._muji_preview_sids.get(room) != sid:
+            return
+        window = self._muji_windows.get(room)
+        if window is not None:
+            window.set_local_frame(image)
 
     def _on_call_ended(self, sid: str, peer: str, reason: str) -> None:
         logger.info("CALL ended %s (%s)", sid, reason)
@@ -1748,12 +1762,15 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.call_window import MujiCallWindow
         window = self._muji_windows.get(room)
         if window is None:
-            window = MujiCallWindow(room)
+            nick = self._muc_self_nicks.get(room, "")
+            window = MujiCallWindow(room, self_nick=nick)
             window.leave.connect(self._client.leave_muji)
             window.participant_audio.connect(
                 self._on_muji_participant_audio)
             window.participant_receive.connect(
                 self._on_muji_participant_receive)
+            window.participant_camera.connect(
+                self._on_muji_participant_camera)
             self._place_window_near_main(window)
             window.show()
             self._muji_windows[room] = window
@@ -1763,11 +1780,37 @@ class MainWindow(QtWidgets.QMainWindow):
         window = self._muji_windows.get(room)
         conf = self._client.muji.conferences.get(room) if self._client else None
         if window is not None and conf is not None:
+            window.set_self_nick(self._muc_self_nicks.get(room, ""))
             window.set_participants(sorted(conf.participants))
             has_video = ("video" in (conf.contents or {}).values()
                          or any("video" in (p.contents or {}).values()
                                 for p in conf.participants.values()))
             window.set_video(has_video)
+        self._sync_muji_preview(room)
+
+    def _muji_preview_sid(self, room: str) -> str:
+        """The first video session of a conference (self-preview source)."""
+        if not self._client:
+            return ""
+        for sid, session in sorted(self._client.rtp_calls.sessions.items()):
+            if (getattr(session, "muji_room", "") == room
+                    and getattr(session, "video", False)):
+                return sid
+        return ""
+
+    def _sync_muji_preview(self, room: str) -> None:
+        """Keep exactly one conference session feeding our self-preview."""
+        if not self._client:
+            return
+        want = self._muji_preview_sid(room)
+        current = self._muji_preview_sids.get(room, "")
+        if want == current:
+            return
+        if current:
+            self._client.set_call_local_preview(current, False)
+        self._muji_preview_sids[room] = want
+        if want:
+            self._client.set_call_local_preview(want, True)
 
     def _on_muji_session(self, sid: str, peer_full: str, room: str) -> None:
         """An incoming Muji session-initiate — record the peer participant."""
@@ -1787,6 +1830,13 @@ class MainWindow(QtWidgets.QMainWindow):
         sid = self._muji_sid_for_nick(room, nick)
         if sid and self._client:
             self._client.set_call_audio_receive(sid, enabled)
+
+    def _on_muji_participant_camera(self, room: str, nick: str,
+                                    enabled: bool) -> None:
+        """Toggle sending this participant our camera."""
+        sid = self._muji_sid_for_nick(room, nick)
+        if sid and self._client:
+            self._client.set_call_video(sid, enabled)
 
     def _muji_sid_for_nick(self, room: str, nick: str) -> str:
         """Find the Jingle session sid for a conference participant."""
@@ -1821,6 +1871,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if "/" in str(session.peer_full) else session.peer_bare
 
     def _on_muji_left(self, room: str) -> None:
+        sid = self._muji_preview_sids.pop(room, "")
+        if sid and self._client:
+            self._client.set_call_local_preview(sid, False)
         window = self._muji_windows.pop(room, None)
         if window is not None:
             window.close()
