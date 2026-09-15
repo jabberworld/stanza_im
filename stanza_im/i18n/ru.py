@@ -780,6 +780,13 @@ STRINGS = {
     'muji_participants': 'Участников: {count}',
     'muji_leave': 'Покинуть конференцию',
     'muji_invite': 'Приглашение в конференц-звонок: {room}',
+    'muji_video_back': 'К сетке',
+    'muji_party_mic': 'Микрофон',
+    'muji_party_mic_off': 'Микрофон выкл',
+    'muji_party_mic_tip': 'Отправлять мой голос этому участнику',
+    'muji_party_hear': 'Слышать',
+    'muji_party_hear_off': 'Не слышать',
+    'muji_party_hear_tip': 'Слышать этого участника',
     # Карта (RFC 5870 geo:)
     'map_window_title': 'Карта',
     'map_follow': 'Следить',

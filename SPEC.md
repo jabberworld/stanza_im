@@ -1172,8 +1172,17 @@ client.leave_muji(room)
 - Muji (`xmpp/muji.py`, `client.muji`): participants advertise a `<muji>`
   contents map in MUC presence; the joiner opens a Jingle session with every
   other participant's real JID tagged `<muji room='…'/>`, handles content
-  add/remove and leaving, and parses XEP-0482 invites. `MujiCallWindow` lists
-  participants. In a MUC chat tab the toolbar call button starts a Muji
+  add/remove and leaving, and parses XEP-0482 invites. Muji sessions never open
+  a 1:1 `CallWindow` — `MainWindow._on_call_state` skips sessions whose
+  `muji_room` is set — and incoming session-initiates are recorded as
+  participants via the `muji_session` event → `MujiManager.note_session`.
+  `MujiCallWindow` shows the participant list with two per-row toggles ("send
+  my mic to this participant" via `set_call_audio`, "hear this participant"
+  via `set_call_audio_receive`/`AiortcCall.set_remote_audio_enabled`, both
+  local-only, no renegotiation) and, for video conferences, a `_MosaicVideo`
+  mosaic: clicking a tile enlarges that participant (the rest become a bottom
+  strip) and a "back to grid" button restores the grid. In a MUC chat tab the
+  toolbar call button starts a Muji
   conference: `ChatWidget` emits `muji_call_requested(room, video)` (never
   `call_requested`) which `ChatWindow.open_groupchat` forwards and
   `MainWindow._on_muji_call_requested` routes to `_join_muji`. The button is

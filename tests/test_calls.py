@@ -17,7 +17,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtGui, QtWidgets
 
 import slixmpp
 
@@ -1084,6 +1084,172 @@ check("audio variant routed too",
       _both_routes == [("room@conf", "me", True),
                        ("room@conf", "me", False)])
 check("MUC call button blocked without aiortc", _blocked)
+
+# ── 13. Muji conference window: gating, session wiring, audio + mosaic -------
+class _FakeMujiRtpSessions:
+    def __init__(self):
+        self.sessions = {}
+
+
+class _FakeMujiConfClient:
+    """Minimal client for the Muji window / MainWindow conference tests."""
+
+    def __init__(self):
+        self.events = []
+        self.rtp_calls = _FakeMujiRtpSessions()
+        self.muji = muji.MujiManager(self)
+        self.sent_audio = []
+        self.sent_receive = []
+        self.started = []
+
+    def emit(self, *args):
+        self.events.append(args)
+
+    def _start_task(self, coro):
+        self.started.append(coro)
+
+    def join_muji(self, *args):
+        pass
+
+    def leave_muji(self, *args):
+        pass
+
+    def end_call(self, *args):
+        pass
+
+    def set_call_audio(self, sid, enabled):
+        self.sent_audio.append((sid, enabled))
+
+    def set_call_audio_receive(self, sid, enabled):
+        self.sent_receive.append((sid, enabled))
+
+    def set_client_active(self, active=True):
+        pass
+
+
+class _MujiFakeSession:
+    def __init__(self, sid, peer_bare, muji_room=""):
+        self.sid = sid
+        self.peer_bare = peer_bare
+        self.peer_full = peer_bare + "/res"
+        self.muji_room = muji_room
+        self.video = False
+
+
+def _muji_no_call_window_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    client.rtp_calls.sessions["s1"] = _MujiFakeSession(
+        "s1", "alice@host", muji_room="room@conf")
+    mw._on_call_state("s1", "alice@host/res", "ringing")
+    mw._on_call_state("s1", "alice@host/res", "active")
+    muji_no_window = not mw._call_windows
+    # a normal 1:1 call still opens a call window
+    client.rtp_calls.sessions["s2"] = _MujiFakeSession("s2", "bob@host")
+    mw._on_call_state("s2", "bob@host/res", "ringing")
+    one_to_one_ok = "s2" in mw._call_windows
+    mw.close()
+    return muji_no_window, one_to_one_ok
+
+
+_muji_no_w, _one2one_w = _muji_no_call_window_result()
+check("muji sessions never open a 1:1 call window",
+      _muji_no_w and _one2one_w)
+
+
+def _muji_session_wiring_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    client.muji.conferences["room@conf"] = muji.MujiConference(
+        room="room@conf")
+    mw._on_muji_session("sx", "carol@host/res", "room@conf")
+    conf = client.muji.conferences["room@conf"]
+    ok = ("res" in conf.participants
+          and conf.participants["res"].real_jid == "carol@host")
+    mw.close()
+    return ok
+
+
+check("muji_session records the incoming session peer as participant",
+      _muji_session_wiring_result())
+
+
+def _muji_audio_proxy_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    conf = muji.MujiConference(room="room@conf")
+    conf.participants["alice"] = muji.MujiParticipant(
+        nick="alice", real_jid="alice@host")
+    client.muji.conferences["room@conf"] = conf
+    client.rtp_calls.sessions["sa"] = _MujiFakeSession(
+        "sa", "alice@host", muji_room="room@conf")
+    mw._on_muji_participant_audio("room@conf", "alice", False)
+    mw._on_muji_participant_receive("room@conf", "alice", False)
+    ok = (client.sent_audio == [("sa", False)]
+          and client.sent_receive == [("sa", False)])
+    # unknown nick resolves to no sid, no crash
+    mw._on_muji_participant_audio("room@conf", "ghost", False)
+    mw.close()
+    return ok and client.sent_audio == [("sa", False)]
+
+
+check("muji participant audio toggles proxy to the matching session",
+      _muji_audio_proxy_result())
+
+
+def _muji_window_ui_result():
+    from stanza_im.ui.call_window import MujiCallWindow
+    w = MujiCallWindow("room@conf")
+    w.set_video(True)
+    sent_audio, sent_recv = [], []
+    w.participant_audio.connect(lambda *a: sent_audio.append(a))
+    w.participant_receive.connect(lambda *a: sent_recv.append(a))
+    w.set_participants(["alice", "bob"])
+    item = w._rows["alice"]
+    row = w._list.itemWidget(item)
+    row_btns = row.findChildren(QtWidgets.QPushButton)
+    row_btns[0].setChecked(False)   # mute mic toward alice
+    row_btns[1].setChecked(False)   # stop hearing alice
+    toggles_ok = (sent_audio == [("room@conf", "alice", False)]
+                  and sent_recv == [("room@conf", "alice", False)]
+                  and w._mic_state["alice"] is False
+                  and w._recv_state["alice"] is False)
+    # rebuild against the same set keeps the toggle states
+    w.set_participants(["alice", "bob"])
+    item = w._rows["alice"]
+    row = w._list.itemWidget(item)
+    row_btns = row.findChildren(QtWidgets.QPushButton)
+    preserve = (row_btns[0].isChecked() is False
+                and row_btns[1].isChecked() is False)
+
+    img = QtGui.QImage(64, 48, QtGui.QImage.Format.Format_RGB888)
+    img.fill(0)
+    w.set_frame("alice", img)
+    w.set_frame("bob", img)
+    mosaic = w._video
+    grid_first = mosaic._grid_holder.currentIndex() == 0
+    mosaic._zoom_to("bob")
+    zoom_ok = (mosaic._grid_holder.currentIndex() == 1
+               and mosaic._big.nick == "bob"
+               and set(mosaic._strip_tiles) == {"alice"})
+    mosaic._show_grid()
+    back_ok = mosaic._grid_holder.currentIndex() == 0
+    w.close()
+    return toggles_ok, preserve, grid_first, zoom_ok, back_ok
+
+
+_togg, _pres, _grid, _zoom, _back = _muji_window_ui_result()
+check("muji participant rows emit audio and receive toggles", _togg)
+check("muji participant toggle state survives list rebuild", _pres)
+check("muji mosaic starts in grid mode", _grid)
+check("muji mosaic zooms one participant with a strip for the rest", _zoom)
+check("muji mosaic back button restores the grid", _back)
 
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")

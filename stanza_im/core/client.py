@@ -2917,6 +2917,10 @@ class JabberClient:
         """Mute/unmute the outgoing microphone (silence frames)."""
         self.rtp_calls.set_call_audio(sid, enabled)
 
+    def set_call_audio_receive(self, sid: str, enabled: bool) -> None:
+        """Mute/unmute playback of this session's remote audio."""
+        self.rtp_calls.set_call_audio_receive(sid, enabled)
+
     def set_call_video(self, sid: str, enabled: bool) -> None:
         """Turn the local camera on/off (black frames to the peer)."""
         self.rtp_calls.set_call_video(sid, enabled)

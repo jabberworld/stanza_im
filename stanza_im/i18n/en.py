@@ -780,6 +780,13 @@ STRINGS = {
     'muji_participants': 'Participants: {count}',
     'muji_leave': 'Leave conference',
     'muji_invite': 'Invitation to conference call: {room}',
+    'muji_video_back': 'Back to grid',
+    'muji_party_mic': 'Mic',
+    'muji_party_mic_off': 'Mic off',
+    'muji_party_mic_tip': 'Send my audio to this participant',
+    'muji_party_hear': 'Hear',
+    'muji_party_hear_off': 'Not hear',
+    'muji_party_hear_tip': 'Hear this participant',
     # Map (RFC 5870 geo:)
     'map_window_title': 'Map',
     'map_follow': 'Follow',

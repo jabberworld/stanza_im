@@ -403,6 +403,7 @@ if HAS_AIORTC:
             self._rate, self._channels = AUDIO_RATE, AUDIO_CHANNELS
             self._av_fmt = AUDIO_FORMAT
             self._resampler = None
+            self._enabled = True
             if not HAS_QTMM:
                 return
             self._sink, self._io, fmt, name, error = open_audio_sink(device_id)
@@ -434,7 +435,7 @@ if HAS_AIORTC:
             return frames[0] if frames else None
 
         def write(self, frame):
-            if self._io is None:
+            if self._io is None or not self._enabled:
                 return
             try:
                 out = self._to_device_format(frame)
@@ -443,6 +444,13 @@ if HAS_AIORTC:
                 self._io.write(bytes(out.planes[0]))
             except Exception:
                 logger.debug("CALL speaker write failed", exc_info=True)
+
+        @property
+        def enabled(self) -> bool:
+            return self._enabled
+
+        def set_enabled(self, enabled: bool) -> None:
+            self._enabled = enabled
 
         def stop(self):
             try:
@@ -784,7 +792,8 @@ if HAS_AIORTC:
             try:
                 while True:
                     frame = await track.recv()
-                    if self._audio_play:
+                    if (self._audio_play is not None
+                            and self._audio_play.enabled):
                         self._audio_play.write(frame)
             except Exception:
                 # Normal at call end (MediaStreamError) — no traceback.
@@ -817,6 +826,11 @@ if HAS_AIORTC:
         def set_audio_enabled(self, enabled: bool) -> None:
             if self._local_audio is not None:
                 self._local_audio.set_enabled(enabled)
+
+        def set_remote_audio_enabled(self, enabled: bool) -> None:
+            """Mute/unmute playback of this session's remote audio."""
+            if self._audio_play is not None:
+                self._audio_play.set_enabled(enabled)
 
         def set_video_enabled(self, enabled: bool) -> None:
             if self._local_video is not None:

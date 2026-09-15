@@ -88,6 +88,27 @@ class MujiManager:
         self.client.emit("muji_updated", room)
         return True
 
+    def note_session(self, room: str, peer_full_jid: str) -> None:
+        """Record a peer seen through an incoming Jingle session.
+
+        MUC presence sometimes arrives late or without the peer's <muji/>
+        advertisement (late joiners, reduced-functionality clients), so a
+        session-initiate may be our only record of a conference member.
+        """
+        peer_bare = str(peer_full_jid).split("/", 1)[0]
+        nick = (str(peer_full_jid).split("/", 1)[1]
+                if "/" in str(peer_full_jid) else peer_bare)
+        conf = self.conferences.get(room)
+        if conf is None:
+            return
+        participant = conf.participants.setdefault(
+            nick, MujiParticipant(nick))
+        if not participant.real_jid:
+            participant.real_jid = peer_bare
+        logger.info("MUJI session peer %s (%s) recorded in %s",
+                    peer_full_jid, nick, room)
+        self.client.emit("muji_updated", room)
+
     # ── join / leave ──────────────────────────────────────────────
     def join(self, room: str, self_nick: str, video: bool = False) -> None:
         conf = self.conferences.setdefault(room, MujiConference(room=room))

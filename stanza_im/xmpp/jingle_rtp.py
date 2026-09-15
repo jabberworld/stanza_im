@@ -1147,6 +1147,10 @@ class JingleRtpManager:
         """Mute/unmute outgoing audio (silence frames, no renegotiation)."""
         self._set_track_enabled(sid, "set_audio_enabled", enabled)
 
+    def set_call_audio_receive(self, sid: str, enabled: bool) -> None:
+        """Mute/unmute playback of this session's remote audio."""
+        self._set_track_enabled(sid, "set_remote_audio_enabled", enabled)
+
     def set_call_video(self, sid: str, enabled: bool) -> None:
         """Turn the local camera on/off (black frames, no renegotiation)."""
         self._set_track_enabled(sid, "set_video_enabled", enabled)

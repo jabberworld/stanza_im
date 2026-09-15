@@ -583,8 +583,18 @@ spamming tracebacks after a hang-up. Muji (XEP-0272) coordinates conference call
 `<muji>` contents map is advertised in MUC presence (`MujiManager.handle_presence`),
 the joiner opens a Jingle session with every other participant's real JID
 tagged `<muji room=…/>` (`start_call(..., muji_room=rook)`), and content
-add/remove, leaving and XEP-0482 invites are handled; `MujiCallWindow` lists
-the participants. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
+add/remove, leaving and XEP-0482 invites are handled. Muji sessions never open
+a 1:1 `CallWindow` — `MainWindow._on_call_state` skips windows whose session
+carries `muji_room` — and incoming session-initiates are recorded as
+participants via the `muji_session` event → `MujiManager.note_session` (a peer
+whose MUC presence we missed is still listed). The single `MujiCallWindow`
+shows the participant list with two per-row toggles — "send my mic to this
+participant" (`set_call_audio`, per-session silence) and "hear this
+participant" (`set_call_audio_receive` → `AiortcCall.set_remote_audio_enabled`
+→ per-session playback mute, no renegotiation) — and, when the conference
+carries video, a video mosaic (`_MosaicVideo`, tiles per participant) where
+clicking a tile enlarges that participant with the rest as a bottom strip and
+a "back to grid" button. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled.
 
