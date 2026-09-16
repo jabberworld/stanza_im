@@ -79,6 +79,30 @@ _grab = _grab_region(QtCore.QPoint(0, 0), QtCore.QSize(32, 32))
 check("_grab_region tolerates a failed grab",
       _grab is None or isinstance(_grab, QtGui.QPixmap))
 
+# Snapshot only without a compositor AND opacity < 100 %.
+_orig_compositing = osd_mod.compositing_available
+osd_mod.compositing_available = lambda: False
+try:
+    _nc = _OsdWindow(None, "t", "b", bg_color="#123456", opacity=50)
+    _nc.resize(120, 40)
+    _need_50 = _nc._needs_backdrop()
+    _nc._opacity = 100
+    _need_100 = _nc._needs_backdrop()
+    _nc._refresh_backdrop()          # 100 % -> clear, no capture
+    _cleared = _nc._backdrop is None
+    _nc._opacity = 50
+    _nc._refresh_backdrop()          # tries a capture; must not crash
+    _captured = (_nc._backdrop is None
+                 or isinstance(_nc._backdrop, QtGui.QPixmap))
+    _nc.deleteLater()
+finally:
+    osd_mod.compositing_available = _orig_compositing
+
+check("backdrop needed only below 100% without a compositor",
+      _need_50 is True and _need_100 is False)
+check("no snapshot is kept at 100% opacity", _cleared)
+check("_refresh_backdrop tolerates a failed capture", _captured)
+
 # 2. stacking math -----------------------------------------------------------
 check("topdown base", stack_position(0, 100, [40, 40], True) == 100)
 check("topdown below", stack_position(1, 100, [40, 60], True) ==

@@ -287,13 +287,16 @@ not the active window on that conversation), `osd_typing`, `osd_status`
 (`never`/`available`/`any`, skipping the initial presence sync),
 `osd_conference` (`never`/`mention`/`all`), plus the `_notify_osd_file` entry
 point wired for future p2p file transfers. The bubble (rounded background +
-`osd_opacity`, border) is painted in `_OsdWindow.paintEvent`; when
+`osd_opacity`, border) is painted in `_OsdWindow.paintEvent`. When
 `compositing_available()` finds **no** X11 compositor (`_NET_WM_CM_S0` has no
-owner, checked via `libX11`/ctypes), the same paint draws a desktop snapshot
-grabbed by `_grab_region` (`QScreen.grabWindow`, refreshed on spawn and on
-preview drag while the window is hidden) so the opacity still looks transparent
-instead of black; Wayland/unknown platforms always composite and use plain
-alpha.
+owner, checked via `libX11`/ctypes) **and** the opacity is below 100 %,
+`_refresh_backdrop()` snaps the desktop area behind the window (`_grab_region`,
+a region-only `QScreen.grabWindow` with a full-grab+crop fallback; refreshed on
+spawn and on preview drag while the window is briefly hidden) and paints it
+under the translucent bubble so it looks transparent instead of black; at
+100 % opacity the whole rectangle is filled with the bubble color (straight
+corners) and no snapshot is taken. Wayland/unknown platforms always composite
+and use plain alpha.
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The

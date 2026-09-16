@@ -65,26 +65,48 @@ def compositing_available() -> bool:
 
 
 def _grab_region(pos: QtCore.QPoint, size: QtCore.QSize):
-    """Snapshot the screen area at *pos* (logical coords); None on failure."""
+    """Snapshot the screen area at *pos* (logical coords); None on failure.
+
+    Tries a region grab first; some platforms ignore ``x``/``y`` for
+    ``window == 0`` (returning the whole screen), so the result is validated
+    by size and falls back to a full grab cropped to the region.
+    """
     app = QtWidgets.QApplication.instance()
     if app is None:
         return None
     screen = app.screenAt(pos) or app.primaryScreen()
-    if screen is None:
+    if screen is None or size.width() <= 0 or size.height() <= 0:
         return None
+    origin = screen.geometry().topLeft()
+    lx = pos.x() - origin.x()
+    ly = pos.y() - origin.y()
+    lw = size.width()
+    lh = size.height()
+    if lx < 0 or ly < 0:
+        return None
+    try:
+        region = screen.grabWindow(0, lx, ly, lw, lh)
+    except Exception:
+        region = None
+    if region is not None and not region.isNull():
+        dpr = region.devicePixelRatio() or 1.0
+        for scale in (1.0, dpr):
+            if (abs(region.width() - lw * scale) <= 2
+                    and abs(region.height() - lh * scale) <= 2):
+                return region
+    # Fallback: grab the whole screen and crop.
     try:
         shot = screen.grabWindow(0)
     except Exception:
         return None
-    if shot is None or shot.isNull() or size.width() <= 0 or size.height() <= 0:
+    if shot is None or shot.isNull():
         return None
-    origin = screen.geometry().topLeft()
     dpr = shot.devicePixelRatio() or 1.0
-    x = int((pos.x() - origin.x()) * dpr)
-    y = int((pos.y() - origin.y()) * dpr)
-    w = int(size.width() * dpr)
-    h = int(size.height() * dpr)
-    if x < 0 or y < 0 or x + w > shot.width() or y + h > shot.height():
+    x = int(lx * dpr)
+    y = int(ly * dpr)
+    w = int(lw * dpr)
+    h = int(lh * dpr)
+    if x + w > shot.width() or y + h > shot.height():
         return None
     return shot.copy(QtCore.QRect(x, y, w, h))
 
@@ -139,11 +161,27 @@ class _OsdWindow(QtWidgets.QWidget):
         bg.setAlpha(int(round(max(0, min(100, self._opacity)) * 255 / 100)))
         return bg
 
+    def _needs_backdrop(self) -> bool:
+        """A screen snapshot is only needed without a compositor and < 100 %."""
+        return not compositing_available() and self._opacity < 100
+
     def paintEvent(self, event):
         # The bubble is painted here (not via a stylesheet) so a no-compositor
         # screen snapshot can be drawn underneath it.
+        color = self._bubble_color()
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        if (self._backdrop is None or self._backdrop.isNull()) \
+                and color.alpha() >= 255:
+            # No compositor, fully opaque: fill the whole rectangle (straight
+            # corners) so no snapshot is needed and nothing stays black.
+            painter.fillRect(self.rect(), color)
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 90), 1.0))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRect(QtCore.QRectF(self.rect()).adjusted(0.5, 0.5,
+                                                                -0.5, -0.5))
+            painter.end()
+            return
         rect = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QtGui.QPainterPath()
         path.addRoundedRect(rect, _RADIUS, _RADIUS)
@@ -151,7 +189,7 @@ class _OsdWindow(QtWidgets.QWidget):
             # Full-rect snapshot: the rounded corners then show the desktop
             # (fake transparency) instead of an opaque window background.
             painter.drawPixmap(self.rect(), self._backdrop)
-        painter.fillPath(path, self._bubble_color())
+        painter.fillPath(path, color)
         painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 90), 1.0))
         painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(rect, _RADIUS, _RADIUS)
@@ -161,9 +199,24 @@ class _OsdWindow(QtWidgets.QWidget):
         self._backdrop = pixmap
         self.update()
 
-    def load_backdrop(self) -> None:
-        """Capture the desktop behind the hidden window (no-compositor mode)."""
-        self._backdrop = _grab_region(self.pos(), self.size())
+    def _refresh_backdrop(self) -> None:
+        """Match the backdrop to the current compositor/opacity state.
+
+        Captures the area behind the window (briefly hiding it so it does not
+        capture itself) only when there is no compositor and the bubble is
+        translucent; otherwise clears any stale snapshot.
+        """
+        need = self._needs_backdrop()
+        was_visible = self.isVisible()
+        if need and was_visible:
+            self.hide()
+        if need:
+            self._backdrop = _grab_region(self.pos(), self.size())
+        else:
+            self._backdrop = None
+        if need and was_visible:
+            self.show()
+            self.raise_()
         self.update()
 
     def __init__(self, icon, title: str, body: str, draggable: bool = False,
@@ -277,7 +330,7 @@ class _OsdWindow(QtWidgets.QWidget):
         frame = getattr(self, "_frame", None)
         if frame is not None:
             frame.setStyleSheet(self._stylesheet())
-        self.update()
+        self._refresh_backdrop()
 
     def _click(self) -> None:
         cb = self._on_clicked
@@ -465,13 +518,9 @@ class OsdManager:
             timer.start(int(duration * 1000))
             rec["timer"] = timer
         self._restack()
-        if not compositing_available():
-            # No compositor: fake transparency with a desktop snapshot taken
-            # while the window is hidden (so it does not capture itself).
-            win.hide()
-            win.load_backdrop()
-            win.show()
-            win.raise_()
+        # Capture the desktop snapshot only when there is no compositor and
+        # the bubble is translucent (hide/show so it does not capture itself).
+        win._refresh_backdrop()
         return rec
 
     def _dismiss(self, rec: dict) -> None:

@@ -719,12 +719,15 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   title and word-wrapped body; clicking dismisses (and may focus the chat).
   Frame and label children are mouse-transparent so drags and clicks reach the
   window itself, and each window is raised on show/restack. The bubble
-  (rounded background using `appearance.osd_bg_color`/`osd_font_color`/
+  (  rounded background using `appearance.osd_bg_color`/`osd_font_color`/
   `osd_opacity` and a 1px border) is drawn in `_OsdWindow.paintEvent`. When
-  `compositing_available()` finds no X11 compositor (no `_NET_WM_CM_S0` owner),
-  a desktop snapshot (`_grab_region` → `QScreen.grabWindow`, refreshed on spawn
-  and on preview drag while hidden) is painted under the bubble so opacity still
-  looks transparent rather than black; Wayland/unknown platforms always
+  `compositing_available()` finds no X11 compositor (no `_NET_WM_CM_S0` owner)
+  and the opacity is below 100 %, a desktop snapshot is painted under the
+  bubble (`_grab_region`: a region-only `QScreen.grabWindow` with a
+  full-grab+crop fallback, refreshed on spawn and on preview drag while the
+  window is briefly hidden) so opacity still looks transparent rather than
+  black; at 100 % opacity the whole rectangle is filled with the bubble color
+  (straight corners) and no snapshot is taken. Wayland/unknown platforms always
   composite with plain alpha.
 - All windows dock to a saved base position (`notifications.osd_x/osd_y`, the
   position of the first notification) and stack from it: top-down when
