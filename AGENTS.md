@@ -299,7 +299,12 @@ preview drag and after every `_restack` (windows are briefly hidden) — and
 painted under the translucent bubble so it looks transparent instead of black;
 at 100 % opacity the whole rectangle is filled with the bubble color (straight
 corners) and no snapshot is taken. Wayland/unknown platforms always composite
-and use plain alpha.
+and use plain alpha. The tray icon's middle click
+(`TrayIcon.cycle_unread_requested`, `ActivationReason.MiddleClick`) lets the
+user walk unread conversations: `MainWindow._on_tray_cycle_unread` opens the
+topmost roster contact with `unread_count > 0`, then `_reset_unread` +
+`mds_mark_displayed` mark it read so each further middle click advances until
+nothing is left.
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The

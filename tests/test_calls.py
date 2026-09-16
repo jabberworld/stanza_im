@@ -1213,6 +1213,9 @@ class _FakeMujiConfClient:
     def mds_mark_displayed(self, *args):
         pass
 
+    def get_vcard(self, *args, **kwargs):
+        pass
+
 
 class _MujiFakeSession:
     def __init__(self, sid, peer_bare, muji_room=""):
@@ -1221,6 +1224,60 @@ class _MujiFakeSession:
         self.peer_full = peer_bare + "/res"
         self.muji_room = muji_room
         self.video = False
+
+
+# ── Tray middle-click: cycle unread chats ────────────────────────────────
+from stanza_im.ui.roster_style import UserItem
+
+
+def _unread_cycle_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    roster = mw._roster
+    roster.add_user(UserItem(jid="b@host", name="b", group="g"))
+    roster.add_user(UserItem(jid="a@host", name="a", group="g",
+                             unread_count=2))
+    roster.add_user(UserItem(jid="d@host", name="d", group="g",
+                             unread_count=1))
+
+    opened = []
+    mds = []
+    mw._osd_click = lambda jid, nick="": opened.append(jid)
+    client.mds_mark_displayed = lambda jid: mds.append(jid)
+
+    mw._on_tray_cycle_unread()
+    first = opened[0]
+    a_cleared = next(u for u in roster._users
+                     if u.jid == "a@host").unread_count == 0
+
+    opened.clear()
+    mw._on_tray_cycle_unread()
+    second = opened[0] if opened else None
+    d_cleared = next(u for u in roster._users
+                     if u.jid == "d@host").unread_count == 0
+
+    # all unread cleared -> no chat opened, mds not called
+    opened.clear()
+    mw._on_tray_cycle_unread()
+    idle_silent = not opened
+
+    mw.close()
+    return first, a_cleared, second, d_cleared, mds, idle_silent
+
+
+(_uo_first, _uo_cleared, _uo_second, _uo_d_cleared,
+ _uo_mds, _uo_idle) = _unread_cycle_result()
+check("tray middle-click opens the topmost unread contact",
+      _uo_first == "a@host")
+check("tray middle-click clears the first contact's unread", _uo_cleared)
+check("next middle-click advances to the next unread contact",
+      _uo_second == "d@host")
+check("next middle-click clears that contact too", _uo_d_cleared)
+check("tray middle-click marks the chat as displayed",
+      _uo_mds == ["a@host", "d@host"])
+check("tray middle-click is a no-op once nothing is unread", _uo_idle)
 
 
 def _muji_no_call_window_result():

@@ -714,6 +714,10 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   PNGs via `build_app_icon()`, multi-size 16/22/32/48)
 - Context menu: Show/Hide, Quit
 - Click: toggle main window visibility
+- Middle-click: `cycle_unread_requested` → MainWindow opens the topmost roster
+  contact with unread messages and marks it read, so each subsequent
+  middle-click advances to the next unread contact until none remain
+  (`MainWindow._on_tray_cycle_unread`)
 - Blinking: alternates between icon and blank every 500ms when unread messages exist
 - Notifications: `showMessage()` for connection status, errors
 

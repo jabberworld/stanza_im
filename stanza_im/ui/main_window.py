@@ -227,6 +227,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tray.quit_requested.connect(self._quit)
         self._tray.settings_requested.connect(self._on_preferences)
         self._tray.status_requested.connect(self._on_tray_status)
+        self._tray.cycle_unread_requested.connect(self._on_tray_cycle_unread)
         self._set_tray_status_icon(self._config.last_status)
         self._tray.show()
 
@@ -3457,6 +3458,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_tray_status(self, show: str):
         self._apply_status(show)
+
+    def _on_tray_cycle_unread(self):
+        """Middle-click on the tray: open the next chat with unread mail.
+
+        Opens the topmost roster contact that still has unread messages and
+        marks it read, so each subsequent middle click advances to the next
+        one until nothing is left.
+        """
+        unread = [user.jid for user in self._roster._users
+                  if getattr(user, "unread_count", 0) > 0]
+        if not unread:
+            return
+        target = unread[0]
+        self._osd_click(target)
+        self._reset_unread(target)
+        if self._client:
+            self._client.mds_mark_displayed(target)
 
     def _on_status_change(self, index: int):
         self._apply_status(self._status_combo.currentData() or "")

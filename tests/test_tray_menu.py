@@ -82,8 +82,10 @@ check("status actions carry the same icons as the roster",
 # ── Signals ────────────────────────────────────────────────────────
 received_status = []
 received_settings = []
+received_cycle = []
 tray.status_requested.connect(received_status.append)
 tray.settings_requested.connect(lambda: received_settings.append(True))
+tray.cycle_unread_requested.connect(lambda: received_cycle.append(True))
 
 status_action("away").trigger()
 check("status action emits status_requested('away')",
@@ -107,6 +109,29 @@ menu.aboutToShow.emit()
 check("checkmark follows set_current_status",
       status_action("online").isChecked()
       and not status_action("dnd").isChecked())
+
+
+# ── Middle-click (unread cycling) ──────────────────────────────────
+received_cycle.clear()
+tray._on_activated(
+    QtWidgets.QSystemTrayIcon.ActivationReason.Trigger)
+check("Trigger does not emit cycle_unread_requested",
+      received_cycle == [])
+
+received_cycle.clear()
+received_settings.clear()
+tray._on_activated(
+    QtWidgets.QSystemTrayIcon.ActivationReason.MiddleClick)
+check("MiddleClick emits cycle_unread_requested",
+      received_cycle == [True])
+
+cycle_bare = []
+tray_bare2 = TrayIcon()
+tray_bare2.cycle_unread_requested.connect(lambda: cycle_bare.append(True))
+tray_bare2._on_activated(
+    QtWidgets.QSystemTrayIcon.ActivationReason.MiddleClick)
+check("MiddleClick works on bare tray (no icons)",
+      cycle_bare == [True])
 
 
 # ── No icons passed: menu still builds ─────────────────────────────

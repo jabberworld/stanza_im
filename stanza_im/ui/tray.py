@@ -57,6 +57,7 @@ class TrayIcon(QtCore.QObject):
     disconnect_requested = QtCore.pyqtSignal()
     settings_requested = QtCore.pyqtSignal()
     status_requested = QtCore.pyqtSignal(str)
+    cycle_unread_requested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None, icons=None):
         super().__init__(parent)
@@ -141,6 +142,8 @@ class TrayIcon(QtCore.QObject):
     def _on_activated(self, reason):
         if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger:
             self.show_requested.emit()
+        elif reason == QtWidgets.QSystemTrayIcon.ActivationReason.MiddleClick:
+            self.cycle_unread_requested.emit()
 
     def _on_show(self):
         self.show_requested.emit()
