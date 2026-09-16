@@ -160,10 +160,23 @@ def tokenize_urls(text: str, media_render=None, geo_render=None
         anchors.append(markup or f'<a href="{uri}">{uri}</a>')
         return token
 
+    def _xmpp_repl(match):
+        # XEP-0147 xmpp: URIs become plain anchors (never media embeds).
+        url = match.group(0)
+        trimmed = _URL_TRAILING_PUNCT.sub("", url)
+        if not trimmed:
+            return url
+        token = f"\x00{len(anchors)}\x00"
+        anchors.append(f'<a href="{trimmed}">{trimmed}</a>')
+        return token + url[len(trimmed):]
+
     from stanza_im.include.geo import _GEO_IN_TEXT_RE
     tmp = _URL_RE.sub(_repl, text)
     if geo_render is not None or _GEO_IN_TEXT_RE.search(tmp):
         tmp = _GEO_IN_TEXT_RE.sub(_geo_repl, tmp)
+    from stanza_im.include.xmpp_uri import _XMPP_URI_RE
+    if _XMPP_URI_RE.search(tmp):
+        tmp = _XMPP_URI_RE.sub(_xmpp_repl, tmp)
     return tmp, anchors
 
 

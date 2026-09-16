@@ -205,6 +205,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_geo_view_requested)
         self._chat_window.geo_message_corrected.connect(
             self._on_geo_message_corrected)
+        self._chat_window.xmpp_link_clicked.connect(self._on_xmpp_uri)
         self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
@@ -436,7 +437,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── Menu actions ─────────────────────────────────────────────
 
-    def _on_add_contact(self):
+    def _on_add_contact(self, jid: str = ""):
         if not self._client:
             return
         from stanza_im.ui.add_contact_dialog import AddContactDialog
@@ -445,7 +446,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                                tr("roster_group_transports"),
                                                tr("roster_group_ungrouped"))},
                         key=str.casefold)
-        dlg = AddContactDialog(groups, self._client, self)
+        dlg = AddContactDialog(groups, self._client, self, jid=jid)
         if not dlg.exec():
             return
         data = dlg.collect()
@@ -1352,6 +1353,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("csi_enabled", self._on_csi_enabled)
         c.on("subscribed", self._on_subscribed)
         c.on("vcard_received", self._on_vcard_received)
+        c.on("vcard_error", self._on_vcard_error)
         c.on("typing", self._on_typing)
         c.on("chatstate_received", self._on_chatstate_received)
         c.on("receipt_delivered", self._on_receipt_delivered)
@@ -2033,6 +2035,90 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, APP_NAME,
                                           tr("vcard_save_error"))
 
+    # ── XMPP URI handling (XEP-0147) ───────────────────────────────
+
+    def _on_xmpp_uri(self, uri: str):
+        """Act on a clicked ``xmpp:`` URI (XEP-0147)."""
+        if not self._client:
+            return
+        from stanza_im.include.xmpp_uri import parse_xmpp_uri
+        parsed = parse_xmpp_uri(uri)
+        if not parsed:
+            return
+        jid = parsed["jid"]
+        action = (parsed.get("action") or "").lower()
+        params = parsed.get("params", {})
+
+        if action in ("", "message"):
+            self._on_contact_open(jid)
+            body = params.get("body") or params.get("thread")
+            if body:
+                chat = self._chat_window.get_chat(jid)
+                if chat:
+                    chat.set_input_text(body)
+            return
+
+        if action == "join":
+            if jid in self._muc_self_nicks:
+                self._on_contact_open(jid)
+                return
+            self._open_join_conference_dialog_for_jid(jid)
+            return
+
+        if action in ("roster", "subscribe"):
+            self._on_add_contact(jid=jid)
+            return
+
+        QtWidgets.QMessageBox.warning(
+            self, APP_NAME,
+            tr("xmpp_uri_unhandled", action=action))
+
+    def _open_join_conference_dialog_for_jid(self, jid: str):
+        from stanza_im.ui.conference_dialog import JoinConferenceDialog
+        room, sep, server = jid.partition("@")
+        if not sep:
+            room, server = "", jid
+        servers = list(self._config.connection.conference_servers or [])
+        if server and server not in servers:
+            servers.insert(0, server)
+        dlg = JoinConferenceDialog(self._client, servers,
+                                   list(self._bookmarks.values()), self,
+                                   room=room)
+        dlg.vcard_requested.connect(self._show_profile)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            data = dlg.collect()
+            if data["server"] and data["server"] not in (
+                    self._config.connection.conference_servers or []):
+                stored = list(self._config.connection.conference_servers or [])
+                stored.append(data["server"])
+                self._config.connection.conference_servers = stored
+                self._config.save()
+            self._join_muc(data["room"], data["nick"], data["password"],
+                           save_bookmark=data["save"],
+                           bookmark_name=data["name"],
+                           autojoin=data["autojoin"],
+                           server=data["server"])
+        dlg.finished.connect(finished)
+        dlg.open()
+
+    # ── vCard error ────────────────────────────────────────────────
+
+    def _on_vcard_error(self, jid: str):
+        if jid not in self._pending_profile:
+            return
+        self._pending_profile.discard(jid)
+        bare = jid.split("/", 1)[0]
+        is_conf = (bare in self._conference_roster
+                   or jid in self._muc_self_nicks
+                   or bare in self._muc_self_nicks)
+        QtWidgets.QMessageBox.information(
+            self, tr("vcard_info_title"),
+            tr("vcard_room_unavailable" if is_conf
+               else "vcard_unavailable", jid=jid))
+
     def _recount_groups(self):
         """Recount online/total per group after presence changes."""
         for group in self._roster._groups.values():
@@ -2250,6 +2336,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     tr("call_video"),
                     lambda checked=False: defer(
                         lambda: self._join_muji(jid, True)))
+            from stanza_im.include.xmpp_uri import make_xmpp_uri
+            menu.addAction(
+                self._menu_icon("edit.png"),
+                tr("conference_copy_join"),
+                lambda checked=False: defer(
+                    lambda: QtWidgets.QApplication.clipboard().setText(
+                        make_xmpp_uri(jid, "join"))))
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_leave_conference"),
                            lambda: defer(lambda: self._on_leave_conference(jid)))

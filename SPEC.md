@@ -1294,6 +1294,25 @@ class ContactInfo:       # jid, name, groups, show, status, avatar_path, resourc
 class GroupChatInfo:     # room, nick, subject, users
 ```
 
+### 14.12 XMPP URIs (XEP-0147)
+
+`xmpp:` URIs are handled end-to-end (`include/xmpp_uri.py`):
+- **Parse/build** — `parse_xmpp_uri`/`make_xmpp_uri` implement RFC 5122 /
+  XEP-0147 (`xmpp:<jid>[?<action>[;<key>=<value>…]]`), percent-encoding
+  preserved on round trips.
+- **In chat bodies** — `tokenize_urls` (`include/utils.py`, QWebEngine path)
+  and `escape_body_with_geo` (`include/geo.py`, QTextBrowser fallback) turn
+  `xmpp:` URIs into clickable `<a>` anchors; `ChatWidget.xmpp_link_clicked`
+  forwards them through `ChatWindow` to `MainWindow._on_xmpp_uri`.
+- **Actions** — bare JID / `?message` opens the chat (a `body`/`thread` param
+  is prefilled into the input), `?join` focuses the open room or prefills
+  `JoinConferenceDialog` with the room (and persists the server in
+  `connection.conference_servers` on accept), `?roster`/`?subscribe` open
+  `AddContactDialog` prefilled with the JID, and unrecognized actions warn.
+- **Copy to clipboard** — the vCard dialog ("Copy XMPP address") copies
+  `xmpp:<jid>`; the conference roster context menu ("Copy conference address")
+  copies `xmpp:<jid>?join`.
+
 ## 15. i18n System (`i18n/`)
 
 ### 15.1 Format

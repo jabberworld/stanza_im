@@ -42,6 +42,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("vcard_info_title"))
         self.setMinimumWidth(360)
+        self._jid = card.get("jid") or jid
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -91,9 +92,17 @@ class VCardInfoDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.StandardButton.Close)
         btn.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
             tr("dialog_ok"))
+        copy_btn = btn.addButton(
+            tr("vcard_copy_jid"),
+            QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
+        copy_btn.clicked.connect(self._copy_jid)
         btn.rejected.connect(self.reject)
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
+
+    def _copy_jid(self):
+        from stanza_im.include.xmpp_uri import make_xmpp_uri
+        QtWidgets.QApplication.clipboard().setText(make_xmpp_uri(self._jid))
 
     def update_status(self, values: dict):
         self._status_data.update({key: value for key, value in values.items()

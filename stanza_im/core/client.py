@@ -1902,6 +1902,7 @@ class JabberClient:
         except Exception:
             logger.debug("vCard for %s unavailable", jid)
             self._vcard_inflight.discard(jid)
+            self.emit("vcard_error", jid)
             return
         self._on_vcard(iq, jid)
         self._vcard_inflight.discard(jid)

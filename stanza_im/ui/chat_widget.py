@@ -200,6 +200,7 @@ class ChatWidget(QtWidgets.QWidget):
     message_edit_sent = QtCore.pyqtSignal(str, str, str)  # jid, body, edit_id
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
     link_clicked = QtCore.pyqtSignal(str)
+    xmpp_link_clicked = QtCore.pyqtSignal(str)      # XEP-0147 xmpp: URI
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since_ts
     bookmark_toggled = QtCore.pyqtSignal(str)              # MUC room
@@ -559,6 +560,9 @@ class ChatWidget(QtWidgets.QWidget):
             self.load_more_from_server()
             return
         low = url.lower()
+        if low.startswith("xmpp:"):
+            self.xmpp_link_clicked.emit(url)
+            return
         if low.startswith(("http://", "https://", "mailto:")):
             webbrowser.open(url)
             return
@@ -1874,3 +1878,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def focus_input(self):
         self._input.setFocus()
+
+    def set_input_text(self, text: str):
+        """Preload the input with *text* (e.g. an XEP-0147 ?message;body=)."""
+        self._input.setPlainText(text or "")
+        self.focus_input()

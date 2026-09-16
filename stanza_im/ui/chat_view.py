@@ -18,7 +18,7 @@ except ImportError:
 
 
 def _register_custom_url_schemes() -> None:
-    """Register ``stanza``/``mam`` as application-handled URL schemes.
+    """Register ``stanza``/``mam``/``xmpp`` as application-handled URL schemes.
 
     Must run before the first QWebEngineProfile is used. Knowing the scheme
     stops Chromium from attempting (and erroring on) a real navigation when
@@ -27,12 +27,12 @@ def _register_custom_url_schemes() -> None:
     """
     try:
         from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
-        for name in (b"stanza", b"mam"):
+        for name in (b"stanza", b"mam", b"xmpp"):
             scheme = QWebEngineUrlScheme(name)
             scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
             scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
             QWebEngineUrlScheme.registerScheme(scheme)
-        logger.info("Registered custom URL schemes stanza/mam")
+        logger.info("Registered custom URL schemes stanza/mam/xmpp")
     except Exception as exc:  # pragma: no cover - optional capability
         logger.warning("Could not register custom URL schemes: %s", exc)
 
@@ -342,7 +342,7 @@ if HAS_WEBENGINE:
             denying ``data:`` would wedge the page in a reload loop.
             """
             scheme = str(url.scheme()).lower()
-            if scheme in ("stanza", "mam", "http", "https", "mailto"):
+            if scheme in ("stanza", "mam", "xmpp", "http", "https", "mailto"):
                 self._schedule_content_probe()
                 self.link_clicked.emit(url.toString())
                 return False

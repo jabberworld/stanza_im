@@ -90,11 +90,12 @@ def extract_geo_uris(body: str) -> list[str]:
 
 
 def escape_body_with_geo(body: str) -> str:
-    """HTML-escape *body* and wrap its geo: URIs in clickable ``<a>`` links.
+    """HTML-escape *body* and wrap its geo: and xmpp: URIs in clickable links.
 
     Used by the QTextBrowser chat fallback (which does no skin rendering):
-    HTTP(S)/ftp URLs stay plain text, only ``geo:`` coordinates become
-    ``<a href="geo:...">`` anchors that the view forwards to the map window.
+    HTTP(S)/ftp URLs stay plain text, only ``geo:`` coordinates and XEP-0147
+    ``xmpp:`` URIs become ``<a href="...">`` anchors that the view forwards to
+    the map window / the XMPP-URI handler.
     """
     import html as _html
     if not body:
@@ -106,7 +107,18 @@ def escape_body_with_geo(body: str) -> str:
         uri = match.group(0)
         return f'<a href="{uri}">{uri}</a>'
 
-    return _GEO_IN_TEXT_RE.sub(_repl, escaped)
+    escaped = _GEO_IN_TEXT_RE.sub(_repl, escaped)
+
+    from stanza_im.include.xmpp_uri import _XMPP_URI_RE
+    from stanza_im.include.utils import _URL_TRAILING_PUNCT
+
+    def _uri_repl(match):
+        uri = _URL_TRAILING_PUNCT.sub("", match.group(0))
+        if not uri:
+            return match.group(0)
+        return f'<a href="{uri}">{uri}</a>' + match.group(0)[len(uri):]
+
+    return _XMPP_URI_RE.sub(_uri_repl, escaped)
 
 
 def clamp_zoom(zoom: float) -> float:

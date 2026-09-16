@@ -150,6 +150,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.message_edit_sent.connect(self._on_message_edit_sent)
         widget.typing_changed.connect(self.typing_changed)
+        widget.link_clicked.connect(self.link_clicked)
+        widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
@@ -200,6 +202,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_edit_sent.connect(
             self._on_groupchat_message_edit_sent)
         widget.typing_changed.connect(self.typing_changed)
+        widget.link_clicked.connect(self.link_clicked)
+        widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
@@ -453,6 +457,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave
     typing_changed = QtCore.pyqtSignal(str, bool)       # jid, is_typing
+    link_clicked = QtCore.pyqtSignal(str)               # unhandled chat link
+    xmpp_link_clicked = QtCore.pyqtSignal(str)          # XEP-0147 xmpp: URI
     clear_history_requested = QtCore.pyqtSignal(str)    # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since
     bookmark_toggled = QtCore.pyqtSignal(str)               # MUC room
