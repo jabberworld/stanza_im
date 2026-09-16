@@ -211,6 +211,7 @@ if HAS_WEBENGINE:
             self._last_edit_ref = ""
             self._last_reply_ref = ""
             self._last_mention_ref = ""
+            self._last_xmpp_ref = ""
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
@@ -686,6 +687,18 @@ window.__stanzaMentionRef = '';
                         g.getAttribute('href') || '';
                     return;
                 }
+                // xmpp: URI — never navigate. Leaving the href alone would
+                // request a navigation that can replace the chat document and
+                // blank the conversation (the same defence as geo/reply/edit).
+                // Hand it to the scroll poll, which delivers it to Python as
+                // a link_clicked without touching the document.
+                var x = t && t.closest ? t.closest('a[href^="xmpp:"]') : null;
+                if (x) {
+                    e.preventDefault();
+                    window.__stanzaXmppRef =
+                        x.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -745,7 +758,8 @@ window.__stanzaMentionRef = '';
                 "[st, window.innerHeight || 0, document.body.scrollHeight || 0,"
                 "window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
                 " window.__stanzaMediaRef || '',"
-                " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '']",
+                " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '',"
+                " window.__stanzaXmppRef || '']",
                 self._on_scroll_position,
             )
 
@@ -776,6 +790,12 @@ window.__stanzaMentionRef = '';
         def _clear_geo_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaGeoRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_xmpp_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaXmppRef = '';")
             except RuntimeError:
                 pass
 
@@ -828,6 +848,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_geo_ref = ""
+            if len(value) > 8 and isinstance(value[8], str) and value[8]:
+                self._clear_xmpp_request()
+                requested = value[8]
+                if requested != getattr(self, "_last_xmpp_ref", ""):
+                    self._last_xmpp_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_xmpp_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
