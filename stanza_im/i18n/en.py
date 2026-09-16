@@ -380,6 +380,7 @@ STRINGS = {
     "prefs_stream_management": "Stream management (XEP-0198)",
     "prefs_csi": "Client state indication (XEP-0352)",
     "prefs_csi_keep_active": "Stay active while typing notifications are shown (keeps OSD typing working)",
+    "prefs_csi_keep_active_tip": "When the window is inactive and Client State Indication (XEP-0352) is on, the server withholds chat states (typing), so typing OSDs do not arrive. Enable this to keep the client active so they still do.",
     "prefs_pep_sweep": "PEP activity poll interval",
     "prefs_pep_sweep_off": "Off",
     "prefs_pep_sweep_30": "30 seconds",

@@ -21,12 +21,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtGui, QtWidgets
 from stanza_im.core.storage import Config
 from stanza_im.core.client import (JabberClient, tls_flags, order_tls_first,
                                     filter_plus_mechs)
 from stanza_im.i18n import load as load_i18n
 from stanza_im.i18n import tr
+from stanza_im.include.constants import ACTIONS_DIR_16
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.preferences import PreferencesDialog
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
@@ -336,6 +337,21 @@ check("pep sweep is a selector, not a spin",
 check("pep sweep options are 0/30/60/120/300 s",
       [_pep.itemData(i) for i in range(_pep.count())]
       == [0, 30, 60, 120, 300])
+
+# ── info icon on the information affordances ──────────────────────
+check("info.svg exists and loads",
+      not QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.svg")).isNull())
+check("PreferencesDialog._info_icon is not null",
+      not PreferencesDialog._info_icon().isNull())
+check("certificate button uses the info icon",
+      not dlg._cert_btn.icon().isNull())
+check("connection info label uses the info icon",
+      not dlg._conn_info.pixmap().isNull())
+check("STUN/TURN info label uses the info icon",
+      not dlg._stun_info.pixmap().isNull())
+check("CSI keep-active option has an info tooltip",
+      hasattr(dlg, "_csi_keep_info")
+      and bool(dlg._csi_keep_info.toolTip()))
 
 controls["file_proxy_mode"].setCurrentIndex(
     controls["file_proxy_mode"].findData("manual"))

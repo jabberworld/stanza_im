@@ -426,6 +426,15 @@ class PreferencesDialog(QtWidgets.QDialog):
         return QtGui.QIcon()
 
     @staticmethod
+    def _info_icon() -> QtGui.QIcon:
+        """Blue "i" glyph for the information affordances/tooltips."""
+        for ext in ("svg", "png"):
+            icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, f"info.{ext}"))
+            if not icon.isNull():
+                return icon
+        return QtGui.QIcon()
+
+    @staticmethod
     def _change_password_icon() -> QtGui.QIcon:
         """Key glyph for the icon-only "Change password" button."""
         icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "change-password.svg"))
@@ -585,8 +594,14 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(self._check(
             "stream_management", tr("prefs_stream_management")))
         advanced_form.addRow(self._check("csi", tr("prefs_csi")))
-        advanced_form.addRow(self._check(
-            "csi_keep_active_for_typing_osd", tr("prefs_csi_keep_active")))
+        csi_keep = self._check(
+            "csi_keep_active_for_typing_osd", tr("prefs_csi_keep_active"))
+        self._csi_keep_info = QtWidgets.QLabel()
+        csi_icon = self._info_icon()
+        if not csi_icon.isNull():
+            self._csi_keep_info.setPixmap(csi_icon.pixmap(16, 16))
+        self._csi_keep_info.setToolTip(tr("prefs_csi_keep_active_tip"))
+        advanced_form.addRow(self._row(csi_keep, self._csi_keep_info))
         pep_interval = self._combo("pep_sweep_interval", [
             ("prefs_pep_sweep_off", 0),
             ("prefs_pep_sweep_30", 30),
@@ -614,7 +629,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(tr("prefs_connection_mode"), tls_mode)
 
         self._conn_info = QtWidgets.QLabel()
-        info_icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.png"))
+        info_icon = self._info_icon()
         if not info_icon.isNull():
             self._conn_info.setPixmap(info_icon.pixmap(16, 16))
         self._conn_info.setToolTip(tr("conn_info_not_connected"))
@@ -702,7 +717,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_stun_manual", "manual"),
         ])
         self._stun_info = QtWidgets.QLabel()
-        info_icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.png"))
+        info_icon = self._info_icon()
         if not info_icon.isNull():
             self._stun_info.setPixmap(info_icon.pixmap(16, 16))
         self._stun_info.setToolTip(tr("prefs_stun_tip_empty"))

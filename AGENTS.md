@@ -776,7 +776,10 @@ text is kept. Returning activity (`eventFilter`) resumes
   days left/expired, serial, DNS SANs, SHA-256 fingerprint of the DER,
   `verified`). The Connection page's separate info icon (row «Сертификат»)
   opens `ui/certificate_dialog.CertificateDialog` non-modally with the same
-  `certificate_lines()`; it is disabled when no certificate is available.
+  `certificate_lines()`; it is disabled when no certificate is available. These
+  information affordances use the glyph
+  `resources/images/16x16/actions/info.svg` (a blue «i» circle) via
+  `PreferencesDialog._info_icon()`.
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
 
@@ -800,7 +803,10 @@ text is kept. Returning activity (`eventFilter`) resumes
   off, Preferences → Connection → Advanced) keeps the client active while
   `notifications.osd_enabled` **and** `osd_typing` are on
   (`MainWindow._keep_csi_active_for_typing_osd`), so typing OSDs still arrive
-  with the window in the background.
+  with the window in the background. The option is followed by an info glyph
+  (`resources/images/16x16/actions/info.svg`, a blue «i» circle) whose tooltip
+  explains this server-side buffering; the same glyph is used for the
+  encryption/certificate/STUN information affordances.
 
 ### 10. Service discovery — file proxy & STUN/TURN (`core/discovery.py`)
 

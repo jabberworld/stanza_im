@@ -53,7 +53,7 @@ _ACTION_SPECS = (
     ("service_search", "search.png"),
     ("service_add_roster", "add-user.png"),
     ("service_commands", "exec.png"),
-    ("service_version", "info.png"),
+    ("service_version", "info.svg"),
     ("service_vcard", "v-card.png"),
 )
 _ACTION_TIPS = {

@@ -1015,7 +1015,10 @@ See `XEPs.md` for the full supported-extensions matrix.
   `<active/>` before disabling. Servers hold non-urgent chat states while the
   client is inactive, so `connection.csi_keep_active_for_typing_osd` (default
   off) forces active while `notifications.osd_typing` and `osd_enabled` are on
-  (`MainWindow._keep_csi_active_for_typing_osd`).
+  (`MainWindow._keep_csi_active_for_typing_osd`). The option carries an info
+  glyph (`info.svg`, blue «i»; `PreferencesDialog._info_icon`) whose tooltip
+  explains the server-side chat-state buffering; the same glyph is used for the
+  connection/certificate/STUN information affordances.
 
 ### 14.8 Service Discovery — File Proxy & STUN/TURN (`core/discovery.py`)
 
