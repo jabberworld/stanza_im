@@ -259,6 +259,11 @@ previously stored status text is kept. Returning activity resumes
 `status.last_status` with an empty message, so the auto text is cleared and
 never sticks. Manual status changes reset the auto-applied state.
 
+The auto-status field in Preferences → Status is a vertically fixed
+`QPlainTextEdit` (max 70 px): it must not be vertically expanding, or the
+page's `QFormLayout` (`ExpandingFieldsGrow`) spreads every row evenly over the
+dialog height and the section looks gapped.
+
 ## 6. Login Form (`ui/login_widget.py`)
 
 Widgets:

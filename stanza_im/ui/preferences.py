@@ -1114,6 +1114,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         link_status_minutes(away_spin, xa_spin)
         status_message = QtWidgets.QPlainTextEdit()
         status_message.setMaximumHeight(70)
+        status_message.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed)
         status_message.setPlaceholderText(tr("prefs_auto_status_message_placeholder"))
         self._controls["auto_status_message"] = status_message
         form.addRow(tr("prefs_auto_status_message"), status_message)

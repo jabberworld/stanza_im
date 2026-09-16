@@ -77,5 +77,43 @@ check("standalone relink fixes equal pair",
       d2._controls["xa_minutes"].value()
       == d2._controls["away_minutes"].value() + 1)
 
+
+# 8. the auto-status field must not stretch the whole form ----------------
+from stanza_im.i18n import tr as _tr
+
+
+def _prefs_status_index(dialog):
+    for i in range(dialog._sections.count()):
+        if dialog._sections.item(i).text() == _tr("prefs_status"):
+            return i
+    return None
+
+
+d = PreferencesDialog(Config(), ChatThemeFactory())
+te = d._controls["auto_status_message"]
+check("auto-status field is vertically fixed (no form stretching)",
+      te.sizePolicy().verticalPolicy()
+      == QtWidgets.QSizePolicy.Policy.Fixed
+      and te.maximumHeight() == 70)
+
+# behavioral: rows stay tightly packed even in a tall window
+idx = _prefs_status_index(d)
+if idx is not None:
+    d._sections.setCurrentRow(idx)
+d.resize(600, 900)
+d.show()
+app.processEvents()
+form = d._stack.currentWidget().layout()
+pos = []
+for i in range(form.rowCount()):
+    item = form.itemAt(i, QtWidgets.QFormLayout.ItemRole.FieldRole)
+    wid = item.widget() if item else None
+    if wid is not None:
+        pos.append(wid.geometry().y())
+d.close()
+gaps_ok = (len(pos) == 5 and pos[-1] - pos[0] < 200)
+check("status rows stay packed in a tall window (no large gaps)", gaps_ok)
+
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
