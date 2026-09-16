@@ -1261,13 +1261,23 @@ client.leave_muji(room)
   by `MainWindow._apply_muji_support` on every MUC-tab open — `_join_muc`,
   `_on_muc_joined` for auto-joined rooms and `_on_contact_open`); it
   is a no-op on 1:1 tabs. While a conference is live the MUC call button
-  doubles as its indicator: `MainWindow._sync_muji_indicator(room)` (driven by
-  `room in client.muji.conferences`, called from `_apply_muji_support`,
-  `_on_muji_updated` and `_on_muji_left`) forwards to
-  `ChatWindow.set_muji_active(room, active)` → `ChatWidget.set_muji_active`,
-  which swaps the idle `call` icon/tooltip (`muji_button`) for the
-  `call-accept` glyph and the `muji_active` tooltip, restores the idle look
-  when the conference ends, and is a no-op on 1:1 tabs. All call/Muji code
+  doubles as its indicator: `MainWindow._sync_muji_indicator(room)` keeps it
+  lit while anyone in the room (ourselves or other participants) has an
+  active conference — `MujiManager.leave()` keeps the room record (joined=False)
+  as long as peers continue, and drops it (emitting `muji_ended`) when the last
+  participant leaves — so the indicator survives our own departure and goes
+  dark only when nobody is left. It is called from `_apply_muji_support`,
+  `_on_muji_updated` and `_on_muji_left` and forwards to
+  `ChatWindow.set_muji_active(room, active, video)` →
+  `ChatWidget.set_muji_active`, which swaps the idle `call` icon/tooltip
+  (`muji_button`) for the `call-accept` glyph and an audio/video-aware
+  tooltip (`muji_active_audio`/`muji_active_video` per the conference
+  contents) and restores the idle look otherwise; it is a no-op on 1:1 tabs.
+  The Audio/Video menu actions of the call button carry the `mic.svg` and
+  `camera.svg` icons. The MUC chat shows conference lifecycle status lines
+  (gated by `chat.muc_show_status`): `muji_started_audio`/`muji_started_video`
+  on `_on_muji_joined` and `muji_ended` on the `muji_ended` event
+  (`_on_muji_ended`). All call/Muji code
   logs via `stanza_im.call*` with `CALL[…]` / `MUJI[…]` markers.
 
 ### 14.11 Data Classes

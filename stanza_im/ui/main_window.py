@@ -680,9 +680,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_muji_indicator(room)
 
     def _sync_muji_indicator(self, room: str) -> None:
-        """Update the MUC tab's call button to reflect an active conference."""
+        """Update the MUC tab's call button to reflect a live conference.
+
+        The button stays lit while anyone in the room (ourselves or other
+        participants) has an active conference; it goes dark when the last
+        participant leaves.
+        """
         confs = getattr(getattr(self._client, "muji", None), "conferences", {})
-        self._chat_window.set_muji_active(room, room in confs)
+        conf = confs.get(room)
+        active = False
+        video = False
+        if conf is not None:
+            self_nick = self._muc_self_nicks.get(room, "")
+            active = bool(conf.joined) or any(
+                nick != self_nick for nick in conf.participants)
+            video = self._muji_has_video(room)
+        self._chat_window.set_muji_active(room, active, video)
 
     def _join_muc(self, room: str, nick: str, password: str = "",
                    save_bookmark: bool = False, bookmark_name: str = "",
@@ -1359,6 +1372,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("call_failed", self._on_call_failed)
         c.on("muji_joined", self._on_muji_joined)
         c.on("muji_updated", self._on_muji_updated)
+        c.on("muji_ended", self._on_muji_ended)
         c.on("muji_session", self._on_muji_session)
         c.on("muji_left", self._on_muji_left)
         c.on("muji_invite", self._on_muji_invite)
@@ -1828,6 +1842,21 @@ class MainWindow(QtWidgets.QMainWindow):
             window.show()
             self._muji_windows[room] = window
         self._on_muji_updated(room)
+        if self._config.chat.muc_show_status:
+            chat = self._chat_window.get_chat(room)
+            if chat is not None:
+                from stanza_im.include.utils import format_time
+                key = ("muji_started_video" if self._muji_has_video(room)
+                       else "muji_started_audio")
+                chat.add_status(tr(key), format_time())
+
+    def _on_muji_ended(self, room: str) -> None:
+        """The last conference participant left — the room conference ended."""
+        if self._config.chat.muc_show_status:
+            chat = self._chat_window.get_chat(room)
+            if chat is not None:
+                from stanza_im.include.utils import format_time
+                chat.add_status(tr("muji_ended"), format_time())
 
     def _on_muji_updated(self, room: str) -> None:
         window = self._muji_windows.get(room)
@@ -1870,6 +1899,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if not self._client:
             return
+        conf = self._client.muji.conferences.get(room)
+        joined = bool(conf and conf.joined)
         want = self._muji_preview_sid(room)
         current = self._muji_preview_sids.get(room, "")
         if want:
@@ -1884,7 +1915,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if current:
             self._client.set_call_local_preview(current, False)
             self._muji_preview_sids[room] = ""
-        if self._muji_has_video(room):
+        if joined and self._muji_has_video(room):
             self._client.start_muji_preview(room)
         else:
             self._client.stop_muji_preview(room)

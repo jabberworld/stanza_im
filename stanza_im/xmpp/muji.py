@@ -138,6 +138,9 @@ class MujiManager:
             except Exception:
                 logger.debug("MUJI end_muji_peer failed", exc_info=True)
         self.client.emit("muji_updated", room)
+        if not conf.joined and not conf.participants:
+            self.conferences.pop(room, None)
+            self.client.emit("muji_ended", room)
         return True
 
     def forget_session(self, room: str, peer_full_jid: str) -> None:
@@ -252,7 +255,15 @@ class MujiManager:
             return
         logger.info("MUJI leaving %s", room)
         self._send_presence(room, conf.self_nick, clearing=True)
-        self.conferences.pop(room, None)
+        # Keep the room record while other participants keep their conference
+        # alive, so the MUC call indicator stays lit until the last one leaves.
+        conf.joined = False
+        conf.contents = {}
+        if conf.self_nick:
+            conf.participants.pop(conf.self_nick, None)
+        if not conf.participants:
+            self.conferences.pop(room, None)
+            self.client.emit("muji_ended", room)
         self.client.rtp_calls.end_muji(room)
         self.client.emit("muji_left", room)
 

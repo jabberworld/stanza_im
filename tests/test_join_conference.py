@@ -69,7 +69,7 @@ class _FakeChatWindow:
     def set_muji_support(self, room, enabled):
         pass
 
-    def set_muji_active(self, room, active):
+    def set_muji_active(self, room, active, video=False):
         pass
 
 

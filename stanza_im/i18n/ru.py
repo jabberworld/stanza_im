@@ -799,7 +799,11 @@ STRINGS = {
     'prefs_device_test_unavailable': 'Предпросмотр камеры недоступен.',
     # Muji (XEP-0272)
     'muji_button': 'Конференц-звонок',
-    'muji_active': 'Идёт конференция',
+    'muji_active_audio': 'Идёт аудиоконференция',
+    'muji_active_video': 'Идёт видеоконференция',
+    'muji_started_audio': 'Начата аудиоконференция',
+    'muji_started_video': 'Начата видеоконференция',
+    'muji_ended': 'Конференция завершена',
     'muji_window_title': 'Конференция {room}',
     'muji_participants': 'Участников: {count}',
     'muji_leave': 'Покинуть конференцию',

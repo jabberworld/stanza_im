@@ -440,6 +440,8 @@ class ChatWidget(QtWidgets.QWidget):
         call_menu = QtWidgets.QMenu(self)
         self._call_audio_action = call_menu.addAction(tr("call_audio"))
         self._call_video_action = call_menu.addAction(tr("call_video"))
+        self._call_audio_action.setIcon(self._chat_icon("mic.svg"))
+        self._call_video_action.setIcon(self._chat_icon("camera.svg"))
         if self.is_muc:
             self._call_audio_action.triggered.connect(
                 lambda: self.muji_call_requested.emit(self.jid, False))
@@ -1621,13 +1623,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_audio_action.setEnabled(bool(enabled))
         self._call_video_action.setEnabled(bool(enabled))
 
-    def set_muji_active(self, active: bool) -> None:
+    def set_muji_active(self, active: bool, video: bool = False) -> None:
         """Reflect a live conference in the call button icon and tooltip."""
         if not self.is_muc:
             return
         if active:
             self._call_btn.setIcon(self._muji_active_icon())
-            self._call_btn.setToolTip(tr("muji_active"))
+            key = "muji_active_video" if video else "muji_active_audio"
+            self._call_btn.setToolTip(tr(key))
         else:
             self._call_btn.setIcon(self._call_icon_idle)
             self._call_btn.setToolTip(self._call_tip_idle)

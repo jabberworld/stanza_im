@@ -298,11 +298,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         if widget is not None and widget.is_muc:
             widget.set_muji_support(enabled)
 
-    def set_muji_active(self, room: str, active: bool) -> None:
+    def set_muji_active(self, room: str, active: bool,
+                        video: bool = False) -> None:
         """Reflect a live conference in the MUC tab's call button."""
         widget = self._tabs.get(room)
         if widget is not None and widget.is_muc:
-            widget.set_muji_active(active)
+            widget.set_muji_active(active, video)
 
     def set_chat_options(self, options):
         self._chat_options = dict(options)

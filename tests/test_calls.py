@@ -558,6 +558,12 @@ check("muc muji menu disabled again", not cmuc._call_btn.isEnabled())
 # set_muji_support is a no-op on 1:1 widgets.
 cw.set_muji_support(True)
 check("muji support ignored on 1:1 widget", not cw._call_btn.isEnabled())
+# The audio/video menu actions carry mic/camera icons (both call modes).
+check("call menu actions carry mic and camera icons",
+      not cmuc._call_audio_action.icon().isNull()
+      and not cmuc._call_video_action.icon().isNull()
+      and not cw._call_audio_action.icon().isNull()
+      and not cw._call_video_action.icon().isNull())
 
 from stanza_im.ui.chat_window import ChatWindow
 
@@ -594,8 +600,10 @@ def _indicator_result():
     idle_tip = w._call_btn.toolTip()
     idle_icon = QtGui.QIcon(w._call_btn.icon())
     w.set_muji_active(True)
-    active_tip = w._call_btn.toolTip()
-    active_icon = QtGui.QIcon(w._call_btn.icon())
+    audio_tip = w._call_btn.toolTip()
+    audio_icon = QtGui.QIcon(w._call_btn.icon())
+    w.set_muji_active(True, video=True)
+    video_tip = w._call_btn.toolTip()
     w.set_muji_active(False)
     restored_tip = w._call_btn.toolTip()
     restored_key = QtGui.QIcon(w._call_btn.icon()).cacheKey()
@@ -605,17 +613,20 @@ def _indicator_result():
     w11_tip = w11._call_btn.toolTip()
     w11.set_muji_active(True)
     w11_unchanged = w11._call_btn.toolTip() == w11_tip
-    return (active_tip, active_icon.cacheKey() != idle_icon.cacheKey(),
+    return (audio_tip, video_tip,
+            audio_icon.cacheKey() != idle_icon.cacheKey(),
             restored_tip == idle_tip, restored_key == idle_icon.cacheKey(),
             w11_unchanged)
 
 
-# i18n reachable only when the real tr() dicts are loaded; the widget marks
-# active with a distinct tooltip and a swapped icon (en strings per module load).
-_atip, _icon_swapped, _restored, _icon_restored, _w11 = _indicator_result()
+# en strings per module load.
+_a_tip, _v_tip, _icon_swapped, _restored, _icon_restored, _w11 = \
+    _indicator_result()
 check("set_muji_active(True) changes tooltip and icon", _icon_swapped)
-check("set_muji_active(True) shows the active tooltip",
-      _atip == "Conference call in progress")
+check("active audio conference tooltip",
+      _a_tip == "Audio conference in progress")
+check("active video conference tooltip",
+      _v_tip == "Video conference in progress")
 check("set_muji_active(False) restores the idle tooltip", _restored)
 check("set_muji_active(False) restores the idle icon", _icon_restored)
 check("set_muji_active is a no-op on 1:1 widgets", _w11)
@@ -1198,6 +1209,16 @@ class _FakeMujiRtpSessions:
     def end_muji_peer(self, room, peer_bare):
         self.ended_peers.append((room, peer_bare))
 
+    def end_muji(self, room):
+        pass
+
+
+class _FakeMujiXmpp:
+    def Presence(self):
+        pres = slixmpp.Presence()
+        pres.send = lambda: None
+        return pres
+
 
 class _FakeMujiConfClient:
     """Minimal client for the Muji window / MainWindow conference tests."""
@@ -1206,6 +1227,7 @@ class _FakeMujiConfClient:
         self.events = []
         self.rtp_calls = _FakeMujiRtpSessions()
         self.muji = muji.MujiManager(self)
+        self.xmpp = _FakeMujiXmpp()
         self.sent_audio = []
         self.sent_receive = []
         self.sent_video = []
@@ -1484,6 +1506,7 @@ def _muji_presence(room_nick, real_jid="", with_muji=True,
 def _muji_leave_result():
     c = _FakeMujiConfClient()
     conf = muji.MujiConference(room="room@conf")
+    conf.joined = True
     conf.participants["rain"] = muji.MujiParticipant(
         nick="rain", real_jid="rain@host/monocles res")
     c.muji.conferences["room@conf"] = conf
@@ -1590,6 +1613,7 @@ def _muji_standalone_preview_result():
     client = _FakeMujiConfClient()
     mw._client = client
     conf = muji.MujiConference(room="room@conf")
+    conf.joined = True
     conf.contents = {"voice": "audio", "video": "video"}
     client.muji.conferences["room@conf"] = conf
     # alone: no video session -> standalone capture
@@ -1654,32 +1678,170 @@ def _muji_indicator_sync_result():
     client = _FakeMujiConfClient()
     mw._client = client
     mw._chat_window.open_groupchat("room@conf", "me", "room")
+    mw._muc_self_nicks["room@conf"] = "me"
     # no conference yet -> idle look
     mw._sync_muji_indicator("room@conf")
     idle_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
-    client.muji.conferences["room@conf"] = muji.MujiConference(room="room@conf")
-    # a live conference -> active look
+    # a live audio conference (we joined) -> audio tooltip
+    conf = muji.MujiConference(room="room@conf")
+    conf.joined = True
+    conf.contents = {"voice": "audio"}
+    client.muji.conferences["room@conf"] = conf
     mw._sync_muji_indicator("room@conf")
-    active_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
+    audio_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
+    # video added -> video tooltip
+    conf.contents["video"] = "video"
+    mw._sync_muji_indicator("room@conf")
+    video_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
     active_icon = QtGui.QIcon(
         mw._chat_window.get_chat("room@conf")._call_btn.icon())
-    # dropping the conference restores the idle look
+    # we leave but a peer keeps a video conference -> still lit (the bug fix)
+    conf.joined = False
+    conf.contents = {}
+    conf.participants["rain"] = muji.MujiParticipant(
+        nick="rain", real_jid="r@host/x", contents={"video": "video"})
+    mw._sync_muji_indicator("room@conf")
+    peer_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
+    # the last participant leaves -> conference over, idle
     del client.muji.conferences["room@conf"]
     mw._sync_muji_indicator("room@conf")
     restored_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
     mw.close()
-    return (idle_tip, active_tip, active_icon.cacheKey(),
-            restored_tip)
+    return (idle_tip, audio_tip, video_tip, peer_tip, restored_tip,
+            active_icon.cacheKey())
 
 
-_ind_idle, _ind_active, _ind_active_key, _ind_restored = \
+_ind_idle, _ind_audio, _ind_video, _ind_peer, _ind_restored, _ind_key = \
     _muji_indicator_sync_result()
 check("_sync_muji_indicator leaves the button idle without a conference",
       _ind_idle == "Conference call")
-check("_sync_muji_indicator marks the button active for a live conference",
-      _ind_active == "Conference call in progress")
-check("_sync_muji_indicator restores the idle look after the conference ends",
+check("_sync_muji_indicator marks an audio conference active",
+      _ind_audio == "Audio conference in progress")
+check("_sync_muji_indicator marks a video conference active",
+      _ind_video == "Video conference in progress")
+check("a conference kept alive by peers stays lit after we leave (bug fix)",
+      _ind_peer == "Video conference in progress")
+check("_sync_muji_indicator restores the idle look when nobody is left",
       _ind_restored == "Conference call")
+
+
+def _muji_manager_leave_result():
+    # We leave while a peer continues -> the record stays (joined=False).
+    c = _FakeMujiConfClient()
+    conf = muji.MujiConference(room="room@conf")
+    conf.self_nick = "me"
+    conf.joined = True
+    conf.contents = {"voice": "audio", "video": "video"}
+    conf.participants["me"] = muji.MujiParticipant(nick="me")
+    conf.participants["rain"] = muji.MujiParticipant(
+        nick="rain", real_jid="rain@host/x")
+    c.muji.conferences["room@conf"] = conf
+    c.muji.leave("room@conf")
+    kept = c.muji.conferences.get("room@conf") is conf
+    joined_false = conf.joined is False
+    me_gone = "me" not in conf.participants
+    rain_stays = "rain" in conf.participants
+    no_ended = not any(e[0] == "muji_ended" for e in c.events)
+    left = ("muji_left", "room@conf") in c.events
+    # Alone: leaving drops the record and ends the conference.
+    c2 = _FakeMujiConfClient()
+    conf2 = muji.MujiConference(room="room@conf")
+    conf2.self_nick = "me"
+    conf2.joined = True
+    conf2.contents = {"voice": "audio"}
+    c2.muji.conferences["room@conf"] = conf2
+    c2.muji.leave("room@conf")
+    alone_dropped = "room@conf" not in c2.muji.conferences
+    alone_ended = any(e[0] == "muji_ended" for e in c2.events)
+    return (kept, joined_false, me_gone, rain_stays, no_ended, left,
+            alone_dropped, alone_ended)
+
+
+_mj_keep, _mj_joined, _mj_me_gone, _mj_rain, _mj_no_end, _mj_left, \
+    _mj_dropped, _mj_ended = _muji_manager_leave_result()
+check("leaving keeps the room record while a peer continues",
+      _mj_keep and _mj_joined)
+check("leaving drops our own nick but keeps the peer", _mj_me_gone and _mj_rain)
+check("leaving does not end the conference while a peer remains", _mj_no_end)
+check("leaving still emits muji_left", _mj_left)
+check("leaving alone drops the record and ends the conference",
+      _mj_dropped and _mj_ended)
+
+
+def _muji_last_participant_ended_result():
+    # We never joined (or left); the last peer leaving ends the conference.
+    c = _FakeMujiConfClient()
+    conf = muji.MujiConference(room="room@conf")
+    conf.participants["rain"] = muji.MujiParticipant(
+        nick="rain", real_jid="rain@host/x")
+    c.muji.conferences["room@conf"] = conf
+    c.muji.handle_presence(
+        _muji_presence("rain", "rain@host/x", with_muji=False))
+    dropped = "room@conf" not in c.muji.conferences
+    ended = any(e[0] == "muji_ended" for e in c.events)
+    updated = ("muji_updated", "room@conf") in c.events
+    ended_peers = c.rtp_calls.ended_peers == [("room@conf", "rain@host")]
+    return dropped, ended, updated, ended_peers
+
+
+_mp_dropped, _mp_ended, _mp_updated, _mp_peers = \
+    _muji_last_participant_ended_result()
+check("the last peer leaving drops the room record", _mp_dropped)
+check("the last peer leaving emits muji_ended", _mp_ended)
+check("the last peer leaving still updates + closes our session",
+      _mp_updated and _mp_peers)
+
+
+def _muji_left_keeps_indicator_result():
+    # End-to-end bug reproduction: we leave via the Muji window, the peer
+    # keeps a video conference, the MUC call button must stay lit and the
+    # chat reports the conference start and its end.
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    mw._chat_window.open_groupchat("room@conf", "me", "room")
+    mw._muc_self_nicks["room@conf"] = "me"
+    conf = muji.MujiConference(room="room@conf")
+    conf.self_nick = "me"
+    conf.joined = True
+    conf.contents = {"voice": "audio", "video": "video"}
+    conf.participants["me"] = muji.MujiParticipant(nick="me")
+    conf.participants["rain"] = muji.MujiParticipant(
+        nick="rain", real_jid="rain@host/x", contents={"video": "video"})
+    client.muji.conferences["room@conf"] = conf
+    mw._on_muji_joined("room@conf")
+    chat = mw._chat_window.get_chat("room@conf")
+    before = chat._call_btn.toolTip()
+    started = any("Video conference started" in s[0]
+                  for s in chat._status_lines)
+    # We leave; the peer keeps the conference alive.
+    client.muji.leave("room@conf")
+    mw._on_muji_left("room@conf")
+    after_left = chat._call_btn.toolTip()
+    # The last peer leaves -> the conference ends everywhere.
+    client.muji.handle_presence(
+        _muji_presence("rain", "rain@host/x", with_muji=False))
+    mw._on_muji_updated("room@conf")
+    mw._on_muji_ended("room@conf")
+    after_end = chat._call_btn.toolTip()
+    ended = any("Conference ended" in s[0] for s in chat._status_lines)
+    window_closed = "room@conf" not in mw._muji_windows
+    mw.close()
+    return (before, after_left, after_end, started, ended, window_closed)
+
+
+_mjo_before, _mjo_after_left, _mjo_after_end, _mjo_started, _mjo_ended, \
+    _mjo_window = _muji_left_keeps_indicator_result()
+check("the conference window keeps the button lit while we are in",
+      _mjo_before == "Video conference in progress")
+check("leaving with peers still in the call keeps the button lit (bug fix)",
+      _mjo_after_left == "Video conference in progress")
+check("the button goes dark once the last participant left",
+      _mjo_after_end == "Conference call")
+check("starting a conference writes the status line", _mjo_started)
+check("the conference end writes the status line", _mjo_ended)
+check("leaving closes the conference window", _mjo_window)
 
 
 def _muji_window_ui_result():

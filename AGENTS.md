@@ -572,11 +572,19 @@ that opens a MUC tab — manual join, server auto-join in `_on_muc_joined`, rost
 open in `_on_contact_open` — so an auto-joined room's button is never left
 disabled) and is a no-op on 1:1 tabs. While a conference is live the same
 button doubles as its indicator: `MainWindow._sync_muji_indicator(room)`
-(active iff `room in client.muji.conferences`, also called from
-`_on_muji_updated`/`_on_muji_left`) → `ChatWindow.set_muji_active` →
-`ChatWidget.set_muji_active`, which swaps the idle `call` icon + `muji_button`
-tooltip for the `call-accept` glyph + `muji_active` tooltip and restores the
-idle look when the conference ends. `ui/call_window.CallWindow` shows the active call and
+(lit while anyone in the room — ourselves or other participants — has an
+active conference, so it stays lit after we leave as long as the room's
+conference continues; also called from `_on_muji_updated`/`_on_muji_left`)
+→ `ChatWindow.set_muji_active(room, active, video)` → `ChatWidget.set_muji_active`,
+which swaps the idle `call` icon + `muji_button` tooltip for the `call-accept`
+glyph and an audio/video-aware tooltip (`muji_active_audio`/`muji_active_video`
+per the conference contents), and restores the idle look when the last
+participant leaves. The A/V menu actions carry `mic.svg`/`camera.svg` icons.
+The MUC chat reports the conference lifecycle as status lines (gated by `chat.muc_show_status`):
+`muji_started_audio`/`muji_started_video` when we start a conference
+(`_on_muji_joined`) and `muji_ended` when the last participant leaves
+(`MujiManager` drops the room record and emits `muji_ended` → `_on_muji_ended`).
+`ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
 over the roster); remote video frames are painted by `VideoView`, which draws a
