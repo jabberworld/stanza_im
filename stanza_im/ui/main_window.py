@@ -2263,32 +2263,56 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
                        lambda checked=False: defer(lambda: self._show_profile(jid)))
         if self._client:
-            send_menu = menu.addMenu(self._menu_icon("upload.png"),
+            send_menu = menu.addMenu(self._menu_icon("upload.svg"),
                                      tr("ctx_send_file"))
             send_menu.addAction(
+                self._menu_icon("send.png"),
                 tr("ft_p2p"),
                 lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "p2p")))
             send_menu.addAction(
+                self._menu_icon("send.png"),
                 tr("ft_p2p_ibb"),
                 lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "p2p-ibb")))
             send_menu.addAction(
+                self._menu_icon("upload.svg"),
                 tr("ft_http_upload"),
                 lambda checked=False: defer(lambda: self._pick_and_send_file(jid, "http")))
-            call_menu = menu.addMenu(self._menu_icon("phone.png"),
+            call_menu = menu.addMenu(self._menu_icon("call.svg"),
                                      tr("call_button"))
-            can_audio = self._client.supports_calls(jid)
-            can_video = self._client.supports_calls(jid, video=True)
-            audio_action = call_menu.addAction(tr("call_audio"))
-            video_action = call_menu.addAction(tr("call_video"))
+            if is_conf:
+                available = bool(getattr(getattr(self._client, "rtp_calls", None),
+                                         "available", False))
+                can_audio = can_video = available
+                audio_handler = lambda checked=False: defer(
+                    lambda: self._join_muji(jid, False))
+                video_handler = lambda checked=False: defer(
+                    lambda: self._join_muji(jid, True))
+            else:
+                can_audio = self._client.supports_calls(jid)
+                can_video = self._client.supports_calls(jid, video=True)
+                audio_handler = lambda checked=False: defer(
+                    lambda: self._on_call_requested(jid, False))
+                video_handler = lambda checked=False: defer(
+                    lambda: self._on_call_requested(jid, True))
+            audio_action = call_menu.addAction(
+                self._menu_icon("mic.svg"), tr("call_audio"))
+            video_action = call_menu.addAction(
+                self._menu_icon("camera.svg"), tr("call_video"))
             audio_action.setEnabled(can_audio)
             video_action.setEnabled(can_video)
             call_menu.setEnabled(can_audio or can_video)
-            audio_action.triggered.connect(
-                lambda checked=False: defer(lambda: self._on_call_requested(jid, False)))
-            video_action.triggered.connect(
-                lambda checked=False: defer(lambda: self._on_call_requested(jid, True)))
+            audio_action.triggered.connect(audio_handler)
+            video_action.triggered.connect(video_handler)
         menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
                        lambda checked=False: defer(lambda: self._on_history_contact(jid)))
+        if is_conf:
+            from stanza_im.include.xmpp_uri import make_xmpp_uri
+            menu.addAction(
+                self._menu_icon("edit.png"),
+                tr("conference_copy_join"),
+                lambda checked=False: defer(
+                    lambda: QtWidgets.QApplication.clipboard().setText(
+                        make_xmpp_uri(jid, "join"))))
         if not is_conf:
             menu.addSeparator()
             menu.addAction(self._menu_icon("edit.png"), tr("ctx_rename"),
@@ -2325,24 +2349,6 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addAction(self._menu_icon("process-stop.png"),
                        tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
         if is_conf:
-            if self._client:
-                muji_menu = menu.addMenu(self._menu_icon("phone.png"),
-                                         tr("muji_button"))
-                muji_menu.addAction(
-                    tr("call_audio"),
-                    lambda checked=False: defer(
-                        lambda: self._join_muji(jid, False)))
-                muji_menu.addAction(
-                    tr("call_video"),
-                    lambda checked=False: defer(
-                        lambda: self._join_muji(jid, True)))
-            from stanza_im.include.xmpp_uri import make_xmpp_uri
-            menu.addAction(
-                self._menu_icon("edit.png"),
-                tr("conference_copy_join"),
-                lambda checked=False: defer(
-                    lambda: QtWidgets.QApplication.clipboard().setText(
-                        make_xmpp_uri(jid, "join"))))
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_leave_conference"),
                            lambda: defer(lambda: self._on_leave_conference(jid)))

@@ -435,7 +435,8 @@ conference join dialog (prepopulating room+server and persisting the server),
 Unrecognized actions warn the user. The vCard dialog shows its JID with an
 icon-only copy button right beside the address (toolbar-style
 `QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",
-`make_xmpp_uri(jid)` → clipboard); the conference roster context menu
+`make_xmpp_uri(jid)` → clipboard); the conference roster context menu's
+«Скопировать адрес конференции» entry (directly below «История переписки»)
 copies `xmpp:<jid>?join`. Failed vCard fetches emit `vcard_error` on the event
 bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
@@ -581,9 +582,12 @@ elements (video wins; nested or not), and the session-initiate that follows a
 (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 + rtp:audio [+ rtp:video]`, fetched
 per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
 (XEP-0215 `urn:xmpp:extdisco:2` → the connection settings' STUN/TURN endpoint →
-SRV discovery). The call menu is a submenu in the roster contact context menu
-and an icon-only button in the chat toolbar (both enabled only for capable
-contacts). The toolbar button on a **MUC** tab instead starts a Muji
+SRV discovery). The «Звонок» call menu is a submenu in the roster contact
+context menu and an icon-only button in the chat toolbar (both enabled only for
+capable contacts). For a **conference** contact the roster «Звонок» submenu
+instead starts a Muji call (`_join_muji`, enabled only when
+`client.rtp_calls.available`), while the 1:1 Jingle call is offered for
+non-conference contacts. The toolbar button on a **MUC** tab instead starts a Muji
 conference call: `ChatWidget._call_btn`'s Audio/Video menu actions emit
 `muji_call_requested(room, video)` (never `call_requested`), which
 `ChatWindow.open_groupchat` forwards and `MainWindow._on_muji_call_requested`

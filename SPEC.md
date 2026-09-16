@@ -394,7 +394,11 @@ Context menu differs for conferences (items in `_conference_roster` /
 `_muc_self_nicks`): «Переименовать», «Группа» and
 «Повторить запрос авторизации» are hidden, and «Удалить контакт» becomes
 «Покинуть конференцию» (`ctx_leave_conference`) which leaves the MUC
-(`_on_muc_leave`) and closes its tab.
+(`_on_muc_leave`) and closes its tab. The conference menu also carries
+«Скопировать адрес конференции» (`conference_copy_join`) directly below
+«История переписки», and its «Звонок» submenu starts a Muji conference call
+(`_join_muji`) instead of the 1:1 Jingle call, enabled only when aiortc is
+available (`client.rtp_calls.available`).
 
 ### 7.4 Strategy Pattern
 
@@ -1256,7 +1260,8 @@ client.leave_muji(room)
   toolbar call button starts a Muji
   conference: `ChatWidget` emits `muji_call_requested(room, video)` (never
   `call_requested`) which `ChatWindow.open_groupchat` forwards and
-  `MainWindow._on_muji_call_requested` routes to `_join_muji`. The button is
+  `MainWindow._on_muji_call_requested` routes to `_join_muji` (a conference
+  contact's roster «Звонок» submenu calls `_join_muji` the same way). The button is
   enabled only when aiortc is available (`ChatWindow.set_muji_support`, applied
   by `MainWindow._apply_muji_support` on every MUC-tab open — `_join_muc`,
   `_on_muc_joined` for auto-joined rooms and `_on_contact_open`); it
