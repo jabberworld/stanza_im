@@ -170,6 +170,8 @@ and allows full visual control (avatars, status icons, unread badges, mood icons
 
 **Data model**: `GroupItem` and `UserItem` dataclasses. The widget maintains
 flat lists and sorted dicts. Hit-testing iterates items by accumulated Y offset.
+Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
+used by `MainWindow` for the conferences group) which always come last.
 
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.
@@ -484,7 +486,8 @@ drop subscriptions on session end) and unsubscribed on roster removal
 counts as a failure. As a fallback for servers that never forward PEP
 events, an optional periodic sweep polls online contacts' nodes every
 `connection.pep_sweep_interval` seconds (`0` = off, the default; Preferences →
-Connection → «Периодический опрос PEP») via the same `_maybe_refresh_pep`
+Connection → «Периодический опрос активности PEP» is a selector with
+Off/30 s/1 min/2 min/5 min) via the same `_maybe_refresh_pep`
 guards; the sweep is paused while the user is idle
 (`client.set_pep_sweep_paused`, driven by `MainWindow._sync_pep_sweep_pause`
 alongside the auto-status inactivity timer) and stopped on disconnect.
@@ -495,7 +498,9 @@ icon-only `QToolButton`s right of the status combo: a smiley with a menu
 ("Mood" + nested "Activity" groups/subs, icons from the packs, plus a "None"
 clear entry) that calls `client.publish_mood`/`publish_activity` and persists
 to `status.mood` / `status.activity` (republished on `session_started` via
-`MainWindow._republish_pep`), and an `edit.png` button opening
+`MainWindow._republish_pep`); the menu's actions are checkable and
+`_sync_pep_checks` (on `aboutToShow`) marks the currently active mood/activity,
+like the tray status menu. An `edit.png` button opens
 `ui/status_message_dialog.StatusMessageDialog` (multiline, preloaded from
 `status.message`) whose result is sent with presence (`MainWindow._send_presence`).
 Contacts' mood/activity/tune/location are shown in the roster tooltip
@@ -689,7 +694,8 @@ slider. Changing the chat font re-renders open tabs via
 `ChatWindow.rerender_messages`.
 
 **Colors** (`appearance.{roster_bg_color,roster_group_bg_color,chat_bg_color,
-muc_highlight_color, colored_muc_nicks}`, a «Цвет» page in Appearance
+muc_highlight_color,osd_bg_color,osd_font_color,osd_opacity,
+colored_muc_nicks}`, a «Цвет» page in Appearance
 preferences): roster colors are drawn by the QPainter pass — `RosterStyle.set_colors`
 (`bg_color()` fills each item area in `RosterWidget.paintEvent`, `group_bg_color()`
 stripes the group headers) and `MainWindow._apply_roster_colors` also paints the
@@ -698,7 +704,10 @@ override injected by `ChatThemeFactory.set_chat_bg_color` (`body {
 background-color: … !important; background-image: none !important }`, applied
 to both 1:1 and MUC factories; it overrides the skin's tiled image); the MUC
 mention highlight color feeds `ChatThemeFactory.set_highlight_color`. Color
-changes re-render open chats via `ChatWindow.rerender_messages`.
+changes re-render open chats via `ChatWindow.rerender_messages`. The OSD
+background/text color and opacity (0–100 %) feed `OsdManager.apply_colors` →
+`_OsdWindow.apply_style`, which rebuilds the OSD stylesheet (`rgba(r,g,b,a)`
+background, text color on all labels); live popups update in place.
 
 **Colorful MUC nicknames** (`appearance.colored_muc_nicks`, default on):
 `ChatWidget` keeps a `NickColorAllocator` (`ui/nick_colors.py`); keys are the

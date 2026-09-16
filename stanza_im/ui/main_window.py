@@ -321,6 +321,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Roster widget
         self._roster = RosterWidget()
+        self._roster.set_trailing_groups({tr("roster_group_conferences")})
         self._apply_roster_font()
         self._roster.set_tooltip_provider(self._roster_tooltip)
         self._show_offline_action.toggled.connect(self._roster.set_show_offline)
@@ -1126,6 +1127,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if osd_font != getattr(self, "_applied_osd_font", ("", 0)):
             self._osd.apply_font(*osd_font)
             self._applied_osd_font = osd_font
+        osd_colors = (
+            getattr(self._config.appearance, "osd_bg_color", "") or "",
+            getattr(self._config.appearance, "osd_font_color", "") or "",
+            int(getattr(self._config.appearance, "osd_opacity", 92) or 0))
+        if osd_colors != getattr(self, "_applied_osd_colors", None):
+            self._osd.apply_colors(*osd_colors)
+            self._applied_osd_colors = osd_colors
         variant = self._config.appearance.chat_theme or self._config.chat.theme
         muc_variant = self._config.appearance.muc_theme
         if (variant, muc_variant) != getattr(self, "_applied_chat_themes", ("", "")):
@@ -3310,25 +3318,33 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         mood_icons = pep.mood_icons()
         activity_icons = pep.activity_icons()
+        self._mood_actions: dict[str, QtGui.QAction] = {}
+        self._activity_actions: dict[tuple, QtGui.QAction] = {}
 
         mood_menu = menu.addMenu(self._pep_icon({}, "", "mood"), tr("pep_mood"))
         clear = mood_menu.addAction(self._pep_icon({}, "", "mood"),
                                     tr("pep_none"))
+        clear.setCheckable(True)
         clear.triggered.connect(lambda: self._on_set_mood(""))
+        self._mood_actions[""] = clear
         mood_menu.addSeparator()
         for key in MOODS:
             if key == "none":
                 continue
             action = mood_menu.addAction(
                 self._pep_icon(mood_icons, key, "mood"), tr("mood_%s" % key))
+            action.setCheckable(True)
             action.triggered.connect(
                 lambda checked=False, k=key: self._on_set_mood(k))
+            self._mood_actions[key] = action
 
         activity_menu = menu.addMenu(
             self._pep_icon({}, "", "activity"), tr("pep_activity"))
         clear_act = activity_menu.addAction(
             self._pep_icon({}, "", "activity"), tr("pep_none"))
+        clear_act.setCheckable(True)
         clear_act.triggered.connect(lambda: self._on_set_activity("", ""))
+        self._activity_actions[("", "")] = clear_act
         activity_menu.addSeparator()
         for group in ACTIVITY_ORDER:
             submenu = activity_menu.addMenu(
@@ -3337,8 +3353,10 @@ class MainWindow(QtWidgets.QMainWindow):
             group_action = submenu.addAction(
                 self._pep_icon(activity_icons, group, "activity"),
                 tr("activity_group_%s" % group))
+            group_action.setCheckable(True)
             group_action.triggered.connect(
                 lambda checked=False, g=group: self._on_set_activity(g, ""))
+            self._activity_actions[(group, "")] = group_action
             subs = ACTIVITY_GROUPS.get(group, [])
             if subs:
                 submenu.addSeparator()
@@ -3346,10 +3364,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 action = submenu.addAction(
                     self._pep_icon(activity_icons, sub, "activity"),
                     tr("activity_%s" % sub))
+                action.setCheckable(True)
                 action.triggered.connect(
                     lambda checked=False, g=group, s=sub:
                     self._on_set_activity(g, s))
+                self._activity_actions[(group, sub)] = action
+        menu.aboutToShow.connect(self._sync_pep_checks)
         return menu
+
+    def _sync_pep_checks(self) -> None:
+        """Check the currently active mood/activity (extended status)."""
+        mood = getattr(self._config.status, "mood", "") or ""
+        for key, action in getattr(self, "_mood_actions", {}).items():
+            action.setChecked(key == mood)
+        value = getattr(self._config.status, "activity", "") or ""
+        group, _, sub = value.partition("/")
+        target = (group, sub) if group and sub else (group, "")
+        for key, action in getattr(self, "_activity_actions", {}).items():
+            action.setChecked(key == target)
 
     def _rebuild_pep_menu(self) -> None:
         if getattr(self, "_pep_btn", None) is not None:

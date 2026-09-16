@@ -129,6 +129,8 @@ class Config:
                         "roster_font": "", "roster_font_size": 0,
                         "chat_font": "", "chat_font_size": 0,
                         "osd_font": "", "osd_font_size": 0,
+                        "osd_bg_color": "#282828", "osd_font_color": "#ffffff",
+                        "osd_opacity": 92,
                         "nick_font": "", "nick_font_size": 0,
                         "participant_font": "", "participant_font_size": 0},
         "notifications": {"tray_blink": True, "popups": True,

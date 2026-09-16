@@ -38,29 +38,45 @@ def stack_position(index: int, base_y: int, heights,
 class _OsdWindow(QtWidgets.QWidget):
     """A single OSD bubble (optionally draggable for the preview)."""
 
-    @staticmethod
-    def _stylesheet(family: str = "", size: int = 0) -> str:
+    def _stylesheet(self) -> str:
+        alpha = int(round(max(0, min(100, self._opacity)) * 255 / 100))
+        bg = QtGui.QColor(self._bg_color) if self._bg_color else \
+            QtGui.QColor(40, 40, 40)
+        if not bg.isValid():
+            bg = QtGui.QColor(40, 40, 40)
+        fg = QtGui.QColor(self._font_color) if self._font_color else \
+            QtGui.QColor(255, 255, 255)
+        if not fg.isValid():
+            fg = QtGui.QColor(255, 255, 255)
         css = (
-            "#osd-frame { background: rgba(40, 40, 40, 235); border: 1px solid "
+            "#osd-frame { background: rgba(%d, %d, %d, %d); border: 1px solid "
             "rgba(255, 255, 255, 90); border-radius: 8px; }"
-            "#osd-frame QLabel { color: #fff; background: transparent; }"
+            "#osd-frame QLabel { color: %s; background: transparent; }"
             "#osd-title { font-weight: bold; font-size: 13px; }"
-            "#osd-body { font-size: 12px; color: #eee; }"
-            "#osd-close { color: #fff; background: transparent; border: 0; "
+            "#osd-body { font-size: 12px; color: %s; }"
+            "#osd-close { color: %s; background: transparent; border: 0; "
             "border-radius: 9px; font-size: 12px; font-weight: bold; }"
-            "#osd-close:hover { background: rgba(255, 255, 255, 45); }")
-        if family or size:
-            fam = (family or "sans-serif").replace("'", "\\'").replace("\\", "\\\\")
-            title_size = size or 13
-            body_size = size or 12
+            "#osd-close:hover { background: rgba(255, 255, 255, 45); }"
+            % (bg.red(), bg.green(), bg.blue(), alpha,
+               fg.name(), fg.name(), fg.name()))
+        if self._family or self._size:
+            fam = (self._family or "sans-serif").replace("'", "\\'").replace("\\", "\\\\")
+            title_size = self._size or 13
+            body_size = self._size or 12
             css += ("\n#osd-title {{ font-family: '{0}'; font-size: {1}pt; }}"
                     "\n#osd-body {{ font-family: '{0}'; font-size: {2}pt; }}"
                     .format(fam, title_size, body_size))
         return css
 
     def __init__(self, icon, title: str, body: str, draggable: bool = False,
-                 family: str = "", size: int = 0, parent=None):
+                 family: str = "", size: int = 0, bg_color: str = "",
+                 font_color: str = "", opacity: int = 92, parent=None):
         super().__init__(None)
+        self._family = family or ""
+        self._size = int(size or 0)
+        self._bg_color = bg_color or ""
+        self._font_color = font_color or ""
+        self._opacity = int(opacity)
         self.setWindowFlags(
             QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.FramelessWindowHint
@@ -88,7 +104,7 @@ class _OsdWindow(QtWidgets.QWidget):
 
         frame = QtWidgets.QFrame(self)
         frame.setObjectName("osd-frame")
-        frame.setStyleSheet(self._stylesheet(family, size))
+        frame.setStyleSheet(self._stylesheet())
         self._frame = frame
 
         row = QtWidgets.QHBoxLayout(frame)
@@ -144,9 +160,24 @@ class _OsdWindow(QtWidgets.QWidget):
 
     def apply_font(self, family: str = "", size: int = 0) -> None:
         """Re-apply the configured font to a live OSD window."""
+        self.apply_style(family=family, size=size)
+
+    def apply_style(self, family=None, size=None, bg_color=None,
+                    font_color=None, opacity=None) -> None:
+        """Update any of the font/color/opacity settings and restyle."""
+        if family is not None:
+            self._family = family or ""
+        if size is not None:
+            self._size = int(size or 0)
+        if bg_color is not None:
+            self._bg_color = bg_color or ""
+        if font_color is not None:
+            self._font_color = font_color or ""
+        if opacity is not None:
+            self._opacity = int(opacity)
         frame = getattr(self, "_frame", None)
         if frame is not None:
-            frame.setStyleSheet(self._stylesheet(family, size))
+            frame.setStyleSheet(self._stylesheet())
 
     def _click(self) -> None:
         cb = self._on_clicked
@@ -265,6 +296,13 @@ class OsdManager:
         for rec in list(self._windows):
             rec["window"].apply_font(family, size)
 
+    def apply_colors(self, bg_color: str = "", font_color: str = "",
+                     opacity: int = 92) -> None:
+        """Re-apply the configured background/text color and opacity."""
+        for rec in list(self._windows):
+            rec["window"].apply_style(bg_color=bg_color,
+                                      font_color=font_color, opacity=opacity)
+
     @property
     def _osd_font(self) -> tuple[str, int]:
         appearance = getattr(self._config, "appearance", None)
@@ -272,6 +310,15 @@ class OsdManager:
             return "", 0
         return (getattr(appearance, "osd_font", "") or "",
                 int(getattr(appearance, "osd_font_size", 0) or 0))
+
+    @property
+    def _osd_colors(self) -> tuple[str, str, int]:
+        appearance = getattr(self._config, "appearance", None)
+        if appearance is None:
+            return "", "", 92
+        return (getattr(appearance, "osd_bg_color", "") or "",
+                getattr(appearance, "osd_font_color", "") or "",
+                int(getattr(appearance, "osd_opacity", 92) or 0))
 
     def dismiss_all(self):
         for rec in list(self._windows):
@@ -293,8 +340,10 @@ class OsdManager:
     def _spawn(self, icon, title: str, body: str, draggable: bool,
                preview: bool, duration: float) -> dict:
         family, size = self._osd_font
+        bg_color, font_color, opacity = self._osd_colors
         win = _OsdWindow(icon, title, body, draggable=draggable,
-                         family=family, size=size)
+                         family=family, size=size, bg_color=bg_color,
+                         font_color=font_color, opacity=opacity)
         rec = {"window": win, "timer": None, "preview": preview,
                "on_click": None}
         win._on_close = lambda: self._dismiss(rec)

@@ -138,7 +138,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `keepalive` | `true` | Send whitespace keep-alive packets |
 | `stream_management` | `true` | XEP-0198 resumption/acks |
 | `csi` | `true` | XEP-0352 active/inactive |
-| `pep_sweep_interval` | `0` | Periodic XEP-0080/0107/0108/0118 sweep (s); `0` = off |
+| `pep_sweep_interval` | `0` | Periodic XEP-0080/0107/0108/0118 sweep (s); `0` = off. Preferences presents a selector: Off / 30 s / 1 min / 2 min / 5 min |
 | `message_carbons` | `true` | XEP-0280 |
 | `file_proxy_mode` / `file_proxy_manual` | `auto` / — | XEP-0065 file proxy (JID) |
 | `stun_turn_mode` / `stun_turn_manual` | `auto` / — | STUN/TURN (host:port list) |
@@ -162,6 +162,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_activity` | `true` | Show/hide the PEP activity icon (XEP-0108) in roster rows, drawn from the same icon set as the mood/activity picker (`pep.activity_icon_path`). |
 | `appearance.roster_show_mood` | `true` | Show/hide the PEP mood icon (XEP-0107) in roster rows (`pep.mood_icon_path`). |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
+| `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
+| `appearance.osd_font_color` | `#ffffff` | OSD text color applied to all OSD labels (`_OsdWindow._stylesheet`). |
+| `appearance.osd_opacity` | `92` | OSD background opacity in percent (0–100); the alpha is `round(opacity/100*255)`. |
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
 | `status.auto_status_message` | `""` | Single shared status text sent with the auto Away/XA presence (`MainWindow._check_auto_status`); when empty the previous status text is kept. Returning activity resumes `status.last_status` with an empty message, so the auto text is cleared. |
@@ -363,6 +366,10 @@ The roster background and the group-header stripe colorized per
 `bg_color()` (white default), and `paint_group` draws its stripe with
 `group_bg_color()`. `MainWindow._apply_roster_colors` also colors the roster
 widget's viewport palette so the area below the last contact matches.
+
+Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
+`MainWindow` to the conferences group, `roster_group_conferences`) forces those
+groups after all contact groups.
 
 ### 7.3 Interactions
 
@@ -1111,8 +1118,10 @@ client.leave_muji(room)
 - The roster bottom bar has two icon-only buttons: a smiley menu
   ("Mood" + nested "Activity" groups/sub-activities + "None", with pack icons)
   that publishes via `publish_mood`/`publish_activity` and persists
-  `status.mood`/`status.activity` (republished on `session_started`), and an
-  `edit.png` button opening `StatusMessageDialog` (multiline, preloaded from
+  `status.mood`/`status.activity` (republished on `session_started`); its actions
+  are checkable and `MainWindow._sync_pep_checks` (on `aboutToShow`) marks the
+  active mood/activity (like the tray status menu). The `edit.png` button opens
+  `StatusMessageDialog` (multiline, preloaded from
   `status.message`); the edited text is sent with presence.
 - Contacts' mood/activity/tune/location are shown in the roster tooltip
   (`MainWindow._roster_tooltip`) and on the vCard "Status" tab

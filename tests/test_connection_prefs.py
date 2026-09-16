@@ -327,6 +327,13 @@ check("default starttls_mode=always", conn.starttls_mode == "always")
 dlg = PreferencesDialog(cfg, ChatThemeFactory(), client=None)
 controls = dlg._controls
 
+_pep = controls["pep_sweep_interval"]
+check("pep sweep is a selector, not a spin",
+      isinstance(_pep, QtWidgets.QComboBox))
+check("pep sweep options are 0/30/60/120/300 s",
+      [_pep.itemData(i) for i in range(_pep.count())]
+      == [0, 30, 60, 120, 300])
+
 controls["file_proxy_mode"].setCurrentIndex(
     controls["file_proxy_mode"].findData("manual"))
 controls["file_proxy_manual"].setText("proxy.example.org")
@@ -355,12 +362,16 @@ controls["tls_mode"].setCurrentIndex(controls["tls_mode"].findData("normal"))
 controls["starttls_mode"].setCurrentIndex(
     controls["starttls_mode"].findData("opportunistic"))
 controls["keepalive"].setChecked(False)
+controls["pep_sweep_interval"].setCurrentIndex(
+    controls["pep_sweep_interval"].findData(120))
 dlg._apply_settings()
 
 check("apply: tls_mode saved", cfg.connection.tls_mode == "normal")
 check("apply: starttls_mode saved",
       cfg.connection.starttls_mode == "opportunistic")
 check("apply: keepalive saved", cfg.connection.keepalive is False)
+check("apply: pep sweep selector saved as int",
+      cfg.connection.pep_sweep_interval == 120)
 
 check("apply: file_proxy_mode saved",
       cfg.connection.file_proxy_mode == "auto")

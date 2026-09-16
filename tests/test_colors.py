@@ -46,6 +46,26 @@ check("appearance.muc_highlight_color default",
       getattr(cfg.appearance, "muc_highlight_color", "") == "#e53935")
 check("appearance.colored_muc_nicks default",
       getattr(cfg.appearance, "colored_muc_nicks", False) is True)
+check("appearance.osd_bg_color default",
+      getattr(cfg.appearance, "osd_bg_color", "") == "#282828")
+check("appearance.osd_font_color default",
+      getattr(cfg.appearance, "osd_font_color", "") == "#ffffff")
+check("appearance.osd_opacity default",
+      int(getattr(cfg.appearance, "osd_opacity", 0)) == 92)
+
+# ── OSD window styling (bg / font color / opacity) ─────────────────
+from stanza_im.ui.osd import _OsdWindow
+
+_osd = _OsdWindow(None, "t", "b", bg_color="#112233",
+                  font_color="#445566", opacity=50)
+_osd_ss = _osd._stylesheet()
+check("osd bg uses the configured color and opacity",
+      "rgba(17, 34, 51, 128)" in _osd_ss)
+check("osd font color applied", "#445566" in _osd_ss)
+_osd.apply_style(bg_color="#000000", opacity=0)
+check("osd restyle updates the background",
+      "rgba(0, 0, 0, 0)" in _osd._stylesheet())
+_osd.deleteLater()
 
 # ── ChatThemeFactory chat background & highlight color ─────────────
 factory = ChatThemeFactory()
@@ -85,6 +105,14 @@ check("roster group bg color", style.group_bg_color().name() == "#040506")
 roster = RosterWidget()
 roster.set_style(style)
 check("paint uses style colors", roster._style is style)
+
+trailing = RosterWidget()
+trailing.set_trailing_groups({"Конференции"})
+trailing.add_group("Work")
+trailing.add_group("Конференции")
+trailing.add_group("Friends")
+check("conferences group sorts after the contact groups",
+      trailing._sorted_groups == ["Friends", "Work", "Конференции"])
 
 # ── NickColorAllocator ─────────────────────────────────────────────
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
@@ -158,13 +186,17 @@ from stanza_im.ui.preferences import PreferencesDialog
 dlg = PreferencesDialog(cfg, ChatThemeFactory())
 dlg._load_values()
 for key in ("roster_bg_color", "roster_group_bg_color", "chat_bg_color",
-            "muc_highlight_color", "colored_muc_nicks"):
+            "muc_highlight_color", "colored_muc_nicks",
+            "osd_bg_color", "osd_font_color", "osd_opacity"):
     check(f"preferences loads {key}", key in dlg._controls)
 
 dlg._set("roster_bg_color", "#000000")
 dlg._set("chat_bg_color", "#101010")
 dlg._set("muc_highlight_color", "#202020")
 dlg._set("colored_muc_nicks", False)
+dlg._set("osd_bg_color", "#010203")
+dlg._set("osd_font_color", "#040506")
+dlg._set("osd_opacity", 40)
 dlg._apply_settings()
 check("roster_bg_color saved",
       cfg.appearance.roster_bg_color == "#000000")
@@ -172,6 +204,9 @@ check("chat_bg_color saved", cfg.appearance.chat_bg_color == "#101010")
 check("muc_highlight_color saved",
       cfg.appearance.muc_highlight_color == "#202020")
 check("colored_muc_nicks saved", cfg.appearance.colored_muc_nicks is False)
+check("osd_bg_color saved", cfg.appearance.osd_bg_color == "#010203")
+check("osd_font_color saved", cfg.appearance.osd_font_color == "#040506")
+check("osd_opacity saved", int(cfg.appearance.osd_opacity) == 40)
 dlg.close()
 
 

@@ -585,8 +585,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(self._check(
             "stream_management", tr("prefs_stream_management")))
         advanced_form.addRow(self._check("csi", tr("prefs_csi")))
-        pep_interval = self._spin("pep_sweep_interval", 0, 3600)
-        pep_interval.setSpecialValueText(tr("prefs_pep_sweep_off"))
+        pep_interval = self._combo("pep_sweep_interval", [
+            ("prefs_pep_sweep_off", 0),
+            ("prefs_pep_sweep_30", 30),
+            ("prefs_pep_sweep_60", 60),
+            ("prefs_pep_sweep_120", 120),
+            ("prefs_pep_sweep_300", 300),
+        ])
         advanced_form.addRow(tr("prefs_pep_sweep"), pep_interval)
         tls_mode = self._combo("tls_mode", [
             ("conn_mode_direct", "direct"),
@@ -977,6 +982,13 @@ class PreferencesDialog(QtWidgets.QDialog):
                           self._color_button("muc_highlight_color", "#e53935"))
         color_form.addRow(
             self._check("colored_muc_nicks", tr("prefs_color_muc_nicks")))
+        color_form.addRow(tr("prefs_color_osd_bg"),
+                          self._color_button("osd_bg_color", "#282828"))
+        color_form.addRow(tr("prefs_color_osd_font"),
+                          self._color_button("osd_font_color", "#ffffff"))
+        osd_opacity = self._spin("osd_opacity", 0, 100)
+        osd_opacity.setSuffix(" %")
+        color_form.addRow(tr("prefs_color_osd_opacity"), osd_opacity)
 
         misc, misc_form = self._page()
         misc_form.addRow(tr("prefs_media_preview_size"),
@@ -1219,6 +1231,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             "chat_font_size": getattr(appearance, "chat_font_size", 0),
             "osd_font": getattr(appearance, "osd_font", ""),
             "osd_font_size": getattr(appearance, "osd_font_size", 0),
+            "osd_bg_color": getattr(appearance, "osd_bg_color", "#282828"),
+            "osd_font_color": getattr(appearance, "osd_font_color", "#ffffff"),
+            "osd_opacity": getattr(appearance, "osd_opacity", 92),
             "nick_font": getattr(appearance, "nick_font", ""),
             "nick_font_size": getattr(appearance, "nick_font_size", 0),
             "participant_font": getattr(appearance, "participant_font", ""),
@@ -1275,7 +1290,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.connection[key] = self._value(key)
         cfg.connection.priority = self._value("priority")
         cfg.connection.keepalive = self._value("keepalive")
-        cfg.connection.pep_sweep_interval = self._value("pep_sweep_interval")
+        cfg.connection.pep_sweep_interval = int(
+            self._value("pep_sweep_interval") or 0)
         cfg.connection.stream_management = self._value("stream_management")
         cfg.connection.csi = self._value("csi")
         cfg.connection.message_carbons = self._value("message_carbons")
@@ -1319,6 +1335,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
                     "osd_font", "osd_font_size", "nick_font", "nick_font_size",
                     "participant_font", "participant_font_size",
+                    "osd_bg_color", "osd_font_color", "osd_opacity",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",
                     "roster_show_avatars", "roster_show_activity",

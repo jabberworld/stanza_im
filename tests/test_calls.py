@@ -1634,6 +1634,37 @@ check("self-preview frames fill our own tile", _self_f)
 check("participant churn never drops our own tile", _self_k)
 check("video tiles are captioned with the sender nick", _cap == "bob")
 
+
+def _pep_menu_check_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    mw._build_pep_menu()
+    mw._config.status.mood = "happy"
+    mw._config.status.activity = "relaxing/partying"
+    mw._sync_pep_checks()
+    mood_ok = (mw._mood_actions["happy"].isCheckable()
+               and mw._mood_actions["happy"].isChecked()
+               and not mw._mood_actions[""].isChecked())
+    sub_ok = mw._activity_actions[("relaxing", "partying")].isChecked()
+    mw._config.status.activity = "working"
+    mw._sync_pep_checks()
+    group_ok = (mw._activity_actions[("working", "")].isChecked()
+                and not mw._activity_actions[("relaxing", "partying")].isChecked())
+    mw._config.status.mood = ""
+    mw._config.status.activity = ""
+    mw._sync_pep_checks()
+    none_ok = (mw._mood_actions[""].isChecked()
+               and mw._activity_actions[("", "")].isChecked())
+    mw.close()
+    return mood_ok, sub_ok, group_ok, none_ok
+
+
+_pep_mood, _pep_sub, _pep_group, _pep_none = _pep_menu_check_result()
+check("PEP menu checks the active mood", _pep_mood)
+check("PEP menu checks the active activity sub-type", _pep_sub)
+check("PEP menu checks a group-only activity", _pep_group)
+check("PEP menu checks the 'None' entries when cleared", _pep_none)
+
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")
 sys.exit(1 if FAILURES else 0)

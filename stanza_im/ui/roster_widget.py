@@ -29,6 +29,7 @@ class RosterWidget(QtWidgets.QWidget):
         self._users: list[UserItem] = []
         self._sorted_groups: list[str] = []
         self._sorted_users: dict[str, list[UserItem]] = {}
+        self._trailing_groups: set[str] = set()
         self._selected_jid: str | None = None
         self._hover_jid: str | None = None
         self._search_text: str = ""
@@ -51,12 +52,22 @@ class RosterWidget(QtWidgets.QWidget):
         contact tooltips (default: no tooltips)."""
         self._tooltip_provider = provider
 
+    def _group_sort_key(self, name: str):
+        """Sort contact groups alphabetically, trailing groups last."""
+        return (name in self._trailing_groups, name.casefold())
+
+    def set_trailing_groups(self, names) -> None:
+        """Groups (e.g. conferences) that always sort after the rest."""
+        self._trailing_groups = set(names or ())
+        self._sorted_groups.sort(key=self._group_sort_key)
+        self.update()
+
     def add_group(self, name: str) -> GroupItem:
         if name not in self._groups:
             item = GroupItem(name=name)
             self._groups[name] = item
             self._sorted_groups.append(name)
-            self._sorted_groups.sort(key=str.casefold)
+            self._sorted_groups.sort(key=self._group_sort_key)
         return self._groups[name]
 
     def add_user(self, user: UserItem) -> None:
