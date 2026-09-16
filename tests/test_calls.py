@@ -580,6 +580,46 @@ check("chat window muji support reaches muc tab", _support_ok)
 check("chat window forwards muji_call_requested",
       _cw_reqs == [("room@conf.example", True)])
 
+# ── 7c. live-conference indicator on the MUC call button --------------------
+_idle_tip = cmuc._call_btn.toolTip()
+_idle_icon = QtGui.QIcon(cmuc._call_btn.icon())
+check("muc call button defaults to the idle state",
+      cmuc._call_btn.toolTip() == _idle_tip == "Conference call"
+      and cmuc._call_btn.icon().cacheKey() == _idle_icon.cacheKey())
+
+
+def _indicator_result():
+    w = ChatWidget("room@conf.example", "Room",
+                   chat_themes.ChatThemeFactory(), is_muc=True)
+    idle_tip = w._call_btn.toolTip()
+    idle_icon = QtGui.QIcon(w._call_btn.icon())
+    w.set_muji_active(True)
+    active_tip = w._call_btn.toolTip()
+    active_icon = QtGui.QIcon(w._call_btn.icon())
+    w.set_muji_active(False)
+    restored_tip = w._call_btn.toolTip()
+    restored_key = QtGui.QIcon(w._call_btn.icon()).cacheKey()
+    # 1:1 widgets never change their button.
+    w11 = ChatWidget("bob@example.com", "Bob",
+                     chat_themes.ChatThemeFactory())
+    w11_tip = w11._call_btn.toolTip()
+    w11.set_muji_active(True)
+    w11_unchanged = w11._call_btn.toolTip() == w11_tip
+    return (active_tip, active_icon.cacheKey() != idle_icon.cacheKey(),
+            restored_tip == idle_tip, restored_key == idle_icon.cacheKey(),
+            w11_unchanged)
+
+
+# i18n reachable only when the real tr() dicts are loaded; the widget marks
+# active with a distinct tooltip and a swapped icon (en strings per module load).
+_atip, _icon_swapped, _restored, _icon_restored, _w11 = _indicator_result()
+check("set_muji_active(True) changes tooltip and icon", _icon_swapped)
+check("set_muji_active(True) shows the active tooltip",
+      _atip == "Conference call in progress")
+check("set_muji_active(False) restores the idle tooltip", _restored)
+check("set_muji_active(False) restores the idle icon", _icon_restored)
+check("set_muji_active is a no-op on 1:1 widgets", _w11)
+
 # ── 8. call window + incoming dialog --------------------------------------
 from stanza_im.ui.call_window import CallWindow, IncomingCallDialog
 win = CallWindow("sid1", "bob@example.com", video=True)
@@ -1606,6 +1646,40 @@ _gate_before, _gate_after = _muji_support_gate_result()
 check("opening a MUC tab leaves the call button disabled until support is set",
       _gate_before is False)
 check("_apply_muji_support enables the MUC call button", _gate_after is True)
+
+
+def _muji_indicator_sync_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    client = _FakeMujiConfClient()
+    mw._client = client
+    mw._chat_window.open_groupchat("room@conf", "me", "room")
+    # no conference yet -> idle look
+    mw._sync_muji_indicator("room@conf")
+    idle_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
+    client.muji.conferences["room@conf"] = muji.MujiConference(room="room@conf")
+    # a live conference -> active look
+    mw._sync_muji_indicator("room@conf")
+    active_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
+    active_icon = QtGui.QIcon(
+        mw._chat_window.get_chat("room@conf")._call_btn.icon())
+    # dropping the conference restores the idle look
+    del client.muji.conferences["room@conf"]
+    mw._sync_muji_indicator("room@conf")
+    restored_tip = mw._chat_window.get_chat("room@conf")._call_btn.toolTip()
+    mw.close()
+    return (idle_tip, active_tip, active_icon.cacheKey(),
+            restored_tip)
+
+
+_ind_idle, _ind_active, _ind_active_key, _ind_restored = \
+    _muji_indicator_sync_result()
+check("_sync_muji_indicator leaves the button idle without a conference",
+      _ind_idle == "Conference call")
+check("_sync_muji_indicator marks the button active for a live conference",
+      _ind_active == "Conference call in progress")
+check("_sync_muji_indicator restores the idle look after the conference ends",
+      _ind_restored == "Conference call")
 
 
 def _muji_window_ui_result():

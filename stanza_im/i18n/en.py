@@ -799,6 +799,7 @@ STRINGS = {
     'prefs_device_test_unavailable': 'Camera preview is not available.',
     # Muji (XEP-0272)
     'muji_button': 'Conference call',
+    'muji_active': 'Conference call in progress',
     'muji_window_title': 'Conference {room}',
     'muji_participants': 'Participants: {count}',
     'muji_leave': 'Leave conference',

@@ -570,7 +570,13 @@ routes to `_join_muji`. The MUC button is gated solely on aiortc availability
 (`set_muji_support` via `MainWindow._apply_muji_support`, called on every path
 that opens a MUC tab — manual join, server auto-join in `_on_muc_joined`, roster
 open in `_on_contact_open` — so an auto-joined room's button is never left
-disabled) and is a no-op on 1:1 tabs. `ui/call_window.CallWindow` shows the active call and
+disabled) and is a no-op on 1:1 tabs. While a conference is live the same
+button doubles as its indicator: `MainWindow._sync_muji_indicator(room)`
+(active iff `room in client.muji.conferences`, also called from
+`_on_muji_updated`/`_on_muji_left`) → `ChatWindow.set_muji_active` →
+`ChatWidget.set_muji_active`, which swaps the idle `call` icon + `muji_button`
+tooltip for the `call-accept` glyph + `muji_active` tooltip and restores the
+idle look when the conference ends. `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
 over the roster); remote video frames are painted by `VideoView`, which draws a

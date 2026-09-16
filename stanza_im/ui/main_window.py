@@ -677,6 +677,12 @@ class MainWindow(QtWidgets.QMainWindow):
         available = bool(getattr(getattr(self._client, "rtp_calls", None),
                                  "available", False))
         self._chat_window.set_muji_support(room, available)
+        self._sync_muji_indicator(room)
+
+    def _sync_muji_indicator(self, room: str) -> None:
+        """Update the MUC tab's call button to reflect an active conference."""
+        confs = getattr(getattr(self._client, "muji", None), "conferences", {})
+        self._chat_window.set_muji_active(room, room in confs)
 
     def _join_muc(self, room: str, nick: str, password: str = "",
                    save_bookmark: bool = False, bookmark_name: str = "",
@@ -1834,6 +1840,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                 for p in conf.participants.values()))
             window.set_video(has_video)
         self._sync_muji_preview(room)
+        self._sync_muji_indicator(room)
 
     def _muji_preview_sid(self, room: str) -> str:
         """The first video session of a conference (self-preview source)."""
@@ -1949,6 +1956,7 @@ class MainWindow(QtWidgets.QMainWindow):
         window = self._muji_windows.pop(room, None)
         if window is not None:
             window.close()
+        self._sync_muji_indicator(room)
 
     def _on_muji_invite(self, frm: str, room: str) -> None:
         logger.info("MUJI invite from %s to %s", frm, room)

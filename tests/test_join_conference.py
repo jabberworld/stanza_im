@@ -69,6 +69,9 @@ class _FakeChatWindow:
     def set_muji_support(self, room, enabled):
         pass
 
+    def set_muji_active(self, room, active):
+        pass
+
 
 class _FakeClient:
     def __init__(self):

@@ -464,6 +464,9 @@ class ChatWidget(QtWidgets.QWidget):
         actions_row.addStretch(1)
         chat_col.addLayout(actions_row)
 
+        self._call_icon_idle = QtGui.QIcon(self._call_btn.icon())
+        self._call_tip_idle = self._call_btn.toolTip()
+
         self._nick_complete_candidates: list[str] = []
         self._nick_complete_index = -1
         self._nick_complete_inserted = ""
@@ -1593,6 +1596,17 @@ class ChatWidget(QtWidgets.QWidget):
                 return QtGui.QIcon(pix)
         return QtGui.QIcon()
 
+    @staticmethod
+    def _muji_active_icon() -> QtGui.QIcon:
+        for candidate in (os.path.join(ACTIONS_DIR_16, "call-accept.svg"),
+                          os.path.join(ACTIONS_DIR_16, "call-accept.png"),
+                          os.path.join(ACTIONS_DIR_16, "call.svg"),
+                          os.path.join(ACTIONS_DIR_16, "call.png")):
+            pix = QtGui.QPixmap(candidate)
+            if not pix.isNull():
+                return QtGui.QIcon(pix)
+        return QtGui.QIcon()
+
     def set_call_support(self, audio: bool, video: bool) -> None:
         """Enable the call menu according to the peer's capabilities."""
         self._call_btn.setEnabled(bool(audio or video))
@@ -1606,6 +1620,17 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_btn.setEnabled(bool(enabled))
         self._call_audio_action.setEnabled(bool(enabled))
         self._call_video_action.setEnabled(bool(enabled))
+
+    def set_muji_active(self, active: bool) -> None:
+        """Reflect a live conference in the call button icon and tooltip."""
+        if not self.is_muc:
+            return
+        if active:
+            self._call_btn.setIcon(self._muji_active_icon())
+            self._call_btn.setToolTip(tr("muji_active"))
+        else:
+            self._call_btn.setIcon(self._call_icon_idle)
+            self._call_btn.setToolTip(self._call_tip_idle)
 
     def _set_input_height(self, height: int):
         height = max(40, min(240, int(height)))

@@ -1260,8 +1260,15 @@ client.leave_muji(room)
   enabled only when aiortc is available (`ChatWindow.set_muji_support`, applied
   by `MainWindow._apply_muji_support` on every MUC-tab open — `_join_muc`,
   `_on_muc_joined` for auto-joined rooms and `_on_contact_open`); it
-  is a no-op on 1:1 tabs. All call/Muji code logs via `stanza_im.call*` with
-  `CALL[…]` / `MUJI[…]` markers.
+  is a no-op on 1:1 tabs. While a conference is live the MUC call button
+  doubles as its indicator: `MainWindow._sync_muji_indicator(room)` (driven by
+  `room in client.muji.conferences`, called from `_apply_muji_support`,
+  `_on_muji_updated` and `_on_muji_left`) forwards to
+  `ChatWindow.set_muji_active(room, active)` → `ChatWidget.set_muji_active`,
+  which swaps the idle `call` icon/tooltip (`muji_button`) for the
+  `call-accept` glyph and the `muji_active` tooltip, restores the idle look
+  when the conference ends, and is a no-op on 1:1 tabs. All call/Muji code
+  logs via `stanza_im.call*` with `CALL[…]` / `MUJI[…]` markers.
 
 ### 14.11 Data Classes
 
