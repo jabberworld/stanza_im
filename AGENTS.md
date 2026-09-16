@@ -1,5 +1,17 @@
 # AGENTS.md — Stanza IM Architecture
 
+## Language
+
+**Always explain your work in Russian.** Every plan, progress note, status
+update and any commentary addressed to the user MUST be in Russian.
+
+This rule holds **after every context reset or session compaction**: `AGENTS.md`
+is re-read then, so switch to Russian immediately rather than waiting to be
+asked again.
+
+Code, identifiers, code comments, commit messages and the documentation files
+(`AGENTS.md`, `SPEC.md`, `XEPs.md`) stay in English as before.
+
 ## Overview
 
 Stanza IM is a lightweight XMPP/Jabber desktop client for Linux, inspired by the
