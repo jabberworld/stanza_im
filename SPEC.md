@@ -1275,11 +1275,13 @@ client.leave_muji(room)
   contents) and restores the idle look otherwise; it is a no-op on 1:1 tabs.
   The Audio/Video menu actions of the call button carry the `mic.svg` and
   `camera.svg` icons. The MUC chat shows conference lifecycle status lines
-  (gated by `chat.muc_show_status`), written on the same transitions that
-  toggle the indicator: `MujiManager` emits `muji_started(room, video)` when a
-  conference becomes active (we joined or any peer participates — peer-started
-  calls included) and `muji_ended(room, video)` when the last participant
-  leaves; `_on_muji_started`/`_on_muji_ended` write the kind-aware
+  (gated by `chat.muc_show_status`), kind-aware to the conference's media:
+  `MujiManager` emits `muji_started(room, video)` once the media contents are
+  confirmed — our own join (`_finalise_join`) or a peer advertising real
+  contents in presence, peer-started calls included — so a preparing-only
+  presence or a session placeholder never locks in a wrong audio kind, and
+  `muji_ended(room, video)` when the last participant leaves;
+  `_on_muji_started`/`_on_muji_ended` write the kind-aware
   `muji_started_audio`/`muji_started_video`/`muji_ended_audio`/`muji_ended_video`
   lines. `MujiManager` reports the start once per conference lifetime
   (`_started` guard, cleared when the room record drops). All call/Muji code

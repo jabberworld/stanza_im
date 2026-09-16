@@ -1489,17 +1489,31 @@ check("the MUC presence merges the virtual placeholder", _p_merged)
 
 
 def _muji_presence(room_nick, real_jid="", with_muji=True,
-                   ptype="available"):
+                   ptype="available", preparing=False):
     pres = slixmpp.Presence()
     pres["from"] = "room@conf/" + room_nick
     if ptype != "available":
         pres["type"] = ptype
     if with_muji:
-        ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+        muji_el = ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+        if preparing:
+            ET.SubElement(muji_el, "{%s}preparing" % muji.NS_MUJI)
     user = ET.SubElement(pres.xml, "{http://jabber.org/protocol/muc#user}x")
     item = ET.SubElement(user, "{http://jabber.org/protocol/muc#user}item")
     if real_jid:
         item.set("jid", real_jid)
+    return pres
+
+
+def _muji_video_presence(room_nick, room="room@conf"):
+    """A MUC presence advertising one video content."""
+    pres = slixmpp.Presence()
+    pres["from"] = room + "/" + room_nick
+    muji_el = ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+    content = ET.SubElement(muji_el, "{%s}content" % muji.NS_MUJI)
+    content.set("name", "video")
+    desc = ET.SubElement(content, "{%s}description" % muji.NS_RTP)
+    desc.set("media", "video")
     return pres
 
 
@@ -1895,6 +1909,56 @@ check("a conference start is reported only once", _sp_once)
 check("the peer leaving emits a video-aware muji_ended",
       _sp_end and _sp_dropped)
 check("an ended conference can start again (audio-aware)", _sp_restart)
+
+
+def _muji_started_preparing_after_audio_race_result():
+    # Bug repro: a peer's preparing-only presence (no contents yet) must not
+    # lock the start kind to audio; the video contents that follow win.
+    c = _FakeMujiConfClient()
+    # Peer starts with <muji><preparing/> — no media contents.
+    c.muji.handle_presence(
+        _muji_presence("Alice", with_muji=True, preparing=True))
+    started_after_preparing = any(
+        e[0] == "muji_started" for e in c.events)
+    # Without the bug the showed conference would report video afterwards.
+    pv = _muji_video_presence("Alice")
+    c.muji.handle_presence(pv)
+    started_video = ("muji_started", "room@conf", True) in c.events
+    # A second presence must not re-report the start.
+    c2 = _FakeMujiConfClient()
+    p2 = _muji_video_presence("Alice", room="room@conf")
+    c2.muji.handle_presence(p2)
+    c2.muji.handle_presence(p2)
+    started_count = sum(e[0] == "muji_started" for e in c2.events)
+    # The leaving peer ends the call as a video one.
+    c.muji.handle_presence(
+        _muji_presence("Alice", with_muji=False, ptype="unavailable"))
+    ended_video = ("muji_ended", "room@conf", True) in c.events
+    # And the session-placeholder race: an incoming session-initiate before
+    # our own video echo must not lock in audio either.
+    c3 = _FakeMujiConfClient()
+    c3.muji.join("room@conf", "me", video=True)
+    c3.muji.note_session("room@conf", "bob@host/res")
+    started_placeholder = any(e[0] == "muji_started" for e in c3.events)
+    c3.muji.handle_presence(
+        _muji_video_presence("me", room="room@conf"))
+    started_own_video = ("muji_started", "room@conf", True) in c3.events
+    return (started_after_preparing, started_video, started_count == 1,
+            ended_video, started_placeholder, started_own_video)
+
+
+_pp_no_start, _pp_started_video, _pp_once, _pp_end, _pp_placeholder, \
+    _pp_own_video = _muji_started_preparing_after_audio_race_result()
+check("a preparing-only peer presence does not report a start",
+      not _pp_no_start)
+check("the video contents of the preparing peer report video",
+      _pp_started_video)
+check("the start is still reported only once", _pp_once)
+check("the peer leaving ends the video conference", _pp_end)
+check("a session placeholder does not lock the kind to audio",
+      not _pp_placeholder)
+check("our own video contents report video after a placeholder race",
+      _pp_own_video)
 
 
 def _muji_window_ui_result():

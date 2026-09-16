@@ -65,20 +65,23 @@ class MujiManager:
         logger.info("MUJI manager ready")
 
     def _maybe_emit_started(self, room: str) -> None:
-        """Emit ``muji_started(room, video)`` when a conference becomes active.
+        """Emit ``muji_started(room, video)`` when a conference's media start.
 
-        Uses the same predicate as the MUC call-button indicator — *joined*
-        ourselves or any other participant in the room — so the "started"
-        status line appears exactly when the indicator lights up, including
-        when a peer starts a conference we are not in.
+        Reported only once the media contents are confirmed — *joined* with
+        our own contents, or a peer advertising real contents in presence.
+        A preparing-only presence or a session placeholder (whose contents are
+        not yet known) never locks in a wrong (audio) kind, so a video
+        conference is never mislabelled as audio.
         """
         if room in self._started:
             return
         conf = self.conferences.get(room)
         if conf is None:
             return
-        active = bool(conf.joined) or any(
-            nick != conf.self_nick for nick in conf.participants)
+        active = (bool(conf.joined) or bool(conf.contents)
+                  or any(nick != conf.self_nick
+                         and bool(conf.participants[nick].contents)
+                         for nick in conf.participants))
         if not active:
             return
         self._started.add(room)
@@ -279,6 +282,9 @@ class MujiManager:
         conf.contents = contents
         conf.preparing = False
         self._send_presence(room, self_nick, contents=contents)
+        # Report the start as soon as our contents are known, so the status
+        # line does not wait on (and is never mislabelled by) the presence echo.
+        self._maybe_emit_started(room)
         await asyncio.sleep(1.0)
         self._initiate_sessions(room)
         self.client.emit("muji_joined", room)
