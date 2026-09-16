@@ -1371,6 +1371,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("call_ended", self._on_call_ended)
         c.on("call_failed", self._on_call_failed)
         c.on("muji_joined", self._on_muji_joined)
+        c.on("muji_started", self._on_muji_started)
         c.on("muji_updated", self._on_muji_updated)
         c.on("muji_ended", self._on_muji_ended)
         c.on("muji_session", self._on_muji_session)
@@ -1842,21 +1843,24 @@ class MainWindow(QtWidgets.QMainWindow):
             window.show()
             self._muji_windows[room] = window
         self._on_muji_updated(room)
+
+    def _on_muji_started(self, room: str, video: bool) -> None:
+        """A conference became active in the room (like the indicator lights)."""
         if self._config.chat.muc_show_status:
             chat = self._chat_window.get_chat(room)
             if chat is not None:
                 from stanza_im.include.utils import format_time
-                key = ("muji_started_video" if self._muji_has_video(room)
-                       else "muji_started_audio")
+                key = "muji_started_video" if video else "muji_started_audio"
                 chat.add_status(tr(key), format_time())
 
-    def _on_muji_ended(self, room: str) -> None:
+    def _on_muji_ended(self, room: str, video: bool) -> None:
         """The last conference participant left — the room conference ended."""
         if self._config.chat.muc_show_status:
             chat = self._chat_window.get_chat(room)
             if chat is not None:
                 from stanza_im.include.utils import format_time
-                chat.add_status(tr("muji_ended"), format_time())
+                key = "muji_ended_video" if video else "muji_ended_audio"
+                chat.add_status(tr(key), format_time())
 
     def _on_muji_updated(self, room: str) -> None:
         window = self._muji_windows.get(room)
@@ -1864,10 +1868,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if window is not None and conf is not None:
             window.set_self_nick(self._muc_self_nicks.get(room, ""))
             window.set_participants(sorted(conf.participants))
-            has_video = ("video" in (conf.contents or {}).values()
-                         or any("video" in (p.contents or {}).values()
-                                for p in conf.participants.values()))
-            window.set_video(has_video)
+            window.set_video(conf.has_video())
         self._sync_muji_preview(room)
         self._sync_muji_indicator(room)
 
@@ -1884,11 +1885,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _muji_has_video(self, room: str) -> bool:
         """True when our conference (or a peer) advertises a video content."""
         conf = self._client.muji.conferences.get(room) if self._client else None
-        if conf is None:
-            return False
-        return ("video" in (conf.contents or {}).values()
-                or any("video" in (p.contents or {}).values()
-                       for p in conf.participants.values()))
+        return conf.has_video() if conf is not None else False
 
     def _sync_muji_preview(self, room: str) -> None:
         """Keep exactly one own-video source feeding the conference self tile.

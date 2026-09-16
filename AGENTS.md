@@ -580,10 +580,16 @@ which swaps the idle `call` icon + `muji_button` tooltip for the `call-accept`
 glyph and an audio/video-aware tooltip (`muji_active_audio`/`muji_active_video`
 per the conference contents), and restores the idle look when the last
 participant leaves. The A/V menu actions carry `mic.svg`/`camera.svg` icons.
-The MUC chat reports the conference lifecycle as status lines (gated by `chat.muc_show_status`):
-`muji_started_audio`/`muji_started_video` when we start a conference
-(`_on_muji_joined`) and `muji_ended` when the last participant leaves
-(`MujiManager` drops the room record and emits `muji_ended` → `_on_muji_ended`).
+The MUC chat reports the conference lifecycle as status lines (gated by `chat.muc_show_status`),
+written on the same transitions that toggle the indicator:
+`MujiManager` emits `muji_started(room, video)` when a conference becomes
+active (we joined or any peer participates — peer-started calls included) —
+`_on_muji_started` writes `muji_started_audio`/`muji_started_video` — and `muji_ended(room, video)`
+when the last participant leaves (`MujiManager` drops the room record and
+emits it → `_on_muji_ended` writes `muji_ended_audio`/`muji_ended_video`).
+The start is reported once per conference lifetime (`_started` guard,
+cleared when the room record drops) and the kind-aware texts read «Начата
+аудио/видеоконференция» / «Аудио/видеоконференция завершена».
 `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them

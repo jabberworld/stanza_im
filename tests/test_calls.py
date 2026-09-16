@@ -1811,6 +1811,7 @@ def _muji_left_keeps_indicator_result():
         nick="rain", real_jid="rain@host/x", contents={"video": "video"})
     client.muji.conferences["room@conf"] = conf
     mw._on_muji_joined("room@conf")
+    mw._on_muji_started("room@conf", True)
     chat = mw._chat_window.get_chat("room@conf")
     before = chat._call_btn.toolTip()
     started = any("Video conference started" in s[0]
@@ -1823,9 +1824,9 @@ def _muji_left_keeps_indicator_result():
     client.muji.handle_presence(
         _muji_presence("rain", "rain@host/x", with_muji=False))
     mw._on_muji_updated("room@conf")
-    mw._on_muji_ended("room@conf")
+    mw._on_muji_ended("room@conf", True)
     after_end = chat._call_btn.toolTip()
-    ended = any("Conference ended" in s[0] for s in chat._status_lines)
+    ended = any("Video conference ended" in s[0] for s in chat._status_lines)
     window_closed = "room@conf" not in mw._muji_windows
     mw.close()
     return (before, after_left, after_end, started, ended, window_closed)
@@ -1842,6 +1843,58 @@ check("the button goes dark once the last participant left",
 check("starting a conference writes the status line", _mjo_started)
 check("the conference end writes the status line", _mjo_ended)
 check("leaving closes the conference window", _mjo_window)
+
+
+def _muji_started_peer_result():
+    # A peer starting a conference in a room we are not in emits
+    # muji_started with the correct kind; leaving emits the kind-aware
+    # muji_ended; a new conference in the same room can start again.
+    c = _FakeMujiConfClient()
+    pres = slixmpp.Presence()
+    pres["from"] = "room@conf/Alice"
+    pres["type"] = "available"
+    muji_el = ET.SubElement(pres.xml, "{%s}muji" % muji.NS_MUJI)
+    vcontent = ET.SubElement(muji_el, "{%s}content" % muji.NS_MUJI)
+    vcontent.set("name", "video")
+    vdesc = ET.SubElement(vcontent, "{%s}description" % muji.NS_RTP)
+    vdesc.set("media", "video")
+    c.muji.handle_presence(pres)
+    started_video = ("muji_started", "room@conf", True) in c.events
+    no_ended_yet = not any(e[0] == "muji_ended" for e in c.events)
+    # A follow-up presence (contents update) does not re-report the start.
+    c.muji.handle_presence(pres)
+    started_count = sum(e[0] == "muji_started" for e in c.events)
+    # The peer leaves -> the record drops and the end reports the conference
+    # was a video one.
+    leav = slixmpp.Presence()
+    leav["from"] = "room@conf/Alice"
+    leav["type"] = "unavailable"
+    c.muji.handle_presence(leav)
+    ended_video = ("muji_ended", "room@conf", True) in c.events
+    dropped = "room@conf" not in c.muji.conferences
+    # An audio-only peer in the same room starts a fresh conference again.
+    ao = slixmpp.Presence()
+    ao["from"] = "room@conf/Bob"
+    ao["type"] = "available"
+    amuji = ET.SubElement(ao.xml, "{%s}muji" % muji.NS_MUJI)
+    acontent = ET.SubElement(amuji, "{%s}content" % muji.NS_MUJI)
+    acontent.set("name", "voice")
+    adesc = ET.SubElement(acontent, "{%s}description" % muji.NS_RTP)
+    adesc.set("media", "audio")
+    c.muji.handle_presence(ao)
+    restarted = ("muji_started", "room@conf", False) in c.events
+    return (started_video, no_ended_yet, started_count == 1,
+            ended_video, dropped, restarted)
+
+
+_sp_video, _sp_no_ended, _sp_once, _sp_end, _sp_dropped, _sp_restart = \
+    _muji_started_peer_result()
+check("a peer starting a conference emits muji_started(video)", _sp_video)
+check("muji_started does not report an end", _sp_no_ended)
+check("a conference start is reported only once", _sp_once)
+check("the peer leaving emits a video-aware muji_ended",
+      _sp_end and _sp_dropped)
+check("an ended conference can start again (audio-aware)", _sp_restart)
 
 
 def _muji_window_ui_result():

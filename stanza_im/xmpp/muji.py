@@ -45,6 +45,13 @@ class MujiConference:
     contents: dict = field(default_factory=dict)   # name -> media ("audio"/"video")
     participants: dict = field(default_factory=dict)  # nick -> MujiParticipant
 
+    def has_video(self) -> bool:
+        """True when this conference advertises a video content."""
+        if "video" in (self.contents or {}).values():
+            return True
+        return any("video" in (p.contents or {}).values()
+                   for p in self.participants.values())
+
 
 class MujiManager:
     """Coordinates Muji conferences for one :class:`JabberClient`."""
@@ -52,7 +59,30 @@ class MujiManager:
     def __init__(self, client):
         self.client = client
         self.conferences: dict[str, MujiConference] = {}
+        # Rooms whose conference start has already been reported, so the
+        # "started" status line is written once per conference lifetime.
+        self._started: set[str] = set()
         logger.info("MUJI manager ready")
+
+    def _maybe_emit_started(self, room: str) -> None:
+        """Emit ``muji_started(room, video)`` when a conference becomes active.
+
+        Uses the same predicate as the MUC call-button indicator — *joined*
+        ourselves or any other participant in the room — so the "started"
+        status line appears exactly when the indicator lights up, including
+        when a peer starts a conference we are not in.
+        """
+        if room in self._started:
+            return
+        conf = self.conferences.get(room)
+        if conf is None:
+            return
+        active = bool(conf.joined) or any(
+            nick != conf.self_nick for nick in conf.participants)
+        if not active:
+            return
+        self._started.add(room)
+        self.client.emit("muji_started", room, conf.has_video())
 
     # ── MUC presence (XEP-0272 §3/§5/§6) ──────────────────────────
     def handle_presence(self, pres) -> bool:
@@ -95,6 +125,7 @@ class MujiManager:
         logger.debug("MUJI presence %s/%s preparing=%s contents=%s",
                      room, nick, participant.preparing, contents)
         self.client.emit("muji_updated", room)
+        self._maybe_emit_started(room)
         return True
 
     @staticmethod
@@ -111,6 +142,7 @@ class MujiManager:
         conf = self.conferences.get(room)
         if conf is None:
             return False
+        video = conf.has_video()
         participant = conf.participants.pop(nick, None)
         bare = ""
         if participant is not None and participant.real_jid:
@@ -140,7 +172,8 @@ class MujiManager:
         self.client.emit("muji_updated", room)
         if not conf.joined and not conf.participants:
             self.conferences.pop(room, None)
-            self.client.emit("muji_ended", room)
+            self._started.discard(room)
+            self.client.emit("muji_ended", room, video)
         return True
 
     def forget_session(self, room: str, peer_full_jid: str) -> None:
@@ -194,6 +227,7 @@ class MujiManager:
         logger.info("MUJI session peer %s (%s) recorded in %s",
                     peer_full_jid, nick, room)
         self.client.emit("muji_updated", room)
+        self._maybe_emit_started(room)
 
     @staticmethod
     def _participant_for_bare(conf: MujiConference, bare: str):
@@ -254,6 +288,7 @@ class MujiManager:
         if conf is None:
             return
         logger.info("MUJI leaving %s", room)
+        video = conf.has_video()
         self._send_presence(room, conf.self_nick, clearing=True)
         # Keep the room record while other participants keep their conference
         # alive, so the MUC call indicator stays lit until the last one leaves.
@@ -263,7 +298,8 @@ class MujiManager:
             conf.participants.pop(conf.self_nick, None)
         if not conf.participants:
             self.conferences.pop(room, None)
-            self.client.emit("muji_ended", room)
+            self._started.discard(room)
+            self.client.emit("muji_ended", room, video)
         self.client.rtp_calls.end_muji(room)
         self.client.emit("muji_left", room)
 
