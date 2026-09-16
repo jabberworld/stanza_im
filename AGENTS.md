@@ -423,13 +423,19 @@ persisted under `map.window`.
 **xmpp: URIs & vCard copy (XEP-0147, `include/xmpp_uri.py`)**:
 `xmpp:<jid>[?<action>[;param=val…]]` URIs in message bodies are linkified
 (`include/utils.tokenize_urls` for QWebEngine, `geo.escape_body_with_geo` for
-the QTextBrowser fallback). Clicking them emits `ChatWidget.xmpp_link_clicked`
+the QTextBrowser fallback). Clicking them never navigates: the `_ACTION_JS`
+document handler preventDefaults the anchor and the always-running scroll poll
+delivers the `xmpp:` href to Python as a `link_clicked` (the same defensive
+relay as reply/edit/mention/geo), so the chat document is never reset by the
+click. It then emits `ChatWidget.xmpp_link_clicked`
 → `ChatWindow.xmpp_link_clicked` → `MainWindow._on_xmpp_uri`:
 bare JID / `?message` opens the chat (prefilling `body`), `?join` opens the
 conference join dialog (prepopulating room+server and persisting the server),
 `?roster`/`?subscribe` open `AddContactDialog` prefilled with the JID.
-Unrecognized actions warn the user. The vCard dialog has a "Copy XMPP address"
-button (`make_xmpp_uri(jid)` → clipboard); the conference roster context menu
+Unrecognized actions warn the user. The vCard dialog shows its JID with an
+icon-only copy button right beside the address (toolbar-style
+`QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",
+`make_xmpp_uri(jid)` → clipboard); the conference roster context menu
 copies `xmpp:<jid>?join`. Failed vCard fetches emit `vcard_error` on the event
 bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.

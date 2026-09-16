@@ -1302,16 +1302,21 @@ class GroupChatInfo:     # room, nick, subject, users
   preserved on round trips.
 - **In chat bodies** — `tokenize_urls` (`include/utils.py`, QWebEngine path)
   and `escape_body_with_geo` (`include/geo.py`, QTextBrowser fallback) turn
-  `xmpp:` URIs into clickable `<a>` anchors; `ChatWidget.xmpp_link_clicked`
+  `xmpp:` URIs into clickable `<a>` anchors. In the WebEngine view a click is
+  preventDefaulted by the `_ACTION_JS` document handler and relayed through the
+  always-running scroll poll as a `link_clicked` (the same defensive relay as
+  reply/edit/mention/geo, so the chat document is never reset by the click);
+  `ChatWidget.xmpp_link_clicked`
   forwards them through `ChatWindow` to `MainWindow._on_xmpp_uri`.
 - **Actions** — bare JID / `?message` opens the chat (a `body`/`thread` param
   is prefilled into the input), `?join` focuses the open room or prefills
   `JoinConferenceDialog` with the room (and persists the server in
   `connection.conference_servers` on accept), `?roster`/`?subscribe` open
   `AddContactDialog` prefilled with the JID, and unrecognized actions warn.
-- **Copy to clipboard** — the vCard dialog ("Copy XMPP address") copies
-  `xmpp:<jid>`; the conference roster context menu ("Copy conference address")
-  copies `xmpp:<jid>?join`.
+- **Copy to clipboard** — the vCard dialog shows an icon-only copy button
+  right beside the JID address (`copy.svg`, tooltip "Copy XMPP address")
+  copying `xmpp:<jid>`; the conference roster context menu ("Copy conference
+  address") copies `xmpp:<jid>?join`.
 
 ## 15. i18n System (`i18n/`)
 

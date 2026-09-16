@@ -1,9 +1,12 @@
 """vCard (XEP-0054) display and editing dialogs."""
 from __future__ import annotations
 
+import os
+
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import ACTIONS_DIR_16
 
 
 def _photo_pixmap(card: dict, size: int = 96) -> QtGui.QIcon:
@@ -56,9 +59,20 @@ class VCardInfoDialog(QtWidgets.QDialog):
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         subtitle = QtWidgets.QLabel(card.get("jid") or jid)
         subtitle.setStyleSheet("color: gray;")
+        copy_btn = QtWidgets.QToolButton()
+        copy_btn.setIcon(QtGui.QIcon(
+            os.path.join(ACTIONS_DIR_16, "copy.svg")))
+        copy_btn.setIconSize(QtCore.QSize(16, 16))
+        copy_btn.setAutoRaise(True)
+        copy_btn.setToolTip(tr("vcard_copy_jid"))
+        copy_btn.clicked.connect(self._copy_jid)
+        jid_row = QtWidgets.QHBoxLayout()
+        jid_row.addWidget(subtitle)
+        jid_row.addWidget(copy_btn)
+        jid_row.addStretch(1)
         head_col = QtWidgets.QVBoxLayout()
         head_col.addWidget(title)
-        head_col.addWidget(subtitle)
+        head_col.addLayout(jid_row)
         head_col.addStretch()
         head.addLayout(head_col, 1)
         layout.addLayout(head)
@@ -92,10 +106,6 @@ class VCardInfoDialog(QtWidgets.QDialog):
             QtWidgets.QDialogButtonBox.StandardButton.Close)
         btn.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
             tr("dialog_ok"))
-        copy_btn = btn.addButton(
-            tr("vcard_copy_jid"),
-            QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
-        copy_btn.clicked.connect(self._copy_jid)
         btn.rejected.connect(self.reject)
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
