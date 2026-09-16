@@ -718,7 +718,14 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   X11BypassWindowManagerHint | WindowDoesNotAcceptFocus`) with an icon, bold
   title and word-wrapped body; clicking dismisses (and may focus the chat).
   Frame and label children are mouse-transparent so drags and clicks reach the
-  window itself, and each window is raised on show/restack.
+  window itself, and each window is raised on show/restack. The bubble
+  (rounded background using `appearance.osd_bg_color`/`osd_font_color`/
+  `osd_opacity` and a 1px border) is drawn in `_OsdWindow.paintEvent`. When
+  `compositing_available()` finds no X11 compositor (no `_NET_WM_CM_S0` owner),
+  a desktop snapshot (`_grab_region` → `QScreen.grabWindow`, refreshed on spawn
+  and on preview drag while hidden) is painted under the bubble so opacity still
+  looks transparent rather than black; Wayland/unknown platforms always
+  composite with plain alpha.
 - All windows dock to a saved base position (`notifications.osd_x/osd_y`, the
   position of the first notification) and stack from it: top-down when
   `osd_topdown` is on (second below, third below that), otherwise upward
@@ -1120,7 +1127,8 @@ client.leave_muji(room)
   that publishes via `publish_mood`/`publish_activity` and persists
   `status.mood`/`status.activity` (republished on `session_started`); its actions
   are checkable and `MainWindow._sync_pep_checks` (on `aboutToShow`) marks the
-  active mood/activity (like the tray status menu). The `edit.png` button opens
+  active mood/activity, including the first-level activity group entries
+  (`submenu.menuAction()`), like the tray status menu. The `edit.png` button opens
   `StatusMessageDialog` (multiline, preloaded from
   `status.message`); the edited text is sent with presence.
 - Contacts' mood/activity/tune/location are shown in the roster tooltip

@@ -1646,22 +1646,27 @@ def _pep_menu_check_result():
                and mw._mood_actions["happy"].isChecked()
                and not mw._mood_actions[""].isChecked())
     sub_ok = mw._activity_actions[("relaxing", "partying")].isChecked()
+    group_icon_ok = (
+        mw._activity_group_menus["relaxing"].menuAction().isChecked()
+        and not mw._activity_group_menus["working"].menuAction().isChecked())
     mw._config.status.activity = "working"
     mw._sync_pep_checks()
     group_ok = (mw._activity_actions[("working", "")].isChecked()
-                and not mw._activity_actions[("relaxing", "partying")].isChecked())
+                and not mw._activity_actions[("relaxing", "partying")].isChecked()
+                and mw._activity_group_menus["working"].menuAction().isChecked())
     mw._config.status.mood = ""
     mw._config.status.activity = ""
     mw._sync_pep_checks()
     none_ok = (mw._mood_actions[""].isChecked()
                and mw._activity_actions[("", "")].isChecked())
     mw.close()
-    return mood_ok, sub_ok, group_ok, none_ok
+    return mood_ok, sub_ok, group_icon_ok, group_ok, none_ok
 
 
-_pep_mood, _pep_sub, _pep_group, _pep_none = _pep_menu_check_result()
+_pep_mood, _pep_sub, _pep_icon, _pep_group, _pep_none = _pep_menu_check_result()
 check("PEP menu checks the active mood", _pep_mood)
 check("PEP menu checks the active activity sub-type", _pep_sub)
+check("PEP menu checks the first-level activity group icon", _pep_icon)
 check("PEP menu checks a group-only activity", _pep_group)
 check("PEP menu checks the 'None' entries when cleared", _pep_none)
 

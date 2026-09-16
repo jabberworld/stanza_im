@@ -3320,6 +3320,7 @@ class MainWindow(QtWidgets.QMainWindow):
         activity_icons = pep.activity_icons()
         self._mood_actions: dict[str, QtGui.QAction] = {}
         self._activity_actions: dict[tuple, QtGui.QAction] = {}
+        self._activity_group_menus: dict[str, QtWidgets.QMenu] = {}
 
         mood_menu = menu.addMenu(self._pep_icon({}, "", "mood"), tr("pep_mood"))
         clear = mood_menu.addAction(self._pep_icon({}, "", "mood"),
@@ -3350,6 +3351,9 @@ class MainWindow(QtWidgets.QMainWindow):
             submenu = activity_menu.addMenu(
                 self._pep_icon(activity_icons, group, "activity"),
                 tr("activity_group_%s" % group))
+            # Highlight the first-level group entry (its icon) too.
+            submenu.menuAction().setCheckable(True)
+            self._activity_group_menus[group] = submenu
             group_action = submenu.addAction(
                 self._pep_icon(activity_icons, group, "activity"),
                 tr("activity_group_%s" % group))
@@ -3382,6 +3386,8 @@ class MainWindow(QtWidgets.QMainWindow):
         target = (group, sub) if group and sub else (group, "")
         for key, action in getattr(self, "_activity_actions", {}).items():
             action.setChecked(key == target)
+        for name, submenu in getattr(self, "_activity_group_menus", {}).items():
+            submenu.menuAction().setChecked(name == target[0])
 
     def _rebuild_pep_menu(self) -> None:
         if getattr(self, "_pep_btn", None) is not None:

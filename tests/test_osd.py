@@ -55,6 +55,30 @@ check("osd defaults present",
       and n.osd_status == "available" and n.osd_conference == "mention"
       and n.osd_x == 0 and n.osd_y == 0)
 
+# 1b. no-compositor backdrop fallback ---------------------------------------
+from stanza_im.ui.osd import compositing_available, _OsdWindow, _grab_region
+
+check("compositing_available returns a bool",
+      isinstance(compositing_available(), bool))
+
+_bd = _OsdWindow(None, "t", "b", bg_color="#123456",
+                 font_color="#ffffff", opacity=50)
+_bd.resize(120, 40)
+_pix = QtGui.QPixmap(120, 40)
+_pix.fill(QtGui.QColor("#00ff00"))
+_bd.set_backdrop(_pix)
+check("osd backdrop stored", _bd._backdrop is _pix)
+_img = QtGui.QImage(120, 40, QtGui.QImage.Format.Format_ARGB32)
+_img.fill(QtGui.QColor(0, 0, 0, 0))
+_bd.render(_img)   # must not raise with a backdrop
+_bd.set_backdrop(None)
+check("osd backdrop cleared", _bd._backdrop is None)
+_bd.deleteLater()
+
+_grab = _grab_region(QtCore.QPoint(0, 0), QtCore.QSize(32, 32))
+check("_grab_region tolerates a failed grab",
+      _grab is None or isinstance(_grab, QtGui.QPixmap))
+
 # 2. stacking math -----------------------------------------------------------
 check("topdown base", stack_position(0, 100, [40, 40], True) == 100)
 check("topdown below", stack_position(1, 100, [40, 60], True) ==

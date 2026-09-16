@@ -17,6 +17,76 @@ logger = logging.getLogger(__name__)
 _OSD_WIDTH = 280
 _OSD_GAP = 8
 _MIN_HEIGHT = 14
+_RADIUS = 8
+
+
+def _x11_compositor_running() -> bool:
+    """True when an X11 compositing manager owns ``_NET_WM_CM_S0``."""
+    import ctypes
+    try:
+        lib = ctypes.cdll.LoadLibrary("libX11.so.6")
+    except OSError:
+        return True
+    try:
+        lib.XOpenDisplay.restype = ctypes.c_void_p
+        lib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        display = lib.XOpenDisplay(None)
+        if not display:
+            return True
+        try:
+            lib.XInternAtom.restype = ctypes.c_ulong
+            lib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                        ctypes.c_int]
+            lib.XGetSelectionOwner.restype = ctypes.c_ulong
+            lib.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            atom = lib.XInternAtom(display, b"_NET_WM_CM_S0", False)
+            return bool(lib.XGetSelectionOwner(display, atom))
+        finally:
+            lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            lib.XCloseDisplay(display)
+    except Exception:
+        return True
+
+
+def compositing_available() -> bool:
+    """True when the platform composites per-window alpha.
+
+    Wayland and unknown platforms always composite; on X11 it depends on a
+    running compositing manager.  Without one the OSD would show black where
+    it is translucent, so a screen-snapshot backdrop is used instead.
+    """
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return True
+    platform = (app.platformName() or "").lower()
+    if platform.startswith("wayland") or not platform.startswith("xcb"):
+        return True
+    return _x11_compositor_running()
+
+
+def _grab_region(pos: QtCore.QPoint, size: QtCore.QSize):
+    """Snapshot the screen area at *pos* (logical coords); None on failure."""
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return None
+    screen = app.screenAt(pos) or app.primaryScreen()
+    if screen is None:
+        return None
+    try:
+        shot = screen.grabWindow(0)
+    except Exception:
+        return None
+    if shot is None or shot.isNull() or size.width() <= 0 or size.height() <= 0:
+        return None
+    origin = screen.geometry().topLeft()
+    dpr = shot.devicePixelRatio() or 1.0
+    x = int((pos.x() - origin.x()) * dpr)
+    y = int((pos.y() - origin.y()) * dpr)
+    w = int(size.width() * dpr)
+    h = int(size.height() * dpr)
+    if x < 0 or y < 0 or x + w > shot.width() or y + h > shot.height():
+        return None
+    return shot.copy(QtCore.QRect(x, y, w, h))
 
 
 def stack_position(index: int, base_y: int, heights,
@@ -39,26 +109,19 @@ class _OsdWindow(QtWidgets.QWidget):
     """A single OSD bubble (optionally draggable for the preview)."""
 
     def _stylesheet(self) -> str:
-        alpha = int(round(max(0, min(100, self._opacity)) * 255 / 100))
-        bg = QtGui.QColor(self._bg_color) if self._bg_color else \
-            QtGui.QColor(40, 40, 40)
-        if not bg.isValid():
-            bg = QtGui.QColor(40, 40, 40)
         fg = QtGui.QColor(self._font_color) if self._font_color else \
             QtGui.QColor(255, 255, 255)
         if not fg.isValid():
             fg = QtGui.QColor(255, 255, 255)
         css = (
-            "#osd-frame { background: rgba(%d, %d, %d, %d); border: 1px solid "
-            "rgba(255, 255, 255, 90); border-radius: 8px; }"
+            "#osd-frame { background: transparent; border: none; }"
             "#osd-frame QLabel { color: %s; background: transparent; }"
             "#osd-title { font-weight: bold; font-size: 13px; }"
             "#osd-body { font-size: 12px; color: %s; }"
             "#osd-close { color: %s; background: transparent; border: 0; "
             "border-radius: 9px; font-size: 12px; font-weight: bold; }"
             "#osd-close:hover { background: rgba(255, 255, 255, 45); }"
-            % (bg.red(), bg.green(), bg.blue(), alpha,
-               fg.name(), fg.name(), fg.name()))
+            % (fg.name(), fg.name(), fg.name()))
         if self._family or self._size:
             fam = (self._family or "sans-serif").replace("'", "\\'").replace("\\", "\\\\")
             title_size = self._size or 13
@@ -67,6 +130,41 @@ class _OsdWindow(QtWidgets.QWidget):
                     "\n#osd-body {{ font-family: '{0}'; font-size: {2}pt; }}"
                     .format(fam, title_size, body_size))
         return css
+
+    def _bubble_color(self) -> QtGui.QColor:
+        bg = QtGui.QColor(self._bg_color) if self._bg_color else \
+            QtGui.QColor(40, 40, 40)
+        if not bg.isValid():
+            bg = QtGui.QColor(40, 40, 40)
+        bg.setAlpha(int(round(max(0, min(100, self._opacity)) * 255 / 100)))
+        return bg
+
+    def paintEvent(self, event):
+        # The bubble is painted here (not via a stylesheet) so a no-compositor
+        # screen snapshot can be drawn underneath it.
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        rect = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QtGui.QPainterPath()
+        path.addRoundedRect(rect, _RADIUS, _RADIUS)
+        if self._backdrop is not None and not self._backdrop.isNull():
+            # Full-rect snapshot: the rounded corners then show the desktop
+            # (fake transparency) instead of an opaque window background.
+            painter.drawPixmap(self.rect(), self._backdrop)
+        painter.fillPath(path, self._bubble_color())
+        painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 90), 1.0))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, _RADIUS, _RADIUS)
+        painter.end()
+
+    def set_backdrop(self, pixmap) -> None:
+        self._backdrop = pixmap
+        self.update()
+
+    def load_backdrop(self) -> None:
+        """Capture the desktop behind the hidden window (no-compositor mode)."""
+        self._backdrop = _grab_region(self.pos(), self.size())
+        self.update()
 
     def __init__(self, icon, title: str, body: str, draggable: bool = False,
                  family: str = "", size: int = 0, bg_color: str = "",
@@ -77,6 +175,7 @@ class _OsdWindow(QtWidgets.QWidget):
         self._bg_color = bg_color or ""
         self._font_color = font_color or ""
         self._opacity = int(opacity)
+        self._backdrop = None
         self.setWindowFlags(
             QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.FramelessWindowHint
@@ -178,6 +277,7 @@ class _OsdWindow(QtWidgets.QWidget):
         frame = getattr(self, "_frame", None)
         if frame is not None:
             frame.setStyleSheet(self._stylesheet())
+        self.update()
 
     def _click(self) -> None:
         cb = self._on_clicked
@@ -223,7 +323,14 @@ class _OsdWindow(QtWidgets.QWidget):
                 pass
         # Manual move: reliable on X11 (the window is override-redirect) and
         # a safe fallback for any other platform.
-        self.move(event.globalPosition().toPoint() - self._drag_offset)
+        target = event.globalPosition().toPoint() - self._drag_offset
+        if self._backdrop is not None:
+            # Snapshot the destination before moving (so we don't capture
+            # ourselves) to keep the fake transparency current.
+            shot = _grab_region(target, self.size())
+            if shot is not None:
+                self._backdrop = shot
+        self.move(target)
         if self._on_moved:
             self._on_moved(self.x(), self.y())
 
@@ -358,6 +465,13 @@ class OsdManager:
             timer.start(int(duration * 1000))
             rec["timer"] = timer
         self._restack()
+        if not compositing_available():
+            # No compositor: fake transparency with a desktop snapshot taken
+            # while the window is hidden (so it does not capture itself).
+            win.hide()
+            win.load_backdrop()
+            win.show()
+            win.raise_()
         return rec
 
     def _dismiss(self, rec: dict) -> None:

@@ -59,12 +59,14 @@ from stanza_im.ui.osd import _OsdWindow
 _osd = _OsdWindow(None, "t", "b", bg_color="#112233",
                   font_color="#445566", opacity=50)
 _osd_ss = _osd._stylesheet()
-check("osd bg uses the configured color and opacity",
-      "rgba(17, 34, 51, 128)" in _osd_ss)
+_osd_bg = _osd._bubble_color()
+check("osd bubble uses the configured color and opacity",
+      (_osd_bg.red(), _osd_bg.green(), _osd_bg.blue(), _osd_bg.alpha())
+      == (17, 34, 51, 128))
 check("osd font color applied", "#445566" in _osd_ss)
 _osd.apply_style(bg_color="#000000", opacity=0)
-check("osd restyle updates the background",
-      "rgba(0, 0, 0, 0)" in _osd._stylesheet())
+check("osd restyle updates the bubble alpha",
+      _osd._bubble_color().alpha() == 0)
 _osd.deleteLater()
 
 # ── ChatThemeFactory chat background & highlight color ─────────────

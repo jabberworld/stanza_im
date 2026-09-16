@@ -286,7 +286,14 @@ per-event toggles: `osd_message` (1:1 + private, only while the chat window is
 not the active window on that conversation), `osd_typing`, `osd_status`
 (`never`/`available`/`any`, skipping the initial presence sync),
 `osd_conference` (`never`/`mention`/`all`), plus the `_notify_osd_file` entry
-point wired for future p2p file transfers.
+point wired for future p2p file transfers. The bubble (rounded background +
+`osd_opacity`, border) is painted in `_OsdWindow.paintEvent`; when
+`compositing_available()` finds **no** X11 compositor (`_NET_WM_CM_S0` has no
+owner, checked via `libX11`/ctypes), the same paint draws a desktop snapshot
+grabbed by `_grab_region` (`QScreen.grabWindow`, refreshed on spawn and on
+preview drag while the window is hidden) so the opacity still looks transparent
+instead of black; Wayland/unknown platforms always composite and use plain
+alpha.
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The
@@ -500,7 +507,8 @@ clear entry) that calls `client.publish_mood`/`publish_activity` and persists
 to `status.mood` / `status.activity` (republished on `session_started` via
 `MainWindow._republish_pep`); the menu's actions are checkable and
 `_sync_pep_checks` (on `aboutToShow`) marks the currently active mood/activity,
-like the tray status menu. An `edit.png` button opens
+including the first-level activity group entries (`submenu.menuAction()`), like
+the tray status menu. An `edit.png` button opens
 `ui/status_message_dialog.StatusMessageDialog` (multiline, preloaded from
 `status.message`) whose result is sent with presence (`MainWindow._send_presence`).
 Contacts' mood/activity/tune/location are shown in the roster tooltip
