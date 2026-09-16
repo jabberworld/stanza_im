@@ -1670,6 +1670,34 @@ check("PEP menu checks the first-level activity group icon", _pep_icon)
 check("PEP menu checks a group-only activity", _pep_group)
 check("PEP menu checks the 'None' entries when cleared", _pep_none)
 
+
+def _keep_csi_active_result():
+    mw = MainWindow(app)
+    mw._idle_timer.stop()
+    conn = mw._config.connection
+    notif = mw._config.notifications
+    conn.csi_keep_active_for_typing_osd = True
+    notif.osd_enabled = True
+    notif.osd_typing = True
+    enabled = mw._keep_csi_active_for_typing_osd()
+    notif.osd_typing = False
+    typing_off = mw._keep_csi_active_for_typing_osd()
+    notif.osd_typing = True
+    notif.osd_enabled = False
+    osd_off = mw._keep_csi_active_for_typing_osd()
+    conn.csi_keep_active_for_typing_osd = False
+    default_off = mw._keep_csi_active_for_typing_osd()
+    mw.close()
+    return enabled, typing_off, osd_off, default_off
+
+
+_csi_on, _csi_typing_off, _csi_osd_off, _csi_default = \
+    _keep_csi_active_result()
+check("CSI stays active when the option and typing OSD are on", _csi_on)
+check("CSI option is ignored without typing OSD", not _csi_typing_off)
+check("CSI option is ignored without OSD enabled", not _csi_osd_off)
+check("CSI option is off by default", not _csi_default)
+
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")
 sys.exit(1 if FAILURES else 0)

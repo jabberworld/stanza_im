@@ -1066,6 +1066,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.call_devices = self._call_device_config()
             self._client.call_auto_accept = bool(getattr(
                 getattr(self._config, "calls", None), "auto_accept", False))
+            csi = bool(getattr(self._config.connection, "csi", True))
+            if csi != bool(self._client.csi):
+                self._client.set_csi_config(csi)
+            self._update_csi()
         self._apply_roster_font()
         roster_opts = (
             bool(getattr(self._config.appearance, "roster_show_avatars", True)),
@@ -1403,12 +1407,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_csi_enabled(self):
         self._update_csi()
 
+    def _keep_csi_active_for_typing_osd(self) -> bool:
+        """Keep the client 'active' so typing OSDs are not server-buffered."""
+        connection = getattr(self._config, "connection", None)
+        notifications = getattr(self._config, "notifications", None)
+        if connection is None or notifications is None:
+            return False
+        return (bool(getattr(connection, "csi_keep_active_for_typing_osd", False))
+                and bool(getattr(notifications, "osd_enabled", False))
+                and bool(getattr(notifications, "osd_typing", False)))
+
     def _update_csi(self):
         """Send the current activity state (XEP-0352) to the server."""
         if self._client is None:
             return
         active = (self.app.applicationState()
                   == QtCore.Qt.ApplicationState.ApplicationActive)
+        if not active and self._keep_csi_active_for_typing_osd():
+            active = True
         self._client.set_client_active(active)
 
     def _set_tray_status_icon(self, show: str):

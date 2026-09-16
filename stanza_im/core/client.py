@@ -400,6 +400,7 @@ class JabberClient:
         self._client_active = True
         self._sm_resumed = False
         self._csi_enabled = False
+        self._csi_handler_registered = bool(csi)
         self.tls_mode = tls_mode
         self.starttls_mode = starttls_mode
         self._discovered: dict | None = None
@@ -817,6 +818,43 @@ class JabberClient:
             return
         self._client_active = active
         self._sync_csi()
+
+    def set_csi_config(self, enabled: bool) -> None:
+        """Apply the CSI preference to the live connection (no restart)."""
+        enabled = bool(enabled)
+        if enabled == self.csi:
+            return
+        self.csi = enabled
+        plugin = self.xmpp.plugin.get("xep_0352")
+        if enabled:
+            if plugin is None:
+                self.xmpp.register_plugin("xep_0352")
+                plugin = self.xmpp.plugin.get("xep_0352")
+            if not self._csi_handler_registered:
+                self.xmpp.add_event_handler("csi_enabled", self._on_csi_enabled)
+                self._csi_handler_registered = True
+            if plugin is not None and "csi" in getattr(self.xmpp, "features", set()):
+                plugin.enabled = True
+                self._csi_enabled = True
+            logger.info("CSI enabled live (server supports=%s)",
+                        "csi" in getattr(self.xmpp, "features", set()))
+            self._sync_csi()
+            self.emit("csi_enabled")
+        else:
+            if plugin is not None and self._csi_enabled:
+                try:
+                    # Stop the server from buffering; it must think we are active.
+                    plugin.send_active()
+                except Exception:
+                    logger.debug("CSI send_active failed", exc_info=True)
+            self._csi_enabled = False
+            if plugin is not None:
+                try:
+                    self.xmpp.unregister_plugin("xep_0352")
+                except Exception:
+                    logger.debug("CSI unregister failed", exc_info=True)
+            logger.info("CSI disabled live")
+            self.emit("connection_info", self.connection_info())
 
     def _sync_csi(self) -> None:
         """Send the current CSI state if the server supports it."""

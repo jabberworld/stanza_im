@@ -290,11 +290,14 @@ point wired for future p2p file transfers. The bubble (rounded background +
 `osd_opacity`, border) is painted in `_OsdWindow.paintEvent`. When
 `compositing_available()` finds **no** X11 compositor (`_NET_WM_CM_S0` has no
 owner, checked via `libX11`/ctypes) **and** the opacity is below 100 %,
-`_refresh_backdrop()` snaps the desktop area behind the window (`_grab_region`,
-a region-only `QScreen.grabWindow` with a full-grab+crop fallback; refreshed on
-spawn and on preview drag while the window is briefly hidden) and paints it
-under the translucent bubble so it looks transparent instead of black; at
-100 % opacity the whole rectangle is filled with the bubble color (straight
+`_refresh_backdrop()` snaps the desktop area behind the window
+(`_grab_region`): it tries a region `QScreen.grabWindow(0, x, y, w, h)`, but a
+one-time probe compares it against `grabWindow(0)` cropped to the same area
+(`_region_matches`) and permanently falls back to the full-grab+crop path when
+the platform ignores the region offsets; the snapshot is refreshed on spawn, on
+preview drag and after every `_restack` (windows are briefly hidden) — and
+painted under the translucent bubble so it looks transparent instead of black;
+at 100 % opacity the whole rectangle is filled with the bubble color (straight
 corners) and no snapshot is taken. Wayland/unknown platforms always composite
 and use plain alpha.
 
@@ -789,7 +792,15 @@ text is kept. Returning activity (`eventFilter`) resumes
   `QApplication.applicationState() == ApplicationActive` through an application
   `eventFilter` (`ApplicationStateChange`/`WindowActivate`/`WindowDeactivate`)
   plus the show/hide/toggle/Esc/close hooks, and re-sends the state on
-  `session_start`/`session_resumed`/`csi_enabled`.
+  `session_start`/`session_resumed`/`csi_enabled`. The preference applies live
+  (no restart): `JabberClient.set_csi_config()` (un)registers the plugin and
+  sends `<active/>` on disable; MainWindow calls it from `_on_settings_applied`.
+  Because a server holds non-urgent stanzas (chat states) while the client is
+  inactive, the optional `connection.csi_keep_active_for_typing_osd` (default
+  off, Preferences → Connection → Advanced) keeps the client active while
+  `notifications.osd_enabled` **and** `osd_typing` are on
+  (`MainWindow._keep_csi_active_for_typing_osd`), so typing OSDs still arrive
+  with the window in the background.
 
 ### 10. Service discovery — file proxy & STUN/TURN (`core/discovery.py`)
 

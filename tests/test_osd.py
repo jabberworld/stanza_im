@@ -103,6 +103,47 @@ check("backdrop needed only below 100% without a compositor",
 check("no snapshot is kept at 100% opacity", _cleared)
 check("_refresh_backdrop tolerates a failed capture", _captured)
 
+# Region-grab reliability probe and restack backdrop refresh.
+_r1 = QtGui.QPixmap(4, 4)
+_r1.fill(QtGui.QColor("#112233"))
+_r2 = QtGui.QPixmap(4, 4)
+_r2.fill(QtGui.QColor("#112233"))
+_r3 = QtGui.QPixmap(4, 4)
+_r3.fill(QtGui.QColor("#332211"))
+check("_region_matches: identical regions match",
+      osd_mod._region_matches(_r1, _r2))
+check("_region_matches: different regions differ",
+      not osd_mod._region_matches(_r1, _r3))
+check("_region_matches: None is not a match",
+      not osd_mod._region_matches(None, _r1))
+
+_calls = []
+_orig_grab = osd_mod._grab_region
+_orig_comp = osd_mod.compositing_available
+
+
+def _fake_grab(pos, size):
+    _calls.append((pos.x(), pos.y()))
+    pm = QtGui.QPixmap(max(1, size.width()), max(1, size.height()))
+    pm.fill(QtGui.QColor("black"))
+    return pm
+
+
+osd_mod._grab_region = _fake_grab
+osd_mod.compositing_available = lambda: False
+try:
+    mgr = OsdManager(make_cfg())
+    mgr.show(None, "one", "first")
+    mgr.show(None, "two", "second")
+    refreshed = len(_calls) >= 3      # both spawns + the moved one
+    moved = len({y for _x, y in _calls}) >= 2
+    mgr.dismiss_all()
+finally:
+    osd_mod._grab_region = _orig_grab
+    osd_mod.compositing_available = _orig_comp
+check("restack refreshes backdrops of moved OSDs", refreshed)
+check("restacked OSD snapshots follow the new positions", moved)
+
 # 2. stacking math -----------------------------------------------------------
 check("topdown base", stack_position(0, 100, [40, 40], True) == 100)
 check("topdown below", stack_position(1, 100, [40, 60], True) ==

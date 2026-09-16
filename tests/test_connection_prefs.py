@@ -320,6 +320,9 @@ check("default stun_turn_manual empty", conn.stun_turn_manual == "")
 check("default keepalive=True", conn.keepalive is True)
 check("default tls_mode=prefer", conn.tls_mode == "prefer")
 check("default starttls_mode=always", conn.starttls_mode == "always")
+check("default csi=True", conn.csi is True)
+check("default csi_keep_active_for_typing_osd=False",
+      conn.csi_keep_active_for_typing_osd is False)
 
 
 # ── preferences apply and preserve manual values ──────────────────
@@ -362,6 +365,7 @@ controls["tls_mode"].setCurrentIndex(controls["tls_mode"].findData("normal"))
 controls["starttls_mode"].setCurrentIndex(
     controls["starttls_mode"].findData("opportunistic"))
 controls["keepalive"].setChecked(False)
+controls["csi_keep_active_for_typing_osd"].setChecked(True)
 controls["pep_sweep_interval"].setCurrentIndex(
     controls["pep_sweep_interval"].findData(120))
 dlg._apply_settings()
@@ -370,6 +374,8 @@ check("apply: tls_mode saved", cfg.connection.tls_mode == "normal")
 check("apply: starttls_mode saved",
       cfg.connection.starttls_mode == "opportunistic")
 check("apply: keepalive saved", cfg.connection.keepalive is False)
+check("apply: csi_keep_active saved",
+      cfg.connection.csi_keep_active_for_typing_osd is True)
 check("apply: pep sweep selector saved as int",
       cfg.connection.pep_sweep_interval == 120)
 
@@ -481,6 +487,74 @@ off_client = JabberClient("u@example.org", "p",
                           stream_management=False, csi=False)
 check("SM plugin absent when disabled", "xep_0198" not in off_client.xmpp.plugin)
 check("CSI plugin absent when disabled", "xep_0352" not in off_client.xmpp.plugin)
+
+
+# ── set_csi_config applies the preference live ────────────────────
+
+class _FakeCsiPlugin:
+    def __init__(self, xmpp):
+        self.xmpp = xmpp
+        self.enabled = False
+
+    def send_active(self):
+        self.xmpp.calls.append(("active",))
+
+    def send_inactive(self):
+        self.xmpp.calls.append(("inactive",))
+
+
+class _FakeCsiXmpp:
+    def __init__(self, features=("csi",)):
+        self.plugin = {}
+        self.features = set(features)
+        self.calls = []
+
+    def register_plugin(self, name):
+        self.plugin[name] = _FakeCsiPlugin(self)
+        self.calls.append(("register", name))
+
+    def unregister_plugin(self, name):
+        self.plugin.pop(name, None)
+        self.calls.append(("unregister", name))
+
+    def add_event_handler(self, event, *_args):
+        self.calls.append(("handler", event))
+
+
+def _csi_client(csi):
+    client = object.__new__(JabberClient)
+    client.csi = bool(csi)
+    client._csi_enabled = False
+    client._csi_handler_registered = bool(csi)
+    client._client_active = True
+    client.xmpp = _FakeCsiXmpp()
+    client._events = []
+    client.emit = lambda *a: client._events.append(a)
+    client.connection_info = lambda: {"mode": "plain"}
+    if csi:
+        client.xmpp.register_plugin("xep_0352")
+    return client
+
+
+_en = _csi_client(csi=False)
+_en.xmpp._session_started = True
+_en.set_csi_config(True)
+check("set_csi_config(True) registers the plugin",
+      "xep_0352" in _en.xmpp.plugin)
+check("set_csi_config(True) enables CSI on a supporting server",
+      _en.csi is True and _en._csi_enabled is True)
+check("set_csi_config(True) emits csi_enabled",
+      ("csi_enabled",) in _en._events)
+
+_dis = _csi_client(csi=True)
+_dis.xmpp._session_started = True
+_dis._csi_enabled = True
+_dis.set_csi_config(False)
+check("set_csi_config(False) tells the server we are active",
+      ("active",) in _dis.xmpp.calls)
+check("set_csi_config(False) unregisters the plugin",
+      ("unregister", "xep_0352") in _dis.xmpp.calls
+      and _dis.csi is False and _dis._csi_enabled is False)
 
 # Event mapping slixmpp -> app.
 _events = []

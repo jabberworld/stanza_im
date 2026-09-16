@@ -138,6 +138,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `keepalive` | `true` | Send whitespace keep-alive packets |
 | `stream_management` | `true` | XEP-0198 resumption/acks |
 | `csi` | `true` | XEP-0352 active/inactive |
+| `csi_keep_active_for_typing_osd` | `false` | Keep the client active while `notifications.osd_typing` (and `osd_enabled`) are on, so servers do not buffer typing chat states |
 | `pep_sweep_interval` | `0` | Periodic XEP-0080/0107/0108/0118 sweep (s); `0` = off. Preferences presents a selector: Off / 30 s / 1 min / 2 min / 5 min |
 | `message_carbons` | `true` | XEP-0280 |
 | `file_proxy_mode` / `file_proxy_manual` | `auto` / — | XEP-0065 file proxy (JID) |
@@ -719,16 +720,18 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   title and word-wrapped body; clicking dismisses (and may focus the chat).
   Frame and label children are mouse-transparent so drags and clicks reach the
   window itself, and each window is raised on show/restack. The bubble
-  (  rounded background using `appearance.osd_bg_color`/`osd_font_color`/
+  (rounded background using `appearance.osd_bg_color`/`osd_font_color`/
   `osd_opacity` and a 1px border) is drawn in `_OsdWindow.paintEvent`. When
   `compositing_available()` finds no X11 compositor (no `_NET_WM_CM_S0` owner)
   and the opacity is below 100 %, a desktop snapshot is painted under the
-  bubble (`_grab_region`: a region-only `QScreen.grabWindow` with a
-  full-grab+crop fallback, refreshed on spawn and on preview drag while the
-  window is briefly hidden) so opacity still looks transparent rather than
-  black; at 100 % opacity the whole rectangle is filled with the bubble color
-  (straight corners) and no snapshot is taken. Wayland/unknown platforms always
-  composite with plain alpha.
+  bubble (`_grab_region`): it tries a region `QScreen.grabWindow(0, x, y, w, h)`,
+  but a one-time probe compares it against `grabWindow(0)` cropped to the same
+  area (`_region_matches`) and permanently falls back to the full-grab+crop path
+  when the platform ignores the region offsets; the snapshot is refreshed on
+  spawn, on preview drag and after every `_restack` (windows briefly hidden) so
+  opacity still looks transparent rather than black. At 100 % opacity the whole
+  rectangle is filled with the bubble color (straight corners) and no snapshot
+  is taken. Wayland/unknown platforms always composite with plain alpha.
 - All windows dock to a saved base position (`notifications.osd_x/osd_y`, the
   position of the first notification) and stack from it: top-down when
   `osd_topdown` is on (second below, third below that), otherwise upward
@@ -1006,7 +1009,13 @@ See `XEPs.md` for the full supported-extensions matrix.
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow recomputes activity from `QApplication.applicationState()` via an
   application event filter and the show/hide/toggle/Esc/close hooks, and
-  re-sends the state on `session_start`/`session_resumed`/`csi_enabled`.
+  re-sends the state on `session_start`/`session_resumed`/`csi_enabled`. The
+  preference is applied live by `JabberClient.set_csi_config()` (called from
+  `_on_settings_applied`): it registers/unregisters the plugin and sends
+  `<active/>` before disabling. Servers hold non-urgent chat states while the
+  client is inactive, so `connection.csi_keep_active_for_typing_osd` (default
+  off) forces active while `notifications.osd_typing` and `osd_enabled` are on
+  (`MainWindow._keep_csi_active_for_typing_osd`).
 
 ### 14.8 Service Discovery — File Proxy & STUN/TURN (`core/discovery.py`)
 

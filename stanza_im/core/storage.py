@@ -101,6 +101,7 @@ class Config:
                         "keepalive": True,
                         "stream_management": True,
                         "csi": True,
+                        "csi_keep_active_for_typing_osd": False,
                         "tls_mode": "prefer",
                         "starttls_mode": "always",
                         "pep_sweep_interval": 0,

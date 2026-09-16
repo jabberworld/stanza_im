@@ -64,13 +64,35 @@ def compositing_available() -> bool:
     return _x11_compositor_running()
 
 
+_REGION_GRAB_OK: bool | None = None
+
+
+def _region_matches(region, crop) -> bool:
+    """True when a region grab equals the same area cropped from a full grab."""
+    try:
+        ri = region.toImage()
+        ci = crop.toImage()
+    except Exception:
+        return False
+    if ri.isNull() or ci.isNull() or ri.size() != ci.size():
+        return False
+    width, height = ri.width(), ri.height()
+    samples = [(1, 1), (width // 2, height // 2), (width - 2, height - 2)]
+    for x, y in samples:
+        if 0 <= x < width and 0 <= y < height and ri.pixel(x, y) != ci.pixel(x, y):
+            return False
+    return True
+
+
 def _grab_region(pos: QtCore.QPoint, size: QtCore.QSize):
     """Snapshot the screen area at *pos* (logical coords); None on failure.
 
     Tries a region grab first; some platforms ignore ``x``/``y`` for
-    ``window == 0`` (returning the whole screen), so the result is validated
-    by size and falls back to a full grab cropped to the region.
+    ``window == 0`` (returning the top-left), so on the first capture the
+    region is compared against the same area cropped from a full grab and the
+    region path is disabled permanently if they differ.
     """
+    global _REGION_GRAB_OK
     app = QtWidgets.QApplication.instance()
     if app is None:
         return None
@@ -84,31 +106,44 @@ def _grab_region(pos: QtCore.QPoint, size: QtCore.QSize):
     lh = size.height()
     if lx < 0 or ly < 0:
         return None
-    try:
-        region = screen.grabWindow(0, lx, ly, lw, lh)
-    except Exception:
-        region = None
-    if region is not None and not region.isNull():
-        dpr = region.devicePixelRatio() or 1.0
-        for scale in (1.0, dpr):
-            if (abs(region.width() - lw * scale) <= 2
-                    and abs(region.height() - lh * scale) <= 2):
-                return region
-    # Fallback: grab the whole screen and crop.
-    try:
-        shot = screen.grabWindow(0)
-    except Exception:
-        return None
-    if shot is None or shot.isNull():
-        return None
-    dpr = shot.devicePixelRatio() or 1.0
-    x = int(lx * dpr)
-    y = int(ly * dpr)
-    w = int(lw * dpr)
-    h = int(lh * dpr)
-    if x + w > shot.width() or y + h > shot.height():
-        return None
-    return shot.copy(QtCore.QRect(x, y, w, h))
+
+    region = None
+    if _REGION_GRAB_OK is not False:
+        try:
+            candidate = screen.grabWindow(0, lx, ly, lw, lh)
+        except Exception:
+            candidate = None
+        if candidate is not None and not candidate.isNull():
+            dpr = candidate.devicePixelRatio() or 1.0
+            for scale in (1.0, dpr):
+                if (abs(candidate.width() - lw * scale) <= 2
+                        and abs(candidate.height() - lh * scale) <= 2):
+                    region = candidate
+                    break
+
+    crop = None
+    if region is None or _REGION_GRAB_OK is None:
+        try:
+            shot = screen.grabWindow(0)
+        except Exception:
+            shot = None
+        if shot is not None and not shot.isNull():
+            dpr = shot.devicePixelRatio() or 1.0
+            x = int(lx * dpr)
+            y = int(ly * dpr)
+            w = int(lw * dpr)
+            h = int(lh * dpr)
+            if (x >= 0 and y >= 0 and x + w <= shot.width()
+                    and y + h <= shot.height()):
+                crop = shot.copy(QtCore.QRect(x, y, w, h))
+
+    if _REGION_GRAB_OK is None and region is not None and crop is not None:
+        _REGION_GRAB_OK = _region_matches(region, crop)
+        if not _REGION_GRAB_OK:
+            logger.info("OSD region grab ignores position; using full-screen crop")
+    if _REGION_GRAB_OK is not False and region is not None:
+        return region
+    return crop
 
 
 def stack_position(index: int, base_y: int, heights,
@@ -567,5 +602,16 @@ class OsdManager:
         for index, rec in enumerate(active):
             y = stack_position(index, base.y(), heights, topdown, _OSD_GAP)
             win = rec["window"]
-            win.move(base.x(), y)
+            target = QtCore.QPoint(base.x(), y)
+            if win._backdrop is not None:
+                # Keep the fake-transparency snapshot aligned with the new
+                # position (hide first so we do not capture ourselves).
+                win.hide()
+                win.move(target)
+                shot = _grab_region(target, win.size())
+                if shot is not None:
+                    win._backdrop = shot
+                win.show()
+            else:
+                win.move(target)
             win.raise_()

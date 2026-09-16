@@ -585,6 +585,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         advanced_form.addRow(self._check(
             "stream_management", tr("prefs_stream_management")))
         advanced_form.addRow(self._check("csi", tr("prefs_csi")))
+        advanced_form.addRow(self._check(
+            "csi_keep_active_for_typing_osd", tr("prefs_csi_keep_active")))
         pep_interval = self._combo("pep_sweep_interval", [
             ("prefs_pep_sweep_off", 0),
             ("prefs_pep_sweep_30", 30),
@@ -1182,6 +1184,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "pep_sweep_interval": getattr(connection, "pep_sweep_interval", 0),
             "stream_management": getattr(connection, "stream_management", True),
             "csi": getattr(connection, "csi", True),
+            "csi_keep_active_for_typing_osd": getattr(
+                connection, "csi_keep_active_for_typing_osd", False),
             "tls_mode": getattr(connection, "tls_mode", "prefer"),
             "starttls_mode": getattr(connection, "starttls_mode", "always"),
             "host": connection.host, "port": connection.port,
@@ -1294,6 +1298,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._value("pep_sweep_interval") or 0)
         cfg.connection.stream_management = self._value("stream_management")
         cfg.connection.csi = self._value("csi")
+        cfg.connection.csi_keep_active_for_typing_osd = self._value(
+            "csi_keep_active_for_typing_osd")
         cfg.connection.message_carbons = self._value("message_carbons")
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)

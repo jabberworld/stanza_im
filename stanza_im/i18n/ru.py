@@ -379,6 +379,7 @@ STRINGS = {
     "prefs_keepalive": "Отправлять \"keep alive\"-пакеты",
     "prefs_stream_management": "Управление потоком (XEP-0198)",
     "prefs_csi": "Индикация состояния клиента (XEP-0352)",
+    "prefs_csi_keep_active": "Не переходить в inactive, пока показываются уведомления о печати (OSD)",
     "prefs_pep_sweep": "Периодический опрос активности PEP",
     "prefs_pep_sweep_off": "Выключено",
     "prefs_pep_sweep_30": "30 секунд",

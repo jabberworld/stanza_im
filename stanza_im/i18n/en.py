@@ -379,6 +379,7 @@ STRINGS = {
     "prefs_keepalive": "Send keep-alive packets",
     "prefs_stream_management": "Stream management (XEP-0198)",
     "prefs_csi": "Client state indication (XEP-0352)",
+    "prefs_csi_keep_active": "Stay active while typing notifications are shown (keeps OSD typing working)",
     "prefs_pep_sweep": "PEP activity poll interval",
     "prefs_pep_sweep_off": "Off",
     "prefs_pep_sweep_30": "30 seconds",
