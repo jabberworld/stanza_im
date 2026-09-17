@@ -367,9 +367,9 @@ class MujiManager:
                 continue
             logger.info("MUJI initiating session with %s (%s)",
                         participant.real_jid, nick)
-            self.client.rtp_calls.start_call(
+            self.client._start_task(self.client.rtp_calls.start_call(
                 participant.real_jid, video="video" in conf.contents.values(),
-                muji_room=room)
+                muji_room=room))
 
     # ── XEP-0482 call invites ─────────────────────────────────────
     def handle_invite_message(self, msg) -> bool:
