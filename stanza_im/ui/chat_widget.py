@@ -552,6 +552,9 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:view:"):
             self._handle_media_view_uri(url)
             return
+        if url.startswith("stanza:forward:"):
+            self._handle_forward_uri(url)
+            return
         if url.startswith("stanza:geo:"):
             self._handle_geo_uri(url)
             return
@@ -600,6 +603,12 @@ class ChatWidget(QtWidgets.QWidget):
         target = unquote(encoded) if encoded else ""
         if target:
             self.media_view_requested.emit(target, kind or "image", False)
+
+    def _handle_forward_uri(self, url: str) -> None:
+        """Decode ``stanza:forward:<text>`` and open the share window."""
+        content = unquote(url[len("stanza:forward:"):])
+        if content:
+            self.share_requested.emit(content)
 
     def _handle_geo_uri(self, url: str) -> None:
         """Open the map window for a ``stanza:geo:<ref>/<uri>`` or plain geo:."""

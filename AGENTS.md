@@ -337,10 +337,13 @@ tracking) and are evicted by `appearance.media_cache_days` (TTL) and
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the
-WebEngine `contextMenuEvent` builds the media menu (copy original link / Save
-as… / open viewer / fullscreen) and a "Share" entry from
-`page().contextMenuData()`; right-clicking a link or a text selection shows the
-same menu with «Поделиться» («Share»). Sharing (and an address-less
+WebEngine `contextMenuEvent` reads the request via
+`QWebEngineView.lastContextMenuRequest()` (Qt 6; the old
+`page().contextMenuData()` does not exist and silently fell back to the engine
+menu) and always builds its own menu — never Chromium's. Over media it keeps the
+copy/Save as…/open viewer/fullscreen entries; otherwise it offers «Поделиться»
+(«Share», only for `http(s)`), copy link / open in browser for a web link, copy
+for a selection, and "Select all". Sharing (and an address-less
 ``xmpp:?message;body=…`` URI) opens `ShareDialog` — a checkable list of the
 roster contacts and the conferences we are in — and sends each chosen target a
 `«Переслано:»` line followed by the content as a XEP-0393 quote
@@ -409,7 +412,12 @@ scroll poll delivers to Python as a `stanza:edit:<id>` ``link_clicked`` —
 editing never navigates, so the chat document is never reset); the body loads
 into the input with a cancelable editing banner and `_send` emits
 `message_edit_sent`, so the client sends `<replace id='…'/>` (fresh stanza id)
-and replaces the message locally (1:1) or via the MUC echo. A post-click
+and replaces the message locally (1:1) or via the MUC echo. The same message
+menu carries "Copy" and "Forward": the latter stores the whole message
+(`[time] sender: text`, or the media URL for a media-only message) as
+`window.__stanzaForwardRef` → the scroll poll delivers it as a
+`stanza:forward:<urlencoded>` ``link_clicked`` → `ChatWidget._handle_forward_uri`
+→ `share_requested`, i.e. the same `ShareDialog` flow. A post-click
 content probe (`_schedule_content_probe`/`_verify_after_click`) restores the
 window via `document_lost` if the conversation vanished. Incoming corrections
 replace (edited flag + a large bold «✎» appended right after the edited phrase

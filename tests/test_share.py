@@ -15,16 +15,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from urllib.parse import quote
+
 from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.core import client as client_mod
 from stanza_im.i18n import load as i18n_load
-from stanza_im.ui.chat_view import share_payload
+from stanza_im.ui import chat_themes
+from stanza_im.ui.chat_view import context_menu_values, share_payload
+from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.share_dialog import ShareDialog
 from stanza_im.ui.main_window import MainWindow
 from stanza_im.ui.roster_style import UserItem
 
 i18n_load("en")
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FAILURES = []
 
@@ -118,6 +124,68 @@ win._on_share_requested = lambda content: shared.append(content)
 win._on_xmpp_uri("xmpp:?message;body=https%3A%2F%2Fgultsch.de%2Fposts%2F")
 check("address-less xmpp: opens share with the body",
       shared == ["https://gultsch.de/posts/"])
+
+
+# 6. context menu data + source guards -------------------------------------
+class _FakeUrl:
+    def __init__(self, text):
+        self._text = text
+
+    def isEmpty(self):
+        return not self._text
+
+    def toString(self):
+        return self._text
+
+
+class _FakeMenuData:
+    def __init__(self, media="", link="", selected="", kind=""):
+        self._media = media
+        self._link = link
+        self._selected = selected
+        self._kind = kind
+
+    def mediaUrl(self):
+        return _FakeUrl(self._media)
+
+    def linkUrl(self):
+        return _FakeUrl(self._link)
+
+    def selectedText(self):
+        return self._selected
+
+    def mediaType(self):
+        return self._kind
+
+
+check("context_menu_values(None) is empty",
+      context_menu_values(None) == ("", "", "", ""))
+check("context_menu_values extracts url/link/text",
+      context_menu_values(_FakeMenuData(
+          media="https://img/x.png", link="https://page", selected="hi"))
+      == ("https://img/x.png", "", "https://page", "hi"))
+
+_view_src = open(os.path.join(_ROOT, "stanza_im/ui/chat_view.py"),
+                 encoding="utf-8").read()
+_widget_src = open(os.path.join(_ROOT, "stanza_im/ui/chat_widget.py"),
+                   encoding="utf-8").read()
+check("chat view reads lastContextMenuRequest",
+      "lastContextMenuRequest" in _view_src)
+check("chat view no longer reads page().contextMenuData()",
+      "contextMenuData" not in _view_src)
+check("chat view relays the per-message forward menu item",
+      "__stanzaForwardRef" in _view_src)
+check("chat widget routes stanza:forward URIs",
+      "stanza:forward:" in _widget_src)
+
+# 7. per-message "Forward" opens the share window ---------------------------
+cw = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+forwarded = []
+cw.share_requested.connect(lambda content: forwarded.append(content))
+cw._open_link("stanza:forward:" + quote("[10:00] Alice: hi"))
+check("stanza:forward opens the share window with the message text",
+      forwarded == ["[10:00] Alice: hi"])
+cw.close()
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

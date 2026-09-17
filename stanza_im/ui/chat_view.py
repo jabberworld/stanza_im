@@ -89,6 +89,43 @@ def share_payload(link_url: str, media_url: str, media_kind: str,
     return (selected_text or "").strip()
 
 
+def _media_type_name(media_type) -> str:
+    """Map QWebEngineContextMenuRequest.MediaType to image/audio/video."""
+    if not HAS_WEBENGINE or media_type is None:
+        return ""
+    from PyQt6 import QtWebEngineCore
+    enum = getattr(QtWebEngineCore.QWebEngineContextMenuRequest,
+                   "MediaType", None)
+    if enum is None:
+        return ""
+    for name in ("Image", "Audio", "Video"):
+        try:
+            if media_type == getattr(enum, name):
+                return name.lower()
+        except Exception:
+            pass
+    return ""
+
+
+def context_menu_values(data) -> tuple[str, str, str, str]:
+    """``(media_url, media_kind, link_url, selected_text)``.
+
+    *data* is the ``QWebEngineContextMenuRequest`` from
+    ``QWebEngineView.lastContextMenuRequest()`` (or ``None``); the helper also
+    works with a plain test double exposing the same methods.
+    """
+    if data is None:
+        return "", "", "", ""
+    media_url = ""
+    media = data.mediaUrl()
+    if media is not None and not media.isEmpty():
+        media_url = media.toString()
+    kind = _media_type_name(data.mediaType())
+    link_url = data.linkUrl().toString() if data.linkUrl() else ""
+    selected = data.selectedText() or ""
+    return media_url, kind, link_url, selected
+
+
 class _JumpButtonMixin:
     """Floating 'jump to bottom' button for either chat backend."""
 
@@ -176,20 +213,6 @@ if HAS_WEBENGINE:
         @QtCore.pyqtSlot(str, str, str, str)
         def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
             self.reply_requested.emit(reply_id, author, sender, snippet)
-
-    def _media_type_name(media_type) -> str:
-        """Map QWebEngineContextMenuRequest.MediaType to image/audio/video."""
-        enum = getattr(QtWebEngineCore.QWebEngineContextMenuRequest,
-                       "MediaType", None)
-        if enum is None:
-            return ""
-        for name in ("Image", "Audio", "Video"):
-            try:
-                if media_type == getattr(enum, name):
-                    return name.lower()
-            except Exception:
-                pass
-        return ""
 
     class _StanzaPage(QtWebEngineCore.QWebEnginePage):
         """QWebEnginePage that routes clicks to Python via navigation.
@@ -315,31 +338,18 @@ if HAS_WEBENGINE:
             """)
 
         def contextMenuEvent(self, event):
-            """Show the media/link/share menu when there is something to act on."""
+            """Show our own chat context menu (never the engine's)."""
             data = None
             try:
-                data = self.page().contextMenuData()
+                data = self.lastContextMenuRequest()
             except Exception:
-                data = None
-            media_url = ""
-            kind = ""
-            link_url = ""
-            selected = ""
-            if data is not None:
-                media = data.mediaUrl()
-                if media is not None and not media.isEmpty():
-                    media_url = media.toString()
-                kind = _media_type_name(data.mediaType())
-                link_url = data.linkUrl().toString() if data.linkUrl() else ""
-                selected = data.selectedText() or ""
+                logger.debug("lastContextMenuRequest failed", exc_info=True)
+            media_url, kind, link_url, selected = context_menu_values(data)
             content = share_payload(link_url, media_url, kind, selected)
             if media_url and kind:
                 self._show_media_menu(event, media_url, kind, content)
                 return
-            if link_url or selected:
-                self._show_link_menu(event, link_url, selected, content)
-                return
-            super().contextMenuEvent(event)
+            self._show_context_menu(event, link_url, selected, content)
 
         def _show_media_menu(self, event, url: str, kind: str,
                              share_content: str = "") -> None:
@@ -364,27 +374,37 @@ if HAS_WEBENGINE:
                             u, "video_fs"))
             menu.exec(event.globalPos())
 
-        def _show_link_menu(self, event, link_url: str, selected: str,
-                            share_content: str) -> None:
+        def _show_context_menu(self, event, link_url: str, selected: str,
+                               share_content: str) -> None:
+            """The standard chat menu: share / copy link / open / select all."""
             menu = QtWidgets.QMenu(self)
+            web_link = link_url.lower().startswith(("http://", "https://"))
             if share_content:
                 menu.addAction(
                     tr("ctx_share"),
                     lambda c=share_content: self.share_requested.emit(c))
-            if link_url:
+            if web_link:
                 menu.addAction(
                     tr("media_copy_link"),
                     lambda u=link_url: QtWidgets.QApplication.clipboard().setText(u))
-                if link_url.lower().startswith(("http://", "https://")):
-                    menu.addAction(
-                        tr("ctx_open_link"),
-                        lambda u=link_url: QtGui.QDesktopServices.openUrl(
-                            QtCore.QUrl(u)))
+                menu.addAction(
+                    tr("ctx_open_link"),
+                    lambda u=link_url: QtGui.QDesktopServices.openUrl(
+                        QtCore.QUrl(u)))
             elif selected:
                 menu.addAction(
                     tr("ctx_copy"),
                     lambda t=selected: QtWidgets.QApplication.clipboard().setText(t))
+            menu.addSeparator()
+            menu.addAction(tr("ctx_select_all"), self._select_all)
             menu.exec(event.globalPos())
+
+        def _select_all(self) -> None:
+            try:
+                self.triggerPageAction(
+                    QtWebEngineCore.QWebEnginePage.WebAction.SelectAll)
+            except Exception:
+                logger.debug("select all failed", exc_info=True)
 
         def _accept_navigation(self, url) -> bool:
             """Route a page navigation; return True to allow the load.
@@ -583,6 +603,7 @@ if HAS_WEBENGINE:
 
             var MENU_CLASS = 'stanza-menu';
             var EDIT_LABEL = %EDIT_LABEL%;
+            var FORWARD_LABEL = %FORWARD_LABEL%;
             var menu = null;
 
             function closeMenu() {
@@ -594,6 +615,7 @@ if HAS_WEBENGINE:
             window.__stanzaMediaRef = '';
 window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
+            window.__stanzaForwardRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -679,6 +701,30 @@ window.__stanzaMentionRef = '';
                     closeMenu();
                 });
                 menu.appendChild(item);
+                var fwd = document.createElement('button');
+                fwd.type = 'button';
+                fwd.textContent = FORWARD_LABEL || 'Forward';
+                fwd.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    // Never navigate: leave the whole message for the scroll
+                    // poll, which delivers it to Python as a link_clicked.
+                    var content = body;
+                    if (!content) {
+                        var media = wrap.querySelector(
+                            'a.stanza-media, a.stanza-media-open');
+                        if (media) {
+                            content = media.getAttribute('data-media-url')
+                                || media.getAttribute('href') || '';
+                        }
+                    }
+                    if (content) {
+                        window.__stanzaForwardRef = 'stanza:forward:'
+                            + encodeURIComponent(
+                                composeCopyText(sender, timeRaw, content));
+                    }
+                    window.setTimeout(closeMenu, 0);
+                });
+                menu.appendChild(fwd);
                 document.body.appendChild(menu);
                 var rect = menu.getBoundingClientRect();
                 var M = 4;
@@ -769,8 +815,9 @@ window.__stanzaMentionRef = '';
         """
 
         def _install_action_js(self):
-            code = self._ACTION_JS.replace(
-                "%EDIT_LABEL%", json.dumps(tr("chat_edit")))
+            code = (self._ACTION_JS
+                    .replace("%EDIT_LABEL%", json.dumps(tr("chat_edit")))
+                    .replace("%FORWARD_LABEL%", json.dumps(tr("chat_forward"))))
             self.page().runJavaScript(code)
 
         def _close_stanza_menu(self):
@@ -813,7 +860,7 @@ window.__stanzaMentionRef = '';
                 "window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
                 " window.__stanzaMediaRef || '',"
                 " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '',"
-                " window.__stanzaXmppRef || '']",
+                " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '']",
                 self._on_scroll_position,
             )
 
@@ -850,6 +897,12 @@ window.__stanzaMentionRef = '';
         def _clear_xmpp_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaXmppRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_forward_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaForwardRef = '';")
             except RuntimeError:
                 pass
 
@@ -910,6 +963,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_xmpp_ref = ""
+            if len(value) > 9 and isinstance(value[9], str) and value[9]:
+                self._clear_forward_request()
+                requested = value[9]
+                if requested != getattr(self, "_last_forward_ref", ""):
+                    self._last_forward_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_forward_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
