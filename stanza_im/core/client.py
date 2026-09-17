@@ -50,6 +50,7 @@ NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
+NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 
 
@@ -136,22 +137,49 @@ def _stanza_id(stanza, by: str) -> str:
 
 
 def muc_invite_from_message(msg) -> dict | None:
-    """Parse a XEP-0249 direct MUC invitation from *msg*.
+    """Parse a MUC invitation (XEP-0249 / XEP-0045 §7.8) from *msg*.
 
-    Returns a dict with ``frm`` (bare sender), ``room``, ``password`` and
-    ``reason``, or ``None`` when the stanza carries no invitation.
+    Returns a dict with ``inviter`` (the inviter's JID, or "" when the room
+    relayed the invitation without naming one), ``room``, ``password``,
+    ``reason`` and ``mediated``, or ``None`` when the stanza carries no
+    invitation.
+
+    A direct XEP-0249 invitation names the inviter in the message ``from``;
+    a mediated one is relayed by the room (``from`` is the room JID) and the
+    real inviter sits in the XEP-0045
+    ``<x xmlns='http://jabber.org/protocol/muc#user'><invite from='…'/></x>``.
     """
     xml = getattr(msg, "xml", None)
     if xml is None:
         return None
-    x = xml.find("{%s}x" % NS_MUC_INVITE)
-    if x is None or x.get("jid") is None:
+    conf = xml.find("{%s}x" % NS_MUC_INVITE)
+    if conf is None or conf.get("jid") is None:
         return None
+    frm = str(msg["from"])
+    room = str(conf.get("jid", ""))
+    password = str(conf.get("password", "") or "")
+    reason = str(conf.get("reason", "") or "")
+    inviter = ""
+    mediated = False
+    user = xml.find("{%s}x" % NS_MUC_USER)
+    if user is not None:
+        invite = user.find("{%s}invite" % NS_MUC_USER)
+        if invite is not None:
+            mediated = True
+            inviter = str(invite.get("from", "") or "")
+            invite_reason = invite.findtext("{%s}reason" % NS_MUC_USER)
+            if invite_reason:
+                reason = str(invite_reason)
+    if not inviter:
+        # A direct invitation names the inviter in `from`; a room relay whose
+        # `from` is the room itself carries no inviter at all.
+        inviter = "" if frm.split("/", 1)[0] == room else frm
     return {
-        "frm": str(msg["from"]).split("/", 1)[0],
-        "room": str(x.get("jid", "")),
-        "password": str(x.get("password", "") or ""),
-        "reason": str(x.get("reason", "") or ""),
+        "inviter": inviter,
+        "room": room,
+        "password": password,
+        "reason": reason,
+        "mediated": mediated,
     }
 
 
@@ -673,8 +701,9 @@ class JabberClient:
         invite = muc_invite_from_message(msg)
         if invite is None:
             return
-        logger.info("MUC invite from %s to %s", invite["frm"], invite["room"])
-        self.emit("muc_invite_received", invite["frm"], invite["room"],
+        logger.info("MUC invite to %s (inviter=%r mediated=%s)",
+                    invite["room"], invite["inviter"], invite["mediated"])
+        self.emit("muc_invite_received", invite["inviter"], invite["room"],
                   invite["password"], invite["reason"])
 
     async def _dispatch_jingle_iq(self, iq) -> None:

@@ -239,6 +239,7 @@ STRINGS = {
     "muc_invite_sent": "Invitation sent: {room}",
     "muc_invite_received_title": "Conference invitation",
     "muc_invite_received_text": "{inviter} invites you to {room}",
+    "muc_invite_received_unknown": "Somebody invites you to {room}",
     "muc_invite_join": "Join",
     "muc_invite_decline": "Decline",
     # vCard

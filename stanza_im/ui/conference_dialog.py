@@ -170,7 +170,7 @@ class JoinConferenceDialog(QtWidgets.QDialog):
 class IncomingInviteDialog(QtWidgets.QDialog):
     """Prompt shown for an incoming XEP-0249 direct conference invitation."""
 
-    def __init__(self, inviter: str, room: str, reason: str = "",
+    def __init__(self, inviter_label: str, room: str, reason: str = "",
                  nick: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("muc_invite_received_title"))
@@ -180,7 +180,11 @@ class IncomingInviteDialog(QtWidgets.QDialog):
         pix = QtGui.QPixmap(f"{CATEGORIES_DIR_16}/muc.png")
         if not pix.isNull():
             icon.setPixmap(pix.scaled(48, 48))
-        text = tr("muc_invite_received_text", inviter=inviter, room=room)
+        if inviter_label:
+            text = tr("muc_invite_received_text", inviter=inviter_label,
+                      room=room)
+        else:
+            text = tr("muc_invite_received_unknown", room=room)
         if reason:
             text += "\n\n" + reason
         label = QtWidgets.QLabel(text)

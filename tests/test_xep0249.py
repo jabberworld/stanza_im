@@ -67,16 +67,62 @@ c.send_muc_invite("bob@example.com", "")
 check("invite with empty target/room is skipped", sent == [])
 
 # 2. muc_invite_from_message parses incoming invitations --------------------
-m = slixmpp.Message()
-m["from"] = "anna@example.com/phone"
-x = ET.SubElement(m.xml, "{jabber:x:conference}x")
-x.set("jid", "room@conf.example")
-x.set("password", "pw")
-x.set("reason", "come")
-check("invite parse fields",
-      client_mod.muc_invite_from_message(m) == {
-          "frm": "anna@example.com", "room": "room@conf.example",
-          "password": "pw", "reason": "come"})
+NS_MUC_USER = "http://jabber.org/protocol/muc#user"
+
+
+def _conference_x(message, jid, password="", reason=""):
+    x = ET.SubElement(message.xml, "{jabber:x:conference}x")
+    x.set("jid", jid)
+    if password:
+        x.set("password", password)
+    if reason:
+        x.set("reason", reason)
+    return x
+
+
+def _muc_user_invite(message, frm, reason=""):
+    x = ET.SubElement(message.xml, "{%s}x" % NS_MUC_USER)
+    invite = ET.SubElement(x, "{%s}invite" % NS_MUC_USER)
+    invite.set("from", frm)
+    if reason:
+        ET.SubElement(invite, "{%s}reason" % NS_MUC_USER).text = reason
+    return x
+
+
+direct = slixmpp.Message()
+direct["from"] = "anna@example.com/phone"
+_conference_x(direct, "room@conf.example", password="pw", reason="come")
+check("direct invite parse",
+      client_mod.muc_invite_from_message(direct) == {
+          "inviter": "anna@example.com/phone", "room": "room@conf.example",
+          "password": "pw", "reason": "come", "mediated": False})
+
+# the mediated stanza seen from another client (XEP-0045 §7.8 + XEP-0249)
+real = slixmpp.Message()
+real["from"] = "bimroom@conference.jabberworld.info"
+real["to"] = "jabbim-test@linuxoid.in"
+_muc_user_invite(real, "rain@jabberworld.info/walkbook")
+_conference_x(real, "bimroom@conference.jabberworld.info")
+check("mediated invite names the real inviter",
+      client_mod.muc_invite_from_message(real) == {
+          "inviter": "rain@jabberworld.info/walkbook",
+          "room": "bimroom@conference.jabberworld.info",
+          "password": "", "reason": "", "mediated": True})
+
+# a mediated invite may carry the reason inside <invite>
+reasoned = slixmpp.Message()
+reasoned["from"] = "room@conf.example"
+_muc_user_invite(reasoned, "ann@example.com", reason="join us")
+_conference_x(reasoned, "room@conf.example")
+check("mediated invite reason comes from <invite>",
+      client_mod.muc_invite_from_message(reasoned)["reason"] == "join us")
+
+# a room relay without an <invite> element names no inviter
+relay = slixmpp.Message()
+relay["from"] = "room@conf.example"
+_conference_x(relay, "room@conf.example")
+check("a room relay without <invite> has no inviter",
+      client_mod.muc_invite_from_message(relay)["inviter"] == "")
 
 plain = slixmpp.Message()
 plain["from"] = "anna@example.com"
@@ -92,9 +138,10 @@ check("an invite without a jid is ignored",
 # 2b. the stanza handler re-emits the invitation ----------------------------
 events = []
 c.on("muc_invite_received", lambda *a: events.append(a))
-asyncio.get_event_loop().run_until_complete(c._on_muc_invite_stanza(m))
+asyncio.get_event_loop().run_until_complete(c._on_muc_invite_stanza(real))
 check("incoming invite emits muc_invite_received",
-      events == [("anna@example.com", "room@conf.example", "pw", "come")])
+      events == [("rain@jabberworld.info/walkbook",
+                  "bimroom@conference.jabberworld.info", "", "")])
 
 # 3. MainWindow "Invite to" submenu ----------------------------------------
 class _FakeGC:
@@ -150,6 +197,20 @@ check("no submenu when we are not in any conference",
       win._build_invite_menu(menu, "bob@example.com") is None)
 check("no submenu without a target jid",
       win._build_invite_menu(menu, "") is None)
+
+# 4. inviter label resolution ----------------------------------------------
+win._muc_users = {"room1@conf.example": {
+    "rain": {"nick": "rain", "real_jid": "rain@jabberworld.info/walkbook"}}}
+check("inviter label uses the room nick and jid",
+      win._muc_invite_inviter_label(
+          "room1@conf.example", "rain@jabberworld.info/walkbook")
+      == "rain (rain@jabberworld.info)")
+check("unknown inviter yields an empty label",
+      win._muc_invite_inviter_label("room1@conf.example", "") == "")
+check("inviter without a known nick falls back to the jid",
+      win._muc_invite_inviter_label(
+          "room1@conf.example", "bob@example.com/walkbook")
+      == "bob@example.com")
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

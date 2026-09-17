@@ -455,7 +455,12 @@ copies `xmpp:<jid>?join`. A non-conference roster contact's context menu also
 carries «Пригласить в» (`_build_invite_menu`), a submenu of the conferences we
 are in; picking one calls `client.send_muc_invite(target, room, reason,
 password)` (XEP-0249, the room password is included when known) and shows a tray
-notice — the entry is hidden when we are in no conference. Failed vCard fetches emit `vcard_error` on the event
+notice — the entry is hidden when we are in no conference. An incoming
+invitation opens `IncomingInviteDialog`; the inviter is shown as `nick (jid)`
+(the nick resolved from the room's occupants or the XMPP roster and the real
+inviter taken from the XEP-0045 `<invite from>`, which is the only source when
+the room relays the invitation), or a neutral text when the stanza names no
+inviter (`muc_invite_received_unknown`). Failed vCard fetches emit `vcard_error` on the event
 bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
 

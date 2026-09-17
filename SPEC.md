@@ -405,7 +405,11 @@ currently in (XEP-0249): picking one calls
 included when known) and shows a tray notice; the entry is hidden when we are in
 no conference. The MUC participant context menu offers the same submenu for a
 participant with a visible real JID, excluding the room that participant is
-already in.
+already in. An incoming invitation opens `IncomingInviteDialog`: the inviter is
+rendered as `nick (jid)` (the nick resolved from the room's occupants or the
+XMPP roster, the real inviter taken from the XEP-0045 `<invite from>` when the
+room relays the invitation), and a relay that names no inviter falls back to
+`muc_invite_received_unknown`.
 
 ### 7.4 Strategy Pattern
 

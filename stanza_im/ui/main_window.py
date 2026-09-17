@@ -3397,12 +3397,13 @@ class MainWindow(QtWidgets.QMainWindow):
             APP_NAME,
             tr("muc_invite_sent", room=self._muc_display_name(room)))
 
-    def _on_muc_invite_received(self, frm: str, room: str, password: str,
+    def _on_muc_invite_received(self, inviter: str, room: str, password: str,
                                 reason: str) -> None:
-        """A XEP-0249 direct invitation arrived — offer to join the room."""
+        """A MUC invitation arrived — offer to join the room."""
         from stanza_im.ui.conference_dialog import IncomingInviteDialog
+        label = self._muc_invite_inviter_label(room, inviter)
         nick = self._client.jid_str.split("@", 1)[0] if self._client else ""
-        dlg = IncomingInviteDialog(frm, room, reason, nick, self)
+        dlg = IncomingInviteDialog(label, room, reason, nick, self)
 
         def finished(result: int):
             if result != QtWidgets.QDialog.DialogCode.Accepted:
@@ -3410,6 +3411,29 @@ class MainWindow(QtWidgets.QMainWindow):
             self._join_muc(room, dlg.nick(), password)
         dlg.finished.connect(finished)
         dlg.open()
+
+    def _muc_invite_inviter_label(self, room: str, inviter: str) -> str:
+        """A ``"nick (jid)"`` label for an invitation's inviter, or "".
+
+        The inviter's JID comes from the invitation itself; the nick is looked
+        up in the room's occupant list (a co-occupant) and falls back to the
+        XMPP roster name.  An empty *inviter* means the room relayed the
+        invitation without naming one.
+        """
+        if not inviter:
+            return ""
+        jid = inviter.split("/", 1)[0]
+        nick = ""
+        for info in self._muc_users.get(room, {}).values():
+            real = info.get("real_jid", "")
+            if real and real.split("/", 1)[0] == jid:
+                nick = info.get("nick", "")
+                break
+        if not nick:
+            nick = self._roster_name(jid)
+        if nick and nick != jid:
+            return f"{nick} ({jid})"
+        return jid
 
     # ── Status ────────────────────────────────────────────────────
 
