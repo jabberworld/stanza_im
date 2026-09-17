@@ -175,13 +175,21 @@ class ChatThemeFactory:
 
     def set_media_preview(self, service, mode: str = "none",
                           size: int = 200) -> None:
-        """Attach a :class:`MediaPreviewService` and its policy."""
+        """Attach a :class:`MediaPreviewService` and its policy.
+
+        The factory is the single source of truth for the preview policy: the
+        mode/size are pushed into the service too, so it never keeps a stale
+        default that would silently drop audio/video embeds.
+        """
         self._media = service
         self._media_mode = mode or "none"
         try:
             self._media_size = int(size or 200)
         except (TypeError, ValueError):
             self._media_size = 200
+        if service is not None:
+            service.set_mode(self._media_mode)
+            service.set_size(self._media_size)
 
     def set_chat_font(self, family: str = "", size: int = 0) -> None:
         """Set the chat base-font override (*family*, point size).

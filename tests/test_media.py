@@ -133,6 +133,27 @@ plain = factory.render_message("Bob", f"look {url}", "12:00:00", "incoming")
 check("theme plain link when off", 'stanza-media' not in plain
       and f'<a href="{url}">' in plain)
 
+# 7b. startup wiring: the factory pushes the mode into the service ------------
+#     (regression: MainWindow passed the mode only to the factory, so the
+#      service kept its "images" default and dropped audio/video embeds)
+startup_svc = MediaPreviewService(cache)
+startup_factory = ChatThemeFactory()
+startup_factory.set_message_styling(False)
+startup_factory.set_media_preview(startup_svc, "all", 180)
+check("startup service mode synced", startup_svc.mode == "all")
+mp3_html = startup_factory.render_message(
+    "Bob", "https://h/a/song.mp3", "12:00:00", "incoming")
+check("startup audio embed", "<audio" in mp3_html)
+mp4_html = startup_factory.render_message(
+    "Bob", "https://h/v/clip.mp4", "12:00:00", "incoming")
+check("startup video embed", "<video" in mp4_html)
+
+# 7c. a URL query string is HTML-escaped exactly once -------------------------
+q_url = "https://h/a/song.mp3?token=abc&x=1"
+q_html = startup_factory.render_message("Bob", q_url, "12:00:00", "incoming")
+check("query '&' single-escaped", "&amp;amp;" not in q_html
+      and "?token=abc&amp;x=1" in q_html)
+
 # 8. tokenize_urls media hook -------------------------------------------------
 _tmp, anchors = tokenize_urls("see https://h/p/x.png now")
 check("default anchor", anchors and anchors[0].startswith("<a href="))

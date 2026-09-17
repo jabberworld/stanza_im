@@ -104,6 +104,10 @@ class MediaPreviewService(QtCore.QObject):
         kind = self.previewable(url)
         if not kind:
             return None
+        # Callers pass the already HTML-escaped body text, so undo that first
+        # and escape exactly once below; otherwise a URL query would come out
+        # as ``&amp;amp;`` and remote players would request a wrong address.
+        url = html.unescape(url)
         data = html.escape(url, quote=True)
         enc = quote(url, safe="")
         if kind == "image":

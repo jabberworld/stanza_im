@@ -1277,8 +1277,6 @@ class MainWindow(QtWidgets.QMainWindow):
         media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
         media_size = self._config.appearance.media_preview_size
         if (media_mode, media_size) != getattr(self, "_applied_media", None):
-            self._media_service.set_mode(media_mode)
-            self._media_service.set_size(media_size)
             self._theme_factory.set_media_preview(
                 self._media_service, media_mode, media_size)
             self._muc_theme_factory.set_media_preview(
