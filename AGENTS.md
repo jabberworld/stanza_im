@@ -966,6 +966,11 @@ text is kept. Returning activity (`eventFilter`) resumes
    `QWebEngineView`/page for the app's lifetime; `ChatWidget.detach` stops the
    typing timer and the view's scroll poll (`ChatView.shutdown`) and clears the
    Python message lists before deletion. [`tests/test_tab_leak.py`]
+7. **Per-tab bounds**: an open tab keeps at most `_HISTORY_MAX` (5000) history
+   rows, `_MESSAGES_MAX` live rows and `_STATUS_MAX` (300) status lines
+   (`chat_widget.py`), while the WebEngine DOM trims to
+   `ChatView._MAX_DOM_MESSAGES` (500) message nodes; older messages stay in
+   SQLite/MAM and are re-fetched by the paging menus.
 
 ## Running
 

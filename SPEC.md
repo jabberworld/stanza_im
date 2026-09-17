@@ -467,6 +467,12 @@ show/raise/activate calls and emits `attention_requested` instead, so
 | Last tab closed | Hide window |
 | New incoming message | Create tab if needed, add message, blink tray |
 
+Per-tab memory is bounded: `ChatWidget` keeps at most `_HISTORY_MAX` (5000)
+history rows, `_MESSAGES_MAX` live rows and `_STATUS_MAX` (300) status lines,
+and the WebEngine DOM trims to `ChatView._MAX_DOM_MESSAGES` (500) message nodes
+(oldest first); everything older stays in SQLite/MAM and is re-fetched through
+the history paging menus.
+
 ## 9. Chat Widget (`ui/chat_widget.py`)
 
 Single conversation tab. Layout:

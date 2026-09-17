@@ -276,6 +276,7 @@ if HAS_WEBENGINE:
         share_requested = QtCore.pyqtSignal(str)            # shared content
 
         _LOAD_RETRY_LIMIT = 5
+        _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
@@ -1053,6 +1054,14 @@ window.__stanzaMentionRef = '';
                 var slot = document.getElementById('stanza-typing-slot');
                 if (slot) {{ chat.insertBefore(div, slot); }}
                 else {{ chat.appendChild(div); }}
+                var nodes = chat.querySelectorAll('.stanza-message');
+                for (var i = 0; i < nodes.length - {self._MAX_DOM_MESSAGES}; i++) {{
+                    var wrap = nodes[i];
+                    while (wrap.parentNode && wrap.parentNode !== chat) {{
+                        wrap = wrap.parentNode;
+                    }}
+                    if (wrap.parentNode === chat) {{ chat.removeChild(wrap); }}
+                }}
             }}
             if ({do_scroll}) window.scrollTo(0, document.body.scrollHeight);
             """

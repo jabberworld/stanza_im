@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 _TYPING_DEBOUNCE_MS = 2000
 
+# Upper bounds for the in-memory conversation state of one open tab. Paging
+# still works through the SQLite/MAM window (`_window_size`); these only stop a
+# never-closed tab from growing without limit.
+_HISTORY_MAX = 5000
+_MESSAGES_MAX = 5000
+_STATUS_MAX = 300
+
 _MUC_BADGES: dict[str, str] = {
     "owner": "~",
     "admin": "@",
@@ -1035,6 +1042,8 @@ class ChatWidget(QtWidgets.QWidget):
                   "reply_to": reply_to, "reply_id": reply_id,
                   "edited": edited}
         self._messages.append(entry)
+        if len(self._messages) > _MESSAGES_MAX:
+            del self._messages[:len(self._messages) - _MESSAGES_MAX]
         self._render_entry(entry)
         if direction == "incoming" or sender == "Me":
             self._last_sender = sender
@@ -1044,6 +1053,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def add_status(self, text: str, timestamp: str):
         self._status_lines.append((text, timestamp))
+        if len(self._status_lines) > _STATUS_MAX:
+            del self._status_lines[:len(self._status_lines) - _STATUS_MAX]
         self._view.add_status(text, timestamp)
 
     def set_history_status(self, text: str):
@@ -1231,6 +1242,7 @@ class ChatWidget(QtWidgets.QWidget):
             return
         self._preserve_fraction = self._view.scroll_fraction()
         self._history = unique + self._history
+        self._trim_history()
         self._db_exhausted = bool(exhausted)
         self._hist_loading = False
         self._view.prepend_messages([
@@ -1314,6 +1326,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._history.sort(key=lambda entry: (
             entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
         self._messages.clear()
+        self._trim_history()
+
+    def _trim_history(self):
+        """Drop the oldest rows past a generous cap (they stay in SQLite)."""
+        limit = max(_HISTORY_MAX, self._window_size * 10)
+        if len(self._history) > limit:
+            del self._history[:len(self._history) - limit]
 
     def mark_server_exhausted(self):
         """Server has no MAM archive or it errored out — stop retrying."""

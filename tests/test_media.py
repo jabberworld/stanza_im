@@ -170,6 +170,31 @@ try:
 finally:
     media_preview_mod._THUMB_CACHE_BYTES = saved_thumb_budget
 
+# 7e. per-tab in-memory bounds (history / status lines / DOM) ----------------
+from stanza_im.ui.chat_widget import ChatWidget, _STATUS_MAX
+from stanza_im.ui import chat_widget as chat_widget_mod
+
+tab = ChatWidget("bounds@example.com", "Bounds", ChatThemeFactory())
+for i in range(_STATUS_MAX + 50):
+    tab.add_status("s%d" % i, "12:00:00")
+check("status lines bounded", len(tab._status_lines) == _STATUS_MAX)
+
+tab._window_size = 50
+hist_cap = max(chat_widget_mod._HISTORY_MAX, 50 * 10)
+tab._messages = [
+    {"sender": "A", "body": "m%d" % i, "direction": "incoming",
+     "timestamp": "2026-01-01T00:00:00", "id": i}
+    for i in range(hist_cap + 200)]
+tab._merge_live_history()
+check("history window bounded", len(tab._history) <= hist_cap)
+tab.detach()
+
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
+               encoding="utf-8").read()
+check("DOM message cap present",
+      "_MAX_DOM_MESSAGES" in _cv_src and "removeChild" in _cv_src)
+
 # 8. tokenize_urls media hook -------------------------------------------------
 _tmp, anchors = tokenize_urls("see https://h/p/x.png now")
 check("default anchor", anchors and anchors[0].startswith("<a href="))
