@@ -181,6 +181,8 @@ check("chat view no longer reads page().contextMenuData()",
       "contextMenuData" not in _view_src)
 check("chat view maps the prefixed MediaType members",
       "MediaTypeImage" in _view_src)
+check("chat view registers the custom schemes with the Path syntax",
+      "Syntax.Path" in _view_src and "Syntax.Host" not in _view_src)
 check("chat view relays the per-message forward menu item",
       "__stanzaForwardRef" in _view_src)
 check("chat widget routes stanza:forward URIs",

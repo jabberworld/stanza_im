@@ -676,8 +676,10 @@ marker request a navigation intercepted on the C++ side by
 `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which
 emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto` schemes
 and denies the in-view load. `stanza`/`mam` are pre-registered as app-handled
-schemes (`QWebEngineUrlScheme.registerScheme`) so Chromium never starts a real
-load or error page; a stray `loadFinished(false)` from a blocked link is
+schemes (`QWebEngineUrlScheme.registerScheme`) with the `Path` syntax, which
+preserves the opaque `stanza:view:…`/`xmpp:…` forms verbatim (so `linkUrl()`
+still reports them to the media context menu). Chromium thus never starts a
+real load or error page; a stray `loadFinished(false)` from a blocked link is
 self-healed by `_on_load_finished`/`_probe_chat_alive` (which probes that
 `#chat` survived and un-wedges the pending buffer; a truly lost document
 reloads the empty page and emits `document_lost`, so

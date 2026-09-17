@@ -23,13 +23,16 @@ def _register_custom_url_schemes() -> None:
     Must run before the first QWebEngineProfile is used. Knowing the scheme
     stops Chromium from attempting (and erroring on) a real navigation when
     an anchor is clicked; the actual routing still happens in
-    ``acceptNavigationRequest``.
+    ``acceptNavigationRequest``.  The schemes use the ``Path`` syntax (Qt's
+    default): everything after ``scheme:`` is preserved verbatim, so Chromium
+    keeps the opaque ``stanza:view:…``/``xmpp:…`` anchors intact — the media
+    context menu reads that raw link back through ``linkUrl()``.
     """
     try:
         from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
         for name in (b"stanza", b"mam", b"xmpp"):
             scheme = QWebEngineUrlScheme(name)
-            scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+            scheme.setSyntax(QWebEngineUrlScheme.Syntax.Path)
             scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
             QWebEngineUrlScheme.registerScheme(scheme)
         logger.info("Registered custom URL schemes stanza/mam/xmpp")

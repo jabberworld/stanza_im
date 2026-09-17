@@ -232,7 +232,9 @@ which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
 schemes and denies the in-view load. The `stanza`/`mam` schemes are
 pre-registered as app-handled with `QWebEngineUrlScheme.registerScheme`
 (`_register_custom_url_schemes`) so Chromium never starts (and errors on) a
-real load; a denied navigation is thus harmless, and a stray
+real load; they use the `Path` syntax, which preserves the opaque
+`stanza:view:…`/`xmpp:…` forms verbatim so `linkUrl()` still reports them to
+the media context menu. A denied navigation is thus harmless, and a stray
 `loadFinished(false)` from a blocked link is self-healed by
 `_on_load_finished`/`_probe_chat_alive`, which verifies that
 `#chat` survived and un-wedges the pending-message buffer; if the document was
