@@ -97,6 +97,7 @@ stanza_im/                      # Python package
 ├── plugins/                     # (Future) Plugin system
 resources/                       # Images, chat skins, sounds, etc.
 old/                             # Original Jabbim code (reference only, gitignored)
+README.md                        # Общее описание проекта (назначение, возможности, зависимости)
 main.py                          # python main.py entry point
 pyproject.toml                   # Package config (distribution: stanza-im)
 AGENTS.md                        # This architecture guide (living document)
