@@ -212,5 +212,67 @@ check("inviter without a known nick falls back to the jid",
           "room1@conf.example", "bob@example.com/walkbook")
       == "bob@example.com")
 
+# 5. an invitation never becomes a 1:1 chat message -------------------------
+received = []
+c.on("message_received", lambda *a: received.append(a))
+
+inv = slixmpp.Message()
+inv["from"] = "bimroom@conference.jabberworld.info"
+inv["type"] = "normal"
+inv["body"] = "rain invites you"
+_muc_user_invite(inv, "rain@jabberworld.info/walkbook")
+_conference_x(inv, "bimroom@conference.jabberworld.info")
+c._on_message(inv)
+check("an invitation does not emit message_received", received == [])
+
+med = slixmpp.Message()
+med["from"] = "room@conf.example"
+med["type"] = "normal"
+med["body"] = "invitation"
+_muc_user_invite(med, "ann@example.com")
+c._on_message(med)
+check("a mediated invitation does not emit message_received", received == [])
+
+plain2 = slixmpp.Message()
+plain2["from"] = "bob@example.com"
+plain2["type"] = "chat"
+plain2["body"] = "hi"
+c._on_message(plain2)
+check("a normal message still emits message_received", len(received) == 1)
+
+check("_is_muc_invite detects the XEP-0249 element",
+      client_mod._is_muc_invite(inv) is True)
+check("_is_muc_invite detects a mediated invite",
+      client_mod._is_muc_invite(med) is True)
+check("_is_muc_invite rejects a plain message",
+      client_mod._is_muc_invite(plain2) is False)
+
+check("mediated invite parse (no conference element)",
+      client_mod.muc_mediated_invite_from_message(med) == {
+          "inviter": "ann@example.com", "room": "room@conf.example",
+          "password": "", "reason": "", "mediated": True})
+
+# 6. OSD notification -------------------------------------------------------
+class _OsdRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def show(self, icon, title, body, on_click=None):
+        self.calls.append((title, body))
+
+
+win._osd = _OsdRecorder()
+win._notify_osd_invite("rain (rain@jabberworld.info)",
+                       "bimroom@conference.jabberworld.info")
+check("invite OSD shows the inviter and room",
+      win._osd.calls[-1] == (
+          "Conference invitation",
+          "rain (rain@jabberworld.info) invites you to "
+          "bimroom@conference.jabberworld.info"))
+win._notify_osd_invite("", "room@conf.example")
+check("invite OSD falls back to the neutral text",
+      win._osd.calls[-1] == ("Conference invitation",
+                             "Somebody invites you to room@conf.example"))
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

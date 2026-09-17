@@ -3399,9 +3399,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muc_invite_received(self, inviter: str, room: str, password: str,
                                 reason: str) -> None:
-        """A MUC invitation arrived — offer to join the room."""
+        """A MUC invitation arrived — notify (OSD + prompt), never a chat."""
         from stanza_im.ui.conference_dialog import IncomingInviteDialog
         label = self._muc_invite_inviter_label(room, inviter)
+        self._notify_osd_invite(label, room)
         nick = self._client.jid_str.split("@", 1)[0] if self._client else ""
         dlg = IncomingInviteDialog(label, room, reason, nick, self)
 
@@ -3411,6 +3412,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self._join_muc(room, dlg.nick(), password)
         dlg.finished.connect(finished)
         dlg.open()
+
+    def _notify_osd_invite(self, label: str, room: str) -> None:
+        """An OSD notification for an incoming conference invitation."""
+        if label:
+            body = tr("muc_invite_received_text", inviter=label, room=room)
+        else:
+            body = tr("muc_invite_received_unknown", room=room)
+        self._osd.show(self._menu_icon("muc.png"),
+                       tr("muc_invite_received_title"), self._osd_body(body))
 
     def _muc_invite_inviter_label(self, room: str, inviter: str) -> str:
         """A ``"nick (jid)"`` label for an invitation's inviter, or "".

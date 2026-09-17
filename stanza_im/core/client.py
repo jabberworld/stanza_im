@@ -183,6 +183,43 @@ def muc_invite_from_message(msg) -> dict | None:
     }
 
 
+def _is_muc_invite(msg) -> bool:
+    """True when *msg* carries a MUC invitation in either shape."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return False
+    if xml.find("{%s}x" % NS_MUC_INVITE) is not None:
+        return True
+    user = xml.find("{%s}x" % NS_MUC_USER)
+    return (user is not None
+            and user.find("{%s}invite" % NS_MUC_USER) is not None)
+
+
+def muc_mediated_invite_from_message(msg) -> dict | None:
+    """Parse a XEP-0045 §7.8 mediated invitation (room relay).
+
+    The room is the message sender and the inviter sits in
+    ``<x xmlns='http://jabber.org/protocol/muc#user'><invite from='…'/></x>``.
+    Returns the same shape as :func:`muc_invite_from_message`, or ``None``.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    user = xml.find("{%s}x" % NS_MUC_USER)
+    if user is None:
+        return None
+    invite = user.find("{%s}invite" % NS_MUC_USER)
+    if invite is None:
+        return None
+    return {
+        "inviter": str(invite.get("from", "") or ""),
+        "room": str(msg["from"]).split("/", 1)[0],
+        "password": "",
+        "reason": str(invite.findtext("{%s}reason" % NS_MUC_USER) or ""),
+        "mediated": True,
+    }
+
+
 def _make_unique_id(xml) -> str:
     """Return a stable, per-stanza unique id used as the ``origin-id``.
 
@@ -671,6 +708,10 @@ class JabberClient:
             MatchXPath("%s/{%s}x" % (msg_ns, NS_MUC_INVITE)),
             self._on_muc_invite_stanza))
         self.xmpp.register_handler(CoroutineCallback(
+            "MUC Mediated Invite",
+            MatchXPath("%s/{%s}x" % (msg_ns, NS_MUC_USER)),
+            self._on_muc_mediated_invite_stanza))
+        self.xmpp.register_handler(CoroutineCallback(
             "PEP Event",
             MatchXPath("%s/{%s}event" % (msg_ns, NS_PUBSUB_EVENT)),
             self._on_pubsub_event_stanza))
@@ -703,6 +744,20 @@ class JabberClient:
             return
         logger.info("MUC invite to %s (inviter=%r mediated=%s)",
                     invite["room"], invite["inviter"], invite["mediated"])
+        self.emit("muc_invite_received", invite["inviter"], invite["room"],
+                  invite["password"], invite["reason"])
+
+    async def _on_muc_mediated_invite_stanza(self, msg) -> None:
+        """A room-relayed invitation may carry only the XEP-0045 ``muc#user``
+        invite; when a ``jabber:x:conference`` element is present the XEP-0249
+        handler already covers the stanza."""
+        if msg.xml.find("{%s}x" % NS_MUC_INVITE) is not None:
+            return
+        invite = muc_mediated_invite_from_message(msg)
+        if invite is None:
+            return
+        logger.info("Mediated MUC invite to %s from %s", invite["room"],
+                    invite["inviter"])
         self.emit("muc_invite_received", invite["inviter"], invite["room"],
                   invite["password"], invite["reason"])
 
@@ -2722,6 +2777,10 @@ class JabberClient:
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
             return
+        if _is_muc_invite(msg):
+            # A MUC invitation is surfaced by its own handler (dialog + OSD);
+            # it must not turn into a 1:1 chat message.
+            return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
@@ -2777,6 +2836,8 @@ class JabberClient:
         try:
             inner = slixmpp.Message(xml=element)
         except Exception:
+            return
+        if _is_muc_invite(inner):
             return
         if inner["type"] not in ("chat", "normal"):
             return

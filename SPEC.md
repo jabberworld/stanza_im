@@ -409,7 +409,11 @@ already in. An incoming invitation opens `IncomingInviteDialog`: the inviter is
 rendered as `nick (jid)` (the nick resolved from the room's occupants or the
 XMPP roster, the real inviter taken from the XEP-0045 `<invite from>` when the
 room relays the invitation), and a relay that names no inviter falls back to
-`muc_invite_received_unknown`.
+`muc_invite_received_unknown`. An invitation stanza (the XEP-0249 shape and the
+XEP-0045 mediated shape, `<x xmlns='http://jabber.org/protocol/muc#user'><invite
+from='…'/></x>`) is never rendered as a chat message — `JabberClient._on_message`
+drops it from `message_received` — and is surfaced only as the prompt plus an OSD
+notification.
 
 ### 7.4 Strategy Pattern
 
