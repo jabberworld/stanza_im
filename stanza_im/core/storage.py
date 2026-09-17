@@ -127,6 +127,7 @@ class Config:
                         "roster_show_avatars": True,
                         "roster_show_activity": True,
                         "roster_show_mood": True,
+                        "interface_mode": "separate",
                         "roster_font": "", "roster_font_size": 0,
                         "chat_font": "", "chat_font_size": 0,
                         "osd_font": "", "osd_font_size": 0,

@@ -162,6 +162,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_avatars` | `true` | Show/hide vCard avatars in roster rows. Applied live via `MainWindow._apply_roster_options` → `RosterStyle.set_options`; gated in `RosterStyle.paint_user`. |
 | `appearance.roster_show_activity` | `true` | Show/hide the PEP activity icon (XEP-0108) in roster rows, drawn from the same icon set as the mood/activity picker (`pep.activity_icon_path`). |
 | `appearance.roster_show_mood` | `true` | Show/hide the PEP mood icon (XEP-0107) in roster rows (`pep.mood_icon_path`). |
+| `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
 | `appearance.osd_font_color` | `#ffffff` | OSD text color applied to all OSD labels (`_OsdWindow._stylesheet`). |
@@ -426,14 +427,19 @@ Future: hot-swappable styles from `resources/rosterstyles/`.
 
 ### 8.1 Modes
 
-Configurable via settings (Phase 2):
+`appearance.interface_mode` selects how conversations are hosted:
 
 | Mode | Behavior |
 |------|----------|
-| Standalone | Separate `QMainWindow`, hides when no tabs |
-| Embedded | `QWidget` inside MainWindow splitter |
+| `separate` (default) | Standalone `QMainWindow`; hidden while it has no tabs. |
+| `unified` | The `ChatWindow` is embedded as a child widget (`Qt.Widget`) in a horizontal `QSplitter` on the roster page, beside the contact list. |
 
-Default: standalone.
+The mode is applied live: `MainWindow._apply_interface_mode` (called from
+`_on_settings_applied`) reparents the chat between the top-level window and the
+splitter. `ChatWindow` gained an `embedded` constructor flag plus
+`set_embedded()`; when embedded it suppresses title/geometry handling and the
+show/raise/activate calls and emits `attention_requested` instead, so
+`MainWindow._raise_chat_area` raises the main window. Default: `separate`.
 
 ### 8.2 Tab Management
 

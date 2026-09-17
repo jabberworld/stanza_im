@@ -1019,6 +1019,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_highlight_color", "color"),
             ("prefs_highlight_both", "both"),
         ]))
+        misc_form.addRow(tr("prefs_interface_mode"),
+                         self._combo("interface_mode", [
+                             ("prefs_interface_separate", "separate"),
+                             ("prefs_interface_unified", "unified"),
+                         ]))
 
         return self._tabs([(tr("prefs_appearance_themes"), themes),
                            (tr("prefs_appearance_roster"), roster),
@@ -1233,6 +1238,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "media_cache_days": appearance.media_cache_days,
             "media_cache_mb": appearance.media_cache_mb,
             "muc_highlight": getattr(appearance, "muc_highlight", "both"),
+            "interface_mode": getattr(appearance, "interface_mode", "separate"),
             "tray_blink": notifications.tray_blink, "popups": notifications.popups,
             "osd_enabled": notifications.osd_enabled,
             "osd_duration": notifications.osd_duration,
@@ -1338,6 +1344,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.appearance.media_cache_days = self._value("media_cache_days")
         cfg.appearance.media_cache_mb = self._value("media_cache_mb")
         cfg.appearance.muc_highlight = self._value("muc_highlight") or "both"
+        cfg.appearance.interface_mode = self._value("interface_mode") or "separate"
         cfg.privacy.send_software = self._value("send_software")
         cfg.privacy.send_typing_notifications = self._value("send_typing_notifications")
         cfg.privacy.send_activity_notifications = self._value("send_activity_notifications")

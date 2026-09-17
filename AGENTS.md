@@ -773,7 +773,14 @@ roster avatars/activity/mood, see §3; «Разное» holds the media-preview 
 the preview cache TTL/limit and the MUC mention highlight mode). `Apply` applies
 settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
-checkable group assignment and creation of new groups.
+checkable group assignment and creation of new groups. Appearance → «Разное»
+also selects the interface mode (`appearance.interface_mode`): `separate`
+(default) keeps the chat in its own window, `unified` embeds the whole
+`ChatWindow` as a child widget beside the roster in a horizontal
+`QSplitter`; `MainWindow._apply_interface_mode` switches live and
+`ChatWindow.set_embedded` toggles the window flags/title/geometry handling
+(embedded `ChatWindow` emits `attention_requested`, which raises the main
+window instead of the chat window).
 
 **Chat text scale** (`chat.text_scale`, default `1.0`): a per-chat zoom in a
 50–300 % range (clamped to 0.5–3.0 by `chat_view.clamp_zoom`, which also

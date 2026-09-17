@@ -162,10 +162,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tile_prune_timer.timeout.connect(self._prune_tile_cache)
         self._tile_prune_timer.start()
 
-        # ── Chat window (standalone) ─────────────────────────────
+        # ── Chat window (standalone or embedded beside the roster) ──
+        self._unified = (getattr(self._config.appearance, "interface_mode",
+                                 "separate") == "unified")
         self._chat_window = ChatWindow(self._theme_factory,
                                        self._muc_theme_factory,
-                                       icons=self._icons)
+                                       icons=self._icons,
+                                       embedded=self._unified)
         participant_font = (
             self._config.appearance.participant_font or "",
             int(self._config.appearance.participant_font_size or 0))
@@ -208,7 +211,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.geo_message_corrected.connect(
             self._on_geo_message_corrected)
         self._chat_window.xmpp_link_clicked.connect(self._on_xmpp_uri)
-        self._chat_window.restore_geometry(self._config.chat_window)
+        self._chat_window.attention_requested.connect(self._on_chat_attention)
+        if not self._unified:
+            self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
@@ -222,7 +227,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_muc_participant_clicked)
         self._chat_window.participant_context_requested.connect(
             self._on_muc_participant_context)
-        self._chat_window.hide()
+        if not self._unified:
+            self._chat_window.hide()
 
         # ── Tray ─────────────────────────────────────────────────
         self._tray = TrayIcon(self, icons=self._icons)
@@ -367,10 +373,96 @@ class MainWindow(QtWidgets.QMainWindow):
 
         roster_layout.addLayout(status_bar)
 
-        self._stack.addWidget(roster_page)
+        self._add_roster_page(roster_page)
 
         # Start on login page
         self._stack.setCurrentIndex(_PAGE_LOGIN)
+
+    # ── Interface mode (separate / unified chat layout) ───────────
+
+    def _add_roster_page(self, roster_page: QtWidgets.QWidget) -> None:
+        """Add the roster page to the stack, embedding the chat if unified."""
+        self._roster_page = roster_page
+        self._chat_splitter = None
+        if self._unified:
+            splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+            splitter.setChildrenCollapsible(False)
+            splitter.addWidget(roster_page)
+            splitter.addWidget(self._chat_window)
+            splitter.setStretchFactor(0, 0)
+            splitter.setStretchFactor(1, 1)
+            splitter.setSizes([300, 420])
+            self._chat_splitter = splitter
+            self._stack.addWidget(splitter)
+        else:
+            self._stack.addWidget(roster_page)
+
+    def _apply_interface_mode(self) -> None:
+        """Move the chat between a separate window and the roster splitter."""
+        unified = (getattr(self._config.appearance, "interface_mode",
+                           "separate") == "unified")
+        if unified == getattr(self, "_unified", False):
+            return
+        self._unified = unified
+        index = self._stack.indexOf(
+            self._roster_page if unified else self._chat_splitter)
+        if index < 0:
+            index = _PAGE_ROSTER
+        if unified:
+            splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+            splitter.setChildrenCollapsible(False)
+            self._stack.removeWidget(self._roster_page)
+            splitter.addWidget(self._roster_page)
+            self._chat_window.set_embedded(True)
+            splitter.addWidget(self._chat_window)
+            splitter.setStretchFactor(0, 0)
+            splitter.setStretchFactor(1, 1)
+            splitter.setSizes([300, 420])
+            self._chat_splitter = splitter
+            self._stack.insertWidget(index, splitter)
+        else:
+            splitter = self._chat_splitter
+            if splitter is not None:
+                self._stack.removeWidget(splitter)
+                self._chat_splitter = None
+            self._chat_window.setParent(None)
+            self._stack.insertWidget(index, self._roster_page)
+            self._chat_window.set_embedded(False)
+            self._chat_window.restore_geometry(self._config.chat_window)
+        self._stack.setCurrentIndex(index)
+
+    def _chat_area_visible(self) -> bool:
+        """Whether the chat surface is on screen (standalone or embedded)."""
+        if self._unified:
+            return self.isVisible()
+        return self._chat_window.isVisible()
+
+    def _chat_area_active(self) -> bool:
+        """Whether the chat surface is the active window."""
+        if self._unified:
+            return self.isActiveWindow()
+        return self._chat_window.isActiveWindow()
+
+    def _raise_chat_area(self) -> None:
+        """Bring the chat surface to the front (main or chat window)."""
+        if self._unified:
+            self._stack.setCurrentIndex(_PAGE_ROSTER)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        else:
+            self._chat_window.show()
+            self._chat_window.raise_()
+            self._chat_window.activateWindow()
+
+    def _on_chat_attention(self, jid: str) -> None:
+        if self._unified:
+            self._raise_chat_area()
+
+    def _chat_dialog_parent(self) -> QtWidgets.QWidget:
+        if self._unified or not self._chat_window.isVisible():
+            return self
+        return self._chat_window
 
     @staticmethod
     def _menu_icon(filename: str) -> QtGui.QIcon:
@@ -1093,6 +1185,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if csi != bool(self._client.csi):
                 self._client.set_csi_config(csi)
             self._update_csi()
+        self._apply_interface_mode()
         self._apply_roster_font()
         roster_opts = (
             bool(getattr(self._config.appearance, "roster_show_avatars", True)),
@@ -2655,7 +2748,7 @@ class MainWindow(QtWidgets.QMainWindow):
             reply_to=reply_to, reply_id=reply_id))
 
         # Unread badge + tray blink (skip when conversation is on screen)
-        active = (self._chat_window.isVisible()
+        active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == bare_jid)
         if not active:
             self._bump_unread(bare_jid)
@@ -2734,7 +2827,7 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_message(nick, body, target)
-        if (self._client and self._chat_window.isVisible()
+        if (self._client and self._chat_area_visible()
                 and self._chat_window.current_jid() == target):
             self._client.mds_mark_displayed(target)
 
@@ -2799,7 +2892,7 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_groupchat(room, nick, body)
-        if (self._client and self._chat_window.isVisible()
+        if (self._client and self._chat_area_visible()
                 and self._chat_window.current_jid() == room):
             self._client.mds_mark_displayed(room)
         self._remember_contact(room, name=self._muc_display_name(room),
@@ -3323,8 +3416,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.decision.connect(
             lambda accept, save_path: self._on_file_offer_decision(
                 offer_id, from_jid, name, accept, save_path))
-        self._place_dialog_over(dlg, self._chat_window
-                                if self._chat_window.isVisible() else self)
+        self._place_dialog_over(dlg, self._chat_dialog_parent())
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
@@ -3570,13 +3662,11 @@ class MainWindow(QtWidgets.QMainWindow):
         The chat window may stay visible while the roster (or another app)
         is active, so gate on the actual active window, not mere visibility.
         """
-        return not (self._chat_window.isActiveWindow()
+        return not (self._chat_area_active()
                     and self._chat_window.current_jid() == jid)
 
     def _osd_click(self, jid, nick: str = ""):
-        self._chat_window.show()
-        self._chat_window.raise_()
-        self._chat_window.activateWindow()
+        self._raise_chat_area()
         self._on_contact_open(jid)
 
     def _maybe_osd_message(self, title: str, body: str, jid: str):

@@ -51,11 +51,12 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     def __init__(self, theme_factory: ChatThemeFactory,
                  muc_theme_factory: ChatThemeFactory | None = None, parent=None,
-                 icons=None):
+                 icons=None, embedded: bool = False):
         super().__init__(parent)
         self._theme = theme_factory
         self._muc_theme = muc_theme_factory or theme_factory
         self._icons = icons
+        self._embedded = bool(embedded)
         self._tabs: dict[str, ChatWidget] = {}  # jid -> widget
         self._tab_order: list[str] = []         # ordered jid list
         self._tab_title_length = 30
@@ -68,7 +69,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._muc_leave_confirm: Callable[[str], bool] | None = None
 
         self.setWindowTitle(APP_NAME)
-        self.setMinimumSize(500, 400)
+        if self._embedded:
+            # Embedded beside the roster: behave as a plain child widget.
+            self.setWindowFlags(QtCore.Qt.WindowType.Widget)
+            self.setMinimumSize(200, 120)
+        else:
+            self.setMinimumSize(500, 400)
 
         # Central widget with tab widget
         central = QtWidgets.QWidget()
@@ -130,6 +136,21 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     # ── Public API ────────────────────────────────────────────────
 
+    def set_embedded(self, embedded: bool) -> None:
+        """Switch between standalone window and embedded child widget."""
+        embedded = bool(embedded)
+        if embedded == self._embedded:
+            return
+        self._embedded = embedded
+        if embedded:
+            self.setWindowFlags(QtCore.Qt.WindowType.Widget)
+            self.setMinimumSize(200, 120)
+        else:
+            self.setWindowFlags(QtCore.Qt.WindowType.Window)
+            self.setMinimumSize(500, 400)
+            if self._tabs:
+                self.show()
+
     def open_chat(self, jid: str, display_name: str,
                   focus: bool = True) -> ChatWidget:
         """Open (or focus) a 1-on-1 chat tab for *jid*."""
@@ -178,9 +199,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._apply_tab_icon(jid)
         if focus:
             self._tab_widget.setCurrentIndex(idx)
-            self.show()
-            self.raise_()
-            self.activateWindow()
+            if self._embedded:
+                self.attention_requested.emit(jid)
+            else:
+                self.show()
+                self.raise_()
+                self.activateWindow()
             self._update_title()
             widget.focus_input()
         return widget
@@ -230,9 +254,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_order.append(room)
         self._apply_tab_icon(room)
         self._tab_widget.setCurrentIndex(idx)
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        if self._embedded:
+            self.attention_requested.emit(room)
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
         self._update_title()
         widget.focus_input()
         return widget
@@ -250,7 +277,7 @@ class ChatWindow(QtWidgets.QMainWindow):
                 self._tab_widget.removeTab(idx)
             del self._tabs[jid]
             self._tab_order = [j for j in self._tab_order if j != jid]
-        if not self._tabs:
+        if not self._tabs and not self._embedded:
             self.hide()
         self._update_title()
 
@@ -348,6 +375,8 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     def restore_geometry(self, cfg):
         """Restore window position/size from a config section."""
+        if self._embedded:
+            return
         width = max(500, int(cfg.get("width", 640) or 640))
         height = max(400, int(cfg.get("height", 480) or 480))
         x, y = int(cfg.get("x", 0) or 0), int(cfg.get("y", 0) or 0)
@@ -359,6 +388,8 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     def save_geometry(self, cfg):
         """Persist current window geometry into a config section."""
+        if self._embedded:
+            return
         geo = self.geometry()
         cfg["x"] = geo.x()
         cfg["y"] = geo.y()
@@ -418,6 +449,8 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     def _update_title(self):
         """Title reflects the currently active chat."""
+        if self._embedded:
+            return
         w = self._tab_widget.currentWidget()
         if isinstance(w, ChatWidget) and w.display_name:
             state = "" if w.is_muc else self._remote_activity.get(w.jid, "")
@@ -481,6 +514,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     geo_view_requested = QtCore.pyqtSignal(str, str, str)      # chat, ref, geo_uri
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)    # chat, ref, new_body
     window_closed = QtCore.pyqtSignal()                        # window closed
+    attention_requested = QtCore.pyqtSignal(str)               # embedded: focus
 
     # ── Internal ──────────────────────────────────────────────────
 
@@ -535,8 +569,11 @@ class ChatWindow(QtWidgets.QMainWindow):
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.setCurrentIndex(idx)
-            self.show()
-            self.raise_()
+            if self._embedded:
+                self.attention_requested.emit(jid)
+            else:
+                self.show()
+                self.raise_()
 
     def _on_message_sent(self, jid: str, body: str):
         self.message_to_send.emit(jid, body)
