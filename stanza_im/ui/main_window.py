@@ -103,10 +103,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._media_cache = MediaCache(
             ttl_days=self._config.appearance.media_cache_days,
             max_bytes=int(self._config.appearance.media_cache_mb) * 1024 * 1024)
-        try:
-            self._media_cache.prune()
-        except Exception:
-            logger.debug("media cache prune failed", exc_info=True)
+        # Prune off the startup path (the cache is disk-only); the periodic
+        # timer keeps it in check afterwards.
+        QtCore.QTimer.singleShot(5000, self._prune_media_cache)
         self._media_service = MediaPreviewService(self._media_cache, self)
         media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
         media_size = self._config.appearance.media_preview_size

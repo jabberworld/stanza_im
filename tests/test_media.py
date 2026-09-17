@@ -195,6 +195,13 @@ _cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
 check("DOM message cap present",
       "_MAX_DOM_MESSAGES" in _cv_src and "removeChild" in _cv_src)
 
+_mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
+               encoding="utf-8").read()
+check("media cache is pruned only via the timer",
+      _mw_src.count("self._media_cache.prune()") == 1)
+check("tile cache is created lazily",
+      "_ensure_tile_cache" in _mw_src and "self._tile_cache = None" in _mw_src)
+
 # 8. tokenize_urls media hook -------------------------------------------------
 _tmp, anchors = tokenize_urls("see https://h/p/x.png now")
 check("default anchor", anchors and anchors[0].startswith("<a href="))

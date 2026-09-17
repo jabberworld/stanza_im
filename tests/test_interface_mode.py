@@ -64,6 +64,9 @@ check("separate: no splitter", win._chat_splitter is None)
 check("separate: chat is a top-level window", win._chat_window.isWindow())
 check("separate: roster page in stack",
       win._stack.indexOf(win._roster_page) >= 0)
+check("tile cache is lazy at startup", win._tile_cache is None)
+check("tile cache is created on demand",
+      win._ensure_tile_cache() is win._tile_cache and win._tile_cache is not None)
 
 win._config.appearance.interface_mode = "unified"
 win._apply_interface_mode()
