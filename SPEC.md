@@ -817,12 +817,17 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   corrections whose bodies carry a geo: URI into the matching window
   (`update_position` → `Track.add_fix`, gap- and duplicate-filtered), and a
   correction without coordinates calls `mark_track_final()` (status-bar note,
-  tracking stops). Speed = great-circle distance over time delta.
+  tracking stops). Speed = great-circle distance over time delta. The `Track`
+  keeps at most 2000 fixes (oldest dropped), so a long live session stays
+  bounded.
 - **Tiles**: `TileLoader` (worker thread) fetches `{z}/{x}/{y}.png` with a
   browser-style `User-Agent`, ≤2 req/s pacing and retry backoff, into the
-  on-disk LRU `TileCache` (`map.tile_cache_mb`/`tile_cache_days`, pruned
-  30 min + startup). No tiles / empty `map.tiles_url`: the window still paints
-  the markers, track, coordinates and status.
+  on-disk LRU `TileCache` (`map.tile_cache_mb`/`tile_cache_days`). The cache
+  and its 30-min prune timer are created lazily on the first map window
+  (`MainWindow._ensure_tile_cache`); the decoded tile `QPixmap`s use a 32 MB
+  in-memory LRU budget (`GeoMapWidget._MEM_PIXMAP_BYTES`), flushed by
+  `set_zoom` on a zoom-level change. No tiles / empty `map.tiles_url`: the
+  window still paints the markers, track, coordinates and status.
 
 ## 13. Icon Cache (`ui/icons.py`)
 

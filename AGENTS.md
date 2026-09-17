@@ -450,10 +450,14 @@ carrying coordinates are fed to the matching window by
 filtered, haversine speed in km/h on the status bar); a corrected body without
 coordinates calls `mark_track_final()`. OSM tiles are fetched by the paced
 `TileLoader` worker (browser `User-Agent`, ≤2 req/s, retry backoff) into the
-LRU disk `TileCache` (`map.tile_cache_mb`/`tile_cache_days`, pruned on
-startup and every 30 min, `$XDG_CACHE_HOME/stanza-im/tiles/`); offline or with
-a tiled URL unset the window still paints markers/status. Window geometry is
-persisted under `map.window`.
+LRU disk `TileCache` (`map.tile_cache_mb`/`tile_cache_days`,
+`$XDG_CACHE_HOME/stanza-im/tiles/`); the cache and its 30-min prune timer are
+created lazily on the first map window (`MainWindow._ensure_tile_cache`), so a
+session that never opens a map pays nothing. In-memory tile bitmaps use a 32 MB
+LRU budget (`GeoMapWidget._MEM_PIXMAP_BYTES`) that `set_zoom` flushes when the
+zoom level changes, and the live `Track` is capped at 2000 fixes (oldest
+dropped). Offline or with a tiled URL unset the window still paints
+markers/status. Window geometry is persisted under `map.window`.
 
 **xmpp: URIs & vCard copy (XEP-0147, `include/xmpp_uri.py`)**:
 `xmpp:<jid>[?<action>[;param=val…]]` URIs in message bodies are linkified

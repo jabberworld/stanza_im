@@ -150,17 +150,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── Map windows (geo: links) ──────────────────────────────
         self._geo_windows: dict = {}
-        self._tile_cache = TileCache(
-            ttl_days=float(self._config.map.tile_cache_days or 14.0),
-            max_bytes=int(self._config.map.tile_cache_mb or 64) * 1024 * 1024)
-        try:
-            self._tile_cache.prune()
-        except Exception:
-            logger.debug("tile cache prune failed", exc_info=True)
-        self._tile_prune_timer = QtCore.QTimer(self)
-        self._tile_prune_timer.setInterval(30 * 60 * 1000)
-        self._tile_prune_timer.timeout.connect(self._prune_tile_cache)
-        self._tile_prune_timer.start()
+        # The tile disk cache and its prune timer are created lazily on the
+        # first map window, so a session that never opens a map pays nothing.
+        self._tile_cache = None
+        self._tile_prune_timer = None
 
         # ── Chat window (standalone or embedded beside the roster) ──
         self._unified = (getattr(self._config.appearance, "interface_mode",
@@ -3114,7 +3107,25 @@ class MainWindow(QtWidgets.QMainWindow):
             self._tray.show_message(
                 APP_NAME, tr("share_sent", count=count))
 
+    def _ensure_tile_cache(self):
+        """Create the tile disk cache (and prune timer) on first use."""
+        if self._tile_cache is None:
+            self._tile_cache = TileCache(
+                ttl_days=float(self._config.map.tile_cache_days or 14.0),
+                max_bytes=int(self._config.map.tile_cache_mb or 64) * 1024 * 1024)
+            try:
+                self._tile_cache.prune()
+            except Exception:
+                logger.debug("tile cache prune failed", exc_info=True)
+            self._tile_prune_timer = QtCore.QTimer(self)
+            self._tile_prune_timer.setInterval(30 * 60 * 1000)
+            self._tile_prune_timer.timeout.connect(self._prune_tile_cache)
+            self._tile_prune_timer.start()
+        return self._tile_cache
+
     def _prune_tile_cache(self):
+        if self._tile_cache is None:
+            return
         try:
             self._tile_cache.prune()
         except Exception:
@@ -3135,7 +3146,7 @@ class MainWindow(QtWidgets.QMainWindow):
         win = self._geo_windows.get(key)
         if win is None:
             win = GeoMapWindow(
-                self._tile_url(), self._tile_cache,
+                self._tile_url(), self._ensure_tile_cache(),
                 geometry_cfg=self._config.map.window,
                 parent=self,
                 follow=bool(getattr(self._config.map, "follow", True)))

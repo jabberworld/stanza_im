@@ -45,7 +45,7 @@ _USER_AGENT = ("StanzaIM/0.1 (XMPP desktop client / OpenStreetMap tiles, "
                "https://www.openstreetmap.org/copyright)")
 _REQUEST_PACING_S = 0.5        # OSM tile policy: stay far below 2 req/s
 _RETRY_PACING_S = 10.0         # re-request a failed tile after this delay
-_MEM_PIXMAP_MAX = 512          # in-memory QPixmap LRU cap
+_MEM_PIXMAP_BYTES = 32 << 20   # in-memory tile QPixmap LRU budget (32 MB)
 # HTTP codes worth a retry (429 rate-limit, 5xx, temporary server states).
 _TRANSIENT_HTTP_CODES = {408, 425, 429, 500, 502, 503, 504}
 
@@ -155,6 +155,7 @@ class GeoMapWidget(QtWidgets.QWidget):
         self._track = Track()
         self._follow = True
         self._pixmaps: dict[tuple[int, int, int], QtGui.QPixmap] = {}
+        self._pixmap_bytes = 0
         self._pending: set[tuple[int, int, int]] = set()
         self._drag: QtCore.QPointF | None = None
         # No C++ parent on purpose: the loader must survive the widget's
@@ -186,7 +187,7 @@ class GeoMapWidget(QtWidgets.QWidget):
                     zoom: float | None = None, ts: float | None = None) -> None:
         self._center = (float(lat), float(lon))
         if zoom:
-            self._zoom = clamp_zoom(zoom)
+            self.set_zoom(zoom)
         self._track.add_fix(float(lat), float(lon), float(accuracy), ts)
         self._follow = True
         self.update()
@@ -247,10 +248,7 @@ class GeoMapWidget(QtWidgets.QWidget):
         path = self._cache.get(z, x, y) if self._cache else None
         if path:
             pm = QtGui.QPixmap(path)
-            self._pixmaps[key] = pm
-            if len(self._pixmaps) > _MEM_PIXMAP_MAX:
-                for stale in list(self._pixmaps)[: -_MEM_PIXMAP_MAX]:
-                    self._pixmaps.pop(stale, None)
+            self._store_pixmap(key, pm)
             return pm
         if key not in self._pending and self._tile_url:
             self._pending.add(key)
@@ -262,7 +260,40 @@ class GeoMapWidget(QtWidgets.QWidget):
         if path:
             pm = QtGui.QPixmap(path)
             if not pm.isNull():
-                self._pixmaps[(z, x, y)] = pm
+                self._store_pixmap((z, x, y), pm)
+        self.update()
+
+    @staticmethod
+    def _pixmap_size(pm: QtGui.QPixmap) -> int:
+        return max(1, pm.width()) * max(1, pm.height()) * 4
+
+    def _store_pixmap(self, key: tuple[int, int, int],
+                      pm: QtGui.QPixmap) -> None:
+        old = self._pixmaps.pop(key, None)
+        if old is not None:
+            self._pixmap_bytes -= self._pixmap_size(old)
+        self._pixmaps[key] = pm
+        self._pixmap_bytes += self._pixmap_size(pm)
+        self._evict_pixmaps()
+
+    def _evict_pixmaps(self) -> None:
+        """Drop the least-recently-used tiles until the byte budget fits."""
+        while self._pixmap_bytes > _MEM_PIXMAP_BYTES and len(self._pixmaps) > 1:
+            key, pm = next(iter(self._pixmaps.items()))
+            self._pixmaps.pop(key, None)
+            self._pixmap_bytes -= self._pixmap_size(pm)
+
+    def clear_pixmaps(self) -> None:
+        """Release every cached tile bitmap (e.g. on a zoom change)."""
+        self._pixmaps.clear()
+        self._pixmap_bytes = 0
+
+    def set_zoom(self, zoom: float) -> None:
+        """Set the zoom level, dropping tiles cached for another zoom."""
+        new_zoom = clamp_zoom(zoom)
+        if int(new_zoom) != int(self._zoom):
+            self.clear_pixmaps()
+        self._zoom = new_zoom
         self.update()
 
     # ── Painting ───────────────────────────────────────────────────
@@ -366,7 +397,7 @@ class GeoMapWidget(QtWidgets.QWidget):
         steps = delta / 120.0
         pos = event.position()
         anchor = self._lat_lon_under(pos)
-        self._zoom = clamp_zoom(round(self._zoom + steps))
+        self.set_zoom(round(self._zoom + steps))
         # Keep the point under the cursor fixed on screen while zooming.
         wx, wy = self._world_px(*anchor)
         self._center = world_to_lat_lon(
@@ -409,7 +440,7 @@ class GeoMapWidget(QtWidgets.QWidget):
     def mouseDoubleClickEvent(self, event):
         pos = event.position()
         anchor = self._lat_lon_under(pos)
-        self._zoom = clamp_zoom(self._zoom + 1)
+        self.set_zoom(self._zoom + 1)
         self._center = anchor
         self.update()
         event.accept()
@@ -489,8 +520,7 @@ class GeoMapWindow(QtWidgets.QMainWindow):
         self._widget.set_follow(self._follow_action.isChecked())
 
     def _zoom_by(self, steps: float) -> None:
-        self._widget._zoom = clamp_zoom(self._widget._zoom + steps)
-        self._widget.update()
+        self._widget.set_zoom(self._widget.zoom + steps)
 
     def _open_in_browser(self) -> None:
         current = self._widget.track.current

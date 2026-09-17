@@ -312,6 +312,42 @@ check("geometry saved", True)
 win.close()
 widget.stop_loading()
 
+# 10. memory bounds: track cap + tile pixmap budget + zoom eviction -----------
+capped = Track(max_fixes=3)
+for i in range(6):
+    capped.add_fix(55.0 + i * 0.001, 37.0, ts=1000.0 + i)
+check("track cap drops oldest", capped.count == 3)
+check("track cap keeps newest", abs(capped.current.lat - 55.005) < 1e-9)
+
+from stanza_im.ui import map_widget as map_widget_mod
+
+mem = GeoMapWidget("", None)
+saved_budget = map_widget_mod._MEM_PIXMAP_BYTES
+map_widget_mod._MEM_PIXMAP_BYTES = 256 * 256 * 4 * 2   # room for two tiles
+try:
+    tile = QtGui.QPixmap(256, 256)
+    tile.fill(QtCore.Qt.GlobalColor.red)
+    for i in range(6):
+        mem._store_pixmap((15, i, 0), QtGui.QPixmap(tile))
+    check("tile pixmap byte budget enforced",
+          mem._pixmap_bytes <= map_widget_mod._MEM_PIXMAP_BYTES)
+    check("tile pixmap LRU bounded", len(mem._pixmaps) <= 2)
+finally:
+    map_widget_mod._MEM_PIXMAP_BYTES = saved_budget
+
+mem._zoom = 15
+mem._store_pixmap((15, 1, 1), QtGui.QPixmap(tile))
+mem.set_zoom(16)
+check("zoom change clears the tile cache",
+      not mem._pixmaps and mem._pixmap_bytes == 0)
+mem._store_pixmap((16, 1, 1), QtGui.QPixmap(tile))
+mem.set_zoom(16.4)
+check("same integer zoom keeps the tile cache", len(mem._pixmaps) == 1)
+mem.clear_pixmaps()
+check("clear_pixmaps empties the cache",
+      not mem._pixmaps and mem._pixmap_bytes == 0)
+mem.stop_loading()
+
 check("haversine",
       abs(haversine_m(55.0, 37.0, 55.0001, 37.0) - 11.1) < 2.0)
 

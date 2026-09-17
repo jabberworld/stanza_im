@@ -185,17 +185,24 @@ def osm_external_url(lat: float, lon: float, zoom: int = 16) -> str:
 
 _MIN_FIX_DISTANCE_M = 2.0   # ignore fixes closer than 2 m to the previous one
 _MIN_FIX_DT_S = 1.0         # ... and earlier than 1 s after the previous one
+_MAX_TRACK_FIXES = 2000     # keep a bounded live track (drop oldest fixes)
 
 
 class Track:
     """An ordered series of location fixes plus derived movement stats.
 
     The current speed is the great-circle distance between the last two fixes
-    divided by their time delta (empty/zero delta yields zero).
+    divided by their time delta (empty/zero delta yields zero).  The track is
+    capped at *max_fixes* (oldest fixes dropped) so a long live session cannot
+    grow without bound; the start marker then reflects the oldest retained fix.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_fixes: int = _MAX_TRACK_FIXES) -> None:
         self._fixes: list[Fix] = []
+        try:
+            self._max_fixes = max(1, int(max_fixes))
+        except (TypeError, ValueError):
+            self._max_fixes = _MAX_TRACK_FIXES
 
     def add_fix(self, lat: float, lon: float, accuracy: float = 0.0,
                 ts: float | None = None) -> bool:
@@ -208,6 +215,8 @@ class Track:
             if distance < _MIN_FIX_DISTANCE_M and fix.ts - last.ts < _MIN_FIX_DT_S:
                 return False
         self._fixes.append(fix)
+        if len(self._fixes) > self._max_fixes:
+            del self._fixes[:len(self._fixes) - self._max_fixes]
         return True
 
     @property
