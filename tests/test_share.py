@@ -164,6 +164,12 @@ check("context_menu_values extracts url/link/text",
       context_menu_values(_FakeMenuData(
           media="https://img/x.png", link="https://page", selected="hi"))
       == ("https://img/x.png", "", "https://page", "hi"))
+check("context_menu_values resolves the image thumbnail from the media link",
+      context_menu_values(_FakeMenuData(
+          media="data:image/png;base64,AAAA",
+          link="stanza:view:image/https%3A%2F%2Fimg%2Fx.png"))
+      == ("https://img/x.png", "image",
+          "stanza:view:image/https%3A%2F%2Fimg%2Fx.png", ""))
 
 _view_src = open(os.path.join(_ROOT, "stanza_im/ui/chat_view.py"),
                  encoding="utf-8").read()
@@ -173,6 +179,8 @@ check("chat view reads lastContextMenuRequest",
       "lastContextMenuRequest" in _view_src)
 check("chat view no longer reads page().contextMenuData()",
       "contextMenuData" not in _view_src)
+check("chat view maps the prefixed MediaType members",
+      "MediaTypeImage" in _view_src)
 check("chat view relays the per-message forward menu item",
       "__stanzaForwardRef" in _view_src)
 check("chat widget routes stanza:forward URIs",

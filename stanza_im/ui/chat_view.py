@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import html
 import logging
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -90,7 +90,11 @@ def share_payload(link_url: str, media_url: str, media_kind: str,
 
 
 def _media_type_name(media_type) -> str:
-    """Map QWebEngineContextMenuRequest.MediaType to image/audio/video."""
+    """Map QWebEngineContextMenuRequest.MediaType to image/audio/video.
+
+    PyQt6 exposes the members prefixed (``MediaTypeImage``); the unprefixed
+    spellings are tried too for other bindings.
+    """
     if not HAS_WEBENGINE or media_type is None:
         return ""
     from PyQt6 import QtWebEngineCore
@@ -98,13 +102,31 @@ def _media_type_name(media_type) -> str:
                    "MediaType", None)
     if enum is None:
         return ""
-    for name in ("Image", "Audio", "Video"):
+    for member, label in (("MediaTypeImage", "image"),
+                          ("MediaTypeAudio", "audio"),
+                          ("MediaTypeVideo", "video"),
+                          ("Image", "image"), ("Audio", "audio"),
+                          ("Video", "video")):
         try:
-            if media_type == getattr(enum, name):
-                return name.lower()
+            if media_type == getattr(enum, member):
+                return label
         except Exception:
             pass
     return ""
+
+
+def _stanza_media_link(link_url: str):
+    """``"stanza:view:<kind>/<urlencoded>"`` -> ``(kind, url)`` or ``None``.
+
+    The chat's previews wrap media in such a link and the original URL lives in
+    its href; the DOM ``src`` of an image is only a data-URI thumbnail.
+    """
+    if not link_url.startswith("stanza:view:"):
+        return None
+    kind, sep, encoded = link_url[len("stanza:view:"):].partition("/")
+    if not sep or kind not in ("image", "audio", "video"):
+        return None
+    return kind, unquote(encoded)
 
 
 def context_menu_values(data) -> tuple[str, str, str, str]:
@@ -123,6 +145,14 @@ def context_menu_values(data) -> tuple[str, str, str, str]:
     kind = _media_type_name(data.mediaType())
     link_url = data.linkUrl().toString() if data.linkUrl() else ""
     selected = data.selectedText() or ""
+    stanza_media = _stanza_media_link(link_url)
+    if stanza_media is not None:
+        link_kind, original = stanza_media
+        kind = kind or link_kind
+        if not media_url.lower().startswith(("http://", "https://")):
+            # An embedded image reports its data-URI thumbnail as the media
+            # URL; the shareable original is in the stanza:view: link.
+            media_url = original
     return media_url, kind, link_url, selected
 
 

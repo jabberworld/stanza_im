@@ -1356,7 +1356,10 @@ class GroupChatInfo:     # room, nick, subject, users
   `QWebEngineView.lastContextMenuRequest()` and always shows the app's own menu
   (never Chromium's): over media the copy/save/view entries, otherwise
   «Поделиться» for a media URL, a link or the selected text (only `http(s)`),
-  copy link / open in browser, copy the selection, and "Select all".
+  copy link / open in browser, copy the selection, and "Select all". The media
+  kind comes from the `MediaType*` enum members, and an embedded image's
+  shareable original URL is decoded from its `stanza:view:` link (the request's
+  media URL is only the data-URI thumbnail).
   `ChatView.share_requested` → `ChatWindow` → `MainWindow._on_share_requested`
   opens `ShareDialog` (a checkable list of the roster contacts and the
   conferences we are in) and sends each target a `«Переслано:»` line plus the

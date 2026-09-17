@@ -340,7 +340,10 @@ to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the
 WebEngine `contextMenuEvent` reads the request via
 `QWebEngineView.lastContextMenuRequest()` (Qt 6; the old
 `page().contextMenuData()` does not exist and silently fell back to the engine
-menu) and always builds its own menu — never Chromium's. Over media it keeps the
+menu) and always builds its own menu — never Chromium's. The media kind comes
+from the `MediaType*` enum members, and for an embedded image the shareable
+original URL is decoded from its `stanza:view:` link (the reported media URL is
+only the data-URI thumbnail). Over media it keeps the
 copy/Save as…/open viewer/fullscreen entries; otherwise it offers «Поделиться»
 («Share», only for `http(s)`), copy link / open in browser for a web link, copy
 for a selection, and "Select all". Sharing (and an address-less
