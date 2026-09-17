@@ -234,6 +234,13 @@ STRINGS = {
     "ctx_leave_conference": "Leave Conference",
     "xmpp_uri_unhandled": "The \"{action}\" XMPP link action is not supported.",
     "ctx_show_history": "Conversation History",
+    "ctx_invite_to": "Invite to",
+    "muc_invite_default_reason": "Join me in the conference",
+    "muc_invite_sent": "Invitation sent: {room}",
+    "muc_invite_received_title": "Conference invitation",
+    "muc_invite_received_text": "{inviter} invites you to {room}",
+    "muc_invite_join": "Join",
+    "muc_invite_decline": "Decline",
     # vCard
     "vcard_info_title": "Contact info",
     "vcard_copy_jid": "Copy XMPP address",

@@ -234,6 +234,13 @@ STRINGS = {
     "ctx_leave_conference": "Покинуть конференцию",
     "xmpp_uri_unhandled": "Действие «{action}» в XMPP-ссылке не поддерживается.",
     "ctx_show_history": "История переписки",
+    "ctx_invite_to": "Пригласить в",
+    "muc_invite_default_reason": "Присоединяйтесь к конференции",
+    "muc_invite_sent": "Приглашение отправлено: {room}",
+    "muc_invite_received_title": "Приглашение в конференцию",
+    "muc_invite_received_text": "{inviter} приглашает вас в {room}",
+    "muc_invite_join": "Присоединиться",
+    "muc_invite_decline": "Отклонить",
     # vCard
     "vcard_info_title": "Информация о контакте",
     "vcard_copy_jid": "Скопировать XMPP-адрес",

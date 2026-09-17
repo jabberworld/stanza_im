@@ -275,8 +275,10 @@ mid-line only the bare nick is completed; the previous token is replaced so the
 cycle wraps correctly (`ChatWidget._tab_complete_nick`). The MUC participant
 sidebar (`ChatWidget._users_list`, a `_ParticipantList` subclass) opens the
 private chat on a double-click of a participant row (`participant_clicked`;
-single click only selects), and a left click on empty list space clears the
-selection (`_ParticipantList.mousePressEvent`). `Esc` in the chat
+single click only selects), a left click on empty list space clears the
+selection (`_ParticipantList.mousePressEvent`), and the right-click participant
+context menu offers «Пригласить в» (XEP-0249) when the participant's real JID is
+visible. `Esc` in the chat
 window collapses a conference back to the roster without leaving the room (the
 tab is removed, the room stays joined, other tabs keep the window open); on a
 1:1 tab Esc closes it. `Ctrl+W` leaves a conference (with the optional confirm)
@@ -449,7 +451,11 @@ icon-only copy button right beside the address (toolbar-style
 `QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",
 `make_xmpp_uri(jid)` → clipboard); the conference roster context menu's
 «Скопировать адрес конференции» entry (directly below «История переписки»)
-copies `xmpp:<jid>?join`. Failed vCard fetches emit `vcard_error` on the event
+copies `xmpp:<jid>?join`. A non-conference roster contact's context menu also
+carries «Пригласить в» (`_build_invite_menu`), a submenu of the conferences we
+are in; picking one calls `client.send_muc_invite(target, room, reason,
+password)` (XEP-0249, the room password is included when known) and shows a tray
+notice — the entry is hidden when we are in no conference. Failed vCard fetches emit `vcard_error` on the event
 bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
 
@@ -582,10 +588,11 @@ Per XEP-0353 the `propose` targets the peer's **bare** JID while the responses
 (`proceed`/`reject`/`retract`) and the `session-initiate` are addressed to the
 **full** JID of the resource that accepted (the `proceed` sender) — a peer with
 several resources must not receive the Jingle IQ on a non-call resource.
-Bodyless `<message>` stanzas (propose/retract and XEP-0482 invites) never reach
+Bodyless `<message>` stanzas (propose/retract, XEP-0482 call invites and
+XEP-0249 MUC invitations) never reach
 the core `message` event — slixmpp registers its IM handler as
 `message/body` — so they have dedicated `MatchXPath` handlers
-(`_on_jingle_message_stanza`/`_on_call_invite_stanza`). Incoming proposals are
+(`_on_jingle_message_stanza`/`_on_call_invite_stanza`/`_on_muc_invite_stanza`). Incoming proposals are
 answered via `client.answer_proposal(sid, accept)` (sends `proceed`/`reject`);
 the proposed media kind (`_propose_media`) is read from **all** `<description>`
 elements (video wins; nested or not), and the session-initiate that follows a

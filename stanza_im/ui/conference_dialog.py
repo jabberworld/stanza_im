@@ -165,3 +165,50 @@ class JoinConferenceDialog(QtWidgets.QDialog):
                 "server": self._server.currentText().strip(), "password": self._password.text(),
                 "save": self._save_bookmark.isChecked(),
                 "name": self._bookmark_name.text().strip(), "autojoin": self._auto_join.isChecked()}
+
+
+class IncomingInviteDialog(QtWidgets.QDialog):
+    """Prompt shown for an incoming XEP-0249 direct conference invitation."""
+
+    def __init__(self, inviter: str, room: str, reason: str = "",
+                 nick: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("muc_invite_received_title"))
+        self.setMinimumWidth(420)
+        layout = QtWidgets.QVBoxLayout(self)
+        icon = QtWidgets.QLabel()
+        pix = QtGui.QPixmap(f"{CATEGORIES_DIR_16}/muc.png")
+        if not pix.isNull():
+            icon.setPixmap(pix.scaled(48, 48))
+        text = tr("muc_invite_received_text", inviter=inviter, room=room)
+        if reason:
+            text += "\n\n" + reason
+        label = QtWidgets.QLabel(text)
+        label.setWordWrap(True)
+        head = QtWidgets.QHBoxLayout()
+        head.addWidget(icon, alignment=QtCore.Qt.AlignmentFlag.AlignTop)
+        head.addWidget(label, stretch=1)
+        layout.addLayout(head)
+
+        form = QtWidgets.QFormLayout()
+        self._nick = QtWidgets.QLineEdit(nick)
+        form.addRow(tr("conference_nick"), self._nick)
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QDialogButtonBox()
+        join = buttons.addButton(
+            tr("muc_invite_join"),
+            QtWidgets.QDialogButtonBox.ButtonRole.AcceptRole)
+        decline = buttons.addButton(
+            tr("muc_invite_decline"),
+            QtWidgets.QDialogButtonBox.ButtonRole.RejectRole)
+        join.clicked.connect(self._validate)
+        decline.clicked.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _validate(self):
+        if self._nick.text().strip():
+            self.accept()
+
+    def nick(self) -> str:
+        return self._nick.text().strip()

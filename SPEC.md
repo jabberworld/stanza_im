@@ -398,7 +398,14 @@ Context menu differs for conferences (items in `_conference_roster` /
 «Скопировать адрес конференции» (`conference_copy_join`) directly below
 «История переписки», and its «Звонок» submenu starts a Muji conference call
 (`_join_muji`) instead of the 1:1 Jingle call, enabled only when aiortc is
-available (`client.rtp_calls.available`).
+available (`client.rtp_calls.available`). For a non-conference contact the menu
+carries «Пригласить в» (`ctx_invite_to`) — a submenu of the conferences we are
+currently in (XEP-0249): picking one calls
+`client.send_muc_invite(target, room, reason, password)` (the room password is
+included when known) and shows a tray notice; the entry is hidden when we are in
+no conference. The MUC participant context menu offers the same submenu for a
+participant with a visible real JID, excluding the room that participant is
+already in.
 
 ### 7.4 Strategy Pattern
 
@@ -470,7 +477,8 @@ Single conversation tab. Layout:
   chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,
   falling back to `room/nick`), and a left click on empty list space clears the
   selection (`_ParticipantList.mousePressEvent`). Right-click opens the
-  participant context menu.
+  participant context menu; when the participant's real JID is visible it also
+  offers «Пригласить в» (XEP-0249, §7.3).
 
 ### 9.1 Slash Commands
 

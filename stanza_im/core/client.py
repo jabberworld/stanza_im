@@ -49,6 +49,7 @@ NS_DISCO_ITEMS = "http://jabber.org/protocol/disco#items"
 NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
+NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 
 
@@ -132,6 +133,26 @@ def _stanza_id(stanza, by: str) -> str:
         if el_by and (el_by == by or el_by.split("/")[0] == by.split("/")[0]):
             return str(el.get("id", ""))
     return ""
+
+
+def muc_invite_from_message(msg) -> dict | None:
+    """Parse a XEP-0249 direct MUC invitation from *msg*.
+
+    Returns a dict with ``frm`` (bare sender), ``room``, ``password`` and
+    ``reason``, or ``None`` when the stanza carries no invitation.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    x = xml.find("{%s}x" % NS_MUC_INVITE)
+    if x is None or x.get("jid") is None:
+        return None
+    return {
+        "frm": str(msg["from"]).split("/", 1)[0],
+        "room": str(x.get("jid", "")),
+        "password": str(x.get("password", "") or ""),
+        "reason": str(x.get("reason", "") or ""),
+    }
 
 
 def _make_unique_id(xml) -> str:
@@ -618,6 +639,10 @@ class JabberClient:
             MatchXPath("%s/{%s}*" % (msg_ns, muji_mod.NS_CALL_INVITES)),
             self._on_call_invite_stanza))
         self.xmpp.register_handler(CoroutineCallback(
+            "MUC Invite",
+            MatchXPath("%s/{%s}x" % (msg_ns, NS_MUC_INVITE)),
+            self._on_muc_invite_stanza))
+        self.xmpp.register_handler(CoroutineCallback(
             "PEP Event",
             MatchXPath("%s/{%s}event" % (msg_ns, NS_PUBSUB_EVENT)),
             self._on_pubsub_event_stanza))
@@ -642,6 +667,15 @@ class JabberClient:
             self.muji.handle_invite_message(msg)
         except Exception:
             logger.exception("MUJI invite handling failed")
+
+    async def _on_muc_invite_stanza(self, msg) -> None:
+        """A bodyless XEP-0249 invitation (slixmpp ignores it without a body)."""
+        invite = muc_invite_from_message(msg)
+        if invite is None:
+            return
+        logger.info("MUC invite from %s to %s", invite["frm"], invite["room"])
+        self.emit("muc_invite_received", invite["frm"], invite["room"],
+                  invite["password"], invite["reason"])
 
     async def _dispatch_jingle_iq(self, iq) -> None:
         """Ack a Jingle IQ once and route it to FT or RTP."""
@@ -1021,6 +1055,24 @@ class JabberClient:
                      mtype, jid, reply_id, body[:200])
         msg.send()
         return message_id
+
+    def send_muc_invite(self, jid: str, room: str, reason: str = "",
+                        password: str = "") -> None:
+        """Send a XEP-0249 direct MUC invitation to *jid* for *room*."""
+        if not isinstance(jid, str) or not jid.strip() or not room:
+            logger.warning("Skipping MUC invite (jid=%r room=%r)", jid, room)
+            return
+        msg = self.xmpp.Message()
+        msg["to"] = jid.strip()
+        msg["type"] = "normal"
+        x = ET.SubElement(msg.xml, "{%s}x" % NS_MUC_INVITE)
+        x.set("jid", room)
+        if password:
+            x.set("password", password)
+        if reason:
+            x.set("reason", reason)
+        logger.info("Sending MUC invite to %s for %s", jid.strip(), room)
+        msg.send()
 
     @staticmethod
     def _attach_reply(msg, reply_to: str, reply_id: str,

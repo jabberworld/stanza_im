@@ -1381,6 +1381,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muji_session", self._on_muji_session)
         c.on("muji_left", self._on_muji_left)
         c.on("muji_invite", self._on_muji_invite)
+        c.on("muc_invite_received", self._on_muc_invite_received)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("mam_unavailable", self._on_mam_unavailable)
         c.on("mam_parse_error", self._on_mam_parse_error)
@@ -2354,6 +2355,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     lambda: QtWidgets.QApplication.clipboard().setText(
                         make_xmpp_uri(jid, "join"))))
         if not is_conf:
+            self._build_invite_menu(menu, jid.split("/", 1)[0])
             menu.addSeparator()
             menu.addAction(self._menu_icon("edit.png"), tr("ctx_rename"),
                            lambda checked=False: defer(lambda: self._rename_contact(jid)))
@@ -3329,6 +3331,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                  tr("muc_user_execute_command"))
         command.triggered.connect(
             lambda: self._muc_user_command(room, nick))
+        if real_jid:
+            self._build_invite_menu(menu, real_jid, exclude_room=room)
         menu.addSeparator()
         roles = menu.addMenu(tr("muc_user_change_role"))
         for role in ("visitor", "participant", "moderator"):
@@ -3353,6 +3357,59 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         self._client.set_muc_role(room, nick, role)
+
+    # ── XEP-0249 conference invitations ───────────────────────────
+
+    def _joined_conferences(self) -> list[str]:
+        """The rooms we are currently in, sorted by display name."""
+        return sorted(self._muc_self_nicks,
+                      key=lambda room: self._muc_display_name(room).casefold())
+
+    def _build_invite_menu(self, parent, target_jid: str, exclude_room: str = ""):
+        """Build the "Invite to" submenu; ``None`` when there is nothing to offer."""
+        if not self._client or not target_jid:
+            return None
+        rooms = [room for room in self._joined_conferences()
+                 if room != exclude_room]
+        if not rooms:
+            return None
+        submenu = parent.addMenu(self._menu_icon("add-user.svg"),
+                                 tr("ctx_invite_to"))
+        for room in rooms:
+            action = submenu.addAction(self._menu_icon("muc.png"),
+                                       self._muc_display_name(room))
+            action.triggered.connect(
+                lambda checked=False, r=room, t=target_jid:
+                self._invite_to_conference(t, r))
+        return submenu
+
+    def _invite_to_conference(self, target_jid: str, room: str) -> None:
+        """Send a XEP-0249 invitation to *target_jid* for *room*."""
+        if not self._client or not target_jid or not room:
+            return
+        groupchats = getattr(self._client, "groupchats", None) or {}
+        groupchat = groupchats.get(room)
+        password = getattr(groupchat, "password", "") if groupchat else ""
+        self._client.send_muc_invite(
+            target_jid, room, reason=tr("muc_invite_default_reason"),
+            password=password)
+        self._tray.show_message(
+            APP_NAME,
+            tr("muc_invite_sent", room=self._muc_display_name(room)))
+
+    def _on_muc_invite_received(self, frm: str, room: str, password: str,
+                                reason: str) -> None:
+        """A XEP-0249 direct invitation arrived — offer to join the room."""
+        from stanza_im.ui.conference_dialog import IncomingInviteDialog
+        nick = self._client.jid_str.split("@", 1)[0] if self._client else ""
+        dlg = IncomingInviteDialog(frm, room, reason, nick, self)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._join_muc(room, dlg.nick(), password)
+        dlg.finished.connect(finished)
+        dlg.open()
 
     # ── Status ────────────────────────────────────────────────────
 
