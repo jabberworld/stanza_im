@@ -61,6 +61,13 @@ check("parse unknown action",
 check("parse non-xmpp", parse_xmpp_uri("https://example.org") is None)
 check("parse empty jid", parse_xmpp_uri("xmpp:") is None)
 
+noaddr = parse_xmpp_uri(
+    "xmpp:?message;body=https%3A%2F%2Fgultsch.de%2Fposts%2Fhow-do-we-gain-traction%2F")
+check("parse address-less message", noaddr == {
+    "jid": "", "action": "message",
+    "params": {"body": "https://gultsch.de/posts/how-do-we-gain-traction/"}})
+check("parse address-less empty query", parse_xmpp_uri("xmpp:?") is None)
+
 # 3. roundtrip ----------------------------------------------------------------------
 
 for jid in ("a@b.c", "room@conf.example.org"):
@@ -87,6 +94,11 @@ check("tokenise trailing punct",
       '<a href="xmpp:romeo@montague.net">' in anchors[0]
       and anchors[0].endswith("romeo@montague.net</a>"))
 check("restore full text", restored == 'chat <a href="xmpp:romeo@montague.net">xmpp:romeo@montague.net</a>, please')
+
+tmp, anchors = tokenize_urls(
+    "go xmpp:?message;body=https%3A%2F%2Fgultsch.de%2Fposts%2F")
+check("tokenise address-less xmpp",
+      "\x000\x00" in tmp and anchors[0].startswith('<a href="xmpp:?message;'))
 
 # 6. escape_body_with_geo (QTextBrowser fallback) -----------------------------------
 

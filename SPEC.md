@@ -1343,7 +1343,18 @@ class GroupChatInfo:     # room, nick, subject, users
   is prefilled into the input), `?join` focuses the open room or prefills
   `JoinConferenceDialog` with the room (and persists the server in
   `connection.conference_servers` on accept), `?roster`/`?subscribe` open
-  `AddContactDialog` prefilled with the JID, and unrecognized actions warn.
+  `AddContactDialog` prefilled with the JID, and unrecognized actions warn. An
+  address-less `xmpp:?message;body=…` (empty JID) opens `ShareDialog` with that
+  body instead.
+- **Share** — the WebEngine chat context menu offers «Поделиться» for a media
+  URL, a link or the selected text (only `http(s)`); `ChatView.share_requested`
+  → `ChatWindow` → `MainWindow._on_share_requested` opens `ShareDialog` (a
+  checkable list of the roster contacts and the conferences we are in) and
+  sends each target a `«Переслано:»` line plus the content as a XEP-0393 quote
+  (`compose_reply_body`): 1:1 targets are echoed via `_display_local_outgoing`
+  and stored in history, conferences get a groupchat message, and a tray notice
+  confirms the count. The QTextBrowser fallback adds «Поделиться» to its
+  standard menu.
 - **Copy to clipboard** — the vCard dialog shows an icon-only copy button
   right beside the JID address (`copy.svg`, tooltip "Copy XMPP address")
   copying `xmpp:<jid>`; the conference roster context menu ("Copy conference

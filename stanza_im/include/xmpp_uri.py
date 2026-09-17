@@ -43,14 +43,15 @@ def parse_xmpp_uri(uri: str) -> dict | None:
     Returns ``{"jid": str, "action": str, "params": dict[str, str]}`` or
     ``None`` when *uri* is not a well-formed xmpp: URI.  The JID keeps its
     percent-decoded form; query keys/values are percent-decoded too, and a
-    value without ``=`` parses as an empty string.
+    value without ``=`` parses as an empty string.  The address-less form
+    ``xmpp:?message;body=…`` (XEP-0147) parses with an empty ``jid``.
     """
     if not isinstance(uri, str) or not _XMPP_URI_RE.fullmatch(uri.strip()):
         return None
     rest = uri[5:]
     jid_part, has_query, query = rest.partition("?")
     jid = unquote(jid_part)
-    if not jid:
+    if not jid and not query:
         return None
     action = ""
     params: dict[str, str] = {}

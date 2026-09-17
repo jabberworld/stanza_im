@@ -71,6 +71,24 @@ def clamp_zoom(factor: float) -> float:
         return 1.0
 
 
+def share_payload(link_url: str, media_url: str, media_kind: str,
+                  selected_text: str) -> str:
+    """The content a chat context menu should offer to share, or "".
+
+    Priority: a media URL, then a link URL, then the selected text.  Only
+    ``http(s)`` URLs are shareable — internal ``stanza:``/``data:`` links are
+    not.
+    """
+    def _web(url: str) -> bool:
+        return (url or "").lower().startswith(("http://", "https://"))
+
+    if media_kind and _web(media_url):
+        return media_url
+    if _web(link_url):
+        return link_url
+    return (selected_text or "").strip()
+
+
 class _JumpButtonMixin:
     """Floating 'jump to bottom' button for either chat backend."""
 
@@ -199,6 +217,7 @@ if HAS_WEBENGINE:
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
+        share_requested = QtCore.pyqtSignal(str)            # shared content
 
         _LOAD_RETRY_LIMIT = 5
 
@@ -296,30 +315,43 @@ if HAS_WEBENGINE:
             """)
 
         def contextMenuEvent(self, event):
-            """Show the media menu (copy/save/view) when over media."""
+            """Show the media/link/share menu when there is something to act on."""
             data = None
             try:
                 data = self.page().contextMenuData()
             except Exception:
                 data = None
-            url = ""
+            media_url = ""
             kind = ""
+            link_url = ""
+            selected = ""
             if data is not None:
-                media_url = data.mediaUrl()
-                if media_url is not None and not media_url.isEmpty():
-                    url = media_url.toString()
+                media = data.mediaUrl()
+                if media is not None and not media.isEmpty():
+                    media_url = media.toString()
                 kind = _media_type_name(data.mediaType())
-            if url and kind:
-                self._show_media_menu(event, url, kind)
+                link_url = data.linkUrl().toString() if data.linkUrl() else ""
+                selected = data.selectedText() or ""
+            content = share_payload(link_url, media_url, kind, selected)
+            if media_url and kind:
+                self._show_media_menu(event, media_url, kind, content)
+                return
+            if link_url or selected:
+                self._show_link_menu(event, link_url, selected, content)
                 return
             super().contextMenuEvent(event)
 
-        def _show_media_menu(self, event, url: str, kind: str) -> None:
+        def _show_media_menu(self, event, url: str, kind: str,
+                             share_content: str = "") -> None:
             menu = QtWidgets.QMenu(self)
             menu.addAction(tr("media_copy_link"),
                            lambda: self.media_copy_requested.emit(url))
             menu.addAction(tr("media_save"),
                            lambda: self.media_save_requested.emit(url))
+            if share_content:
+                menu.addAction(
+                    tr("ctx_share"),
+                    lambda c=share_content: self.share_requested.emit(c))
             if kind in ("audio", "video"):
                 menu.addSeparator()
                 menu.addAction(
@@ -330,6 +362,28 @@ if HAS_WEBENGINE:
                         tr("media_fullscreen"),
                         lambda u=url: self.media_open_requested.emit(
                             u, "video_fs"))
+            menu.exec(event.globalPos())
+
+        def _show_link_menu(self, event, link_url: str, selected: str,
+                            share_content: str) -> None:
+            menu = QtWidgets.QMenu(self)
+            if share_content:
+                menu.addAction(
+                    tr("ctx_share"),
+                    lambda c=share_content: self.share_requested.emit(c))
+            if link_url:
+                menu.addAction(
+                    tr("media_copy_link"),
+                    lambda u=link_url: QtWidgets.QApplication.clipboard().setText(u))
+                if link_url.lower().startswith(("http://", "https://")):
+                    menu.addAction(
+                        tr("ctx_open_link"),
+                        lambda u=link_url: QtGui.QDesktopServices.openUrl(
+                            QtCore.QUrl(u)))
+            elif selected:
+                menu.addAction(
+                    tr("ctx_copy"),
+                    lambda t=selected: QtWidgets.QApplication.clipboard().setText(t))
             menu.exec(event.globalPos())
 
         def _accept_navigation(self, url) -> bool:
@@ -1162,6 +1216,7 @@ else:
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
+        share_requested = QtCore.pyqtSignal(str)            # shared content
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
@@ -1186,6 +1241,26 @@ else:
                 event.accept()
                 return
             super().wheelEvent(event)
+
+        def contextMenuEvent(self, event):
+            """Standard menu plus a Share action for a link or selected text."""
+            menu = self.createStandardContextMenu()
+            pos = self.viewport().mapFromGlobal(event.globalPos())
+            anchor = self.anchorAt(pos)
+            selected = self.textCursor().selectedText().replace("\u2029", "\n")
+            content = share_payload(anchor, "", "", selected)
+            if content:
+                action = QtGui.QAction(tr("ctx_share"), menu)
+                action.triggered.connect(
+                    lambda _checked=False, payload=content:
+                    self.share_requested.emit(payload))
+                actions = menu.actions()
+                if actions:
+                    menu.insertAction(actions[0], action)
+                    menu.insertSeparator(actions[0])
+                else:
+                    menu.addAction(action)
+            menu.exec(event.globalPos())
 
         def set_chat_zoom(self, factor: float):
             """Set a persisted text-scale factor as the document font size."""

@@ -338,7 +338,14 @@ view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the
 WebEngine `contextMenuEvent` builds the media menu (copy original link / Save
-as… / open viewer / fullscreen) from `page().contextMenuData()`. Previews are
+as… / open viewer / fullscreen) and a "Share" entry from
+`page().contextMenuData()`; right-clicking a link or a text selection shows the
+same menu with «Поделиться» («Share»). Sharing (and an address-less
+``xmpp:?message;body=…`` URI) opens `ShareDialog` — a checkable list of the
+roster contacts and the conferences we are in — and sends each chosen target a
+`«Переслано:»` line followed by the content as a XEP-0393 quote
+(`compose_reply_body`); 1:1 targets are echoed locally via
+`_display_local_outgoing` (and stored), conferences get a groupchat message. Previews are
 off when QtWebEngine is unavailable. Settings changes re-render open chats via
 `ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
 `showEvent` (a cached original returns before layout, so the initial fit is
@@ -445,7 +452,9 @@ click. It then emits `ChatWidget.xmpp_link_clicked`
 → `ChatWindow.xmpp_link_clicked` → `MainWindow._on_xmpp_uri`:
 bare JID / `?message` opens the chat (prefilling `body`), `?join` opens the
 conference join dialog (prepopulating room+server and persisting the server),
-`?roster`/`?subscribe` open `AddContactDialog` prefilled with the JID.
+`?roster`/`?subscribe` open `AddContactDialog` prefilled with the JID. An
+address-less `xmpp:?message;body=…` (no JID) opens `ShareDialog` with that body
+instead.
 Unrecognized actions warn the user. The vCard dialog shows its JID with an
 icon-only copy button right beside the address (toolbar-style
 `QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",

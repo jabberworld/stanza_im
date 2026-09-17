@@ -202,6 +202,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_media_save_requested)
         self._chat_window.media_copy_requested.connect(
             self._on_media_copy_requested)
+        self._chat_window.share_requested.connect(self._on_share_requested)
         self._chat_window.geo_view_requested.connect(
             self._on_geo_view_requested)
         self._chat_window.geo_message_corrected.connect(
@@ -2090,6 +2091,18 @@ class MainWindow(QtWidgets.QMainWindow):
         action = (parsed.get("action") or "").lower()
         params = parsed.get("params", {})
 
+        if not jid:
+            # XEP-0147 allows an address-less message URI, e.g.
+            # ``xmpp:?message;body=…`` — offer to share the body.
+            body = params.get("body") or params.get("thread") or ""
+            if action in ("", "message") and body:
+                self._on_share_requested(body)
+                return
+            QtWidgets.QMessageBox.warning(
+                self, APP_NAME,
+                tr("xmpp_uri_unhandled", action=action or "message"))
+            return
+
         if action in ("", "message"):
             self._on_contact_open(jid)
             body = params.get("body") or params.get("thread")
@@ -2950,6 +2963,65 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_media_copy_requested(self, url: str):
         QtWidgets.QApplication.clipboard().setText(url or "")
+
+    # ── Share (forward a URL/media/selection to contacts & conferences) ──
+
+    def _on_share_requested(self, content: str) -> None:
+        """Open the share window for a chat URL/media/selection or xmpp: body."""
+        content = (content or "").strip()
+        if not self._client or not content:
+            return
+        from stanza_im.ui.share_dialog import ShareDialog
+        contacts = self._share_contacts()
+        conferences = self._share_conferences()
+        if not contacts and not conferences:
+            return
+        dlg = ShareDialog(contacts, conferences, content, self)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._send_share(content, dlg.selected_targets())
+        dlg.finished.connect(finished)
+        dlg.open()
+
+    def _share_contacts(self) -> list:
+        """``(jid, name)`` pairs for the non-conference roster contacts."""
+        skip_groups = {tr("roster_group_conferences"),
+                       tr("roster_group_transports")}
+        seen: set = set()
+        out = []
+        for user in self._roster._users:
+            jid = user.jid
+            if (not jid or jid in seen or jid in self._conference_roster
+                    or user.group in skip_groups):
+                continue
+            seen.add(jid)
+            out.append((jid, user.name or jid))
+        out.sort(key=lambda item: item[1].casefold())
+        return out
+
+    def _share_conferences(self) -> list:
+        """``(room, name)`` pairs for the conferences we are currently in."""
+        rooms = sorted(self._muc_self_nicks,
+                       key=lambda room: self._muc_display_name(room).casefold())
+        return [(room, self._muc_display_name(room)) for room in rooms]
+
+    def _send_share(self, content: str, targets: list) -> None:
+        """Forward *content* (as a "Forwarded:" quote) to the chosen targets."""
+        from stanza_im.core.client import compose_reply_body
+        body = tr("share_forwarded") + "\n" + compose_reply_body(content)
+        count = 0
+        for jid, is_conference in targets:
+            if is_conference:
+                self._client.send_muc_message(jid, body)
+            else:
+                message_id = self._client.send_message(jid, body)
+                self._display_local_outgoing(jid, body, message_id)
+            count += 1
+        if count:
+            self._tray.show_message(
+                APP_NAME, tr("share_sent", count=count))
 
     def _prune_tile_cache(self):
         try:

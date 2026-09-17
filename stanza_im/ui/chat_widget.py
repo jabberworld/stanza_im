@@ -218,6 +218,7 @@ class ChatWidget(QtWidgets.QWidget):
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)             # url
     media_copy_requested = QtCore.pyqtSignal(str)             # url
+    share_requested = QtCore.pyqtSignal(str)                  # shared content
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, new_body
 
@@ -342,6 +343,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._view.media_save_requested.connect(self.media_save_requested)
         self._view.media_copy_requested.connect(self.media_copy_requested)
         self._view.media_open_requested.connect(self._on_media_open_requested)
+        self._view.share_requested.connect(self.share_requested)
         chat_col.addWidget(self._view, stretch=1)
 
         # Reply context bar (XEP-0461): shown while composing a reply.
