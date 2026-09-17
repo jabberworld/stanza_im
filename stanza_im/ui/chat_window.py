@@ -290,6 +290,39 @@ class ChatWindow(QtWidgets.QMainWindow):
     def has_chat(self, jid: str) -> bool:
         return jid in self._tabs
 
+    def tabs(self) -> list[str]:
+        """JIDs of every open (possibly suspended) tab, in no order."""
+        return list(self._tabs.keys())
+
+    def suspend_tab(self, jid: str) -> bool:
+        """Unload an inactive tab's view; never the current tab."""
+        if jid == self.current_jid():
+            return False
+        widget = self._tabs.get(jid)
+        if widget is None:
+            return False
+        return widget.suspend()
+
+    def resume_tab(self, jid: str) -> bool:
+        widget = self._tabs.get(jid)
+        if widget is None:
+            return False
+        self._resume_widget(widget)
+        return True
+
+    def is_suspended(self, jid: str) -> bool:
+        widget = self._tabs.get(jid)
+        return bool(widget is not None and getattr(widget, "suspended", False))
+
+    def _resume_widget(self, widget) -> None:
+        """Wake a suspended tab and re-apply the window-level options."""
+        if not getattr(widget, "suspended", False):
+            return
+        widget.resume()
+        widget.set_chat_options(self._chat_options)
+        widget.set_participant_font(*self._participant_font)
+        widget.set_colored_muc_nicks(self._colored_muc_nicks)
+
     def reload_themes(self, variant: str = "", muc_variant: str | None = None):
         """Re-apply the chat theme variant to all open tabs."""
         self._theme.set_variant(variant)
@@ -555,6 +588,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         current = None
         widget = self._tab_widget.currentWidget()
         if isinstance(widget, ChatWidget):
+            self._resume_widget(widget)
             current = widget.jid
             widget.focus_input()
             self.tab_focused.emit(widget.jid)
@@ -572,6 +606,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     def _focus_tab(self, jid: str):
         widget = self._tabs.get(jid)
         if widget:
+            self._resume_widget(widget)
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.setCurrentIndex(idx)

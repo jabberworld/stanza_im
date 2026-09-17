@@ -198,6 +198,30 @@ class _SubjectEdit(QtWidgets.QLineEdit):
         super().leaveEvent(event)
 
 
+class _NullView:
+    """Stand-in for a suspended ``ChatView``: swallows every call.
+
+    While an inactive tab's WebEngine page is unloaded the widget keeps
+    accumulating messages in Python (``_messages``/``_history``); a resume
+    recreates the real view and re-renders them.
+    """
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+    def height(self) -> int:
+        return 0
+
+    def width(self) -> int:
+        return 0
+
+    def scroll_fraction(self) -> float:
+        return 1.0
+
+    def isVisible(self) -> bool:
+        return False
+
+
 class ChatWidget(QtWidgets.QWidget):
     """A single chat tab's content: header info + message view + input bar."""
 
@@ -262,10 +286,29 @@ class ChatWidget(QtWidgets.QWidget):
         self._subjects: list[tuple[str, str]] = []
         self._released = False
         self._last_view_h = 0
+        self._suspended = False
+        self._suspended_fraction = 1.0
+        self._text_scale = 1.0
         self._build_ui(theme)
-        self._view.near_top.connect(self._on_near_top)
 
     # ── UI construction ───────────────────────────────────────────
+
+    def _create_view(self, theme: ChatThemeFactory):
+        """Build and wire a fresh ``ChatView`` (shared by build/resume)."""
+        view = ChatView(theme)
+        view.mention_senders = self.is_muc
+        view.link_clicked.connect(self._open_link)
+        view.link_clicked.connect(self.link_clicked)
+        view.reply_requested.connect(self._on_reply_requested)
+        view.document_lost.connect(self._restore_after_document_lost)
+        view.zoom_changed.connect(
+            lambda factor: self.text_scale_changed.emit(self.jid, factor))
+        view.media_save_requested.connect(self.media_save_requested)
+        view.media_copy_requested.connect(self.media_copy_requested)
+        view.media_open_requested.connect(self._on_media_open_requested)
+        view.share_requested.connect(self.share_requested)
+        view.near_top.connect(self._on_near_top)
+        return view
 
     def _build_ui(self, theme: ChatThemeFactory):
         layout = QtWidgets.QVBoxLayout(self)
@@ -336,21 +379,12 @@ class ChatWidget(QtWidgets.QWidget):
             layout.addLayout(header)
 
         # Chat view + resizable MUC participant sidebar
+        self._theme = theme
         chat_col = QtWidgets.QVBoxLayout()
         chat_col.setContentsMargins(0, 0, 0, 0)
         chat_col.setSpacing(0)
-        self._view = ChatView(theme)
-        self._view.mention_senders = self.is_muc
-        self._view.link_clicked.connect(self._open_link)
-        self._view.link_clicked.connect(self.link_clicked)
-        self._view.reply_requested.connect(self._on_reply_requested)
-        self._view.document_lost.connect(self._restore_after_document_lost)
-        self._view.zoom_changed.connect(
-            lambda factor: self.text_scale_changed.emit(self.jid, factor))
-        self._view.media_save_requested.connect(self.media_save_requested)
-        self._view.media_copy_requested.connect(self.media_copy_requested)
-        self._view.media_open_requested.connect(self._on_media_open_requested)
-        self._view.share_requested.connect(self.share_requested)
+        self._chat_col = chat_col
+        self._view = self._create_view(theme)
         chat_col.addWidget(self._view, stretch=1)
 
         # Reply context bar (XEP-0461): shown while composing a reply.
@@ -1209,6 +1243,54 @@ class ChatWidget(QtWidgets.QWidget):
         self._users.clear()
         self._subjects.clear()
 
+    def suspend(self) -> bool:
+        """Free the WebEngine page of an inactive tab, keeping its state.
+
+        The chat keeps receiving/merging messages in Python; ``resume``
+        recreates the view and re-renders them from ``_history``/``_messages``.
+        """
+        if self._suspended or self._released:
+            return False
+        try:
+            self._suspended_fraction = self._view.scroll_fraction()
+        except (AttributeError, RuntimeError):
+            self._suspended_fraction = 1.0
+        try:
+            self._typing_timer.stop()
+        except RuntimeError:
+            pass
+        try:
+            self._view.shutdown()
+        except (AttributeError, RuntimeError):
+            pass
+        try:
+            self._chat_col.removeWidget(self._view)
+            self._view.setParent(None)
+            self._view.deleteLater()
+        except (AttributeError, RuntimeError):
+            pass
+        self._view = _NullView()
+        self._suspended = True
+        return True
+
+    def resume(self) -> bool:
+        """Rebuild the view after :meth:`suspend` and re-render the chat."""
+        if not self._suspended or self._released:
+            return False
+        self._suspended = False
+        view = self._create_view(self._theme)
+        view.highlight_nick = self._self_nick
+        self._view = view
+        self._chat_col.insertWidget(0, view, 1)
+        self._view.set_chat_zoom(self._text_scale)
+        self._preserve_fraction = self._suspended_fraction
+        self._render_all()
+        return True
+
+    @property
+    def suspended(self) -> bool:
+        return self._suspended
+
     def set_history(self, entries: list[dict], window_size: int,
                     exhausted: bool):
         """Initial window: replace history rows and re-render from bottom."""
@@ -1824,7 +1906,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_text_scale(self, factor: float):
         """Re-apply the text-scale factor (reopened tabs keep the zoom)."""
-        self._view.set_chat_zoom(factor)
+        self._text_scale = float(factor or 1.0)
+        self._view.set_chat_zoom(self._text_scale)
 
     def mark_delivered(self, message_id: str) -> None:
         if not message_id:

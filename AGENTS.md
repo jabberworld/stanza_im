@@ -959,7 +959,14 @@ text is kept. Returning activity (`eventFilter`) resumes
 1. **IconCache**: max 200 entries, 60s TTL, auto-eviction every 30s
 2. **Avatars**: stored as `str` path, QPixmap created in paintEvent, never cached long-term
 3. **ChatView**: shared `QWebEngineProfile` (not per-tab)
-4. **Inactive MUCs**: planned — reduce resources after 10min idle
+4. **Idle tab suspension**: `chat.idle_unload_minutes` (default `10`, `0` = off,
+   Preferences → Chat → «General»). `MainWindow._maybe_suspend_tabs` (per-minute
+   timer) asks `ChatWindow.suspend_tab` for tabs that are not current, have no
+   unread message and saw no activity within the window; `ChatWidget.suspend`
+   frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub (messages
+   keep accumulating in Python), while `resume` (lazy, on tab activation)
+   rebuilds the view and re-renders `_history`/`_messages`.
+   [`tests/test_tab_suspend.py`]
 5. **Roster**: no child widgets, single QPainter pass
 6. **Closed tabs**: `ChatWindow.close_chat` removes the tab, then
    `setParent(None)` + `deleteLater()` on the `ChatWidget` — a `QTabWidget`

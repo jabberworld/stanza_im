@@ -246,6 +246,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._visible = True
         self._shutting_down = False
         self._unread_total = 0
+        self._unread_jids: set[str] = set()
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_self_nicks: dict[str, str] = {}
         self._muc_names: dict[str, str] = {}
@@ -268,6 +269,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._idle_timer = QtCore.QTimer(self)
         self._idle_timer.timeout.connect(self._check_auto_status)
         self._idle_timer.start(30_000)
+
+        # Unload the WebEngine page of tabs that stay cold (see P7).
+        self._tab_activity: dict[str, float] = {}
+        self._suspend_timer = QtCore.QTimer(self)
+        self._suspend_timer.setInterval(60_000)
+        self._suspend_timer.timeout.connect(self._maybe_suspend_tabs)
+        self._suspend_timer.start()
 
         self._chat_window.typing_changed.connect(self._on_typing_local)
         self._chat_window.activity_changed.connect(self._on_chat_activity)
@@ -2344,6 +2352,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_contact_open(self, jid: str):
         display_name = self._roster_name(jid) or jid.split("@")[0]
+        self._touch_tab_activity(jid)
         if jid in self._muc_self_nicks:
             is_new = not self._chat_window.has_chat(jid)
             chat = self._chat_window.open_groupchat(
@@ -2680,6 +2689,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _bump_unread(self, jid: str):
         """Increment the unread counter for a roster contact."""
+        self._unread_jids.add(jid)
         for user in self._roster._users:
             if user.jid == jid:
                 self._roster.update_user(jid, unread_count=user.unread_count + 1)
@@ -2687,6 +2697,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _reset_unread(self, jid: str):
         """Clear the unread counter for *jid* and refresh totals."""
+        self._unread_jids.discard(jid)
         found = False
         for user in self._roster._users:
             if user.jid == jid and user.unread_count:
@@ -2702,9 +2713,39 @@ class MainWindow(QtWidgets.QMainWindow):
             self._tray.stop_blinking()
 
     def _on_tab_focused(self, jid: str):
+        self._touch_tab_activity(jid)
         self._reset_unread(jid)
         if self._client:
             self._client.mds_mark_displayed(jid)
+
+    def _touch_tab_activity(self, jid: str) -> None:
+        """Remember when a conversation last had real activity."""
+        if jid:
+            self._tab_activity[jid.split("/")[0]] = time.monotonic()
+
+    def _maybe_suspend_tabs(self) -> None:
+        """Unload the view of tabs that went cold (no unread, idle)."""
+        if self._client is None or self._shutting_down:
+            return
+        try:
+            minutes = int(getattr(self._config.chat,
+                                  "idle_unload_minutes", 10) or 0)
+        except (TypeError, ValueError):
+            minutes = 10
+        if minutes <= 0:
+            return
+        chat_window = getattr(self, "_chat_window", None)
+        if chat_window is None:
+            return
+        now = time.monotonic()
+        idle = minutes * 60
+        for jid in chat_window.tabs():
+            if jid in self._unread_jids:
+                continue
+            if now - self._tab_activity.get(jid.split("/")[0], 0.0) < idle:
+                continue
+            if chat_window.suspend_tab(jid):
+                logger.debug("Suspended idle tab %s", jid)
 
     def _on_message_received(self, frm: str, body: str, ts,
                              unstyled: bool = False,
@@ -2712,6 +2753,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_to: str = "", reply_id: str = "",
                              carbon: bool = False):
         bare_jid = frm.split("/")[0]
+        self._touch_tab_activity(bare_jid)
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
         self._remember_contact(bare_jid, name=sender_name,
                                is_conference=False)
@@ -2824,6 +2866,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
             jid = jid.strip()
+            self._touch_tab_activity(jid)
             message_id = self._client.send_message(jid, body)
             chat = self._chat_window.get_chat(jid)
             if chat:
@@ -2846,6 +2889,7 @@ class MainWindow(QtWidgets.QMainWindow):
                               archive_id: str = "", unstyled: bool = False,
                               reply_able_id: str = "", reply_author: str = "",
                               reply_to: str = "", reply_id: str = ""):
+        self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
             self._start_task(history.store_message_async(
@@ -2949,6 +2993,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                   self_nick=self._muc_self_nicks.get(room, ""))
 
     def _on_groupchat_send(self, room: str, body: str):
+        self._touch_tab_activity(room)
         if self._client:
             self._client.send_muc_message(room, body)
 

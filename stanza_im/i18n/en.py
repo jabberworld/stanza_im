@@ -574,6 +574,7 @@ STRINGS = {
     "prefs_interface_mode": "Window layout:",
     "prefs_interface_separate": "Separate chat window",
     "prefs_interface_unified": "Chat beside the roster",
+    "prefs_idle_unload_minutes": "Unload idle chats after (min, 0 = off):",
     "prefs_media_preview_size": "Image preview size, px:",
     "prefs_media_cache_days": "Keep previews, days:",
     "prefs_media_cache_mb": "Preview cache limit, MB:",

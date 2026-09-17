@@ -150,6 +150,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
+| `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
@@ -472,6 +473,13 @@ history rows, `_MESSAGES_MAX` live rows and `_STATUS_MAX` (300) status lines,
 and the WebEngine DOM trims to `ChatView._MAX_DOM_MESSAGES` (500) message nodes
 (oldest first); everything older stays in SQLite/MAM and is re-fetched through
 the history paging menus.
+
+Cold tabs are additionally suspended: after `chat.idle_unload_minutes`
+(default 10, `0` = off) `MainWindow._maybe_suspend_tabs` unloads a tab that is
+not current, has no unread message and saw no recent activity; `ChatWidget.suspend`
+frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub, and
+activating the tab (`ChatWindow._on_tab_changed` → `resume`) rebuilds the view
+and re-renders `_history`/`_messages`.
 
 ## 9. Chat Widget (`ui/chat_widget.py`)
 

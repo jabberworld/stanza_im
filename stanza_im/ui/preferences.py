@@ -882,6 +882,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                                 ("media_preview_images_audio", "images_audio"),
                                 ("media_preview_all", "all"),
                             ]))
+        general_form.addRow(tr("prefs_idle_unload_minutes"),
+                            self._spin("idle_unload_minutes", 0, 240))
 
         chat, chat_form = self._page()
         chat_form.addRow(self._check("show_status", tr("prefs_show_status")))
@@ -1220,6 +1222,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "show_music": chat.show_music, "show_avatars": chat.show_avatars,
             "message_styling": chat.message_styling,
             "media_preview": chat.media_preview,
+            "idle_unload_minutes": int(getattr(chat, "idle_unload_minutes", 10) or 0),
             "muc_show_presence": chat.muc_show_presence,
             "muc_show_status": chat.muc_show_status,
             "muc_show_status_text": chat.muc_show_status_text,
@@ -1333,7 +1336,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_show_status", "muc_show_status_text",
                     "muc_auto_nick", "muc_confirm_leave",
                     "muc_minimize_startup", "message_displayed_sync",
-                    "allow_incoming_edits"):
+                    "allow_incoming_edits", "idle_unload_minutes"):
             cfg.chat[key] = self._value(key)
         cfg.chat.theme = self._value("chat_theme") or ""
         cfg.appearance.chat_theme = cfg.chat.theme

@@ -574,6 +574,7 @@ STRINGS = {
     "prefs_interface_mode": "Расположение окон:",
     "prefs_interface_separate": "Отдельное окно чата",
     "prefs_interface_unified": "Чат рядом со списком контактов",
+    "prefs_idle_unload_minutes": "Выгружать неактивные чаты через (мин, 0 — выкл.):",
     "prefs_media_preview_size": "Размер превью изображений, px:",
     "prefs_media_cache_days": "Хранить превью, дней:",
     "prefs_media_cache_mb": "Лимит кэша превью, МБ:",
