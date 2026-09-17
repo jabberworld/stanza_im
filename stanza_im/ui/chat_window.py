@@ -402,11 +402,10 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     def _tab_caption(self, widget: ChatWidget) -> str:
         title = widget.display_name
-        prefix = "🔒 " if widget.is_muc else ""
-        available = max(1, self._tab_title_length - len(prefix))
+        available = max(1, self._tab_title_length)
         if len(title) > available:
             title = title[:max(1, available - 1)] + "…"
-        return prefix + title
+        return title
 
     def tab_count(self) -> int:
         return len(self._tabs)
