@@ -336,7 +336,10 @@ are downloaded in a worker (`asyncio.to_thread`/thread) and resized to
 `appearance.media_preview_size`; thumbnails and originals live in
 `MediaCache` (`$XDG_CACHE_HOME/stanza-im/media/`, `index.json`, last-access
 tracking) and are evicted by `appearance.media_cache_days` (TTL) and
-`appearance.media_cache_mb` (LRU). `thumbnail_ready` is pushed into every open
+`appearance.media_cache_mb` (LRU). The ready PNG data-URIs are held in a bounded
+in-memory LRU (`MediaPreviewService._thumb_uris`, 16 MB budget), so a long
+session with many images cannot grow the thumbnail cache without limit.
+`thumbnail_ready` is pushed into every open
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the

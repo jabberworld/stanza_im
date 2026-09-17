@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 MODES = ("none", "images", "images_audio", "all")
 
+_THUMB_CACHE_BYTES = 16 << 20   # in-memory thumbnail data-URI LRU budget
+
 __all__ = ["MODES", "mode_allows", "MediaPreviewService"]
 
 
@@ -53,6 +55,7 @@ class MediaPreviewService(QtCore.QObject):
         self._size = 200
         self._pending: set[str] = set()
         self._thumb_uris: dict[str, str] = {}
+        self._thumb_bytes = 0
 
     # ── Policy ────────────────────────────────────────────────────
 
@@ -66,6 +69,7 @@ class MediaPreviewService(QtCore.QObject):
             size = 200
         self._size = max(32, min(1024, size))
         self._thumb_uris.clear()
+        self._thumb_bytes = 0
 
     @property
     def mode(self) -> str:
@@ -90,14 +94,29 @@ class MediaPreviewService(QtCore.QObject):
     def cached_thumb_uri(self, url: str) -> str | None:
         uri = self._thumb_uris.get(url)
         if uri is not None:
+            self._thumb_uris.pop(url)
+            self._thumb_uris[url] = uri     # LRU refresh
             return uri
         path = self._cache.thumb_path(url)
         if not path:
             return None
         uri = self._file_data_uri(path)
         if uri:
-            self._thumb_uris[url] = uri
+            self._remember_thumb(url, uri)
         return uri
+
+    def _remember_thumb(self, url: str, uri: str) -> None:
+        """Cache a thumbnail data-URI under a bounded in-memory LRU."""
+        old = self._thumb_uris.pop(url, None)
+        if old is not None:
+            self._thumb_bytes -= len(old)
+        self._thumb_uris[url] = uri
+        self._thumb_bytes += len(uri)
+        while (self._thumb_bytes > _THUMB_CACHE_BYTES
+               and len(self._thumb_uris) > 1):
+            key, value = next(iter(self._thumb_uris.items()))
+            self._thumb_uris.pop(key, None)
+            self._thumb_bytes -= len(value)
 
     def markup(self, url: str) -> str | None:
         """Return embed HTML for *url*, or ``None`` to keep the plain link."""
@@ -162,7 +181,7 @@ class MediaPreviewService(QtCore.QObject):
             self._cache.store(url, original_bytes=raw, thumb_bytes=thumb,
                               kind="image")
             uri = self._data_uri(thumb)
-            self._thumb_uris[url] = uri
+            self._remember_thumb(url, uri)
             self.thumbnail_ready.emit(url, uri)
         except Exception as exc:  # noqa: BLE001 - reported via signal
             logger.debug("media preview failed for %s: %s", url, exc)
@@ -177,7 +196,7 @@ class MediaPreviewService(QtCore.QObject):
             self._cache.store(url, original_bytes=raw, thumb_bytes=thumb,
                               kind="image")
             uri = self._data_uri(thumb)
-            self._thumb_uris[url] = uri
+            self._remember_thumb(url, uri)
             QtCore.QTimer.singleShot(
                 0, lambda: self.thumbnail_ready.emit(url, uri))
         except Exception as exc:  # noqa: BLE001

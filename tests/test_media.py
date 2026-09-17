@@ -154,6 +154,22 @@ q_html = startup_factory.render_message("Bob", q_url, "12:00:00", "incoming")
 check("query '&' single-escaped", "&amp;amp;" not in q_html
       and "?token=abc&amp;x=1" in q_html)
 
+# 7d. thumbnail data-URI cache is bounded (LRU by bytes) ---------------------
+from stanza_im.ui import media_preview as media_preview_mod
+
+thumb_svc = MediaPreviewService(cache)
+saved_thumb_budget = media_preview_mod._THUMB_CACHE_BYTES
+media_preview_mod._THUMB_CACHE_BYTES = 40
+try:
+    for i in range(10):
+        thumb_svc._remember_thumb("u%d" % i, "x" * 10)
+    check("thumbnail cache respects the byte budget",
+          thumb_svc._thumb_bytes <= media_preview_mod._THUMB_CACHE_BYTES)
+    check("thumbnail cache evicts the oldest",
+          "u9" in thumb_svc._thumb_uris and "u0" not in thumb_svc._thumb_uris)
+finally:
+    media_preview_mod._THUMB_CACHE_BYTES = saved_thumb_budget
+
 # 8. tokenize_urls media hook -------------------------------------------------
 _tmp, anchors = tokenize_urls("see https://h/p/x.png now")
 check("default anchor", anchors and anchors[0].startswith("<a href="))
