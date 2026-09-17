@@ -690,13 +690,23 @@ fires and `JingleRtpManager.end_muji_peer` closes our session to that peer
 placeholder); `_MosaicVideo.remove_nick` resets the zoom to the grid when the
 enlarged participant leaves. The single `MujiCallWindow`
 splits horizontally: the video mosaic / status on the left and the participant
-list on the right (the same style as the MUC chat participant sidebar), with a
-red `call-hangup` "leave" button. Each participant row carries **three
-icon-only** toggles that swap their glyph on state — "send my mic to this
+list on the right (the same style as the MUC chat participant sidebar). Each
+participant row carries a rounded avatar (`_rounded_avatar`, the cached vCard
+PNG masked to a circle, filled by `MainWindow._muji_avatar` →
+`set_avatars`) before the nick and **three**
+icon-only toggles that swap their glyph on state — "send my mic to this
 participant" (`set_call_audio`, per-session silence), "hear this participant"
 (`set_call_audio_receive` → `AiortcCall.set_remote_audio_enabled` →
 per-session playback mute, no renegotiation) and "send my video to this
-participant" (`set_call_video`, per-session black frames). When the conference
+participant" (`set_call_video`, per-session black frames). Below the list a
+separate icon-only row — microphone, speaker and (video conferences only)
+camera — beside the red `call-hangup` "leave" button drives the same devices
+for **all** participants: the effective per-party state is the global layer AND
+the per-party layer (`_effective`), so these toggles never change the per-party
+configuration, and each channel is emitted only when it changes. A session is
+often bound after its row was created, so `JingleRtpManager._bind_call` emits
+`call_bound` → `MainWindow._on_call_bound` → `MujiCallWindow.apply_states`,
+which re-applies the effective states to the freshly bound session. When the conference
 carries video the mosaic (`_MosaicVideo`) shows one captioned tile per video
 participant **plus a mirrored self tile** labelled with our own nick; clicking
 a tile enlarges that participant with the rest as a bottom strip and a "back to

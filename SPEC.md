@@ -1238,12 +1238,22 @@ client.leave_muji(room)
   `muji_updated` fires and `JingleRtpManager.end_muji_peer` /
   `MujiManager.forget_session` close our session and drop the placeholder;
   `MujiCallWindow` splits horizontally (video mosaic / status on the left,
-  participant list on the right, like the MUC chat sidebar) with a red
-  `call-hangup` "leave" button and **three** icon-only per-row toggles ("send my
+  participant list on the right, like the MUC chat sidebar); each participant
+  row shows a rounded avatar (`_rounded_avatar`, the cached vCard PNG masked to
+  a circle, `set_avatars` from `MainWindow._muji_avatar`) before the nick and
+  **three** icon-only toggles ("send my
   mic to this participant" via `set_call_audio`, "hear this participant" via
   `set_call_audio_receive`/`AiortcCall.set_remote_audio_enabled`, "send my video
   to this participant" via `set_call_video`, all local-only, no renegotiation);
-  glyphs swap between the plain and crossed variants on state. For video
+  glyphs swap between the plain and crossed variants on state. Below the list a
+  separate icon-only row (microphone, speaker and, for video conferences,
+  camera) beside the red `call-hangup` "leave" button drives the devices for all
+  participants: the effective per-party state is the global layer AND the
+  per-party layer (`_effective`), so the global toggles leave the per-party
+  configuration untouched and each channel is emitted only when it changes.
+  `JingleRtpManager._bind_call` emits `call_bound` so
+  `MainWindow._on_call_bound` → `MujiCallWindow.apply_states` re-applies the
+  effective states to a session bound after its row was created. For video
   conferences `_MosaicVideo` shows one captioned tile per video participant
   **plus a mirrored self tile** labelled with our own nick: clicking a tile
   enlarges that participant (the rest become a bottom strip) and a "back to

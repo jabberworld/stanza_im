@@ -1038,14 +1038,18 @@ check("manager toggles tolerate unknown sessions", True)
 
 def _bind_call_preview_result():
     mgr = jr.JingleRtpManager.__new__(jr.JingleRtpManager)
+    events = []
+    mgr.client = type("_C", (), {
+        "emit": lambda self, *a: events.append(a)})()
     session = type("_S", (), {"local_preview": True, "call": None,
-                              "muji_room": ""})()
+                              "muji_room": "", "sid": "s1"})()
     call = _FakeEngineCall()
     mgr._bind_call(session, call)
-    return session.call is call and call.calls == [("preview", True)]
+    return (session.call is call and call.calls == [("preview", True)]
+            and events == [("call_bound", "s1")])
 
 
-check("binding a call applies the pending self-preview flag",
+check("binding a call applies the pending self-preview flag and emits call_bound",
       _bind_call_preview_result())
 
 
@@ -2013,6 +2017,102 @@ check("muji participant toggle state survives list rebuild", _pres)
 check("muji mosaic starts in grid mode", _grid)
 check("muji mosaic zooms one participant with a strip for the rest", _zoom)
 check("muji mosaic back button restores the grid", _back)
+
+
+def _row_buttons(window, nick):
+    item = window._rows[nick]
+    row = window._list.itemWidget(item)
+    return row.findChildren(QtWidgets.QPushButton)
+
+
+def _muji_global_controls_result():
+    from stanza_im.ui.call_window import MujiCallWindow
+    w = MujiCallWindow("room@conf", self_nick="me")
+    w.set_video(True)
+    sent_audio, sent_recv, sent_cam = [], [], []
+    w.participant_audio.connect(lambda *a: sent_audio.append(a))
+    w.participant_receive.connect(lambda *a: sent_recv.append(a))
+    w.participant_camera.connect(lambda *a: sent_cam.append(a))
+    w.set_participants(["alice", "bob"])
+
+    # Global mic off mutes everyone; per-party buttons keep their state.
+    w._all_mic_btn.setChecked(False)
+    muted_all = sent_audio == [("room@conf", "alice", False),
+                               ("room@conf", "bob", False)]
+    per_kept = (w._mic_state == {}
+                and all(b.isChecked() for b in _row_buttons(w, "alice"))
+                and all(b.isChecked() for b in _row_buttons(w, "bob")))
+
+    # Effective = global AND per-party: with alice's own mic off, turning the
+    # global back on restores bob but leaves alice muted.
+    _row_buttons(w, "alice")[0].setChecked(False)
+    w._all_mic_btn.setChecked(True)
+    layered = (w._mic_state.get("alice") is False
+               and w._effective("alice")[0] is False
+               and w._effective("bob")[0] is True
+               and sent_audio[-1:] == [("room@conf", "bob", True)])
+
+    w._all_recv_btn.setChecked(False)
+    recv_all = sent_recv[-2:] == [("room@conf", "alice", False),
+                                 ("room@conf", "bob", False)]
+    w._all_cam_btn.setChecked(False)
+    cam_all = sent_cam[-2:] == [("room@conf", "alice", False),
+                                ("room@conf", "bob", False)]
+
+    # The camera toggle only appears for video conferences.
+    audio_only = MujiCallWindow("room@conf", self_nick="me")
+    audio_only.set_participants(["alice"])
+    cam_hidden_audio = not audio_only._all_cam_btn.isVisibleTo(audio_only)
+    audio_only.close()
+    cam_shown_video = w._all_cam_btn.isVisibleTo(w)
+    w.close()
+    return muted_all, per_kept, layered, recv_all, cam_all, \
+        cam_hidden_audio, cam_shown_video
+
+
+_gm, _gk, _gl, _gr, _gc, _gha, _ghv = _muji_global_controls_result()
+check("global mic mutes every participant", _gm)
+check("global toggles leave per-party buttons untouched", _gk)
+check("effective state is global AND per-party", _gl)
+check("global speaker mutes every participant", _gr)
+check("global camera disables video for every participant", _gc)
+check("camera control is hidden in an audio conference", _gha)
+check("camera control is shown in a video conference", _ghv)
+
+
+def _muji_apply_states_result():
+    from stanza_im.ui.call_window import MujiCallWindow
+    w = MujiCallWindow("room@conf", self_nick="me")
+    w.set_participants(["alice"])
+    w._all_mic_btn.setChecked(False)          # applied alice -> (False, …)
+    sent = []
+    w.participant_audio.connect(lambda *a: sent.append(a))
+    w.apply_states("alice")                   # force re-apply on late bind
+    w.close()
+    return sent == [("room@conf", "alice", False)]
+
+
+check("apply_states re-applies to a late-bound session",
+      _muji_apply_states_result())
+
+
+def _muji_avatar_result():
+    from stanza_im.ui.call_window import MujiCallWindow
+    from stanza_im.include.avatars import default_avatar
+    w = MujiCallWindow("room@conf", self_nick="me")
+    w.set_participants(["alice"])
+    label = w._avatar_labels.get("alice")
+    default_ok = (label is not None and label.width() == 24
+                  and not label.pixmap().isNull())
+    w.set_avatars({"alice": default_avatar()})
+    set_ok = w._avatar_paths.get("alice") == default_avatar()
+    w.close()
+    return default_ok, set_ok
+
+
+_av_default, _av_set = _muji_avatar_result()
+check("participant rows carry a rounded avatar", _av_default)
+check("set_avatars stores and applies a cache path", _av_set)
 
 
 def _muji_self_tile_result():

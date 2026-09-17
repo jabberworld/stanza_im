@@ -14,6 +14,7 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.avatars import default_avatar
 from stanza_im.include.constants import ACTIONS_DIR_16
 
 logger = logging.getLogger("stanza_im.call.ui")
@@ -35,6 +36,28 @@ def _icon(name: str) -> QtGui.QIcon:
                     break
         _ICON_CACHE[name] = icon
     return icon
+
+
+def _rounded_avatar(path: str, size: int = 24) -> QtGui.QPixmap:
+    """Return a circular, scaled avatar pixmap from *path*."""
+    pix = QtGui.QPixmap(path)
+    if pix.isNull():
+        return pix
+    scaled = pix.scaled(
+        size, size, QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        QtCore.Qt.TransformationMode.SmoothTransformation)
+    rounded = QtGui.QPixmap(size, size)
+    rounded.fill(QtCore.Qt.GlobalColor.transparent)
+    painter = QtGui.QPainter(rounded)
+    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+    clip = QtGui.QPainterPath()
+    clip.addEllipse(0, 0, size, size)
+    painter.setClipPath(clip)
+    x = (scaled.width() - size) // 2
+    y = (scaled.height() - size) // 2
+    painter.drawPixmap(-x, -y, scaled)
+    painter.end()
+    return rounded
 
 
 class VideoView(QtWidgets.QLabel):
@@ -240,7 +263,11 @@ class MujiCallWindow(QtWidgets.QWidget):
     visible only when the conference carries a video content.  The participant
     list carries three per-row icon toggles — "send my microphone to this
     participant", "hear this participant" and "send my video to this
-    participant".
+    participant" — preceded by the participant's rounded avatar.  Under the
+    list a separate row of icon toggles (microphone, speaker, camera) drives
+    the same devices for *all* participants at once: the effective per-party
+    state is the global layer AND the per-party layer, so the global toggles
+    never change the per-party button configuration.
     """
 
     leave = QtCore.pyqtSignal(str)                      # room
@@ -257,6 +284,15 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._mic_state: dict[str, bool] = {}
         self._recv_state: dict[str, bool] = {}
         self._cam_state: dict[str, bool] = {}
+        # Global ("all participants") device layer.  The effective per-party
+        # state is global AND per-party, so the global toggles never change
+        # the per-party button configuration — they are a separate channel.
+        self._all_mic = True
+        self._all_recv = True
+        self._all_cam = True
+        self._applied: dict[str, tuple[bool, bool, bool]] = {}
+        self._avatar_paths: dict[str, str] = {}
+        self._avatar_labels: dict[str, QtWidgets.QLabel] = {}
         self._rows: dict[str, QtWidgets.QListWidgetItem] = {}
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -289,8 +325,24 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._leave_btn.setIconSize(QtCore.QSize(20, 20))
         self._leave_btn.setToolTip(tr("muji_leave"))
         self._leave_btn.clicked.connect(lambda: self.leave.emit(self.room))
-        right_layout.addWidget(
-            self._leave_btn, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+
+        controls = QtWidgets.QHBoxLayout()
+        self._all_mic_btn = self._icon_toggle(
+            right, "mic", "mic-off", True, tr("muji_all_mic_tip"),
+            self._on_all_mic)
+        self._all_recv_btn = self._icon_toggle(
+            right, "speaker", "speaker-off", True, tr("muji_all_hear_tip"),
+            self._on_all_recv)
+        self._all_cam_btn = self._icon_toggle(
+            right, "camera", "camera-off", True, tr("muji_all_cam_tip"),
+            self._on_all_cam)
+        self._all_cam_btn.setVisible(False)
+        controls.addWidget(self._all_mic_btn)
+        controls.addWidget(self._all_recv_btn)
+        controls.addWidget(self._all_cam_btn)
+        controls.addStretch(1)
+        controls.addWidget(self._leave_btn)
+        right_layout.addLayout(controls)
 
         splitter.addWidget(left)
         splitter.addWidget(right)
@@ -301,6 +353,7 @@ class MujiCallWindow(QtWidgets.QWidget):
 
     def set_video(self, enabled: bool) -> None:
         self._video.setVisible(enabled)
+        self._all_cam_btn.setVisible(enabled)
 
     def set_self_nick(self, nick: str) -> None:
         """Update our own conference nick (labels the mirrored self tile)."""
@@ -316,6 +369,10 @@ class MujiCallWindow(QtWidgets.QWidget):
                 item = self._rows.pop(nick)
                 self._list.takeItem(self._list.row(item))
                 self._video.remove_nick(nick)
+                self._avatar_labels.pop(nick, None)
+                # A rejoining participant gets a fresh session, so drop the
+                # applied-state record to re-apply it later.
+                self._applied.pop(nick, None)
         for nick in participants:
             if nick in current:
                 continue
@@ -326,6 +383,27 @@ class MujiCallWindow(QtWidgets.QWidget):
             self._rows[nick] = item
             self._list.setItemWidget(item, self._make_row(nick))
         self._state.setText(tr("muji_participants", count=len(participants)))
+        self._sync_states(list(participants))
+
+    def set_avatars(self, avatars: dict) -> None:
+        """Apply nick -> avatar cache path (the default is kept when absent)."""
+        for nick, path in (avatars or {}).items():
+            if not path:
+                continue
+            self._avatar_paths[nick] = path
+            label = self._avatar_labels.get(nick)
+            if label is not None:
+                pix = _rounded_avatar(path)
+                if not pix.isNull():
+                    label.setPixmap(pix)
+
+    def apply_states(self, nick: str) -> None:
+        """Force the effective device states onto one participant.
+
+        Called when a participant's engine call is bound *after* its row was
+        created, so a global mute/camera set earlier reaches that session.
+        """
+        self._sync_states([nick], force=True)
 
     def set_frame(self, nick: str, image) -> None:
         self._video.set_frame(nick, image)
@@ -339,6 +417,12 @@ class MujiCallWindow(QtWidgets.QWidget):
         row = QtWidgets.QWidget(self._list)
         layout = QtWidgets.QHBoxLayout(row)
         layout.setContentsMargins(4, 2, 4, 2)
+        avatar = QtWidgets.QLabel(row)
+        avatar.setFixedSize(24, 24)
+        avatar.setPixmap(_rounded_avatar(
+            self._avatar_paths.get(nick) or default_avatar()))
+        self._avatar_labels[nick] = avatar
+        layout.addWidget(avatar)
         name = QtWidgets.QLabel(nick, row)
         name.setStyleSheet("font-weight: bold;")
         layout.addWidget(name)
@@ -377,15 +461,57 @@ class MujiCallWindow(QtWidgets.QWidget):
 
     def _on_mic_toggle(self, nick: str, enabled: bool) -> None:
         self._mic_state[nick] = enabled
-        self.participant_audio.emit(self.room, nick, enabled)
+        self._sync_states([nick])
 
     def _on_recv_toggle(self, nick: str, enabled: bool) -> None:
         self._recv_state[nick] = enabled
-        self.participant_receive.emit(self.room, nick, enabled)
+        self._sync_states([nick])
 
     def _on_cam_toggle(self, nick: str, enabled: bool) -> None:
         self._cam_state[nick] = enabled
-        self.participant_camera.emit(self.room, nick, enabled)
+        self._sync_states([nick])
+
+    def _on_all_mic(self, enabled: bool) -> None:
+        self._all_mic = enabled
+        self._sync_states()
+
+    def _on_all_recv(self, enabled: bool) -> None:
+        self._all_recv = enabled
+        self._sync_states()
+
+    def _on_all_cam(self, enabled: bool) -> None:
+        self._all_cam = enabled
+        self._sync_states()
+
+    def _effective(self, nick: str) -> tuple[bool, bool, bool]:
+        """The device states actually applied to a participant."""
+        return (
+            self._all_mic and self._mic_state.get(nick, True),
+            self._all_recv and self._recv_state.get(nick, True),
+            self._all_cam and self._cam_state.get(nick, True),
+        )
+
+    def _sync_states(self, nicks: list | None = None,
+                     force: bool = False) -> None:
+        """Emit the effective states, per channel, only when they changed.
+
+        *force* re-applies every channel (a newly bound session that never saw
+        the earlier emissions).
+        """
+        if nicks is None:
+            nicks = list(self._rows)
+        for nick in nicks:
+            if nick not in self._rows:
+                continue
+            eff = self._effective(nick)
+            prev = self._applied.get(nick, (True, True, True))
+            if force or eff[0] != prev[0]:
+                self.participant_audio.emit(self.room, nick, eff[0])
+            if force or eff[1] != prev[1]:
+                self.participant_receive.emit(self.room, nick, eff[1])
+            if force or eff[2] != prev[2]:
+                self.participant_camera.emit(self.room, nick, eff[2])
+            self._applied[nick] = eff
 
     def closeEvent(self, event):
         self.leave.emit(self.room)

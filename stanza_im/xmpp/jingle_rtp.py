@@ -841,6 +841,9 @@ class JingleRtpManager:
             except Exception:
                 logger.debug("CALL set_local_preview on bind failed",
                              exc_info=True)
+        # The UI may have set per-party device states before the engine call
+        # existed; it re-applies them when the session is bound.
+        self.client.emit("call_bound", session.sid)
 
     def start_local_preview(self, room: str) -> None:
         """Open a standalone camera capture for a conference self tile.

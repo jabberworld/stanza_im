@@ -824,6 +824,9 @@ STRINGS = {
     'muji_party_cam': 'Camera',
     'muji_party_cam_off': 'Camera off',
     'muji_party_cam_tip': 'Send my video to this participant',
+    'muji_all_mic_tip': 'Send my microphone to all participants',
+    'muji_all_hear_tip': 'Hear all participants',
+    'muji_all_cam_tip': 'Send my video to all participants',
     # Map (RFC 5870 geo:)
     'map_window_title': 'Map',
     'map_follow': 'Follow',

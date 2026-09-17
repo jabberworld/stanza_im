@@ -17,7 +17,8 @@ import uuid
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr, load as load_i18n
-from stanza_im.include.avatars import save_avatar
+from stanza_im.include.avatars import (save_avatar, avatar_path, has_avatar,
+                                        default_avatar)
 from stanza_im.include.enumerators import (populate_translations,
                                            show_to_icon_key, MOODS,
                                            ACTIVITY_GROUPS, ACTIVITY_ORDER)
@@ -1367,6 +1368,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("call_proposed", self._on_call_proposed)
         c.on("call_proposal_ended", self._on_call_proposal_ended)
         c.on("call_state", self._on_call_state)
+        c.on("call_bound", self._on_call_bound)
         c.on("call_video_frame", self._on_call_video_frame)
         c.on("call_local_video_frame", self._on_call_local_video_frame)
         c.on("muji_local_video_frame", self._on_muji_local_video_frame)
@@ -1564,6 +1566,9 @@ class MainWindow(QtWidgets.QMainWindow):
                         self_nick=self._muc_self_nicks.get(room, ""))
                     for nick, avatar_jid in changed_nicks:
                         chat.refresh_avatar_for_sender(nick, avatar_jid)
+                muji = self._muji_windows.get(room)
+                if muji is not None and path:
+                    muji.set_avatars({nick: path for nick, _ in changed_nicks})
         if jid in self._pending_profile:
             self._pending_profile.discard(jid)
             self._open_vcard_info(jid, card)
@@ -1869,10 +1874,28 @@ class MainWindow(QtWidgets.QMainWindow):
         conf = self._client.muji.conferences.get(room) if self._client else None
         if window is not None and conf is not None:
             window.set_self_nick(self._muc_self_nicks.get(room, ""))
-            window.set_participants(sorted(conf.participants))
+            nicks = sorted(conf.participants)
+            window.set_participants(nicks)
+            window.set_avatars({nick: self._muji_avatar(room, nick, conf)
+                                for nick in nicks})
             window.set_video(conf.has_video())
         self._sync_muji_preview(room)
         self._sync_muji_indicator(room)
+
+    def _muji_avatar(self, room: str, nick: str, conf) -> str:
+        """Resolve (and lazily request) a participant's avatar cache path."""
+        info = self._muc_users.get(room, {}).get(nick, {})
+        path = info.get("avatar_path") or ""
+        participant = conf.participants.get(nick)
+        real_jid = getattr(participant, "real_jid", "") if participant else ""
+        bare = real_jid.split("/", 1)[0] if real_jid else ""
+        if not path and bare and has_avatar(bare):
+            path = avatar_path(bare)
+        if not path and bare and self._client:
+            # The client enforces the vCard TTL; a later vcard_received
+            # refreshes the row in place.
+            self._client.get_vcard(bare)
+        return path or default_avatar()
 
     def _muji_preview_sid(self, room: str) -> str:
         """The first video session of a conference (self-preview source)."""
@@ -1923,6 +1946,23 @@ class MainWindow(QtWidgets.QMainWindow):
         """An incoming Muji session-initiate — record the peer participant."""
         if self._client is not None:
             self._client.muji.note_session(room, peer_full)
+
+    def _on_call_bound(self, sid: str) -> None:
+        """A session's engine call is ready — re-apply conference device states.
+
+        A participant's session is often bound *after* its list row was
+        created, so the global/per-party microphone, speaker and camera
+        choices must be pushed onto the freshly bound session.
+        """
+        session = (self._client.rtp_calls.sessions.get(sid)
+                   if self._client else None)
+        room = getattr(session, "muji_room", "")
+        if not room:
+            return
+        nick = self._muji_nick_for_sid(room, sid)
+        window = self._muji_windows.get(room)
+        if nick and window is not None:
+            window.apply_states(nick)
 
     def _on_muji_participant_audio(self, room: str, nick: str,
                                    enabled: bool) -> None:
