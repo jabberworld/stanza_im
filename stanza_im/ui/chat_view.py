@@ -330,6 +330,19 @@ if HAS_WEBENGINE:
             # Load the empty page
             self._load_empty()
 
+        def shutdown(self) -> None:
+            """Stop the scroll poll and drop buffers on tab teardown.
+
+            Called from ``ChatWidget.detach`` right before the tab widget is
+            ``deleteLater``-ed; the page itself is freed with the view.
+            """
+            try:
+                self._scroll_poll.stop()
+            except RuntimeError:
+                pass
+            self._ready = False
+            self._pending.clear()
+
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""
             if (event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier

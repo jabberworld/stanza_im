@@ -463,7 +463,7 @@ show/raise/activate calls and emits `attention_requested` instead, so
 | Event | Action |
 |-------|--------|
 | Open chat | Create `ChatWidget`, add tab, focus input |
-| Close tab | Remove tab, cleanup widget |
+| Close tab | Remove tab, `ChatWidget.detach()` (stops the typing timer + view scroll poll, drops the Python history copies) then `setParent(None)` + `deleteLater()`; a removed `QTabWidget` page stays parented and would otherwise leak its `QWebEngineView`/page |
 | Last tab closed | Hide window |
 | New incoming message | Create tab if needed, add message, blink tray |
 

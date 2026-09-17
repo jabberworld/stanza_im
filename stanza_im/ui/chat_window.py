@@ -275,6 +275,12 @@ class ChatWindow(QtWidgets.QMainWindow):
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.removeTab(idx)
+            # removeTab leaves the page widget parented to the tab widget's
+            # internal stack; without an explicit delete a closed conversation
+            # (and its QWebEngineView/page) would stay alive for the app's
+            # lifetime.
+            widget.setParent(None)
+            widget.deleteLater()
             del self._tabs[jid]
             self._tab_order = [j for j in self._tab_order if j != jid]
         if not self._tabs and not self._embedded:

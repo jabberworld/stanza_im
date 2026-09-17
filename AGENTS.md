@@ -953,6 +953,12 @@ text is kept. Returning activity (`eventFilter`) resumes
 3. **ChatView**: shared `QWebEngineProfile` (not per-tab)
 4. **Inactive MUCs**: planned — reduce resources after 10min idle
 5. **Roster**: no child widgets, single QPainter pass
+6. **Closed tabs**: `ChatWindow.close_chat` removes the tab, then
+   `setParent(None)` + `deleteLater()` on the `ChatWidget` — a `QTabWidget`
+   page stays parented after `removeTab` and would otherwise leak the whole
+   `QWebEngineView`/page for the app's lifetime; `ChatWidget.detach` stops the
+   typing timer and the view's scroll poll (`ChatView.shutdown`) and clears the
+   Python message lists before deletion. [`tests/test_tab_leak.py`]
 
 ## Running
 

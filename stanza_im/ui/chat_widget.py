@@ -269,10 +269,10 @@ class ChatWidget(QtWidgets.QWidget):
         header = QtWidgets.QHBoxLayout()
         header.setContentsMargins(4, 2, 4, 2)
         header.setSpacing(6)
-        self._name_label = QtWidgets.QLabel(self.display_name)
+        self._name_label = QtWidgets.QLabel(self.display_name, self)
         self._name_label.setStyleSheet("font-weight: bold;")
         self._name_label.setVisible(False)
-        self._status_label = QtWidgets.QLabel("")
+        self._status_label = QtWidgets.QLabel("", self)
         self._status_label.setStyleSheet("color: gray; font-size: 11px;")
         self._status_label.setVisible(False)
         header.addWidget(self._name_label)
@@ -1182,6 +1182,21 @@ class ChatWidget(QtWidgets.QWidget):
     def detach(self):
         """Mark the widget as torn down: pending async history pages abort."""
         self._released = True
+        try:
+            self._typing_timer.stop()
+        except RuntimeError:
+            pass
+        try:
+            self._view.shutdown()
+        except (AttributeError, RuntimeError):
+            pass
+        # Drop the Python-side conversation copy right away so a deleted tab
+        # does not keep message bodies alive until the widget is destroyed.
+        self._history.clear()
+        self._messages.clear()
+        self._status_lines.clear()
+        self._users.clear()
+        self._subjects.clear()
 
     def set_history(self, entries: list[dict], window_size: int,
                     exhausted: bool):
