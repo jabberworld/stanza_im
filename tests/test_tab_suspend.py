@@ -104,6 +104,14 @@ win._maybe_suspend_tabs()
 check("threshold 0 keeps tabs loaded",
       not win._chat_window.is_suspended("c@example.com"))
 
+# 4. main-process housekeeping ------------------------------------------------
+win._trim_main_process_memory()   # must not raise
+_mw_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "ui", "main_window.py"), encoding="utf-8").read()
+check("housekeeping uses malloc_trim", "malloc_trim" in _mw_src)
+check("housekeeping runs on a timer", "_memory_timer" in _mw_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

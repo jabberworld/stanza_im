@@ -481,6 +481,10 @@ frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub, and
 activating the tab (`ChatWindow._on_tab_changed` → `resume`) rebuilds the view
 and re-renders `_history`/`_messages`.
 
+`MainWindow._trim_main_process_memory` (30-min timer, plus after a tab closes
+or suspends) runs `gc.collect()` and glibc `malloc_trim(0)` to return freed
+main-process heap to the OS; the Chromium renderer processes are unaffected.
+
 ## 9. Chat Widget (`ui/chat_widget.py`)
 
 Single conversation tab. Layout:

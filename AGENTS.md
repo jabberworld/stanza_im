@@ -979,6 +979,10 @@ text is kept. Returning activity (`eventFilter`) resumes
    (`chat_widget.py`), while the WebEngine DOM trims to
    `ChatView._MAX_DOM_MESSAGES` (500) message nodes; older messages stay in
    SQLite/MAM and are re-fetched by the paging menus.
+8. **Housekeeping**: a 30-min `MainWindow._trim_main_process_memory` runs
+   `gc.collect()` + glibc `malloc_trim(0)` (also right after a tab closes or is
+   suspended) to return freed main-process heap to the OS; WebEngine renderers
+   are separate processes and are unaffected.
 
 ## Running
 

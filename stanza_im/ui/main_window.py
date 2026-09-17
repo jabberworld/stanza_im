@@ -277,6 +277,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suspend_timer.timeout.connect(self._maybe_suspend_tabs)
         self._suspend_timer.start()
 
+        # Hand freed Python/Qt heap back to the OS periodically.
+        self._memory_timer = QtCore.QTimer(self)
+        self._memory_timer.setInterval(30 * 60 * 1000)
+        self._memory_timer.timeout.connect(self._trim_main_process_memory)
+        self._memory_timer.start()
+
         self._chat_window.typing_changed.connect(self._on_typing_local)
         self._chat_window.activity_changed.connect(self._on_chat_activity)
 
@@ -2739,6 +2745,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         now = time.monotonic()
         idle = minutes * 60
+        suspended_any = False
         for jid in chat_window.tabs():
             if jid in self._unread_jids:
                 continue
@@ -2746,6 +2753,26 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             if chat_window.suspend_tab(jid):
                 logger.debug("Suspended idle tab %s", jid)
+                suspended_any = True
+        if suspended_any:
+            self._trim_main_process_memory()
+
+    def _trim_main_process_memory(self) -> None:
+        """Return freed Python/Qt heap to the OS (glibc ``malloc_trim``).
+
+        The WebEngine renderers run in separate processes and are not affected;
+        this only shrinks the main process after cache/list churn.
+        """
+        import gc
+        try:
+            gc.collect()
+        except Exception:
+            pass
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
 
     def _on_message_received(self, frm: str, body: str, ts,
                              unstyled: bool = False,
@@ -4034,6 +4061,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """A chat tab was closed — release its history DB connection."""
         from stanza_im.core import history
         history.close(jid)
+        self._trim_main_process_memory()
 
     def _toggle_visibility(self):
         if self._visible:
