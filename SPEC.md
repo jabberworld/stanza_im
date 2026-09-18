@@ -505,6 +505,16 @@ Single conversation tab. Layout:
 - Input: `QPlainTextEdit`, max height 60px, placeholder "Send"
 - Send on Enter (without Shift), Shift+Enter for newline
 - Signal: `message_sent(jid, body)`
+- Jump-to-bottom button (`_JumpButtonMixin`): shown while the view overflows and
+  is not at the bottom. It shows the count of incoming, non-own messages that
+  arrived while scrolled up (`ChatWidget.add_message` →
+  `ChatView.is_scrolled_up` → `note_new_message`), as `▼ N` (capped `99+`). The
+  first click jumps to the first such message (`scroll_to_message(..., highlight=False)`),
+  the second click — or reaching the bottom — scrolls to the end and clears the
+  counter, which lives until the actual bottom. WebEngine renders the button as
+  the in-page `#stanza-jump` div (its click goes through `bridge.on_jump_clicked`
+  → `_on_jump_clicked`); the QTextBrowser fallback uses a `QToolButton` and
+  cannot target a message, so it always scrolls to the bottom.
 - MUC participant sidebar (`_users_list`, a `_ParticipantList` subclass): a
   single click selects a row (highlight only), a double-click opens the private
   chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,

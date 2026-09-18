@@ -271,6 +271,16 @@ pages and scrolls. Those pages are inserted with
 revert the jump, and the target node is matched by `data-reply-id` or
 `data-stanza-id`. Feature advertised as `urn:xmpp:reply:0`.
 
+**Jump-to-bottom button** (`_JumpButtonMixin`, `chat_view.py`): the floating
+`▼` button (WebEngine renders it as the in-page `#stanza-jump` div, the
+QTextBrowser fallback as a `QToolButton`) shows how many messages arrived while
+the view was scrolled up. `ChatWidget.add_message` counts incoming, non-own
+messages while `ChatView.is_scrolled_up()` (`note_new_message`), showing
+`▼ N` (capped `99+`). The first click jumps to the first such message
+(`scroll_to_message(..., highlight=False)`), the second click (or reaching the
+bottom) scrolls to the end and clears the counter, which lives until the actual
+bottom. [`tests/test_jump_button.py`]
+
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
 enabled via `ChatView.mention_senders`); clicking it inserts `nick: ` into the

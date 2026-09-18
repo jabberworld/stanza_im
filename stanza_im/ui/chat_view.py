@@ -176,9 +176,10 @@ class _JumpButtonMixin:
             "  font-size: 18px;"
             "}"
             "QToolButton:hover { background: #d9d9d9; }")
-        button.clicked.connect(self.scroll_to_bottom)
+        button.clicked.connect(self._on_jump_clicked)
         button.hide()
         self._jump_button = button
+        self._init_jump_state()
 
     def _position_jump_button(self):
         button = getattr(self, "_jump_button", None)
@@ -199,6 +200,65 @@ class _JumpButtonMixin:
             return
         if button.isVisible() != show:
             button.setVisible(show)
+        self._position_jump_button()
+
+    # ── New-message counter + two-step jump ───────────────────────
+
+    def _init_jump_state(self):
+        self._new_count = 0
+        self._first_unread_id = ""
+        self._jumped_once = False
+        self._update_jump_label()
+
+    def is_scrolled_up(self) -> bool:
+        """True while the view overflows and is not at the very bottom."""
+        return (bool(getattr(self, "_overflow", False))
+                and self.scroll_fraction() < 0.999)
+
+    def note_new_message(self, target_id: str = "") -> None:
+        """Count a message that arrived while the user was scrolled up."""
+        self._new_count += 1
+        if not self._first_unread_id and target_id:
+            self._first_unread_id = target_id
+        self._update_jump_label()
+
+    def _reset_unread_indicator(self) -> None:
+        if not (getattr(self, "_new_count", 0)
+                or getattr(self, "_first_unread_id", "")
+                or getattr(self, "_jumped_once", False)):
+            return
+        self._new_count = 0
+        self._first_unread_id = ""
+        self._jumped_once = False
+        self._update_jump_label()
+
+    @staticmethod
+    def _jump_label(count: int) -> str:
+        if count <= 0:
+            return "\u25bc"
+        return "\u25bc " + ("99+" if count > 99 else str(count))
+
+    def _on_jump_clicked(self) -> None:
+        if (self._new_count > 0 and self._first_unread_id
+                and not self._jumped_once and self._jump_has_target()):
+            self._jumped_once = True
+            self.scroll_to_message(self._first_unread_id, highlight=False)
+        else:
+            self._reset_unread_indicator()
+            self.scroll_to_bottom()
+
+    def _jump_has_target(self) -> bool:
+        """Whether the backend can scroll to a specific message."""
+        return False
+
+    def _update_jump_label(self):
+        button = getattr(self, "_jump_button", None)
+        if button is None:
+            return
+        text = self._jump_label(getattr(self, "_new_count", 0))
+        if button.text() != text:
+            button.setText(text)
+            button.setFixedSize(max(34, button.sizeHint().width() + 8), 34)
         self._position_jump_button()
 
     def resizeEvent(self, event):
@@ -296,11 +356,12 @@ if HAS_WEBENGINE:
             self._overflow = False
             self._near_top_hit = False
             self._bridge.scroll_fraction.connect(self._set_fraction)
-            self._bridge.jump_clicked.connect(self.scroll_to_bottom)
+            self._bridge.jump_clicked.connect(self._on_jump_clicked)
             self._bridge.reply_requested.connect(self.reply_requested)
 
             self._page = _StanzaPage(self, parent=self)
             self.setPage(self._page)
+            self._init_jump_state()
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -631,7 +692,6 @@ if HAS_WEBENGINE:
                 d.style.background = '#ececec';
             });
             d.addEventListener('click', function () {
-                window.scrollTo(0, document.body.scrollHeight);
                 if (window.bridge && window.bridge.on_jump_clicked) {
                     window.bridge.on_jump_clicked();
                 }
@@ -922,6 +982,19 @@ window.__stanzaMentionRef = '';
                 "if (d) d.style.display = %s;"
                 % ("'block'" if show else "'none'"))
 
+        def _jump_has_target(self) -> bool:
+            return True
+
+        def _update_jump_label(self):
+            count = getattr(self, "_new_count", 0)
+            text = json.dumps(self._jump_label(count))
+            self.evaluate_js(
+                "var d = document.getElementById('stanza-jump');"
+                "if (d) { d.textContent = %s; d.style.width = %s;"
+                " d.style.padding = %s; }"
+                % (text, "'auto'" if count else "'34px'",
+                   "'0 10px'" if count else "'0'"))
+
         def _poll_scroll_position(self):
             if not self._ready:
                 return
@@ -1085,10 +1158,14 @@ window.__stanzaMentionRef = '';
                     self.near_top.emit()
             else:
                 self._near_top_hit = False
+            if self._fraction >= 0.999:
+                self._reset_unread_indicator()
             self._update_jump_button()
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
+            if self._fraction >= 0.999:
+                self._reset_unread_indicator()
             self._update_jump_button()
 
         def _append_chunk(self, html: str) -> None:
@@ -1120,6 +1197,7 @@ window.__stanzaMentionRef = '';
             self._ready = False
             self._fraction = 1.0
             self._overflow = False
+            self._reset_unread_indicator()
             self._update_jump_button()
             html = self._theme.generate_empty_page()
             self.setHtml(html, QtCore.QUrl("about:blank"))
@@ -1326,18 +1404,22 @@ window.__stanzaMentionRef = '';
             }}
             """)
 
-        def scroll_to_message(self, message_id: str) -> None:
-            """Scroll the ``data-stanza-id`` node into view and flash it."""
+        def scroll_to_message(self, message_id: str,
+                              highlight: bool = True) -> None:
+            """Scroll the ``data-stanza-id`` node into view (and flash it)."""
             safe = json.dumps(message_id or "")
+            flash = 1 if highlight else 0
             self.page().runJavaScript(f"""
             (function() {{
                 var id = {safe};
                 if (!id) return;
+                var flash = {flash};
                 var nodes = document.querySelectorAll('.stanza-message');
                 for (var i = 0; i < nodes.length; i++) {{
                     if (nodes[i].getAttribute('data-stanza-id') === id
                         || nodes[i].getAttribute('data-reply-id') === id) {{
                         nodes[i].scrollIntoView({{block: 'center'}});
+                        if (!flash) return;
                         nodes[i].classList.remove('stanza-jump-highlight');
                         void nodes[i].offsetWidth;
                         nodes[i].classList.add('stanza-jump-highlight');
@@ -1372,6 +1454,7 @@ window.__stanzaMentionRef = '';
             self._pending.clear()
             self._fraction = 1.0
             self._overflow = False
+            self._reset_unread_indicator()
             self._update_jump_button()
             self._load_empty()
 
@@ -1381,6 +1464,7 @@ window.__stanzaMentionRef = '';
         def scroll_to_bottom(self):
             self._near_top_hit = False
             self._fraction = 1.0
+            self._reset_unread_indicator()
             self._update_jump_button()
             self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
 
@@ -1474,7 +1558,8 @@ else:
             """No-op: media previews are disabled without QWebEngine."""
             return
 
-        def scroll_to_message(self, message_id: str) -> None:
+        def scroll_to_message(self, message_id: str,
+                              highlight: bool = True) -> None:
             """No-op: the QTextBrowser fallback has no per-message nodes."""
             return
 
@@ -1497,6 +1582,8 @@ else:
                     self.near_top.emit()
             else:
                 self._near_top_hit = False
+            if self._fraction >= 0.999:
+                self._reset_unread_indicator()
             self._update_jump_button()
 
         def _typing_block_start(self) -> int:
@@ -1640,6 +1727,7 @@ else:
             self._near_top_hit = False
             self._fraction = 1.0
             self._overflow = False
+            self._reset_unread_indicator()
             self._update_jump_button()
 
         def evaluate_js(self, code: str):
@@ -1652,6 +1740,7 @@ else:
             self._fraction = 1.0
             vbar = self.verticalScrollBar()
             vbar.setValue(vbar.maximum())
+            self._reset_unread_indicator()
             self._update_jump_button()
 
         def scroll_fraction(self) -> float:
