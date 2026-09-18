@@ -259,7 +259,6 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _page_application(self):
         general, form = self._page()
         form.addRow(self._check("close_to_tray", tr("prefs_close_to_tray")))
-        form.addRow(tr("prefs_history_limit"), self._spin("history_limit", 10, 5000))
         form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length", 10, 120))
 
         files, file_form = self._page()
@@ -893,7 +892,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         chat_form.addRow(self._check("show_avatars", tr("prefs_show_avatars")))
         chat_form.addRow(self._check("message_styling",
                                      tr("prefs_message_styling")))
-        chat_form.addRow(tr("prefs_history_limit"), self._spin("history_limit_chat", 10, 5000))
+        chat_form.addRow(tr("prefs_history_limit"), self._spin("history_limit_chat", 10, 1000))
         chat_form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length_chat", 10, 120))
 
         muc, muc_form = self._page()
@@ -1187,7 +1186,6 @@ class PreferencesDialog(QtWidgets.QDialog):
         files = getattr(cfg, "files", None)
         values = {
             "close_to_tray": cfg.ui.close_to_tray,
-            "history_limit": app.history_limit or chat.history_limit,
             "history_limit_chat": chat.history_limit,
             "tab_title_length": app.tab_title_length or chat.tab_title_length,
             "tab_title_length_chat": chat.tab_title_length,

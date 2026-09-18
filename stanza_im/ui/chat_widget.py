@@ -41,6 +41,8 @@ _TYPING_DEBOUNCE_MS = 2000
 _HISTORY_MAX = 5000
 _MESSAGES_MAX = 5000
 _STATUS_MAX = 300
+_HISTORY_PAGE = 60          # rows per DB/MAM request (one paging step)
+_HISTORY_WINDOW_MAX = 1000  # upper bound of the configurable history window
 
 _MUC_BADGES: dict[str, str] = {
     "owner": "~",
@@ -1377,7 +1379,7 @@ class ChatWidget(QtWidgets.QWidget):
         before = self.oldest_ts()
         if before:
             rows = await history.load_older_timestamp_async(
-                self.jid, before, self._window_size)
+                self.jid, before, min(self._window_size, _HISTORY_PAGE))
             if self._released:
                 return
             # These rows belong to the MAM page just stored. Do not
@@ -1387,7 +1389,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._db_exhausted = True
         else:
             self._history = await history.load_history_async(
-                self.jid, limit=self._window_size)
+                self.jid, limit=min(self._window_size, _HISTORY_PAGE))
             if self._released:
                 return
             self._merge_live_history()
@@ -1424,7 +1426,7 @@ class ChatWidget(QtWidgets.QWidget):
 
     def refresh_history(self, size: int | None = None):
         """Re-read the conversation tail from the local DB."""
-        size = size or self._window_size * 2
+        size = size or min(self._window_size * 2, _HISTORY_MAX)
         self._start_task(self._refresh_history_async(size))
 
     async def _refresh_history_async(self, size):
@@ -1455,7 +1457,7 @@ class ChatWidget(QtWidgets.QWidget):
         return min(timestamps) if timestamps else ""
 
     def _batch_size(self):
-        return max(50, self._window_size // 2)
+        return min(self._window_size, _HISTORY_PAGE)
 
     def _fill_threshold(self):
         estimate = max(10, self._view.height() // 40)

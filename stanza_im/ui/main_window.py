@@ -32,6 +32,7 @@ from stanza_im.ui.icons import init_icons
 from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.roster_widget import RosterWidget, UserItem
 from stanza_im.ui.chat_window import ChatWindow
+from stanza_im.ui.chat_widget import _HISTORY_PAGE, _HISTORY_WINDOW_MAX
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.roster_style import RosterStyle
 from stanza_im.ui.subject_dialog import SubjectDialog
@@ -45,7 +46,6 @@ from stanza_im.include.geo import extract_geo_uris, parse_geo_uri, TileCache
 from stanza_im.ui.map_widget import GeoMapWindow
 
 logger = logging.getLogger(__name__)
-_HISTORY_BATCH_LIMIT = 60
 
 
 def _current_timestamp() -> str:
@@ -2388,18 +2388,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if not os.path.isfile(history._path(jid)):
             await history.migrate_from_jsonl_async(jid)
         try:
-            limit = int(self._config.chat.history_limit)
+            window = int(self._config.chat.history_limit)
         except (TypeError, ValueError):
-            limit = _HISTORY_BATCH_LIMIT
-        limit = min(limit, _HISTORY_BATCH_LIMIT)
+            window = _HISTORY_PAGE
+        window = max(10, min(window, _HISTORY_WINDOW_MAX))
         chat = self._chat_window.get_chat(jid)
         if chat is None:
             return
-        entries = await history.load_history_async(jid, limit=limit)
+        entries = await history.load_history_async(jid, limit=window)
         exhausted = bool(entries) and not await \
             history.older_available_timestamp_async(
                 jid, entries[0].get("timestamp", ""))
-        chat.set_history(entries, limit, exhausted)
+        chat.set_history(entries, window, exhausted)
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -2654,12 +2654,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if not client:
             return
         try:
-            limit = int(self._config.chat.history_limit)
+            window = int(self._config.chat.history_limit)
         except (TypeError, ValueError):
-            limit = _HISTORY_BATCH_LIMIT
-        limit = min(limit, _HISTORY_BATCH_LIMIT)
+            window = _HISTORY_PAGE
+        # One network page per request; scrolling loads the next page.
+        page = max(10, min(window, _HISTORY_PAGE))
         try:
-            stored = await client.fetch_history_mam(jid, since, limit)
+            stored = await client.fetch_history_mam(jid, since, page)
         except Exception:
             stored = None
         chat = self._chat_window.get_chat(jid)

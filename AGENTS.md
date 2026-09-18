@@ -978,7 +978,10 @@ text is kept. Returning activity (`eventFilter`) resumes
    rows, `_MESSAGES_MAX` live rows and `_STATUS_MAX` (300) status lines
    (`chat_widget.py`), while the WebEngine DOM trims to
    `ChatView._MAX_DOM_MESSAGES` (500) message nodes; older messages stay in
-   SQLite/MAM and are re-fetched by the paging menus.
+   SQLite/MAM and are re-fetched by the paging menus. `chat.history_limit`
+   (default 60, 10–1000, Preferences → Chat → «General») is the on-open window;
+   DB/MAM requests page in `_HISTORY_PAGE` (60) steps so a large window never
+   turns into one huge request.
 8. **Housekeeping**: a 30-min `MainWindow._trim_main_process_memory` runs
    `gc.collect()` + glibc `malloc_trim(0)` (also right after a tab closes or is
    suspended) to return freed main-process heap to the OS; WebEngine renderers
