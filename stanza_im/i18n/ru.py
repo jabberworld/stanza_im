@@ -340,6 +340,7 @@ STRINGS = {
     "muc_config_jid": "Jabber ID",
     "muc_config_note": "Примечание",
     "muc_config_invalid_jid": "Укажите корректный Jabber ID.",
+    "muc_config_no_permission": "Недостаточно прав для изменения этого участника.",
     "muc_config_confirm_delete": "Удалить {jid} из списка?",
     "muc_config_loading": "Загрузка…",
     "muc_config_no_rights": "Недостаточно прав для изменения настроек конференции.",

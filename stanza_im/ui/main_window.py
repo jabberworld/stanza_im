@@ -825,7 +825,8 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.muc_config_dialog import MucConfigDialog
         can_configure = self._muc_affiliation(room) == "owner"
         dialog = MucConfigDialog(self._client, room,
-                                 can_configure=can_configure, parent=self)
+                                 can_configure=can_configure, parent=self,
+                                 actor_affiliation=self._muc_affiliation(room))
         self._muc_config_dialogs[room] = dialog
         dialog.finished.connect(
             lambda *_, r=room: self._muc_config_dialog_closed(r))

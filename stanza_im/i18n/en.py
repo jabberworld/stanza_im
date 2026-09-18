@@ -340,6 +340,7 @@ STRINGS = {
     "muc_config_jid": "Jabber ID",
     "muc_config_note": "Note",
     "muc_config_invalid_jid": "Enter a valid Jabber ID.",
+    "muc_config_no_permission": "You do not have permission to change this participant.",
     "muc_config_confirm_delete": "Remove {jid} from the list?",
     "muc_config_loading": "Loading…",
     "muc_config_no_rights": "You do not have permission to change the room settings.",

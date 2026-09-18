@@ -163,31 +163,38 @@ class DataFormWidget(QtWidgets.QWidget):
             return tr("form_required", label=label)
         return None
 
+    def _field_value(self, field):
+        """Current widget value for *field* (falls back to its form value)."""
+        var = str(field["var"] or "")
+        widget = self._fields.get(var)
+        if widget is None:
+            return field["value"]
+        if isinstance(widget, QtWidgets.QLineEdit):
+            return widget.text()
+        if isinstance(widget, QtWidgets.QCheckBox):
+            return widget.isChecked()
+        if isinstance(widget, QtWidgets.QComboBox):
+            return str(widget.currentData() or "")
+        checks = self._multi_fields.get(var, [])
+        chosen = [value for check, value in checks
+                  if not isinstance(check, str) and check.isChecked()]
+        for check, value in checks:
+            if isinstance(check, QtWidgets.QLineEdit) and check.text().strip():
+                chosen = [part.strip() for part in check.text().split(",")]
+                break
+        return chosen if chosen else ""
+
+    def values(self) -> dict:
+        """Return the current ``{var: value}`` for every form field."""
+        return {str(field["var"] or ""): self._field_value(field)
+                for field in self._form["fields"]}
+
     def apply_to_form(self) -> None:
         """Copy widget values back onto the form's fields."""
         for field in self._form["fields"]:
-            var = str(field["var"] or "")
-            widget = self._fields.get(var)
-            if widget is None:
+            if self._fields.get(str(field["var"] or "")) is None:
                 continue
-            if isinstance(widget, QtWidgets.QLineEdit):
-                field["value"] = widget.text()
-            elif isinstance(widget, QtWidgets.QCheckBox):
-                field["value"] = widget.isChecked()
-            elif isinstance(widget, QtWidgets.QComboBox):
-                field["value"] = str(widget.currentData() or "")
-            else:
-                checks = self._multi_fields.get(var, [])
-                chosen = [value for check, value in checks
-                          if not isinstance(check, str) and check.isChecked()]
-                for check, value in checks:
-                    if isinstance(check, QtWidgets.QLineEdit) and check.text().strip():
-                        chosen = [part.strip() for part in check.text().split(",")]
-                        break
-                if chosen:
-                    field["value"] = chosen
-                else:
-                    field["value"] = ""
+            field["value"] = self._field_value(field)
         try:
             self._form["type"] = "submit"
         except KeyError:

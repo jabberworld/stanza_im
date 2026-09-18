@@ -806,7 +806,12 @@ affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
   (`client.muc_get_config`) into a `DataFormWidget`.
 
 Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
-`client.muc_set_config`); «Отмена» discards them.
+`client.muc_set_config`); «Отмена» discards them. Only what changed is sent:
+affiliations when the participant list was edited (each pre-validated against
+the XEP-0045 rule — owners may modify any list, admins only member/outcast, and
+the edit dialog warns immediately otherwise) and the configuration only when a
+form value changed, as a fresh `type='submit'` form built by
+`client.muc_set_config(room, values)` (the server's own form is never mutated).
 
 The MUC toolbar's vCard button opens the room's own vCard
 (`MainWindow._show_muc_room_info` → `_show_profile(room)`). `VCardInfoDialog`
@@ -932,7 +937,10 @@ LRU cache for QPixmap icons:
 ### 14.1 Architecture
 
 Wraps `slixmpp.ClientXMPP` through the `_StanzaXMPP` subclass (deterministic
-direct-TLS ordering, STARTTLS enforcement, unusable `-PLUS` SASL filter).
+direct-TLS ordering, STARTTLS enforcement, unusable `-PLUS` SASL filter). The
+stream advertises the UI language (`i18n.current_language()`) as `xml:lang` and
+`start_stream_handler` forces `peer_default_lang` to it, so outgoing stanzas
+carry it and servers localize data forms (e.g. the MUC room configuration).
 Registers XEP plugins (conditionally where noted):
 - xep_0054 (vCard), xep_0045 (MUC), xep_0066 (OOB), xep_0085 (Chat State)
 - xep_0184 (Receipts), xep_0224 (Attention), xep_0048 (Bookmarks)

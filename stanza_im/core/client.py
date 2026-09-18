@@ -25,6 +25,7 @@ from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.include.constants import APP_NAME, VERSION
+from stanza_im.i18n import current_language as _current_language
 from stanza_im.xmpp import jingle as jingle_mod
 from stanza_im.xmpp import jingle_rtp
 from stanza_im.xmpp.jingle import JingleFileTransferManager
@@ -394,6 +395,12 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
     _dns_hosts: dict = {}
     _connected_target: tuple | None = None
 
+    def start_stream_handler(self, xml):
+        super().start_stream_handler(xml)
+        # Advertise the UI language on outgoing stanzas so servers localize
+        # data forms (e.g. the MUC room configuration) to it, like Psi does.
+        self.peer_default_lang = self.default_lang
+
     async def get_dns_records(self, domain, port=None):
         records = await super().get_dns_records(domain, port)
         # (address, port) -> SRV target host, so the actual endpoint can be
@@ -508,7 +515,7 @@ class JabberClient:
         self.send_software = send_software
         self._full_jid = f"{self.jid_str}/{resource}"
 
-        self.xmpp = _StanzaXMPP(jid, password)
+        self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
         self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")
         self.xmpp.auto_reconnect = True
         self.xmpp.reconnect_max_retries = 5
@@ -1982,8 +1989,21 @@ class JabberClient:
         muc = self.xmpp.plugin["xep_0045"]
         return await muc.get_room_config(room)
 
-    async def muc_set_config(self, room: str, form) -> None:
-        """Submit a room configuration form (XEP-0045 ``muc#owner``)."""
+    async def muc_set_config(self, room: str, values: dict) -> None:
+        """Submit a room configuration (XEP-0045 ``muc#owner``).
+
+        *values* is a ``{var: value}`` mapping; a fresh ``type='submit'`` form
+        is built so the server's own form (with labels/options) is never
+        mutated by slixmpp's submit handling.
+        """
+        from slixmpp.plugins.xep_0004.stanza import Form, FormField
+        form = Form()
+        form["type"] = "submit"
+        for var, value in values.items():
+            field = FormField()
+            field["var"] = var
+            field["value"] = value
+            form.append(field)
         muc = self.xmpp.plugin["xep_0045"]
         await muc.set_room_config(room, form)
 

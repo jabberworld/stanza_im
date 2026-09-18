@@ -15,6 +15,22 @@ _CATEGORY_KEYS = {
     "member": "muc_config_members",
     "outcast": "muc_config_outcasts",
 }
+_AFFILIATION_RANK = {"owner": 3, "admin": 2, "member": 1, "outcast": 0,
+                     "none": 0, "": 0}
+
+
+def can_change_affiliation(actor: str, original: str, new: str) -> bool:
+    """Whether *actor* may change a participant from *original* to *new*.
+
+    XEP-0045: owners may modify any list; admins only the member and outcast
+    lists (and cannot grant admin/owner).
+    """
+    if actor == "owner":
+        return True
+    if actor == "admin":
+        return (_AFFILIATION_RANK.get(original, 0) <= 1
+                and _AFFILIATION_RANK.get(new, 0) <= 1)
+    return False
 
 
 class _ParticipantEditDialog(QtWidgets.QDialog):
@@ -22,8 +38,12 @@ class _ParticipantEditDialog(QtWidgets.QDialog):
 
     def __init__(self, parent=None, affiliation: str = "member",
                  jid: str = "", note: str = "",
-                 title_key: str = "muc_config_add_title"):
+                 title_key: str = "muc_config_add_title",
+                 actor_affiliation: str = "",
+                 original_affiliation: str = ""):
         super().__init__(parent)
+        self._actor_affiliation = actor_affiliation
+        self._original_affiliation = original_affiliation or "none"
         self.setWindowTitle(tr(title_key))
         form = QtWidgets.QFormLayout(self)
         self._category = QtWidgets.QComboBox()
@@ -54,6 +74,12 @@ class _ParticipantEditDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(
                 self, self.windowTitle(), tr("muc_config_invalid_jid"))
             return
+        if not can_change_affiliation(
+                self._actor_affiliation, self._original_affiliation,
+                self._category.currentData()):
+            QtWidgets.QMessageBox.warning(
+                self, self.windowTitle(), tr("muc_config_no_permission"))
+            return
         self.accept()
 
     def values(self) -> tuple[str, str, str]:
@@ -65,15 +91,18 @@ class MucConfigDialog(QtWidgets.QDialog):
     """Room management: affiliation lists and (owner) room configuration."""
 
     def __init__(self, client, room: str, can_configure: bool = False,
-                 parent=None):
+                 parent=None, actor_affiliation: str = ""):
         super().__init__(parent)
         self._client = client
         self._room = room
         self._can_configure = bool(can_configure)
+        self._actor_affiliation = actor_affiliation
         self._participants: dict[str, dict] = {}
         self._changes: dict[str, dict] = {}
         self._form = None
         self._form_widget: DataFormWidget | None = None
+        self._initial_values: dict | None = None
+        self._pending_values: dict | None = None
         self._busy = False
 
         self.setWindowTitle(tr("muc_config_title", room=room))
@@ -214,7 +243,10 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._update_buttons()
 
     def _on_add(self) -> None:
-        dlg = _ParticipantEditDialog(self, affiliation="member")
+        dlg = _ParticipantEditDialog(
+            self, affiliation="member",
+            actor_affiliation=self._actor_affiliation,
+            original_affiliation="none")
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         affiliation, jid, note = dlg.values()
@@ -229,7 +261,9 @@ class MucConfigDialog(QtWidgets.QDialog):
         current = self._participants.get(jid, {})
         dlg = _ParticipantEditDialog(
             self, affiliation=current.get("affiliation", "member"), jid=jid,
-            note=current.get("note", ""), title_key="muc_config_edit_title")
+            note=current.get("note", ""), title_key="muc_config_edit_title",
+            actor_affiliation=self._actor_affiliation,
+            original_affiliation=current.get("affiliation", "none"))
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         affiliation, new_jid, note = dlg.values()
@@ -269,19 +303,28 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._form_widget = DataFormWidget(form)
         self._settings_body.addWidget(self._form_widget)
         self._settings_status.setText("")
+        self._initial_values = self._form_widget.values()
 
     # ── Apply ─────────────────────────────────────────────────────
 
     def _on_ok(self) -> None:
         if self._busy:
             return
+        values = None
         if self._can_configure and self._form_widget is not None:
             error = self._form_widget.validate()
             if error:
                 QtWidgets.QMessageBox.warning(
                     self, self.windowTitle(), error)
                 return
-            self._form_widget.apply_to_form()
+            current = self._form_widget.values()
+            if current != self._initial_values:
+                values = current
+        if not self._changes and values is None:
+            # Nothing actually changed: close without sending anything.
+            self.accept()
+            return
+        self._pending_values = values
         self._busy = True
         self._ok_btn.setEnabled(False)
         self._start_task(self._apply())
@@ -292,8 +335,9 @@ class MucConfigDialog(QtWidgets.QDialog):
                 await self._client.muc_set_affiliation(
                     self._room, jid, change.get("affiliation", "none"),
                     change.get("note", ""))
-            if self._can_configure and self._form is not None:
-                await self._client.muc_set_config(self._room, self._form)
+            if self._pending_values is not None:
+                await self._client.muc_set_config(
+                    self._room, self._pending_values)
         except Exception as exc:
             QtWidgets.QMessageBox.warning(
                 self, self.windowTitle(),

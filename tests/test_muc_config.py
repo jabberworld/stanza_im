@@ -21,7 +21,7 @@ from PyQt6 import QtWidgets
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.chat_widget import ChatWidget
-from stanza_im.ui.muc_config_dialog import MucConfigDialog
+from stanza_im.ui.muc_config_dialog import MucConfigDialog, can_change_affiliation
 
 i18n_load("en")
 
@@ -59,8 +59,8 @@ class _FakeClient:
     async def muc_set_affiliation(self, room, jid, affiliation, reason=""):
         self.affiliation_calls.append((room, jid, affiliation, reason))
 
-    async def muc_set_config(self, room, form):
-        self.config_calls.append((room, form))
+    async def muc_set_config(self, room, values):
+        self.config_calls.append((room, values))
 
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -108,18 +108,37 @@ try:
     check("edit/delete disabled without selection",
           not dlg._edit_btn.isEnabled() and not dlg._delete_btn.isEnabled())
 
-    # Ok applies the collected changes (edit + delete -> none)
+    # Ok with no changes must send nothing at all
+    dlg._changes = {}
+    dlg._pending_values = None
+    dlg._on_ok()
+    check("no-change Ok sends nothing",
+          client.affiliation_calls == [] and client.config_calls == [])
+
+    # Ok with only affiliation changes must not submit the config form
     dlg._changes = {
         "m1@x": {"affiliation": "admin", "note": "promoted"},
         "bad@x": {"affiliation": "none", "note": ""},
     }
+    dlg._pending_values = None
     loop.run_until_complete(dlg._apply())
     check("affiliation changes submitted",
           client.affiliation_calls == [
               ("room@conf.example", "m1@x", "admin", "promoted"),
               ("room@conf.example", "bad@x", "none", "")])
-    check("room config submitted", client.config_calls == [
-        ("room@conf.example", client.form)])
+    check("no config sent for an affiliation-only edit",
+          client.config_calls == [])
+
+    # Ok with only settings changes must not send affiliations
+    client.affiliation_calls.clear()
+    dlg._changes = {}
+    dlg._pending_values = {"muc#roomconfig_roomname": "New"}
+    loop.run_until_complete(dlg._apply())
+    check("room config submitted",
+          client.config_calls == [
+              ("room@conf.example", {"muc#roomconfig_roomname": "New"})])
+    check("no affiliations sent for a settings-only edit",
+          client.affiliation_calls == [])
     dlg.deleteLater()
 
     client2, dlg2 = loop.run_until_complete(scenario(False))
@@ -129,6 +148,33 @@ try:
     dlg2.deleteLater()
 finally:
     loop.close()
+
+# 2b. affiliation permission rules (XEP-0045) --------------------------------
+check("owner can change anything",
+      all(can_change_affiliation("owner", o, n)
+          for o in ("owner", "admin", "member", "outcast", "none")
+          for n in ("owner", "admin", "member", "outcast", "none")))
+check("admin cannot touch owner",
+      not can_change_affiliation("admin", "owner", "member"))
+check("admin cannot touch admin",
+      not can_change_affiliation("admin", "admin", "member"))
+check("admin cannot grant admin",
+      not can_change_affiliation("admin", "member", "admin"))
+check("admin cannot grant owner",
+      not can_change_affiliation("admin", "member", "owner"))
+check("admin can manage members/outcasts",
+      can_change_affiliation("admin", "member", "outcast")
+      and can_change_affiliation("admin", "outcast", "member")
+      and can_change_affiliation("admin", "none", "member"))
+check("non-managers cannot change",
+      not can_change_affiliation("member", "member", "outcast"))
+
+# 2c. the stanza language follows the UI language ----------------------------
+from stanza_im.i18n import load as _load, current_language as _current_language
+_load("ru")
+check("current_language reflects the loaded dict", _current_language() == "ru")
+_load("en")
+check("current_language switches", _current_language() == "en")
 
 # 3. static wiring ------------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -147,6 +193,16 @@ _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
 check("MainWindow applies rights and opens the dialog",
       "def _apply_muc_admin" in _mw_src
       and "def _on_muc_config_requested" in _mw_src)
+check("client advertises the UI language",
+      "lang=_current_language()" in _client_src
+      and "self.peer_default_lang = self.default_lang" in _client_src)
+check("config submit builds a fresh form",
+      'await muc.set_room_config(room, form)' in _client_src
+      and 'form = Form()' in _client_src)
+check("dialog sends only what changed",
+      "current != self._initial_values" in open(
+          os.path.join(_root, "stanza_im", "ui", "muc_config_dialog.py"),
+          encoding="utf-8").read())
 
 print()
 if FAILURES:

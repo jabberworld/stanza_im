@@ -132,6 +132,14 @@ enabled for the owner only and hosts the `muc#owner` room-configuration
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
 only JIDs). [`tests/test_muc_config.py`]
 
+On «Ок» only the parts that actually changed are sent: affiliation edits go
+through `client.muc_set_affiliation` (each pre-checked client-side against the
+XEP-0045 rule — owners change any list, admins only member/outcast — so the edit
+dialog warns immediately instead of deferring to the server), and the room
+configuration is sent only when a form value changed, as a fresh `type='submit'`
+form (`client.muc_set_config(room, values)`) so slixmpp never mutates the
+server's own form (which raised `('options', None)`).
+
 The MUC toolbar's vCard button opens the **room's** vCard (`MainWindow.
 _show_muc_room_info` → `_show_profile(room)`, not our occupant's real JID). The
 viewer (`VCardInfoDialog`) shows an Edit button for room cards, enabled for
@@ -952,6 +960,11 @@ text is kept. Returning activity (`eventFilter`) resumes
   without `tls-exporter` in `ssl.CHANNEL_BINDING_TYPES` (Python < 3.12),
   `filter_plus_mechs()` drops `*-PLUS` so SCRAM does not send an invalid
   channel binding and trigger a transient `failed_auth`.
+- **Language**: the stream advertises the UI language
+  (`i18n.current_language()`) as `xml:lang` (`_StanzaXMPP(jid, password,
+  lang=…)`) and `start_stream_handler` forces `peer_default_lang` to it, so
+  outgoing stanzas carry it and servers localize data forms (e.g. the room
+  configuration) like Psi.
 - **Keep-alive**: `connection.keepalive` → `xmpp.whitespace_keepalive`.
 - `_connected_target` (via `_dns_hosts`) reports the real SRV endpoint;
   `connection_info()` feeds the preferences info icon (mode, TLS version,
