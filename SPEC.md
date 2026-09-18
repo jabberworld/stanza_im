@@ -29,6 +29,7 @@ stanza_im/
 │   ├── storage.py      — Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py      — SQLite chat-history access (day/summary + async wrappers)
 │   ├── known_contacts.py — persisted JID → name/groups/conference registry
+│   ├── unread_state.py — persisted per-contact unread counters (JSON)
 │   ├── vcard_cache.py  — vCard avatar download/cache coordination
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
 │   └── memstats.py     — periodic memory statistics (CLI -m)
@@ -862,6 +863,13 @@ order).
   middle-click advances to the next unread contact until none remain
   (`MainWindow._on_tray_cycle_unread`)
 - Blinking: alternates between icon and blank every 500ms when unread messages exist
+- Unread counters are persisted (`$XDG_DATA_HOME/stanza-im/unread.json`,
+  `core/unread_state.py`) and restored on startup: roster badges and tray
+  blinking come back exactly as before the restart (`MainWindow._unread_counts`,
+  applied in `_add_roster_item`/`_sync_conference_roster`, saved with a 1 s
+  debounce and on quit). OSD popups are not replayed. Messages received while
+  the client was offline are delivered by the server on reconnect and counted
+  as unread in the new session (no MAM catch-up).
 - Notifications: `showMessage()` for connection status, errors
 
 ## 12A. OSD Notifications (`ui/osd.py`)

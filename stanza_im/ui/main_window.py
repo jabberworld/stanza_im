@@ -28,6 +28,7 @@ from stanza_im.include.constants import (APP_NAME, VERSION,
                                       PLACES_DIR_22, IMAGES_DIR)
 from stanza_im.include import pep
 from stanza_im.core.storage import Config
+from stanza_im.core import unread_state
 from stanza_im.ui.icons import init_icons
 from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.roster_widget import RosterWidget, UserItem
@@ -257,8 +258,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── State ────────────────────────────────────────────────
         self._visible = True
         self._shutting_down = False
-        self._unread_total = 0
-        self._unread_jids: set[str] = set()
+        self._unread_counts: dict[str, int] = unread_state.load()
+        self._unread_total = sum(self._unread_counts.values())
+        self._unread_jids: set[str] = set(self._unread_counts)
+        if self._unread_total > 0 and self._config.notifications.tray_blink:
+            self._tray.start_blinking()
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_self_nicks: dict[str, str] = {}
         self._muc_names: dict[str, str] = {}
@@ -286,6 +290,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._idle_timer = QtCore.QTimer(self)
         self._idle_timer.timeout.connect(self._check_auto_status)
         self._idle_timer.start(30_000)
+
+        # Coalesce unread-counter writes to disk.
+        self._unread_save_timer = QtCore.QTimer(self)
+        self._unread_save_timer.setSingleShot(True)
+        self._unread_save_timer.setInterval(1000)
+        self._unread_save_timer.timeout.connect(self._flush_unread)
 
         # Unload the WebEngine page of tabs that stay cold (see P7).
         self._tab_activity: dict[str, float] = {}
@@ -776,6 +786,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else "online",
             avatar_path=(self._muc_avatar_paths.get(room)
                          or getattr(contact, "avatar_path", None)),
+            unread_count=self._unread_counts.get(room, 0),
         ))
         self._conference_roster.add(room)
         self._roster._groups[tr("roster_group_conferences")].single_count = True
@@ -1758,6 +1769,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 mood=mood_data.get("key") or "",
                 activity=((activity_data.get("sub")
                            or activity_data.get("group")) or ""),
+                unread_count=self._unread_counts.get(jid, 0),
             )
             self._roster.add_user(user)
         self._request_vcard(jid)
@@ -2893,27 +2905,36 @@ class MainWindow(QtWidgets.QMainWindow):
     def _bump_unread(self, jid: str):
         """Increment the unread counter for a roster contact."""
         self._unread_jids.add(jid)
+        count = self._unread_counts.get(jid, 0) + 1
+        self._unread_counts[jid] = count
+        self._unread_total += 1
+        self._schedule_unread_save()
         for user in self._roster._users:
             if user.jid == jid:
-                self._roster.update_user(jid, unread_count=user.unread_count + 1)
+                self._roster.update_user(jid, unread_count=count)
                 return
 
     def _reset_unread(self, jid: str):
         """Clear the unread counter for *jid* and refresh totals."""
         self._unread_jids.discard(jid)
-        found = False
+        self._unread_counts.pop(jid, None)
         for user in self._roster._users:
             if user.jid == jid and user.unread_count:
-                self._unread_total = max(0, self._unread_total - user.unread_count)
                 self._roster.update_user(jid, unread_count=0)
-                found = True
                 break
-        if not found:
-            # Message came from a contact not in the roster — decrement the
-            # running total so blinking always stops once everything is read.
-            self._unread_total = max(0, self._unread_total - 1)
+        self._unread_total = sum(self._unread_counts.values())
+        self._schedule_unread_save()
         if self._unread_total == 0:
             self._tray.stop_blinking()
+
+    def _schedule_unread_save(self) -> None:
+        """Coalesce unread-counter writes to disk."""
+        timer = getattr(self, "_unread_save_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _flush_unread(self) -> None:
+        unread_state.save(self._unread_counts)
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -3008,7 +3029,6 @@ class MainWindow(QtWidgets.QMainWindow):
                   and self._chat_window.current_jid() == bare_jid)
         if not active:
             self._bump_unread(bare_jid)
-            self._unread_total += 1
             if self._config.notifications.tray_blink:
                 self._tray.start_blinking()
         if active and self._client:
@@ -4285,6 +4305,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._shutting_down:
             return
         self._shutting_down = True
+        self._flush_unread()
         self._tray.hide()
         self.hide()
         self._chat_window.close()

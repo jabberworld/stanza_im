@@ -47,6 +47,7 @@ stanza_im/                      # Python package
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py               # SQLite history; RLock + store_many + async wrappers
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
+│   ├── unread_state.py          # Persisted per-contact unread counters (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
 │   └── memstats.py              # Periodic memory statistics (CLI -m)
@@ -225,6 +226,7 @@ Everything follows the XDG Base Directory spec:
 |------|----------|
 | Config (TOML) | `$XDG_CONFIG_HOME/stanza-im/config.toml` (0600) |
 | Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/history/<bare-jid>.jsonl` (0600) |
+| Unread counters (JSON) | `$XDG_DATA_HOME/stanza-im/unread.json` (0600) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
 Passwords are stored plaintext per user request (file is 0600). History is
@@ -400,6 +402,13 @@ user walk unread conversations: `MainWindow._on_tray_cycle_unread` opens the
 topmost roster contact with `unread_count > 0`, then `_reset_unread` +
 `mds_mark_displayed` mark it read so each further middle click advances until
 nothing is left.
+
+Unread counters are persisted per contact (`core/unread_state.py` →
+`$XDG_DATA_HOME/stanza-im/unread.json`) so the badges and tray blinking survive
+a restart: `MainWindow` loads them at startup, applies them when building
+roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
+in `_bump_unread`/`_reset_unread` and flushes them to disk with a 1 s debounce
+plus on quit. OSD popups are not replayed. [`tests/test_unread_state.py`]
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The
