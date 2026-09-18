@@ -36,6 +36,9 @@ def check(name, cond):
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
+# 0. default history window ---------------------------------------------------
+check("history default is 50", Config().chat.history_limit == 50)
+
 # 1. the setting defines the window, paging stays a small page ---------------
 tab = ChatWidget("hist@example.com", "Hist", ChatThemeFactory())
 tab.set_history([], 200, False)
@@ -68,6 +71,11 @@ dlg.close()
 
 # 4. the initial load no longer clamps the window to a page -----------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_prefs_src = open(os.path.join(_root, "stanza_im", "ui", "preferences.py"),
+                  encoding="utf-8").read()
+check("history setting lives on the Chat General tab",
+      'general_form.addRow(tr("prefs_history_limit")' in _prefs_src
+      and 'chat_form.addRow(tr("prefs_history_limit")' not in _prefs_src)
 _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
                encoding="utf-8").read()
 check("initial load passes the window (not the page cap)",

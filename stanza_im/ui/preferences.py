@@ -883,6 +883,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                             ]))
         general_form.addRow(tr("prefs_idle_unload_minutes"),
                             self._spin("idle_unload_minutes", 0, 240))
+        general_form.addRow(tr("prefs_history_limit"),
+                            self._spin("history_limit_chat", 10, 1000))
 
         chat, chat_form = self._page()
         chat_form.addRow(self._check("show_status", tr("prefs_show_status")))
@@ -892,7 +894,6 @@ class PreferencesDialog(QtWidgets.QDialog):
         chat_form.addRow(self._check("show_avatars", tr("prefs_show_avatars")))
         chat_form.addRow(self._check("message_styling",
                                      tr("prefs_message_styling")))
-        chat_form.addRow(tr("prefs_history_limit"), self._spin("history_limit_chat", 10, 1000))
         chat_form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length_chat", 10, 120))
 
         muc, muc_form = self._page()

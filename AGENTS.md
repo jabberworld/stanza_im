@@ -987,7 +987,7 @@ text is kept. Returning activity (`eventFilter`) resumes
    (`chat_widget.py`), while the WebEngine DOM trims to
    `ChatView._MAX_DOM_MESSAGES` (500) message nodes; older messages stay in
    SQLite/MAM and are re-fetched by the paging menus. `chat.history_limit`
-   (default 60, 10–1000, Preferences → Chat → «General») is the on-open window;
+   (default 50, 10–1000, Preferences → Chat → «General») is the on-open window;
    DB/MAM requests page in `_HISTORY_PAGE` (60) steps so a large window never
    turns into one huge request.
 8. **Housekeeping**: a 30-min `MainWindow._trim_main_process_memory` runs
