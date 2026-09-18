@@ -510,6 +510,26 @@ def count_messages(jid: str) -> int:
         return 0
 
 
+def message_exists(jid: str, stable_id: str) -> bool:
+    """True when a locally stored message carries *stable_id*.
+
+    *stable_id* may be any of the reference ids a XEP-0461 ``<reply/>`` can
+    target (``origin_id``/``archive_id``/``message_id``).
+    """
+    if not stable_id:
+        return False
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT 1 FROM messages WHERE archive_id = ? "
+                "OR origin_id = ? OR message_id = ? LIMIT 1",
+                (stable_id, stable_id, stable_id)).fetchone()
+            return row is not None
+    except sqlite3.Error:
+        return False
+
+
 def first_id(jid: str) -> int | None:
     """Return the smallest stored message id for *jid*, or ``None``."""
     try:
@@ -655,6 +675,10 @@ async def load_older_timestamp_async(jid: str, before: str,
                                      limit: int = 200) -> list[dict]:
     return await asyncio.to_thread(load_older_timestamp, jid, before,
                                    limit=limit)
+
+
+async def message_exists_async(jid: str, stable_id: str) -> bool:
+    return await asyncio.to_thread(message_exists, jid, stable_id)
 
 
 async def load_day_async(jid: str, date: str) -> list[dict]:

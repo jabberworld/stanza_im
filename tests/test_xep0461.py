@@ -164,6 +164,17 @@ check("reply button relayed by scroll poll, never navigation",
       and "__stanzaReplyRef || ''" in _view_src
       and "_last_reply_ref" in _view_src
       and "_clear_reply_request" in _view_src)
+check("reply quote jump wired through the scroll poll",
+      "a.stanza-reply-jump" in _view_src
+      and "window.__stanzaJumpRef" in _view_src
+      and "scrollIntoView" in _view_src
+      and "_last_jump_ref" in _view_src
+      and "def scroll_to_message" in _view_src)
+_hist_src = open(os.path.join(
+    _root, "stanza_im", "core", "history.py"), encoding="utf-8").read()
+check("jump resolution is local-only",
+      "def message_exists" in _hist_src
+      and "message_exists_async" in _hist_src)
 check("MUC mention relayed by scroll poll, never navigation",
       "a.mention" in _view_src
       and "window.__stanzaMentionRef" in _view_src
@@ -218,6 +229,43 @@ cw.add_message(sender="Alice", body="are you in?",
                reply_able_id="oid-1", reply_author="alice@example.com/res")
 resolved = cw._reply_quote_for({"reply_id": "oid-1"})
 check("reply_quote_for", resolved == ("Alice", "are you in?"))
+
+# 9b. clickable reply quote: DOM target resolution + jump -------------------
+_entry = cw._find_message("oid-1")
+check("dom id resolves to the stored message", cw._dom_id(_entry) == "oid-1")
+check("reply_reference returns the target",
+      cw._reply_reference({"reply_id": "oid-1"})
+      == ("Alice", "are you in?", "oid-1"))
+
+jumped = []
+cw._view.scroll_to_message = lambda mid: jumped.append(mid)
+cw._jump_to_message("oid-1")
+check("jump scrolls when the target is loaded", jumped == ["oid-1"])
+
+# 9c. render_reply becomes a stanza:jump link when a target is known --------
+_reply_html = theme.render_reply("Anna", "are you in?", "oid-1")
+check("render_reply jump link",
+      "stanza-reply-jump" in _reply_html
+      and "stanza:jump:oid-1" in _reply_html)
+check("render_reply without target stays plain",
+      "stanza-reply-jump" not in theme.render_reply("Anna", "x"))
+
+# 9d. local-only history lookup ---------------------------------------------
+_tmpd2 = tempfile.mkdtemp(prefix="stanza_jump_")
+_old_dir2 = history_mod.HISTORY_DIR
+history_mod.HISTORY_DIR = _tmpd2
+try:
+    history_mod.store_message("jump@example.com", "incoming", "hi",
+                              "10:00", "A", origin_id="o-1")
+    check("message_exists finds a stored id",
+          history_mod.message_exists("jump@example.com", "o-1"))
+    check("message_exists misses an unknown id",
+          not history_mod.message_exists("jump@example.com", "nope"))
+finally:
+    history_mod.close_all()
+    history_mod.HISTORY_DIR = _old_dir2
+    import shutil as _shutil
+    _shutil.rmtree(_tmpd2, ignore_errors=True)
 
 # 10. quote-only reply (message without a reference id) --------------------
 plain.clear()

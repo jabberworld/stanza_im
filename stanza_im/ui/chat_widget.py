@@ -43,6 +43,7 @@ _MESSAGES_MAX = 5000
 _STATUS_MAX = 300
 _HISTORY_PAGE = 60          # rows per DB/MAM request (one paging step)
 _HISTORY_WINDOW_MAX = 1000  # upper bound of the configurable history window
+_JUMP_MAX_PAGES = 100       # local-DB pages walked to reach a reply target
 
 _MUC_BADGES: dict[str, str] = {
     "owner": "~",
@@ -291,6 +292,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._suspended = False
         self._suspended_fraction = 1.0
         self._text_scale = 1.0
+        self._jump_pending = ""
+        self._jump_pages = 0
         self._build_ui(theme)
 
     # ── UI construction ───────────────────────────────────────────
@@ -592,6 +595,9 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:edit:"):
             self._handle_edit_uri(url)
             return
+        if url.startswith("stanza:jump:"):
+            self._jump_to_message(unquote(url[len("stanza:jump:"):]))
+            return
         if url.startswith("stanza:view:"):
             self._handle_media_view_uri(url)
             return
@@ -879,12 +885,29 @@ class ChatWidget(QtWidgets.QWidget):
         return (entry.get("origin_id") or entry.get("archive_id")
                 or entry.get("message_id") or "")
 
-    def _reply_quote_for(self, entry: dict):
-        """Resolve a reply reference to (sender_name, body_quote)."""
+    @staticmethod
+    def _dom_id(entry: dict) -> str:
+        """DOM ``data-stanza-id`` a rendered *entry* carries."""
+        return (entry.get("message_id") or entry.get("origin_id")
+                or entry.get("archive_id") or "")
+
+    def _reply_reference(self, entry: dict):
+        """Resolve a reply reference to (sender_name, body_quote, target_id).
+
+        *target_id* is the referenced message's DOM id when it is known
+        locally, else the raw ``reply_id`` used for a local lookup.
+        """
         original = self._find_message(entry.get("reply_id", ""))
         if original:
-            return (original.get("sender", ""), original.get("body", ""))
-        return (self._author_display(entry.get("reply_to", "")), "")
+            return (original.get("sender", ""), original.get("body", ""),
+                    self._dom_id(original))
+        return (self._author_display(entry.get("reply_to", "")), "",
+                entry.get("reply_id", "") or "")
+
+    def _reply_quote_for(self, entry: dict):
+        """Resolve a reply reference to (sender_name, body_quote)."""
+        sender, quote, _target = self._reply_reference(entry)
+        return (sender, quote)
 
     @staticmethod
     def _author_display(reply_to: str) -> str:
@@ -1106,9 +1129,9 @@ class ChatWidget(QtWidgets.QWidget):
         reply_quote = None
         if entry.get("reply_id"):
             body, fb_quote = self._split_reply_quote(body)
-            ref_sender, ref_body = self._reply_quote_for(entry)
+            ref_sender, ref_body, ref_target = self._reply_reference(entry)
             reply_quote = (ref_sender or entry.get("reply_author") or "",
-                           ref_body or fb_quote)
+                           ref_body or fb_quote, ref_target)
         from stanza_im.include.utils import ts_to_time
         return {
             "sender": entry["sender"],
@@ -1244,6 +1267,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._status_lines.clear()
         self._users.clear()
         self._subjects.clear()
+        self._jump_pending = ""
 
     def suspend(self) -> bool:
         """Free the WebEngine page of an inactive tab, keeping its state.
@@ -1339,7 +1363,7 @@ class ChatWidget(QtWidgets.QWidget):
                       else self._split_reply_quote(entry.get("body", ""))[0]),
              "origin_id": self._reply_target_id(entry),
              "reply_author": entry.get("reply_author", ""),
-             "reply_quote": self._reply_quote_for(entry)
+             "reply_quote": self._reply_reference(entry)
                             if entry.get("reply_id") else None,
              "outgoing": self._is_mine(entry),
              "edited": bool(entry.get("edited"))}
@@ -1506,6 +1530,53 @@ class ChatWidget(QtWidgets.QWidget):
             self._db_exhausted = True
             self._hist_loading = False
             self.load_more_from_server()
+
+    def _jump_to_message(self, ref_id: str) -> None:
+        """Scroll to a replied message, resolving it from local history.
+
+        The target comes from the already loaded window when possible;
+        otherwise the local SQLite archive is walked page by page (never the
+        server) and the loaded pages are rendered before scrolling.
+        """
+        if not ref_id:
+            return
+        entry = self._find_message(ref_id)
+        if entry is not None:
+            self._view.scroll_to_message(self._dom_id(entry))
+            return
+        self._jump_pending = ref_id
+        self._jump_pages = 0
+        self._start_task(self._load_jump_pages_async())
+
+    async def _load_jump_pages_async(self) -> None:
+        from stanza_im.core import history
+        ref_id = self._jump_pending
+        if not ref_id or self._released:
+            return
+        if not await history.message_exists_async(self.jid, ref_id):
+            # Not in the local archive: do not bother the server.
+            self._jump_pending = ""
+            return
+        while (self._jump_pending and not self._released
+               and self._jump_pages < _JUMP_MAX_PAGES):
+            entry = self._find_message(self._jump_pending)
+            if entry is not None:
+                self._jump_pending = ""
+                self._view.scroll_to_message(self._dom_id(entry))
+                return
+            before = self.oldest_ts()
+            if not before or not await \
+                    history.older_available_timestamp_async(self.jid, before):
+                break
+            self._jump_pages += 1
+            rows = await history.load_older_timestamp_async(
+                self.jid, before, self._batch_size())
+            if self._released:
+                return
+            if not rows:
+                break
+            self.prepend_history(rows, False)
+        self._jump_pending = ""
 
     def load_more_from_server(self):
         if self._server_fetching or self._server_exhausted:

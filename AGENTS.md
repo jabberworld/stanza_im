@@ -261,7 +261,12 @@ gets the quote and is sent as a plain message. Received replies are parsed in
 `client._on_message`/`_on_groupchat_message`, stored in history
 (`origin_id`/`reply_to`/`reply_id`, see `core/history.py`) and rendered with the
 `.stanza-reply` quote bar (body quotes stripped) via `chat_themes.render_reply()`.
-Feature advertised as `urn:xmpp:reply:0`.
+The bar is clickable when the referenced message resolves locally
+(`render_reply(sender, snippet, target_id)` → a `stanza:jump:` anchor): the page
+scrolls to the `data-stanza-id` node and briefly highlights it; if the node is
+not rendered, `ChatWidget._jump_to_message` walks the **local** SQLite archive
+(never MAM, gated by `history.message_exists`) page by page, renders the loaded
+pages and scrolls. Feature advertised as `urn:xmpp:reply:0`.
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
@@ -1093,3 +1098,16 @@ python main.py
 Note: `QtWebEngine` cannot load here (missing `libnss3` on the local apt mirror),
 but `chat_view.py` falls back to `QTextBrowser` gracefully. All other Qt modules
 (core, gui, widgets, webchannel) work offscreen.
+
+<!-- CODE_BRAIN_MANDATORY -->
+## Code Brain MCP - Mandatory when loaded
+
+Use Code Brain MCP first for substantive tasks in this project.
+
+- Start with `start_task(runIntake=true)` or `neural_sync`.
+- Use `agent_plan` before `agent_code` for chunk and deep work.
+- Use `memory_retrieve` at intake and `memory_store` at task end.
+- Use `uncertainty_guard` before storing conclusions.
+- Disable duplicate MCPs with `get_superseded_mcps`.
+<!-- CODE_BRAIN_MANDATORY -->
+

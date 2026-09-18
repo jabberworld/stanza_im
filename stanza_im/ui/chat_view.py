@@ -288,6 +288,7 @@ if HAS_WEBENGINE:
             self._last_reply_ref = ""
             self._last_mention_ref = ""
             self._last_xmpp_ref = ""
+            self._last_jump_ref = ""
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
@@ -663,6 +664,7 @@ if HAS_WEBENGINE:
 window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
             window.__stanzaForwardRef = '';
+            window.__stanzaJumpRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -788,6 +790,36 @@ window.__stanzaMentionRef = '';
                 var t = e.target;
                 if (t && t.closest && t.closest('.' + MENU_CLASS)) return;
                 closeMenu();
+                // Reply-quote jump: never navigate. Scroll locally when the
+                // target is already rendered; otherwise hand the stanza:jump:
+                // target to the scroll poll so Python can load it from the
+                // local archive and scroll afterwards.
+                var jump = t && t.closest
+                    ? t.closest('a.stanza-reply-jump') : null;
+                if (jump) {
+                    e.preventDefault();
+                    var jhref = jump.getAttribute('href') || '';
+                    var jid = jhref.indexOf('stanza:jump:') === 0
+                        ? decodeURIComponent(jhref.slice('stanza:jump:'.length))
+                        : '';
+                    var jnodes = document.querySelectorAll('.stanza-message');
+                    for (var k = 0; k < jnodes.length; k++) {
+                        if (jnodes[k].getAttribute('data-stanza-id') === jid) {
+                            jnodes[k].scrollIntoView({block: 'center'});
+                            jnodes[k].classList.remove('stanza-jump-highlight');
+                            void jnodes[k].offsetWidth;
+                            jnodes[k].classList.add('stanza-jump-highlight');
+                            setTimeout((function (n) {
+                                return function () {
+                                    n.classList.remove('stanza-jump-highlight');
+                                };
+                            })(jnodes[k]), 1600);
+                            return;
+                        }
+                    }
+                    window.__stanzaJumpRef = jhref;
+                    return;
+                }
                 // Media preview/player links must never navigate: a custom
                 // stanza: navigation can otherwise replace the chat document
                 // (and the image click would not reach Python).  Leave the
@@ -907,7 +939,8 @@ window.__stanzaMentionRef = '';
                 "window.__stanzaEditRef || '', window.__stanzaReplyRef || '',"
                 " window.__stanzaMediaRef || '',"
                 " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '',"
-                " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '']",
+                " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '',"
+                " window.__stanzaJumpRef || '']",
                 self._on_scroll_position,
             )
 
@@ -950,6 +983,12 @@ window.__stanzaMentionRef = '';
         def _clear_forward_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaForwardRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_jump_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaJumpRef = '';")
             except RuntimeError:
                 pass
 
@@ -1018,6 +1057,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_forward_ref = ""
+            if len(value) > 10 and isinstance(value[10], str) and value[10]:
+                self._clear_jump_request()
+                requested = value[10]
+                if requested != getattr(self, "_last_jump_ref", ""):
+                    self._last_jump_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_jump_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1102,8 +1149,9 @@ window.__stanzaMentionRef = '';
                     edited=edited, highlight_nick=self.highlight_nick,
                     geo_ref=reply_able_id or "")
             if reply_quote is not None:
-                ref_sender, ref_snippet = reply_quote
-                html = self._theme.render_reply(ref_sender, ref_snippet) + html
+                ref_sender, ref_snippet, ref_target = reply_quote
+                html = self._theme.render_reply(
+                    ref_sender, ref_snippet, ref_target) + html
             return self._mark_message(html, sender, message_id, raw_timestamp,
                                       reply_able_id, reply_author,
                                       reply_body=body, outgoing=outgoing,
@@ -1188,9 +1236,9 @@ window.__stanzaMentionRef = '';
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
-                    ref_sender, ref_snippet = reply_quote
-                    html_msg = (self._theme.render_reply(ref_sender, ref_snippet)
-                                + html_msg)
+                    ref_sender, ref_snippet, ref_target = reply_quote
+                    html_msg = (self._theme.render_reply(
+                        ref_sender, ref_snippet, ref_target) + html_msg)
                 return html_msg
 
             html = "".join(self._mark_message(
@@ -1266,6 +1314,29 @@ window.__stanzaMentionRef = '';
                 var mark = document.createElement('span');
                 mark.className = 'delivery'; mark.textContent = '✓'; stamp.appendChild(mark);
             }}
+            """)
+
+        def scroll_to_message(self, message_id: str) -> None:
+            """Scroll the ``data-stanza-id`` node into view and flash it."""
+            safe = json.dumps(message_id or "")
+            self.page().runJavaScript(f"""
+            (function() {{
+                var id = {safe};
+                if (!id) return;
+                var nodes = document.querySelectorAll('.stanza-message');
+                for (var i = 0; i < nodes.length; i++) {{
+                    if (nodes[i].getAttribute('data-stanza-id') === id) {{
+                        nodes[i].scrollIntoView({{block: 'center'}});
+                        nodes[i].classList.remove('stanza-jump-highlight');
+                        void nodes[i].offsetWidth;
+                        nodes[i].classList.add('stanza-jump-highlight');
+                        setTimeout(function() {{
+                            nodes[i].classList.remove('stanza-jump-highlight');
+                        }}, 1600);
+                        return;
+                    }}
+                }}
+            }})();
             """)
 
         def set_typing_indicator(self, text: str):
@@ -1392,6 +1463,10 @@ else:
             """No-op: media previews are disabled without QWebEngine."""
             return
 
+        def scroll_to_message(self, message_id: str) -> None:
+            """No-op: the QTextBrowser fallback has no per-message nodes."""
+            return
+
         def scrollContentsBy(self, dx: int, dy: int) -> None:
             super().scrollContentsBy(dx, dy)
             self._check_scroll()
@@ -1452,7 +1527,7 @@ else:
             edited_suffix = " " + tr("msg_edited_tooltip") if edited else ""
             reply_line = ""
             if reply_quote is not None:
-                ref_sender, ref_snippet = reply_quote
+                ref_sender, ref_snippet = reply_quote[0], reply_quote[1]
                 label = tr("reply_in_reply_to", sender=ref_sender or "…")
                 if ref_snippet:
                     label += f": {html.escape(ref_snippet)}"
@@ -1509,7 +1584,7 @@ else:
                 reply_line = ""
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
-                    ref_sender, ref_snippet = reply_quote
+                    ref_sender, ref_snippet = reply_quote[0], reply_quote[1]
                     label = tr("reply_in_reply_to", sender=ref_sender or "…")
                     if ref_snippet:
                         label += f": {html.escape(ref_snippet)}"

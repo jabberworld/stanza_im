@@ -736,6 +736,19 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   columns) and rendered with the referenced text in a `.stanza-reply` quote bar
   above the body; leading XEP-0421 quote lines are stripped from the displayed
   body. Supported feature advertised as `urn:xmpp:reply:0`.
+- The quote bar is clickable when the referenced message resolves to a local
+  DOM id: `render_reply(sender, snippet, target_id)` wraps it in a
+  `stanza:jump:<urlencoded id>` anchor. The `_ACTION_JS` click handler
+  preventDefaults it (never a navigation) and scrolls the matching
+  `.stanza-message[data-stanza-id]` node into view with a brief
+  `.stanza-jump-highlight` flash; if the node is not rendered yet it relays the
+  reference through `window.__stanzaJumpRef` (scroll poll → `link_clicked` →
+  `ChatWidget._jump_to_message`). The jump then walks the **local** SQLite
+  archive only (`history.message_exists` + `older_available_timestamp`/
+  `load_older_timestamp`, bounded by `_JUMP_MAX_PAGES`) — the server is never
+  contacted — renders the loaded pages and scrolls. `ChatWidget._reply_reference`
+  returns `(sender, snippet, target_id)`; `_dom_id` picks the rendered id
+  (`message_id` → `origin_id` → `archive_id`).
 
 ### 11.6 MUC Mentions & Nick Completion
 

@@ -417,16 +417,25 @@ class ChatThemeFactory:
 
     # XEP-0461 Message Replies ──────────────────────────────────────
 
-    def render_reply(self, sender: str, quote: str = "") -> str:
-        """Render a XEP-0461 reply-bar above the message body."""
+    def render_reply(self, sender: str, snippet: str = "",
+                     target_id: str = "") -> str:
+        """Render a XEP-0461 reply-bar above the message body.
+
+        With *target_id* the bar becomes a ``stanza:jump:`` link that the chat
+        page turns into a scroll-to-message action (never a navigation).
+        """
         label = tr("reply_in_reply_to", sender=sender or "…")
-        esc_quote = escape_html(quote or "")
-        return (f'<div class="stanza-reply">'
-                f'<span class="reply-arrow">\u21b0</span> '
-                f'<span class="reply-label">{escape_html(label)}</span>'
-                + (f' <span class="reply-quote">{esc_quote}</span>'
-                   if quote else '')
-                + '</div>')
+        esc_quote = escape_html(snippet or "")
+        inner = (f'<span class="reply-arrow">\u21b0</span> '
+                 f'<span class="reply-label">{escape_html(label)}</span>'
+                 + (f' <span class="reply-quote">{esc_quote}</span>'
+                    if snippet else ''))
+        if target_id:
+            href = "stanza:jump:" + quote(target_id, safe="")
+            inner = (f'<a class="stanza-reply-jump" href="{href}" '
+                     f'title="{escape_html(tr("reply_jump_tooltip"))}">'
+                     f'{inner}</a>')
+        return f'<div class="stanza-reply">{inner}</div>'
 
     def generate_page(self, messages: list[dict], base_url: str = "") -> str:
         """Generate a complete HTML page containing the given messages.
@@ -473,6 +482,12 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
                  border-left: 3px solid #bbb; background: rgba(0,0,0,.04); margin-bottom: 1px; }}
 .stanza-reply .reply-label {{ font-weight: bold; }}
 .stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
+.stanza-reply a.stanza-reply-jump {{ display: block; color: inherit;
+                 text-decoration: none; cursor: pointer; }}
+.stanza-reply a.stanza-reply-jump:hover .reply-label {{ text-decoration: underline; }}
+.stanza-jump-highlight {{ animation: stanza-jump-flash 1.6s ease-out; }}
+@keyframes stanza-jump-flash {{ 0% {{ background: rgba(255,214,0,.45); }}
+                 100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
 {self._font_override_css()}
 </style>
@@ -508,6 +523,12 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
                  border-left: 3px solid #bbb; background: rgba(0,0,0,.04); margin-bottom: 1px; }}
 .stanza-reply .reply-label {{ font-weight: bold; }}
 .stanza-reply .reply-quote {{ font-style: italic; color: #888; }}
+.stanza-reply a.stanza-reply-jump {{ display: block; color: inherit;
+                 text-decoration: none; cursor: pointer; }}
+.stanza-reply a.stanza-reply-jump:hover .reply-label {{ text-decoration: underline; }}
+.stanza-jump-highlight {{ animation: stanza-jump-flash 1.6s ease-out; }}
+@keyframes stanza-jump-flash {{ 0% {{ background: rgba(255,214,0,.45); }}
+                 100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
 {self._font_override_css()}
 </style>
