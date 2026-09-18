@@ -248,6 +248,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.geo_view_requested.connect(self.geo_view_requested)
         widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.muji_call_requested.connect(self.muji_call_requested)
+        widget.muc_config_requested.connect(self.muc_config_requested)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -369,6 +370,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = self._tabs.get(room)
         if widget is not None and widget.is_muc:
             widget.set_muji_support(enabled)
+
+    def set_muc_admin(self, room: str, can_manage: bool) -> None:
+        """Enable/disable the room-management button of a MUC tab."""
+        widget = self._tabs.get(room)
+        if widget is not None and widget.is_muc:
+            widget.set_muc_admin(can_manage)
 
     def set_muji_active(self, room: str, active: bool,
                         video: bool = False) -> None:
@@ -544,6 +551,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
+    muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen

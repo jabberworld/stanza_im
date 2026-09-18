@@ -247,6 +247,7 @@ class ChatWidget(QtWidgets.QWidget):
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
+    muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
@@ -379,6 +380,16 @@ class ChatWidget(QtWidgets.QWidget):
         self._bookmark_btn.clicked.connect(
             lambda: self.bookmark_toggled.emit(self.jid))
         header.addWidget(self._bookmark_btn)
+
+        self._config_btn = QtWidgets.QToolButton(self)
+        self._config_btn.setIcon(self._chat_icon("gtk-preferences.svg"))
+        self._config_btn.setToolTip(tr("muc_config_tooltip"))
+        self._config_btn.setVisible(self.is_muc)
+        self._config_btn.setEnabled(False)
+        self._config_btn.setAutoRaise(True)
+        self._config_btn.clicked.connect(
+            lambda: self.muc_config_requested.emit(self.jid))
+        header.addWidget(self._config_btn)
 
         if self.is_muc:
             layout.addLayout(header)
@@ -1832,6 +1843,12 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_btn.setEnabled(bool(enabled))
         self._call_audio_action.setEnabled(bool(enabled))
         self._call_video_action.setEnabled(bool(enabled))
+
+    def set_muc_admin(self, can_manage: bool) -> None:
+        """Enable the room-management button (owner/admin only)."""
+        if not self.is_muc:
+            return
+        self._config_btn.setEnabled(bool(can_manage))
 
     def set_muji_active(self, active: bool, video: bool = False) -> None:
         """Reflect a live conference in the call button icon and tooltip."""

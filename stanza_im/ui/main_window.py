@@ -186,6 +186,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 jid, paths, method, self._chat_window))
         self._chat_window.call_requested.connect(self._on_call_requested)
         self._chat_window.muji_call_requested.connect(self._on_muji_call_requested)
+        self._chat_window.muc_config_requested.connect(
+            self._on_muc_config_requested)
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
         self._chat_window.text_scale_changed.connect(
@@ -252,6 +254,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_names: dict[str, str] = {}
         self._muc_avatar_paths: dict[str, str] = {}
         self._muc_join_tries: dict[str, int] = {}
+        self._muc_config_dialogs: dict[str, object] = {}
         self._muc_base_nicks: dict[str, str] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
@@ -798,6 +801,43 @@ class MainWindow(QtWidgets.QMainWindow):
             video = self._muji_has_video(room)
         self._chat_window.set_muji_active(room, active, video)
 
+    def _muc_affiliation(self, room: str) -> str:
+        """Our own affiliation in *room* (empty when unknown)."""
+        nick = self._muc_self_nicks.get(room, "")
+        user = self._muc_users.get(room, {}).get(nick, {})
+        return str(user.get("affiliation", "") or "")
+
+    def _apply_muc_admin(self, room: str) -> None:
+        """Enable the room-management button for owners/admins."""
+        self._chat_window.set_muc_admin(
+            room, self._muc_affiliation(room) in ("owner", "admin"))
+
+    def _on_muc_config_requested(self, room: str) -> None:
+        """Open (or raise) the room-management dialog for *room*."""
+        if self._client is None:
+            return
+        dialog = self._muc_config_dialogs.get(room)
+        if dialog is not None:
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        from stanza_im.ui.muc_config_dialog import MucConfigDialog
+        can_configure = self._muc_affiliation(room) == "owner"
+        dialog = MucConfigDialog(self._client, room,
+                                 can_configure=can_configure, parent=self)
+        self._muc_config_dialogs[room] = dialog
+        dialog.finished.connect(
+            lambda *_, r=room: self._muc_config_dialog_closed(r))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _muc_config_dialog_closed(self, room: str) -> None:
+        dialog = self._muc_config_dialogs.pop(room, None)
+        if dialog is not None:
+            dialog.deleteLater()
+        self._apply_muc_admin(room)
+
     def _join_muc(self, room: str, nick: str, password: str = "",
                    save_bookmark: bool = False, bookmark_name: str = "",
                    autojoin: bool = False, server: str = ""):
@@ -818,6 +858,7 @@ class MainWindow(QtWidgets.QMainWindow):
         }
         self._client.join_muc(room, nick, password=password, save_bookmark=False)
         self._apply_muji_support(room)
+        self._apply_muc_admin(room)
         if save_bookmark:
             self._start_task(self._client.save_bookmark(
                 room, nick, password, autojoin=autojoin, name=bookmark_name))
@@ -899,6 +940,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_history(room)
             self._request_vcard(room, force=True)
         self._apply_muji_support(room)
+        self._apply_muc_admin(room)
         users = self._muc_users.setdefault(room, {})
         for occ in occupants or []:
             if isinstance(occ, str):
@@ -2365,6 +2407,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 jid, self._muc_self_nicks[jid], display_name)
             self._seed_muc_chat(jid, chat, title=display_name, is_new=is_new)
             self._apply_muji_support(jid)
+            self._apply_muc_admin(jid)
             return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)
@@ -2988,6 +3031,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             self_nick = self._muc_self_nicks.get(room, "")
             chat.update_muc_users(list(users.values()), self_nick=self_nick)
+            self._apply_muc_admin(room)
             if self._config.chat.muc_show_presence and show == "unavailable":
                 chat.add_status(tr("muc_user_left", nick=nick), time.strftime("%H:%M:%S"))
             elif self._config.chat.muc_show_presence and not was_present:

@@ -105,8 +105,9 @@ SPEC.md                          # Detailed specification (living document)
 XEPs.md                          # Supported XEP list (living document)
 ```
 
-Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`
-and `ui/conference_dialog.py`. The latter provides conference joining,
+Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`,
+`ui/conference_dialog.py` and `ui/muc_config_dialog.py`. The conference dialog
+provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
 servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
 names are preserved and used as the menu label with a localpart fallback.
@@ -116,6 +117,20 @@ vCard information dialogs are opened non-modally from async callbacks.
 Chat and MUC tabs use separate `ChatThemeFactory` instances, while emoticon
 sets are discovered from `resources/emoticons/*/smileys*.cfg`. Preferences
 show a live preview of the selected emoticon set.
+
+**Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
+button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
+and enabled only for owners/admins (`MainWindow._apply_muc_admin` derives our
+affiliation from `_muc_users`). It opens a non-modal `MucConfigDialog` with two
+tabs: «Участники» — a `QTreeWidget` grouped into Владельцы/Администраторы/
+Зарегистрированные пользователи/Заблокированные (owner/admin/member/outcast)
+with «Jabber ID» and «Примечание» columns (the note is the XEP-0045 `<reason>`)
+and Add/Edit/Delete buttons (Delete sets affiliation `none`); «Настройки» —
+enabled for the owner only and hosts the `muc#owner` room-configuration
+`DataFormWidget`. Edits are collected and applied on «Ок» via
+`client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
+builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
+only JIDs). [`tests/test_muc_config.py`]
 `ServiceBrowserDialog` groups XEP-0030 items into conferences, gateways,
 services and uncategorized items. It discovers the account domain on open and
 builds the tree fully lazily with no eager discovery: a node renders its

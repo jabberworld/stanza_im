@@ -1977,6 +1977,51 @@ class JabberClient:
         if asyncio.iscoroutine(result):
             asyncio.get_event_loop().create_task(result)
 
+    async def muc_get_config(self, room: str):
+        """Fetch the room configuration form (XEP-0045 ``muc#owner``)."""
+        muc = self.xmpp.plugin["xep_0045"]
+        return await muc.get_room_config(room)
+
+    async def muc_set_config(self, room: str, form) -> None:
+        """Submit a room configuration form (XEP-0045 ``muc#owner``)."""
+        muc = self.xmpp.plugin["xep_0045"]
+        await muc.set_room_config(room, form)
+
+    async def muc_get_affiliations(self, room: str) -> dict:
+        """Return ``{affiliation: [{"jid", "nick", "reason"}]}`` for *room*.
+
+        slixmpp's ``get_affiliation_list`` keeps only the JIDs, so the admin
+        IQ is built here to also read the optional ``<reason>`` (the
+        "note" shown in the room-management dialog).  A failing category
+        (e.g. an admin without access to the owner list) is left empty.
+        """
+        out: dict[str, list[dict]] = {
+            aff: [] for aff in ("owner", "admin", "member", "outcast")}
+        for aff in out:
+            try:
+                iq = self.xmpp.make_iq_get(ito=room)
+                iq["mucadmin_query"]["item"]["affiliation"] = aff
+                result = await iq.send()
+                for item in result["mucadmin_query"]:
+                    jid = str(item["jid"] or "")
+                    if not jid:
+                        continue
+                    out[aff].append({
+                        "jid": jid,
+                        "nick": str(item["nick"] or ""),
+                        "reason": str(item["reason"] or ""),
+                    })
+            except Exception:
+                logger.debug("MUC %s list for %s failed", aff, room,
+                             exc_info=True)
+        return out
+
+    async def muc_set_affiliation(self, room: str, jid: str,
+                                  affiliation: str, reason: str = "") -> None:
+        """Change *jid*'s affiliation; ``none`` removes it from the list."""
+        muc = self.xmpp.plugin["xep_0045"]
+        await muc.set_affiliation(room, affiliation, jid=jid, reason=reason)
+
     def set_muc_subject(self, room: str, subject: str,
                         langs: list[tuple[str, str]] | None = None) -> None:
         """Set the subject/topic of a MUC room.

@@ -51,6 +51,7 @@ stanza_im/
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
 │   ├── device_test.py  — Devices self-tests (mic meter/tone/camera)
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
+│   ├── muc_config_dialog.py — XEP-0045 room management (affiliations + config)
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── history_manager.py   — Per-contact history browser
@@ -783,6 +784,28 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   trailing space); a nick completed mid-line is inserted bare. The previously
   inserted token is tracked and replaced, so the cycle never accumulates text,
   and any edit restarts the search (`ChatWidget._tab_complete_nick`).
+
+### 11.7 Room Management (XEP-0045)
+
+The MUC tab header shows a gear button after the bookmark (hidden on 1:1 tabs),
+enabled only for owners/admins (`MainWindow._apply_muc_admin`, fed by our
+affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
+(`ui/muc_config_dialog.py`) with two tabs:
+
+- «Участники» — a `QTreeWidget` with the four affiliation groups (Владельцы =
+  owner, Администраторы = admin, Зарегистрированные пользователи = member,
+  Заблокированные = outcast), columns «Jabber ID» and «Примечание» (the
+  XEP-0045 `<reason>`), and Add/Edit/Delete buttons (Edit/Delete enabled only
+  with a selected participant). Add/Edit use `_ParticipantEditDialog`
+  (category + JID + note); Delete confirms and sets affiliation `none`.
+  `client.muc_get_affiliations` builds a custom `muc#admin` IQ so the `reason`
+  survives (slixmpp's `get_affiliation_list` returns only JIDs); a failing
+  category is left empty.
+- «Настройки» — enabled for the owner only; fetches the `muc#owner` room form
+  (`client.muc_get_config`) into a `DataFormWidget`.
+
+Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
+`client.muc_set_config`); «Отмена» discards them.
 
 ## 12. Tray (`ui/tray.py`)
 

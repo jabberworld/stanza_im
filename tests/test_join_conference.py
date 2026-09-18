@@ -72,6 +72,9 @@ class _FakeChatWindow:
     def set_muji_active(self, room, active, video=False):
         pass
 
+    def set_muc_admin(self, room, can_manage):
+        pass
+
 
 class _FakeClient:
     def __init__(self):
