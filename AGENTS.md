@@ -266,7 +266,10 @@ The bar is clickable when the referenced message resolves locally
 scrolls to the `data-stanza-id` node and briefly highlights it; if the node is
 not rendered, `ChatWidget._jump_to_message` walks the **local** SQLite archive
 (never MAM, gated by `history.message_exists`) page by page, renders the loaded
-pages and scrolls. Feature advertised as `urn:xmpp:reply:0`.
+pages and scrolls. Those pages are inserted with
+`View.prepend_messages(keep_position=False)` so the reading-anchor restore cannot
+revert the jump, and the target node is matched by `data-reply-id` or
+`data-stanza-id`. Feature advertised as `urn:xmpp:reply:0`.
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,

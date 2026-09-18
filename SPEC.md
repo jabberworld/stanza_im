@@ -746,9 +746,12 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   `ChatWidget._jump_to_message`). The jump then walks the **local** SQLite
   archive only (`history.message_exists` + `older_available_timestamp`/
   `load_older_timestamp`, bounded by `_JUMP_MAX_PAGES`) — the server is never
-  contacted — renders the loaded pages and scrolls. `ChatWidget._reply_reference`
-  returns `(sender, snippet, target_id)`; `_dom_id` picks the rendered id
-  (`message_id` → `origin_id` → `archive_id`).
+  contacted — renders the loaded pages and scrolls. Those pages are prepended
+  with `keep_position=False` so the reading-anchor restore (`restoreAnchor`)
+  cannot revert the jump, and the target node is matched by `data-reply-id` or
+  `data-stanza-id`. `ChatWidget._reply_reference` returns
+  `(sender, snippet, target_id)`, where *target_id* is `_reply_target_id`
+  (`origin_id` → `archive_id` → `message_id`).
 
 ### 11.6 MUC Mentions & Nick Completion
 

@@ -885,22 +885,17 @@ class ChatWidget(QtWidgets.QWidget):
         return (entry.get("origin_id") or entry.get("archive_id")
                 or entry.get("message_id") or "")
 
-    @staticmethod
-    def _dom_id(entry: dict) -> str:
-        """DOM ``data-stanza-id`` a rendered *entry* carries."""
-        return (entry.get("message_id") or entry.get("origin_id")
-                or entry.get("archive_id") or "")
-
     def _reply_reference(self, entry: dict):
         """Resolve a reply reference to (sender_name, body_quote, target_id).
 
-        *target_id* is the referenced message's DOM id when it is known
-        locally, else the raw ``reply_id`` used for a local lookup.
+        *target_id* is the referenced message's stable reply id (what a
+        rendered node carries in ``data-reply-id``) when known locally, else
+        the raw ``reply_id`` used for a local lookup.
         """
         original = self._find_message(entry.get("reply_id", ""))
         if original:
             return (original.get("sender", ""), original.get("body", ""),
-                    self._dom_id(original))
+                    self._reply_target_id(original))
         return (self._author_display(entry.get("reply_to", "")), "",
                 entry.get("reply_id", "") or "")
 
@@ -1333,8 +1328,13 @@ class ChatWidget(QtWidgets.QWidget):
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
 
-    def prepend_history(self, entries: list[dict], exhausted: bool):
-        """Insert older rows at the top of the window, keeping position."""
+    def prepend_history(self, entries: list[dict], exhausted: bool,
+                        keep_position: bool = True):
+        """Insert older rows at the top of the window.
+
+        *keep_position* preserves the reading anchor (normal paging); a
+        reply-quote jump passes ``False`` so its scroll is not reverted.
+        """
         from stanza_im.include.utils import ts_to_time
         known = {self._entry_key(entry) for entry in self._history}
         unique = []
@@ -1367,8 +1367,8 @@ class ChatWidget(QtWidgets.QWidget):
                             if entry.get("reply_id") else None,
              "outgoing": self._is_mine(entry),
              "edited": bool(entry.get("edited"))}
-            for entry in unique
-        ])
+             for entry in unique
+        ], keep_position=keep_position)
 
     def history_cleared(self):
         """Local history was wiped — reset buffers and show the marker."""
@@ -1542,7 +1542,7 @@ class ChatWidget(QtWidgets.QWidget):
             return
         entry = self._find_message(ref_id)
         if entry is not None:
-            self._view.scroll_to_message(self._dom_id(entry))
+            self._view.scroll_to_message(self._reply_target_id(entry))
             return
         self._jump_pending = ref_id
         self._jump_pages = 0
@@ -1562,7 +1562,7 @@ class ChatWidget(QtWidgets.QWidget):
             entry = self._find_message(self._jump_pending)
             if entry is not None:
                 self._jump_pending = ""
-                self._view.scroll_to_message(self._dom_id(entry))
+                self._view.scroll_to_message(self._reply_target_id(entry))
                 return
             before = self.oldest_ts()
             if not before or not await \
@@ -1575,7 +1575,7 @@ class ChatWidget(QtWidgets.QWidget):
                 return
             if not rows:
                 break
-            self.prepend_history(rows, False)
+            self.prepend_history(rows, False, keep_position=False)
         self._jump_pending = ""
 
     def load_more_from_server(self):

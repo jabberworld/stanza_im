@@ -170,6 +170,9 @@ check("reply quote jump wired through the scroll poll",
       and "scrollIntoView" in _view_src
       and "_last_jump_ref" in _view_src
       and "def scroll_to_message" in _view_src)
+check("jump skips the anchor restore and matches both ids",
+      "keep_position" in _view_src
+      and "nodes[i].getAttribute('data-reply-id') === id" in _view_src)
 _hist_src = open(os.path.join(
     _root, "stanza_im", "core", "history.py"), encoding="utf-8").read()
 check("jump resolution is local-only",
@@ -232,7 +235,8 @@ check("reply_quote_for", resolved == ("Alice", "are you in?"))
 
 # 9b. clickable reply quote: DOM target resolution + jump -------------------
 _entry = cw._find_message("oid-1")
-check("dom id resolves to the stored message", cw._dom_id(_entry) == "oid-1")
+check("reply target resolves to the stored message",
+      cw._reply_target_id(_entry) == "oid-1")
 check("reply_reference returns the target",
       cw._reply_reference({"reply_id": "oid-1"})
       == ("Alice", "are you in?", "oid-1"))
@@ -241,6 +245,60 @@ jumped = []
 cw._view.scroll_to_message = lambda mid: jumped.append(mid)
 cw._jump_to_message("oid-1")
 check("jump scrolls when the target is loaded", jumped == ["oid-1"])
+
+# 9b2. jump prepends must not preserve (and thus revert) the scroll anchor --
+_forwarded = {}
+cw._view.prepend_messages = lambda msgs, keep_position=True: _forwarded.update(
+    kp=keep_position)
+cw.prepend_history([{"sender": "Z", "body": "older", "timestamp": "09:00",
+                     "direction": "incoming"}], False, keep_position=False)
+check("jump prepend skips anchor preservation",
+      _forwarded.get("kp") is False)
+cw.prepend_history([{"sender": "Z", "body": "older2", "timestamp": "08:00",
+                     "direction": "incoming"}], False)
+check("normal prepend preserves the anchor", _forwarded.get("kp") is True)
+
+# 9b3. local-only jump loop walks the DB and scrolls ------------------------
+import asyncio as _asyncio
+_target_entry = {"sender": "B", "body": "target", "timestamp": "10:00",
+                 "direction": "incoming", "origin_id": "j1"}
+cw3 = ChatWidget("jump2@example.com", "J", chat_themes.ChatThemeFactory())
+cw3._history = [{"sender": "A", "body": "new", "timestamp": "11:00",
+                 "direction": "incoming", "origin_id": "n1"}]
+_scrolled = []
+cw3._view.scroll_to_message = lambda mid: _scrolled.append(mid)
+cw3._view.prepend_messages = lambda msgs, keep_position=True: None
+cw3._view.scroll_fraction = lambda: 1.0
+_saved = (history_mod.message_exists_async,
+          history_mod.older_available_timestamp_async,
+          history_mod.load_older_timestamp_async)
+
+
+async def _exists(_jid, _sid):
+    return True
+
+
+async def _older(_jid, _before):
+    return True
+
+
+async def _page(_jid, _before, _limit):
+    return [_target_entry]
+
+
+history_mod.message_exists_async = _exists
+history_mod.older_available_timestamp_async = _older
+history_mod.load_older_timestamp_async = _page
+try:
+    cw3._jump_pending = "j1"
+    cw3._jump_pages = 0
+    _asyncio.new_event_loop().run_until_complete(cw3._load_jump_pages_async())
+finally:
+    (history_mod.message_exists_async,
+     history_mod.older_available_timestamp_async,
+     history_mod.load_older_timestamp_async) = _saved
+check("local jump loads the page and scrolls to the target",
+      _scrolled == ["j1"] and cw3._jump_pending == "")
 
 # 9c. render_reply becomes a stanza:jump link when a target is known --------
 _reply_html = theme.render_reply("Anna", "are you in?", "oid-1")

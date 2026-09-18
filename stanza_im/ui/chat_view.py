@@ -804,7 +804,8 @@ window.__stanzaMentionRef = '';
                         : '';
                     var jnodes = document.querySelectorAll('.stanza-message');
                     for (var k = 0; k < jnodes.length; k++) {
-                        if (jnodes[k].getAttribute('data-stanza-id') === jid) {
+                        if (jnodes[k].getAttribute('data-stanza-id') === jid
+                            || jnodes[k].getAttribute('data-reply-id') === jid) {
                             jnodes[k].scrollIntoView({block: 'center'});
                             jnodes[k].classList.remove('stanza-jump-highlight');
                             void jnodes[k].offsetWidth;
@@ -1208,8 +1209,14 @@ window.__stanzaMentionRef = '';
                 return
             self._append_chunk(html)
 
-        def prepend_messages(self, messages: list[dict]) -> None:
-            """Insert older messages before the current document."""
+        def prepend_messages(self, messages: list[dict],
+                             keep_position: bool = True) -> None:
+            """Insert older messages before the current document.
+
+            With *keep_position* the reading anchor is preserved (normal
+            "load earlier" paging); a reply-quote jump passes ``False`` so the
+            subsequent scroll to the target is not reverted.
+            """
             if not messages:
                 return
 
@@ -1254,15 +1261,18 @@ window.__stanzaMentionRef = '';
                 self._pending.insert(0, html)
                 return
             safe = json.dumps(html)
+            keep = 1 if keep_position else 0
             self.page().runJavaScript(f"""
             (function() {{
                 var chat = document.getElementById('chat');
                 if (!chat) return;
-                var anchor = document.elementFromPoint(
+                var keep = {keep};
+                var anchor = keep ? document.elementFromPoint(
                     Math.max(4, window.innerWidth / 2),
-                    Math.max(4, window.innerHeight / 2));
+                    Math.max(4, window.innerHeight / 2)) : null;
                 var anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
                 chat.insertAdjacentHTML('afterbegin', {safe});
+                if (!keep) return;
                 function restoreAnchor() {{
                     if (!anchor) return;
                     var delta = anchor.getBoundingClientRect().top - anchorTop;
@@ -1325,7 +1335,8 @@ window.__stanzaMentionRef = '';
                 if (!id) return;
                 var nodes = document.querySelectorAll('.stanza-message');
                 for (var i = 0; i < nodes.length; i++) {{
-                    if (nodes[i].getAttribute('data-stanza-id') === id) {{
+                    if (nodes[i].getAttribute('data-stanza-id') === id
+                        || nodes[i].getAttribute('data-reply-id') === id) {{
                         nodes[i].scrollIntoView({{block: 'center'}});
                         nodes[i].classList.remove('stanza-jump-highlight');
                         void nodes[i].offsetWidth;
@@ -1568,8 +1579,9 @@ else:
         def add_status(self, text: str, timestamp: str):
             self._append_before_typing(f"<i>({timestamp}) {text}</i>")
 
-        def prepend_messages(self, messages: list[dict]) -> None:
-            """Insert older messages while keeping the visible content fixed."""
+        def prepend_messages(self, messages: list[dict],
+                             keep_position: bool = True) -> None:
+            """Insert older messages above the current document (fallback)."""
             if not messages:
                 return
             bar = self.verticalScrollBar()
