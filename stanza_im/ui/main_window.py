@@ -252,6 +252,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_self_nicks: dict[str, str] = {}
         self._muc_names: dict[str, str] = {}
+        self._muc_vcard_names: dict[str, str] = {}
         self._muc_avatar_paths: dict[str, str] = {}
         self._muc_join_tries: dict[str, int] = {}
         self._muc_config_dialogs: dict[str, object] = {}
@@ -882,6 +883,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_users.pop(room, None)
         self._muc_self_nicks.pop(room, None)
         self._muc_names.pop(room, None)
+        self._muc_vcard_names.pop(room, None)
         self._muc_avatar_paths.pop(room, None)
         self._muc_join_tries.pop(room, None)
         self._muc_base_nicks.pop(room, None)
@@ -1090,21 +1092,27 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_muc_info_received(self, room: str, name: str):
         if room in self._muc_self_nicks and name:
             self._muc_names[room] = name
-            self._chat_window.set_chat_title(room, name)
-            self._sync_conference_roster(room)
+            self._apply_muc_name(room)
 
     def _muc_display_name(self, room: str, preferred: str = "") -> str:
-        if preferred:
-            return preferred
-        if room in self._muc_names:
-            return self._muc_names[room]
-        if self._client:
-            contact = self._client.get_contact(room)
-            card = getattr(contact, "vcard", None) or {}
-            name = card.get("fn") or card.get("nickname") or ""
-            if name:
-                return name
-        return room.split("@", 1)[0]
+        name = preferred or self._muc_names.get(room, "")
+        if (getattr(self._config.chat, "muc_name_source", "from_name")
+                == "from_vcard"):
+            nick = self._muc_vcard_names.get(room, "")
+            if nick:
+                return nick
+        return name or room.split("@", 1)[0]
+
+    def _apply_muc_name(self, room: str) -> None:
+        """Refresh a room's tab title and roster row from its name source."""
+        if room not in self._muc_self_nicks:
+            return
+        self._chat_window.set_chat_title(room, self._muc_display_name(room))
+        self._sync_conference_roster(room)
+
+    def _refresh_muc_names(self) -> None:
+        for room in list(self._muc_self_nicks):
+            self._apply_muc_name(room)
 
     def _roster_tooltip(self, jid: str) -> tuple[str, str | None]:
         """Build the roster contact/conference tooltip (html, avatar path)."""
@@ -1234,6 +1242,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.set_csi_config(csi)
             self._update_csi()
         self._apply_interface_mode()
+        self._refresh_muc_names()
         self._apply_roster_font()
         roster_opts = (
             bool(getattr(self._config.appearance, "roster_show_avatars", True)),
@@ -1686,9 +1695,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if room_jid:
             self._sync_conference_roster(room_jid)
         if room_jid:
-            title = card.get("fn") or card.get("nickname") or ""
-            if title:
-                self._chat_window.set_chat_title(room_jid, title)
+            self._muc_vcard_names[room_jid] = (
+                card.get("nickname") or card.get("fn") or "")
+            self._apply_muc_name(room_jid)
         for room, users in self._muc_users.items():
             changed_nicks: list[tuple[str, str]] = []
             for nick, info in users.items():

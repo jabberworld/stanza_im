@@ -907,6 +907,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         muc_show_status_text.setEnabled(muc_show_status.isChecked())
         muc_show_status.toggled.connect(muc_show_status_text.setEnabled)
         muc_form.addRow(self._check("muc_auto_nick", tr("prefs_muc_auto_nick")))
+        muc_form.addRow(tr("prefs_muc_name_source"),
+                        self._combo("muc_name_source", [
+                            ("prefs_muc_name_from_name", "from_name"),
+                            ("prefs_muc_name_from_vcard", "from_vcard"),
+                        ]))
         muc_form.addRow(self._check("muc_confirm_leave",
                                     tr("prefs_muc_confirm_leave")))
         muc_form.addRow(self._check("muc_minimize_startup",
@@ -1222,6 +1227,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "message_styling": chat.message_styling,
             "media_preview": chat.media_preview,
             "idle_unload_minutes": int(getattr(chat, "idle_unload_minutes", 10) or 0),
+            "muc_name_source": getattr(chat, "muc_name_source", "from_name"),
             "muc_show_presence": chat.muc_show_presence,
             "muc_show_status": chat.muc_show_status,
             "muc_show_status_text": chat.muc_show_status_text,
@@ -1335,7 +1341,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_show_status", "muc_show_status_text",
                     "muc_auto_nick", "muc_confirm_leave",
                     "muc_minimize_startup", "message_displayed_sync",
-                    "allow_incoming_edits", "idle_unload_minutes"):
+                    "allow_incoming_edits", "idle_unload_minutes",
+                    "muc_name_source"):
             cfg.chat[key] = self._value(key)
         cfg.chat.theme = self._value("chat_theme") or ""
         cfg.appearance.chat_theme = cfg.chat.theme

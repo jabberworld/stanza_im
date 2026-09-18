@@ -78,7 +78,7 @@ class Config:
                  "message_displayed_sync": True,
                  "allow_incoming_edits": True, "input_height": 60,
                  "text_scale": 1.0, "media_preview": "images",
-                 "idle_unload_minutes": 10},
+                 "idle_unload_minutes": 10, "muc_name_source": "from_name"},
         "chat_window": {"width": 640, "height": 480,
                         "x": 0, "y": 0, "maximized": False},
         "media_viewer": {"width": 900, "height": 680,
