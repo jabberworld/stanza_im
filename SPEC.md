@@ -829,6 +829,26 @@ uses the room/disco name, `from_vcard` uses the room vCard's `nickname` (else
 resolves the name and `_apply_muc_name` updates the tab title and roster row;
 the setting applies live.
 
+### 11.8 MUC Join Reliability
+
+- Presence status lines (`muc_user_joined`/`muc_user_left`/`muc_status_changed`)
+  are rendered only after a successful join: `MainWindow` tracks `_muc_joined`
+  (set in `_on_muc_joined`) and a 2 s `_muc_join_grace`, so the server's initial
+  occupant dump is never shown as "X joined" even when history loading lags.
+- Auto-joined rooms are retried after transient `muc_join_error` conditions
+  (`timeout`, `unknown`, `remote-server-timeout`, `internal-server-error`,
+  `service-unavailable`) with a bounded 5/15/45 s backoff
+  (`MainWindow._schedule_autojoin_retry`/`_retry_muc_join`); permanent
+  conditions surface a failure status.
+- `client._autojoin_bookmarks` retries the bookmarks fetch and skips only rooms
+  that actually joined (`GroupChatInfo.joined`), so a stale entry from a failed
+  attempt does not block the retry; `client.join_muc` cancels a pending join
+  task before starting a new one.
+- A bookmarked room that is also a plain roster contact is moved to the
+  conferences group before joining
+  (`MainWindow._classify_bookmarked_conferences`, run after bookmarks load and
+  on roster additions).
+
 ## 12. Tray (`ui/tray.py`)
 
 - System tray icon (built from `resources/images/scalable/apps/stanza-im.svg` +

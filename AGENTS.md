@@ -140,6 +140,19 @@ configuration is sent only when a form value changed, as a fresh `type='submit'`
 form (`client.muc_set_config(room, values)`) so slixmpp never mutates the
 server's own form (which raised `('options', None)`).
 
+**MUC join reliability**: presence status lines (`muc_user_joined`/`left`/
+`muc_status_changed`) are shown only after a successful join — `MainWindow`
+tracks `_muc_joined`/`_muc_join_grace` and suppresses them until
+`_on_muc_joined` plus a 2 s grace window, so the server's initial occupant dump
+is never rendered as "X joined". Auto-joined rooms are retried on transient
+`muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
+`internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and
+`client._autojoin_bookmarks` re-fetches the bookmarks and skips only rooms that
+actually joined (a stale `GroupChatInfo` no longer blocks a retry; `join_muc`
+cancels a pending join task). A bookmarked room that is also a normal roster
+contact is moved to the conferences group before joining
+(`_classify_bookmarked_conferences`). [`tests/test_muc_join.py`]
+
 The MUC toolbar's vCard button opens the **room's** vCard (`MainWindow.
 _show_muc_room_info` → `_show_profile(room)`, not our occupant's real JID). The
 viewer (`VCardInfoDialog`) shows an Edit button for room cards, enabled for

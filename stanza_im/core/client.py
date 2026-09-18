@@ -1338,6 +1338,9 @@ class JabberClient:
         if save_bookmark:
             loop.create_task(self.save_bookmark(room, nick, password,
                                                 autojoin=True))
+        old_task = self._muc_join_tasks.get(room)
+        if old_task is not None and not old_task.done():
+            old_task.cancel()
         task = loop.create_task(
             self._join_muc_task(room, nick, password))
         self._muc_join_tasks[room] = task
@@ -2439,14 +2442,21 @@ class JabberClient:
         plugin = self.xmpp.plugin["xep_0048"]
         if not self.auto_join_conferences:
             return
-        try:
-            result = await plugin.get_bookmarks()
-            if plugin.storage_method == "xep_0223":
-                bookmarks = result["pubsub"]["items"]["item"]["bookmarks"]
-            else:
-                bookmarks = result["private"]["bookmarks"]
-        except Exception:
-            logger.debug("No bookmarks to auto-join", exc_info=True)
+        bookmarks = None
+        for attempt in range(3):
+            try:
+                result = await plugin.get_bookmarks()
+                if plugin.storage_method == "xep_0223":
+                    bookmarks = result["pubsub"]["items"]["item"]["bookmarks"]
+                else:
+                    bookmarks = result["private"]["bookmarks"]
+                break
+            except Exception:
+                logger.debug("Bookmarks fetch failed (attempt %d)",
+                             attempt + 1, exc_info=True)
+                await asyncio.sleep(1 + attempt)
+        if bookmarks is None:
+            logger.debug("No bookmarks to auto-join")
             return
         for conf in bookmarks["conferences"]:
             try:
@@ -2456,7 +2466,10 @@ class JabberClient:
                 password = conf["password"] or ""
             except Exception:
                 continue
-            if not autojoin or not room or room in self.groupchats:
+            gi = self.groupchats.get(room)
+            # Skip only rooms that actually joined: a stale GroupChatInfo from
+            # a failed attempt must not block the retry.
+            if not autojoin or not room or (gi is not None and gi.joined):
                 continue
             logger.info("Auto-joining bookmarked room %s", room)
             self.autojoin_rooms.add(room)

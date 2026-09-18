@@ -56,6 +56,16 @@ _PAGE_LOGIN = 0
 _PAGE_SPLASH = 1
 _PAGE_ROSTER = 2
 
+# Presence status lines are suppressed for this long after a successful join:
+# the server's initial occupant dump must not be rendered as "X joined".
+_MUC_JOIN_GRACE_S = 2.0
+# Auto-join retry backoff (seconds) for transient join failures.
+_MUC_AUTOJOIN_RETRY_DELAYS = (5, 15, 45)
+_MUC_TRANSIENT_JOIN_ERRORS = {
+    "timeout", "unknown", "remote-server-timeout", "internal-server-error",
+    "service-unavailable",
+}
+
 
 class MainWindow(QtWidgets.QMainWindow):
     """Top-level window that owns the roster, chat window, tray and XMPP client."""
@@ -255,6 +265,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_vcard_names: dict[str, str] = {}
         self._muc_avatar_paths: dict[str, str] = {}
         self._muc_join_tries: dict[str, int] = {}
+        self._muc_autojoin_tries: dict[str, int] = {}
+        self._muc_joined: set[str] = set()
+        self._muc_join_grace: dict[str, float] = {}
         self._muc_config_dialogs: dict[str, object] = {}
         self._muc_base_nicks: dict[str, str] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
@@ -654,6 +667,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bookmarks = await self._client.list_bookmarks()
         self._bookmarks = {item["jid"]: item for item in bookmarks}
         self._rebuild_bookmarks_menu()
+        self._classify_bookmarked_conferences()
         for room in self._muc_self_nicks:
             chat = self._chat_window.get_chat(room)
             if chat:
@@ -772,6 +786,34 @@ class MainWindow(QtWidgets.QMainWindow):
         for room in self._muc_self_nicks:
             self._sync_conference_roster(room)
 
+    def _classify_bookmarked_conferences(self) -> None:
+        """Show bookmarked rooms under Conferences even before joining.
+
+        A bookmark that is also present as a normal roster contact would
+        otherwise stay in the contacts group until the room is joined.
+        """
+        import dataclasses
+        group = tr("roster_group_conferences")
+        changed = False
+        for room in list(self._bookmarks):
+            if room in self._muc_self_nicks:
+                continue
+            existing = next(
+                (user for user in self._roster._users
+                 if user.jid == room and user.group != group), None)
+            if existing is not None:
+                moved = dataclasses.replace(existing, group=group)
+                self._roster.remove_user(room)
+                self._roster.add_user(moved)
+                changed = True
+            if room not in self._conference_roster:
+                self._conference_roster.add(room)
+                self._remember_contact(room, name=self._muc_display_name(room),
+                                       groups=[group], is_conference=True)
+        if changed:
+            self._roster.sort_and_update()
+            self._schedule_roster_repaint()
+
     def _apply_muji_support(self, room: str) -> None:
         """Enable the MUC tab's call menu when aiortc is available.
 
@@ -854,6 +896,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_self_nicks[room] = nick
         self._muc_base_nicks[room] = nick
         self._muc_join_tries[room] = 0
+        self._muc_joined.discard(room)
+        self._muc_join_grace.pop(room, None)
         self._muc_users.setdefault(room, {})[nick] = {
             "nick": nick, "show": "online", "status": "",
             "role": "", "affiliation": "",
@@ -887,7 +931,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_vcard_names.pop(room, None)
         self._muc_avatar_paths.pop(room, None)
         self._muc_join_tries.pop(room, None)
+        self._muc_autojoin_tries.pop(room, None)
+        self._muc_joined.discard(room)
+        self._muc_join_grace.pop(room, None)
         self._muc_base_nicks.pop(room, None)
+        if self._client:
+            self._client.autojoin_rooms.discard(room)
         if room in self._conference_roster:
             self._roster.remove_user(room)
             self._conference_roster.discard(room)
@@ -927,7 +976,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muc_joined(self, room: str, subject: str, occupants):
         self._muc_join_tries.pop(room, None)
+        self._muc_autojoin_tries.pop(room, None)
         self._muc_user_nick_change_from.pop(room, None)
+        self._muc_joined.add(room)
+        self._muc_join_grace[room] = time.monotonic()
         if room not in self._muc_self_nicks:
             info = self._client.groupchats.get(room) if self._client else None
             nick = info.nick if info else (
@@ -1066,6 +1118,36 @@ class MainWindow(QtWidgets.QMainWindow):
         client.join_muc(room, new_nick, password=password)
         self._update_muc_self_nick(room, new_nick, status_key="muc_nick_changed")
 
+    def _schedule_autojoin_retry(self, room: str, condition: str) -> bool:
+        """Re-join an auto-joined room after a transient failure."""
+        if condition not in _MUC_TRANSIENT_JOIN_ERRORS:
+            return False
+        client = self._client
+        if client is None or room not in getattr(client, "autojoin_rooms", set()):
+            return False
+        tries = self._muc_autojoin_tries.get(room, 0)
+        if tries >= len(_MUC_AUTOJOIN_RETRY_DELAYS):
+            return False
+        delay = _MUC_AUTOJOIN_RETRY_DELAYS[tries]
+        self._muc_autojoin_tries[room] = tries + 1
+        logger.info("Auto-join retry %d for %s in %ds", tries + 1, room, delay)
+        QtCore.QTimer.singleShot(
+            int(delay * 1000), lambda r=room: self._retry_muc_join(r))
+        return True
+
+    def _retry_muc_join(self, room: str) -> None:
+        client = self._client
+        if client is None or room not in getattr(client, "autojoin_rooms", set()):
+            return
+        gi = client.groupchats.get(room)
+        nick = (self._muc_self_nicks.get(room)
+                or (gi.nick if gi else "")
+                or client.jid_str.split("@", 1)[0])
+        if not nick:
+            return
+        client.join_muc(room, nick, password=gi.password if gi else "",
+                        save_bookmark=False)
+
     def _on_muc_join_error(self, room: str, condition: str, code: str):
         if condition == "conflict" and room in self._muc_user_nick_change_from:
             old = self._muc_user_nick_change_from.pop(room)
@@ -1081,6 +1163,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 from stanza_im.include.utils import format_time
                 chat.add_status(tr("muc_nick_conflict_give_up"),
                                 format_time())
+            return
+        if self._schedule_autojoin_retry(room, condition):
             return
         chat = self._chat_window.get_chat(room)
         if not chat:
@@ -1625,6 +1709,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_roster_item_added(self, item):
         self._add_roster_item(item)
+        self._classify_bookmarked_conferences()
         self._roster.sort_and_update()
 
     def _on_roster_item_removed(self, jid: str):
@@ -3086,11 +3171,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self_nick = self._muc_self_nicks.get(room, "")
             chat.update_muc_users(list(users.values()), self_nick=self_nick)
             self._apply_muc_admin(room)
-            if self._config.chat.muc_show_presence and show == "unavailable":
+            # Do not render the initial occupant dump as "X joined": only show
+            # presence status lines once the join succeeded and the grace
+            # window passed.
+            ready = (room in self._muc_joined
+                     and time.monotonic()
+                     - self._muc_join_grace.get(room, 0.0) >= _MUC_JOIN_GRACE_S)
+            if ready and self._config.chat.muc_show_presence and show == "unavailable":
                 chat.add_status(tr("muc_user_left", nick=nick), time.strftime("%H:%M:%S"))
-            elif self._config.chat.muc_show_presence and not was_present:
+            elif ready and self._config.chat.muc_show_presence and not was_present:
                 chat.add_status(tr("muc_user_joined", nick=nick), time.strftime("%H:%M:%S"))
-            elif (self._config.chat.muc_show_status and was_present
+            elif (ready and self._config.chat.muc_show_status and was_present
                   and previous_show != show):
                 from stanza_im.include.utils import escape_html
                 msg = tr("muc_status_changed",
