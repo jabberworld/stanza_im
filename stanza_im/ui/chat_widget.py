@@ -1099,13 +1099,16 @@ class ChatWidget(QtWidgets.QWidget):
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
         self._render_entry(entry)
-        if (direction == "incoming" and not self._is_mine(entry)
-                and self._view.is_scrolled_up()):
+        mine = self._is_mine(entry)
+        if direction == "incoming" and not mine and self._view.is_scrolled_up():
             self._view.note_new_message(self._reply_target_id(entry))
+            self._anchor_bottom = False
+        else:
+            self._anchor_bottom = True
+            if mine:
+                self._view.scroll_to_bottom()
         if direction == "incoming" or sender == "Me":
             self._last_sender = sender
-        self._anchor_bottom = True
-        self._view.scroll_to_bottom()
         self._maybe_unblock_after_clear()
 
     def add_status(self, text: str, timestamp: str):

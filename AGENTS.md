@@ -279,7 +279,12 @@ messages while `ChatView.is_scrolled_up()` (`note_new_message`), showing
 `▼ N` (capped `99+`). The first click jumps to the first such message
 (`scroll_to_message(..., highlight=False)`), the second click (or reaching the
 bottom) scrolls to the end and clears the counter, which lives until the actual
-bottom. [`tests/test_jump_button.py`]
+bottom. Incoming messages no longer force a scroll to the bottom (only the
+user's own outgoing messages do); the HTML button's click sets
+`window.__stanzaJumpPress` and is relayed through the scroll poll, with the
+QWebChannel `bridge.on_jump_clicked` only as an optional fast path (the poll is
+the fallback when the transport is unavailable).
+[`tests/test_jump_button.py`]
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,

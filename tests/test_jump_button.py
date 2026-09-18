@@ -84,13 +84,19 @@ check("scroll_to_bottom clears the counter", view._new_count == 0
 
 # 5. ChatWidget counts only incoming (not own) messages -----------------------
 calls = []
+scrolls = []
 view.is_scrolled_up = lambda: True
 view.note_new_message = lambda tid="": calls.append(tid)
+_real_scroll = view.scroll_to_bottom
+view.scroll_to_bottom = lambda: scrolls.append(True)
 cw.add_message(sender="A", body="hi", timestamp="10:00",
                direction="incoming", reply_able_id="x1")
 check("incoming message counted", calls == ["x1"])
+check("incoming message does not force-scroll", scrolls == [])
 cw.add_message(sender="Me", body="yo", timestamp="10:01", direction="outgoing")
 check("outgoing message not counted", calls == ["x1"])
+check("own message scrolls to bottom", scrolls == [True])
+view.scroll_to_bottom = _real_scroll
 
 # 6. static wiring ------------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -103,10 +109,17 @@ _jump_js = _view_src.split('_JUMP_JS = """', 1)[1].split('"""', 1)[0]
 check("HTML jump button delegates to Python",
       "window.bridge.on_jump_clicked()" in _jump_js
       and "scrollTo" not in _jump_js)
+check("jump button press is also relayed by the scroll poll",
+      "window.__stanzaJumpPress = 1;" in _jump_js
+      and "window.__stanzaJumpPress ? 1 : 0" in _view_src
+      and "self._on_jump_clicked()" in _view_src)
 _widget_src = open(os.path.join(_root, "stanza_im", "ui", "chat_widget.py"),
                    encoding="utf-8").read()
 check("add_message feeds the counter",
       "self._view.note_new_message(self._reply_target_id(entry))" in _widget_src)
+check("add_message no longer force-scrolls every message",
+      "self._anchor_bottom = True\n        self._view.scroll_to_bottom()"
+      not in _widget_src)
 
 cw.detach()
 print()

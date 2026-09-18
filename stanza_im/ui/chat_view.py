@@ -691,12 +691,15 @@ if HAS_WEBENGINE:
             d.addEventListener('mouseleave', function () {
                 d.style.background = '#ececec';
             });
-            d.addEventListener('click', function () {
-                if (window.bridge && window.bridge.on_jump_clicked) {
-                    window.bridge.on_jump_clicked();
-                }
-            });
+                d.addEventListener('click', function () {
+                    window.__stanzaJumpPress = 1;
+                    if (window.bridge && window.bridge.on_jump_clicked) {
+                        window.bridge.on_jump_clicked();
+                        window.__stanzaJumpPress = 0;
+                    }
+                });
             d.textContent = '\\u25bc';
+            window.__stanzaJumpPress = 0;
             document.body.appendChild(d);
         })();
         """
@@ -1014,7 +1017,7 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaMediaRef || '',"
                 " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '',"
                 " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '',"
-                " window.__stanzaJumpRef || '']",
+                " window.__stanzaJumpRef || '', window.__stanzaJumpPress ? 1 : 0]",
                 self._on_scroll_position,
             )
 
@@ -1139,6 +1142,9 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_jump_ref = ""
+            if len(value) > 11 and value[11]:
+                self.evaluate_js("window.__stanzaJumpPress = 0;")
+                self._on_jump_clicked()
             try:
                 offset = float(value[0])
                 viewport = float(value[1])

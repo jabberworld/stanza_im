@@ -512,9 +512,12 @@ Single conversation tab. Layout:
   first click jumps to the first such message (`scroll_to_message(..., highlight=False)`),
   the second click — or reaching the bottom — scrolls to the end and clears the
   counter, which lives until the actual bottom. WebEngine renders the button as
-  the in-page `#stanza-jump` div (its click goes through `bridge.on_jump_clicked`
-  → `_on_jump_clicked`); the QTextBrowser fallback uses a `QToolButton` and
-  cannot target a message, so it always scrolls to the bottom.
+  the in-page `#stanza-jump` div (its click sets `window.__stanzaJumpPress` and
+  is relayed by the scroll poll to `_on_jump_clicked`; `bridge.on_jump_clicked`
+  is only an optional fast path); the QTextBrowser fallback uses a `QToolButton`
+  and cannot target a message, so it always scrolls to the bottom. Incoming
+  messages never force a scroll to the bottom — only the user's own outgoing
+  messages do.
 - MUC participant sidebar (`_users_list`, a `_ParticipantList` subclass): a
   single click selects a row (highlight only), a double-click opens the private
   chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,
