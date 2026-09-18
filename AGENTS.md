@@ -131,6 +131,14 @@ enabled for the owner only and hosts the `muc#owner` room-configuration
 `client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
 only JIDs). [`tests/test_muc_config.py`]
+
+The MUC toolbar's vCard button opens the **room's** vCard (`MainWindow.
+_show_muc_room_info` → `_show_profile(room)`, not our occupant's real JID). The
+viewer (`VCardInfoDialog`) shows an Edit button for room cards, enabled for
+owners/admins (`MainWindow._can_edit_room_vcard`); it reuses `VCardEditDialog`
+(with `title_key="vcard_edit_room_title"`) and publishes via
+`client.set_room_vcard` (`xep_0054.publish_vcard(..., jid=room)`, which also
+refreshes the cached room card/avatar/title). [`tests/test_vcard_room.py`]
 `ServiceBrowserDialog` groups XEP-0030 items into conferences, gateways,
 services and uncategorized items. It discovers the account domain on open and
 builds the tree fully lazily with no eager discovery: a node renders its

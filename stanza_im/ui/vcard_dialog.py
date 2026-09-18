@@ -40,8 +40,11 @@ def _photo_pixmap(card: dict, size: int = 96) -> QtGui.QIcon:
 class VCardInfoDialog(QtWidgets.QDialog):
     """Read-only summary of a contact's vCard."""
 
+    edit_requested = QtCore.pyqtSignal(str)   # jid
+
     def __init__(self, jid: str, card: dict, status: dict | None = None,
-                 parent=None):
+                 parent=None, show_edit: bool = False,
+                 can_edit: bool = False):
         super().__init__(parent)
         self.setWindowTitle(tr("vcard_info_title"))
         self.setMinimumWidth(360)
@@ -108,6 +111,14 @@ class VCardInfoDialog(QtWidgets.QDialog):
             tr("dialog_ok"))
         btn.rejected.connect(self.reject)
         btn.clicked.connect(self.accept)
+        self._edit_btn = btn.addButton(
+            tr("vcard_edit"), QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
+        self._edit_btn.setIcon(QtGui.QIcon(
+            os.path.join(ACTIONS_DIR_16, "edit.png")))
+        self._edit_btn.setVisible(bool(show_edit))
+        self._edit_btn.setEnabled(bool(can_edit))
+        self._edit_btn.clicked.connect(
+            lambda: self.edit_requested.emit(self._jid))
         layout.addWidget(btn)
 
     def _copy_jid(self):
@@ -146,9 +157,10 @@ class VCardEditDialog(QtWidgets.QDialog):
     """Edit your own vCard; ``collect()`` returns a :mod:`~stanza_im.include.
     vcard`-compatible dict."""
 
-    def __init__(self, card: dict, parent=None):
+    def __init__(self, card: dict, parent=None,
+                 title_key: str = "vcard_edit_title"):
         super().__init__(parent)
-        self.setWindowTitle(tr("vcard_edit_title"))
+        self.setWindowTitle(tr(title_key))
         self.setMinimumSize(520, 430)
         self._card = card
 

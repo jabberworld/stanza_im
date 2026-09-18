@@ -2110,6 +2110,26 @@ class JabberClient:
         self.emit("vcard_updated", self.jid_str, card)
         return True
 
+    async def set_room_vcard(self, room: str, card: dict) -> bool:
+        """Publish *card* as the room's vCard (XEP-0045 room + XEP-0054).
+
+        Returns True on success; the local cache/contact are refreshed so the
+        room avatar/title update immediately.
+        """
+        vcard = self.xmpp.plugin["xep_0054"]
+        stanza = _build_vcard(vcard, card)
+        try:
+            await vcard.publish_vcard(stanza, jid=room)
+        except Exception:
+            logger.exception("Failed to publish room vCard for %s", room)
+            return False
+        card["jid"] = room
+        contact = self.get_contact(room)
+        contact.vcard = card
+        self._vcard_cache.put(room, card)
+        self.emit("vcard_received", room, card)
+        return True
+
     def update_contact(self, jid: str, name: str = "",
                        groups: list[str] | None = None) -> None:
         """Rename *jid* and/or reassign it to *groups* on the roster."""

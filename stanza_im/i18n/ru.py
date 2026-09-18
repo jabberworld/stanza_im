@@ -261,6 +261,8 @@ STRINGS = {
     "vcard_unavailable": "Визитная карточка для {jid} недоступна.",
     "vcard_room_unavailable": "Эта конференция не предоставляет визитную карточку.",
     "vcard_edit_title": "Моя визитная карточка",
+    "vcard_edit": "Редактировать",
+    "vcard_edit_room_title": "Визитная карточка конференции",
     "vcard_field_fn": "Полное имя",
     "vcard_field_nickname": "Псевдоним",
     "vcard_field_email": "Email",

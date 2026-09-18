@@ -1747,13 +1747,51 @@ class MainWindow(QtWidgets.QMainWindow):
                 if summary.get(key):
                     status[key] = summary[key]
             self._client.fetch_pep(bare)
-        dlg = VCardInfoDialog(jid, card, status=status)
+        bare = jid.split("/", 1)[0]
+        is_room = bool(bare in self._conference_roster
+                       or bare in self._muc_self_nicks)
+        can_edit = is_room and self._can_edit_room_vcard(bare)
+        dlg = VCardInfoDialog(jid, card, status=status, show_edit=is_room,
+                              can_edit=can_edit)
         self._vcard_dialogs[jid] = dlg
         dlg.finished.connect(lambda _result, key=jid:
                              self._vcard_dialogs.pop(key, None))
+        if is_room:
+            dlg.edit_requested.connect(
+                lambda _j, room=bare, c=card: self._edit_room_vcard(room, c))
         if self._client:
             self._client.probe_entity(jid)
         dlg.open()
+
+    def _can_edit_room_vcard(self, room: str) -> bool:
+        """Owners and admins may edit the room's vCard."""
+        return self._muc_affiliation(room) in ("owner", "admin")
+
+    def _edit_room_vcard(self, room: str, card: dict) -> None:
+        if not self._client:
+            return
+        from stanza_im.ui.vcard_dialog import VCardEditDialog
+        data = dict(card or {})
+        data["jid"] = room
+        dlg = VCardEditDialog(data, self, title_key="vcard_edit_room_title")
+        if not dlg.exec():
+            return
+        collected = dlg.collect()
+        collected["jid"] = room
+        self._start_task(self._save_room_vcard(room, collected))
+
+    async def _save_room_vcard(self, room: str, card: dict) -> None:
+        if self._client is None:
+            return
+        if not await self._client.set_room_vcard(room, card):
+            QtWidgets.QMessageBox.warning(self, APP_NAME,
+                                          tr("vcard_save_error"))
+            return
+        existing = self._vcard_dialogs.pop(room, None)
+        if existing is not None:
+            existing.close()
+        self._open_vcard_info(room, card)
+        QtWidgets.QMessageBox.information(self, APP_NAME, tr("vcard_saved"))
 
     def _on_entity_info_received(self, jid: str, info: dict):
         dialog = self._vcard_dialogs.get(jid)
@@ -3561,9 +3599,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._notify_osd_file(from_jid, name)
 
     def _show_muc_room_info(self, room: str):
-        member = self._muc_users.get(room, {}).get(
-            self._muc_self_nicks.get(room, ""), {})
-        self._show_profile(member.get("real_jid") or room)
+        """Show the room's own vCard (not our occupant's real JID)."""
+        self._show_profile(room)
 
     def _on_message_corrected(self, frm: str, ref_id: str, body: str, ts,
                               unstyled: bool = False,

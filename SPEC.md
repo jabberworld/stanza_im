@@ -807,6 +807,14 @@ affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
 Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
 `client.muc_set_config`); «Отмена» discards them.
 
+The MUC toolbar's vCard button opens the room's own vCard
+(`MainWindow._show_muc_room_info` → `_show_profile(room)`). `VCardInfoDialog`
+shows an Edit button for room cards, enabled for owners/admins
+(`MainWindow._can_edit_room_vcard`); the editor reuses `VCardEditDialog`
+(`title_key="vcard_edit_room_title"`) and saves through
+`client.set_room_vcard` (`xep_0054.publish_vcard(..., jid=room)`); the open
+viewer is refreshed afterwards.
+
 ## 12. Tray (`ui/tray.py`)
 
 - System tray icon (built from `resources/images/scalable/apps/stanza-im.svg` +
