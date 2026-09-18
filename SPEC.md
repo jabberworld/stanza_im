@@ -813,7 +813,9 @@ shows an Edit button for room cards, enabled for owners/admins
 (`MainWindow._can_edit_room_vcard`); the editor reuses `VCardEditDialog`
 (`title_key="vcard_edit_room_title"`) and saves through
 `client.set_room_vcard` (`xep_0054.publish_vcard(..., jid=room)`); the open
-viewer is refreshed afterwards.
+viewer is refreshed afterwards. The room vCard viewer, editor and confirmation
+boxes are parented to the chat window (`MainWindow._chat_dialog_parent`), not
+the roster.
 
 ## 12. Tray (`ui/tray.py`)
 

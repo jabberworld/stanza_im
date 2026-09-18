@@ -1751,14 +1751,16 @@ class MainWindow(QtWidgets.QMainWindow):
         is_room = bool(bare in self._conference_roster
                        or bare in self._muc_self_nicks)
         can_edit = is_room and self._can_edit_room_vcard(bare)
-        dlg = VCardInfoDialog(jid, card, status=status, show_edit=is_room,
-                              can_edit=can_edit)
+        parent = self._chat_dialog_parent() if is_room else self
+        dlg = VCardInfoDialog(jid, card, status=status, parent=parent,
+                              show_edit=is_room, can_edit=can_edit)
         self._vcard_dialogs[jid] = dlg
         dlg.finished.connect(lambda _result, key=jid:
                              self._vcard_dialogs.pop(key, None))
         if is_room:
             dlg.edit_requested.connect(
-                lambda _j, room=bare, c=card: self._edit_room_vcard(room, c))
+                lambda _j, room=bare, c=card, p=parent:
+                self._edit_room_vcard(room, c, p))
         if self._client:
             self._client.probe_entity(jid)
         dlg.open()
@@ -1767,31 +1769,35 @@ class MainWindow(QtWidgets.QMainWindow):
         """Owners and admins may edit the room's vCard."""
         return self._muc_affiliation(room) in ("owner", "admin")
 
-    def _edit_room_vcard(self, room: str, card: dict) -> None:
+    def _edit_room_vcard(self, room: str, card: dict, parent=None) -> None:
         if not self._client:
             return
         from stanza_im.ui.vcard_dialog import VCardEditDialog
         data = dict(card or {})
         data["jid"] = room
-        dlg = VCardEditDialog(data, self, title_key="vcard_edit_room_title")
+        dlg = VCardEditDialog(data, parent or self,
+                              title_key="vcard_edit_room_title")
         if not dlg.exec():
             return
         collected = dlg.collect()
         collected["jid"] = room
-        self._start_task(self._save_room_vcard(room, collected))
+        self._start_task(self._save_room_vcard(room, collected, parent))
 
-    async def _save_room_vcard(self, room: str, card: dict) -> None:
+    async def _save_room_vcard(self, room: str, card: dict,
+                               parent=None) -> None:
         if self._client is None:
             return
+        box_parent = parent or self
         if not await self._client.set_room_vcard(room, card):
-            QtWidgets.QMessageBox.warning(self, APP_NAME,
+            QtWidgets.QMessageBox.warning(box_parent, APP_NAME,
                                           tr("vcard_save_error"))
             return
         existing = self._vcard_dialogs.pop(room, None)
         if existing is not None:
             existing.close()
         self._open_vcard_info(room, card)
-        QtWidgets.QMessageBox.information(self, APP_NAME, tr("vcard_saved"))
+        QtWidgets.QMessageBox.information(box_parent, APP_NAME,
+                                          tr("vcard_saved"))
 
     def _on_entity_info_received(self, jid: str, info: dict):
         dialog = self._vcard_dialogs.get(jid)

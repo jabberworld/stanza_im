@@ -102,6 +102,9 @@ _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
 check("room info no longer uses our real JID",
       'member.get("real_jid") or room' not in _mw_src
       and "def _save_room_vcard" in _mw_src)
+check("room vCard dialogs parent to the chat window",
+      "parent = self._chat_dialog_parent() if is_room else self" in _mw_src
+      and "VCardEditDialog(data, parent or self" in _mw_src)
 
 print()
 if FAILURES:
