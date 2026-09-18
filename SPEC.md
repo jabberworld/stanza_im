@@ -153,7 +153,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
-| `chat.muc_name_source` | `from_name` | Conference display-name source (Preferences → Chat → «Конференции»): `from_name` uses the room/disco name, `from_vcard` uses the room vCard's `nickname` (else `fn`); both fall back to the JID localpart. Applied live by `MainWindow._refresh_muc_names` (tab title + roster). |
+| `chat.muc_name_source` | `from_name` | Conference display-name source (Preferences → Chat → «Конференции» + info icon): `from_name` = bookmark name → room/disco name → JID localpart; `from_vcard` = bookmark name → vCard `fn` → vCard `nickname` → room/disco name → JID localpart. Applied live by `MainWindow._refresh_muc_names` (tab title + roster). |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
@@ -824,10 +824,12 @@ boxes are parented to the chat window (`MainWindow._chat_dialog_parent`), not
 the roster.
 
 Conference display names follow `chat.muc_name_source`: `from_name` (default)
-uses the room/disco name, `from_vcard` uses the room vCard's `nickname` (else
-`fn`), and both fall back to the JID localpart. `MainWindow._muc_display_name`
-resolves the name and `_apply_muc_name` updates the tab title and roster row;
-the setting applies live.
+resolves bookmark name → room/disco name → JID localpart; `from_vcard`
+resolves bookmark name → vCard `fn` → vCard `nickname` → room/disco name → JID
+localpart. `MainWindow._muc_display_name` resolves the name and
+`_apply_muc_name` updates the tab title and roster row; the setting and
+bookmark changes apply live (the Preferences combo has an info icon with this
+order).
 
 ### 11.8 MUC Join Reliability
 

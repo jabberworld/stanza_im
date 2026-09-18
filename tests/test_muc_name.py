@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.core.storage import Config
-from stanza_im.i18n import load as i18n_load
+from stanza_im.i18n import load as i18n_load, tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.main_window import MainWindow
 from stanza_im.ui.preferences import PreferencesDialog
@@ -47,7 +47,9 @@ win._suspend_timer.stop()
 win._memory_timer.stop()
 win._muc_self_nicks = {"room@conf.example": "me"}
 win._muc_names = {"room@conf.example": "Room Name"}
-win._muc_vcard_names = {"room@conf.example": "Nick"}
+win._muc_vcard_names = {
+    "room@conf.example": {"fn": "Full Name", "nickname": "Nick"}}
+win._bookmarks = {}
 seen_titles = []
 win._chat_window.set_chat_title = lambda room, title: seen_titles.append(title)
 win._sync_conference_roster = lambda room: None
@@ -59,26 +61,38 @@ win._apply_muc_name("room@conf.example")
 check("apply updates the tab title", seen_titles == ["Room Name"])
 
 win._config.chat.muc_name_source = "from_vcard"
-check("from_vcard prefers the vCard nick",
+check("from_vcard prefers the vCard FN",
+      win._muc_display_name("room@conf.example") == "Full Name")
+win._muc_vcard_names["room@conf.example"] = {"fn": "", "nickname": "Nick"}
+check("from_vcard falls back to the nickname",
       win._muc_display_name("room@conf.example") == "Nick")
 
-win._muc_vcard_names["room@conf.example"] = ""
-check("empty nick falls back to the name",
+# The bookmark name is the explicit user label and wins in both modes.
+win._bookmarks = {"room@conf.example": {"name": "My Room"}}
+check("bookmark name wins in from_vcard",
+      win._muc_display_name("room@conf.example") == "My Room")
+win._config.chat.muc_name_source = "from_name"
+check("bookmark name wins in from_name",
+      win._muc_display_name("room@conf.example") == "My Room")
+win._bookmarks = {}
+
+win._muc_vcard_names["room@conf.example"] = {"fn": "", "nickname": ""}
+win._config.chat.muc_name_source = "from_vcard"
+check("empty vCard falls back to the room name",
       win._muc_display_name("room@conf.example") == "Room Name")
 
 win._muc_names = {}
-win._config.chat.muc_name_source = "from_vcard"
+win._muc_vcard_names["room@conf.example"] = {"fn": "", "nickname": ""}
 check("no name falls back to the JID localpart",
       win._muc_display_name("room@conf.example") == "room")
-win._muc_vcard_names["room@conf.example"] = "Nick"
-check("from_vcard still uses the nick",
-      win._muc_display_name("room@conf.example") == "Nick")
 
 win._config.chat.muc_name_source = "from_name"
+win._muc_vcard_names["room@conf.example"] = {
+    "fn": "Full Name", "nickname": "Nick"}
 check("from_name ignores the vCard",
       win._muc_display_name("room@conf.example") == "room")
 
-check("explicit preferred name wins",
+check("explicit preferred name beats the localpart",
       win._muc_display_name("room@conf.example", preferred="Pref") == "Pref")
 
 # 3. refresh iterates the joined rooms ---------------------------------------
@@ -97,6 +111,9 @@ check("prefs exposes the name source",
       == ["from_name", "from_vcard"])
 check("prefs default is from_name",
       combo.itemData(combo.currentIndex()) == "from_name")
+info = [b for b in dlg.findChildren(QtWidgets.QToolButton)
+        if b.toolTip() == tr("prefs_muc_name_source_info")]
+check("name source has an info tooltip", bool(info))
 dlg.close()
 
 # 5. static wiring ------------------------------------------------------------
@@ -105,8 +122,11 @@ _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
                encoding="utf-8").read()
 check("display name consults the setting",
       'getattr(self._config.chat, "muc_name_source", "from_name")' in _mw_src)
-check("vCard reception stores the nick and re-applies the name",
-      "self._muc_vcard_names[room_jid] =" in _mw_src
+check("bookmark name has top priority",
+      'self._bookmarks.get(room) or {}).get("name"' in _mw_src)
+check("vCard reception stores fn and nickname",
+      '"fn": card.get("fn")' in _mw_src
+      and '"nickname": card.get("nickname")' in _mw_src
       and "self._apply_muc_name(room_jid)" in _mw_src)
 
 print()

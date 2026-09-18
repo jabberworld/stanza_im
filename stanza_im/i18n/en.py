@@ -505,6 +505,11 @@ STRINGS = {
     "prefs_muc_show_status_text": "Show status text",
     "prefs_muc_auto_nick": "Automatically change nickname on conflicts",
     "prefs_muc_name_source": "Use name:",
+    "prefs_muc_name_source_info": (
+        "How the conference name is built.\n"
+        "From the name: bookmark name → room name → JID localpart.\n"
+        "From the vCard: bookmark name → full name (FN) → nickname → "
+        "room name → JID localpart."),
     "prefs_muc_name_from_name": "From the room name",
     "prefs_muc_name_from_vcard": "From the vCard",
     "prefs_muc_confirm_leave": "Ask before leaving a room",

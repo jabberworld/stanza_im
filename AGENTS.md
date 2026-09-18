@@ -163,11 +163,13 @@ refreshes the cached room card/avatar/title). The room vCard viewer, editor and
 its confirmation boxes are parented to the chat window
 (`MainWindow._chat_dialog_parent`), not the roster. [`tests/test_vcard_room.py`]
 
-Conference display names honour `chat.muc_name_source`: `from_name` (default)
-uses the room/disco name, `from_vcard` uses the room vCard's `nickname` (else
-`fn`), and both fall back to the JID localpart. `MainWindow._muc_display_name`
-resolves it and `_apply_muc_name` refreshes the tab title and roster row; the
-setting applies live (`_refresh_muc_names`). [`tests/test_muc_name.py`]
+Conference display names honour `chat.muc_name_source` (Preferences → Chat →
+«Конференции», which carries an info icon explaining the order):
+`from_name` (default) resolves bookmark name → room/disco name → JID
+localpart; `from_vcard` resolves bookmark name → vCard `fn` → vCard `nickname`
+→ room/disco name → JID localpart. `MainWindow._muc_display_name` resolves it
+and `_apply_muc_name` refreshes the tab title and roster row; the setting and
+bookmark changes apply live (`_refresh_muc_names`). [`tests/test_muc_name.py`]
 `ServiceBrowserDialog` groups XEP-0030 items into conferences, gateways,
 services and uncategorized items. It discovers the account domain on open and
 builds the tree fully lazily with no eager discovery: a node renders its

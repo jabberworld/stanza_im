@@ -262,7 +262,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_self_nicks: dict[str, str] = {}
         self._muc_names: dict[str, str] = {}
-        self._muc_vcard_names: dict[str, str] = {}
+        self._muc_vcard_names: dict[str, dict] = {}
         self._muc_avatar_paths: dict[str, str] = {}
         self._muc_join_tries: dict[str, int] = {}
         self._muc_autojoin_tries: dict[str, int] = {}
@@ -668,6 +668,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks = {item["jid"]: item for item in bookmarks}
         self._rebuild_bookmarks_menu()
         self._classify_bookmarked_conferences()
+        self._refresh_muc_names()
         for room in self._muc_self_nicks:
             chat = self._chat_window.get_chat(room)
             if chat:
@@ -723,6 +724,7 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(room)
         if chat:
             chat.set_bookmarked(False)
+        self._refresh_muc_names()
         self._start_task(self._client.remove_bookmark(room))
         self._rebuild_bookmarks_menu()
 
@@ -738,6 +740,7 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(room)
         if chat:
             chat.set_bookmarked(True)
+        self._refresh_muc_names()
         self._start_task(self._client.save_bookmark(
             room, nick, "", autojoin=False))
 
@@ -1180,13 +1183,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._apply_muc_name(room)
 
     def _muc_display_name(self, room: str, preferred: str = "") -> str:
-        name = preferred or self._muc_names.get(room, "")
+        # The bookmark name is the user's explicit label and wins in both
+        # modes.
+        bookmark = (self._bookmarks.get(room) or {}).get("name", "") or ""
+        if bookmark:
+            return bookmark
         if (getattr(self._config.chat, "muc_name_source", "from_name")
                 == "from_vcard"):
-            nick = self._muc_vcard_names.get(room, "")
-            if nick:
-                return nick
-        return name or room.split("@", 1)[0]
+            info = self._muc_vcard_names.get(room, {})
+            if isinstance(info, dict):
+                vcard_name = info.get("fn") or info.get("nickname") or ""
+            else:                      # tolerate older string state
+                vcard_name = info or ""
+            if vcard_name:
+                return vcard_name
+        return (preferred or self._muc_names.get(room, "")
+                or room.split("@", 1)[0])
 
     def _apply_muc_name(self, room: str) -> None:
         """Refresh a room's tab title and roster row from its name source."""
@@ -1781,8 +1793,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if room_jid:
             self._sync_conference_roster(room_jid)
         if room_jid:
-            self._muc_vcard_names[room_jid] = (
-                card.get("nickname") or card.get("fn") or "")
+            self._muc_vcard_names[room_jid] = {
+                "fn": card.get("fn") or "",
+                "nickname": card.get("nickname") or "",
+            }
             self._apply_muc_name(room_jid)
         for room, users in self._muc_users.items():
             changed_nicks: list[tuple[str, str]] = []
