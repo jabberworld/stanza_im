@@ -2497,6 +2497,17 @@ class JabberClient:
         if msg_id:
             self._mds_last_id[chat_jid] = msg_id
 
+    def set_displayed_state(self, mapping: dict) -> None:
+        """Seed the MDS bookkeeping with restored per-chat displayed sids.
+
+        Keeps the startup XEP-0490 catch-up from re-applying our own stale
+        state (which would clear unread messages that arrived after it), while
+        a genuinely different remote state still clears them.
+        """
+        for jid, sid in (mapping or {}).items():
+            if jid and isinstance(sid, str) and sid:
+                self._mds_local[jid] = sid
+
     def mds_mark_displayed(self, chat_jid: str, sid: str = "",
                            msg_id: str = "") -> None:
         """Flag *chat_jid* as displayed up to the latest received message."""

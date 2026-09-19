@@ -411,7 +411,13 @@ Unread counters are persisted per contact (`core/unread_state.py` →
 a restart: `MainWindow` loads them at startup, applies them when building
 roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
 in `_bump_unread`/`_reset_unread` and flushes them to disk with a 1 s debounce
-plus on quit. OSD popups are not replayed. [`tests/test_unread_state.py`]
+plus on quit. Alongside each count the file stores the last displayed MDS
+stanza-id (`{"count": N, "displayed": "sid"}`; the legacy `{"jid": N}` format is
+still read); `_flush_unread` collects it from the client's `_mds_local` and
+`_on_login` seeds it back via `client.set_displayed_state`, so the startup
+XEP-0490 catch-up cannot clear unread messages that arrived after our own last
+displayed point (a genuinely newer remote state still clears them). OSD popups
+are not replayed. [`tests/test_unread_state.py`]
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The
@@ -502,7 +508,10 @@ focused/active (server-assist via a companion XEP-0333 marker when the server
 announces `urn:xmpp:mds:server-assist:0`); incoming PEP events (routed like the
 extended-presence notifications, see below) and a catch-up
 fetch apply remote displayed states — unread is cleared and an open chat gets
-an "Displayed on another device" status line.
+an "Displayed on another device" status line. `_mds_apply_remote` skips a state
+equal to the one already recorded in `_mds_local`; that map is seeded at connect
+from the persisted unread state, so the startup catch-up does not wipe restored
+unread (see the unread-counters paragraph above).
 
 Last Message Correction (XEP-0308): any own message is editable (Ctrl+Up =
 last sent; the message menu's "Edit" button for `data-stanza-outgoing` wrappers

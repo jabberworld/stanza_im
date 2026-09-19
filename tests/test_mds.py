@@ -136,7 +136,21 @@ check("track sid", c._mds_last_sid.get("eve@example.com") == "sid-track")
 c.mds_mark_displayed("eve@example.com")
 check("mark updates local", c._mds_local.get("eve@example.com") == "sid-track")
 
-# 7. toggle off ----------------------------------------------------------------
+# 7. seeded displayed state suppresses stale catch-up --------------------------
+c_seed = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)
+seed_events = []
+c_seed.on("mds_displayed", lambda *a: seed_events.append(a))
+c_seed.set_displayed_state({"frank@example.com": "sid-old", "": "x",
+                            "g@example.com": ""})
+c_seed._mds_apply_remote("frank@example.com", "sid-old")
+check("seeded state suppresses stale apply", not seed_events)
+c_seed._mds_apply_remote("frank@example.com", "sid-new")
+check("newer state still applies after seeding",
+      seed_events == [("frank@example.com",)])
+check("seed ignores blank jids/sids",
+      "" not in c_seed._mds_local and "g@example.com" not in c_seed._mds_local)
+
+# 8. toggle off ----------------------------------------------------------------
 c_off = JabberClient("me@example.com/r", "pw", message_displayed_sync=False)
 c_off.mds_mark_displayed("any@example.com")
 check("disabled does nothing", not c_off._mds_local)

@@ -869,7 +869,11 @@ order).
   `core/unread_state.py`) and restored on startup: roster badges and tray
   blinking come back exactly as before the restart (`MainWindow._unread_counts`,
   applied in `_add_roster_item`/`_sync_conference_roster`, saved with a 1 s
-  debounce and on quit). OSD popups are not replayed. Messages received while
+  debounce and on quit). The file entry is `{"count": N, "displayed": "<sid>"}`
+  (legacy `{"jid": N}` is still read): the displayed sid is the last XEP-0490
+  point we published, seeded into the client on login, so the startup MDS
+  catch-up does not clear unread that arrived after it. OSD popups are not
+  replayed. Messages received while
   the client was offline are delivered by the server on reconnect and counted
   as unread in the new session (no MAM catch-up).
 - Notifications: `showMessage()` for connection status, errors
@@ -1032,7 +1036,11 @@ Registers XEP plugins (conditionally where noted):
   `message` event requires a `<body>`); a catch-up fetch after bind also
   applies remote displayed states (`mds_displayed` event):
   unread is cleared and an "Displayed on another device" status line is added
-  to an open chat. Config `chat.message_displayed_sync` (default on).
+  to an open chat. `_mds_apply_remote` skips a state equal to `_mds_local`;
+  on login `MainWindow` seeds `_mds_local` from the persisted unread state
+  (`client.set_displayed_state`), so the startup catch-up does not wipe restored
+  unread while a newer remote state still clears it.
+  Config `chat.message_displayed_sync` (default on).
 
 ### 14.4 Last Message Correction (XEP-0308)
 

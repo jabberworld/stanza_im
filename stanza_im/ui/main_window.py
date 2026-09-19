@@ -258,7 +258,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── State ────────────────────────────────────────────────
         self._visible = True
         self._shutting_down = False
-        self._unread_counts: dict[str, int] = unread_state.load()
+        self._unread_counts, self._unread_displayed = unread_state.load_state()
         self._unread_total = sum(self._unread_counts.values())
         self._unread_jids: set[str] = set(self._unread_counts)
         if self._unread_total > 0 and self._config.notifications.tray_blink:
@@ -1543,6 +1543,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._client.call_devices = self._call_device_config()
         self._client.call_auto_accept = bool(getattr(
             getattr(self._config, "calls", None), "auto_accept", False))
+        self._client.set_displayed_state(self._unread_displayed)
         self._connect_client_signals()
 
         self._start_task(self._connect_async(jid, show))
@@ -2927,6 +2928,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Clear the unread counter for *jid* and refresh totals."""
         self._unread_jids.discard(jid)
         self._unread_counts.pop(jid, None)
+        self._unread_displayed.pop(jid, None)
         for user in self._roster._users:
             if user.jid == jid and user.unread_count:
                 self._roster.update_user(jid, unread_count=0)
@@ -2943,7 +2945,16 @@ class MainWindow(QtWidgets.QMainWindow):
             timer.start()
 
     def _flush_unread(self) -> None:
-        unread_state.save(self._unread_counts)
+        displayed = {jid: sid for jid, sid in self._unread_displayed.items()
+                     if jid in self._unread_counts}
+        if self._client is not None:
+            local = getattr(self._client, "_mds_local", {}) or {}
+            for jid in self._unread_counts:
+                sid = local.get(jid, "")
+                if sid:
+                    displayed[jid] = sid
+        self._unread_displayed = displayed
+        unread_state.save(self._unread_counts, displayed)
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
