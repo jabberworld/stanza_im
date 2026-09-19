@@ -862,6 +862,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `urn:xmpp:hats:commands` nodes (execute → submit); `room_supports_hats` is a
   cached disco#info probe. The create URI is
   `urn:xmpp:hats:<sha1(room + "\x00" + title)>`.
+  The form is submitted with `action` taken from the server's `<actions/>`
+  (`complete` if absent, which ejabberd requires), and the URI goes into the
+  field var the returned form declares (`hats#uri` for `create`, `hat` for
+  `destroy`/`assign`/`unassign` on ejabberd); an error `<note/>` raises so the
+  tab shows it instead of a silent reload.
 - **Context menu**: the participant context menu gains a «Шапка» submenu after
   «Изменить роль» (owner/admin only) with «Назначить» (`HatAssignDialog`, the
   user preselected; present users or a manual JID) and «Снять»

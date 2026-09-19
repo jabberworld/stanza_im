@@ -2076,12 +2076,13 @@ class JabberClient:
         return supported
 
     def _hats_command(self, room: str, node: str, values: dict | None = None,
-                      sessionid: str = ""):
+                      sessionid: str = "", action: str = "execute"):
         """Build a Hats ad-hoc command IQ (not sent), used by tests too."""
         iq = self.xmpp.Iq()
         iq["type"] = "set"
         iq["to"] = room
-        iq.xml.append(hats_mod.build_command(node, values, sessionid))
+        iq.xml.append(
+            hats_mod.build_command(node, values, sessionid, action))
         return iq
 
     @staticmethod
@@ -2099,10 +2100,29 @@ class JabberClient:
 
     async def _hats_submit(self, room: str, node: str,
                            values: dict) -> None:
-        """Execute a two-step Hats command (execute → submit form)."""
+        """Execute a two-step Hats command (execute → complete form).
+
+        The submit action is taken from the server's ``<actions/>`` (some
+        servers, e.g. ejabberd, require the literal ``complete``), and the
+        URI field is renamed to whatever var the server's form declares
+        (``hat`` for destroy/assign/unassign on ejabberd).
+        """
         first = await self._hats_command(room, node).send()
-        sessionid, _status = hats_mod.command_session(first.xml)
-        await self._hats_command(room, node, values, sessionid).send()
+        sessionid, status = hats_mod.command_session(first.xml)
+        if status == "completed":
+            return
+        data = dict(values)
+        uri = data.pop("hats#uri", "")
+        if uri:
+            data[hats_mod.uri_field_var(first.xml)] = uri
+        action = hats_mod.submit_action(first.xml)
+        logger.debug("Hats %s submit action=%s fields=%s", node, action,
+                     sorted(data))
+        result = await self._hats_command(
+            room, node, data, sessionid, action).send()
+        error = hats_mod.command_error(result.xml)
+        if error:
+            raise Exception(error)
 
     async def hats_list(self, room: str) -> list[dict]:
         """Return the hats configured in *room* (title/uri/hue)."""
@@ -2139,9 +2159,8 @@ class JabberClient:
                                 {"hats#jid": jid, "hats#uri": uri})
 
     async def hats_unassign(self, room: str, jid: str, uri: str) -> None:
-        await self._hats_command(
-            room, hats_mod.CMD_UNASSIGN,
-            {"hats#jid": jid, "hats#uri": uri}).send()
+        await self._hats_submit(room, hats_mod.CMD_UNASSIGN,
+                                {"hats#jid": jid, "hats#uri": uri})
 
     def set_muc_subject(self, room: str, subject: str,
                         langs: list[tuple[str, str]] | None = None) -> None:

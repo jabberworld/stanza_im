@@ -150,7 +150,12 @@ URI is `urn:xmpp:hats:<sha1(room + "\x00" + title)>`; the optional colour is a
 `hats#hue` angle turned into RGB by the XEP-0392 HSLuv implementation in
 `include/hats.py`. Management uses the `urn:xmpp:hats:commands` ad-hoc
 `create`/`destroy`/`list`/`list-assigned`/`assign`/`unassign` nodes
-(`client.hats_*`, custom IQs: execute → submit). The participant context menu
+(`client.hats_*`, custom IQs). A form is submitted with the action read from
+the server's `<actions/>` (`complete` when there is none — ejabberd requires
+the literal `complete`), and the URI field is whatever var the returned form
+declares (`hats#uri` for create, `hat` for destroy/assign/unassign on
+ejabberd). An error `<note/>`/status surfaces in the tab instead of being
+silently reloaded away. The participant context menu
 gains a gated «Шапка» submenu (after «Изменить роль») with «Назначить»
 (preselects the user in `HatAssignDialog`) and «Снять» (`HatUnassignDialog`
 lists the user's hats, then confirms). Messages render the sender's hats as

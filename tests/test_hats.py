@@ -7,6 +7,7 @@ Run with:
 import os
 import sys
 import tempfile
+import asyncio
 from xml.etree import ElementTree as ET
 
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_hats_")
@@ -142,6 +143,126 @@ check("client maps result rows",
       rows2 and rows2[0]["title"] == "Host"
       and rows2[0]["uri"] == "urn:xmpp:hats:abc"
       and abs(rows2[0]["hue"] - 10.0) < 0.001)
+
+
+# 5b. submit action + URI field var (ejabberd compatibility) ------------------
+def _hats_response(*, status="executing", sessionid="", execute_action=None,
+                   form_vars=(), note=None):
+    root = ET.Element("iq")
+    cmd = ET.SubElement(root, f"{{{hats_mod.NS_COMMANDS}}}command")
+    cmd.set("status", status)
+    if sessionid:
+        cmd.set("sessionid", sessionid)
+    if execute_action:
+        acts = ET.SubElement(cmd, f"{{{hats_mod.NS_COMMANDS}}}actions")
+        acts.set("execute", execute_action)
+        ET.SubElement(acts, f"{{{hats_mod.NS_COMMANDS}}}complete")
+    if form_vars:
+        form = ET.SubElement(cmd, f"{{{hats_mod.NS_DATA}}}x")
+        form.set("type", "form")
+        for var in form_vars:
+            field = ET.SubElement(form, f"{{{hats_mod.NS_DATA}}}field")
+            field.set("var", var)
+    if note:
+        n = ET.SubElement(cmd, f"{{{hats_mod.NS_COMMANDS}}}note")
+        n.set("type", "error")
+        n.text = note
+    return root
+
+
+check("submit_action uses the offered complete",
+      hats_mod.submit_action(
+          _hats_response(execute_action="complete")) == "complete")
+check("submit_action defaults to complete",
+      hats_mod.submit_action(_hats_response()) == "complete")
+check("submit_action honours next",
+      hats_mod.submit_action(_hats_response(execute_action="next")) == "next")
+check("uri_field_var detects hat",
+      hats_mod.uri_field_var(_hats_response(form_vars=("hat",))) == "hat")
+check("uri_field_var defaults to hats#uri",
+      hats_mod.uri_field_var(
+          _hats_response(form_vars=("hats#uri",))) == "hats#uri")
+check("command_error reads the error note",
+      hats_mod.command_error(_hats_response(note="bad uri")) == "bad uri")
+check("build_command carries the action",
+      hats_mod.build_command(hats_mod.CMD_CREATE, {},
+                             action="complete").get("action") == "complete")
+
+
+class _FakeIq:
+    def __init__(self, xml):
+        self.xml = xml
+
+    async def send(self):
+        return self
+
+
+def _drive_submit(node, values, responses):
+    calls = []
+    client = JabberClient("me@example.com/res", "pw")
+
+    def fake_command(room, n, vals=None, sessionid="", action="execute"):
+        calls.append({"node": n, "values": dict(vals) if vals else None,
+                      "sessionid": sessionid, "action": action})
+        return _FakeIq(responses[len(calls) - 1])
+
+    client._hats_command = fake_command
+
+    async def run():
+        await client._hats_submit("room@conf.example", node, values)
+
+    _loop = asyncio.new_event_loop()
+    try:
+        _loop.run_until_complete(run())
+    finally:
+        _loop.close()
+    return calls
+
+
+calls = _drive_submit(hats_mod.CMD_DESTROY, {"hats#uri": "urn:x"},
+                      [_hats_response(status="executing", sessionid="s1",
+                                      execute_action="complete",
+                                      form_vars=("hat",)),
+                       _hats_response(status="completed")])
+check("destroy executes then completes with the hat field",
+      calls[0]["action"] == "execute" and calls[1]["action"] == "complete"
+      and calls[1]["sessionid"] == "s1"
+      and calls[1]["values"] == {"hat": "urn:x"})
+
+calls = _drive_submit(hats_mod.CMD_CREATE,
+                      {"hats#title": "T", "hats#uri": "urn:x"},
+                      [_hats_response(status="executing", sessionid="s2",
+                                      execute_action="complete",
+                                      form_vars=("hats#uri", "hats#title")),
+                       _hats_response(status="completed")])
+check("create keeps the hats#uri field",
+      calls[1]["values"] == {"hats#title": "T", "hats#uri": "urn:x"}
+      and calls[1]["action"] == "complete")
+
+calls = _drive_submit(hats_mod.CMD_ASSIGN,
+                      {"hats#jid": "bob@example.com", "hats#uri": "urn:x"},
+                      [_hats_response(status="executing", sessionid="s3",
+                                      execute_action="complete",
+                                      form_vars=("hats#jid", "hat")),
+                       _hats_response(status="completed")])
+check("assign uses hats#jid + hat",
+      calls[1]["values"] == {"hats#jid": "bob@example.com", "hat": "urn:x"})
+
+try:
+    _drive_submit(hats_mod.CMD_DESTROY, {"hats#uri": "urn:x"},
+                  [_hats_response(status="executing", sessionid="s4",
+                                  execute_action="complete",
+                                  form_vars=("hat",)),
+                   _hats_response(status="completed", note="bad uri")])
+    _raised = False
+except Exception:
+    _raised = True
+check("error note raises", _raised)
+
+calls = _drive_submit(hats_mod.CMD_LIST, {},
+                      [_hats_response(status="completed")])
+check("completed first response is final", len(calls) == 1)
+
 
 events = []
 c.on("groupchat_presence", lambda *a: events.append(a))

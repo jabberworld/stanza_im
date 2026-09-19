@@ -396,11 +396,14 @@ class HatsTab(QtWidgets.QWidget):
         self._start_task(self._wrap(coro))
 
     async def _wrap(self, coro) -> None:
+        error = ""
         try:
             await coro
         except Exception as exc:
-            self._status.setText(tr("hats_error", error=str(exc)))
+            error = tr("hats_error", error=str(exc))
         await self._reload()
+        if error:
+            self._status.setText(error)
         self._set_busy(False)
 
     def _on_create(self) -> None:

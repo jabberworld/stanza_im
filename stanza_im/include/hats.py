@@ -106,15 +106,70 @@ def command_session(obj) -> tuple[str, str]:
             str(command.get("status") or ""))
 
 
+def submit_action(obj) -> str:
+    """Return the action to use when submitting a command's form.
+
+    XEP-0050 maps ``execute`` to the ``execute`` attribute of ``<actions/>``
+    (or to ``complete`` when there is no ``<actions/>``); some servers (e.g.
+    ejabberd) require the literal ``complete`` instead, so honour the offered
+    action explicitly.
+    """
+    root = _as_element(obj)
+    command = root.find(f"{{{NS_COMMANDS}}}command")
+    if command is None:
+        return "complete"
+    actions = command.find(f"{{{NS_COMMANDS}}}actions")
+    if actions is None:
+        return "complete"
+    execute = str(actions.get("execute") or "")
+    if execute in ("complete", "next", "prev"):
+        return execute
+    if actions.find(f"{{{NS_COMMANDS}}}complete") is not None:
+        return "complete"
+    if actions.find(f"{{{NS_COMMANDS}}}next") is not None:
+        return "next"
+    if actions.find(f"{{{NS_COMMANDS}}}prev") is not None:
+        return "prev"
+    return "complete"
+
+
+def uri_field_var(obj, default: str = "hats#uri") -> str:
+    """Return the field var the server's form uses for a hat URI.
+
+    ``create`` uses ``hats#uri`` while ejabberd's ``destroy``/``assign``/
+    ``unassign`` forms declare a ``list-single`` field named ``hat``.
+    """
+    root = _as_element(obj)
+    for form in root.iter(f"{{{NS_DATA}}}x"):
+        if form.get("type") != "form":
+            continue
+        for field in form.findall(f"{{{NS_DATA}}}field"):
+            if field.get("var") == "hat":
+                return "hat"
+    return default
+
+
+def command_error(obj) -> str:
+    """Return the text of an error ``<note/>`` in a command response."""
+    root = _as_element(obj)
+    command = root.find(f"{{{NS_COMMANDS}}}command")
+    if command is None:
+        return ""
+    for note in command.findall(f"{{{NS_COMMANDS}}}note"):
+        if note.get("type") == "error":
+            return (note.text or "").strip() or "error"
+    return ""
+
+
 def build_command(node: str, values: dict | None = None,
-                  sessionid: str = "") -> ET.Element:
+                  sessionid: str = "", action: str = "execute") -> ET.Element:
     """Build an XEP-0050 ``<command/>`` element for a Hats operation.
 
     With ``values`` the command carries a ``type='submit'`` form; otherwise it
     is a bare ``execute`` request.
     """
     command = ET.Element(f"{{{NS_COMMANDS}}}command")
-    command.set("action", "execute")
+    command.set("action", action or "execute")
     command.set("node", node)
     if sessionid:
         command.set("sessionid", sessionid)
