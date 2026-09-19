@@ -1904,6 +1904,16 @@ class JabberClient:
                                      password=conf["password"])
         bookmarks.add_conference(room, nick, name=name or None,
                                   autojoin=bool(autojoin), password=password)
+        if not name:
+            # slixmpp would store the JID as the name; XEP-0048's name is
+            # optional, so drop it entirely when the caller gave none.
+            for conf in bookmarks["conferences"]:
+                if str(conf["jid"]) == room:
+                    try:
+                        del conf["name"]
+                    except Exception:
+                        pass
+                    break
         try:
             await plugin.set_bookmarks(bookmarks)
             logger.debug("Saved bookmark for room %s", room)

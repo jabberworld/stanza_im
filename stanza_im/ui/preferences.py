@@ -911,12 +911,10 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_muc_name_from_name", "from_name"),
             ("prefs_muc_name_from_vcard", "from_vcard"),
         ])
-        name_source_info = QtWidgets.QToolButton()
+        name_source_info = QtWidgets.QLabel()
         info_icon = self._info_icon()
         if not info_icon.isNull():
-            name_source_info.setIcon(info_icon)
-        name_source_info.setIconSize(QtCore.QSize(16, 16))
-        name_source_info.setAutoRaise(True)
+            name_source_info.setPixmap(info_icon.pixmap(16, 16))
         name_source_info.setToolTip(tr("prefs_muc_name_source_info"))
         muc_form.addRow(tr("prefs_muc_name_source"),
                         self._row(name_source, name_source_info))

@@ -168,7 +168,10 @@ Conference display names honour `chat.muc_name_source` (Preferences → Chat →
 «Конференции», which carries an info icon explaining the order):
 `from_name` (default) resolves bookmark name → room/disco name → JID
 localpart; `from_vcard` resolves bookmark name → vCard `fn` → vCard `nickname`
-→ room/disco name → JID localpart. `MainWindow._muc_display_name` resolves it
+→ room/disco name → JID localpart. A bookmark name equal to the room JID
+(slixmpp's default when no name is set) is ignored, and
+`client.save_bookmark` drops that name element instead of storing the JID.
+`MainWindow._muc_display_name` resolves it
 and `_apply_muc_name` refreshes the tab title and roster row; the setting and
 bookmark changes apply live (`_refresh_muc_names`). [`tests/test_muc_name.py`]
 `ServiceBrowserDialog` groups XEP-0030 items into conferences, gateways,

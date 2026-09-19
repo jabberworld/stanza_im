@@ -675,7 +675,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     async def _load_bookmarks(self):
         bookmarks = await self._client.list_bookmarks()
-        self._bookmarks = {item["jid"]: item for item in bookmarks}
+        self._bookmarks = {}
+        for item in bookmarks:
+            jid = item.get("jid", "")
+            if not jid:
+                continue
+            name = str(item.get("name") or "")
+            if name == jid:
+                # slixmpp substitutes the JID when a bookmark has no name.
+                name = ""
+            self._bookmarks[jid] = {**item, "name": name}
         self._rebuild_bookmarks_menu()
         self._classify_bookmarked_conferences()
         self._refresh_muc_names()
@@ -1197,7 +1206,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # The bookmark name is the user's explicit label and wins in both
         # modes.
         bookmark = (self._bookmarks.get(room) or {}).get("name", "") or ""
-        if bookmark:
+        if bookmark and bookmark != room:
             return bookmark
         if (getattr(self._config.chat, "muc_name_source", "from_name")
                 == "from_vcard"):

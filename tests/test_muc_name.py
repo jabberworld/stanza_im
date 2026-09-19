@@ -74,6 +74,14 @@ check("bookmark name wins in from_vcard",
 win._config.chat.muc_name_source = "from_name"
 check("bookmark name wins in from_name",
       win._muc_display_name("room@conf.example") == "My Room")
+
+# A bookmark whose name is just the JID (slixmpp's default) must be ignored.
+win._bookmarks = {"room@conf.example": {"name": "room@conf.example"}}
+check("JID-like bookmark name ignored in from_name",
+      win._muc_display_name("room@conf.example") == "Room Name")
+win._config.chat.muc_name_source = "from_vcard"
+check("JID-like bookmark name ignored in from_vcard",
+      win._muc_display_name("room@conf.example") == "Nick")
 win._bookmarks = {}
 
 win._muc_vcard_names["room@conf.example"] = {"fn": "", "nickname": ""}
@@ -111,9 +119,12 @@ check("prefs exposes the name source",
       == ["from_name", "from_vcard"])
 check("prefs default is from_name",
       combo.itemData(combo.currentIndex()) == "from_name")
-info = [b for b in dlg.findChildren(QtWidgets.QToolButton)
-        if b.toolTip() == tr("prefs_muc_name_source_info")]
-check("name source has an info tooltip", bool(info))
+info = [w for w in dlg.findChildren(QtWidgets.QLabel)
+        if w.toolTip() == tr("prefs_muc_name_source_info")]
+check("name source has a non-clickable info label", bool(info))
+check("info affordance is not a button", not [
+    b for b in dlg.findChildren(QtWidgets.QToolButton)
+    if b.toolTip() == tr("prefs_muc_name_source_info")])
 dlg.close()
 
 # 5. static wiring ------------------------------------------------------------
@@ -128,6 +139,12 @@ check("vCard reception stores fn and nickname",
       '"fn": card.get("fn")' in _mw_src
       and '"nickname": card.get("nickname")' in _mw_src
       and "self._apply_muc_name(room_jid)" in _mw_src)
+check("JID-like bookmark name is ignored",
+      "bookmark != room" in _mw_src and "name == jid" in _mw_src)
+_client_src = open(os.path.join(_root, "stanza_im", "core", "client.py"),
+                   encoding="utf-8").read()
+check("bookmark saving drops the JID-as-name",
+      'del conf["name"]' in _client_src)
 
 print()
 if FAILURES:
