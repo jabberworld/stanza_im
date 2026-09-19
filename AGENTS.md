@@ -1049,8 +1049,23 @@ text is kept. Returning activity (`eventFilter`) resumes
   information affordances use the glyph
   `resources/images/16x16/actions/info.svg` (a blue «i» circle) via
   `PreferencesDialog._info_icon()`.
+- **Client identity / caps branding**: `JabberClient.__init__` adds a named
+  disco identity (`client`/`pc`, `name=APP_NAME`) and overrides
+  `xep_0115.caps_node` to `urn:stanza-im:ver:<VERSION>` (slixmpp's default is a
+  nameless `client/bot` plus the `http://slixmpp.com/ver/…` node, which peers
+  show as the client name). The XEP-0092 `software_name`/`version`/`os` are set
+  explicitly (slixmpp's `plugin_init` only honours the `name` config key), so
+  version queries report Stanza IM. [`tests/test_client_branding.py`]
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
+
+- **Graceful shutdown**: `JabberClient.disconnect()` disables `auto_reconnect`,
+  sends `<presence type='unavailable'/>` and **awaits**
+  `xmpp.disconnect(wait=1.0)` (slixmpp's `XMLStream.disconnect` returns a future
+  that drains the send queue and closes the stream). `MainWindow._shutdown_async`
+  waits for it before cancelling tasks and quitting — otherwise the close is
+  cancelled and the server keeps the session (the account stays online) for the
+  XEP-0198 resumption window.
 
 - `connection.stream_management` (default on) registers `xep_0198`: slixmpp
   enables SM after bind and resumes a dropped stream (`session_resumed`)

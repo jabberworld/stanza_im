@@ -604,6 +604,24 @@ class JabberClient:
                 jingle_rtp.NS_MUJI, "urn:xmpp:extdisco:2"):
             self.xmpp["xep_0030"].add_feature(_feature)
 
+        # Client identity + caps branding (XEP-0030/0115).  Without a named
+        # identity slixmpp advertises a nameless ``client/bot`` and peers fall
+        # back to the default caps node (``slixmpp.com/ver/…``); brand both so
+        # other clients show "Stanza IM".
+        self.xmpp["xep_0030"].add_identity(
+            category="client", itype="pc", name=APP_NAME)
+        _caps = self.xmpp.plugin.get("xep_0115", None)
+        if _caps is not None:
+            _caps.caps_node = f"urn:stanza-im:ver:{VERSION}"
+        _version = self.xmpp.plugin.get("xep_0092", None)
+        if _version is not None:
+            # slixmpp's plugin_init only honours the "name" config key; set
+            # the version/os explicitly so XEP-0092 reports ours.
+            _version.software_name = APP_NAME if send_software else ""
+            _version.version = VERSION if send_software else ""
+            _version.os = (f"Python {platform.python_version()}"
+                           if send_software else "")
+
         if (self.proxy_mode == "socks5" and self.proxy_host
                 and self.proxy_port):
             self._install_socks_proxy(self.proxy_host, self.proxy_port)
@@ -1098,13 +1116,30 @@ class JabberClient:
                     proxy_host, proxy_port)
 
     async def disconnect(self) -> None:
-        """Gracefully disconnect."""
+        """Gracefully disconnect: go offline and close the stream."""
         try:
             self.file_transfer.close()
         except Exception:
             logger.debug("Closing file transfers failed", exc_info=True)
-        if self.xmpp.is_connected():
-            self.xmpp.disconnect()
+        if not self.xmpp.is_connected():
+            return
+        # Do not let the reconnect logic turn the shutdown into a resume.
+        self.xmpp.auto_reconnect = False
+        try:
+            self.send_presence("offline")
+        except Exception:
+            logger.debug("Sending unavailable presence failed", exc_info=True)
+        try:
+            # XMLStream.disconnect() returns a future that drains the send
+            # queue (flushing the unavailable presence), sends the stream
+            # footer and closes the transport.  It must be awaited: otherwise
+            # the shutdown cancels it and the server keeps the session (and the
+            # account appears online) until the resumption window expires.
+            await asyncio.wait_for(self.xmpp.disconnect(wait=1.0),
+                                   timeout=2.5)
+        except Exception:
+            logger.debug("XMPP disconnect did not finish cleanly",
+                         exc_info=True)
 
     def send_message(self, jid: str, body: str, mtype: str = "chat",
                      mhtml: str | None = None, reply_to: str = "",

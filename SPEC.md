@@ -1227,9 +1227,21 @@ See `XEPs.md` for the full supported-extensions matrix.
   `verified`) feeds the preferences info icon; the separate «Сертификат» icon
   opens `ui/certificate_dialog.CertificateDialog` non-modally with the shared
   `certificate_lines()`.
+- **Client identity / caps branding**: a named disco identity
+  (`client`/`pc`, `name=APP_NAME`) is added and `xep_0115.caps_node` is set to
+  `urn:stanza-im:ver:<VERSION>` (slixmpp's defaults are a nameless `client/bot`
+  and the `http://slixmpp.com/ver/…` node, which peers display as the client).
+  The XEP-0092 `software_name`/`version`/`os` attributes are set explicitly
+  because slixmpp's `plugin_init` only honours the `name` config key.
 
 ### 14.7 Stream Management & Client State (XEP-0198/0352)
 
+- **Graceful shutdown**: `JabberClient.disconnect()` disables
+  `auto_reconnect`, sends `<presence type='unavailable'/>` and awaits
+  `xmpp.disconnect(wait=1.0)` (slixmpp's future drains the send queue and closes
+  the stream); `MainWindow._shutdown_async` waits for it before cancelling tasks
+  and quitting, so the server ends the session immediately instead of holding it
+  for the XEP-0198 resumption window (the account would otherwise stay online).
 - `connection.stream_management` (default on) registers `xep_0198`: SM is
   enabled after bind and a dropped stream is resumed (`session_resumed`)
   without re-auth/roster/presence; unacked stanzas are replayed by `h` counter.
