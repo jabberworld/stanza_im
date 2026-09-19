@@ -33,7 +33,7 @@ c = JabberClient("me@example.com/r", "pw")
 # 1. caps node + software version branding ------------------------------------
 caps = c.xmpp.plugin["xep_0115"]
 check("caps node is branded",
-      caps.caps_node == f"urn:stanza-im:ver:{VERSION}")
+      caps.caps_node == f"{APP_NAME} {VERSION}")
 check("caps node is not slixmpp's",
       "slixmpp" not in (caps.caps_node or ""))
 

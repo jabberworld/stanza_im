@@ -1229,10 +1229,11 @@ See `XEPs.md` for the full supported-extensions matrix.
   `certificate_lines()`.
 - **Client identity / caps branding**: a named disco identity
   (`client`/`pc`, `name=APP_NAME`) is added and `xep_0115.caps_node` is set to
-  `urn:stanza-im:ver:<VERSION>` (slixmpp's defaults are a nameless `client/bot`
-  and the `http://slixmpp.com/ver/…` node, which peers display as the client).
-  The XEP-0092 `software_name`/`version`/`os` attributes are set explicitly
-  because slixmpp's `plugin_init` only honours the `name` config key.
+  the human-readable `Stanza IM <VERSION>` (slixmpp's defaults are a nameless
+  `client/bot` and the `http://slixmpp.com/ver/…` node; clients that map caps
+  nodes to names display the node verbatim for unknown clients). The XEP-0092
+  `software_name`/`version`/`os` attributes are set explicitly because
+  slixmpp's `plugin_init` only honours the `name` config key.
 
 ### 14.7 Stream Management & Client State (XEP-0198/0352)
 

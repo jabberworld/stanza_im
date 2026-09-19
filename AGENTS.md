@@ -1051,11 +1051,13 @@ text is kept. Returning activity (`eventFilter`) resumes
   `PreferencesDialog._info_icon()`.
 - **Client identity / caps branding**: `JabberClient.__init__` adds a named
   disco identity (`client`/`pc`, `name=APP_NAME`) and overrides
-  `xep_0115.caps_node` to `urn:stanza-im:ver:<VERSION>` (slixmpp's default is a
-  nameless `client/bot` plus the `http://slixmpp.com/ver/…` node, which peers
-  show as the client name). The XEP-0092 `software_name`/`version`/`os` are set
-  explicitly (slixmpp's `plugin_init` only honours the `name` config key), so
-  version queries report Stanza IM. [`tests/test_client_branding.py`]
+  `xep_0115.caps_node` to the human-readable `Stanza IM <VERSION>` (slixmpp's
+  default is a nameless `client/bot` plus the `http://slixmpp.com/ver/…` node;
+  clients that keep a node→name table, e.g. Psi+/Gajim/Conversations, display
+  the caps node verbatim for unknown clients). The XEP-0092
+  `software_name`/`version`/`os` are set explicitly (slixmpp's `plugin_init`
+  only honours the `name` config key), so version queries report Stanza IM.
+  [`tests/test_client_branding.py`]
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
 

@@ -605,14 +605,15 @@ class JabberClient:
             self.xmpp["xep_0030"].add_feature(_feature)
 
         # Client identity + caps branding (XEP-0030/0115).  Without a named
-        # identity slixmpp advertises a nameless ``client/bot`` and peers fall
-        # back to the default caps node (``slixmpp.com/ver/…``); brand both so
-        # other clients show "Stanza IM".
+        # identity slixmpp advertises a nameless ``client/bot``; and clients
+        # that keep a node→name table (Psi+, Gajim, Conversations) display the
+        # caps node verbatim for unknown clients, so make it human-readable
+        # instead of slixmpp's ``http://slixmpp.com/ver/…``.
         self.xmpp["xep_0030"].add_identity(
             category="client", itype="pc", name=APP_NAME)
         _caps = self.xmpp.plugin.get("xep_0115", None)
         if _caps is not None:
-            _caps.caps_node = f"urn:stanza-im:ver:{VERSION}"
+            _caps.caps_node = f"{APP_NAME} {VERSION}"
         _version = self.xmpp.plugin.get("xep_0092", None)
         if _version is not None:
             # slixmpp's plugin_init only honours the "name" config key; set
