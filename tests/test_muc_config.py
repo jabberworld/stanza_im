@@ -43,6 +43,7 @@ class _FakeClient:
         self.affiliation_calls = []
         self.config_calls = []
         self.form = _FakeForm(title="", instructions=[], fields=[])
+        self.groupchats = {}
 
     async def muc_get_affiliations(self, room):
         return {
@@ -61,6 +62,16 @@ class _FakeClient:
 
     async def muc_set_config(self, room, values):
         self.config_calls.append((room, values))
+
+    async def room_supports_hats(self, room):
+        return True
+
+    async def hats_list(self, room):
+        return [{"uri": "urn:xmpp:hats:abc", "title": "Host", "hue": 10.0}]
+
+    async def hats_list_assigned(self, room):
+        return [{"uri": "urn:xmpp:hats:abc", "title": "Host",
+                 "hue": 10.0, "jid": "m1@x"}]
 
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -83,8 +94,10 @@ check("gear emits the room", captured == ["room@conf.example/me"])
 async def scenario(can_configure):
     client = _FakeClient()
     dlg = MucConfigDialog(client, "room@conf.example",
-                          can_configure=can_configure)
-    for _ in range(4):
+                          can_configure=can_configure,
+                          actor_affiliation="owner" if can_configure
+                          else "member")
+    for _ in range(8):
         await asyncio.sleep(0)
     return client, dlg
 
@@ -92,8 +105,22 @@ async def scenario(can_configure):
 loop = asyncio.new_event_loop()
 try:
     client, dlg = loop.run_until_complete(scenario(True))
-    check("two tabs", dlg._tabs.count() == 2)
-    check("owner sees the settings tab", dlg._tabs.isTabEnabled(1))
+    check("three tabs", dlg._tabs.count() == 3)
+    check("owner sees the settings tab", dlg._tabs.isTabEnabled(2))
+    check("hats tab present", dlg._tabs.tabText(1) == "Hats")
+    check("hats tree lists one category with one assignee",
+          dlg._hats_tab._tree.topLevelItemCount() == 1
+          and dlg._hats_tab._tree.topLevelItem(0).childCount() == 1)
+    dlg._hats_tab._tree.setCurrentItem(
+        dlg._hats_tab._tree.topLevelItem(0))
+    check("edit/delete enabled on a hat",
+          dlg._hats_tab._edit_btn.isEnabled()
+          and dlg._hats_tab._delete_btn.isEnabled())
+    dlg._hats_tab._tree.setCurrentItem(
+        dlg._hats_tab._tree.topLevelItem(0).child(0))
+    check("unassign enabled on a user, edit disabled",
+          dlg._hats_tab._unassign_btn.isEnabled()
+          and not dlg._hats_tab._edit_btn.isEnabled())
     check("participants grouped in four categories",
           dlg._tree.topLevelItemCount() == 4)
     counts = [dlg._tree.topLevelItem(i).childCount() for i in range(4)]
@@ -142,7 +169,7 @@ try:
     dlg.deleteLater()
 
     client2, dlg2 = loop.run_until_complete(scenario(False))
-    check("admin cannot see the settings tab", not dlg2._tabs.isTabEnabled(1))
+    check("admin cannot see the settings tab", not dlg2._tabs.isTabEnabled(2))
     check("no-rights note shown", bool(dlg2._settings_status.text()))
     check("no config fetch for admin", dlg2._form_widget is None)
     dlg2.deleteLater()

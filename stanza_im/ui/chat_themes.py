@@ -11,6 +11,7 @@ from PyQt6 import QtCore, QtGui
 from stanza_im.include.constants import CHATSKINS_DIR
 from stanza_im.include.emoticons import smile_to_html
 from stanza_im.include.utils import escape_html, restore_url_tokens
+from stanza_im.include import hats as hats_mod
 from stanza_im.i18n import tr
 
 _logger = logging.getLogger(__name__)
@@ -27,6 +28,13 @@ _MEDIA_CSS = """
                       display: block; }
 .stanza-media-open { display: inline-block; margin-top: 2px; font-size: 11px;
                      color: #1a73e8; }
+"""
+
+_HATS_CSS = """
+.stanza-hat { display: inline-block; margin-left: 4px; padding: 0 5px;
+              border-radius: 7px; font-size: 9px; font-weight: normal;
+              line-height: 14px; vertical-align: middle; white-space: nowrap;
+              background: rgba(0,0,0,.08); }
 """
 
 
@@ -350,7 +358,8 @@ class ChatThemeFactory:
                        sender_color: str = "#000000",
                        user_icon_path: str = "", unstyled: bool = False,
                        mention: bool = False, edited: bool = False,
-                       highlight_nick: str = "", geo_ref: str = "") -> str:
+                       highlight_nick: str = "", geo_ref: str = "",
+                       hats: list | None = None) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -360,6 +369,7 @@ class ChatThemeFactory:
         are wrapped in a styled <span> (see :meth:`_apply_highlight`).  With
         *geo_ref* geo: URIs in the body become ``stanza:geo:`` links carrying
         the message id (used to live-update the map window on corrections).
+        *hats* (XEP-0317) are rendered as coloured chips right of the nick.
         """
         key = direction
         if is_next:
@@ -383,6 +393,7 @@ class ChatThemeFactory:
         if (self._nick_font_family or self._nick_font_size_pt) \
                 and 'class="sender' not in template:
             sender_html = f'<span class="sender">{sender_html}</span>'
+        sender_html += self._render_hats(hats)
 
         html = template.replace("%sender%", sender_html) \
                        .replace("%message%", body_html) \
@@ -394,6 +405,34 @@ class ChatThemeFactory:
         if "{body}" in html:
             html = html.replace("{body}", body_html)
         return html
+
+    @staticmethod
+    def _render_hats(hats: list | None) -> str:
+        """Render XEP-0317 hats as coloured chips right of the sender nick."""
+        if not hats:
+            return ""
+        parts = []
+        for hat in hats:
+            title = str((hat or {}).get("title") or (hat or {}).get("uri") or "")
+            if not title:
+                continue
+            hue = (hat or {}).get("hue")
+            fg = hats_mod.hue_to_color(hue, 90.0, 32.0) if hue is not None else ""
+            bg = hats_mod.hue_to_color(hue, 70.0, 88.0) if hue is not None else ""
+            border = (hats_mod.hue_to_color(hue, 80.0, 72.0)
+                      if hue is not None else "")
+            style = ""
+            if fg:
+                style += f"color:{fg};"
+            if bg:
+                style += f"background:{bg};"
+            if border:
+                style += f"border:1px solid {border};"
+            title_html = escape_html(title)
+            parts.append(
+                f'<span class="stanza-hat" style="{style}" '
+                f'title="{title_html}">{title_html}</span>')
+        return "".join(parts)
 
     def render_status(self, text: str, timestamp: str) -> str:
         """Render a status/system message."""
@@ -463,6 +502,7 @@ class ChatThemeFactory:
                     is_next=msg.get("is_next", False),
                     sender_color=msg.get("sender_color", "#000000"),
                     user_icon_path=msg.get("user_icon_path", ""),
+                    hats=msg.get("hats"),
                 ))
 
         messages_html = "\n".join(body_parts)
@@ -489,6 +529,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 @keyframes stanza-jump-flash {{ 0% {{ background: rgba(255,214,0,.45); }}
                  100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
+{_HATS_CSS}
 {self._font_override_css()}
 </style>
 </head>
@@ -530,6 +571,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 @keyframes stanza-jump-flash {{ 0% {{ background: rgba(255,214,0,.45); }}
                  100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
+{_HATS_CSS}
 {self._font_override_css()}
 </style>
 </head>

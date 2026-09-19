@@ -33,6 +33,7 @@ from stanza_im.xmpp.jingle_rtp import JingleRtpManager
 from stanza_im.xmpp import muji as muji_mod
 from stanza_im.xmpp.muji import MujiManager
 from stanza_im.include import pep
+from stanza_im.include import hats as hats_mod
 
 logger = logging.getLogger(__name__)
 
@@ -508,6 +509,7 @@ class JabberClient:
         self._mds_server_assist = False
         self._mds_pubsub_options = False
         self._upload_service_cache: str | None = None
+        self._hats_support: dict[str, bool] = {}
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
         self.send_chatstates = (self.send_typing_notifications
@@ -2055,6 +2057,92 @@ class JabberClient:
         muc = self.xmpp.plugin["xep_0045"]
         await muc.set_affiliation(room, affiliation, jid=jid, reason=reason)
 
+    # ── XEP-0317 Hats ─────────────────────────────────────────────
+
+    async def room_supports_hats(self, room: str) -> bool:
+        """True when *room* advertises ``urn:xmpp:hats:0`` (cached)."""
+        cached = self._hats_support.get(room)
+        if cached is not None:
+            return cached
+        try:
+            result = await self.xmpp["xep_0030"].get_info(jid=room)
+            features = {str(el.get("var") or "") for el in result.xml.iter()
+                        if str(el.tag).endswith("feature")}
+        except Exception:
+            logger.debug("Hats disco#info for %s failed", room, exc_info=True)
+            return False
+        supported = hats_mod.NS_HATS in features
+        self._hats_support[room] = supported
+        return supported
+
+    def _hats_command(self, room: str, node: str, values: dict | None = None,
+                      sessionid: str = ""):
+        """Build a Hats ad-hoc command IQ (not sent), used by tests too."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = room
+        iq.xml.append(hats_mod.build_command(node, values, sessionid))
+        return iq
+
+    @staticmethod
+    def _hats_rows(root) -> list[dict]:
+        rows = []
+        for row in hats_mod.parse_result_form(root):
+            uri = str(row.get("hats#uri") or "")
+            rows.append({
+                "uri": uri,
+                "title": str(row.get("hats#title") or uri),
+                "hue": hats_mod.parse_hue(row.get("hats#hue")),
+                "jid": str(row.get("hats#jid") or ""),
+            })
+        return rows
+
+    async def _hats_submit(self, room: str, node: str,
+                           values: dict) -> None:
+        """Execute a two-step Hats command (execute → submit form)."""
+        first = await self._hats_command(room, node).send()
+        sessionid, _status = hats_mod.command_session(first.xml)
+        await self._hats_command(room, node, values, sessionid).send()
+
+    async def hats_list(self, room: str) -> list[dict]:
+        """Return the hats configured in *room* (title/uri/hue)."""
+        result = await self._hats_command(room, hats_mod.CMD_LIST).send()
+        return self._hats_rows(result.xml)
+
+    async def hats_list_assigned(self, room: str) -> list[dict]:
+        """Return the hats assigned in *room* (jid/uri/title/hue)."""
+        result = await self._hats_command(
+            room, hats_mod.CMD_LIST_ASSIGNED).send()
+        return self._hats_rows(result.xml)
+
+    async def hats_create(self, room: str, title: str, hue=None,
+                          uri: str = "") -> str:
+        """Create (or update, when *uri* is given) a hat and return its URI."""
+        uri = uri or hats_mod.hat_uri(room, title)
+        values = {"hats#title": title, "hats#uri": uri}
+        if hue is not None:
+            values["hats#hue"] = f"{float(hue):g}"
+        await self._hats_submit(room, hats_mod.CMD_CREATE, values)
+        return uri
+
+    async def hats_update(self, room: str, uri: str, title: str,
+                          hue=None) -> None:
+        """Update an existing hat (create with the same URI)."""
+        await self.hats_create(room, title, hue=hue, uri=uri)
+
+    async def hats_destroy(self, room: str, uri: str) -> None:
+        await self._hats_submit(room, hats_mod.CMD_DESTROY,
+                                {"hats#uri": uri})
+
+    async def hats_assign(self, room: str, jid: str, uri: str) -> None:
+        await self._hats_submit(room, hats_mod.CMD_ASSIGN,
+                                {"hats#jid": jid, "hats#uri": uri})
+
+    async def hats_unassign(self, room: str, jid: str, uri: str) -> None:
+        await self._hats_command(
+            room, hats_mod.CMD_UNASSIGN,
+            {"hats#jid": jid, "hats#uri": uri}).send()
+
     def set_muc_subject(self, room: str, subject: str,
                         langs: list[tuple[str, str]] | None = None) -> None:
         """Set the subject/topic of a MUC room.
@@ -3372,6 +3460,8 @@ class JabberClient:
         except Exception:
             pass
 
+        hats = hats_mod.parse_hats(pres)
+
         gi = self.groupchats.setdefault(room, GroupChatInfo(room=room, nick=nick))
         if show == "unavailable":
             gi.users.pop(nick, None)
@@ -3384,6 +3474,7 @@ class JabberClient:
                 "affiliation": affiliation,
                 "real_jid": real_jid,
                 "client": previous_client,
+                "hats": hats,
             }
             if real_jid and (room, nick) not in self._muc_version_probed:
                 self._muc_version_probed.add((room, nick))
@@ -3391,7 +3482,7 @@ class JabberClient:
         if nick == gi.nick and show != "unavailable":
             self._emit_muc_joined(room, gi.subject, list(gi.users))
         self.emit("groupchat_presence", room, nick, show, status, role,
-                  affiliation, real_jid)
+                  affiliation, real_jid, hats)
 
     async def _prefetch_muc_version(self, room: str, nick: str,
                                     jid: str) -> None:

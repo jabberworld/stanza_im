@@ -1164,6 +1164,7 @@ class ChatWidget(QtWidgets.QWidget):
             "outgoing": self._is_mine(entry),
             "edited": bool(entry.get("edited")),
             "sender_color": self._sender_color(entry),
+            "hats": self._user_hats(entry),
         }
 
     def _render_entry(self, entry: dict):
@@ -1742,6 +1743,20 @@ class ChatWidget(QtWidgets.QWidget):
         if affiliation:
             label = tr(f"muc_affiliation_{affiliation}")
             lines.append(f"{tr('tooltip_affiliation')}: {escape_html(label)}")
+        hats = user.get("hats") or []
+        if hats:
+            from stanza_im.include import hats as hats_mod
+            chips = []
+            for hat in hats:
+                title = str(hat.get("title") or hat.get("uri") or "")
+                if not title:
+                    continue
+                color = hats_mod.hue_to_color(hat.get("hue"), 85.0, 42.0)
+                style = f"color:{color};" if color else ""
+                chips.append(
+                    f'<span style="{style}">{escape_html(title)}</span>')
+            if chips:
+                lines.append(f"{tr('tooltip_hats')}: " + ", ".join(chips))
         status = user.get("status", "")
         if status:
             lines.append("<i>"
@@ -1967,6 +1982,16 @@ class ChatWidget(QtWidgets.QWidget):
                 return self._nick_colors.color_for(
                     self._user_color_key(user))
         return self._nick_colors.color_for(self._color_key(nick))
+
+    def _user_hats(self, entry: dict) -> list:
+        """Return the XEP-0317 hats worn by the message sender (MUC only)."""
+        if not self.is_muc:
+            return []
+        nick = entry.get("sender", "")
+        for user in self._users:
+            if self._same_nick(user.get("nick", ""), nick):
+                return list(user.get("hats") or [])
+        return []
 
     def _color_key(self, nick: str, real_jid: str = "") -> str:
         key = normalize_nick(nick or "")

@@ -273,6 +273,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_joined: set[str] = set()
         self._muc_join_grace: dict[str, float] = {}
         self._muc_config_dialogs: dict[str, object] = {}
+        self._hats_assign_dialogs: dict[str, object] = {}
         self._muc_base_nicks: dict[str, str] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
@@ -3199,7 +3200,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_groupchat_presence(self, room: str, nick: str, show: str,
                                status: str, role: str = "",
-                               affiliation: str = "", real_jid: str = ""):
+                               affiliation: str = "", real_jid: str = "",
+                               hats=None):
         users = self._muc_users.setdefault(room, {})
         was_present = nick in users
         previous_show = users.get(nick, {}).get("show", "")
@@ -3214,6 +3216,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "avatar_jid": previous.get("avatar_jid", ""),
                 "avatar_path": previous.get("avatar_path", ""),
                 "client": previous.get("client", ""),
+                "hats": (list(hats) if hats is not None
+                         else previous.get("hats", [])),
                 "status_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             if self._client:
@@ -3828,6 +3832,16 @@ class MainWindow(QtWidgets.QMainWindow):
             action.triggered.connect(
                 lambda checked=False, value=role:
                 self._change_muc_role(room, nick, value))
+        can_hats = self._muc_affiliation(room) in ("owner", "admin")
+        hats_menu = menu.addMenu(tr("muc_user_hats"))
+        assign = hats_menu.addAction(tr("hats_assign"))
+        assign.setEnabled(can_hats)
+        assign.triggered.connect(
+            lambda: self._show_hat_assign(room, nick))
+        unassign = hats_menu.addAction(tr("hats_unassign"))
+        unassign.setEnabled(can_hats)
+        unassign.triggered.connect(
+            lambda: self._show_hat_unassign(room, nick))
         menu.exec(pos)
 
     def _show_muc_participant_profile(self, room: str, nick: str,
@@ -3844,6 +3858,106 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         self._client.set_muc_role(room, nick, role)
+
+    # ── XEP-0317 Hats ─────────────────────────────────────────────
+
+    @staticmethod
+    def _participant_real_jid(info: dict) -> str:
+        raw = info.get("real_jid")
+        if isinstance(raw, str) and "@" in raw:
+            return raw.split("/", 1)[0].strip()
+        return ""
+
+    def _hats_participants(self, room: str) -> list[dict]:
+        out = []
+        for nick, info in self._muc_users.get(room, {}).items():
+            out.append({"nick": nick,
+                        "jid": self._participant_real_jid(info)})
+        out.sort(key=lambda p: p["nick"].lower())
+        return out
+
+    def _notify_hats(self, message: str) -> None:
+        self._tray.show_message(APP_NAME, message)
+
+    def _show_hat_assign(self, room: str, nick: str):
+        if self._muc_affiliation(room) not in ("owner", "admin"):
+            return
+        jid = self._participant_real_jid(self._participant_info(room, nick))
+        if not jid:
+            self._notify_hats(tr("hats_no_real_jid"))
+            return
+        self._start_task(self._prepare_hat_assign(room, jid))
+
+    async def _prepare_hat_assign(self, room: str, jid: str):
+        if self._client is None:
+            return
+        try:
+            if not await self._client.room_supports_hats(room):
+                self._notify_hats(tr("hats_unsupported"))
+                return
+            hats = await self._client.hats_list(room)
+        except Exception as exc:
+            self._notify_hats(tr("hats_error", error=str(exc)))
+            return
+        if not hats:
+            self._notify_hats(tr("hats_no_hats"))
+            return
+        from stanza_im.ui.hats_dialog import HatAssignDialog
+        dialog = HatAssignDialog(hats, self._hats_participants(room),
+                                 preselect=[jid],
+                                 parent=self._chat_dialog_parent())
+        dialog.accepted.connect(lambda: self._start_task(
+            self._assign_hats(room, dialog.hat_uri(), dialog.jids())))
+        self._hats_assign_dialogs[room] = dialog
+        dialog.finished.connect(
+            lambda *_, r=room: self._hats_assign_dialogs.pop(r, None))
+        self._place_dialog_over(dialog, self._chat_dialog_parent())
+        dialog.show()
+
+    async def _assign_hats(self, room: str, uri: str, jids: list[str]):
+        if self._client is None or not uri:
+            return
+        for jid in jids:
+            try:
+                await self._client.hats_assign(room, jid, uri)
+            except Exception as exc:
+                self._notify_hats(tr("hats_error", error=str(exc)))
+
+    def _show_hat_unassign(self, room: str, nick: str):
+        if self._muc_affiliation(room) not in ("owner", "admin"):
+            return
+        info = self._participant_info(room, nick)
+        jid = self._participant_real_jid(info)
+        hats = info.get("hats") or []
+        if not jid:
+            self._notify_hats(tr("hats_no_real_jid"))
+            return
+        if not hats:
+            self._notify_hats(tr("hats_user_none", nick=nick))
+            return
+        from stanza_im.ui.hats_dialog import HatUnassignDialog
+        dialog = HatUnassignDialog(hats, nick,
+                                   parent=self._chat_dialog_parent())
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        hat = dialog.hat()
+        if not hat:
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("hats_unassign_title"),
+            tr("hats_confirm_unassign", title=hat.get("title") or "",
+               user=nick))
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self._start_task(self._unassign_hat(room, jid, hat.get("uri") or ""))
+
+    async def _unassign_hat(self, room: str, jid: str, uri: str):
+        if self._client is None or not uri:
+            return
+        try:
+            await self._client.hats_unassign(room, jid, uri)
+        except Exception as exc:
+            self._notify_hats(tr("hats_error", error=str(exc)))
 
     # ── XEP-0249 conference invitations ───────────────────────────
 

@@ -90,6 +90,7 @@ stanza_im/                      # Python package
 │   ├── pep.py                   # XEP-0080/0107/0108/0118 payloads + icon packs
 │   ├── geo.py                   # RFC 5870 geo: URIs, Mercator math, track, tile cache
 │   ├── xmpp_uri.py              # XEP-0147 xmpp: URI parse/build (RFC 5122)
+│   ├── hats.py                  # XEP-0317 Hats + XEP-0392 HSLuv colour generation
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -107,7 +108,8 @@ XEPs.md                          # Supported XEP list (living document)
 ```
 
 Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`,
-`ui/conference_dialog.py` and `ui/muc_config_dialog.py`. The conference dialog
+`ui/conference_dialog.py`, `ui/muc_config_dialog.py` and
+`ui/hats_dialog.py`. The conference dialog
 provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
 servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
@@ -122,16 +124,37 @@ show a live preview of the selected emoticon set.
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
 and enabled only for owners/admins (`MainWindow._apply_muc_admin` derives our
-affiliation from `_muc_users`). It opens a non-modal `MucConfigDialog` with two
+affiliation from `_muc_users`). It opens a non-modal `MucConfigDialog` with three
 tabs: «Участники» — a `QTreeWidget` grouped into Владельцы/Администраторы/
 Зарегистрированные пользователи/Заблокированные (owner/admin/member/outcast)
 with «Jabber ID» and «Примечание» columns (the note is the XEP-0045 `<reason>`)
-and Add/Edit/Delete buttons (Delete sets affiliation `none`); «Настройки» —
+and Add/Edit/Delete buttons (Delete sets affiliation `none`); «Шапки» —
+XEP-0317 hats (see below); «Настройки» —
 enabled for the owner only and hosts the `muc#owner` room-configuration
 `DataFormWidget`. Edits are collected and applied on «Ок» via
 `client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
 only JIDs). [`tests/test_muc_config.py`]
+
+**Hats (XEP-0317, `include/hats.py` + `ui/hats_dialog.py`)**: occupants'
+`<hats xmlns='urn:xmpp:hats:0'/>` presence lists are parsed by
+`JabberClient._on_groupchat_presence` into `gi.users[nick]["hats"]` and emitted
+with `groupchat_presence`; `MainWindow._muc_users[room][nick]["hats"]` feeds the
+participant tooltip (`ChatWidget._participant_tooltip`, a «Шапки» line) and the
+message chips. `HatsTab` (embedded in `MucConfigDialog`, always shown; a room
+without `urn:xmpp:hats:0` gets a notice and disabled buttons) lists configured
+hats as top-level categories with their assigned users underneath and offers
+Создать/Изменить/Назначить/Снять/Удалить (Изменить/Удалить need a category
+selected, Снять a user, Назначить at least one hat; owner/admin only). The hat
+URI is `urn:xmpp:hats:<sha1(room + "\x00" + title)>`; the optional colour is a
+`hats#hue` angle turned into RGB by the XEP-0392 HSLuv implementation in
+`include/hats.py`. Management uses the `urn:xmpp:hats:commands` ad-hoc
+`create`/`destroy`/`list`/`list-assigned`/`assign`/`unassign` nodes
+(`client.hats_*`, custom IQs: execute → submit). The participant context menu
+gains a gated «Шапка» submenu (after «Изменить роль») with «Назначить»
+(preselects the user in `HatAssignDialog`) and «Снять» (`HatUnassignDialog`
+lists the user's hats, then confirms). Messages render the sender's hats as
+coloured `.stanza-hat` chips right of the nick. [`tests/test_hats.py`]
 
 On «Ок» only the parts that actually changed are sent: affiliation edits go
 through `client.muc_set_affiliation` (each pre-checked client-side against the

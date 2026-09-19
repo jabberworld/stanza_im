@@ -1220,7 +1220,7 @@ window.__stanzaMentionRef = '';
                                 unstyled: bool = False, raw_timestamp: str = "",
                                 reply_able_id: str = "", reply_author: str = "",
                                 reply_quote=None, outgoing: bool = False,
-                                edited: bool = False) -> str:
+                                edited: bool = False, hats=None) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -1232,7 +1232,7 @@ window.__stanzaMentionRef = '';
                     sender_color=sender_color, user_icon_path=user_icon_path,
                     unstyled=unstyled, mention=self.mention_senders,
                     edited=edited, highlight_nick=self.highlight_nick,
-                    geo_ref=reply_able_id or "")
+                    geo_ref=reply_able_id or "", hats=hats)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -1249,7 +1249,7 @@ window.__stanzaMentionRef = '';
                         unstyled: bool = False, raw_timestamp: str = "",
                         reply_able_id: str = "", reply_author: str = "",
                         reply_quote=None, outgoing: bool = False,
-                        edited: bool = False):
+                        edited: bool = False, hats=None):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -1259,7 +1259,7 @@ window.__stanzaMentionRef = '';
                 sender, body, timestamp, direction, is_next,
                 sender_color, user_icon_path, message_id, unstyled,
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
-                outgoing, edited)
+                outgoing, edited, hats)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -1324,6 +1324,7 @@ window.__stanzaMentionRef = '';
                         mention=self.mention_senders,
                         edited=entry.get("edited", False),
                         highlight_nick=self.highlight_nick,
+                        hats=entry.get("hats"),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -1627,8 +1628,9 @@ else:
                         unstyled: bool = False, raw_timestamp: str = "",
                         reply_able_id: str = "", reply_author: str = "",
                         reply_quote=None, outgoing: bool = False,
-                        edited: bool = False):
+                        edited: bool = False, hats=None):
             edited_suffix = " " + tr("msg_edited_tooltip") if edited else ""
+            hats_suffix = self._hats_text(hats)
             reply_line = ""
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote[0], reply_quote[1]
@@ -1648,14 +1650,21 @@ else:
             elif direction == "incoming":
                 self._append_before_typing(
                     reply_line +
-                    f"<b>{sender}</b> <i>({timestamp})</i>: "
+                    f"<b>{sender}</b>{hats_suffix} <i>({timestamp})</i>: "
                     f"{self._escape_body_for_fallback(body)}{edited_suffix}")
             else:
                 self._append_before_typing(
                     reply_line +
-                    f"<b style='color:#0066cc'>{sender}</b> "
+                    f"<b style='color:#0066cc'>{sender}</b>{hats_suffix} "
                     f"<i>({timestamp})</i>: "
                     f"{self._escape_body_for_fallback(body)}{edited_suffix}")
+
+        @staticmethod
+        def _hats_text(hats) -> str:
+            titles = [str((h or {}).get("title") or (h or {}).get("uri") or "")
+                      for h in (hats or [])]
+            titles = [t for t in titles if t]
+            return " [" + ", ".join(titles) + "]" if titles else ""
 
         @staticmethod
         def _escape_body_for_fallback(body) -> str:
@@ -1704,7 +1713,8 @@ else:
                             f"<i>({entry.get('timestamp', '')}) * "
                             f"{entry.get('sender', 'Me')} {phrase}</i>")
                 return (reply_line +
-                        f"<b>{entry.get('sender', 'Me')}</b> "
+                        f"<b>{entry.get('sender', 'Me')}</b>"
+                        f"{self._hats_text(entry.get('hats'))} "
                         f"<i>({entry.get('timestamp', '')})</i>: {body}")
 
             html = "".join(entry_html(entry) for entry in messages)

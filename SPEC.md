@@ -53,6 +53,7 @@ stanza_im/
 │   ├── device_test.py  — Devices self-tests (mic meter/tone/camera)
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
 │   ├── muc_config_dialog.py — XEP-0045 room management (affiliations + config)
+│   ├── hats_dialog.py       — XEP-0317 hats tab + create/assign/unassign dialogs
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── history_manager.py   — Per-contact history browser
@@ -68,7 +69,7 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870)
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392)
 └── plugins/            — (future)
 ```
 
@@ -792,7 +793,7 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
 The MUC tab header shows a gear button after the bookmark (hidden on 1:1 tabs),
 enabled only for owners/admins (`MainWindow._apply_muc_admin`, fed by our
 affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
-(`ui/muc_config_dialog.py`) with two tabs:
+(`ui/muc_config_dialog.py`) with three tabs:
 
 - «Участники» — a `QTreeWidget` with the four affiliation groups (Владельцы =
   owner, Администраторы = admin, Зарегистрированные пользователи = member,
@@ -803,6 +804,7 @@ affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
   `client.muc_get_affiliations` builds a custom `muc#admin` IQ so the `reason`
   survives (slixmpp's `get_affiliation_list` returns only JIDs); a failing
   category is left empty.
+- «Шапки» — XEP-0317 hats, see §11.7.1 (always shown; owner/admin only).
 - «Настройки» — enabled for the owner only; fetches the `muc#owner` room form
   (`client.muc_get_config`) into a `DataFormWidget`.
 
@@ -833,6 +835,40 @@ name is set) is ignored, and `client.save_bookmark` omits that name element.
 `_apply_muc_name` updates the tab title and roster row; the setting and
 bookmark changes apply live (the Preferences combo has an info icon with this
 order).
+
+### 11.7.1 Hats (XEP-0317, `include/hats.py` + `ui/hats_dialog.py`)
+
+Extended MUC roles. A room that supports hats advertises `urn:xmpp:hats:0`;
+occupants' hats arrive as a `<hats xmlns='urn:xmpp:hats:0'/>` list of
+`<hat uri title hue xml:lang/>` right under the presence. `JabberClient.\
+_on_groupchat_presence` parses it with `hats.parse_hats` into
+`gi.users[nick]["hats"]` and forwards it with the `groupchat_presence` event;
+`MainWindow._muc_users[room][nick]["hats"]` feeds the participant tooltip
+(«Шапки» line, coloured) and `ChatWidget._user_hats` (message chips).
+
+- **Management** (`HatsTab`, embedded in `MucConfigDialog`, owner/admin, always
+  visible; a room without `urn:xmpp:hats:0` shows `hats_unsupported` with the
+  buttons disabled) lists configured hats from the `list` command as top-level
+  categories and the assigned users from `list-assigned` underneath (falling
+  back to the presence hats when the command returns nothing). Buttons:
+  Создать/Изменить/Назначить/Снять/Удалить — Изменить/Удалить require a
+  selected category, Снять a selected user, Назначить at least one hat.
+- **Colour**: `HatEditDialog` has a required «Название» and an optional colour;
+  a picked `QColor` is stored as the `hats#hue` angle and rendered through the
+  XEP-0392 HSLuv conversion (`hue_to_color`, validated against the XEP test
+  vectors) when the chip is drawn.
+- **Commands**: `client.hats_create/update/destroy/assign/unassign/list/
+  list_assigned` build custom `<command/>` IQs on the
+  `urn:xmpp:hats:commands` nodes (execute → submit); `room_supports_hats` is a
+  cached disco#info probe. The create URI is
+  `urn:xmpp:hats:<sha1(room + "\x00" + title)>`.
+- **Context menu**: the participant context menu gains a «Шапка» submenu after
+  «Изменить роль» (owner/admin only) with «Назначить» (`HatAssignDialog`, the
+  user preselected; present users or a manual JID) and «Снять»
+  (`HatUnassignDialog` lists the user's hats, then confirms).
+- **Rendering**: messages show the sender's hats as coloured `.stanza-hat`
+  chips right of the nick (`ChatThemeFactory.render_message(hats=…)`; the
+  QTextBrowser fallback appends them as `[Title, …]` text).
 
 ### 11.8 MUC Join Reliability
 

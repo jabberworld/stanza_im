@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.ui.data_form_widget import DataFormWidget
+from stanza_im.ui.hats_dialog import HatsTab
 
 _AFFILIATIONS = ("owner", "admin", "member", "outcast")
 _CATEGORY_KEYS = {
@@ -142,6 +143,12 @@ class MucConfigDialog(QtWidgets.QDialog):
         p_layout.addLayout(row, 1)
         self._tabs.addTab(participants, tr("muc_config_participants_tab"))
 
+        # ── Hats (XEP-0317) ───────────────────────────────────────
+        self._hats_tab = HatsTab(
+            client, room,
+            can_manage=actor_affiliation in ("owner", "admin"))
+        self._tabs.addTab(self._hats_tab, tr("hats_tab"))
+
         # ── Settings ──────────────────────────────────────────────
         settings = QtWidgets.QWidget()
         s_layout = QtWidgets.QVBoxLayout(settings)
@@ -151,7 +158,7 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._settings_body = QtWidgets.QVBoxLayout()
         s_layout.addLayout(self._settings_body, 1)
         self._tabs.addTab(settings, tr("muc_config_settings_tab"))
-        self._tabs.setTabEnabled(1, self._can_configure)
+        self._tabs.setTabEnabled(2, self._can_configure)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
