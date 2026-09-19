@@ -729,6 +729,13 @@ class ChatWidget(QtWidgets.QWidget):
                     and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
                     and self._edit_last_sent()):
                 return True
+            if (event.key() == QtCore.Qt.Key.Key_Up
+                    and not has_ctrl
+                    and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                    and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
+                    and not self._input.toPlainText()
+                    and self._reply_to_last()):
+                return True
             if (event.key() == QtCore.Qt.Key.Key_V and has_ctrl
                     and self._handle_pasted_image()):
                 return True
@@ -923,6 +930,20 @@ class ChatWidget(QtWidgets.QWidget):
         if "/" in reply_to:
             return reply_to.rsplit("/", 1)[1]
         return reply_to
+
+    def _reply_to_last(self) -> bool:
+        """Start a reply to the newest incoming message (Up on empty input)."""
+        for entry in self._newest_first():
+            if self._is_mine(entry):
+                continue
+            reply_id = self._reply_target_id(entry)
+            if not reply_id:
+                continue
+            self._on_reply_requested(
+                reply_id, entry.get("reply_author", ""),
+                entry.get("sender", ""), entry.get("body", ""))
+            return True
+        return False
 
     def _on_reply_requested(self, reply_id: str, author: str, sender: str,
                             snippet: str):

@@ -713,7 +713,10 @@ navigates: the `_ACTION_JS` document handler preventDefaults the anchor and
 stores its `href` in `window.__stanzaReplyRef`, and the always-running scroll
 poll delivers that `stanza:reply:` reference to Python as a `link_clicked`
 (exactly like the `window.__stanzaEditRef` edit relay) — so the chat document
-is never reset by the click. Real links and the `mam://load`
+is never reset by the click. Pressing `Up` in an empty input starts a reply to
+the newest incoming message (`ChatWidget._reply_to_last` skips our own entries
+and those without a replyable id; Ctrl+Up remains the XEP-0308 edit shortcut).
+Real links and the `mam://load`
 marker request a navigation intercepted on the C++ side by
 `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which
 emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto` schemes
