@@ -41,6 +41,14 @@ def press_up(widget, ctrl: bool = False) -> bool:
     return bool(widget.eventFilter(widget._input, event))
 
 
+def press_down(widget, ctrl: bool = False) -> bool:
+    mods = (QtCore.Qt.KeyboardModifier.ControlModifier if ctrl
+            else QtCore.Qt.KeyboardModifier.NoModifier)
+    event = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress,
+                            QtCore.Qt.Key.Key_Down, mods)
+    return bool(widget.eventFilter(widget._input, event))
+
+
 def new_widget(jid="bob@example.com", is_muc=False, nick="me"):
     widget = ChatWidget(jid, "Chat", chat_themes.ChatThemeFactory(),
                         is_muc=is_muc)
@@ -109,6 +117,39 @@ cw6.add_message(sender="Me", body="editable", timestamp="10:00",
 check("ctrl+up consumed", press_up(cw6, ctrl=True) is True)
 check("edit started", cw6._editing_id == "edit-6"
       and cw6._input.toPlainText() == "editable")
+
+# 8. Down cancels a reply the user has not started typing ---------------------
+cw7 = new_widget()
+cw7.add_message(sender="Bob", body="question", timestamp="10:00",
+                direction="incoming", reply_able_id="orig-7",
+                reply_author="bob@example.com/res")
+press_up(cw7)
+check("reply started before down", cw7._reply_id == "orig-7")
+check("down cancels an untouched reply", press_down(cw7) is True)
+check("reply state cleared",
+      cw7._reply_id == "" and cw7._reply_ctx.isHidden())
+check("quote removed", cw7._input.toPlainText() == "")
+
+cw8 = new_widget()
+cw8.add_message(sender="Bob", body="question", timestamp="10:00",
+                direction="incoming", reply_able_id="orig-8",
+                reply_author="bob@example.com/res")
+press_up(cw8)
+cw8._input.insertPlainText("my answer")
+check("down ignored once typing started", press_down(cw8) is False)
+check("reply kept", cw8._reply_id == "orig-8"
+      and "my answer" in cw8._input.toPlainText())
+
+cw9 = new_widget()
+check("down ignored without a reply", press_down(cw9) is False)
+
+cw10 = new_widget()
+cw10.add_message(sender="Bob", body="question", timestamp="10:00",
+                 direction="incoming", reply_able_id="orig-10",
+                 reply_author="bob@example.com/res")
+press_up(cw10)
+check("ctrl+down ignored", press_down(cw10, ctrl=True) is False)
+check("reply still active", cw10._reply_id == "orig-10")
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

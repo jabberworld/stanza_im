@@ -716,6 +716,8 @@ poll delivers that `stanza:reply:` reference to Python as a `link_clicked`
 is never reset by the click. Pressing `Up` in an empty input starts a reply to
 the newest incoming message (`ChatWidget._reply_to_last` skips our own entries
 and those without a replyable id; Ctrl+Up remains the XEP-0308 edit shortcut).
+Pressing `Down` while the reply is untouched (the input holds exactly the
+inserted quote) cancels it.
 Real links and the `mam://load`
 marker request a navigation intercepted on the C++ side by
 `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which

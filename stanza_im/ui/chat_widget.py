@@ -736,6 +736,13 @@ class ChatWidget(QtWidgets.QWidget):
                     and not self._input.toPlainText()
                     and self._reply_to_last()):
                 return True
+            if (event.key() == QtCore.Qt.Key.Key_Down
+                    and not has_ctrl
+                    and not modifiers & QtCore.Qt.KeyboardModifier.AltModifier
+                    and not modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier
+                    and self._reply_untouched()):
+                self._cancel_reply()
+                return True
             if (event.key() == QtCore.Qt.Key.Key_V and has_ctrl
                     and self._handle_pasted_image()):
                 return True
@@ -982,6 +989,11 @@ class ChatWidget(QtWidgets.QWidget):
         for line in (snippet or "").splitlines() or [""]:
             lines.append(("> " + line) if line else ">")
         return "\n".join(lines) + "\n\n"
+
+    def _reply_untouched(self) -> bool:
+        """True when a reply is active and the user has not typed an answer."""
+        return bool(self._reply_id and self._reply_quote_text
+                    and self._input.toPlainText() == self._reply_quote_text)
 
     def _cancel_reply(self):
         self._remove_inserted_quote()

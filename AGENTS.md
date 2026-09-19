@@ -317,7 +317,9 @@ the chat document cannot be reset by the click. Pressing `Up` in the input
 while it is empty starts a reply to the newest incoming message
 (`ChatWidget._reply_to_last` walks `_newest_first()`, skips our own entries and
 those without a replyable id, then runs the same `_on_reply_requested` flow as
-the reply button; Ctrl+Up stays the XEP-0308 edit shortcut).
+the reply button; Ctrl+Up stays the XEP-0308 edit shortcut). Pressing `Down`
+while the reply is still untouched (the input holds exactly the inserted quote)
+cancels it again.
 [`tests/test_reply_up.py`]
 Real links and the `mam://load`
 marker still request a navigation that is intercepted on the
