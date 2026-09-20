@@ -583,7 +583,9 @@ archive replays both show it, while foreign messages do not; it feeds
 optionally confirms (`chat.confirm_retraction`) and emits `message_retract_sent`;
 `client.send_retraction` sends `<retract id='…'/>`,
 `<fallback for='urn:xmpp:message-retract:1'/>`, a fallback `<body>` and a
-`<store/>` hint, and the message is replaced locally with a tombstone. Incoming
+`<store/>` hint, and the message is replaced locally with a tombstone (the
+wrapper gains `data-retracted="1"`, which the page CSS and the menu JS use to
+hide the inline "✕" and the "Изменить"/"Удалить" items). Incoming
 retractions never render their fallback body: with `chat.allow_incoming_deletions`
 on the referenced message becomes a tombstone, with the option off it keeps its
 body and gains a "✕" marker (like the «✎» edit marker). Archived `<retracted/>`

@@ -1140,7 +1140,9 @@ Registers XEP plugins (conditionally where noted):
   id='…'/>` (the room `stanza-id` in MUC, the message `id` in 1:1), a
   `<fallback xmlns='urn:xmpp:fallback:0' for='urn:xmpp:message-retract:1'/>`,
   a generic fallback `<body>` and a `<store xmlns='urn:xmpp:hints'/>` hint; the
-  message is replaced locally with a tombstone. The client advertises
+  message is replaced locally with a tombstone and its wrapper gains
+  `data-retracted="1"`, so the page CSS hides the inline "✕" and the menu JS
+  omits both "Изменить" and "Удалить". The client advertises
   `urn:xmpp:message-retract:1` and accepts the legacy `:0` namespace on receive.
 - Incoming retractions are routed by dedicated handlers (`message_retracted`,
   `message_retracted_own`, `groupchat_message_retracted`) — the fallback body is

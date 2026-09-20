@@ -42,6 +42,8 @@ _HATS_CSS = """
 _DELETE_CSS = """
 .stanza-message:not([data-stanza-outgoing="1"]) .message_actions a.action-delete
     { display: none; }
+.stanza-message[data-retracted="1"] .message_actions a.action-delete
+    { display: none; }
 """
 
 

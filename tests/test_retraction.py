@@ -216,6 +216,13 @@ check("both skins gate the delete button on data-stanza-outgoing",
 check("page CSS hides the delete button for foreign messages",
       "data-stanza-outgoing" in _src("stanza_im", "ui", "chat_themes.py")
       and "action-delete" in _src("stanza_im", "ui", "chat_themes.py"))
+check("retracted messages are marked on the wrapper",
+      'data-retracted="1"' in _view_src
+      and "retracted=retracted" in _view_src)
+check("menu hides edit/delete on a retracted message",
+      "getAttribute('data-retracted')" in _view_src)
+check("page CSS hides the delete button for retracted messages",
+      '[data-retracted="1"]' in _src("stanza_im", "ui", "chat_themes.py"))
 _xeps = _src("XEPs.md")
 check("XEPs.md lists XEP-0424", "XEP-0424" in _xeps)
 

@@ -791,7 +791,8 @@ window.__stanzaMentionRef = '';
                 menu.style.position = 'fixed';
                 menu.style.top = (y + 2) + 'px';
                 menu.style.left = (x + 2) + 'px';
-                if (wrap.getAttribute('data-stanza-outgoing') === '1') {
+                if (wrap.getAttribute('data-stanza-outgoing') === '1'
+                    && wrap.getAttribute('data-retracted') !== '1') {
                     var edit = document.createElement('button');
                     edit.type = 'button';
                     edit.textContent = EDIT_LABEL || 'Edit';
@@ -1308,7 +1309,7 @@ window.__stanzaMentionRef = '';
             return self._mark_message(html, sender, message_id, raw_timestamp,
                                       reply_able_id, reply_author,
                                       reply_body=body, outgoing=outgoing,
-                                      edited=edited)
+                                      edited=edited, retracted=retracted)
 
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
@@ -1395,6 +1396,8 @@ window.__stanzaMentionRef = '';
                         edited=entry.get("edited", False),
                         highlight_nick=self.highlight_nick,
                         hats=entry.get("hats"),
+                        retracted=entry.get("retracted", False),
+                        retract_marker=entry.get("retract_marker", False),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -1410,7 +1413,8 @@ window.__stanzaMentionRef = '';
                 entry.get("origin_id", ""), entry.get("reply_author", ""),
                 reply_body=entry.get("body", ""),
                 outgoing=entry.get("outgoing", False),
-                edited=entry.get("edited", False))
+                edited=entry.get("edited", False),
+                retracted=entry.get("retracted", False))
                 for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
@@ -1449,7 +1453,8 @@ window.__stanzaMentionRef = '';
         def _mark_message(content: str, sender: str, message_id: str = "",
                           raw_timestamp: str = "", reply_able_id: str = "",
                           reply_author: str = "", reply_body: str = "",
-                          outgoing: bool = False, edited: bool = False) -> str:
+                          outgoing: bool = False, edited: bool = False,
+                          retracted: bool = False) -> str:
             node_id = message_id or reply_able_id
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
@@ -1467,10 +1472,11 @@ window.__stanzaMentionRef = '';
             rauthor = ' data-reply-author="' + html.escape(reply_author, quote=True) + '"'
             outward = ' data-stanza-outgoing="1"' if outgoing else ""
             edited_attr = ' data-edited="1"' if edited else ""
+            retracted_attr = ' data-retracted="1"' if retracted else ""
             return ('<div class="stanza-message"' + marker + stamp
                     + ' data-stanza-sender="'
                     + html.escape(sender or "Me", quote=True) + '"'
-                    + rid + rauthor + outward + edited_attr
+                    + rid + rauthor + outward + edited_attr + retracted_attr
                     + '>' + content + '</div>')
 
         def mark_message_delivered(self, message_id: str) -> None:
