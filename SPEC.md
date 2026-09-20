@@ -1172,7 +1172,8 @@ Registers XEP plugins (conditionally where noted):
   answers copied verbatim); a room that rejected the join is re-joined
   afterwards. The registration dialog renders an embedded CAPTCHA form the same
   way and shows the query-level `<instructions>`/OOB URL. The media viewer zooms
-  images with Ctrl+wheel (0.1–8×, Ctrl+0/double-click resets to fit).
+  images with Ctrl+wheel (0.1–8×, Ctrl+0/double-click resets to fit) and pans a
+  zoomed image by dragging it with the left mouse button.
 
 ### 14.5 HTTP File Upload (XEP-0363)
 

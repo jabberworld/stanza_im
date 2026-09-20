@@ -479,7 +479,8 @@ view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window, `F11` fullscreen; `Esc`
 closes the viewer, `Ctrl+wheel` zooms the image (0.1–8×, `Ctrl+0`/double-click
-resets to fit)); the
+resets to fit) and the zoomed image is dragged to pan with the left mouse
+button (open/closed hand cursor)); the
 WebEngine `contextMenuEvent` reads the request via
 `QWebEngineView.lastContextMenuRequest()` (Qt 6; the old
 `page().contextMenuData()` does not exist and silently fell back to the engine

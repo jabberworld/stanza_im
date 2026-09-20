@@ -345,5 +345,41 @@ check("zoom resets to fit", abs(v4._zoom - 1.0) < 1e-6)
 check("scroll area forwards Ctrl+wheel as a zoom step",
       hasattr(_ImageScroll, "zoom_step") and hasattr(_ImageScroll, "wheelEvent"))
 
+# 13d. drag-to-pan -----------------------------------------------------------
+_hbar = v4._scroll.horizontalScrollBar()
+_vbar = v4._scroll.verticalScrollBar()
+_hbar.setRange(0, 300)
+_hbar.setValue(150)
+_vbar.setRange(0, 300)
+_vbar.setValue(150)
+check("viewer is pannable when zoomed past fit", v4._pannable() is True)
+v4._begin_pan(QtCore.QPoint(100, 100))
+v4._pan_to(QtCore.QPoint(120, 80))
+check("drag moves the viewport", _hbar.value() == 130 and _vbar.value() == 170)
+v4._pan_to(QtCore.QPoint(600, 600))
+check("pan clamps to the scroll range", _hbar.value() == 0 and _vbar.value() == 0)
+v4._end_pan()
+_press = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonPress, QtCore.QPointF(10, 10),
+    QtCore.QPointF(110, 110), QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier)
+_move = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseMove, QtCore.QPointF(20, 20),
+    QtCore.QPointF(130, 120), QtCore.Qt.MouseButton.NoButton,
+    QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.NoModifier)
+_hbar.setValue(50)
+_vbar.setValue(50)
+check("press is consumed while pannable",
+      v4.eventFilter(v4._label, _press) is True)
+v4.eventFilter(v4._label, _move)
+check("move event pans the viewport",
+      _hbar.value() == 30 and _vbar.value() == 40)
+v4._end_pan()
+_hbar.setRange(0, 0)
+_vbar.setRange(0, 0)
+check("drag does nothing when the image fits", v4._pannable() is False)
+check("press is not consumed when not pannable",
+      v4.eventFilter(v4._label, _press) is False)
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

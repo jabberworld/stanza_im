@@ -76,6 +76,8 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._label.setMinimumSize(1, 1)
         self._label.installEventFilter(self)
         self._zoom = 1.0
+        self._pan_origin = None
+        self._pan_scroll = (0, 0)
         scroll = _ImageScroll(self)
         # Keep the widget at the pixmap size so a zoomed-in image gets
         # scrollbars instead of being clipped to the viewport.
@@ -135,12 +137,71 @@ class MediaViewer(QtWidgets.QMainWindow):
             width, height, QtCore.Qt.AspectRatioMode.KeepAspectRatio, mode)
         self._label.setPixmap(scaled)
         self._label.resize(scaled.size())
+        if self._pan_origin is None:
+            if (scaled.width() > target.width()
+                    or scaled.height() > target.height()):
+                self._label.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+            else:
+                self._label.unsetCursor()
+
+    # ── Drag to pan ───────────────────────────────────────────────
+
+    def _pannable(self) -> bool:
+        """True when the scaled image overflows the viewport."""
+        scroll = getattr(self, "_scroll", None)
+        if scroll is None:
+            return False
+        return (scroll.horizontalScrollBar().maximum() > 0
+                or scroll.verticalScrollBar().maximum() > 0)
+
+    def _begin_pan(self, global_pos: QtCore.QPoint) -> None:
+        if not self._pannable():
+            self._pan_origin = None
+            return
+        self._pan_origin = global_pos
+        self._pan_scroll = (
+            self._scroll.horizontalScrollBar().value(),
+            self._scroll.verticalScrollBar().value())
+        self._label.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+
+    def _pan_to(self, global_pos: QtCore.QPoint) -> None:
+        if self._pan_origin is None:
+            return
+        delta = global_pos - self._pan_origin
+        self._scroll.horizontalScrollBar().setValue(
+            self._pan_scroll[0] - delta.x())
+        self._scroll.verticalScrollBar().setValue(
+            self._pan_scroll[1] - delta.y())
+
+    def _end_pan(self) -> None:
+        if self._pan_origin is None:
+            return
+        self._pan_origin = None
+        if self._pannable():
+            self._label.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        else:
+            self._label.unsetCursor()
 
     def eventFilter(self, obj, event):
-        if (obj is getattr(self, "_label", None)
-                and event.type() == QtCore.QEvent.Type.MouseButtonDblClick):
-            self._reset_zoom()
-            return True
+        if obj is getattr(self, "_label", None):
+            etype = event.type()
+            if etype == QtCore.QEvent.Type.MouseButtonDblClick:
+                self._reset_zoom()
+                return True
+            if (etype == QtCore.QEvent.Type.MouseButtonPress
+                    and event.button() == QtCore.Qt.MouseButton.LeftButton):
+                self._begin_pan(event.globalPosition().toPoint())
+                if self._pan_origin is not None:
+                    return True
+            elif (etype == QtCore.QEvent.Type.MouseMove
+                    and self._pan_origin is not None):
+                self._pan_to(event.globalPosition().toPoint())
+                return True
+            elif (etype == QtCore.QEvent.Type.MouseButtonRelease
+                    and event.button() == QtCore.Qt.MouseButton.LeftButton
+                    and self._pan_origin is not None):
+                self._end_pan()
+                return True
         return super().eventFilter(obj, event)
 
     # ── Geometry persistence ──────────────────────────────────────
