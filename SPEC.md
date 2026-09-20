@@ -59,6 +59,7 @@ stanza_im/
 │   ├── history_manager.py   — Per-contact history browser
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
+│   ├── xml_console.py       — Raw XML console (filtered, coloured)
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
@@ -272,6 +273,32 @@ The auto-status field in Preferences → Status is a vertically fixed
 `QPlainTextEdit` (max 70 px): it must not be vertically expanding, or the
 page's `QFormLayout` (`ExpandingFieldsGrow`) spreads every row evenly over the
 dialog height and the section looks gapped.
+
+### 5.3 XML Console (`ui/xml_console.py`)
+
+Actions → «XML-консоль» (directly under the disabled «Профили» item) opens a
+non-modal `XmlConsoleDialog` (singleton kept on `MainWindow._xml_console`,
+raised on reopen). It is fed by `JabberClient.set_xml_console_hook(cb)`, which
+sets `_StanzaXMPP._xml_console_hook`; `_StanzaXMPP` overrides `send_raw` and
+`recv_stanza` and calls `hook(incoming, xml_text)` for every stanza (stream
+header/footer and keep-alive included on the outgoing side), never raising into
+the stream.
+
+| Element | Behaviour |
+|---------|-----------|
+| Output | Read-only `QPlainTextEdit`, monospace, dark background; selectable/copyable |
+| Filter | Checkboxes Сообщения / Присутствия / IQ / SM / Прочее (all on) + bare-JID field; re-renders the buffer live |
+| Enable | Off by default; attaches/detaches the hook; closing detaches it but keeps the buffer |
+| Export | Writes the currently displayed text to a file |
+| Clear | Empties the buffer and the view |
+| Input XML | `XmlInputDialog` (multiline + Отправить/Отмена) → `client.send_raw_xml(text)` |
+
+Classification: `{jabber:client}message|presence|iq`, `urn:xmpp:sm:*` → SM,
+everything else (CSI, stream header/footer) → «Прочее». Colours — incoming:
+message red, presence orange, iq turquoise, sm blue; outgoing: message yellow,
+presence green, iq light blue, sm purple; other grey. `send_raw_xml` accepts
+several top-level elements, strips an XML declaration and gives an `<iq>`
+without an `id` one before sending. The buffer is capped at 5000 entries.
 
 ## 6. Login Form (`ui/login_widget.py`)
 

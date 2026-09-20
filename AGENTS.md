@@ -74,6 +74,7 @@ stanza_im/                      # Python package
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
+│   ├── xml_console.py           # Raw XML console (filtered, coloured)
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
@@ -518,6 +519,29 @@ media viewer, `SHA-256` hashcash fields are solved in the background) and
 room that rejected the join is re-joined after a successful answer. The
 registration dialog renders an embedded CAPTCHA form the same way and also
 shows the query-level `<instructions>`/OOB URL. [`tests/test_captcha.py`]
+
+**XML console (`ui/xml_console.py`, Actions → «XML-консоль» after «Профили»)**:
+a non-modal window fed by `JabberClient.set_xml_console_hook(cb)`, which stores
+the callback in `_StanzaXMPP._xml_console_hook`. `_StanzaXMPP` overrides
+`send_raw` (every byte written to the stream, stream header/footer and
+keep-alive included) and `recv_stanza` (each parsed stanza, serialized with
+`str(stanza)` so the output matches `-x`) and feeds them as
+`hook(incoming, xml_text)`; the overrides never raise into the stream. The
+dialog buffers `Entry(incoming, kind, xml, from, to, ts)` rows (cap 5000),
+classifies each payload by its root tag (`{jabber:client}message|presence|iq`,
+`urn:xmpp:sm:*` → `sm`, anything else — CSI, stream header/footer — → `other`)
+and renders it coloured by direction/kind in a read-only `QPlainTextEdit`
+(incoming: message red, presence orange, iq turquoise, sm blue; outgoing:
+message yellow, presence green, iq light blue, sm purple; other grey; dark
+background). Five filter checkboxes (Сообщения/Присутствия/IQ/SM/Прочее, all
+on) and a bare-JID field re-render the whole buffer live (unchecking hides
+already-captured stanzas, rechecking restores them). «Включить» (off by
+default) attaches/detaches the hook; closing the window detaches it too but
+keeps the buffer. «Экспорт» writes the displayed text, «Очистить» empties the
+buffer and the view, «Ввод XML» opens `XmlInputDialog` (multiline +
+Отправить/Отмена) and `client.send_raw_xml(text)` sends each top-level element
+(an `<iq>` without an `id` gets one) after stripping an XML declaration.
+[`tests/test_xml_console.py`]
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

@@ -256,6 +256,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── XMPP client (created on connect) ─────────────────────
         self._client = None
+        self._xml_console = None
 
         # ── State ────────────────────────────────────────────────
         self._visible = True
@@ -542,6 +543,9 @@ class MainWindow(QtWidgets.QMainWindow):
         prefs.triggered.connect(self._on_preferences)
         profiles = actions_menu.addAction(tr("menu_profiles"))
         profiles.setEnabled(False)
+        xml_console = actions_menu.addAction(
+            self._menu_icon("xml-konzole.svg"), tr("menu_xml_console"))
+        xml_console.triggered.connect(self._on_xml_console)
         actions_menu.addSeparator()
         quit_act = actions_menu.addAction(self._menu_icon("gtk-quit.png"),
                                           tr("menu_quit"))
@@ -1339,6 +1343,15 @@ class MainWindow(QtWidgets.QMainWindow):
             dlg.finished.disconnect(self._on_prefs_finished)
         self._prefs_dialog = None
 
+    def _on_xml_console(self):
+        """Open (or raise) the raw XML console."""
+        if self._xml_console is None:
+            from stanza_im.ui.xml_console import XmlConsoleDialog
+            self._xml_console = XmlConsoleDialog(lambda: self._client, self)
+        self._xml_console.show()
+        self._xml_console.raise_()
+        self._xml_console.activateWindow()
+
     def _on_password_changed(self, new_password: str):
         """Keep the login form in sync after a successful password change."""
         self._login._pw_edit.setText(new_password)
@@ -1591,6 +1604,8 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self._config, "calls", None), "auto_accept", False))
         self._client.set_displayed_state(self._unread_displayed)
         self._connect_client_signals()
+        if self._xml_console is not None:
+            self._xml_console.attach_client()
 
         self._start_task(self._connect_async(jid, show))
 
