@@ -1,0 +1,5 @@
+jabber.name
+jabberworld.info
+linuxoid.in
+jabber.ru
+jabbercity.ru
