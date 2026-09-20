@@ -1058,6 +1058,35 @@ class JabberClient:
         elif isinstance(result, asyncio.Future):
             await result
 
+    async def connect_for_registration(self, server: str) -> dict:
+        """Connect without authenticating and fetch *server*'s XEP-0077 form.
+
+        Used by the account-registration dialog: the SASL feature is disabled
+        on this throwaway connection so the stream stops after the pre-auth
+        features, then the in-band registration form is requested.
+        """
+        plugin = self.xmpp.plugin.get("feature_mechanisms")
+        if plugin is not None:
+            try:
+                self.xmpp.unregister_feature("mechanisms",
+                                             plugin.config["order"])
+            except (KeyError, ValueError):
+                logger.debug("Could not disable SASL for registration")
+        loop = asyncio.get_event_loop()
+        negotiated = loop.create_future()
+
+        def _on_negotiated(_event=None):
+            if not negotiated.done():
+                negotiated.set_result(True)
+
+        self.xmpp.add_event_handler("stream_negotiated", _on_negotiated)
+        try:
+            await self.connect_async()
+            await asyncio.wait_for(negotiated, timeout=20)
+        finally:
+            self.xmpp.del_event_handler("stream_negotiated", _on_negotiated)
+        return await self.get_registration_form(server)
+
     def _on_tls_required(self, _event=None) -> None:
         logger.error("Required STARTTLS is not supported by the server")
         self.emit("tls_required")

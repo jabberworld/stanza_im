@@ -339,8 +339,9 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self._stack)
 
         # Page 0: Login
-        self._login = LoginWidget()
+        self._login = LoginWidget(self._config)
         self._login.login_requested.connect(self._on_login)
+        self._login.register_requested.connect(self._on_create_account)
         self._stack.addWidget(self._login)
 
         # Page 1: Splash / connecting
@@ -1375,6 +1376,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                 client=self._client)
         dlg.settings_applied.connect(self._on_settings_applied)
         dlg.password_changed.connect(self._on_password_changed)
+        dlg.register_requested.connect(self._on_create_account)
         dlg.finished.connect(self._on_prefs_finished)
         self._prefs_dialog = dlg
         # Non-modal so the OSD preview stays interactive while it is open.
@@ -1398,6 +1400,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_password_changed(self, new_password: str):
         """Keep the login form in sync after a successful password change."""
         self._login._pw_edit.setText(new_password)
+
+    def _on_create_account(self):
+        """Open the XEP-0077 account-registration dialog."""
+        from stanza_im.ui.account_registration_dialog import (
+            AccountRegistrationDialog)
+        dialog = AccountRegistrationDialog(self._config, self)
+        dialog.registered.connect(self._on_account_registered)
+        dialog.exec()
+
+    def _on_account_registered(self, jid: str, password: str) -> None:
+        """Prefill the login form after a successful registration."""
+        self._login.prefill(jid, password)
+        self._stack.setCurrentIndex(_PAGE_LOGIN)
+        self._on_settings_applied()
+        prefs = getattr(self, "_prefs_dialog", None)
+        if prefs is not None and prefs.isVisible():
+            prefs.close()
 
     def _apply_roster_font(self) -> None:
         """Apply the configured roster font (empty family = application font)."""

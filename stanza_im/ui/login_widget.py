@@ -13,10 +13,11 @@ class LoginWidget(QtWidgets.QWidget):
     """Login form with JID, password, status, connect button."""
 
     login_requested = QtCore.pyqtSignal(str, str, str)  # jid, password, show
+    register_requested = QtCore.pyqtSignal()            # "Create account" link
 
-    def __init__(self, parent=None):
+    def __init__(self, config: Config | None = None, parent=None):
         super().__init__(parent)
-        self._config = Config()
+        self._config = config or Config()
         self._build_ui()
         self._load_config()
 
@@ -78,6 +79,19 @@ class LoginWidget(QtWidgets.QWidget):
         self._connect_btn.clicked.connect(self._on_connect)
         layout.addWidget(self._connect_btn)
 
+        # Create account link
+        layout.addSpacing(14)
+        self._create_label = QtWidgets.QLabel(
+            f'<a href="create">{tr("login_create_account")}</a>')
+        self._create_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._create_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._create_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        self._create_label.setOpenExternalLinks(False)
+        self._create_label.linkActivated.connect(
+            lambda _href: self.register_requested.emit())
+        layout.addWidget(self._create_label)
+
         # Status label
         self._info_label = QtWidgets.QLabel("")
         self._info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -136,6 +150,15 @@ class LoginWidget(QtWidgets.QWidget):
     def set_status_text(self, message: str, color: str = "gray"):
         self._info_label.setText(message)
         self._info_label.setStyleSheet(f"color: {color};")
+
+    def prefill(self, jid: str, password: str = "") -> None:
+        """Fill the form after a successful account registration."""
+        self._jid_edit.setText(jid or "")
+        self._pw_edit.setText(password or "")
+        if password:
+            self._save_pw.setChecked(True)
+        self.set_status_text("")
+        self._connect_btn.setEnabled(True)
 
     @property
     def config(self) -> Config:

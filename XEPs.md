@@ -20,7 +20,7 @@ whenever a new XEP is implemented or its usage changes.
 | XEP-0060 | Publish-Subscribe | Transport for PEP; used by XEP-0163 to publish and receive the `urn:xmpp:mds:displayed:0` node. |
 | XEP-0065 | SOCKS5 Bytestreams | Registered plugin; `discover_proxies()` autodetects the account's bytestream proxy (`category='proxy' type='bytestreams'`, see `core/discovery.py`). Its SOCKS5 data path is driven by the Jingle SOCKS5 transport (see XEP-0260) via `xmpp/bytestream.py`. |
 | XEP-0066 | Out of Band Data | Plugin registered; file sharing is done over Jingle (XEP-0234) and HTTP Upload (XEP-0363). |
-| XEP-0077 | In-Band Registration | `RegistrationDialog` fetches and submits service registration forms. |
+| XEP-0077 | In-Band Registration | `RegistrationDialog` fetches and submits service registration forms. `AccountRegistrationDialog` (login link / Preferences → Connection) creates a new account: it connects pre-auth (`connect_for_registration`, SASL disabled), shows the server's form and saves the account + connection settings on success. |
 | XEP-0080 | User Location | Geolocation PEP payload (`http://jabber.org/protocol/geoloc`) parsed from contact events and shown in the roster tooltip and the profile "Status" tab. |
 | XEP-0082 | XMPP Date and Time Profiles | Normalizes server timestamps to canonical UTC ISO-8601 (`_normalize_ts`). |
 | XEP-0085 | Chat State Notifications | Sends typing/composing states and shows the remote activity suffix in the chat window title. |

@@ -125,6 +125,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     settings_applied = QtCore.pyqtSignal()
     password_changed = QtCore.pyqtSignal(str)
+    register_requested = QtCore.pyqtSignal()
 
     def __init__(self, config: Config, theme_factory: ChatThemeFactory,
                  osd_manager=None, parent=None,
@@ -444,6 +445,14 @@ class PreferencesDialog(QtWidgets.QDialog):
         return QtGui.QIcon()
 
     @staticmethod
+    def _register_icon() -> QtGui.QIcon:
+        """Glyph for the icon-only "Create account" button."""
+        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "register.png"))
+        if not icon.isNull():
+            return icon
+        return QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "add-user.svg"))
+
+    @staticmethod
     def _row(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
         """Lay widgets out side by side inside a form field."""
         box = QtWidgets.QWidget()
@@ -521,7 +530,20 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         jid = self._line("jid")
         jid.setFixedWidth(CONNECTION_FIELD_WIDTH)
-        form.addRow(tr("login_title"), jid)
+        self._btn_register = QtWidgets.QPushButton()
+        self._btn_register.setToolTip(tr("login_create_account"))
+        self._btn_register.setAccessibleName(tr("login_create_account"))
+        self._btn_register.setIcon(self._register_icon())
+        self._btn_register.setIconSize(QtCore.QSize(16, 16))
+        self._btn_register.clicked.connect(self.register_requested.emit)
+        jid_row = QtWidgets.QWidget()
+        jid_layout = QtWidgets.QHBoxLayout(jid_row)
+        jid_layout.setContentsMargins(0, 0, 0, 0)
+        jid_layout.setSpacing(6)
+        jid_layout.addWidget(jid)
+        jid_layout.addWidget(self._btn_register)
+        jid_layout.addStretch(1)
+        form.addRow(tr("login_title"), jid_row)
 
         self._btn_change_password = QtWidgets.QPushButton()
         self._btn_change_password.setToolTip(tr("prefs_change_password"))

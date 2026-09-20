@@ -71,6 +71,7 @@ stanza_im/                      # Python package
 │   ├── device_test.py           # Devices self-tests (mic meter/tone/camera)
 │   ├── status_message_dialog.py # Multiline presence status editor
 │   ├── captcha_dialog.py        # XEP-0158 CAPTCHA challenge prompt
+│   ├── account_registration_dialog.py  # XEP-0077 account creation wizard
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
@@ -519,6 +520,26 @@ media viewer, `SHA-256` hashcash fields are solved in the background) and
 room that rejected the join is re-joined after a successful answer. The
 registration dialog renders an embedded CAPTCHA form the same way and also
 shows the query-level `<instructions>`/OOB URL. [`tests/test_captcha.py`]
+
+**Account registration (`ui/account_registration_dialog.py`, XEP-0077)**:
+`LoginWidget`'s "Создать аккаунт" link (`register_requested`) and the
+icon-only button next to the Jabber ID in Preferences → Connection
+(`register.png`, styled like the change-password button) both open
+`AccountRegistrationDialog`. Step 1 collects the server (editable combo; the
+suggested list comes from `resources/servers.txt`, one domain per line with
+`#`/blank lines ignored — `include/constants.SERVERS_FILE`) plus the
+connection settings (host/port override, `tls_mode`, `starttls_mode`, proxy),
+defaulting to "Prefer TLS"/"Always". "Далее" builds a throwaway `JabberClient`
+and calls `connect_for_registration(server)`, which unregisters the SASL
+feature on that connection, waits for `stream_negotiated` and fetches the
+XEP-0077 form; step 2 renders it with `DataFormWidget`/`LegacyFormWidget`
+("Зарегистрировать"/"Отмена"). On success the dialog stores the account
+(`jid`, `password`, `save_password`) and the connection/proxy settings in the
+shared `Config` and emits `registered(jid, password)`; `MainWindow` prefills
+the login form (`LoginWidget.prefill`), returns to the login page, re-applies
+the settings and closes the Preferences window if it was open. The login
+widget now shares `MainWindow._config` so the saved values cannot be
+overwritten. [`tests/test_registration.py`]
 
 **XML console (`ui/xml_console.py`, Actions → «XML-консоль» after «Профили»)**:
 a non-modal window that captures the raw stream from the `slixmpp.xmlstream`
