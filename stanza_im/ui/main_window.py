@@ -1604,8 +1604,6 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self._config, "calls", None), "auto_accept", False))
         self._client.set_displayed_state(self._unread_displayed)
         self._connect_client_signals()
-        if self._xml_console is not None:
-            self._xml_console.attach_client()
 
         self._start_task(self._connect_async(jid, show))
 

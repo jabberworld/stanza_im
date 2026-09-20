@@ -3,6 +3,7 @@
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_xml_console.py
 """
+import logging
 import os
 import sys
 import tempfile
@@ -16,12 +17,11 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import slixmpp
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.i18n import tr
-from stanza_im.core.client import JabberClient, _StanzaXMPP
+from stanza_im.core.client import JabberClient
 from stanza_im.ui import xml_console
 from stanza_im.ui.xml_console import (COLORS, XmlConsoleDialog, bare_jid,
                                       classify, format_xml)
@@ -134,57 +134,63 @@ except ET.ParseError:
 check("send_raw_xml rejects malformed XML", invalid_raised)
 
 
-# ── _StanzaXMPP hook ─────────────────────────────────────────────
-captured = []
-probe = object.__new__(_StanzaXMPP)
-probe._xml_console_hook = lambda incoming, text: captured.append((incoming, text))
-_orig_send_raw = slixmpp.ClientXMPP.send_raw
-_orig_recv = slixmpp.ClientXMPP.recv_stanza
-slixmpp.ClientXMPP.send_raw = lambda self, data: None
-slixmpp.ClientXMPP.recv_stanza = lambda self, stanza: None
-try:
-    _StanzaXMPP.send_raw(probe, b"<presence/>")
+# ── log handler parsing (the capture mechanism) ──────────────────
+records = []
+handler = xml_console._XmlConsoleLogHandler(lambda i, t: records.append((i, t)))
 
-    class _FakeStanza:
-        def __str__(self):
-            return "<message xmlns='jabber:client' from='a@b'/>"
 
-    _StanzaXMPP.recv_stanza(probe, _FakeStanza())
-finally:
-    slixmpp.ClientXMPP.send_raw = _orig_send_raw
-    slixmpp.ClientXMPP.recv_stanza = _orig_recv
-check("hook fires for outgoing bytes", captured[0] == (False, "<presence/>"))
-check("hook fires for incoming stanza with XML",
-      captured[1] == (True, "<message xmlns='jabber:client' from='a@b'/>"))
+def _record(message, args):
+    return logging.LogRecord("slixmpp.xmlstream", logging.DEBUG, __file__, 1,
+                             message, args, None)
+
+
+handler.emit(_record("SEND: %s", ("<presence/>",)))
+handler.emit(_record("RECV: %s", (b"<message/>",)))
+handler.emit(_record("Event triggered: message", ()))
+check("handler parses SEND", records[0] == (False, "<presence/>"))
+check("handler decodes bytes and parses RECV", records[1] == (True, "<message/>"))
+check("handler ignores other debug records", len(records) == 2)
 
 
 # ── dialog behaviour ─────────────────────────────────────────────
 class FakeClient:
     def __init__(self):
-        self.hook = None
         self.sent = []
-
-    def set_xml_console_hook(self, hook):
-        self.hook = hook
 
     def send_raw_xml(self, text):
         self.sent.append(text)
         return 1
 
 
+logger = logging.getLogger("slixmpp.xmlstream")
+level_before = logger.level
 fake = FakeClient()
 dlg = XmlConsoleDialog(lambda: fake, None)
 check("capture is off by default", dlg._enable.isChecked() is False)
-check("hook not attached while disabled", fake.hook is None)
+check("logger is not attached while disabled",
+      dlg._log_handler not in logger.handlers)
 
 dlg._enable.setChecked(True)
-check("enabling attaches the hook", fake.hook is not None)
-fake.hook(True, "<message xmlns='jabber:client' from='alice@example.com/phone'>"
-                "<body>hello</body></message>")
-fake.hook(False, "<iq xmlns='jabber:client' type='result' id='1'/>")
+check("enabling attaches the logger", dlg._log_handler in logger.handlers)
+check("enabling raises the logger to DEBUG", logger.level == logging.DEBUG)
+
+# The live path: slixmpp logs the raw dump at DEBUG (same as -x / the file log).
+logger.debug("RECV: %s",
+             "<message from='alice@example.com/phone'><body>hello</body></message>")
+logger.debug("SEND: %s", "<iq type='result' id='1'/>")
+logger.debug("SEND: %s", b"<presence from='bob@example.com'/>")
+logger.debug("Event triggered: message")
 out = dlg._output.toPlainText()
 check("incoming message is shown", "hello" in out)
 check("outgoing iq is shown", 'type="result"' in out)
+check("bytes record is decoded", "<presence" in out)
+check("unrelated debug records are ignored", len(dlg._buffer) == 3)
+
+# controlled entries for the filter checks
+dlg._on_clear()
+dlg._on_raw(True, "<message xmlns='jabber:client' "
+                  "from='alice@example.com/phone'><body>hello</body></message>")
+dlg._on_raw(False, "<iq xmlns='jabber:client' type='result' id='1'/>")
 check("buffer holds both stanzas", len(dlg._buffer) == 2)
 
 # kind filter hides and restores
@@ -221,9 +227,10 @@ check("export writes the visible text",
       os.path.exists(export_path)
       and "<body>x</body>" in open(export_path, encoding="utf-8").read())
 
-# disabling detaches
+# disabling detaches the logger and restores its level
 dlg._enable.setChecked(False)
-check("disabling detaches the hook", fake.hook is None)
+check("disabling detaches the logger", dlg._log_handler not in logger.handlers)
+check("disabling restores the logger level", logger.level == level_before)
 
 # input dialog text round-trip
 entry = xml_console.XmlInputDialog(None)
@@ -235,14 +242,16 @@ check("menu label translated", tr("menu_xml_console") != "menu_xml_console")
 check("other filter label translated", tr("xml_console_other") == "Other")
 
 # ── main window wiring (static) ──────────────────────────────────
-mw = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "stanza_im", "ui", "main_window.py"), encoding="utf-8").read()
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+mw = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
+          encoding="utf-8").read()
+xc = open(os.path.join(_root, "stanza_im", "ui", "xml_console.py"),
+          encoding="utf-8").read()
 check("Actions menu adds the console item",
       'tr("menu_xml_console")' in mw and 'xml-konzole.svg' in mw)
-check("login re-attaches an open console",
-      "self._xml_console.attach_client()" in mw)
 check("handler opens the console",
       "def _on_xml_console" in mw and "XmlConsoleDialog" in mw)
+check("capture uses the slixmpp raw logger", "slixmpp.xmlstream" in xc)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

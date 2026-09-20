@@ -278,17 +278,17 @@ dialog height and the section looks gapped.
 
 Actions → «XML-консоль» (directly under the disabled «Профили» item) opens a
 non-modal `XmlConsoleDialog` (singleton kept on `MainWindow._xml_console`,
-raised on reopen). It is fed by `JabberClient.set_xml_console_hook(cb)`, which
-sets `_StanzaXMPP._xml_console_hook`; `_StanzaXMPP` overrides `send_raw` and
-`recv_stanza` and calls `hook(incoming, xml_text)` for every stanza (stream
-header/footer and keep-alive included on the outgoing side), never raising into
-the stream.
+raised on reopen). It captures the raw stream from the `slixmpp.xmlstream`
+logger — the same `SEND:`/`RECV:` dump as `-x` and the file log, so both
+directions are seen. A `_XmlConsoleLogHandler` parses the `SEND: `/`RECV: `
+prefix (decoding bytes arguments), ignores other debug records and forwards
+each payload through the dialog's `stanza_captured` signal.
 
 | Element | Behaviour |
 |---------|-----------|
 | Output | Read-only `QPlainTextEdit`, monospace, dark background; selectable/copyable |
 | Filter | Checkboxes Сообщения / Присутствия / IQ / SM / Прочее (all on) + bare-JID field; re-renders the buffer live |
-| Enable | Off by default; attaches/detaches the hook; closing detaches it but keeps the buffer |
+| Enable | Off by default; remembers the logger level, sets `slixmpp.xmlstream` to DEBUG and adds the handler; disabling/closing removes it and restores the level (no-op under `-x`/`-l`) |
 | Export | Writes the currently displayed text to a file |
 | Clear | Empties the buffer and the view |
 | Input XML | `XmlInputDialog` (multiline + Отправить/Отмена) → `client.send_raw_xml(text)` |
@@ -302,7 +302,9 @@ incoming: message red, presence orange, iq turquoise, sm blue; outgoing:
 message yellow, presence green, iq light blue, sm purple; other grey.
 `send_raw_xml` accepts several top-level elements, strips an XML declaration
 and gives an `<iq>` without an `id` one before sending. The buffer is capped at
-5000 entries.
+5000 entries. Incoming non-stanza stream elements (SASL
+challenge/success/proceed, `<stream:features>`) are not part of the raw dump and
+therefore do not appear.
 
 ## 6. Login Form (`ui/login_widget.py`)
 

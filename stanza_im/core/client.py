@@ -448,31 +448,6 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
     _require_starttls = False
     _dns_hosts: dict = {}
     _connected_target: tuple | None = None
-    # Optional (incoming: bool, xml_text: str) callback fed by the XML console.
-    _xml_console_hook: Callable[[bool, str], None] | None = None
-
-    def _xml_console_feed(self, incoming: bool, text: str) -> None:
-        hook = self._xml_console_hook
-        if hook is None:
-            return
-        try:
-            hook(incoming, text)
-        except Exception:
-            logger.debug("XML console hook failed", exc_info=True)
-
-    def send_raw(self, data):
-        if isinstance(data, (bytes, bytearray)):
-            self._xml_console_feed(False, bytes(data).decode("utf-8", "replace"))
-        else:
-            self._xml_console_feed(False, str(data))
-        return super().send_raw(data)
-
-    def recv_stanza(self, stanza):
-        try:
-            self._xml_console_feed(True, str(stanza))
-        except Exception:
-            logger.debug("XML console could not serialize a stanza", exc_info=True)
-        return super().recv_stanza(stanza)
 
     def start_stream_handler(self, xml):
         super().start_stream_handler(xml)
@@ -1133,14 +1108,6 @@ class JabberClient:
             plugin.send_active()
         else:
             plugin.send_inactive()
-
-    def set_xml_console_hook(self, hook) -> None:
-        """Attach or detach the raw XML feed used by the XML console.
-
-        ``hook`` is called as ``hook(incoming: bool, xml_text: str)`` for every
-        stanza written to / read from the stream (``None`` detaches it).
-        """
-        self.xmpp._xml_console_hook = hook
 
     def send_raw_xml(self, text: str) -> int:
         """Send XML entered in the console; returns the number of stanzas sent.

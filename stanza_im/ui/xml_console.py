@@ -2,22 +2,25 @@
 
 Shows every stanza crossing the stream, coloured by direction and kind, with
 live filters (messages / presences / iq / sm / other) and a bare-JID filter.
-The window is non-modal and fed by ``JabberClient.set_xml_console_hook``.
+The window is non-modal and captures the ``SEND:``/``RECV:`` raw dump from the
+``slixmpp.xmlstream`` logger (the same source as ``-x`` and the file log).
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Callable
 from xml.dom import minidom
 from xml.etree import ElementTree as ET
 
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 
 _CLIENT_NS = "jabber:client"
 _SM_NS_PREFIX = "urn:xmpp:sm:"
+_LOGGER_NAME = "slixmpp.xmlstream"
 
 KINDS = ("message", "presence", "iq", "sm", "other")
 
@@ -112,6 +115,39 @@ class Entry:
     ts: float
 
 
+class _XmlConsoleLogHandler(logging.Handler):
+    """Forward the raw ``SEND:``/``RECV:`` dump to the console.
+
+    Attached to the ``slixmpp.xmlstream`` logger, so it sees exactly the
+    stanzas that ``-x`` / the file log show — in both directions.
+    """
+
+    def __init__(self, callback: Callable[[bool, str], None]):
+        super().__init__(level=logging.DEBUG)
+        self._callback = callback
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return
+        if message.startswith("SEND: "):
+            incoming = False
+        elif message.startswith("RECV: "):
+            incoming = True
+        else:
+            return
+        payload = message[6:]
+        args = record.args
+        if (isinstance(args, tuple) and len(args) == 1
+                and isinstance(args[0], (bytes, bytearray))):
+            payload = bytes(args[0]).decode("utf-8", "replace")
+        try:
+            self._callback(incoming, payload)
+        except Exception:
+            pass
+
+
 class XmlInputDialog(QtWidgets.QDialog):
     """Multiline editor for manually sending XML."""
 
@@ -146,11 +182,15 @@ class XmlInputDialog(QtWidgets.QDialog):
 class XmlConsoleDialog(QtWidgets.QDialog):
     """Non-modal window showing raw XML with live filters."""
 
+    stanza_captured = QtCore.pyqtSignal(bool, str)
+
     def __init__(self, get_client: Callable[[], object | None], parent=None):
         super().__init__(parent)
         self._get_client = get_client
         self._buffer: list[Entry] = []
-        self._attached_client = None
+        self._prev_log_level: int | None = None
+        self._log_handler = _XmlConsoleLogHandler(self.stanza_captured.emit)
+        self.stanza_captured.connect(self._on_raw)
 
         self.setWindowTitle(tr("xml_console_title"))
         self.resize(860, 620)
@@ -213,20 +253,28 @@ class XmlConsoleDialog(QtWidgets.QDialog):
 
     # ── capture plumbing ────────────────────────────────────────
 
-    def attach_client(self) -> None:
-        """(Re)attach the feed to the current client if capture is enabled."""
-        if not self._enable.isChecked():
-            return
-        client = self._get_client()
-        if client is not None:
-            client.set_xml_console_hook(self._on_raw)
-            self._attached_client = client
-
     def _on_enable_toggled(self, checked: bool) -> None:
-        client = self._get_client()
-        if client is not None:
-            client.set_xml_console_hook(self._on_raw if checked else None)
-        self._attached_client = client if checked else None
+        if checked:
+            self._attach_logger()
+        else:
+            self._detach_logger()
+
+    def _attach_logger(self) -> None:
+        if self._prev_log_level is not None:
+            return
+        logger = logging.getLogger(_LOGGER_NAME)
+        self._prev_log_level = logger.level
+        logger.addHandler(self._log_handler)
+        # The raw dump is only generated at DEBUG (as with -x / the file log).
+        logger.setLevel(logging.DEBUG)
+
+    def _detach_logger(self) -> None:
+        if self._prev_log_level is None:
+            return
+        logger = logging.getLogger(_LOGGER_NAME)
+        logger.removeHandler(self._log_handler)
+        logger.setLevel(self._prev_log_level)
+        self._prev_log_level = None
 
     def _on_raw(self, incoming: bool, xml_text: str) -> None:
         classified = classify(xml_text)
