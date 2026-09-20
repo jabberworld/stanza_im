@@ -56,6 +56,7 @@ NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 NS_RETRACT = "urn:xmpp:message-retract:1"   # XEP-0424 Message Retraction
 NS_RETRACT_LEGACY = "urn:xmpp:message-retract:0"
+NS_MODERATE = "urn:xmpp:message-moderate:1"  # XEP-0425 Moderated Message Retraction
 NS_FALLBACK = "urn:xmpp:fallback:0"        # XEP-0428 Fallback Indication
 NS_HINTS = "urn:xmpp:hints"                # XEP-0334 Message Processing Hints
 NS_CAPTCHA = "urn:xmpp:captcha"            # XEP-0158 CAPTCHA Forms
@@ -137,6 +138,45 @@ def _retracted_tombstone(stanza) -> tuple[str, str]:
                       "{%s}retracted" % NS_RETRACT_LEGACY):
             return (str(el.get("id", "")), str(el.get("stamp", "")))
     return ("", "")
+
+
+def _moderation_info(stanza) -> dict:
+    """Return XEP-0425 moderation details of a retraction/tombstone.
+
+    ``{"moderated": bool, "by": str, "reason": str}`` — ``moderated`` is True
+    when a ``<moderated/>`` element (XEP-0425) accompanies the XEP-0424
+    ``<retract/>``/``<retracted/>``.  ``<reason/>`` may live in either the
+    message-retract or the message-moderate namespace depending on direction.
+    """
+    empty = {"moderated": False, "by": "", "reason": ""}
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return empty
+    for el in xml.iter():
+        if el.tag not in ("{%s}retract" % NS_RETRACT,
+                          "{%s}retract" % NS_RETRACT_LEGACY,
+                          "{%s}retracted" % NS_RETRACT,
+                          "{%s}retracted" % NS_RETRACT_LEGACY):
+            continue
+        moderated = el.find("{%s}moderated" % NS_MODERATE)
+        if moderated is None:
+            continue
+        reason = ""
+        for child in el:
+            if child.tag in ("{%s}reason" % NS_MODERATE,
+                             "{%s}reason" % NS_RETRACT,
+                             "{%s}reason" % NS_RETRACT_LEGACY,
+                             "reason"):
+                reason = str(child.text or "").strip()
+                break
+        return {
+            "moderated": True,
+            "by": str(moderated.get("by", "") or ""),
+            "reason": reason,
+        }
+    return empty
 
 
 def _origin_id(stanza) -> str:
@@ -565,6 +605,7 @@ class JabberClient:
         self._mds_pubsub_options = False
         self._upload_service_cache: str | None = None
         self._hats_support: dict[str, bool] = {}
+        self._moderation_support: dict[str, bool] = {}
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
         self.send_chatstates = (self.send_typing_notifications
@@ -1326,6 +1367,44 @@ class JabberClient:
         logger.debug("Sending retraction to %s for %s", jid, target_id)
         msg.send()
         return str(msg["id"])
+
+    def _build_moderation(self, room: str, stanza_id: str, reason: str = ""):
+        """Build (but do not send) a XEP-0425 moderation IQ; used by tests."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = room
+        moderate = ET.SubElement(iq.xml, "{%s}moderate" % NS_MODERATE)
+        moderate.set("id", str(stanza_id))
+        ET.SubElement(moderate, "{%s}retract" % NS_RETRACT)
+        if reason:
+            ET.SubElement(moderate, "{%s}reason" % NS_MODERATE).text = reason
+        return iq
+
+    async def moderate_message(self, room: str, stanza_id: str,
+                               reason: str = "") -> bool:
+        """Retract *stanza_id* in *room* as a moderator (XEP-0425).
+
+        The room broadcasts the retraction to every occupant, so the message
+        is only updated when that echo arrives.  Returns ``True`` on an IQ
+        result and emits ``moderation_failed`` on an error.
+        """
+        if not isinstance(room, str) or not room.strip() or not stanza_id:
+            logger.warning("Skipping moderation (room=%r id=%r)",
+                           room, stanza_id)
+            return False
+        room = room.strip()
+        iq = self._build_moderation(room, stanza_id, reason)
+        logger.debug("Moderating %s in %s (reason=%r)",
+                     stanza_id, room, reason)
+        try:
+            await iq.send()
+        except Exception as exc:
+            logger.warning("Moderation request for %s in %s failed: %s",
+                           stanza_id, room, exc)
+            self.emit("moderation_failed", room, stanza_id, str(exc))
+            return False
+        self.emit("moderation_sent", room, stanza_id)
+        return True
 
     def send_muc_invite(self, jid: str, room: str, reason: str = "",
                         password: str = "") -> None:
@@ -2290,6 +2369,26 @@ class JabberClient:
             return False
         supported = hats_mod.NS_HATS in features
         self._hats_support[room] = supported
+        return supported
+
+    async def room_supports_moderation(self, room: str) -> bool:
+        """True when *room* advertises ``urn:xmpp:message-moderate:1``.
+
+        The result is cached per room (XEP-0425 §2).
+        """
+        cached = self._moderation_support.get(room)
+        if cached is not None:
+            return cached
+        try:
+            result = await self.xmpp["xep_0030"].get_info(jid=room)
+            features = {str(el.get("var") or "") for el in result.xml.iter()
+                        if str(el.tag).endswith("feature")}
+        except Exception:
+            logger.debug("Moderation disco#info for %s failed", room,
+                         exc_info=True)
+            return False
+        supported = NS_MODERATE in features
+        self._moderation_support[room] = supported
         return supported
 
     def _hats_command(self, room: str, node: str, values: dict | None = None,
@@ -3339,8 +3438,16 @@ class JabberClient:
         retract_ref = _retract_reference(msg)
         if retract_ref:
             # XEP-0424: never render the fallback body of a retraction.
+            info = _moderation_info(msg)
+            if info["moderated"] and (nick or room != frm.split("/")[0]):
+                # XEP-0425 §5: a moderation message is only legitimate when it
+                # comes from the MUC service itself, never from an occupant.
+                logger.warning("Ignoring spoofed moderation retraction "
+                               "from %s", frm)
+                return
             self.emit("groupchat_message_retracted", room, nick, frm,
-                      retract_ref)
+                      retract_ref, info["by"], info["reason"],
+                      info["moderated"])
             return
         subjects = _message_subjects(msg)
         if not body and subjects:
@@ -4003,6 +4110,7 @@ class JabberClient:
                     skip_reasons["no_stanza"] = skip_reasons.get("no_stanza", 0) + 1
                     continue
                 tomb_id, _tomb_stamp = _retracted_tombstone(msg)
+                mod_info = _moderation_info(msg)
                 body = str(_stanza_value(msg, "body") or "")
                 if not body and not tomb_id:
                     skipped += 1
@@ -4057,6 +4165,8 @@ class JabberClient:
                     "reply_to": _reply_reference(msg)[0],
                     "reply_id": _reply_reference(msg)[1],
                     "retracted": bool(tomb_id),
+                    "retract_reason": mod_info["reason"],
+                    "retract_by": mod_info["by"],
                 })
             except Exception:
                 skipped += 1

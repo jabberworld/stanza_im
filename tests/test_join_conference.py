@@ -75,6 +75,9 @@ class _FakeChatWindow:
     def set_muc_admin(self, room, can_manage):
         pass
 
+    def set_moderation_enabled(self, room, enabled):
+        pass
+
 
 class _FakeClient:
     def __init__(self):

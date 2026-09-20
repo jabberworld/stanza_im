@@ -78,6 +78,7 @@ class Config:
                  "message_displayed_sync": True,
                  "allow_incoming_edits": True,
                  "allow_incoming_deletions": True,
+                 "allow_moderation": True,
                  "confirm_retraction": False, "input_height": 60,
                  "text_scale": 1.0, "media_preview": "images",
                  "idle_unload_minutes": 10, "muc_name_source": "from_name"},

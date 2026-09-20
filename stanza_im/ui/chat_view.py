@@ -716,6 +716,7 @@ if HAS_WEBENGINE:
             var EDIT_LABEL = %EDIT_LABEL%;
             var FORWARD_LABEL = %FORWARD_LABEL%;
             var DELETE_LABEL = %DELETE_LABEL%;
+            var MODERATE_LABEL = %MODERATE_LABEL%;
             var menu = null;
 
             function closeMenu() {
@@ -730,6 +731,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaForwardRef = '';
             window.__stanzaJumpRef = '';
             window.__stanzaDeleteRef = '';
+            window.__stanzaModerateRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -817,6 +819,19 @@ window.__stanzaMentionRef = '';
                         window.setTimeout(closeMenu, 0);
                     });
                     menu.appendChild(del);
+                }
+                if (wrap.getAttribute('data-moderatable') === '1') {
+                    var mod = document.createElement('button');
+                    mod.type = 'button';
+                    mod.textContent = MODERATE_LABEL || 'Retract';
+                    mod.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        window.__stanzaModerateRef = 'stanza:moderate:'
+                            + encodeURIComponent(
+                                wrap.getAttribute('data-stanza-id') || '');
+                        window.setTimeout(closeMenu, 0);
+                    });
+                    menu.appendChild(mod);
                 }
                 var item = document.createElement('button');
                 item.type = 'button';
@@ -996,6 +1011,7 @@ window.__stanzaMentionRef = '';
             code = (self._ACTION_JS
                     .replace("%EDIT_LABEL%", json.dumps(tr("chat_edit")))
                     .replace("%DELETE_LABEL%", json.dumps(tr("chat_delete")))
+                    .replace("%MODERATE_LABEL%", json.dumps(tr("chat_moderate")))
                     .replace("%FORWARD_LABEL%", json.dumps(tr("chat_forward"))))
             self.page().runJavaScript(code)
 
@@ -1055,7 +1071,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '',"
                 " window.__stanzaJumpRef || '', window.__stanzaJumpPress ? 1 : 0,"
                 " window.__stanzaLoadRef || '',"
-                " window.__stanzaDeleteRef || '']",
+                " window.__stanzaDeleteRef || '',"
+                " window.__stanzaModerateRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1116,6 +1133,12 @@ window.__stanzaMentionRef = '';
         def _clear_delete_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaDeleteRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_moderate_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaModerateRef = '';")
             except RuntimeError:
                 pass
 
@@ -1211,6 +1234,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_delete_ref = ""
+            if len(value) > 14 and isinstance(value[14], str) and value[14]:
+                self._clear_moderate_request()
+                requested = value[14]
+                if requested != getattr(self, "_last_moderate_ref", ""):
+                    self._last_moderate_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_moderate_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1288,7 +1319,10 @@ window.__stanzaMentionRef = '';
                                 reply_quote=None, outgoing: bool = False,
                                 edited: bool = False, hats=None,
                                 retracted: bool = False,
-                                retract_marker: bool = False) -> str:
+                                retract_marker: bool = False,
+                                retract_reason: str = "",
+                                retract_by: str = "",
+                                moderatable: bool = False) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -1301,7 +1335,8 @@ window.__stanzaMentionRef = '';
                     unstyled=unstyled, mention=self.mention_senders,
                     edited=edited, highlight_nick=self.highlight_nick,
                     geo_ref=reply_able_id or "", hats=hats,
-                    retracted=retracted, retract_marker=retract_marker)
+                    retracted=retracted, retract_marker=retract_marker,
+                    retract_reason=retract_reason, retract_by=retract_by)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -1309,7 +1344,8 @@ window.__stanzaMentionRef = '';
             return self._mark_message(html, sender, message_id, raw_timestamp,
                                       reply_able_id, reply_author,
                                       reply_body=body, outgoing=outgoing,
-                                      edited=edited, retracted=retracted)
+                                      edited=edited, retracted=retracted,
+                                      moderatable=moderatable)
 
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
@@ -1320,7 +1356,10 @@ window.__stanzaMentionRef = '';
                         reply_quote=None, outgoing: bool = False,
                         edited: bool = False, hats=None,
                         retracted: bool = False,
-                        retract_marker: bool = False):
+                        retract_marker: bool = False,
+                        retract_reason: str = "",
+                        retract_by: str = "",
+                        moderatable: bool = False):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -1330,7 +1369,8 @@ window.__stanzaMentionRef = '';
                 sender, body, timestamp, direction, is_next,
                 sender_color, user_icon_path, message_id, unstyled,
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
-                outgoing, edited, hats, retracted, retract_marker)
+                outgoing, edited, hats, retracted, retract_marker,
+                retract_reason, retract_by, moderatable)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -1398,6 +1438,8 @@ window.__stanzaMentionRef = '';
                         hats=entry.get("hats"),
                         retracted=entry.get("retracted", False),
                         retract_marker=entry.get("retract_marker", False),
+                        retract_reason=entry.get("retract_reason", ""),
+                        retract_by=entry.get("retract_by", ""),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -1414,7 +1456,8 @@ window.__stanzaMentionRef = '';
                 reply_body=entry.get("body", ""),
                 outgoing=entry.get("outgoing", False),
                 edited=entry.get("edited", False),
-                retracted=entry.get("retracted", False))
+                retracted=entry.get("retracted", False),
+                moderatable=entry.get("moderatable", False))
                 for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
@@ -1454,7 +1497,8 @@ window.__stanzaMentionRef = '';
                           raw_timestamp: str = "", reply_able_id: str = "",
                           reply_author: str = "", reply_body: str = "",
                           outgoing: bool = False, edited: bool = False,
-                          retracted: bool = False) -> str:
+                          retracted: bool = False,
+                          moderatable: bool = False) -> str:
             node_id = message_id or reply_able_id
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
@@ -1473,10 +1517,12 @@ window.__stanzaMentionRef = '';
             outward = ' data-stanza-outgoing="1"' if outgoing else ""
             edited_attr = ' data-edited="1"' if edited else ""
             retracted_attr = ' data-retracted="1"' if retracted else ""
+            moderatable_attr = ' data-moderatable="1"' if moderatable else ""
             return ('<div class="stanza-message"' + marker + stamp
                     + ' data-stanza-sender="'
                     + html.escape(sender or "Me", quote=True) + '"'
                     + rid + rauthor + outward + edited_attr + retracted_attr
+                    + moderatable_attr
                     + '>' + content + '</div>')
 
         def mark_message_delivered(self, message_id: str) -> None:
@@ -1709,9 +1755,18 @@ else:
                         reply_quote=None, outgoing: bool = False,
                         edited: bool = False, hats=None,
                         retracted: bool = False,
-                        retract_marker: bool = False):
+                        retract_marker: bool = False,
+                        retract_reason: str = "",
+                        retract_by: str = "",
+                        moderatable: bool = False):
             if retracted:
-                body_html = (f"<i>{html.escape(tr('msg_retracted'))}</i>")
+                text = tr('msg_retracted')
+                if retract_reason or retract_by:
+                    text = tr('msg_retracted_moderated')
+                    if retract_reason:
+                        text += " \u2014 " + tr('msg_retracted_reason',
+                                                reason=retract_reason)
+                body_html = f"<i>{html.escape(text)}</i>"
                 edited_suffix = ""
             else:
                 body_html = self._escape_body_for_fallback(body)

@@ -926,6 +926,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                                     tr("prefs_muc_confirm_leave")))
         muc_form.addRow(self._check("muc_minimize_startup",
                                     tr("prefs_muc_minimize_startup")))
+        muc_form.addRow(self._check("allow_moderation",
+                                    tr("prefs_allow_moderation")))
         return self._tabs([(tr("prefs_general"), general),
                            (tr("prefs_chat_tab"), chat),
                            (tr("prefs_conferences"), muc)])
@@ -1246,6 +1248,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "muc_show_status_text": chat.muc_show_status_text,
             "muc_auto_nick": chat.muc_auto_nick,
             "muc_confirm_leave": chat.muc_confirm_leave,
+            "allow_moderation": bool(getattr(chat, "allow_moderation", True)),
             "muc_minimize_startup": chat.muc_minimize_startup,
             "send_software": privacy.send_software,
             "send_typing_notifications": getattr(privacy, "send_typing_notifications", privacy.send_chatstates),
@@ -1355,6 +1358,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_auto_nick", "muc_confirm_leave",
                     "muc_minimize_startup", "message_displayed_sync",
                     "allow_incoming_edits", "allow_incoming_deletions",
+                    "allow_moderation",
                     "confirm_retraction", "idle_unload_minutes",
                     "muc_name_source"):
             cfg.chat[key] = self._value(key)

@@ -645,6 +645,27 @@ tombstones from MAM are stored with `retracted=1`. History gains
 `retracted`/`retract_marker` columns and `retract_message()`.
 [`tests/test_retraction.py`]
 
+Moderated Message Retraction (XEP-0425, `urn:xmpp:message-moderate:1`): a MUC
+moderator (role `moderator` or affiliation owner/admin) can retract another
+participant's message. `MainWindow._apply_muc_admin` also calls
+`_apply_muc_moderation`, which resolves `client.room_supports_moderation`
+(disco#info, cached) and enables `ChatWidget.set_moderation_enabled` for the
+tab; the message menu then shows "Удалить (модерация)" on incoming messages with
+a server `stanza-id` (`data-moderatable="1"`, set by `_mark_message` when
+`ChatWidget._can_moderate_entry` allows it). The click is relayed in-page
+(`stanza:moderate:<id>` via `window.__stanzaModerateRef`, the same
+preventDefault + scroll-poll relay); `_handle_moderate_uri` confirms and asks
+for an optional reason, then `message_moderate_sent` →
+`client.moderate_message` sends `<iq type='set'><moderate id='…'><retract
+xmlns='urn:xmpp:message-retract:1'/><reason/></moderate></iq>`. The room's
+groupchat broadcast (`<retract>` with a nested `<moderated by='…'/>` and
+`<reason/>`) is only accepted from the MUC service itself (`from` is the bare
+room JID), never from an occupant; the tombstone renders "Отозвано модератором"
+with the reason and history stores `retract_reason`/`retract_by`.
+`chat.allow_moderation` (Preferences → Chat → «Конференции», default on) is a
+receive-side switch between the tombstone and the "✕" marker.
+[`tests/test_moderation.py`]
+
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside
 `tokenize_urls` — with a resolvable message id the anchor becomes

@@ -370,7 +370,9 @@ class ChatThemeFactory:
                        highlight_nick: str = "", geo_ref: str = "",
                        hats: list | None = None,
                        retracted: bool = False,
-                       retract_marker: bool = False) -> str:
+                       retract_marker: bool = False,
+                       retract_reason: str = "",
+                       retract_by: str = "") -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -390,9 +392,20 @@ class ChatThemeFactory:
                                          highlight_nick=highlight_nick,
                                          geo_ref=geo_ref)
         if retracted:
-            body_html = ('<span class="stanza-retracted-text" '
-                         'style="color:#888;font-style:italic;">%s</span>'
-                         % escape_html(tr("msg_retracted")))
+            if retract_reason or retract_by:
+                # XEP-0425: a moderator retracted the message.
+                text = escape_html(tr("msg_retracted_moderated"))
+                if retract_reason:
+                    text += " \u2014 " + escape_html(
+                        tr("msg_retracted_reason", reason=retract_reason))
+                title = escape_html(retract_by or retract_reason)
+                body_html = ('<span class="stanza-retracted-text" '
+                             'style="color:#888;font-style:italic;" title="%s">'
+                             '%s</span>' % (title, text))
+            else:
+                body_html = ('<span class="stanza-retracted-text" '
+                             'style="color:#888;font-style:italic;">%s</span>'
+                             % escape_html(tr("msg_retracted")))
         else:
             if edited:
                 body_html += ('<span class="stanza-edited" style="color:#777;'
@@ -400,10 +413,14 @@ class ChatThemeFactory:
                               'cursor:help;" title="%s">\u270e</span>'
                               % escape_html(tr("msg_edited_tooltip")))
             if retract_marker:
+                marker_tip = (tr("msg_retract_marker_reason_tooltip",
+                                 reason=retract_reason)
+                              if retract_reason
+                              else tr("msg_retract_marker_tooltip"))
                 body_html += ('<span class="stanza-retracted" style="color:#777;'
                               'font-size:16px;font-weight:bold;margin-left:4px;'
                               'cursor:help;" title="%s">\u2715</span>'
-                              % escape_html(tr("msg_retract_marker_tooltip")))
+                              % escape_html(marker_tip))
 
         sender_html = escape_html(sender)
         if mention and direction == "incoming" and sender:

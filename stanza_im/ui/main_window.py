@@ -193,6 +193,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_groupchat_edit_send)
         self._chat_window.message_retract_requested.connect(
             self._on_message_retract_send)
+        self._chat_window.message_moderate_requested.connect(
+            self._on_message_moderate_send)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
@@ -267,6 +269,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._unread_total > 0 and self._config.notifications.tray_blink:
             self._tray.start_blinking()
         self._muc_users: dict[str, dict[str, dict]] = {}
+        self._muc_moderation: dict[str, bool] = {}
+        self._muc_moderation_pending: set[str] = set()
         self._muc_self_nicks: dict[str, str] = {}
         self._muc_names: dict[str, str] = {}
         self._muc_vcard_names: dict[str, dict] = {}
@@ -885,6 +889,43 @@ class MainWindow(QtWidgets.QMainWindow):
         """Enable the room-management button for owners/admins."""
         self._chat_window.set_muc_admin(
             room, self._muc_affiliation(room) in ("owner", "admin"))
+        self._apply_muc_moderation(room)
+
+    def _can_moderate_room(self, room: str) -> bool:
+        """True when we are a moderator/owner/admin of *room* (XEP-0425)."""
+        info = self._participant_info(room,
+                                      self._muc_self_nicks.get(room, ""))
+        return (info.get("role") == "moderator"
+                or info.get("affiliation") in ("owner", "admin"))
+
+    def _apply_muc_moderation(self, room: str) -> None:
+        """Offer the XEP-0425 moderation action when the room supports it."""
+        if self._client is None:
+            return
+        if not self._can_moderate_room(room):
+            self._chat_window.set_moderation_enabled(room, False)
+            return
+        resolved = self._muc_moderation.get(room)
+        if resolved is None:
+            if room not in self._muc_moderation_pending:
+                self._muc_moderation_pending.add(room)
+                self._start_task(self._refresh_muc_moderation(room))
+            return
+        self._chat_window.set_moderation_enabled(room, bool(resolved))
+
+    async def _refresh_muc_moderation(self, room: str) -> None:
+        supported = False
+        if self._client is not None:
+            try:
+                supported = bool(
+                    await self._client.room_supports_moderation(room))
+            except Exception:
+                logger.debug("Moderation discovery for %s failed", room,
+                             exc_info=True)
+        self._muc_moderation_pending.discard(room)
+        self._muc_moderation[room] = supported
+        if self._can_moderate_room(room):
+            self._chat_window.set_moderation_enabled(room, supported)
 
     def _on_muc_config_requested(self, room: str) -> None:
         """Open (or raise) the room-management dialog for *room*."""
@@ -957,6 +998,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.leave_muc(room)
         self._muc_users.pop(room, None)
+        self._muc_moderation.pop(room, None)
+        self._muc_moderation_pending.discard(room)
         self._muc_self_nicks.pop(room, None)
         self._muc_names.pop(room, None)
         self._muc_vcard_names.pop(room, None)
@@ -1665,6 +1708,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("message_retracted", self._on_message_retracted)
         c.on("message_retracted_own", self._on_message_retracted_own)
         c.on("groupchat_message_retracted", self._on_groupchat_message_retracted)
+        c.on("moderation_failed", self._on_moderation_failed)
         c.on("file_upload_progress", self._on_file_upload_progress)
         c.on("http_upload_oversize", self._on_http_upload_oversize)
         c.on("file_transfer_progress", self._on_file_transfer_progress)
@@ -3866,19 +3910,38 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         self._start_task(history.retract_message_async(jid, ref_id))
 
+    def _on_message_moderate_send(self, room: str, ref_id: str,
+                                  reason: str = ""):
+        """We retracted another participant's message (XEP-0425)."""
+        if self._client is None or not room or not ref_id:
+            return
+        self._start_task(
+            self._client.moderate_message(room, ref_id, reason))
+
+    def _on_moderation_failed(self, room: str, ref_id: str, error: str = ""):
+        """A XEP-0425 moderation request was rejected by the room."""
+        logger.warning("Moderation of %s in %s failed: %s", ref_id, room, error)
+        self._tray.show_message(APP_NAME, tr("moderate_failed"))
+
     def _apply_retraction(self, jid: str, ref_id: str, sender: str = "",
-                          own: bool = False):
+                          own: bool = False, moderated: bool = False,
+                          moderator: str = "", reason: str = ""):
         marker = False
         if not own:
-            marker = not bool(getattr(self._config.chat,
-                                      "allow_incoming_deletions", True))
+            if moderated:
+                marker = not bool(getattr(self._config.chat,
+                                          "allow_moderation", True))
+            else:
+                marker = not bool(getattr(self._config.chat,
+                                          "allow_incoming_deletions", True))
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.retract_message_by_ref(ref_id, marker=marker,
-                                        from_sender=sender)
+                                        from_sender=sender,
+                                        moderator=moderator, reason=reason)
         from stanza_im.core import history
-        self._start_task(history.retract_message_async(jid, ref_id, marker,
-                                                       sender))
+        self._start_task(history.retract_message_async(
+            jid, ref_id, marker, sender, reason, moderator))
 
     def _on_message_retracted(self, frm: str, ref_id: str):
         """A 1:1 retraction arrived (XEP-0424)."""
@@ -3898,11 +3961,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_retraction(jid, ref_id, own=True)
 
     def _on_groupchat_message_retracted(self, room: str, nick: str,
-                                        frm: str = "", ref_id: str = ""):
-        """A participant retracted their MUC message (XEP-0424)."""
+                                        frm: str = "", ref_id: str = "",
+                                        moderator: str = "",
+                                        reason: str = "",
+                                        moderated: bool = False):
+        """A participant retracted their MUC message (XEP-0424/0425)."""
         own = bool(nick) and nick == self._muc_self_nicks.get(room)
+        moderated = bool(moderated or moderator or reason)
         self._apply_retraction(room, ref_id, sender="" if own else nick,
-                               own=own)
+                               own=own, moderated=moderated,
+                               moderator=moderator, reason=reason)
 
     def _participant_info(self, room: str, nick: str) -> dict:
         return self._muc_users.get(room, {}).get(nick, {})

@@ -157,6 +157,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
 | `chat.allow_incoming_deletions` | `true` | Apply a peer's XEP-0424 retraction (Preferences → Chat → «Общие»/«General»). On: the message becomes a tombstone; off: it keeps its body and gains a "✕" marker. Applied live to the client from `_on_settings_applied`. |
+| `chat.allow_moderation` | `true` | Apply a moderator's XEP-0425 retraction (Preferences → Chat → «Конференции»/«Conferences»). On: the message becomes a "Retracted by a moderator" tombstone with the reason; off: it keeps its body and gains a "✕" marker. It only governs the receive side — the moderator action in the message menu is unaffected. |
 | `chat.confirm_retraction` | `false` | Ask for confirmation before retracting one of our own messages (message menu "Delete" / inline "✕"). |
 | `chat.muc_name_source` | `from_name` | Conference display-name source (Preferences → Chat → «Конференции» + info label tooltip): `from_name` = bookmark name → room/disco name → JID localpart; `from_vcard` = bookmark name → vCard `fn` → vCard `nickname` → room/disco name → JID localpart. A bookmark name equal to the room JID is ignored. Applied live by `MainWindow._refresh_muc_names` (tab title + roster). |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
@@ -1191,6 +1192,30 @@ Registers XEP plugins (conditionally where noted):
 - History gains `retracted`/`retract_marker` columns and `retract_message()`;
   `<retracted/>` tombstones found in MAM results are stored with `retracted=1`
   and render the same notice.
+
+### 14.4.2 Moderated Message Retraction (XEP-0425)
+
+- A MUC moderator (role `moderator` or affiliation owner/admin) can retract
+  another participant's message. `MainWindow._apply_muc_admin` also calls
+  `_apply_muc_moderation`, which resolves `client.room_supports_moderation`
+  (disco#info, cached, `urn:xmpp:message-moderate:1`) and enables
+  `ChatWidget.set_moderation_enabled` for the tab; the message menu then shows
+  "Удалить (модерация)" on incoming messages that carry a server `stanza-id`
+  (`data-moderatable="1"`).
+- The click is relayed in-page (`stanza:moderate:<id>` via the `_ACTION_JS`
+  handler + scroll-poll, `window.__stanzaModerateRef`). `ChatWidget.
+  _handle_moderate_uri` confirms and asks for an optional reason, then emits
+  `message_moderate_sent(room, id, reason)` → `client.moderate_message`, which
+  sends `<iq type='set'><moderate id='…' xmlns='urn:xmpp:message-moderate:1'>
+  <retract xmlns='urn:xmpp:message-retract:1'/><reason/></moderate></iq>` and
+  emits `moderation_failed` on an error.
+- The room's groupchat broadcast carries a normal XEP-0424 `<retract>` with a
+  nested `<moderated by='…' xmlns='urn:xmpp:message-moderate:1'/>` and a
+  `<reason/>`. It is only accepted when it comes from the MUC service itself
+  (`from` is the bare room JID), never from an occupant. The tombstone renders
+  "Отозвано модератором" with the reason, and history stores the reason and
+  moderator (`retract_reason`/`retract_by`). `chat.allow_moderation` (on by
+  default) chooses between the tombstone and the "✕" marker.
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221)
 

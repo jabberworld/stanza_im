@@ -171,6 +171,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.message_edit_sent.connect(self._on_message_edit_sent)
         widget.message_retract_sent.connect(self.message_retract_requested)
+        widget.message_moderate_sent.connect(self.message_moderate_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -228,6 +229,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_edit_sent.connect(
             self._on_groupchat_message_edit_sent)
         widget.message_retract_sent.connect(self.message_retract_requested)
+        widget.message_moderate_sent.connect(self.message_moderate_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -378,6 +380,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = self._tabs.get(room)
         if widget is not None and widget.is_muc:
             widget.set_muc_admin(can_manage)
+
+    def set_moderation_enabled(self, room: str, enabled: bool) -> None:
+        """Enable/disable the XEP-0425 moderation action of a MUC tab."""
+        widget = self._tabs.get(room)
+        if widget is not None and widget.is_muc:
+            widget.set_moderation_enabled(enabled)
 
     def set_muji_active(self, room: str, active: bool,
                         video: bool = False) -> None:
@@ -535,6 +543,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     message_edit_to_send = QtCore.pyqtSignal(str, str, str)      # jid, body, id
     groupchat_message_edit_to_send = QtCore.pyqtSignal(str, str, str)
     message_retract_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
+    #   room, ref_id, reason  (XEP-0425 moderator retraction)
+    message_moderate_requested = QtCore.pyqtSignal(str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed

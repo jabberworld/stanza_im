@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS messages (
     message_id TEXT,
     edited INTEGER NOT NULL DEFAULT 0,
     retracted INTEGER NOT NULL DEFAULT 0,
-    retract_marker INTEGER NOT NULL DEFAULT 0
+    retract_marker INTEGER NOT NULL DEFAULT 0,
+    retract_reason TEXT,
+    retract_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
@@ -145,6 +147,9 @@ def _connection(jid: str) -> sqlite3.Connection:
                 if col not in columns:
                     conn.execute(f"ALTER TABLE messages ADD COLUMN {col} "
                                  "INTEGER NOT NULL DEFAULT 0")
+            for col in ("retract_reason", "retract_by"):
+                if col not in columns:
+                    conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
             _migrate_dedup(conn)
             conn.commit()
         except sqlite3.Error:
@@ -162,7 +167,8 @@ def _connection(jid: str) -> sqlite3.Connection:
 
 def _row_to_entry(row) -> dict:
     _id, direction, sender, body, timestamp, archive_id, origin_id, \
-        reply_to, reply_id, message_id, edited, retracted, retract_marker = row
+        reply_to, reply_id, message_id, edited, retracted, retract_marker, \
+        retract_reason, retract_by = row
     return {
         "id": _id,
         "direction": direction,
@@ -177,6 +183,8 @@ def _row_to_entry(row) -> dict:
         "edited": bool(edited),
         "retracted": bool(retracted),
         "retract_marker": bool(retract_marker),
+        "retract_reason": retract_reason or "",
+        "retract_by": retract_by or "",
     }
 
 
@@ -209,7 +217,8 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             sender: str, archive_id: str, origin_id: str, reply_to: str,
             reply_id: str, message_id: str, edited: bool,
             retracted: bool, retract_marker: bool,
-            skip_existing: bool) -> bool:
+            skip_existing: bool,
+            retract_reason: str = "", retract_by: str = "") -> bool:
     """Insert one row; returns True when a row was actually written."""
     if skip_existing:
         clauses: list[str] = []
@@ -239,12 +248,13 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
         "INSERT INTO messages "
         "(direction, sender, body, timestamp, archive_id, "
         "origin_id, reply_to, reply_id, message_id, edited, "
-        "retracted, retract_marker) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "retracted, retract_marker, retract_reason, retract_by) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (direction, sender, body, ts, archive_id or None,
          origin_id or None, reply_to or None, reply_id or None,
          message_id or None, 1 if edited else 0,
-         1 if retracted else 0, 1 if retract_marker else 0),
+         1 if retracted else 0, 1 if retract_marker else 0,
+         retract_reason or None, retract_by or None),
     )
     return True
 
@@ -255,7 +265,8 @@ def store_message(jid: str, direction: str, body: str,
                   origin_id: str = "", reply_to: str = "",
                   reply_id: str = "", message_id: str = "",
                   edited: bool = False, retracted: bool = False,
-                  retract_marker: bool = False) -> bool:
+                  retract_marker: bool = False,
+                  retract_reason: str = "", retract_by: str = "") -> bool:
     """Append a message to *jid*'s history.
 
     By default (``skip_existing``) an already stored message is not duplicated.
@@ -273,7 +284,7 @@ def store_message(jid: str, direction: str, body: str,
             inserted = _insert(conn, direction, body, ts, sender, archive_id,
                                origin_id, reply_to, reply_id, message_id,
                                edited, retracted, retract_marker,
-                               skip_existing)
+                               skip_existing, retract_reason, retract_by)
             conn.commit()
             return inserted
     except sqlite3.Error as exc:
@@ -312,7 +323,9 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
                            bool(entry.get("edited", False)),
                            bool(entry.get("retracted", False)),
                            bool(entry.get("retract_marker", False)),
-                           skip_existing):
+                           skip_existing,
+                           entry.get("retract_reason", ""),
+                           entry.get("retract_by", "")):
                     inserted += 1
             conn.commit()
         return inserted
@@ -322,13 +335,15 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
 
 
 def retract_message(jid: str, ref_id: str, marker: bool = False,
-                    sender: str = "") -> bool:
+                    sender: str = "", reason: str = "",
+                    by: str = "") -> bool:
     """Apply a XEP-0424 retraction to the stored message *ref_id*.
 
     With *marker* the body is kept and only ``retract_marker`` is set (the
     user disabled incoming deletions); otherwise the body is cleared and
     ``retracted`` is set.  *sender*, when given, restricts the update to rows
     from that sender (a retraction must come from the original author).
+    *reason*/*by* carry the XEP-0425 moderation details when present.
     """
     if not ref_id:
         return False
@@ -342,10 +357,13 @@ def retract_message(jid: str, ref_id: str, marker: bool = False,
                 params.append(sender)
             if marker:
                 sql = (f"UPDATE messages SET retract_marker = 1, "
-                       f"retracted = 0 WHERE {where}")
+                       f"retracted = 0, retract_reason = ?, retract_by = ? "
+                       f"WHERE {where}")
             else:
                 sql = (f"UPDATE messages SET retracted = 1, body = '', "
-                       f"retract_marker = 0 WHERE {where}")
+                       f"retract_marker = 0, retract_reason = ?, "
+                       f"retract_by = ? WHERE {where}")
+            params = [reason or None, by or None] + params
             cur = conn.execute(sql, params)
             conn.commit()
             return cur.rowcount > 0
@@ -397,7 +415,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
                 f"SELECT * FROM ("
                 f"SELECT id, direction, sender, body, timestamp, archive_id,"
                 f" origin_id, reply_to, reply_id, message_id, edited,"
-                f" retracted, retract_marker FROM messages"
+                f" retracted, retract_marker, retract_reason, retract_by FROM messages"
                 f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 f"ORDER BY timestamp ASC, id ASC",
                 params)
@@ -420,7 +438,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
                 "SELECT * FROM ("
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker FROM messages "
+                " retracted, retract_marker, retract_reason, retract_by FROM messages "
                 "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (str(int(before_id)), str(int(limit))))
             rows = cur.fetchall()
@@ -438,7 +456,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
             cur = conn.execute(
                 "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker "
+                " retracted, retract_marker, retract_reason, retract_by "
                 "FROM messages WHERE timestamp < ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
@@ -519,7 +537,7 @@ def load_day(jid: str, date: str) -> list[dict]:
             cur = conn.execute(
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker "
+                " retracted, retract_marker, retract_reason, retract_by "
                 "FROM messages "
                 "WHERE substr(timestamp, 1, 10) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
@@ -713,9 +731,10 @@ async def replace_message_async(jid: str, ref_id: str,
 
 
 async def retract_message_async(jid: str, ref_id: str, marker: bool = False,
-                                sender: str = "") -> bool:
+                                sender: str = "", reason: str = "",
+                                by: str = "") -> bool:
     return await asyncio.to_thread(retract_message, jid, ref_id, marker,
-                                   sender)
+                                   sender, reason, by)
 
 
 async def load_history_async(jid: str, limit: int = 200,
