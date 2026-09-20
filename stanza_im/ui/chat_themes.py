@@ -37,6 +37,13 @@ _HATS_CSS = """
               background: rgba(0,0,0,.08); }
 """
 
+# XEP-0424: the inline delete button lives in every template, but only our
+# own messages (data-stanza-outgoing) may be retracted.
+_DELETE_CSS = """
+.stanza-message:not([data-stanza-outgoing="1"]) .message_actions a.action-delete
+    { display: none; }
+"""
+
 
 def _qwebchannel_js() -> str:
     """Return the ``qwebchannel.js`` glue ($undefined if unavailable).
@@ -543,6 +550,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
                  100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
 {_HATS_CSS}
+{_DELETE_CSS}
 {self._font_override_css()}
 </style>
 </head>
@@ -585,6 +593,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
                  100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
 {_HATS_CSS}
+{_DELETE_CSS}
 {self._font_override_css()}
 </style>
 </head>

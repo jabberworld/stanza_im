@@ -201,6 +201,21 @@ _tmpl = _src("resources", "chatskins", "minimal-mod", "Outgoing",
 check("outgoing skin carries the delete button",
       'class="action-delete"' in _tmpl
       and "stanza:delete:%DELETE_TARGET%" in _tmpl)
+_inc = _src("resources", "chatskins", "minimal-mod", "Incoming",
+            "Content.html")
+check("incoming skin carries the (gated) delete button",
+      'class="action-delete"' in _inc
+      and "stanza:delete:%DELETE_TARGET%" in _inc)
+check("both skins gate the delete button on data-stanza-outgoing",
+      all(
+          "data-stanza-outgoing" in _src("stanza_im", "ui", "chat_themes.py")
+          and 'class="action-delete"' in _src(
+              "resources", "chatskins", skin, direction, "Content.html")
+          for skin in ("minimal-mod", "candy")
+          for direction in ("Incoming", "Outgoing")))
+check("page CSS hides the delete button for foreign messages",
+      "data-stanza-outgoing" in _src("stanza_im", "ui", "chat_themes.py")
+      and "action-delete" in _src("stanza_im", "ui", "chat_themes.py"))
 _xeps = _src("XEPs.md")
 check("XEPs.md lists XEP-0424", "XEP-0424" in _xeps)
 

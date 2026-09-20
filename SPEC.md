@@ -1127,8 +1127,11 @@ Registers XEP plugins (conditionally where noted):
 ### 14.4.1 Message Retraction (XEP-0424)
 
 - Our own messages can be retracted from the message menu's "Delete" item or
-  the inline "✕" button between Reply and the menu button (outgoing templates
-  only, `a.action-delete`). Both keep the click in-page (`window.__stanzaDeleteRef`
+  the inline "✕" button between Reply and the menu button (`a.action-delete`,
+  present in both the incoming and outgoing skin templates; the page CSS
+  `.stanza-message:not([data-stanza-outgoing="1"]) …` hides it for foreign
+  messages, so our own live MUC echoes and archive replays both show it).
+  Both keep the click in-page (`window.__stanzaDeleteRef`
   via the `_ACTION_JS` handler + scroll-poll relay, `stanza:delete:<id>`), so the
   chat document is never reset. `ChatWidget._handle_delete_uri` optionally asks
   for confirmation (`chat.confirm_retraction`, default off) and emits

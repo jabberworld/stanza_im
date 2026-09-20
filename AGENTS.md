@@ -575,7 +575,10 @@ as new messages (off). History gains `message_id`/`edited` columns and
 Message Retraction (XEP-0424, `urn:xmpp:message-retract:1`; the legacy `:0`
 namespace is accepted on receive): our own messages can be retracted from the
 message menu's "Delete" or the inline "✕" button placed between Reply and the
-menu button (`a.action-delete` → `window.__stanzaDeleteRef`, the same JS
+menu button (`a.action-delete` is in every skin template; the page CSS hides it
+unless the wrapper has `data-stanza-outgoing`, so our own live MUC echoes and
+archive replays both show it, while foreign messages do not; it feeds
+`window.__stanzaDeleteRef`, the same JS
 `preventDefault` + scroll-poll relay). `ChatWidget._handle_delete_uri`
 optionally confirms (`chat.confirm_retraction`) and emits `message_retract_sent`;
 `client.send_retraction` sends `<retract id='…'/>`,
