@@ -218,6 +218,15 @@ dlg = _ModerateDialog(None)
 dlg._reason.setText("  spam  ")
 check("moderate dialog returns the trimmed reason", dlg.reason() == "spam")
 check("moderate dialog is empty by default", _ModerateDialog(None).reason() == "")
+check("moderate dialog focuses Cancel",
+      dlg._cancel_btn.isDefault() and not dlg._ok_btn.isDefault())
+check("moderate dialog buttons are localized",
+      dlg._cancel_btn.text() == tr("moderate_cancel")
+      and dlg._ok_btn.text() == tr("moderate_send")
+      and tr("moderate_cancel") != "moderate_cancel")
+check("reason field carries the hint",
+      dlg._reason.placeholderText() == tr("moderate_reason_label")
+      and dlg._reason.placeholderText())
 
 
 # ── history persistence ──────────────────────────────────────────

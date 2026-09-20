@@ -237,18 +237,27 @@ class _ModerateDialog(QtWidgets.QDialog):
         prompt.setWordWrap(True)
         layout.addWidget(prompt)
 
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel(tr("moderate_reason_label"), self))
         self._reason = QtWidgets.QLineEdit(self)
-        row.addWidget(self._reason, 1)
-        layout.addLayout(row)
+        self._reason.setPlaceholderText(tr("moderate_reason_label"))
+        layout.addWidget(self._reason)
 
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok
-            | QtWidgets.QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = QtWidgets.QDialogButtonBox(self)
+        ok = buttons.addButton(
+            tr("moderate_send"),
+            QtWidgets.QDialogButtonBox.ButtonRole.AcceptRole)
+        cancel = buttons.addButton(
+            tr("moderate_cancel"),
+            QtWidgets.QDialogButtonBox.ButtonRole.RejectRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        # Enter (and the initial focus) must not confirm by accident.
+        ok.setAutoDefault(False)
+        cancel.setAutoDefault(True)
+        cancel.setDefault(True)
+        cancel.setFocus()
         layout.addWidget(buttons)
+        self._ok_btn = ok
+        self._cancel_btn = cancel
 
     def reason(self) -> str:
         return self._reason.text().strip()
