@@ -191,6 +191,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.message_edit_to_send.connect(self._on_message_edit_send)
         self._chat_window.groupchat_message_edit_to_send.connect(
             self._on_groupchat_edit_send)
+        self._chat_window.message_retract_requested.connect(
+            self._on_message_retract_send)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
@@ -1352,6 +1354,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""
         if self._client is not None:
+            self._client.allow_incoming_edits = bool(
+                self._config.chat.allow_incoming_edits)
+            self._client.allow_incoming_deletions = bool(
+                getattr(self._config.chat, "allow_incoming_deletions", True))
             self._client.call_devices = self._call_device_config()
             self._client.call_auto_accept = bool(getattr(
                 getattr(self._config, "calls", None), "auto_accept", False))
@@ -1525,6 +1531,8 @@ class MainWindow(QtWidgets.QMainWindow):
             message_carbons=connection.message_carbons,
             message_displayed_sync=self._config.chat.message_displayed_sync,
             allow_incoming_edits=self._config.chat.allow_incoming_edits,
+            allow_incoming_deletions=getattr(
+                self._config.chat, "allow_incoming_deletions", True),
             priority_mode=getattr(connection, "priority_mode", "status"),
             priority=getattr(connection, "priority", 50),
             proxy_mode=getattr(connection, "proxy_mode", "none"),
@@ -1604,6 +1612,9 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("mds_displayed", self._on_mds_displayed)
         c.on("message_corrected", self._on_message_corrected)
         c.on("groupchat_message_corrected", self._on_groupchat_message_corrected)
+        c.on("message_retracted", self._on_message_retracted)
+        c.on("message_retracted_own", self._on_message_retracted_own)
+        c.on("groupchat_message_retracted", self._on_groupchat_message_retracted)
         c.on("file_upload_progress", self._on_file_upload_progress)
         c.on("http_upload_oversize", self._on_http_upload_oversize)
         c.on("file_transfer_progress", self._on_file_transfer_progress)
@@ -3790,6 +3801,57 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.edit_message_by_ref(ref_id, body)
         from stanza_im.core import history
         self._start_task(history.replace_message_async(room, ref_id, body))
+
+    # ── XEP-0424 Message Retraction ───────────────────────────────
+
+    def _on_message_retract_send(self, jid: str, ref_id: str):
+        """We retracted one of our own messages (menu item / inline ✕)."""
+        if self._client is None or not ref_id:
+            return
+        self._client.send_retraction(jid, ref_id)
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.retract_message_by_ref(ref_id)
+        from stanza_im.core import history
+        self._start_task(history.retract_message_async(jid, ref_id))
+
+    def _apply_retraction(self, jid: str, ref_id: str, sender: str = "",
+                          own: bool = False):
+        marker = False
+        if not own:
+            marker = not bool(getattr(self._config.chat,
+                                      "allow_incoming_deletions", True))
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.retract_message_by_ref(ref_id, marker=marker,
+                                        from_sender=sender)
+        from stanza_im.core import history
+        self._start_task(history.retract_message_async(jid, ref_id, marker,
+                                                       sender))
+
+    def _on_message_retracted(self, frm: str, ref_id: str):
+        """A 1:1 retraction arrived (XEP-0424)."""
+        room, sep, nick = frm.partition("/")
+        if sep and self._client and room in self._client.groupchats:
+            # Private MUC message: resolve the private chat target.
+            info = self._participant_info(room, nick)
+            real = info.get("real_jid")
+            target = (real.split("/")[0] if isinstance(real, str) and real
+                      else frm)
+            self._apply_retraction(target, ref_id, sender=nick)
+            return
+        self._apply_retraction(room, ref_id, sender=room)
+
+    def _on_message_retracted_own(self, jid: str, ref_id: str):
+        """Our own retraction sent from another of our resources."""
+        self._apply_retraction(jid, ref_id, own=True)
+
+    def _on_groupchat_message_retracted(self, room: str, nick: str,
+                                        frm: str = "", ref_id: str = ""):
+        """A participant retracted their MUC message (XEP-0424)."""
+        own = bool(nick) and nick == self._muc_self_nicks.get(room)
+        self._apply_retraction(room, ref_id, sender="" if own else nick,
+                               own=own)
 
     def _participant_info(self, room: str, nick: str) -> dict:
         return self._muc_users.get(room, {}).get(nick, {})

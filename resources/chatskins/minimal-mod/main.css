@@ -198,7 +198,8 @@ a:hover{
     border-radius: 3px;
 }
 .message_actions button:hover { background: #d5d5d5; }
-.message_actions a.action-reply {
+.message_actions a.action-reply,
+.message_actions a.action-delete {
     display: inline-block;
     text-align: center;
     text-decoration: none;
@@ -211,7 +212,8 @@ a:hover{
     margin: 0;
     border-radius: 3px;
 }
-.message_actions a.action-reply:hover { background: #d5d5d5; }
+.message_actions a.action-reply:hover,
+.message_actions a.action-delete:hover { background: #d5d5d5; }
 
 .stanza-menu {
     position: fixed;

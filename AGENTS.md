@@ -572,6 +572,22 @@ via `render_message(edited=True)`, `chat.allow_incoming_edits` on) or arrive
 as new messages (off). History gains `message_id`/`edited` columns and
 `replace_message()`.
 
+Message Retraction (XEP-0424, `urn:xmpp:message-retract:1`; the legacy `:0`
+namespace is accepted on receive): our own messages can be retracted from the
+message menu's "Delete" or the inline "✕" button placed between Reply and the
+menu button (`a.action-delete` → `window.__stanzaDeleteRef`, the same JS
+`preventDefault` + scroll-poll relay). `ChatWidget._handle_delete_uri`
+optionally confirms (`chat.confirm_retraction`) and emits `message_retract_sent`;
+`client.send_retraction` sends `<retract id='…'/>`,
+`<fallback for='urn:xmpp:message-retract:1'/>`, a fallback `<body>` and a
+`<store/>` hint, and the message is replaced locally with a tombstone. Incoming
+retractions never render their fallback body: with `chat.allow_incoming_deletions`
+on the referenced message becomes a tombstone, with the option off it keeps its
+body and gains a "✕" marker (like the «✎» edit marker). Archived `<retracted/>`
+tombstones from MAM are stored with `retracted=1`. History gains
+`retracted`/`retract_marker` columns and `retract_message()`.
+[`tests/test_retraction.py`]
+
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside
 `tokenize_urls` — with a resolvable message id the anchor becomes

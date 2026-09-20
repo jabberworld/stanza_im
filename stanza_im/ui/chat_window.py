@@ -170,6 +170,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_sent.connect(self._on_message_sent)
         widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.message_edit_sent.connect(self._on_message_edit_sent)
+        widget.message_retract_sent.connect(self.message_retract_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -226,6 +227,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
         widget.message_edit_sent.connect(
             self._on_groupchat_message_edit_sent)
+        widget.message_retract_sent.connect(self.message_retract_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -532,6 +534,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         str, str, str, str, str, str)
     message_edit_to_send = QtCore.pyqtSignal(str, str, str)      # jid, body, id
     groupchat_message_edit_to_send = QtCore.pyqtSignal(str, str, str)
+    message_retract_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed

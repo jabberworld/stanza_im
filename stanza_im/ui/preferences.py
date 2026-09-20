@@ -874,6 +874,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                                         tr("prefs_message_displayed_sync")))
         general_form.addRow(self._check("allow_incoming_edits",
                                         tr("prefs_allow_incoming_edits")))
+        general_form.addRow(self._check("allow_incoming_deletions",
+                                        tr("prefs_allow_incoming_deletions")))
+        general_form.addRow(self._check("confirm_retraction",
+                                        tr("prefs_confirm_retraction")))
         general_form.addRow(tr("prefs_media_preview"),
                             self._combo("media_preview", [
                                 ("media_preview_none", "none"),
@@ -1228,6 +1232,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
             "message_displayed_sync": chat.message_displayed_sync,
             "allow_incoming_edits": chat.allow_incoming_edits,
+            "allow_incoming_deletions": getattr(
+                chat, "allow_incoming_deletions", True),
+            "confirm_retraction": getattr(chat, "confirm_retraction", False),
             "show_receipts": chat.show_receipts, "show_mood": chat.show_mood,
             "show_music": chat.show_music, "show_avatars": chat.show_avatars,
             "message_styling": chat.message_styling,
@@ -1347,7 +1354,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_show_status", "muc_show_status_text",
                     "muc_auto_nick", "muc_confirm_leave",
                     "muc_minimize_startup", "message_displayed_sync",
-                    "allow_incoming_edits", "idle_unload_minutes",
+                    "allow_incoming_edits", "allow_incoming_deletions",
+                    "confirm_retraction", "idle_unload_minutes",
                     "muc_name_source"):
             cfg.chat[key] = self._value(key)
         cfg.chat.theme = self._value("chat_theme") or ""

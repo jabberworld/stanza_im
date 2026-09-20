@@ -715,6 +715,7 @@ if HAS_WEBENGINE:
             var MENU_CLASS = 'stanza-menu';
             var EDIT_LABEL = %EDIT_LABEL%;
             var FORWARD_LABEL = %FORWARD_LABEL%;
+            var DELETE_LABEL = %DELETE_LABEL%;
             var menu = null;
 
             function closeMenu() {
@@ -728,6 +729,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
             window.__stanzaForwardRef = '';
             window.__stanzaJumpRef = '';
+            window.__stanzaDeleteRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -803,6 +805,17 @@ window.__stanzaMentionRef = '';
                         window.setTimeout(closeMenu, 0);
                     });
                     menu.appendChild(edit);
+                    var del = document.createElement('button');
+                    del.type = 'button';
+                    del.textContent = DELETE_LABEL || 'Delete';
+                    del.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        window.__stanzaDeleteRef = 'stanza:delete:'
+                            + encodeURIComponent(
+                                wrap.getAttribute('data-stanza-id') || '');
+                        window.setTimeout(closeMenu, 0);
+                    });
+                    menu.appendChild(del);
                 }
                 var item = document.createElement('button');
                 item.type = 'button';
@@ -921,6 +934,15 @@ window.__stanzaMentionRef = '';
                         rbtn.getAttribute('href') || '';
                     return;
                 }
+                // Delete (XEP-0424): the inline "✕" button never navigates.
+                var delref = t && t.closest
+                    ? t.closest('a.action-delete') : null;
+                if (delref) {
+                    e.preventDefault();
+                    window.__stanzaDeleteRef =
+                        delref.getAttribute('href') || '';
+                    return;
+                }
                 // MUC mention: never navigate. A stanza: navigation can
                 // otherwise replace the chat document and blank the whole
                 // conversation.  Leave the href for the always-running scroll
@@ -972,6 +994,7 @@ window.__stanzaMentionRef = '';
         def _install_action_js(self):
             code = (self._ACTION_JS
                     .replace("%EDIT_LABEL%", json.dumps(tr("chat_edit")))
+                    .replace("%DELETE_LABEL%", json.dumps(tr("chat_delete")))
                     .replace("%FORWARD_LABEL%", json.dumps(tr("chat_forward"))))
             self.page().runJavaScript(code)
 
@@ -1030,7 +1053,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '',"
                 " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '',"
                 " window.__stanzaJumpRef || '', window.__stanzaJumpPress ? 1 : 0,"
-                " window.__stanzaLoadRef || '']",
+                " window.__stanzaLoadRef || '',"
+                " window.__stanzaDeleteRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1085,6 +1109,12 @@ window.__stanzaMentionRef = '';
         def _clear_load_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaLoadRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_delete_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaDeleteRef = '';")
             except RuntimeError:
                 pass
 
@@ -1172,6 +1202,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_load_ref = ""
+            if len(value) > 13 and isinstance(value[13], str) and value[13]:
+                self._clear_delete_request()
+                requested = value[13]
+                if requested != getattr(self, "_last_delete_ref", ""):
+                    self._last_delete_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_delete_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1247,7 +1285,9 @@ window.__stanzaMentionRef = '';
                                 unstyled: bool = False, raw_timestamp: str = "",
                                 reply_able_id: str = "", reply_author: str = "",
                                 reply_quote=None, outgoing: bool = False,
-                                edited: bool = False, hats=None) -> str:
+                                edited: bool = False, hats=None,
+                                retracted: bool = False,
+                                retract_marker: bool = False) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -1259,7 +1299,8 @@ window.__stanzaMentionRef = '';
                     sender_color=sender_color, user_icon_path=user_icon_path,
                     unstyled=unstyled, mention=self.mention_senders,
                     edited=edited, highlight_nick=self.highlight_nick,
-                    geo_ref=reply_able_id or "", hats=hats)
+                    geo_ref=reply_able_id or "", hats=hats,
+                    retracted=retracted, retract_marker=retract_marker)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -1276,7 +1317,9 @@ window.__stanzaMentionRef = '';
                         unstyled: bool = False, raw_timestamp: str = "",
                         reply_able_id: str = "", reply_author: str = "",
                         reply_quote=None, outgoing: bool = False,
-                        edited: bool = False, hats=None):
+                        edited: bool = False, hats=None,
+                        retracted: bool = False,
+                        retract_marker: bool = False):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -1286,7 +1329,7 @@ window.__stanzaMentionRef = '';
                 sender, body, timestamp, direction, is_next,
                 sender_color, user_icon_path, message_id, unstyled,
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
-                outgoing, edited, hats)
+                outgoing, edited, hats, retracted, retract_marker)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -1407,12 +1450,15 @@ window.__stanzaMentionRef = '';
                           raw_timestamp: str = "", reply_able_id: str = "",
                           reply_author: str = "", reply_body: str = "",
                           outgoing: bool = False, edited: bool = False) -> str:
+            node_id = message_id or reply_able_id
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
                     "%REPLY_TARGET%",
                     _compose_reply_target(reply_able_id, reply_author,
                                           sender, reply_body))
-            node_id = message_id or reply_able_id
+            if "%DELETE_TARGET%" in content:
+                content = content.replace(
+                    "%DELETE_TARGET%", quote(node_id, safe="") if node_id else "")
             marker = (' data-stanza-id="' + html.escape(node_id, quote=True) + '"'
                       if node_id else "")
             stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'
@@ -1655,8 +1701,19 @@ else:
                         unstyled: bool = False, raw_timestamp: str = "",
                         reply_able_id: str = "", reply_author: str = "",
                         reply_quote=None, outgoing: bool = False,
-                        edited: bool = False, hats=None):
-            edited_suffix = " " + tr("msg_edited_tooltip") if edited else ""
+                        edited: bool = False, hats=None,
+                        retracted: bool = False,
+                        retract_marker: bool = False):
+            if retracted:
+                body_html = (f"<i>{html.escape(tr('msg_retracted'))}</i>")
+                edited_suffix = ""
+            else:
+                body_html = self._escape_body_for_fallback(body)
+                edited_suffix = ""
+                if edited:
+                    edited_suffix += " " + tr("msg_edited_tooltip")
+                if retract_marker:
+                    edited_suffix += " \u2715"
             hats_suffix = self._hats_text(hats)
             reply_line = ""
             if reply_quote is not None:
@@ -1678,13 +1735,13 @@ else:
                 self._append_before_typing(
                     reply_line +
                     f"<b>{sender}</b>{hats_suffix} <i>({timestamp})</i>: "
-                    f"{self._escape_body_for_fallback(body)}{edited_suffix}")
+                    f"{body_html}{edited_suffix}")
             else:
                 self._append_before_typing(
                     reply_line +
                     f"<b style='color:#0066cc'>{sender}</b>{hats_suffix} "
                     f"<i>({timestamp})</i>: "
-                    f"{self._escape_body_for_fallback(body)}{edited_suffix}")
+                    f"{body_html}{edited_suffix}")
 
         @staticmethod
         def _hats_text(hats) -> str:

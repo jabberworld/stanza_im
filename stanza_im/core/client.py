@@ -54,6 +54,11 @@ NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
 NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
+NS_RETRACT = "urn:xmpp:message-retract:1"   # XEP-0424 Message Retraction
+NS_RETRACT_LEGACY = "urn:xmpp:message-retract:0"
+NS_FALLBACK = "urn:xmpp:fallback:0"        # XEP-0428 Fallback Indication
+NS_HINTS = "urn:xmpp:hints"                # XEP-0334 Message Processing Hints
+_RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
 
 
 class _UploadProgress:
@@ -102,6 +107,32 @@ def _reply_reference(stanza) -> tuple[str, str]:
     for el in xml:
         if el.tag == "{%s}reply" % NS_REPLY:
             return (str(el.get("to", "")), str(el.get("id", "")))
+    return ("", "")
+
+
+def _retract_reference(stanza) -> str:
+    """Return the target id of a XEP-0424 ``<retract/>`` on *stanza*, else ""."""
+    xml = getattr(stanza, "xml", None)
+    if xml is None:
+        return ""
+    for el in xml:
+        if el.tag in ("{%s}retract" % NS_RETRACT,
+                      "{%s}retract" % NS_RETRACT_LEGACY):
+            return str(el.get("id", ""))
+    return ""
+
+
+def _retracted_tombstone(stanza) -> tuple[str, str]:
+    """Return ``(id, stamp)`` of a XEP-0424 ``<retracted/>`` tombstone."""
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return ("", "")
+    for el in xml.iter():
+        if el.tag in ("{%s}retracted" % NS_RETRACT,
+                      "{%s}retracted" % NS_RETRACT_LEGACY):
+            return (str(el.get("id", "")), str(el.get("stamp", "")))
     return ("", "")
 
 
@@ -465,6 +496,7 @@ class JabberClient:
                  message_carbons: bool = True,
                  message_displayed_sync: bool = True,
                  allow_incoming_edits: bool = True,
+                 allow_incoming_deletions: bool = True,
                  priority_mode: str = "status", priority: int = 50,
                  proxy_mode: str = "none", proxy_host: str = "",
                  proxy_port: int = 0,
@@ -503,6 +535,7 @@ class JabberClient:
         self.message_carbons = message_carbons
         self.message_displayed_sync = message_displayed_sync
         self.allow_incoming_edits = allow_incoming_edits
+        self.allow_incoming_deletions = allow_incoming_deletions
         self._mds_last_sid: dict[str, str] = {}
         self._mds_last_id: dict[str, str] = {}
         self._mds_local: dict[str, str] = {}
@@ -571,6 +604,8 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
         # XEP-0461 Message Replies (urn:xmpp:reply:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature(NS_REPLY)
+        # XEP-0424 Message Retraction (urn:xmpp:message-retract:1).
+        self.xmpp["xep_0030"].add_feature(NS_RETRACT)
         # XEP-0490 Displayed Synchronization — advertise PEP notification support.
         self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
         # Jingle file transfer (XEP-0166/0234) with SOCKS5 (XEP-0260) and
@@ -1184,6 +1219,37 @@ class JabberClient:
                      mtype, jid, reply_id, body[:200])
         msg.send()
         return message_id
+
+    def _build_retraction(self, jid: str, target_id: str, mtype: str = "chat",
+                          msg_id: str = ""):
+        """Build (but do not send) a XEP-0424 retraction; used by tests too."""
+        msg = self.xmpp.Message()
+        msg["to"] = jid
+        msg["type"] = mtype
+        msg["id"] = msg_id or uuid.uuid4().hex
+        retract = ET.SubElement(msg.xml, "{%s}retract" % NS_RETRACT)
+        retract.set("id", str(target_id))
+        fallback = ET.SubElement(msg.xml, "{%s}fallback" % NS_FALLBACK)
+        fallback.set("for", NS_RETRACT)
+        msg["body"] = ("/me retracted a previous message, but it's "
+                       "unsupported by your client.")
+        ET.SubElement(msg.xml, "{%s}store" % NS_HINTS)
+        return msg
+
+    def send_retraction(self, jid: str, target_id: str,
+                        mtype: str = "") -> str:
+        """Retract the message *target_id* (XEP-0424) and return the new id."""
+        if not isinstance(jid, str) or not jid.strip() or not target_id:
+            logger.warning("Skipping retraction (jid=%r id=%r)", jid, target_id)
+            return ""
+        jid = jid.strip()
+        if not mtype:
+            mtype = ("groupchat" if jid.split("/")[0] in self.groupchats
+                     else "chat")
+        msg = self._build_retraction(jid, target_id, mtype)
+        logger.debug("Sending retraction to %s for %s", jid, target_id)
+        msg.send()
+        return str(msg["id"])
 
     def send_muc_invite(self, jid: str, room: str, reason: str = "",
                         password: str = "") -> None:
@@ -3046,6 +3112,11 @@ class JabberClient:
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
+            retract_ref = _retract_reference(msg)
+            if retract_ref:
+                # XEP-0424: a retraction must never render its fallback body.
+                self.emit("message_retracted", frm, retract_ref)
+                return
             unstyled, ts, reply_to, reply_id, stable_id = \
                 self._message_fields(msg)
             server_sid = _stanza_id(msg, self.jid_str)
@@ -3105,6 +3176,10 @@ class JabberClient:
             return
         body = str(inner["body"])
         frm = str(inner["from"])
+        retract_ref = _retract_reference(inner)
+        if retract_ref:
+            self.emit("message_retracted", frm, retract_ref)
+            return
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
         server_sid = _stanza_id(inner, self.jid_str)
@@ -3129,6 +3204,10 @@ class JabberClient:
         bare = target.split("/")[0] if "/" in target else target
         if not bare:
             return
+        retract_ref = _retract_reference(inner)
+        if retract_ref:
+            self.emit("message_retracted_own", bare, retract_ref)
+            return
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
         self.emit("message_carbon_sent", bare, body, ts,
@@ -3139,6 +3218,12 @@ class JabberClient:
         room = frm.split("/")[0]
         nick = frm.split("/", 1)[1] if "/" in frm else ""
         body = str(msg["body"])
+        retract_ref = _retract_reference(msg)
+        if retract_ref:
+            # XEP-0424: never render the fallback body of a retraction.
+            self.emit("groupchat_message_retracted", room, nick, frm,
+                      retract_ref)
+            return
         subjects = _message_subjects(msg)
         if not body and subjects:
             default = next((t for lang, t in subjects if not lang), "")
@@ -3799,8 +3884,9 @@ class JabberClient:
                     skipped += 1
                     skip_reasons["no_stanza"] = skip_reasons.get("no_stanza", 0) + 1
                     continue
+                tomb_id, _tomb_stamp = _retracted_tombstone(msg)
                 body = str(_stanza_value(msg, "body") or "")
-                if not body:
+                if not body and not tomb_id:
                     skipped += 1
                     skip_reasons["empty_body"] = skip_reasons.get("empty_body", 0) + 1
                     continue
@@ -3852,6 +3938,7 @@ class JabberClient:
                     "origin_id": stable,
                     "reply_to": _reply_reference(msg)[0],
                     "reply_id": _reply_reference(msg)[1],
+                    "retracted": bool(tomb_id),
                 })
             except Exception:
                 skipped += 1

@@ -155,6 +155,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
+| `chat.allow_incoming_deletions` | `true` | Apply a peer's XEP-0424 retraction (Preferences → Chat → «Общие»/«General»). On: the message becomes a tombstone; off: it keeps its body and gains a "✕" marker. Applied live to the client from `_on_settings_applied`. |
+| `chat.confirm_retraction` | `false` | Ask for confirmation before retracting one of our own messages (message menu "Delete" / inline "✕"). |
 | `chat.muc_name_source` | `from_name` | Conference display-name source (Preferences → Chat → «Конференции» + info label tooltip): `from_name` = bookmark name → room/disco name → JID localpart; `from_vcard` = bookmark name → vCard `fn` → vCard `nickname` → room/disco name → JID localpart. A bookmark name equal to the room JID is ignored. Applied live by `MainWindow._refresh_muc_names` (tab title + roster). |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
@@ -1121,6 +1123,31 @@ Registers XEP plugins (conditionally where noted):
   `stanza:forward:<urlencoded>` ``link_clicked`` and
   `ChatWidget._handle_forward_uri` emits `share_requested` — the same
   `ShareDialog` flow as a URL/media/selection share (never navigation).
+
+### 14.4.1 Message Retraction (XEP-0424)
+
+- Our own messages can be retracted from the message menu's "Delete" item or
+  the inline "✕" button between Reply and the menu button (outgoing templates
+  only, `a.action-delete`). Both keep the click in-page (`window.__stanzaDeleteRef`
+  via the `_ACTION_JS` handler + scroll-poll relay, `stanza:delete:<id>`), so the
+  chat document is never reset. `ChatWidget._handle_delete_uri` optionally asks
+  for confirmation (`chat.confirm_retraction`, default off) and emits
+  `message_retract_sent`.
+- `client.send_retraction` sends `<retract xmlns='urn:xmpp:message-retract:1'
+  id='…'/>` (the room `stanza-id` in MUC, the message `id` in 1:1), a
+  `<fallback xmlns='urn:xmpp:fallback:0' for='urn:xmpp:message-retract:1'/>`,
+  a generic fallback `<body>` and a `<store xmlns='urn:xmpp:hints'/>` hint; the
+  message is replaced locally with a tombstone. The client advertises
+  `urn:xmpp:message-retract:1` and accepts the legacy `:0` namespace on receive.
+- Incoming retractions are routed by dedicated handlers (`message_retracted`,
+  `message_retracted_own`, `groupchat_message_retracted`) — the fallback body is
+  never rendered. With `chat.allow_incoming_deletions` on (default) the target
+  message becomes a tombstone ("Сообщение отозвано"); off it keeps its body and
+  gains a "✕" marker like the «✎» edit marker. A retraction is only applied when
+  it comes from the original author.
+- History gains `retracted`/`retract_marker` columns and `retract_message()`;
+  `<retracted/>` tombstones found in MAM results are stored with `retracted=1`
+  and render the same notice.
 
 ### 14.5 HTTP File Upload (XEP-0363)
 

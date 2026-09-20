@@ -359,7 +359,9 @@ class ChatThemeFactory:
                        user_icon_path: str = "", unstyled: bool = False,
                        mention: bool = False, edited: bool = False,
                        highlight_nick: str = "", geo_ref: str = "",
-                       hats: list | None = None) -> str:
+                       hats: list | None = None,
+                       retracted: bool = False,
+                       retract_marker: bool = False) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -378,11 +380,21 @@ class ChatThemeFactory:
         body_html = self._transform_body(body, styled=not unstyled,
                                          highlight_nick=highlight_nick,
                                          geo_ref=geo_ref)
-        if edited:
-            body_html += ('<span class="stanza-edited" style="color:#777;'
-                          'font-size:16px;font-weight:bold;margin-left:4px;'
-                          'cursor:help;" title="%s">\u270e</span>'
-                          % escape_html(tr("msg_edited_tooltip")))
+        if retracted:
+            body_html = ('<span class="stanza-retracted-text" '
+                         'style="color:#888;font-style:italic;">%s</span>'
+                         % escape_html(tr("msg_retracted")))
+        else:
+            if edited:
+                body_html += ('<span class="stanza-edited" style="color:#777;'
+                              'font-size:16px;font-weight:bold;margin-left:4px;'
+                              'cursor:help;" title="%s">\u270e</span>'
+                              % escape_html(tr("msg_edited_tooltip")))
+            if retract_marker:
+                body_html += ('<span class="stanza-retracted" style="color:#777;'
+                              'font-size:16px;font-weight:bold;margin-left:4px;'
+                              'cursor:help;" title="%s">\u2715</span>'
+                              % escape_html(tr("msg_retract_marker_tooltip")))
 
         sender_html = escape_html(sender)
         if mention and direction == "incoming" and sender:
@@ -401,7 +413,8 @@ class ChatThemeFactory:
                        .replace("%senderColor%", sender_color) \
                        .replace("%userIconPath%", user_icon_path) \
                        .replace("%reply_title%", tr("chat_reply")) \
-                       .replace("%copy_label%", tr("chat_copy"))
+                       .replace("%copy_label%", tr("chat_copy")) \
+                       .replace("%delete_title%", tr("chat_delete"))
         if "{body}" in html:
             html = html.replace("{body}", body_html)
         return html

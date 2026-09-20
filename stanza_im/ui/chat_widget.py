@@ -232,6 +232,7 @@ class ChatWidget(QtWidgets.QWidget):
     message_reply_sent = QtCore.pyqtSignal(str, str, str, str, str, str)
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
     message_edit_sent = QtCore.pyqtSignal(str, str, str)  # jid, body, edit_id
+    message_retract_sent = QtCore.pyqtSignal(str, str)    # jid, ref_id (XEP-0424)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
     link_clicked = QtCore.pyqtSignal(str)
     xmpp_link_clicked = QtCore.pyqtSignal(str)      # XEP-0147 xmpp: URI
@@ -265,6 +266,7 @@ class ChatWidget(QtWidgets.QWidget):
         self.is_muc = is_muc
         self._show_avatars = True
         self._send_ctrl_enter = False
+        self._confirm_retraction = False
         self._send_typing_notifications = True
         self._send_activity_notifications = True
         self._show_status = True
@@ -599,6 +601,9 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:edit:"):
             self._handle_edit_uri(url)
+            return
+        if url.startswith("stanza:delete:"):
+            self._handle_delete_uri(url)
             return
         if url.startswith("stanza:jump:"):
             self._jump_to_message(unquote(url[len("stanza:jump:"):]))
@@ -1033,6 +1038,19 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is not None:
             self._begin_edit(entry)
 
+    def _handle_delete_uri(self, url: str) -> None:
+        """Retract our own message from a ``stanza:delete:<id>`` click."""
+        ref = unquote(url[len("stanza:delete:"):])
+        if not ref:
+            return
+        if self._confirm_retraction:
+            answer = QtWidgets.QMessageBox.question(
+                self, tr("retract_confirm_title"),
+                tr("retract_confirm_text"))
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+        self.message_retract_sent.emit(self.jid, ref)
+
     def _find_editable(self, ref: str):
         """Locate a message editable via *ref* (must be our own message)."""
         if not ref:
@@ -1105,6 +1123,60 @@ class ChatWidget(QtWidgets.QWidget):
                 self.geo_message_corrected.emit(
                     self.jid, str(ref_id or ""), new_body)
                 return True
+        return False
+
+    @staticmethod
+    def _sender_matches(entry: dict, from_sender: str) -> bool:
+        """True when *from_sender* is the author of *entry* (XEP-0424 rule)."""
+        if not from_sender:
+            return True
+        sender = str(entry.get("sender") or "")
+        if sender and from_sender.split("/")[-1] == sender:
+            return True
+        target_bare = from_sender.split("/")[0]
+        for value in (str(entry.get("reply_author") or ""),
+                      str(entry.get("sender_jid") or ""),
+                      sender):
+            if not value:
+                continue
+            if value == from_sender or value.split("/")[0] == target_bare:
+                return True
+        return False
+
+    def retract_message_by_ref(self, ref_id: str, marker: bool = False,
+                               from_sender: str = "") -> bool:
+        """Apply (or flag) a XEP-0424 retraction on the message *ref_id*.
+
+        With *marker* the message body is kept and only the "✕" marker is
+        shown (incoming deletions are disabled); otherwise the body is cleared
+        and the message becomes a tombstone.  *from_sender* guards against a
+        retraction that did not come from the original author.
+        """
+        if not ref_id:
+            return False
+        for entry in list(self._messages) + list(self._history):
+            if not (str(entry.get("message_id") or "") == ref_id
+                    or str(self._reply_target_id(entry) or "") == ref_id):
+                continue
+            if from_sender and (self._is_mine(entry)
+                                or not self._sender_matches(entry, from_sender)):
+                return False
+            if marker:
+                entry["retract_marker"] = True
+            else:
+                entry["retracted"] = True
+                entry["retract_marker"] = False
+                entry["body"] = ""
+            dom_ref = entry.get("message_id") or self._reply_target_id(entry) \
+                or ref_id
+            try:
+                html = self._view.render_message_html(
+                    **self._entry_view_kwargs(entry))
+                self._view.replace_message_ref(dom_ref, html)
+            except Exception:
+                logger.debug("Could not re-render retracted message",
+                             exc_info=True)
+            return True
         return False
 
     # ── Message rendering ─────────────────────────────────────────
@@ -1193,6 +1265,8 @@ class ChatWidget(QtWidgets.QWidget):
                 entry.get("sender", "")),
             "outgoing": self._is_mine(entry),
             "edited": bool(entry.get("edited")),
+            "retracted": bool(entry.get("retracted")),
+            "retract_marker": bool(entry.get("retract_marker")),
             "sender_color": self._sender_color(entry),
             "hats": self._user_hats(entry),
         }
@@ -2046,6 +2120,7 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_chat_options(self, options):
         self._send_ctrl_enter = bool(options.get("send_ctrl_enter", False))
+        self._confirm_retraction = bool(options.get("confirm_retraction", False))
         self._send_typing_notifications = bool(options.get("send_typing_notifications", True))
         self._send_activity_notifications = bool(options.get("send_activity_notifications", True))
         self._show_status = bool(options.get("show_status", True))
