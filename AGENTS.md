@@ -540,8 +540,10 @@ unchanged) and renders it coloured by direction/kind in a read-only
 `QPlainTextEdit` (incoming: message red, presence orange, iq turquoise, sm
 blue; outgoing: message yellow, presence green, iq light blue, sm purple; other
 grey; dark background). Five filter checkboxes (Сообщения/Присутствия/IQ/SM/
-Прочее, all on) and a bare-JID field re-render the whole buffer live
-(unchecking hides already-captured stanzas, rechecking restores them).
+Прочее, all on) and a substring JID field re-render the whole buffer live
+(unchecking hides already-captured stanzas, rechecking restores them; the JID
+field is a case-insensitive substring match over the full `from`/`to`, so
+`conference.linuxoid.in` catches every room on that service).
 «Экспорт» writes the displayed text, «Очистить» empties the buffer and the
 view, «Ввод XML» opens `XmlInputDialog` (multiline + Отправить/Отмена) and
 `client.send_raw_xml(text)` sends each top-level element (an `<iq>` without an

@@ -23,8 +23,8 @@ from stanza_im.i18n import load as i18n_load
 from stanza_im.i18n import tr
 from stanza_im.core.client import JabberClient
 from stanza_im.ui import xml_console
-from stanza_im.ui.xml_console import (COLORS, XmlConsoleDialog, bare_jid,
-                                      classify, format_xml)
+from stanza_im.ui.xml_console import (COLORS, XmlConsoleDialog, classify,
+                                      format_xml, jid_matches)
 
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -38,11 +38,27 @@ def check(name, cond):
         FAILURES.append(name)
 
 
-# ── classification ───────────────────────────────────────────────
-check("bare JID drops resource and lowercases",
-      bare_jid("Alice@Example.COM/Phone") == "alice@example.com")
-check("bare JID of empty stays empty", bare_jid("") == "")
+# ── JID substring filter ─────────────────────────────────────────
+check("empty filter matches everything", jid_matches("a@b", "c@d", "") is True)
+check("whitespace filter matches everything",
+      jid_matches("a@b", "c@d", "   ") is True)
+check("domain substring matches a MUC JID",
+      jid_matches("room@conference.linuxoid.in/nick", "", "conference.linuxoid.in")
+      is True)
+check("domain substring matches the recipient side",
+      jid_matches("", "room@conference.linuxoid.in/nick", "conference.linuxoid.in")
+      is True)
+check("substring filter is case-insensitive",
+      jid_matches("Room@Conference.Linuxoid.IN/nick", "", "conference.linuxoid") is True)
+check("non-matching filter is rejected",
+      jid_matches("room@conference.linuxoid.in/nick", "", "jabber.ru") is False)
+check("resource is part of the searched string",
+      jid_matches("user@host/phone", "", "phone") is True)
+check("bare JID still matches its resourceful form",
+      jid_matches("user@host/phone", "", "user@host") is True)
 
+
+# ── classification ───────────────────────────────────────────────
 check("incoming message classified",
       classify("<message xmlns='jabber:client' from='a@b' to='c@d'/>")
       == ("message", "a@b", "c@d"))
@@ -200,10 +216,13 @@ check("message survives the IQ filter", "hello" in dlg._output.toPlainText())
 dlg._kind_boxes["iq"].setChecked(True)
 check("rechecking IQ restores it", 'type="result"' in dlg._output.toPlainText())
 
-# bare-JID filter
+# substring JID filter
 dlg._jid_edit.setText("alice@example.com")
 check("bare JID keeps a resourceful match", "hello" in dlg._output.toPlainText()
       and 'type="result"' not in dlg._output.toPlainText())
+dlg._jid_edit.setText("EXAMPLE.com")
+check("filter is a case-insensitive substring",
+      "hello" in dlg._output.toPlainText())
 dlg._jid_edit.setText("bob@example.com")
 check("non-matching JID hides everything",
       dlg._output.toPlainText().strip() == "")

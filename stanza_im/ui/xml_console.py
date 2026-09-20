@@ -43,9 +43,18 @@ COLORS = {
 _MAX_ENTRIES = 5000
 
 
-def bare_jid(value: str) -> str:
-    """Lower-case the JID without its resource (empty string stays empty)."""
-    return (value or "").split("/", 1)[0].lower()
+def jid_matches(entry_from: str, entry_to: str, wanted: str) -> bool:
+    """Case-insensitive substring filter over the full ``from``/``to`` JIDs.
+
+    An empty ``wanted`` matches everything.  Matching the whole JID (resource
+    included) lets e.g. ``conference.linuxoid.in`` catch every room on that
+    service regardless of the room or nickname.
+    """
+    wanted = (wanted or "").strip().lower()
+    if not wanted:
+        return True
+    return (wanted in (entry_from or "").lower()
+            or wanted in (entry_to or "").lower())
 
 
 def _split_tag(tag: str) -> tuple[str, str]:
@@ -295,10 +304,7 @@ class XmlConsoleDialog(QtWidgets.QDialog):
         box = self._kind_boxes.get(entry.kind)
         if box is not None and not box.isChecked():
             return False
-        wanted = bare_jid(self._jid_edit.text())
-        if wanted and wanted not in (bare_jid(entry.from_), bare_jid(entry.to)):
-            return False
-        return True
+        return jid_matches(entry.from_, entry.to, self._jid_edit.text())
 
     def _append(self, entry: Entry) -> None:
         scroll = self._output.verticalScrollBar()

@@ -287,11 +287,16 @@ each payload through the dialog's `stanza_captured` signal.
 | Element | Behaviour |
 |---------|-----------|
 | Output | Read-only `QPlainTextEdit`, monospace, dark background; selectable/copyable |
-| Filter | Checkboxes Сообщения / Присутствия / IQ / SM / Прочее (all on) + bare-JID field; re-renders the buffer live |
+| Filter | Checkboxes Сообщения / Присутствия / IQ / SM / Прочее (all on) + substring JID field; re-renders the buffer live |
 | Enable | Off by default; remembers the logger level, sets `slixmpp.xmlstream` to DEBUG and adds the handler; disabling/closing removes it and restores the level (no-op under `-x`/`-l`) |
 | Export | Writes the currently displayed text to a file |
 | Clear | Empties the buffer and the view |
 | Input XML | `XmlInputDialog` (multiline + Отправить/Отмена) → `client.send_raw_xml(text)` |
+
+The JID field is a case-insensitive **substring** match over the full `from`/`to`
+(resource included); an empty field matches everything. So
+`conference.linuxoid.in` catches every room on that service regardless of the
+room or nickname.
 
 Classification: `message|presence|iq` by local name, accepting both a bare tag
 and `xmlns="jabber:client"` (slixmpp omits the default namespace from top-level
