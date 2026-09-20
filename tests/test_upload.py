@@ -72,12 +72,25 @@ cw._set_input_height(140)
 check("input resized", cw._input.height() == 140
       and cw._input_height == 140)
 
-# 3. toolbar buttons + history move -------------------------------------------
-check("clear button", getattr(cw, "_history_btn") is not None)
+# 3. toolbar buttons + flat style ---------------------------------------------
+check("clear button", getattr(cw, "_clear_btn") is not None)
+check("history menu button removed",
+      not hasattr(cw, "_history_btn")
+      and not hasattr(cw, "_history_menu"))
+check("send button height follows the input",
+      cw._send_btn.height() == cw._input_height == 140)
 cw2 = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
 check("send file button menu", cw2._send_file_btn.menu() is not None)
 actions = [a.text() for a in cw2._send_file_btn.menu().actions()]
 check("send file options", "P2P" in actions and "HTTP Upload" in actions)
+check("toolbar buttons are flat",
+      cw._send_file_btn.autoRaise() and cw._call_btn.autoRaise()
+      and cw._clear_btn.autoRaise())
+cmuc = ChatWidget("room@conf.example", "Room",
+                  chat_themes.ChatThemeFactory(), is_muc=True)
+check("muc send file has no method menu",
+      cmuc._send_file_btn.menu() is None)
+check("muc send file is flat", cmuc._send_file_btn.autoRaise())
 
 # 4. drop requests upload -----------------------------------------------------
 up = []

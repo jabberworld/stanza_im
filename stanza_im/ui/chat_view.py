@@ -884,6 +884,18 @@ window.__stanzaMentionRef = '';
                     window.__stanzaJumpRef = jhref;
                     return;
                 }
+                // "Local history was cleared" marker: never navigate (a
+                // mam: navigation is normalised differently by Chromium);
+                // relay the href through the scroll poll like the other
+                // control links so the server history is fetched.
+                var loadref = t && t.closest
+                    ? t.closest('a.stanza-load') : null;
+                if (loadref) {
+                    e.preventDefault();
+                    window.__stanzaLoadRef =
+                        loadref.getAttribute('href') || '';
+                    return;
+                }
                 // Media preview/player links must never navigate: a custom
                 // stanza: navigation can otherwise replace the chat document
                 // (and the image click would not reach Python).  Leave the
@@ -1017,7 +1029,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaMediaRef || '',"
                 " window.__stanzaMentionRef || '', window.__stanzaGeoRef || '',"
                 " window.__stanzaXmppRef || '', window.__stanzaForwardRef || '',"
-                " window.__stanzaJumpRef || '', window.__stanzaJumpPress ? 1 : 0]",
+                " window.__stanzaJumpRef || '', window.__stanzaJumpPress ? 1 : 0,"
+                " window.__stanzaLoadRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1066,6 +1079,12 @@ window.__stanzaMentionRef = '';
         def _clear_jump_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaJumpRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_load_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaLoadRef = '';")
             except RuntimeError:
                 pass
 
@@ -1145,6 +1164,14 @@ window.__stanzaMentionRef = '';
             if len(value) > 11 and value[11]:
                 self.evaluate_js("window.__stanzaJumpPress = 0;")
                 self._on_jump_clicked()
+            if len(value) > 12 and isinstance(value[12], str) and value[12]:
+                self._clear_load_request()
+                requested = value[12]
+                if requested != getattr(self, "_last_load_ref", ""):
+                    self._last_load_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_load_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])

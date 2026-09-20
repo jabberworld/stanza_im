@@ -321,11 +321,13 @@ the reply button; Ctrl+Up stays the XEP-0308 edit shortcut). Pressing `Down`
 while the reply is still untouched (the input holds exactly the inserted quote)
 cancels it again.
 [`tests/test_reply_up.py`]
-Real links and the `mam://load`
-marker still request a navigation that is intercepted on the
+Real links still request a navigation that is intercepted on the
 C++ side by `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`,
 which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
-schemes and denies the in-view load. The `stanza`/`mam` schemes are
+schemes and denies the in-view load. The "local history was cleared — load it
+from server" marker is a `stanza:load:` control link (`a.stanza-load`, the same
+`preventDefault` + scroll-poll relay as reply/edit/mention), so it reloads the
+server history without relying on a `mam:` navigation. The `stanza`/`mam` schemes are
 pre-registered as app-handled with `QWebEngineUrlScheme.registerScheme`
 (`_register_custom_url_schemes`) so Chromium never starts (and errors on) a
 real load; they use the `Path` syntax, which preserves the opaque
@@ -474,7 +476,8 @@ session with many images cannot grow the thumbnail cache without limit.
 `thumbnail_ready` is pushed into every open
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
-to the window; video in a WebEngine `<video>` window, `F11` fullscreen); the
+to the window; video in a WebEngine `<video>` window, `F11` fullscreen; `Esc`
+closes the viewer); the
 WebEngine `contextMenuEvent` reads the request via
 `QWebEngineView.lastContextMenuRequest()` (Qt 6; the old
 `page().contextMenuData()` does not exist and silently fell back to the engine
@@ -635,9 +638,12 @@ only as the prompt plus an OSD notification. Failed vCard fetches emit `vcard_er
 bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
 
-HTTP File Upload (XEP-0363): a toolbar above the chat input carries icon
-buttons for Clear, History (moved from the tab header), vCard and "Send file"
-(a menu with "P2P" / "P2P IBB" / "HTTP Upload"); the input is vertically
+HTTP File Upload (XEP-0363): a toolbar above the chat input carries flat
+icon buttons for Clear, vCard and "Send file"; in a 1:1 chat "Send file" is a
+menu ("P2P" / "P2P IBB" / "HTTP Upload"), while a conference only supports HTTP
+Upload and gets a plain button (no menu). The "Send" control is a vertical
+icon-only button (an Enter-style arrow) whose height follows the input field.
+The input is vertically
 resizable
 (`chat.input_height`, persisted; the `_InputHandle` drag bar sits on the
 input's top edge just below the toolbar — dragging up grows the field, down
@@ -914,7 +920,10 @@ into «Темы», «Ростер», «Шрифты», «Цвет» and «Раз
 roster avatars/activity/mood, see §3; «Разное» holds the media-preview size,
 the preview cache TTL/limit and the MUC mention highlight mode). `Apply` applies
 settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
-Ctrl+PgUp/Ctrl+PgDown, Ctrl+1..9 and Ctrl+W. Contact context menus provide
+Up (empty input) to reply to the last incoming message, Down to cancel an
+untouched reply, Ctrl+Up to edit the last own message, Ctrl+PgUp/Ctrl+PgDown,
+Ctrl+1..9 and Ctrl+W; Esc also closes the media viewer. Contact context menus
+provide
 checkable group assignment and creation of new groups. Appearance → «Разное»
 also selects the interface mode (`appearance.interface_mode`): `separate`
 (default) keeps the chat in its own window, `unified` embeds the whole

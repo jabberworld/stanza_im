@@ -82,6 +82,27 @@ check("initial load passes the window (not the page cap)",
       "set_history(entries, window, exhausted)" in _mw_src)
 check("old blanket clamp removed", "_HISTORY_BATCH_LIMIT" not in _mw_src)
 
+# 5. the "local history cleared" marker reloads from the server --------------
+tab2 = ChatWidget("hist2@example.com", "Hist2", ChatThemeFactory())
+requests = []
+tab2.server_history_requested.connect(lambda *a: requests.append(a))
+tab2.history_cleared()
+check("cleared marker reset the fetch guard", tab2._server_fetching is False)
+html = tab2._view.toHtml()
+check("marker link is a server-load control link", "stanza:load:" in html)
+tab2._open_link("stanza:load:")
+check("marker click requests server history", bool(requests))
+tab2.detach()
+
+_cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
+               encoding="utf-8").read()
+check("load control link is preventDefaulted and relayed",
+      "a.stanza-load" in _cv_src and "__stanzaLoadRef" in _cv_src)
+_cw_src = open(os.path.join(_root, "stanza_im", "ui", "chat_widget.py"),
+               encoding="utf-8").read()
+check("marker uses the stanza-load control class",
+      'class="stanza-load"' in _cw_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

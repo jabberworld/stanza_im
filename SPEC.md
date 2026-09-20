@@ -718,11 +718,14 @@ the newest incoming message (`ChatWidget._reply_to_last` skips our own entries
 and those without a replyable id; Ctrl+Up remains the XEP-0308 edit shortcut).
 Pressing `Down` while the reply is untouched (the input holds exactly the
 inserted quote) cancels it.
-Real links and the `mam://load`
-marker request a navigation intercepted on the C++ side by
+Real links request a navigation intercepted on the C++ side by
 `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which
 emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto` schemes
-and denies the in-view load. `stanza`/`mam` are pre-registered as app-handled
+and denies the in-view load. The "local history was cleared — load it from
+server" marker is a `stanza:load:` control link (`a.stanza-load`, the same
+`preventDefault` + scroll-poll relay as reply/edit/mention), so it reloads the
+server history without relying on a `mam:` navigation. `stanza`/`mam` are
+pre-registered as app-handled
 schemes (`QWebEngineUrlScheme.registerScheme`) with the `Path` syntax, which
 preserves the opaque `stanza:view:…`/`xmpp:…` forms verbatim (so `linkUrl()`
 still reports them to the media context menu). Chromium thus never starts a
@@ -1121,9 +1124,11 @@ Registers XEP plugins (conditionally where noted):
 
 ### 14.5 HTTP File Upload (XEP-0363)
 
-- A toolbar above the input offers icon buttons: Clear chat, History (moved
-  from the tab header), vCard, and Send file (a menu with "P2P" and
-  "HTTP Upload"). The input is vertically resizable via a thin drag handle on
+- A toolbar above the input offers flat icon buttons: Clear chat, vCard, and
+  Send file (a menu with "P2P" and "HTTP Upload" for 1:1 chats; in a conference
+  a plain button, HTTP Upload only). The Send control is a vertical icon-only
+  button (an Enter-style arrow) whose height tracks the input field. The input
+  is vertically resizable via a thin drag handle on
   its top edge, just below the toolbar (dragging up grows the field, down
   shrinks it; height persisted in `chat.input_height`), and files may be
   dropped directly into the chat window; the view and the input disable

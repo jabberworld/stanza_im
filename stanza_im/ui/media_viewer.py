@@ -39,6 +39,12 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._fullscreen_hint = str(kind) == "video_fs"
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(tr("media_viewer_title"))
+        # Esc closes the viewer from anywhere, including the embedded video
+        # page (its QWebEngineView owns the keyboard focus otherwise).
+        esc = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape),
+                              self)
+        esc.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
+        esc.activated.connect(self.close)
         self.restore_geometry()
         if self._kind == "video":
             self._build_video()
@@ -147,9 +153,6 @@ class MediaViewer(QtWidgets.QMainWindow):
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key.Key_F11:
             self._toggle_fullscreen()
-            return
-        if event.key() == QtCore.Qt.Key.Key_Escape and self.isFullScreen():
-            self.showNormal()
             return
         super().keyPressEvent(event)
 

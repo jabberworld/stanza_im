@@ -317,5 +317,15 @@ v3.closed.connect(lambda: closed.append(True))
 v3.close()
 check("viewer closed signal", closed == [True])
 
+# 13b. Esc closes the media viewer -------------------------------------------
+v4 = MediaViewer("https://h/p/photo.png", "image", _StubService())
+_shortcuts = v4.findChildren(QtGui.QShortcut)
+check("viewer has an Esc shortcut",
+      any(s.key().toString() == "Esc" for s in _shortcuts))
+check("Esc shortcut closes the viewer",
+      "esc.activated.connect(self.close)" in _mv_src)
+check("Esc no longer handled as fullscreen-only in keyPressEvent",
+      "Key_Escape and self.isFullScreen()" not in _mv_src)
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

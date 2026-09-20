@@ -357,20 +357,6 @@ class ChatWidget(QtWidgets.QWidget):
         self._subject_edit.setVisible(self.is_muc)
         header.addWidget(self._subject_edit)
 
-        self._history_menu = QtWidgets.QMenu(self)
-        act_load = self._history_menu.addAction(tr("history_load_earlier"))
-        act_load.triggered.connect(self._load_older_batch)
-        act_server = self._history_menu.addAction(tr("history_load_from_server"))
-        act_server.triggered.connect(self.load_more_from_server)
-        act_clear = self._history_menu.addAction(tr("history_clear"))
-        act_clear.triggered.connect(self._request_clear_history)
-        if self.is_muc:
-            self._history_menu.addSeparator()
-            self._bookmark_action = self._history_menu.addAction(
-                tr("bookmark_add"))
-            self._bookmark_action.triggered.connect(
-                lambda: self.bookmark_toggled.emit(self.jid))
-
         self._bookmark_btn = QtWidgets.QToolButton(self)
         self._bookmark_btn.setIcon(self._bookmark_icon())
         self._bookmark_btn.setCheckable(True)
@@ -458,20 +444,13 @@ class ChatWidget(QtWidgets.QWidget):
         actions_row.setContentsMargins(4, 2, 4, 0)
         actions_row.setSpacing(2)
 
-        clear_btn = QtWidgets.QToolButton(self)
-        clear_btn.setIcon(self._chat_icon("process-stop.png"))
-        clear_btn.setToolTip(tr("chat_clear"))
-        clear_btn.setAutoRaise(True)
-        clear_btn.clicked.connect(lambda: self.clear_history_requested.emit(self.jid))
-        actions_row.addWidget(clear_btn)
-
-        self._history_btn = QtWidgets.QToolButton(self)
-        self._history_btn.setIcon(self._chat_icon("history.png"))
-        self._history_btn.setToolTip(tr("history_menu_tooltip"))
-        self._history_btn.setPopupMode(
-            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._history_btn.setMenu(self._history_menu)
-        actions_row.addWidget(self._history_btn)
+        self._clear_btn = QtWidgets.QToolButton(self)
+        self._clear_btn.setIcon(self._chat_icon("process-stop.png"))
+        self._clear_btn.setToolTip(tr("chat_clear"))
+        self._clear_btn.setAutoRaise(True)
+        self._clear_btn.clicked.connect(
+            lambda: self.clear_history_requested.emit(self.jid))
+        actions_row.addWidget(self._clear_btn)
 
         vcard_btn = QtWidgets.QToolButton(self)
         vcard_btn.setIcon(self._chat_icon("v-card.png"))
@@ -480,19 +459,26 @@ class ChatWidget(QtWidgets.QWidget):
         vcard_btn.clicked.connect(lambda: self.vcard_requested.emit(self.jid))
         actions_row.addWidget(vcard_btn)
 
-        send_menu = QtWidgets.QMenu(self)
-        send_p2p = send_menu.addAction(tr("ft_p2p"))
-        send_p2p.triggered.connect(lambda: self._choose_file_send("p2p"))
-        send_p2p_ibb = send_menu.addAction(tr("ft_p2p_ibb"))
-        send_p2p_ibb.triggered.connect(lambda: self._choose_file_send("p2p-ibb"))
-        send_http = send_menu.addAction(tr("ft_http_upload"))
-        send_http.triggered.connect(lambda: self._choose_file_send("http"))
         self._send_file_btn = QtWidgets.QToolButton(self)
         self._send_file_btn.setIcon(self._chat_icon("upload.png"))
         self._send_file_btn.setToolTip(tr("chat_send_file"))
-        self._send_file_btn.setPopupMode(
-            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._send_file_btn.setMenu(send_menu)
+        self._send_file_btn.setAutoRaise(True)
+        if self.is_muc:
+            # A conference only supports HTTP Upload: no method menu.
+            self._send_file_btn.clicked.connect(
+                lambda: self._choose_file_send("http"))
+        else:
+            send_menu = QtWidgets.QMenu(self)
+            send_p2p = send_menu.addAction(tr("ft_p2p"))
+            send_p2p.triggered.connect(lambda: self._choose_file_send("p2p"))
+            send_p2p_ibb = send_menu.addAction(tr("ft_p2p_ibb"))
+            send_p2p_ibb.triggered.connect(
+                lambda: self._choose_file_send("p2p-ibb"))
+            send_http = send_menu.addAction(tr("ft_http_upload"))
+            send_http.triggered.connect(lambda: self._choose_file_send("http"))
+            self._send_file_btn.setPopupMode(
+                QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+            self._send_file_btn.setMenu(send_menu)
         actions_row.addWidget(self._send_file_btn)
 
         # Call button — 1:1 chats ring a peer (call_requested), MUC tabs
@@ -518,6 +504,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._call_btn = QtWidgets.QToolButton(self)
             self._call_btn.setIcon(self._call_icon())
             self._call_btn.setToolTip(tr("call_button"))
+        self._call_btn.setAutoRaise(True)
         self._call_btn.setPopupMode(
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         self._call_btn.setMenu(call_menu)
@@ -554,7 +541,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._input.textChanged.connect(self._on_input_changed)
         input_row.addWidget(self._input, stretch=1)
 
-        self._send_btn = QtWidgets.QPushButton(tr("chat_send"))
+        self._send_btn = QtWidgets.QToolButton()
+        self._send_btn.setIcon(self._chat_icon("send-arrow.svg"))
+        self._send_btn.setIconSize(QtCore.QSize(16, 16))
+        self._send_btn.setToolTip(tr("chat_send"))
+        self._send_btn.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,
+                                     QtWidgets.QSizePolicy.Policy.Fixed)
+        self._send_btn.setFixedWidth(34)
+        self._send_btn.setFixedHeight(self._input_height)
         self._send_btn.clicked.connect(self._send)
         input_row.addWidget(self._send_btn)
         chat_col.addLayout(input_row)
@@ -620,6 +614,9 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("geo:"):
             self._handle_geo_uri(url)
+            return
+        if url.startswith("stanza:load:"):
+            self.load_more_from_server()
             return
         if url == "mam://load":
             self.load_more_from_server()
@@ -1250,7 +1247,7 @@ class ChatWidget(QtWidgets.QWidget):
             else self._view.scroll_fraction()
         self._view.clear()
         if self._cleared:
-            marker = (f'<a href="mam://load" '
+            marker = (f'<a class="stanza-load" href="stanza:load:" '
                       f'style="color:#1a73e8;text-decoration:underline;">'
                       f'{tr("history_load_from_server")}</a>')
             self._view.add_status(marker, "")
@@ -1430,6 +1427,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._db_exhausted = True
         self._server_exhausted = False
         self._hist_loading = False
+        self._server_fetching = False
         self._anchor_bottom = True
         self._render_all()
 
@@ -1636,9 +1634,6 @@ class ChatWidget(QtWidgets.QWidget):
         logger.info("Requesting server history from widget: jid=%s since=%s",
                     self.jid, self.oldest_ts() or "now")
         self.server_history_requested.emit(self.jid, self.oldest_ts() or None)
-
-    def _request_clear_history(self):
-        self.clear_history_requested.emit(self.jid)
 
     def _on_near_top(self):
         logger.info("History near-top: jid=%s local=%d db_exhausted=%s server_exhausted=%s fetching=%s",
@@ -1915,6 +1910,7 @@ class ChatWidget(QtWidgets.QWidget):
         if height != self._input_height:
             self._input_height = height
             self._input.setFixedHeight(height)
+            self._send_btn.setFixedHeight(height)
             self.input_height_changed.emit(self.jid, height)
 
     def _choose_file_send(self, method: str):

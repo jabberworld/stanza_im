@@ -681,7 +681,10 @@ STRINGS = {
     "prefs_no_plugins": "No plugins installed yet.",
     "prefs_shortcuts_list": ("Enter / Ctrl+Enter — send according to the setting\n"
                               "Shift+Enter — new line\n"
-                              "Esc — close current tab\n"
+                              "Up (empty input) — reply to the last incoming message\n"
+                              "Down — cancel a reply you have not started typing\n"
+                              "Ctrl+Up — edit the last message you sent\n"
+                              "Esc — close the media viewer\n"
                               "Ctrl+PgUp — previous tab\n"
                               "Ctrl+PgDown — next tab\n"
                               "Ctrl+1..9 — jump to chat tab\n"
