@@ -845,6 +845,31 @@ class JabberClient:
             "CAPTCHA",
             MatchXPath("%s/{%s}captcha" % (msg_ns, NS_CAPTCHA)),
             self._on_captcha_stanza))
+        # XEP-0424/0425 retractions are bodyless; slixmpp's MUC handler
+        # requires a <body>, so the room's moderation broadcast would never
+        # reach groupchat_message without a dedicated matcher.
+        self.xmpp.register_handler(CoroutineCallback(
+            "Message Retraction",
+            MatchXPath("%s/{%s}retract" % (msg_ns, NS_RETRACT)),
+            self._on_bodyless_retract_stanza))
+        self.xmpp.register_handler(CoroutineCallback(
+            "Message Retraction (legacy)",
+            MatchXPath("%s/{%s}retract" % (msg_ns, NS_RETRACT_LEGACY)),
+            self._on_bodyless_retract_stanza))
+
+    async def _on_bodyless_retract_stanza(self, msg) -> None:
+        """Route a bodyless XEP-0424/0425 retraction to the right handler.
+
+        Messages that do carry a ``<body>`` (a XEP-0424 fallback) are already
+        delivered through the ``message``/``groupchat_message`` events, so
+        they are ignored here to avoid handling them twice.
+        """
+        if str(msg["body"] or ""):
+            return
+        if str(msg["type"] or "") == "groupchat":
+            self._on_groupchat_message(msg)
+        else:
+            self._on_message(msg)
 
     async def _on_pubsub_event_stanza(self, msg) -> None:
         """Route bodyless pubsub#event messages (PEP, MDS) to their handlers."""

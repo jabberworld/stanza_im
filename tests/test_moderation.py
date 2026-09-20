@@ -27,7 +27,7 @@ from stanza_im.i18n import tr
 from stanza_im.core.client import (JabberClient, _StanzaXMPP, _moderation_info,
                                    NS_MODERATE, NS_RETRACT)
 from stanza_im.core import history
-from stanza_im.ui.chat_widget import ChatWidget
+from stanza_im.ui.chat_widget import ChatWidget, _ModerateDialog
 
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -180,6 +180,44 @@ c3._on_groupchat_message(_retraction("room@muc/bob", False))
 check("author self-retraction still accepted",
       gc_events and gc_events[-1][0] == "groupchat_message_retracted"
       and gc_events[-1][-1] is False)
+
+
+# ── bodyless retraction routing (slixmpp needs a <body>) ─────────
+c4 = JabberClient.__new__(JabberClient)
+c4.groupchats = {}
+bl_events = []
+c4.emit = lambda *args, **kwargs: bl_events.append(args)
+
+
+def _bodyless(frm, mtype, body=""):
+    msg = Message()
+    msg["from"] = frm
+    msg["type"] = mtype
+    retract = ET.SubElement(msg.xml, "{%s}retract" % NS_RETRACT)
+    retract.set("id", "sid1")
+    if body:
+        msg["body"] = body
+    return msg
+
+
+asyncio.run(c4._on_bodyless_retract_stanza(_bodyless("room@muc", "groupchat")))
+check("bodyless groupchat retraction routed",
+      bl_events and bl_events[-1][0] == "groupchat_message_retracted")
+bl_events.clear()
+asyncio.run(c4._on_bodyless_retract_stanza(_bodyless("a@b", "chat")))
+check("bodyless 1:1 retraction routed",
+      bl_events and bl_events[-1][0] == "message_retracted")
+bl_events.clear()
+asyncio.run(c4._on_bodyless_retract_stanza(
+    _bodyless("room@muc", "groupchat", body="fallback")))
+check("retraction with a fallback body is not double handled", bl_events == [])
+
+
+# ── combined moderation dialog ───────────────────────────────────
+dlg = _ModerateDialog(None)
+dlg._reason.setText("  spam  ")
+check("moderate dialog returns the trimmed reason", dlg.reason() == "spam")
+check("moderate dialog is empty by default", _ModerateDialog(None).reason() == "")
 
 
 # ── history persistence ──────────────────────────────────────────

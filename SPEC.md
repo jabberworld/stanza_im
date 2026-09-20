@@ -1204,18 +1204,24 @@ Registers XEP plugins (conditionally where noted):
   (`data-moderatable="1"`).
 - The click is relayed in-page (`stanza:moderate:<id>` via the `_ACTION_JS`
   handler + scroll-poll, `window.__stanzaModerateRef`). `ChatWidget.
-  _handle_moderate_uri` confirms and asks for an optional reason, then emits
-  `message_moderate_sent(room, id, reason)` → `client.moderate_message`, which
-  sends `<iq type='set'><moderate id='…' xmlns='urn:xmpp:message-moderate:1'>
-  <retract xmlns='urn:xmpp:message-retract:1'/><reason/></moderate></iq>` and
-  emits `moderation_failed` on an error.
+  _handle_moderate_uri` opens a single `_ModerateDialog` (confirmation text +
+  optional reason), then emits `message_moderate_sent(room, id, reason)` →
+  `client.moderate_message`, which sends `<iq type='set'><moderate id='…'
+  xmlns='urn:xmpp:message-moderate:1'><retract
+  xmlns='urn:xmpp:message-retract:1'/><reason/></moderate></iq>` and emits
+  `moderation_failed` on an error.
 - The room's groupchat broadcast carries a normal XEP-0424 `<retract>` with a
   nested `<moderated by='…' xmlns='urn:xmpp:message-moderate:1'/>` and a
-  `<reason/>`. It is only accepted when it comes from the MUC service itself
-  (`from` is the bare room JID), never from an occupant. The tombstone renders
-  "Отозвано модератором" with the reason, and history stores the reason and
-  moderator (`retract_reason`/`retract_by`). `chat.allow_moderation` (on by
-  default) chooses between the tombstone and the "✕" marker.
+  `<reason/>`. It is bodyless, while slixmpp's MUC handler requires a `<body>`,
+  so dedicated `MatchXPath` matchers (`{jabber:client}message/{urn:xmpp:
+  message-retract:1|0}retract` → `_on_bodyless_retract_stanza`) route it to
+  `_on_groupchat_message` (messages with a fallback `<body>` take the normal
+  path and are skipped there). It is only accepted when it comes from the MUC
+  service itself (`from` is the bare room JID), never from an occupant. The
+  tombstone renders "Отозвано модератором" with the reason, and history stores
+  the reason and moderator (`retract_reason`/`retract_by`).
+  `chat.allow_moderation` (on by default) chooses between the tombstone and the
+  "✕" marker.
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221)
 

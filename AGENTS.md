@@ -654,17 +654,23 @@ tab; the message menu then shows "Удалить (модерация)" on incomi
 a server `stanza-id` (`data-moderatable="1"`, set by `_mark_message` when
 `ChatWidget._can_moderate_entry` allows it). The click is relayed in-page
 (`stanza:moderate:<id>` via `window.__stanzaModerateRef`, the same
-preventDefault + scroll-poll relay); `_handle_moderate_uri` confirms and asks
-for an optional reason, then `message_moderate_sent` →
+preventDefault + scroll-poll relay); `_handle_moderate_uri` shows a single
+`_ModerateDialog` (confirmation + optional reason) and emits
+`message_moderate_sent` →
 `client.moderate_message` sends `<iq type='set'><moderate id='…'><retract
 xmlns='urn:xmpp:message-retract:1'/><reason/></moderate></iq>`. The room's
 groupchat broadcast (`<retract>` with a nested `<moderated by='…'/>` and
 `<reason/>`) is only accepted from the MUC service itself (`from` is the bare
-room JID), never from an occupant; the tombstone renders "Отозвано модератором"
-with the reason and history stores `retract_reason`/`retract_by`.
-`chat.allow_moderation` (Preferences → Chat → «Конференции», default on) is a
-receive-side switch between the tombstone and the "✕" marker.
-[`tests/test_moderation.py`]
+room JID), never from an occupant. Because slixmpp's MUC handler requires a
+`<body>`, bodyless retractions are routed by dedicated `MatchXPath` matchers
+(`{jabber:client}message/{urn:xmpp:message-retract:1|0}retract` →
+`_on_bodyless_retract_stanza`, alongside the other bodyless handlers) so the
+moderation broadcast still reaches `_on_groupchat_message`; messages that do
+carry a fallback `<body>` take the normal path and are skipped there. The
+tombstone renders "Отозвано модератором" with the reason and history stores
+`retract_reason`/`retract_by`. `chat.allow_moderation` (Preferences → Chat →
+«Конференции», default on) is a receive-side switch between the tombstone and
+the "✕" marker. [`tests/test_moderation.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside

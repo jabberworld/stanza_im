@@ -599,7 +599,7 @@ STRINGS = {
     "prefs_muc_name_from_vcard": "Из визитки",
     "prefs_muc_confirm_leave": "Запрос при выходе из комнаты",
     "prefs_muc_minimize_startup": "При запуске сворачивать конференции",
-    "prefs_allow_moderation": "Разрешать модераторирование сообщений",
+    "prefs_allow_moderation": "Разрешать модерирование сообщений",
     "prefs_privacy": "Приватность",
     "prefs_send_software": "Отправлять версию приложения и ОС",
     "prefs_send_chatstates": "Отправлять уведомления об активности",

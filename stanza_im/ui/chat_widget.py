@@ -225,6 +225,35 @@ class _NullView:
         return False
 
 
+class _ModerateDialog(QtWidgets.QDialog):
+    """XEP-0425 confirmation and optional reason in a single dialog."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("moderate_confirm_title"))
+        layout = QtWidgets.QVBoxLayout(self)
+
+        prompt = QtWidgets.QLabel(tr("moderate_confirm_text"), self)
+        prompt.setWordWrap(True)
+        layout.addWidget(prompt)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel(tr("moderate_reason_label"), self))
+        self._reason = QtWidgets.QLineEdit(self)
+        row.addWidget(self._reason, 1)
+        layout.addLayout(row)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def reason(self) -> str:
+        return self._reason.text().strip()
+
+
 class ChatWidget(QtWidgets.QWidget):
     """A single chat tab's content: header info + message view + input bar."""
 
@@ -1062,16 +1091,10 @@ class ChatWidget(QtWidgets.QWidget):
         ref = unquote(url[len("stanza:moderate:"):])
         if not ref or not self.is_muc:
             return
-        answer = QtWidgets.QMessageBox.question(
-            self, tr("moderate_confirm_title"),
-            tr("moderate_confirm_text"))
-        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+        dialog = _ModerateDialog(self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        reason, ok = QtWidgets.QInputDialog.getText(
-            self, tr("moderate_reason_title"), tr("moderate_reason_label"))
-        if not ok:
-            return
-        self.message_moderate_sent.emit(self.jid, ref, reason.strip())
+        self.message_moderate_sent.emit(self.jid, ref, dialog.reason())
 
     def _find_editable(self, ref: str):
         """Locate a message editable via *ref* (must be our own message)."""
