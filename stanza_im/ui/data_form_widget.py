@@ -1,12 +1,89 @@
 """Rendering of XEP-0004 data forms into a Qt widget."""
 from __future__ import annotations
 
-from PyQt6 import QtCore, QtWidgets
+import hashlib
+import threading
+import urllib.request
+
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 
 _TEXT_TYPES = {"text-single", "text-private", "jid-single", "text-multi",
                "jid-multi"}
+_MEDIA_NS = "urn:xmpp:media-element"
+
+
+class _MediaFetcher(QtCore.QObject):
+    """Fetch a CAPTCHA image in a worker thread (XEP-0221 ``<media/>``)."""
+
+    ready = QtCore.pyqtSignal(str, bytes)
+    failed = QtCore.pyqtSignal(str, str)
+
+    def fetch(self, url: str) -> None:
+        threading.Thread(target=self._run, args=(url,), daemon=True).start()
+
+    def _run(self, url: str) -> None:
+        try:
+            request = urllib.request.Request(
+                url, headers={"User-Agent": "Stanza IM"})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = response.read(2 * 1024 * 1024)
+            self.ready.emit(url, data)
+        except Exception as exc:
+            self.failed.emit(url, str(exc))
+
+
+class _HashcashSolver(QtCore.QObject):
+    """Solve an XEP-0158 SHA-256 hashcash challenge in a worker thread."""
+
+    solved = QtCore.pyqtSignal(str)
+    failed = QtCore.pyqtSignal(str)
+
+    def solve(self, prefix: str, label: str) -> None:
+        threading.Thread(target=self._run, args=(prefix, label),
+                         daemon=True).start()
+
+    def _run(self, prefix: str, label: str) -> None:
+        try:
+            target = int(label, 16)
+            bits = len(label) * 4
+            mask = (1 << bits) - 1
+            prefix = prefix or ""
+            for counter in range(20_000_000):
+                candidate = f"{prefix}{counter:016X}"
+                digest = hashlib.sha256(candidate.encode("utf-8")).digest()
+                if int.from_bytes(digest, "big") & mask == target:
+                    self.solved.emit(candidate)
+                    return
+        except Exception:
+            pass
+        self.failed.emit(tr("captcha_solve_failed"))
+
+
+def _field_media(field):
+    """Return ``{kind, url, mime, alt}`` for a XEP-0221 media field, else None.
+
+    Prefers an image URI (OCR CAPTCHA), then audio, then video.
+    """
+    xml = getattr(field, "xml", None)
+    if xml is None:
+        return None
+    media = xml.find("{%s}media" % _MEDIA_NS)
+    if media is None:
+        return None
+    uris = []
+    for uri in media.findall("{%s}uri" % _MEDIA_NS):
+        value = str(uri.text or "").strip()
+        if value:
+            uris.append((str(uri.get("type") or ""), value))
+    for prefix, kind in (("image/", "image"), ("audio/", "audio"),
+                         ("video/", "video")):
+        for mime, value in uris:
+            if mime.startswith(prefix):
+                return {"kind": kind, "url": value, "mime": mime,
+                        "alt": str(media.get("alt") or "")}
+    return None
 
 
 def _place_button_in_row(layout: QtWidgets.QFormLayout,
@@ -25,9 +102,14 @@ def _place_button_in_row(layout: QtWidgets.QFormLayout,
 class DataFormWidget(QtWidgets.QWidget):
     """Render a slixmpp XEP-0004 form and write user input back to it."""
 
-    def __init__(self, form, parent=None):
+    media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
+
+    def __init__(self, form, parent=None, media_service=None):
         super().__init__(parent)
         self._form = form
+        self._media_service = media_service
+        self._fetchers: list = []
+        self._hashcash = None
         self._fields: dict[str, object] = {}
         self._multi_fields: dict[str, list] = {}
         form_layout = QtWidgets.QFormLayout(self)
@@ -38,7 +120,10 @@ class DataFormWidget(QtWidgets.QWidget):
             title = QtWidgets.QLabel(str(form["title"]))
             title.setStyleSheet("font-weight: bold;")
             form_layout.addRow(title)
-        for instruction in form["instructions"] or ():
+        instructions = form["instructions"]
+        if isinstance(instructions, str):
+            instructions = [instructions] if instructions else []
+        for instruction in instructions or ():
             label = QtWidgets.QLabel(str(instruction))
             label.setWordWrap(True)
             form_layout.addRow(label)
@@ -77,7 +162,13 @@ class DataFormWidget(QtWidgets.QWidget):
             if ftype == "text-multi":
                 edit.setPlaceholderText("line1\\nline2")
             self._fields[var] = edit
-            layout.addRow(label, edit)
+            media = _field_media(field)
+            if media is not None:
+                layout.addRow(label, self._media_row(media, edit))
+            else:
+                layout.addRow(label, edit)
+            if var == "SHA-256":
+                self._start_hashcash(field, edit)
             return True
 
         if ftype == "boolean":
@@ -136,6 +227,75 @@ class DataFormWidget(QtWidgets.QWidget):
         self._fields[var] = edit
         layout.addRow(label, edit)
         return True
+
+    def _media_row(self, media, edit):
+        """A CAPTCHA challenge widget (image inline / audio-video button)."""
+        container = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(container)
+        column.setContentsMargins(0, 0, 0, 0)
+        if media["kind"] == "image":
+            label = QtWidgets.QLabel(tr("form_media_loading"))
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            label.setMinimumHeight(48)
+            column.addWidget(label)
+            self._load_media_image(media["url"], label)
+        else:
+            button = QtWidgets.QToolButton()
+            button.setText(tr("form_media_open"))
+            button.clicked.connect(
+                lambda: self.media_open_requested.emit(media["url"],
+                                                       media["kind"]))
+            column.addWidget(button)
+            if media.get("alt"):
+                alt = QtWidgets.QLabel(str(media["alt"]))
+                alt.setWordWrap(True)
+                column.addWidget(alt)
+        column.addWidget(edit)
+        return container
+
+    def _load_media_image(self, url: str, label) -> None:
+        if not url.lower().startswith(("http://", "https://")):
+            label.setText(url)
+            return
+        fetcher = _MediaFetcher(self)
+        fetcher.ready.connect(
+            lambda _url, data, lbl=label: self._set_media_pixmap(lbl, data))
+        fetcher.failed.connect(
+            lambda _url, _err, lbl=label: lbl.setText(tr("form_media_failed")))
+        self._fetchers.append(fetcher)
+        fetcher.fetch(url)
+
+    @staticmethod
+    def _set_media_pixmap(label, data) -> None:
+        pixmap = QtGui.QPixmap()
+        if not pixmap.loadFromData(data):
+            label.setText(tr("form_media_failed"))
+            return
+        if pixmap.width() > 320:
+            pixmap = pixmap.scaledToWidth(
+                320, QtCore.Qt.TransformationMode.SmoothTransformation)
+        label.setPixmap(pixmap)
+
+    def _hidden_value(self, var: str) -> str:
+        for field in self._form["fields"]:
+            if str(field["var"] or "") != var:
+                continue
+            value = field["value"]
+            if isinstance(value, list):
+                return str(value[0]) if value else ""
+            return str(value or "")
+        return ""
+
+    def _start_hashcash(self, field, edit) -> None:
+        label = str(field.get("label", "") or "").strip()
+        if not label or any(c not in "0123456789abcdefABCDEF" for c in label):
+            return
+        edit.setPlaceholderText(tr("captcha_solving"))
+        solver = _HashcashSolver(self)
+        solver.solved.connect(edit.setText)
+        solver.failed.connect(edit.setPlaceholderText)
+        self._hashcash = solver
+        solver.solve(self._hidden_value("from"), label)
 
     def validate(self) -> str | None:
         """Return a translated message for the first missing required field."""

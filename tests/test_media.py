@@ -327,5 +327,23 @@ check("Esc shortcut closes the viewer",
 check("Esc no longer handled as fullscreen-only in keyPressEvent",
       "Key_Escape and self.isFullScreen()" not in _mv_src)
 
+# 13c. Ctrl+wheel image zoom --------------------------------------------------
+from stanza_im.ui.media_viewer import _ImageScroll
+
+v4._pixmap = QtGui.QPixmap(100, 100)
+v4._reset_zoom()
+v4._on_zoom_step(1)
+check("ctrl+wheel zooms in", v4._zoom > 1.0)
+v4._on_zoom_step(-1)
+check("ctrl+wheel zooms out", abs(v4._zoom - 1.0) < 1e-6)
+v4._set_zoom(100.0)
+check("zoom clamps at max", abs(v4._zoom - 8.0) < 1e-6)
+v4._set_zoom(0.0)
+check("zoom clamps at min", abs(v4._zoom - 0.1) < 1e-6)
+v4._reset_zoom()
+check("zoom resets to fit", abs(v4._zoom - 1.0) < 1e-6)
+check("scroll area forwards Ctrl+wheel as a zoom step",
+      hasattr(_ImageScroll, "zoom_step") and hasattr(_ImageScroll, "wheelEvent"))
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

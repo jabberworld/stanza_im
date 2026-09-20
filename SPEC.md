@@ -45,7 +45,7 @@ stanza_im/
 │   ├── nick_colors.py  — Session MUC nickname → color allocation
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
 │   ├── media_preview.py — Inline image/audio/video previews
-│   ├── media_viewer.py — Fullscreen image/video viewer
+│   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
@@ -58,7 +58,7 @@ stanza_im/
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── history_manager.py   — Per-contact history browser
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
-│   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py
+│   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
@@ -1153,6 +1153,26 @@ Registers XEP plugins (conditionally where noted):
 - History gains `retracted`/`retract_marker` columns and `retract_message()`;
   `<retracted/>` tombstones found in MAM results are stored with `retracted=1`
   and render the same notice.
+
+### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221)
+
+- A field's `<media xmlns='urn:xmpp:media-element'/>` is parsed from its raw
+  XML (no XEP-0221 plugin needed). A challenge arrives as a `<message>` with
+  `<captcha xmlns='urn:xmpp:captcha'><x type='form'/>` (handled by its own
+  `MatchXPath`; the guard in `_on_message` keeps it out of the chat) or inside a
+  CAPTCHA-protected room's join error presence. Both emit
+  `captcha_challenge(jid, form, oob, body)`.
+- `MainWindow._on_captcha_challenge` opens a non-modal `CaptchaDialog`; the
+  `DataFormWidget` renders the challenge: an image URI is fetched in a worker
+  thread and shown inline, audio/video URIs open in the media viewer, and a
+  `SHA-256` hashcash field is solved in the background (`sha256(answer)`'s least
+  significant bits match the field label, prefixed with the `from` JID).
+- Answering calls `client.answer_captcha`, which sends
+  `<iq type='set'><captcha><x type='submit'>…` (FORM_TYPE, challenge, sid and the
+  answers copied verbatim); a room that rejected the join is re-joined
+  afterwards. The registration dialog renders an embedded CAPTCHA form the same
+  way and shows the query-level `<instructions>`/OOB URL. The media viewer zooms
+  images with Ctrl+wheel (0.1–8×, Ctrl+0/double-click resets to fit).
 
 ### 14.5 HTTP File Upload (XEP-0363)
 

@@ -23,6 +23,21 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class _ImageScroll(QtWidgets.QScrollArea):
+    """Scroll area that turns Ctrl+wheel into a zoom request."""
+
+    zoom_step = QtCore.pyqtSignal(int)  # +1 zoom in, -1 zoom out
+
+    def wheelEvent(self, event):
+        if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta:
+                self.zoom_step.emit(1 if delta > 0 else -1)
+                event.accept()
+                return
+        super().wheelEvent(event)
+
+
 class MediaViewer(QtWidgets.QMainWindow):
     """Non-modal viewer window for an image or video URL."""
 
@@ -59,10 +74,15 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._label = QtWidgets.QLabel()
         self._label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._label.setMinimumSize(1, 1)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        self._label.installEventFilter(self)
+        self._zoom = 1.0
+        scroll = _ImageScroll(self)
+        # Keep the widget at the pixmap size so a zoomed-in image gets
+        # scrollbars instead of being clipped to the viewport.
+        scroll.setWidgetResizable(False)
         scroll.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         scroll.setWidget(self._label)
+        scroll.zoom_step.connect(self._on_zoom_step)
         self._scroll = scroll
         self.setCentralWidget(scroll)
         self._load_image()
@@ -81,16 +101,47 @@ class MediaViewer(QtWidgets.QMainWindow):
 
         self._service.ensure_original_async(self._url, _ready, _error)
 
+    def _on_zoom_step(self, step: int) -> None:
+        factor = 1.1 if step > 0 else (1.0 / 1.1)
+        self._set_zoom(self._zoom * factor)
+
+    def _set_zoom(self, zoom: float) -> None:
+        zoom = max(0.1, min(8.0, float(zoom)))
+        if abs(zoom - self._zoom) < 1e-6:
+            return
+        self._zoom = zoom
+        self._fit_image()
+
+    def _reset_zoom(self) -> None:
+        self._set_zoom(1.0)
+
     def _fit_image(self) -> None:
         if self._pixmap.isNull():
             return
         target = self._scroll.viewport().size()
         if target.width() < 32 or target.height() < 32:
             return
+        pw, ph = self._pixmap.width(), self._pixmap.height()
+        if pw <= 0 or ph <= 0:
+            return
+        fit = min(target.width() / pw, target.height() / ph)
+        scale = max(0.001, fit * self._zoom)
+        width = max(1, int(round(pw * scale)))
+        height = max(1, int(round(ph * scale)))
+        mode = (QtCore.Qt.TransformationMode.SmoothTransformation
+                if scale < 1.0
+                else QtCore.Qt.TransformationMode.FastTransformation)
         scaled = self._pixmap.scaled(
-            target, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-            QtCore.Qt.TransformationMode.SmoothTransformation)
+            width, height, QtCore.Qt.AspectRatioMode.KeepAspectRatio, mode)
         self._label.setPixmap(scaled)
+        self._label.resize(scaled.size())
+
+    def eventFilter(self, obj, event):
+        if (obj is getattr(self, "_label", None)
+                and event.type() == QtCore.QEvent.Type.MouseButtonDblClick):
+            self._reset_zoom()
+            return True
+        return super().eventFilter(obj, event)
 
     # ── Geometry persistence ──────────────────────────────────────
 
@@ -153,6 +204,10 @@ class MediaViewer(QtWidgets.QMainWindow):
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key.Key_F11:
             self._toggle_fullscreen()
+            return
+        if (event.key() == QtCore.Qt.Key.Key_0
+                and event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier):
+            self._reset_zoom()
             return
         super().keyPressEvent(event)
 

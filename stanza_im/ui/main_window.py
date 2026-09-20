@@ -276,6 +276,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_join_grace: dict[str, float] = {}
         self._muc_config_dialogs: dict[str, object] = {}
         self._hats_assign_dialogs: dict[str, object] = {}
+        self._captcha_dialogs: dict[str, object] = {}
         self._muc_base_nicks: dict[str, str] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
@@ -1200,6 +1201,42 @@ class MainWindow(QtWidgets.QMainWindow):
                    else tr("muc_join_failed", reason=condition or code))
         chat.add_status(message, format_time())
 
+    def _on_captcha_challenge(self, jid: str, form, oob: str = "",
+                              body: str = ""):
+        """A XEP-0158 CAPTCHA challenge arrived — prompt the user."""
+        if jid in self._captcha_dialogs:
+            dialog = self._captcha_dialogs[jid]
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        from stanza_im.ui.captcha_dialog import CaptchaDialog
+        dialog = CaptchaDialog(
+            self._client, jid, form, oob=oob, body=body,
+            media_service=getattr(self, "_media_service", None),
+            parent=self._chat_dialog_parent())
+        self._captcha_dialogs[jid] = dialog
+
+        def _finished(result: int, _jid=jid, _dlg=dialog):
+            self._captcha_dialogs.pop(_jid, None)
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            # A CAPTCHA-protected room rejected the join until the challenge
+            # was answered; retry it when no join task is still pending.
+            room = _jid.split("/")[0]
+            client = self._client
+            if client is None:
+                return
+            task = client._muc_join_tasks.get(room)
+            if task is not None and not task.done():
+                return
+            gi = client.groupchats.get(room)
+            if gi is not None and not gi.joined and gi.nick:
+                self._join_muc(room, gi.nick, password=gi.password)
+
+        dialog.finished.connect(_finished)
+        self._place_dialog_over(dialog, self._chat_dialog_parent())
+        dialog.open()
+
     def _on_muc_info_received(self, room: str, name: str):
         if room in self._muc_self_nicks and name:
             self._muc_names[room] = name
@@ -1662,6 +1699,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muji_invite", self._on_muji_invite)
         c.on("muc_invite_received", self._on_muc_invite_received)
         c.on("muc_join_error", self._on_muc_join_error)
+        c.on("captcha_challenge", self._on_captcha_challenge)
         c.on("mam_unavailable", self._on_mam_unavailable)
         c.on("mam_parse_error", self._on_mam_parse_error)
         # roster removals are delivered via roster_item_removed (from client)

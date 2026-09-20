@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.ui.data_form_widget import DataFormWidget, LegacyFormWidget
@@ -53,9 +53,23 @@ class RegistrationDialog(QtWidgets.QDialog):
         self._registered = info.get("registered", False)
         form = info.get("form")
         fields = info.get("fields")
+        instructions = info.get("instructions") or ""
+        if instructions:
+            note = QtWidgets.QLabel(str(instructions))
+            note.setWordWrap(True)
+            self._body.addWidget(note)
+        oob = info.get("oob") or ""
+        if oob:
+            link = QtWidgets.QLabel(
+                f'<a href="{oob}">{tr("captcha_open_oob")}</a>')
+            link.setOpenExternalLinks(True)
+            self._body.addWidget(link)
         if form is not None:
             self._form = form
             self._form_widget = DataFormWidget(form)
+            self._form_widget.media_open_requested.connect(
+                lambda url, _kind: QtGui.QDesktopServices.openUrl(
+                    QtCore.QUrl(url)))
             self._body.addWidget(self._form_widget)
         elif fields:
             self._legacy_widget = LegacyFormWidget(fields)

@@ -63,13 +63,14 @@ stanza_im/                      # Python package
 │   ├── nick_colors.py           # Session MUC nickname → color allocation
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
-│   ├── media_viewer.py          # Fullscreen image/video viewer
+│   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
 │   ├── device_test.py           # Devices self-tests (mic meter/tone/camera)
 │   ├── status_message_dialog.py # Multiline presence status editor
+│   ├── captcha_dialog.py        # XEP-0158 CAPTCHA challenge prompt
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
@@ -477,7 +478,8 @@ session with many images cannot grow the thumbnail cache without limit.
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window, `F11` fullscreen; `Esc`
-closes the viewer); the
+closes the viewer, `Ctrl+wheel` zooms the image (0.1–8×, `Ctrl+0`/double-click
+resets to fit)); the
 WebEngine `contextMenuEvent` reads the request via
 `QWebEngineView.lastContextMenuRequest()` (Qt 6; the old
 `page().contextMenuData()` does not exist and silently fell back to the engine
@@ -499,6 +501,22 @@ off when QtWebEngine is unavailable. Settings changes re-render open chats via
 deferred) and persists its geometry/position in the shared `media_viewer`
 config section (image and video viewers share it). Covered by
 `tests/test_media.py`.
+
+**CAPTCHA Forms (XEP-0158, `ui/captcha_dialog.py` + XEP-0221 media)**:
+`<media xmlns='urn:xmpp:media-element'/>` on a form field is parsed from the
+field's raw XML (no XEP-0221 plugin needed). A challenge arrives either as a
+`<message>` with
+`<captcha xmlns='urn:xmpp:captcha'><x type='form'/>` (own `MatchXPath` handler;
+a guard in `_on_message` keeps it from rendering as a chat message) or inside a
+CAPTCHA-protected room's join error presence. Both emit
+`captcha_challenge(jid, form, oob, body)`; `MainWindow._on_captcha_challenge`
+opens a non-modal `CaptchaDialog` (`DataFormWidget` renders the challenge —
+images are fetched in a worker thread and shown inline, audio/video open in the
+media viewer, `SHA-256` hashcash fields are solved in the background) and
+`client.answer_captcha` sends `<iq type='set'><captcha><x type='submit'>…`. A
+room that rejected the join is re-joined after a successful answer. The
+registration dialog renders an embedded CAPTCHA form the same way and also
+shows the query-level `<instructions>`/OOB URL. [`tests/test_captcha.py`]
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via

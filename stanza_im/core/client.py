@@ -58,6 +58,9 @@ NS_RETRACT = "urn:xmpp:message-retract:1"   # XEP-0424 Message Retraction
 NS_RETRACT_LEGACY = "urn:xmpp:message-retract:0"
 NS_FALLBACK = "urn:xmpp:fallback:0"        # XEP-0428 Fallback Indication
 NS_HINTS = "urn:xmpp:hints"                # XEP-0334 Message Processing Hints
+NS_CAPTCHA = "urn:xmpp:captcha"            # XEP-0158 CAPTCHA Forms
+NS_MEDIA = "urn:xmpp:media-element"        # XEP-0221 Data Forms Media Element
+NS_OOB = "jabber:x:oob"                    # XEP-0066 Out-of-Band Data
 _RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
 
 
@@ -226,6 +229,25 @@ def _is_muc_invite(msg) -> bool:
     user = xml.find("{%s}x" % NS_MUC_USER)
     return (user is not None
             and user.find("{%s}invite" % NS_MUC_USER) is not None)
+
+
+def _is_captcha_message(msg) -> bool:
+    """True when *msg* carries a XEP-0158 ``<captcha/>`` challenge."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return False
+    return xml.find("{%s}captcha" % NS_CAPTCHA) is not None
+
+
+def _oob_url(msg) -> str:
+    """Return the XEP-0066 ``<url/>`` of *msg* (or its captcha), else ""."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return ""
+    for el in xml.iter():
+        if el.tag == "{%s}url" % NS_OOB:
+            return str(el.text or "")
+    return ""
 
 
 def muc_mediated_invite_from_message(msg) -> dict | None:
@@ -778,6 +800,10 @@ class JabberClient:
             "PEP Event",
             MatchXPath("%s/{%s}event" % (msg_ns, NS_PUBSUB_EVENT)),
             self._on_pubsub_event_stanza))
+        self.xmpp.register_handler(CoroutineCallback(
+            "CAPTCHA",
+            MatchXPath("%s/{%s}captcha" % (msg_ns, NS_CAPTCHA)),
+            self._on_captcha_stanza))
 
     async def _on_pubsub_event_stanza(self, msg) -> None:
         """Route bodyless pubsub#event messages (PEP, MDS) to their handlers."""
@@ -787,6 +813,38 @@ class JabberClient:
             self._maybe_pep_event(msg)
         except Exception:
             logger.exception("PEP/MDS event handling failed")
+
+    async def _on_captcha_stanza(self, msg) -> None:
+        """A XEP-0158 CAPTCHA challenge arrived."""
+        form = self._captcha_form(msg)
+        if form is None:
+            return
+        jid = str(msg["from"])
+        try:
+            body = str(msg["body"])
+        except (KeyError, TypeError):
+            body = ""
+        logger.info("CAPTCHA challenge from %s", jid)
+        self.emit("captcha_challenge", jid, form, _oob_url(msg), body)
+
+    @staticmethod
+    def _captcha_form(msg):
+        """Return the XEP-0158 CAPTCHA data form of *msg* (slixmpp Form)."""
+        from slixmpp.plugins.xep_0004.stanza import Form
+        xml = getattr(msg, "xml", None)
+        if xml is None:
+            return None
+        for captcha in xml.iter("{%s}captcha" % NS_CAPTCHA):
+            for child in captcha:
+                if (child.tag == "{%s}x" % NS_DATA
+                        and child.get("type") == "form"):
+                    try:
+                        return Form(xml=child)
+                    except Exception:
+                        logger.debug("Could not parse CAPTCHA form",
+                                     exc_info=True)
+                        return None
+        return None
 
     async def _on_jingle_message_stanza(self, msg) -> None:
         try:
@@ -1458,6 +1516,20 @@ class JabberClient:
         except slixmpp.exceptions.PresenceError as exc:
             if self.groupchats.get(room, None) and self.groupchats[room].joined:
                 return
+            pres = getattr(exc, "presence", None)
+            captcha = self._captcha_form(pres) if pres is not None else None
+            if captcha is not None:
+                # XEP-0158 §5: a CAPTCHA-protected room rejects the join until
+                # the challenge is answered (the room continues on success).
+                try:
+                    body = str(pres["body"])
+                except (KeyError, TypeError):
+                    body = ""
+                room_jid = str(pres["from"]) or room
+                logger.info("MUC %s requires a CAPTCHA", room_jid)
+                self.emit("captcha_challenge", room_jid, captcha,
+                          _oob_url(pres), body)
+                return
             error = exc.presence.get_error() if getattr(exc, "presence", None) else {}
             condition = (error or {}).get("condition", "") or "unknown"
             code = (error or {}).get("code", "") or ""
@@ -1625,8 +1697,14 @@ class JabberClient:
         reg = iq["register"]
         form = reg["form"] if reg["form"] and reg["form"].get_fields() else None
         fields = dict(reg["fields"]) if reg["fields"] else None
+        instructions = str(reg["instructions"] or "")
+        oob = ""
+        try:
+            oob = str(reg["oob"]["url"] or "")
+        except (KeyError, TypeError):
+            oob = ""
         return {"registered": bool(reg["registered"]), "form": form,
-                "fields": fields}
+                "fields": fields, "instructions": instructions, "oob": oob}
 
     async def submit_registration(self, jid: str, values: dict[str, str],
                                   form=None) -> None:
@@ -1685,6 +1763,25 @@ class JabberClient:
         iq["type"] = "set"
         iq["to"] = jid
         iq["register"].set_remove(True)
+        await iq.send()
+
+    def _build_captcha_response(self, challenger: str, form):
+        """Build (but do not send) a XEP-0158 CAPTCHA response IQ."""
+        from slixmpp.plugins.xep_0004.stanza import Form
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = challenger
+        captcha = ET.SubElement(iq.xml, "{%s}captcha" % NS_CAPTCHA)
+        submit = Form()
+        submit["type"] = "submit"
+        self._fill_submit_form(submit, form)
+        captcha.append(submit.xml)
+        return iq
+
+    async def answer_captcha(self, challenger: str, form) -> None:
+        """Submit a solved XEP-0158 CAPTCHA form to *challenger*."""
+        iq = self._build_captcha_response(challenger, form)
+        logger.info("Answering CAPTCHA challenge from %s", challenger)
         await iq.send()
 
     async def change_password(self, new_password: str,
@@ -3108,6 +3205,9 @@ class JabberClient:
         if _is_muc_invite(msg):
             # A MUC invitation is surfaced by its own handler (dialog + OSD);
             # it must not turn into a 1:1 chat message.
+            return
+        if _is_captcha_message(msg):
+            # A XEP-0158 challenge is surfaced by its own handler (dialog).
             return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
