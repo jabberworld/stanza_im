@@ -24,7 +24,7 @@ from stanza_im.i18n import tr
 from stanza_im.core.client import JabberClient, _StanzaXMPP
 from stanza_im.ui import xml_console
 from stanza_im.ui.xml_console import (COLORS, XmlConsoleDialog, bare_jid,
-                                      classify)
+                                      classify, format_xml)
 
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -58,6 +58,34 @@ check("stream footer falls into other",
       classify("</stream:stream>") == ("other", "", ""))
 check("keep-alive whitespace dropped", classify("   \n ") is None)
 check("empty payload dropped", classify("") is None)
+
+# regression: slixmpp omits the default jabber:client namespace on top-level
+# stanzas, so a bare <message> must still classify as a message.
+check("namespace-less message classified",
+      classify("<message to='a@b' type='chat'><body>x</body></message>")
+      == ("message", "", "a@b"))
+check("namespace-less presence classified",
+      classify("<presence from='a@b'/>")[0] == "presence")
+check("namespace-less iq classified",
+      classify("<iq type='get' id='1'/>")[0] == "iq")
+check("prefixed message classified",
+      classify("<ns0:message xmlns:ns0='jabber:client' from='a@b'/>")
+      == ("message", "a@b", ""))
+check("foreign namespace is not a message",
+      classify("<message xmlns='urn:example:custom'/>")[0] == "other")
+
+# ── pretty printing ──────────────────────────────────────────────
+formatted = format_xml("<message to='a@b'><event xmlns='urn:x'><items node='n'>"
+                       "<item id='1'><tune/></item></items></event></message>")
+check("nested elements are indented", "\n  <event" in formatted
+      and "\n    <items" in formatted and "\n      <item" in formatted)
+check("text-only element stays on one line",
+      format_xml("<message><body>hi</body></message>")
+      == "<message>\n  <body>hi</body>\n</message>")
+check("no xml declaration is emitted", "<?xml" not in formatted)
+check("unparseable payload is returned as-is",
+      format_xml("</stream:stream>") == "</stream:stream>")
+check("empty payload stays empty", format_xml("   ") == "")
 
 # ── colour palette (per spec) ────────────────────────────────────
 check("incoming message is red", COLORS[("message", True)] == "#ff5c5c")
@@ -156,20 +184,20 @@ fake.hook(True, "<message xmlns='jabber:client' from='alice@example.com/phone'>"
 fake.hook(False, "<iq xmlns='jabber:client' type='result' id='1'/>")
 out = dlg._output.toPlainText()
 check("incoming message is shown", "hello" in out)
-check("outgoing iq is shown", "type='result'" in out)
+check("outgoing iq is shown", 'type="result"' in out)
 check("buffer holds both stanzas", len(dlg._buffer) == 2)
 
 # kind filter hides and restores
 dlg._kind_boxes["iq"].setChecked(False)
-check("unchecking IQ hides it", "type='result'" not in dlg._output.toPlainText())
+check("unchecking IQ hides it", 'type="result"' not in dlg._output.toPlainText())
 check("message survives the IQ filter", "hello" in dlg._output.toPlainText())
 dlg._kind_boxes["iq"].setChecked(True)
-check("rechecking IQ restores it", "type='result'" in dlg._output.toPlainText())
+check("rechecking IQ restores it", 'type="result"' in dlg._output.toPlainText())
 
 # bare-JID filter
 dlg._jid_edit.setText("alice@example.com")
 check("bare JID keeps a resourceful match", "hello" in dlg._output.toPlainText()
-      and "type='result'" not in dlg._output.toPlainText())
+      and 'type="result"' not in dlg._output.toPlainText())
 dlg._jid_edit.setText("bob@example.com")
 check("non-matching JID hides everything",
       dlg._output.toPlainText().strip() == "")

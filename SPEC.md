@@ -293,12 +293,16 @@ the stream.
 | Clear | Empties the buffer and the view |
 | Input XML | `XmlInputDialog` (multiline + Отправить/Отмена) → `client.send_raw_xml(text)` |
 
-Classification: `{jabber:client}message|presence|iq`, `urn:xmpp:sm:*` → SM,
-everything else (CSI, stream header/footer) → «Прочее». Colours — incoming:
-message red, presence orange, iq turquoise, sm blue; outgoing: message yellow,
-presence green, iq light blue, sm purple; other grey. `send_raw_xml` accepts
-several top-level elements, strips an XML declaration and gives an `<iq>`
-without an `id` one before sending. The buffer is capped at 5000 entries.
+Classification: `message|presence|iq` by local name, accepting both a bare tag
+and `xmlns="jabber:client"` (slixmpp omits the default namespace from top-level
+stanzas), `urn:xmpp:sm:*` → SM, everything else (CSI, stream header/footer) →
+«Прочее». Each stanza is pretty-printed with `minidom` (two-space indents,
+text-only elements stay on one line, unparseable payloads unchanged). Colours —
+incoming: message red, presence orange, iq turquoise, sm blue; outgoing:
+message yellow, presence green, iq light blue, sm purple; other grey.
+`send_raw_xml` accepts several top-level elements, strips an XML declaration
+and gives an `<iq>` without an `id` one before sending. The buffer is capped at
+5000 entries.
 
 ## 6. Login Form (`ui/login_widget.py`)
 

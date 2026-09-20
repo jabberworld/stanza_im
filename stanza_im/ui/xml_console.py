@@ -9,14 +9,15 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import Callable
+from xml.dom import minidom
 from xml.etree import ElementTree as ET
 
 from PyQt6 import QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 
-_NS_CLIENT = "{jabber:client}"
-_NS_SM_PREFIX = "{urn:xmpp:sm:"
+_CLIENT_NS = "jabber:client"
+_SM_NS_PREFIX = "urn:xmpp:sm:"
 
 KINDS = ("message", "presence", "iq", "sm", "other")
 
@@ -44,12 +45,24 @@ def bare_jid(value: str) -> str:
     return (value or "").split("/", 1)[0].lower()
 
 
+def _split_tag(tag: str) -> tuple[str, str]:
+    """Split an ElementTree tag into ``(namespace, localname)``."""
+    if tag.startswith("{"):
+        namespace, local = tag[1:].split("}", 1)
+        return namespace, local
+    return "", tag
+
+
 def classify(xml_text: str) -> tuple[str, str, str] | None:
     """Return ``(kind, from, to)`` for a raw XML payload.
 
     ``None`` means the payload is pure whitespace (keep-alive) and should be
     dropped.  Stream headers/footers and any other unparseable payload fall
     into the ``other`` category.
+
+    The match is namespace-agnostic for the client stanzas: slixmpp omits the
+    default ``jabber:client`` namespace from top-level stanzas, so a bare
+    ``<message>`` and ``<message xmlns="jabber:client">`` must classify alike.
     """
     text = (xml_text or "").strip()
     if not text:
@@ -58,18 +71,35 @@ def classify(xml_text: str) -> tuple[str, str, str] | None:
         root = ET.fromstring(text)
     except ET.ParseError:
         return ("other", "", "")
-    tag = root.tag
-    if tag == _NS_CLIENT + "message":
-        kind = "message"
-    elif tag == _NS_CLIENT + "presence":
-        kind = "presence"
-    elif tag == _NS_CLIENT + "iq":
-        kind = "iq"
-    elif tag.startswith(_NS_SM_PREFIX):
+    namespace, local = _split_tag(root.tag)
+    if local in ("message", "presence", "iq") and namespace in ("", _CLIENT_NS):
+        kind = local
+    elif namespace.startswith(_SM_NS_PREFIX):
         kind = "sm"
     else:
         kind = "other"
     return (kind, root.get("from", "") or "", root.get("to", "") or "")
+
+
+def format_xml(xml_text: str) -> str:
+    """Indent a stanza's XML for readability.
+
+    Nested elements get two-space indents; an element whose content is only
+    text (e.g. ``<body>hi</body>``) stays on one line.  Payloads that are not
+    well-formed standalone XML (stream footer, partial data) are returned
+    unchanged.
+    """
+    text = (xml_text or "").strip()
+    if not text:
+        return text
+    try:
+        pretty = minidom.parseString(text).toprettyxml(indent="  ")
+    except Exception:
+        return text
+    lines = [line for line in pretty.splitlines() if line.strip()]
+    if lines and lines[0].startswith("<?xml"):
+        lines = lines[1:]
+    return "\n".join(lines)
 
 
 @dataclass
@@ -203,7 +233,7 @@ class XmlConsoleDialog(QtWidgets.QDialog):
         if classified is None:
             return
         kind, frm, to = classified
-        entry = Entry(incoming, kind, (xml_text or "").strip(), frm, to,
+        entry = Entry(incoming, kind, format_xml(xml_text), frm, to,
                       time.time())
         self._buffer.append(entry)
         if len(self._buffer) > _MAX_ENTRIES:

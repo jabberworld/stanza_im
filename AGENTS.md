@@ -528,9 +528,13 @@ keep-alive included) and `recv_stanza` (each parsed stanza, serialized with
 `str(stanza)` so the output matches `-x`) and feeds them as
 `hook(incoming, xml_text)`; the overrides never raise into the stream. The
 dialog buffers `Entry(incoming, kind, xml, from, to, ts)` rows (cap 5000),
-classifies each payload by its root tag (`{jabber:client}message|presence|iq`,
-`urn:xmpp:sm:*` → `sm`, anything else — CSI, stream header/footer — → `other`)
-and renders it coloured by direction/kind in a read-only `QPlainTextEdit`
+classifies each payload by its **local name** with a namespace check that
+accepts both the bare form and `jabber:client` (slixmpp omits the default
+namespace from top-level stanzas, so a bare `<message>` must classify as a
+message; `urn:xmpp:sm:*` → `sm`, anything else — CSI, stream header/footer —
+→ `other`), pretty-prints it with `minidom` (two-space indents, text-only
+elements stay on one line, unparseable payloads pass through unchanged) and
+renders it coloured by direction/kind in a read-only `QPlainTextEdit`
 (incoming: message red, presence orange, iq turquoise, sm blue; outgoing:
 message yellow, presence green, iq light blue, sm purple; other grey; dark
 background). Five filter checkboxes (Сообщения/Присутствия/IQ/SM/Прочее, all
