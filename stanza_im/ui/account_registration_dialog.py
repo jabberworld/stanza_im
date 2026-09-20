@@ -212,12 +212,21 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         self._set_status(tr("login_connecting"), "gray")
         self._client = self._make_client(server)
         try:
-            info = await self._client.connect_for_registration(server)
+            await self._client.connect_for_registration()
         except Exception as exc:
             logger.debug("Registration connection to %s failed", server,
                          exc_info=True)
             self._set_status(tr("register_connect_failed", error=str(exc)),
                              "red")
+            await self._close_client()
+            self._next_btn.setEnabled(True)
+            return
+        try:
+            info = await self._client.get_registration_form(server)
+        except Exception as exc:
+            logger.debug("Registration form request to %s failed", server,
+                         exc_info=True)
+            self._set_status(tr("register_none"), "red")
             await self._close_client()
             self._next_btn.setEnabled(True)
             return

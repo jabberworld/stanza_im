@@ -530,9 +530,11 @@ suggested list comes from `resources/servers.txt`, one domain per line with
 `#`/blank lines ignored — `include/constants.SERVERS_FILE`) plus the
 connection settings (host/port override, `tls_mode`, `starttls_mode`, proxy),
 defaulting to "Prefer TLS"/"Always". "Далее" builds a throwaway `JabberClient`
-and calls `connect_for_registration(server)`, which unregisters the SASL
-feature on that connection, waits for `stream_negotiated` and fetches the
-XEP-0077 form; step 2 renders it with `DataFormWidget`/`LegacyFormWidget`
+and calls `connect_for_registration()`, which unregisters the SASL feature on
+that connection and waits for `stream_negotiated`; the dialog then fetches the
+XEP-0077 form with `get_registration_form(server)` (a connection failure and a
+"server does not offer registration" failure are reported separately). Step 2
+renders the form with `DataFormWidget`/`LegacyFormWidget`
 ("Зарегистрировать"/"Отмена"). On success the dialog stores the account
 (`jid`, `password`, `save_password`) and the connection/proxy settings in the
 shared `Config` and emits `registered(jid, password)`; `MainWindow` prefills

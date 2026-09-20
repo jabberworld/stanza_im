@@ -3,6 +3,7 @@
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_registration.py
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -20,6 +21,7 @@ from PyQt6 import QtWidgets
 from stanza_im.i18n import load as i18n_load
 from stanza_im.i18n import tr
 from stanza_im.core.storage import Config
+from stanza_im.core.client import JabberClient
 from stanza_im.ui import account_registration_dialog as reg
 from stanza_im.ui.account_registration_dialog import (
     AccountRegistrationDialog, load_servers)
@@ -121,6 +123,87 @@ check("prefill enables saving the password",
 # ── preferences icon ─────────────────────────────────────────────
 check("preferences register icon is available",
       not PreferencesDialog._register_icon().isNull())
+
+
+# ── connect_for_registration (PluginManager.get requires a default) ──
+class _FakePlugin:
+    def __init__(self):
+        self.config = {"order": 100}
+
+
+class _FakePluginManager:
+    def get(self, name, default):  # mirrors slixmpp: default is required
+        if name == "feature_mechanisms":
+            return _FakePlugin()
+        return default
+
+
+class _FakeStream:
+    def __init__(self):
+        self.plugin = _FakePluginManager()
+        self.unregistered = []
+        self.handlers = {}
+
+    def unregister_feature(self, name, order):
+        self.unregistered.append((name, order))
+
+    def add_event_handler(self, name, callback):
+        self.handlers[name] = callback
+
+    def del_event_handler(self, name, callback):
+        self.handlers.pop(name, None)
+
+    def event(self, name, *args):
+        callback = self.handlers.get(name)
+        if callback is not None:
+            callback(*args)
+
+
+reg_client = JabberClient.__new__(JabberClient)
+reg_client.xmpp = _FakeStream()
+
+
+async def _fake_connect():
+    reg_client.xmpp.event("stream_negotiated")
+
+
+reg_client.connect_async = _fake_connect
+check("connect_for_registration completes without a default arg",
+      asyncio.run(reg_client.connect_for_registration()) is None)
+check("connect_for_registration disables SASL",
+      reg_client.xmpp.unregistered == [("mechanisms", 100)])
+check("stream_negotiated handler is removed",
+      "stream_negotiated" not in reg_client.xmpp.handlers)
+
+
+# ── set_csi_config shares the same PluginManager.get signature ───
+class _FakeCsiStream:
+    def __init__(self):
+        self.plugin = _FakePluginManager()
+        self.features = set()
+        self.handlers = {}
+
+    def register_plugin(self, name):
+        pass
+
+    def add_event_handler(self, name, callback):
+        self.handlers[name] = callback
+
+
+csi_client = JabberClient.__new__(JabberClient)
+csi_client.xmpp = _FakeCsiStream()
+csi_client.csi = False
+csi_client._csi_enabled = False
+csi_client._csi_handler_registered = False
+csi_client._client_active = True
+csi_client.emit = lambda *args, **kwargs: None
+csi_client._sync_csi = lambda: None
+try:
+    csi_client.set_csi_config(True)
+    csi_ok = True
+except TypeError:
+    csi_ok = False
+check("set_csi_config does not require a default arg", csi_ok)
 
 
 # ── static wiring ────────────────────────────────────────────────

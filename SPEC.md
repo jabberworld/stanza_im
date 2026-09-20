@@ -375,16 +375,18 @@ Host/Port), "Connection" (`tls_mode`, default `prefer`) and "Encrypt
 connection" (`starttls_mode`, default `always`), and a proxy group
 (`proxy_mode`/`proxy_host`/`proxy_port`). "Далее" builds a throwaway
 `JabberClient` with those settings and calls
-`JabberClient.connect_for_registration(server)`, which unregisters the SASL
-feature, waits for `stream_negotiated` and fetches the server's registration
-form; step 2 renders it (`DataFormWidget`/`LegacyFormWidget`) with
-"Зарегистрировать"/"Отмена". On success the dialog writes `jid`, `password`,
-`save_password=true` and the `connection.*` settings into the shared `Config`,
-emits `registered(jid, password)`; `MainWindow` prefills the login form
-(`LoginWidget.prefill`), returns to the login page, re-applies the settings and
-closes the Preferences window when it was open. The login widget shares
-`MainWindow._config` (passed into `LoginWidget`), so a later `save()` cannot
-revert the newly written sections.
+`JabberClient.connect_for_registration()`, which unregisters the SASL feature
+and waits for `stream_negotiated`; the dialog then fetches the server's
+registration form with `get_registration_form(server)` (a connection failure
+shows "Could not connect", a form-fetch failure shows "server does not offer
+registration"). Step 2 renders the form (`DataFormWidget`/`LegacyFormWidget`)
+with "Зарегистрировать"/"Отмена". On success the dialog writes `jid`,
+`password`, `save_password=true` and the `connection.*` settings into the
+shared `Config`, emits `registered(jid, password)`; `MainWindow` prefills the
+login form (`LoginWidget.prefill`), returns to the login page, re-applies the
+settings and closes the Preferences window when it was open. The login widget
+shares `MainWindow._config` (passed into `LoginWidget`), so a later `save()`
+cannot revert the newly written sections.
 
 ## 7. Roster (`ui/roster_widget.py` + `ui/roster_style.py`)
 
