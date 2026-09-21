@@ -58,7 +58,7 @@ the additional features are listed here.
 | Event publishing | XEP-0163 | ✅ | MDS node + extended presence (`+notify`) |
 | User Avatars | XEP-0084 | ✅ | own avatar published to `avatar:data`/`metadata`; contacts' metadata notifications fetch and cache the image |
 | User Avatar Compatibility | XEP-0398, XEP-0153 | ✅ | vCard PHOTO also publishes the PEP avatar and updates the presence hash; avatars from either source share one SHA-1-keyed cache |
-| User Blocking | XEP-0191 | ❌ | no blocking command/UI |
+| User Blocking | XEP-0191 | ✅ | `urn:xmpp:blocking` block/unblock from the roster and the blocked-contacts dialog, plus XEP-0377 reports; the XEP-0016 privacy-list editor is an extra |
 | Advanced Group Chat | XEP-0048, XEP-0313, XEP-0402, XEP-0410 | ✅ | PEP-native bookmarks (XEP-0402) are the primary store, with legacy XEP-0048 kept in sync when the server does not unify; XEP-0313 MAM history and the XEP-0410 self-ping round it out |
 | Persistent Storage of Private Data via PubSub | XEP-0223 | ✅ | bookmark storage backend |
 | Private XML Storage | XEP-0049 | ✅ | legacy bookmark backend |
@@ -73,7 +73,7 @@ the additional features are listed here.
 
 ### Not implemented
 
-- **XEP-0191 (Blocking Command)** — not implemented.
+(none)
 
 ## Specifications of note
 

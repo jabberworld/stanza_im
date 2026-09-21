@@ -25,7 +25,7 @@ from slixmpp.jid import JID
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from stanza_im.core.vcard_cache import VCardCache
-from stanza_im.core import roster_cache
+from stanza_im.core import privacy, roster_cache
 from stanza_im.include.constants import APP_NAME, VERSION
 from stanza_im.i18n import current_language as _current_language
 from stanza_im.xmpp import jingle as jingle_mod
@@ -71,6 +71,9 @@ NS_VCARD_UPDATE = "vcard-temp:x:update"        # XEP-0153 vCard-Based Avatars
 NS_BOOKMARKS2 = "urn:xmpp:bookmarks:1"          # XEP-0402 PEP Native Bookmarks
 NS_BOOKMARKS2_COMPAT = "urn:xmpp:bookmarks:1#compat"
 NS_BOOKMARKS2_COMPAT_PEP = "urn:xmpp:bookmarks:1#compat-pep"
+NS_PRIVACY = "jabber:iq:privacy"                # XEP-0016 Privacy Lists
+NS_BLOCKING = "urn:xmpp:blocking"               # XEP-0191 Blocking Command
+NS_REPORTING = "urn:xmpp:reporting:1"           # XEP-0377 Blocking Command Reports
 _RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
 
 # XEP-0410 MUC self-ping: after this much silence from a room, verify that we
@@ -806,6 +809,9 @@ class JabberClient:
         self._upload_service_cache: str | None = None
         self._upload_limit: int | None = None
         self._hats_support: dict[str, bool] = {}
+        # XEP-0016/0191: cached account-domain features and blocked JIDs.
+        self._server_features: set[str] | None = None
+        self._blocked: set[str] = set()
         self._moderation_support: dict[str, bool] = {}
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
@@ -862,6 +868,8 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0153")  # vCard-Based Avatars
         self.xmpp.register_plugin("xep_0084")  # User Avatar (PEP)
         self.xmpp.register_plugin("xep_0065")  # SOCKS5 Bytestreams (file proxy)
+        self.xmpp.register_plugin("xep_0191")  # Blocking Command
+        self.xmpp.register_plugin("xep_0377")  # Blocking Command Reports
         if self.stream_management:
             self.xmpp.register_plugin("xep_0198")  # Stream Management
         if self.csi:
@@ -879,6 +887,9 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_BOOKMARKS2 + "+notify")
         # XEP-0144 Roster Item Exchange.
         self.xmpp["xep_0030"].add_feature(NS_ROSTERX)
+        # XEP-0191 blocklist pushes (XEP-0191 §5 carries the full list).
+        self.xmpp.add_event_handler("blocked", self._on_blocked_push)
+        self.xmpp.add_event_handler("unblocked", self._on_unblocked_push)
         # Jingle file transfer (XEP-0166/0234) with SOCKS5 (XEP-0260) and
         # In-Band (XEP-0261) transports — advertise support in disco.
         self.xmpp["xep_0030"].add_feature(jingle_mod.NS_JINGLE)
@@ -2453,6 +2464,141 @@ class JabberClient:
                 for item in result.xml.iter()
                 if str(item.tag).endswith("item") and item.get("node")]
 
+    # ── Privacy lists / blocking (XEP-0016 / XEP-0191 / XEP-0377) ──
+
+    def _server_feature(self, feature: str) -> bool:
+        """Whether the account domain advertises *feature* (optimistic)."""
+        features = getattr(self, "_server_features", None)
+        if features is None:
+            return True  # not probed yet — do not hide the UI
+        return feature in features
+
+    def supports_privacy(self) -> bool:
+        """XEP-0016 privacy lists (`jabber:iq:privacy`)."""
+        return self._server_feature(NS_PRIVACY)
+
+    def supports_blocking(self) -> bool:
+        """XEP-0191 blocking command (`urn:xmpp:blocking`)."""
+        return self._server_feature(NS_BLOCKING)
+
+    def supports_reports(self) -> bool:
+        """XEP-0377 reports (`urn:xmpp:reporting:1`)."""
+        return self._server_feature(NS_REPORTING)
+
+    async def refresh_server_features(self) -> None:
+        """Cache the account domain's disco#info features for the gates."""
+        domain = self.jid_str.split("@")[-1]
+        try:
+            info = await self.xmpp["xep_0030"].get_info(jid=domain)
+            features = {str(el.get("var") or "") for el in info.xml.iter(
+                "{%s}feature" % NS_DISCO_INFO)}
+        except Exception:
+            logger.debug("Server feature probe failed", exc_info=True)
+            return
+        self._server_features = features
+
+    async def _privacy_iq(self, query, itype: str):
+        iq = self.xmpp.Iq()
+        iq["type"] = itype
+        iq.xml.append(query)
+        return await iq.send()
+
+    async def get_privacy_lists(self) -> dict:
+        """Return ``{"active", "default", "lists"}`` for the account."""
+        result = await self._privacy_iq(privacy.lists_query(), "get")
+        return privacy.parse_lists(result.xml)
+
+    async def get_privacy_list(self, name: str) -> list[dict]:
+        """Return the items of the privacy list *name*."""
+        result = await self._privacy_iq(privacy.list_query(name, []), "get")
+        return privacy.parse_list(result.xml, name)
+
+    async def set_privacy_list(self, name: str, items: list[dict]) -> None:
+        """Create or replace the privacy list *name*."""
+        await self._privacy_iq(privacy.list_query(name, items), "set")
+
+    async def remove_privacy_list(self, name: str) -> None:
+        """Delete the privacy list *name* (an empty list removes it)."""
+        await self._privacy_iq(privacy.list_query(name, []), "set")
+
+    async def set_active_privacy_list(self, name: str) -> None:
+        """Make *name* the active privacy list ("" deactivates)."""
+        await self._privacy_iq(privacy.active_query(name), "set")
+
+    async def get_blocked_jids(self) -> set[str]:
+        """XEP-0191: fetch the blocklist and cache it."""
+        if not self.supports_blocking():
+            return set()
+        try:
+            blocked = {str(jid) for jid
+                       in await self.xmpp["xep_0191"].get_blocked_jids()}
+        except Exception:
+            logger.debug("Blocklist fetch failed", exc_info=True)
+            return set(self._blocked)
+        self._blocked = blocked
+        return set(blocked)
+
+    async def block_contact(self, jid: str) -> None:
+        """XEP-0191: block *jid*."""
+        await self.xmpp["xep_0191"].block(jid)
+        self._blocked.add(str(jid))
+        self.emit("blocklist_updated", set(self._blocked))
+
+    async def unblock_contact(self, jid: str) -> None:
+        """XEP-0191: unblock *jid*."""
+        await self.xmpp["xep_0191"].unblock(jid)
+        self._blocked.discard(str(jid))
+        self.emit("blocklist_updated", set(self._blocked))
+
+    async def report_contact(self, jid: str, reason: str = "spam",
+                             text: str = "") -> None:
+        """XEP-0377: block *jid* while attaching a spam/abuse report."""
+        plugin = self.xmpp["xep_0377"]
+        report_reason = plugin.ABUSE if reason == "abuse" else plugin.SPAM
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        block = ET.SubElement(iq.xml, "{%s}block" % NS_BLOCKING)
+        item = ET.SubElement(block, "{%s}item" % NS_BLOCKING)
+        item.set("jid", jid)
+        report = ET.SubElement(item, "{%s}report" % NS_REPORTING)
+        report.set("reason", report_reason)
+        text = str(text or "").strip()
+        if text:
+            node = ET.SubElement(report, "{%s}text" % NS_REPORTING)
+            node.set("{http://www.w3.org/XML/1998/namespace}lang",
+                     _current_language())
+            node.text = text
+        await iq.send()
+        self._blocked.add(str(jid))
+        self.emit("blocklist_updated", set(self._blocked))
+
+    def _on_blocked_push(self, iq) -> None:
+        self._apply_block_push(iq, "block")
+
+    def _on_unblocked_push(self, iq) -> None:
+        self._apply_block_push(iq, "unblock")
+
+    def _apply_block_push(self, iq, tag: str) -> None:
+        """XEP-0191 §5: a push carries the full blocklist."""
+        try:
+            items = iq[tag]["items"]
+            self._blocked = {str(item["jid"]) for item in items}
+        except Exception:
+            logger.debug("Could not parse the %s push", tag, exc_info=True)
+            return
+        self.emit("blocklist_updated", set(self._blocked))
+
+    async def _load_blocklist(self) -> None:
+        """Probe the domain features and fetch the XEP-0191 blocklist."""
+        try:
+            await self.refresh_server_features()
+        except Exception:
+            logger.debug("Server feature probe failed", exc_info=True)
+        if not self.supports_blocking():
+            return
+        blocked = await self.get_blocked_jids()
+        self.emit("blocklist_updated", set(blocked))
+
     async def start_command(self, jid: str, node: str) -> dict:
         """Start an ad-hoc command and await its first response."""
         loop = asyncio.get_event_loop()
@@ -3562,6 +3708,10 @@ class JabberClient:
         self._seed_roster_cache()
         self.request_roster()
         self.send_presence()
+        # Cache the domain features (privacy/blocking/report gating) and the
+        # XEP-0191 blocklist for the roster's strikethrough state.
+        loop = asyncio.get_event_loop()
+        loop.create_task(self._load_blocklist())
         if self.message_carbons:
             try:
                 await self.xmpp["xep_0280"].enable()
