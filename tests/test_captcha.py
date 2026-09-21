@@ -45,7 +45,8 @@ def check(name, cond):
         FAILURES.append(name)
 
 
-def _field(form_el, var, value="", ftype=None, label=None, media=None):
+def _field(form_el, var, value="", ftype=None, label=None, media=None,
+           required=False):
     field = ET.SubElement(form_el, f"{{{NS_DATA}}}field")
     field.set("var", var)
     if ftype:
@@ -55,6 +56,8 @@ def _field(form_el, var, value="", ftype=None, label=None, media=None):
     if value is not None:
         val = ET.SubElement(field, f"{{{NS_DATA}}}value")
         val.text = value
+    if required:
+        ET.SubElement(field, f"{{{NS_DATA}}}required")
     if media:
         mime, url = media
         media_el = ET.SubElement(field, f"{{{NS_MEDIA}}}media")
@@ -194,14 +197,30 @@ check("BOB image is rendered inline",
 
 # 7. clickable URL fields and image sizing ----------------------------------
 url_form = _form_element()
-_field(url_form, "url", "http://server.example/captcha.jpg", "text-single")
+_field(url_form, "url", "http://server.example/captcha.jpg", "text-single",
+       label="Captcha URL")
 url_widget = DataFormWidget(c._captcha_form(_challenge(url_form)))
 url_links = [lbl for lbl in url_widget.findChildren(QtWidgets.QLabel)
              if "<a href=" in lbl.text()]
 check("a URL text field gets a clickable link",
       len(url_links) == 1 and url_links[0].openExternalLinks() is True)
-check("the URL field keeps its editable input",
-      isinstance(url_widget._fields.get("url"), QtWidgets.QLineEdit))
+check("the URL link uses the field label as its text",
+      ">Captcha URL</a>" in url_links[0].text())
+check("the URL link keeps the URL as a tooltip",
+      url_links[0].toolTip() == "http://server.example/captcha.jpg")
+check("the URL field has no editable input",
+      "url" not in url_widget._fields and "url" in url_widget._link_fields)
+check("the URL link spans the whole row",
+      url_widget._form_layout.getItemPosition(
+          url_widget._form_layout.indexOf(url_links[0]))[1]
+      == QtWidgets.QFormLayout.ItemRole.SpanningRole)
+
+req_form = _form_element()
+_field(req_form, "url", "http://server.example/x", "text-single",
+       label="Captcha URL", required=True)
+req_widget = DataFormWidget(c._captcha_form(_challenge(req_form)))
+check("a required read-only URL link still validates",
+      req_widget.validate() is None)
 
 fixed_form = _form_element()
 _field(fixed_form, "note", "http://server.example/help", "fixed")
@@ -209,6 +228,19 @@ fixed_widget = DataFormWidget(c._captcha_form(_challenge(fixed_form)))
 fixed_links = [lbl for lbl in fixed_widget.findChildren(QtWidgets.QLabel)
                if "<a href=" in lbl.text()]
 check("a fixed URL value becomes a clickable link", len(fixed_links) == 1)
+
+plain_form = _form_element()
+plain_field = ET.SubElement(plain_form, f"{{{NS_DATA}}}field")
+plain_field.set("type", "fixed")
+plain_value = ET.SubElement(plain_field, f"{{{NS_DATA}}}value")
+plain_value.text = "If you cannot see the image, open the link."
+plain_widget = DataFormWidget(c._captcha_form(_challenge(plain_form)))
+plain_lbl = next(lbl for lbl in plain_widget.findChildren(QtWidgets.QLabel)
+                 if lbl.text() == plain_value.text)
+check("an unlabeled fixed field spans both columns",
+      plain_widget._form_layout.getItemPosition(
+          plain_widget._form_layout.indexOf(plain_lbl))[1]
+      == QtWidgets.QFormLayout.ItemRole.SpanningRole)
 
 bob_img = next(lbl for lbl in bob_labels
                if lbl.pixmap() is not None and not lbl.pixmap().isNull())

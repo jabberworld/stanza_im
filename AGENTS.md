@@ -566,11 +566,17 @@ that connection and waits for `stream_negotiated`; the dialog then fetches the
 XEP-0077 form with `get_registration_form(server)` (a connection failure and a
 "server does not offer registration" failure are reported separately). Step 2
 renders the form with `DataFormWidget`/`LegacyFormWidget`
-("Зарегистрировать"/"Отмена"); URL-looking field values render as clickable
-`http(s)` links (`DataFormWidget._url_label`, the OOB link text is the short
-`captcha_open_oob` label) and an inline CAPTCHA image grows the dialog to fit
-via the `media_ready` signal (`fit_dialog_to_content`, clamped to the screen,
-inside a `QScrollArea`). On success the dialog shows
+("Зарегистрировать"/"Отмена"); a read-only URL field (`text-single` whose
+value is an `http(s)` URL) renders as a clickable link **only** — no editable
+input, link text is the field label (falling back to the short
+`captcha_open_oob`), the URL is the tooltip and the value is submitted
+unchanged (`DataFormWidget._link_label`/`_link_fields`); a `fixed` field with
+no label spans the full row so its text is not wrapped into a narrow column.
+The dialog is sized to the form (`fit_dialog_to_content`, deferred after the
+form is built and re-run on the `media_ready` signal; it measures the live
+inner widget because `QScrollArea` caches its size hint, and clamps to the
+screen, the `QScrollArea` then providing scrolling only when needed). On
+success the dialog shows
 `ui/registration_result_dialog.py::RegistrationResultDialog` with the Jabber ID,
 password, encryption/proxy details and the data actually submitted
 ("Копировать" copies the whole summary, "Применить" writes the account,

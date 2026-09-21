@@ -7,7 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.ui.data_form_widget import (
-    DataFormWidget, fit_dialog_to_content)
+    DataFormWidget, _link_label, fit_dialog_to_content)
 
 
 class CaptchaDialog(QtWidgets.QDialog):
@@ -27,21 +27,16 @@ class CaptchaDialog(QtWidgets.QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
         if oob:
-            link = QtWidgets.QLabel(
-                f'<a href="{oob}">{tr("captcha_open_oob")}</a>')
-            link.setOpenExternalLinks(True)
-            link.setTextInteractionFlags(
-                QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
-            layout.addWidget(link)
+            layout.addWidget(_link_label(oob, tr("captcha_open_oob")))
         self._widget = DataFormWidget(form, self, media_service=media_service)
         self._widget.media_open_requested.connect(self._open_media)
         self._widget.media_ready.connect(
             lambda: fit_dialog_to_content(self))
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        scroll.setWidget(self._widget)
-        layout.addWidget(scroll, 1)
+        self._form_scroll = QtWidgets.QScrollArea(self)
+        self._form_scroll.setWidgetResizable(True)
+        self._form_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._form_scroll.setWidget(self._widget)
+        layout.addWidget(self._form_scroll, 1)
         self._status = QtWidgets.QLabel("")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
@@ -56,6 +51,7 @@ class CaptchaDialog(QtWidgets.QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))
 
     def _open_media(self, url: str, kind: str) -> None:
         service = getattr(self._widget, "_media_service", None)

@@ -381,6 +381,16 @@ reg_src = _read("stanza_im", "ui", "account_registration_dialog.py")
 check("the result dialog gates the config write",
       "RegistrationResultDialog" in reg_src
       and "if result.exec()" in reg_src)
+check("registration fits the dialog to the form content",
+      "QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))"
+      in reg_src)
+
+form_src = _read("stanza_im", "ui", "data_form_widget.py")
+check("data forms render read-only URLs as links only",
+      "_link_fields" in form_src and "def _link_label" in form_src
+      and "def _link_row" not in form_src)
+check("an unlabeled fixed field spans the whole row",
+      "layout.addRow(widget)" in form_src)
 
 mw = _read("stanza_im", "ui", "main_window.py")
 check("main window wires register_requested",

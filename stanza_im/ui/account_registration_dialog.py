@@ -17,7 +17,7 @@ from stanza_im.core.client import JabberClient
 from stanza_im.core.storage import Config
 from stanza_im.include.constants import ACTIONS_DIR_16, SERVERS_FILE
 from stanza_im.ui.data_form_widget import (
-    DataFormWidget, LegacyFormWidget, fit_dialog_to_content)
+    DataFormWidget, LegacyFormWidget, _link_label, fit_dialog_to_content)
 from stanza_im.ui.registration_result_dialog import RegistrationResultDialog
 
 logger = logging.getLogger(__name__)
@@ -250,10 +250,8 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
             self._form_container.addWidget(note)
         oob = info.get("oob") or ""
         if oob:
-            link = QtWidgets.QLabel(
-                f'<a href="{oob}">{tr("captcha_open_oob")}</a>')
-            link.setOpenExternalLinks(True)
-            self._form_container.addWidget(link)
+            self._form_container.addWidget(
+                _link_label(oob, tr("captcha_open_oob")))
         form = info.get("form")
         fields = info.get("fields")
         if form is not None:
@@ -272,6 +270,7 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
             self._set_status(tr("register_none"), "red")
             self._next_btn.setEnabled(False)
         self._form_container.addStretch(1)
+        QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))
 
     async def _submit(self) -> None:
         if self._form_widget is not None:

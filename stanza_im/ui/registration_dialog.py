@@ -7,7 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.ui.data_form_widget import (
-    DataFormWidget, LegacyFormWidget, fit_dialog_to_content)
+    DataFormWidget, LegacyFormWidget, _link_label, fit_dialog_to_content)
 
 
 class RegistrationDialog(QtWidgets.QDialog):
@@ -61,10 +61,7 @@ class RegistrationDialog(QtWidgets.QDialog):
             self._body.addWidget(note)
         oob = info.get("oob") or ""
         if oob:
-            link = QtWidgets.QLabel(
-                f'<a href="{oob}">{tr("captcha_open_oob")}</a>')
-            link.setOpenExternalLinks(True)
-            self._body.addWidget(link)
+            self._body.addWidget(_link_label(oob, tr("captcha_open_oob")))
         if form is not None:
             self._form = form
             self._form_widget = DataFormWidget(form)
@@ -73,11 +70,11 @@ class RegistrationDialog(QtWidgets.QDialog):
                     QtCore.QUrl(url)))
             self._form_widget.media_ready.connect(
                 lambda: fit_dialog_to_content(self))
-            scroll = QtWidgets.QScrollArea(self)
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-            scroll.setWidget(self._form_widget)
-            self._body.addWidget(scroll)
+            self._form_scroll = QtWidgets.QScrollArea(self)
+            self._form_scroll.setWidgetResizable(True)
+            self._form_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            self._form_scroll.setWidget(self._form_widget)
+            self._body.addWidget(self._form_scroll)
         elif fields:
             self._legacy_widget = LegacyFormWidget(fields)
             self._body.addWidget(self._legacy_widget)
@@ -88,6 +85,7 @@ class RegistrationDialog(QtWidgets.QDialog):
                 self._status.setText(tr("register_none"))
         self._btn_submit.setEnabled(form is not None or fields is not None)
         self._btn_remove.setEnabled(self._registered)
+        QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))
 
     def _on_submit(self) -> None:
         asyncio.get_event_loop().create_task(self._submit())

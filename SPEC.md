@@ -402,10 +402,16 @@ and waits for `stream_negotiated`; the dialog then fetches the server's
 registration form with `get_registration_form(server)` (a connection failure
 shows "Could not connect", a form-fetch failure shows "server does not offer
 registration"). Step 2 renders the form (`DataFormWidget`/`LegacyFormWidget`)
-with "Зарегистрировать"/"Отмена". URL-looking field values (and the OOB link)
-are shown as clickable `http(s)` links, and an inline CAPTCHA image grows the
-dialog to fit (`DataFormWidget.media_ready` → `fit_dialog_to_content`, clamped
-to the screen, wrapped in a `QScrollArea`). On success the dialog opens
+with "Зарегистрировать"/"Отмена". A read-only URL field (`text-single` whose
+value is an `http(s)` URL, e.g. the CAPTCHA URL) is shown as a clickable link
+only — no editable input, the link text is the field label (falling back to
+`captcha_open_oob`), the URL is the tooltip, and the value is submitted
+unchanged; a `fixed` field without a label spans the whole row. The dialog is
+sized to the form (`fit_dialog_to_content`, deferred after the form is built
+and re-run on `DataFormWidget.media_ready`; it measures the live inner widget
+because `QScrollArea` caches its size hint, and clamps to the screen, the
+`QScrollArea` providing scrolling only when the content exceeds it). On success
+the dialog opens
 `RegistrationResultDialog` showing the Jabber ID, the password, the
 encryption/proxy details and the data actually submitted ("Копировать" copies
 the summary, "Применить" applies, "Закрыть" discards). Only "Применить" writes

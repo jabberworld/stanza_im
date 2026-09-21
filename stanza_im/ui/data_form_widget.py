@@ -96,20 +96,49 @@ def _as_url(value) -> str | None:
     return None
 
 
-def _url_label(url: str, parent=None) -> QtWidgets.QLabel:
-    """A label rendering *url* as a clickable external link."""
-    safe = html.escape(url, quote=True)
-    label = QtWidgets.QLabel(f'<a href="{safe}">{safe}</a>', parent)
+def _link_label(url: str, text: str = "", parent=None) -> QtWidgets.QLabel:
+    """A label rendering *text* as a clickable external link to *url*."""
+    safe_url = html.escape(url, quote=True)
+    safe_text = html.escape(text or url)
+    label = QtWidgets.QLabel(f'<a href="{safe_url}">{safe_text}</a>', parent)
     label.setOpenExternalLinks(True)
     label.setTextInteractionFlags(
         QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
     label.setWordWrap(True)
+    label.setToolTip(url)
     return label
 
 
+def _url_label(url: str, parent=None) -> QtWidgets.QLabel:
+    """A label rendering *url* as a clickable external link."""
+    return _link_label(url, url, parent)
+
+
 def fit_dialog_to_content(dialog: QtWidgets.QDialog) -> None:
-    """Grow *dialog* to fit its content, clamped to the available screen."""
-    dialog.adjustSize()
+    """Grow *dialog* to fit its content, clamped to the available screen.
+
+    ``QScrollArea`` caches the inner widget's size hint, so ``adjustSize``
+    would size the dialog to a stale value; the required size is computed
+    from the live inner widget (``dialog._form_scroll``) instead.  If the
+    content is larger than the screen the dialog stays clamped and the
+    scroll area provides the scrolling.
+    """
+    layout = dialog.layout()
+    if layout is not None:
+        layout.activate()
+    scroll = getattr(dialog, "_form_scroll", None)
+    inner = scroll.widget() if scroll is not None else None
+    if scroll is not None and inner is not None and scroll.viewport().width() > 0:
+        extra_w = dialog.width() - scroll.viewport().width()
+        extra_h = dialog.height() - scroll.viewport().height()
+        for _ in range(2):
+            hint = inner.sizeHint()
+            dialog.resize(max(dialog.width(), hint.width() + extra_w),
+                          max(dialog.height(), hint.height() + extra_h))
+            if layout is not None:
+                layout.activate()
+    else:
+        dialog.adjustSize()
     screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
     if screen is None:
         return
@@ -145,6 +174,7 @@ class DataFormWidget(QtWidgets.QWidget):
         self._hashcash = None
         self._fields: dict[str, object] = {}
         self._multi_fields: dict[str, list] = {}
+        self._link_fields: set[str] = set()
         form_layout = QtWidgets.QFormLayout(self)
         self._form_layout = form_layout
         form_layout.setFieldGrowthPolicy(
@@ -179,32 +209,41 @@ class DataFormWidget(QtWidgets.QWidget):
         if ftype == "fixed":
             fixed_url = _as_url(field["value"])
             if fixed_url is not None:
-                layout.addRow(label, _url_label(fixed_url))
-                return True
-            fixed = QtWidgets.QLabel(str(field["value"] or ""))
-            fixed.setWordWrap(True)
-            fixed.setTextInteractionFlags(
-                fixed.textInteractionFlags()
-                | QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
-            layout.addRow(label, fixed)
+                widget = _url_label(fixed_url)
+            else:
+                widget = QtWidgets.QLabel(str(field["value"] or ""))
+                widget.setWordWrap(True)
+                widget.setTextInteractionFlags(
+                    widget.textInteractionFlags()
+                    | QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+            if label.strip():
+                layout.addRow(label, widget)
+            else:
+                layout.addRow(widget)
             return True
 
         if ftype in _TEXT_TYPES or ftype in ("", "text-single"):
+            initial = value if isinstance(value, str) else (
+                value[0] if isinstance(value, list) and value else "")
+            media = _field_media(field)
+            url = _as_url(initial)
+            if media is None and url is not None:
+                # A server-supplied read-only URL: show a link only, the value
+                # is submitted unchanged via the field's own value.
+                if var:
+                    self._link_fields.add(var)
+                link = _link_label(url, label.strip() or tr("captcha_open_oob"))
+                layout.addRow(link)
+                return True
             edit = QtWidgets.QLineEdit()
             if ftype == "text-private":
                 edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-            initial = value if isinstance(value, str) else (
-                value[0] if isinstance(value, list) and value else "")
             edit.setText(initial)
             if ftype == "text-multi":
                 edit.setPlaceholderText("line1\\nline2")
             self._fields[var] = edit
-            media = _field_media(field)
-            url = _as_url(initial)
             if media is not None:
-                layout.addRow(label, self._media_row(media, edit, url))
-            elif url is not None:
-                layout.addRow(label, self._link_row(url, edit))
+                layout.addRow(label, self._media_row(media, edit))
             else:
                 layout.addRow(label, edit)
             if var == "SHA-256":
@@ -268,13 +307,11 @@ class DataFormWidget(QtWidgets.QWidget):
         layout.addRow(label, edit)
         return True
 
-    def _media_row(self, media, edit, url: str | None = None):
+    def _media_row(self, media, edit):
         """A CAPTCHA challenge widget (image inline / audio-video button)."""
         container = QtWidgets.QWidget()
         column = QtWidgets.QVBoxLayout(container)
         column.setContentsMargins(0, 0, 0, 0)
-        if url is not None and url != media["url"]:
-            column.addWidget(_url_label(url))
         if media["kind"] == "image":
             label = QtWidgets.QLabel(tr("form_media_loading"))
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -316,15 +353,6 @@ class DataFormWidget(QtWidgets.QWidget):
         self._fetchers.append(fetcher)
         fetcher.fetch(url)
 
-    def _link_row(self, url: str, edit):
-        """An editable field prefixed by a clickable copy of its URL."""
-        container = QtWidgets.QWidget()
-        column = QtWidgets.QVBoxLayout(container)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.addWidget(_url_label(url))
-        column.addWidget(edit)
-        return container
-
     def _set_media_pixmap(self, label, data) -> None:
         pixmap = QtGui.QPixmap()
         if not pixmap.loadFromData(data):
@@ -364,6 +392,8 @@ class DataFormWidget(QtWidgets.QWidget):
             if not field["required"]:
                 continue
             var = str(field["var"] or "")
+            if var in self._link_fields:
+                continue  # a pre-filled read-only URL, always satisfied
             widget = self._fields.get(var)
             if isinstance(widget, QtWidgets.QLineEdit):
                 if widget.text().strip():
