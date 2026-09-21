@@ -342,13 +342,20 @@ starts (`_set_info_actions_enabled`, toggled on `session_started`/
   peer certificate; a message box when no certificate is available.
 - «О сервере» — `ui/server_info_dialog.ServerInfoDialog` asks
   `core/server_features.collect_server_features(client)` for the account
-  domain's `disco#info` features, the raw `<stream:features>` namespaces
-  (`_StanzaXMPP.stream_feature_ns`), the negotiated SASL mechanism, the server
-  identity/software (XEP-0092) and the XEP-0363 `max-file-size`
-  (`client.http_upload_limit()`), then marks the preset `SERVER_XEPS` list
+  domain's `disco#info` features, the account's **bare JID** features (PEP,
+  stanza IDs, bookmark/avatar conversion), the conference and HTTP-upload
+  components (`discover_conference_service` / `_http_upload_service`, the
+  latter's `max-file-size`), the domain's ad-hoc command list (XEP-0401), the
+  raw `<stream:features>` namespaces (`_StanzaXMPP.stream_feature_ns`), the
+  negotiated SASL mechanism and the server identity/software (XEP-0092), then
+  marks the preset `SERVER_XEPS` list
   (XEP-0045/0050/0054/0059/0060/0077/0092/0163/0191/0198/0199/0202/0215/0237/
   0258/0280/0313/0352/0359/0363/0386/0388/0398/0401/0402/0411/0490) supported or
-  not (green/red) via the pure `evaluate_server_xeps(context)`.
+  not (green/red) via the pure `evaluate_server_xeps(context)`. XEP-0163 uses
+  the account's `pubsub`+`publish-options` (ejabberd does not announce
+  `#pep`), XEP-0402 the `#compat`/`#compat-pep` features, XEP-0401 the ad-hoc
+  commands and XEP-0490 only `urn:xmpp:mds:server-assist:0` (its `displayed:0`
+  node is a client PEP feature).
 
 ## 6. Login Form (`ui/login_widget.py`)
 

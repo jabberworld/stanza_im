@@ -1,16 +1,25 @@
 """Server capability report used by the "Server info" dialog.
 
-The preset XEP list is evaluated against the account domain's ``disco#info``
-features, the raw ``<stream:features>`` namespaces and the negotiated SASL
-mechanism.  ``evaluate_server_xeps`` is pure so it can be tested without a
-network connection.
+The preset XEP list is evaluated against several sources, because a server
+advertises different capabilities in different places:
+
+* the account domain's ``disco#info`` (server features),
+* the account's bare JID ``disco#info`` (PEP, stanza IDs, bookmark/avatar
+  conversion),
+* the conference and HTTP-upload components discovered via ``disco#items``,
+* the raw ``<stream:features>`` namespaces,
+* the domain's ad-hoc command list (XEP-0401).
+
+``evaluate_server_xeps`` is pure so it can be tested without a connection.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import NamedTuple
 
-from stanza_im.core.client import NS_DISCO_INFO
+from stanza_im.core.client import (
+    NS_DISCO_INFO, _upload_max_file_size)
 from stanza_im.include.utils import format_size
 
 logger = logging.getLogger(__name__)
@@ -21,8 +30,9 @@ class ServerXep(NamedTuple):
 
     xep: str
     name: str
-    source: str            # "disco" or "stream"
-    keys: tuple[str, ...]  # feature namespaces (a trailing "*" = prefix)
+    source: str             # "disco" | "account" | "stream" | "commands"
+    keys: tuple[str, ...]   # feature namespaces (a trailing "*" = prefix)
+    alt_keys: tuple[tuple[str, ...], ...] = ()  # all keys of a group
 
 
 # Server-detectable extensions, ordered by XEP number.
@@ -40,8 +50,10 @@ SERVER_XEPS: tuple[ServerXep, ...] = (
               ("jabber:iq:register",)),
     ServerXep("XEP-0092", "Software Version", "disco",
               ("jabber:iq:version",)),
-    ServerXep("XEP-0163", "Personal Eventing Protocol", "disco",
-              ("http://jabber.org/protocol/pubsub#pep",)),
+    ServerXep("XEP-0163", "Personal Eventing Protocol", "account",
+              ("http://jabber.org/protocol/pubsub#pep",),
+              (("http://jabber.org/protocol/pubsub",
+                "http://jabber.org/protocol/pubsub#publish-options"),)),
     ServerXep("XEP-0191", "Blocking Command", "disco",
               ("urn:xmpp:blocking",)),
     ServerXep("XEP-0198", "Stream Management", "stream",
@@ -69,15 +81,15 @@ SERVER_XEPS: tuple[ServerXep, ...] = (
               ("urn:xmpp:sasl:2",)),
     ServerXep("XEP-0398", "User Avatar to vCard Conversion", "disco",
               ("urn:xmpp:pep-vcard-conversion:0",)),
-    ServerXep("XEP-0401", "Easy User Onboarding", "stream",
-              ("urn:xmpp:invite",)),
+    ServerXep("XEP-0401", "Ad-hoc Account Invitation Generation", "commands",
+              ("urn:xmpp:invite*",)),
     ServerXep("XEP-0402", "PEP Native Bookmarks", "disco",
-              ("urn:xmpp:bookmarks:1", "urn:xmpp:bookmarks:1#compat",
+              ("urn:xmpp:bookmarks:1#compat",
                "urn:xmpp:bookmarks:1#compat-pep")),
     ServerXep("XEP-0411", "Bookmarks Conversion", "disco",
               ("urn:xmpp:bookmarks-conversion:0",)),
-    ServerXep("XEP-0490", "Message Displayed Synchronization", "disco",
-              ("urn:xmpp:mds:displayed:0", "urn:xmpp:mds:server-assist:0")),
+    ServerXep("XEP-0490", "Message Displayed Synchronization (server assist)",
+              "account", ("urn:xmpp:mds:server-assist:0",)),
 )
 
 
@@ -91,15 +103,25 @@ def _matches(values: set[str], keys: tuple[str, ...]) -> bool:
     return False
 
 
+def _matches_any(values: set[str], entry: ServerXep) -> bool:
+    if _matches(values, entry.keys):
+        return True
+    return any(all(key in values for key in group)
+               for group in entry.alt_keys)
+
+
 def evaluate_server_xeps(context: dict) -> list[dict]:
     """Return one row per preset XEP: ``{xep, name, supported, detail}``."""
     disco = set(context.get("disco") or ())
+    account = set(context.get("account") or ())
     stream = set(context.get("stream") or ())
+    commands = set(context.get("commands") or ())
     upload_max = context.get("upload_max")
     rows: list[dict] = []
     for entry in SERVER_XEPS:
-        values = stream if entry.source == "stream" else disco
-        supported = _matches(values, entry.keys)
+        values = {"stream": stream, "account": account,
+                  "commands": commands}.get(entry.source, disco)
+        supported = _matches_any(values, entry)
         detail = ""
         if entry.xep == "XEP-0363" and supported and upload_max:
             detail = format_size(int(upload_max))
@@ -108,12 +130,13 @@ def evaluate_server_xeps(context: dict) -> list[dict]:
     return rows
 
 
-async def _disco(client, domain: str) -> tuple[set[str], dict]:
-    """Return the domain's ``disco#info`` features and server identity."""
+async def _disco(client, jid: str) -> tuple[set[str], dict, object]:
+    """Return ``(features, server_identity, xml)`` for *jid*."""
     features: set[str] = set()
     identity = {"name": "", "type": ""}
+    xml = None
     try:
-        info = await client.xmpp["xep_0030"].get_info(jid=domain)
+        info = await client.xmpp["xep_0030"].get_info(jid=jid)
         xml = getattr(info, "xml", None)
         if xml is not None:
             features = {str(el.get("var") or "") for el in xml.iter(
@@ -123,8 +146,17 @@ async def _disco(client, domain: str) -> tuple[set[str], dict]:
                     identity = {"name": str(el.get("name") or ""),
                                 "type": str(el.get("type") or "")}
     except Exception:
-        logger.debug("Server disco#info failed for %s", domain, exc_info=True)
-    return features, identity
+        logger.debug("Server disco#info failed for %s", jid, exc_info=True)
+    return features, identity, xml
+
+
+async def _safe(coro, default):
+    """Await *coro*, returning *default* on any failure."""
+    try:
+        return await coro
+    except Exception:
+        logger.debug("Server info query failed", exc_info=True)
+        return default
 
 
 async def _software(client, domain: str, identity: dict) -> str:
@@ -145,7 +177,25 @@ async def _software(client, domain: str, identity: dict) -> str:
 async def collect_server_features(client) -> dict:
     """Gather everything the "Server info" dialog needs to render."""
     domain = client.jid_str.split("@")[-1]
-    disco, identity = await _disco(client, domain)
+    (domain_feats, identity, _), (account_feats, _, _), muc, upload, commands = \
+        await asyncio.gather(
+            _disco(client, domain),
+            _disco(client, client.jid_str),
+            _safe(client.discover_conference_service(), ""),
+            _safe(client._http_upload_service(), ""),
+            _safe(client.get_commands_list(domain), []),
+            return_exceptions=True,
+        )
+    features = set(domain_feats) | set(account_feats)
+    if muc:
+        muc_feats, _, _ = await _disco(client, muc)
+        features |= muc_feats
+    upload_max = None
+    if upload:
+        upload_feats, _, upload_xml = await _disco(client, upload)
+        features |= upload_feats
+        upload_max = _upload_max_file_size(upload_xml) or None
+    command_nodes = {str(item.get("node") or "") for item in (commands or [])}
     stream = set(getattr(client.xmpp, "stream_feature_ns", set()))
     login = ""
     try:
@@ -153,11 +203,7 @@ async def collect_server_features(client) -> dict:
     except Exception:
         login = ""
     software = await _software(client, domain, identity)
-    upload_max = None
-    try:
-        upload_max = await client.http_upload_limit()
-    except Exception:
-        upload_max = None
-    return {"domain": domain, "disco": disco, "stream": stream,
-            "login": login, "identity": identity, "software": software,
+    return {"domain": domain, "disco": features, "account": set(account_feats),
+            "stream": stream, "commands": command_nodes, "login": login,
+            "identity": identity, "software": software,
             "upload_max": upload_max}

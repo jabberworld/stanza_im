@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import load as i18n_load
+from stanza_im.core.client import _stream_feature_namespaces
 from stanza_im.core.server_features import (
     SERVER_XEPS, collect_server_features, evaluate_server_xeps)
 from stanza_im.ui.connection_info_dialog import connection_info_lines
@@ -45,7 +46,35 @@ check("preset holds the server-relevant XEPs",
 check("preset is sorted by XEP number", _xeps == sorted(_xeps))
 check("no duplicate XEPs in the preset", len(_xeps) == len(set(_xeps)))
 check("every entry uses a known source",
-      all(entry.source in ("disco", "stream") for entry in SERVER_XEPS))
+      all(entry.source in ("disco", "account", "stream", "commands")
+          for entry in SERVER_XEPS))
+_entries = {entry.xep: entry for entry in SERVER_XEPS}
+check("XEP-0490 checks the server-assist feature only",
+      _entries["XEP-0490"].source == "account"
+      and _entries["XEP-0490"].keys == ("urn:xmpp:mds:server-assist:0",))
+check("XEP-0402 checks the compat features only",
+      _entries["XEP-0402"].keys
+      == ("urn:xmpp:bookmarks:1#compat",
+          "urn:xmpp:bookmarks:1#compat-pep"))
+check("XEP-0401 is discovered via ad-hoc commands",
+      _entries["XEP-0401"].source == "commands")
+
+
+# ── stream feature namespace extraction ──────────────────────────
+class _FakeFeatures:
+    def __init__(self, xml):
+        self.xml = xml
+
+
+_sf = ET.Element("{http://etherx.jabber.org/streams}features")
+ET.SubElement(_sf, "{urn:ietf:params:xml:ns:xmpp-bind}bind")
+ET.SubElement(_sf, "{urn:xmpp:sm:3}sm")
+ET.SubElement(_sf, "{urn:xmpp:features:rosterver}ver")
+ET.SubElement(_sf, "{urn:xmpp:csi:0}csi")
+check("stream features keep the namespace, not the {ns}tag",
+      _stream_feature_namespaces(_FakeFeatures(_sf))
+      == {"urn:ietf:params:xml:ns:xmpp-bind", "urn:xmpp:sm:3",
+          "urn:xmpp:features:rosterver", "urn:xmpp:csi:0"})
 
 
 # ── pure evaluation ──────────────────────────────────────────────
@@ -57,8 +86,11 @@ check("an unsupported upload has no size detail",
 
 ctx = {
     "disco": {"http://jabber.org/protocol/muc", "urn:xmpp:carbons:2",
-              "urn:xmpp:http:upload", "jabber:iq:register"},
+              "urn:xmpp:http:upload", "urn:xmpp:sid:0"},
+    "account": {"http://jabber.org/protocol/pubsub",
+                "http://jabber.org/protocol/pubsub#publish-options"},
     "stream": {"urn:xmpp:sm:3", "urn:xmpp:features:rosterver"},
+    "commands": {"urn:xmpp:invite#invite"},
     "login": "SCRAM-SHA-256",
     "upload_max": 10 * 1024 * 1024,
 }
@@ -67,6 +99,16 @@ check("a disco feature marks the XEP supported",
       rows["XEP-0045"]["supported"] and rows["XEP-0280"]["supported"])
 check("a stream feature marks the XEP supported",
       rows["XEP-0198"]["supported"] and rows["XEP-0237"]["supported"])
+check("PEP is read from the account's pubsub features",
+      rows["XEP-0163"]["supported"])
+check("XEP-0359 is read from the account",
+      rows["XEP-0359"]["supported"])
+check("XEP-0401 is read from the ad-hoc commands",
+      rows["XEP-0401"]["supported"])
+check("XEP-0490 stays unsupported without server-assist",
+      not rows["XEP-0490"]["supported"])
+check("XEP-0402 needs the compat feature",
+      not rows["XEP-0402"]["supported"])
 check("an absent feature stays unsupported",
       not rows["XEP-0258"]["supported"]
       and not rows["XEP-0386"]["supported"])
@@ -75,20 +117,54 @@ check("the upload prefix match accepts the bare namespace",
 check("the upload limit is shown as a human size",
       rows["XEP-0363"]["detail"] == "10.0 MB")
 
+assisted = dict(ctx)
+assisted["account"] = ctx["account"] | {"urn:xmpp:mds:server-assist:0"}
+_assisted = {row["xep"]: row for row in evaluate_server_xeps(assisted)}
+check("XEP-0490 is supported with server-assist",
+      _assisted["XEP-0490"]["supported"])
+
 
 # ── collecting from a client ─────────────────────────────────────
 NS_DATA = "jabber:x:data"
 NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
+UPLOAD_MAX = 25 * 1024 * 1024
 
 
-def _disco_xml():
+def _features_xml(features, server_name=""):
     x = ET.Element(f"{{{NS_DISCO_INFO}}}query")
-    for var in ("http://jabber.org/protocol/muc", "urn:xmpp:blocking",
-                "urn:xmpp:mam:2", "urn:xmpp:sid:0"):
+    for var in features:
         ET.SubElement(x, f"{{{NS_DISCO_INFO}}}feature", var=var)
-    ET.SubElement(x, f"{{{NS_DISCO_INFO}}}identity", category="server",
-                  type="im", name="ejabberd")
+    if server_name:
+        ET.SubElement(x, f"{{{NS_DISCO_INFO}}}identity", category="server",
+                      type="im", name=server_name)
     return x
+
+
+def _upload_xml(max_size):
+    x = ET.Element(f"{{{NS_DISCO_INFO}}}query")
+    ET.SubElement(x, f"{{{NS_DISCO_INFO}}}feature",
+                  var="urn:xmpp:http:upload:0")
+    form = ET.SubElement(x, f"{{{NS_DATA}}}x", type="result")
+    field = ET.SubElement(form, f"{{{NS_DATA}}}field", var="max-file-size")
+    value = ET.SubElement(field, f"{{{NS_DATA}}}value")
+    value.text = str(max_size)
+    return x
+
+
+_MAPPING = {
+    "example.com": _features_xml(
+        {"http://jabber.org/protocol/commands", "urn:xmpp:blocking",
+         "urn:xmpp:mam:2", "urn:xmpp:carbons:2"}, server_name="ejabberd"),
+    "me@example.com": _features_xml(
+        {"http://jabber.org/protocol/pubsub",
+         "http://jabber.org/protocol/pubsub#publish-options",
+         "urn:xmpp:sid:0", "urn:xmpp:bookmarks:1#compat",
+         "urn:xmpp:bookmarks-conversion:0",
+         "urn:xmpp:pep-vcard-conversion:0"}),
+    "conference.example.com": _features_xml(
+        {"http://jabber.org/protocol/muc"}),
+    "upload.example.com": _upload_xml(UPLOAD_MAX),
+}
 
 
 class _FakeInfo:
@@ -97,8 +173,11 @@ class _FakeInfo:
 
 
 class _FakeDisco:
+    def __init__(self, mapping):
+        self._mapping = mapping
+
     async def get_info(self, jid=None):
-        return _FakeInfo(_disco_xml())
+        return _FakeInfo(self._mapping.get(jid))
 
 
 class _FakeVersion:
@@ -108,13 +187,14 @@ class _FakeVersion:
 
 
 class _FakeXmpp:
-    def __init__(self):
+    def __init__(self, mapping):
+        self._disco = _FakeDisco(mapping)
         self.plugin = {"xep_0092": _FakeVersion()}
         self.stream_feature_ns = {"urn:xmpp:sm:3", "urn:xmpp:csi:0"}
 
     def __getitem__(self, key):
         if key == "xep_0030":
-            return _FakeDisco()
+            return self._disco
         raise KeyError(key)
 
 
@@ -122,34 +202,51 @@ class _FakeClient:
     jid_str = "me@example.com"
 
     def __init__(self):
-        self.xmpp = _FakeXmpp()
+        self.xmpp = _FakeXmpp(_MAPPING)
 
     def connection_info(self):
         return {"sasl": "SCRAM-SHA-256"}
 
-    async def http_upload_limit(self):
-        return 25 * 1024 * 1024
+    async def discover_conference_service(self):
+        return "conference.example.com"
+
+    async def _http_upload_service(self):
+        return "upload.example.com"
+
+    async def get_commands_list(self, jid):
+        return [{"jid": jid, "node": "urn:xmpp:invite#invite",
+                 "name": "Invite"}]
 
 
 collected = asyncio.run(collect_server_features(_FakeClient()))
 check("collect keeps the domain", collected["domain"] == "example.com")
-check("collect keeps the disco features",
-      {"urn:xmpp:blocking", "urn:xmpp:mam:2"} <= collected["disco"])
+check("collect merges the domain and component features",
+      {"urn:xmpp:blocking", "http://jabber.org/protocol/muc",
+       "urn:xmpp:http:upload:0"} <= collected["disco"])
+check("collect keeps the account features separately",
+      "urn:xmpp:sid:0" in collected["account"]
+      and "http://jabber.org/protocol/pubsub" in collected["account"])
 check("collect keeps the stream features",
       "urn:xmpp:csi:0" in collected["stream"])
+check("collect keeps the ad-hoc command nodes",
+      collected["commands"] == {"urn:xmpp:invite#invite"})
 check("collect keeps the login mechanism",
       collected["login"] == "SCRAM-SHA-256")
 check("collect builds the software string",
       collected["software"] == "ejabberd 24.06")
 check("collect keeps the upload limit",
-      collected["upload_max"] == 25 * 1024 * 1024)
+      collected["upload_max"] == UPLOAD_MAX)
 
 collected_rows = {row["xep"]: row for row in
                   evaluate_server_xeps(collected)}
 check("collected context drives the report",
-      collected_rows["XEP-0191"]["supported"]
+      collected_rows["XEP-0045"]["supported"]
       and collected_rows["XEP-0313"]["supported"]
       and collected_rows["XEP-0352"]["supported"]
+      and collected_rows["XEP-0163"]["supported"]
+      and collected_rows["XEP-0401"]["supported"]
+      and collected_rows["XEP-0363"]["detail"] == "25.0 MB"
+      and not collected_rows["XEP-0490"]["supported"]
       and not collected_rows["XEP-0386"]["supported"])
 
 
@@ -201,6 +298,11 @@ def _read(*parts):
     with open(os.path.join(_root, *parts), encoding="utf-8") as fh:
         return fh.read()
 
+
+client_src = _read("stanza_im", "core", "client.py")
+check("the stream features keep their namespaces",
+      "self.stream_feature_ns = _stream_feature_namespaces(features)"
+      in client_src)
 
 mw = _read("stanza_im", "ui", "main_window.py")
 check("the Help menu wires the three info entries",

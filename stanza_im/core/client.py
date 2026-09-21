@@ -582,6 +582,19 @@ def _format_fingerprint(der: bytes) -> str:
     return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
 
 
+def _stream_feature_namespaces(features) -> set[str]:
+    """Namespaces of the children of a ``<stream:features/>`` stanza.
+
+    The element tags are ``{namespace}local``, so only the namespace part is
+    kept (e.g. ``urn:xmpp:sm:3``), matching the server-feature keys.
+    """
+    try:
+        return {child.tag.split("}", 1)[0].lstrip("{")
+                for child in features.xml if isinstance(child.tag, str)}
+    except Exception:
+        return set()
+
+
 def _upload_max_file_size(xml) -> int:
     """Return the XEP-0363 ``max-file-size`` from a disco#info form, else 0."""
     if xml is None:
@@ -713,12 +726,8 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
 
     async def _handle_stream_features(self, features):
         # Raw namespaces advertised in <stream:features>, for the "Server
-        # info" dialog (SM, CSI, rosterver, Bind 2, SASL2, invites, ...).
-        try:
-            self.stream_feature_ns = {child.tag for child in features.xml
-                                      if isinstance(child.tag, str)}
-        except Exception:
-            self.stream_feature_ns = set()
+        # info" dialog (SM, CSI, rosterver, Bind 2, SASL2, ...).
+        self.stream_feature_ns = _stream_feature_namespaces(features)
         if (self._require_starttls and not _is_tls(getattr(self, "socket", None))
                 and 'starttls' not in features['features']):
             logger.error(

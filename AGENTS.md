@@ -1268,12 +1268,19 @@ text is kept. Returning activity (`eventFilter`) resumes
   «О сервере» (`_on_server_info`) shows
   `ui/server_info_dialog.ServerInfoDialog`, which calls
   `core/server_features.collect_server_features(client)` — the account domain's
-  `disco#info` features, the raw `<stream:features>` namespaces captured by
-  `_StanzaXMPP.stream_feature_ns`, the negotiated SASL mechanism, the server
-  identity/software (XEP-0092) and the XEP-0363 `max-file-size`
-  (`client.http_upload_limit()`) — and marks the preset `SERVER_XEPS` list
-  supported/unsupported (green/red) via the pure `evaluate_server_xeps(ctx)`.
-  [`tests/test_server_features.py`]
+  `disco#info` features, the account's **bare JID** features (PEP, stanza IDs,
+  bookmark/avatar conversion), the conference and HTTP-upload components
+  (`discover_conference_service` / `_http_upload_service`, the latter's
+  `max-file-size`), the domain's ad-hoc command list (XEP-0401) and the raw
+  `<stream:features>` namespaces captured by `_StanzaXMPP.stream_feature_ns`
+  (stored as namespaces, not `{ns}tag`) — plus the negotiated SASL mechanism and
+  the server identity/software (XEP-0092) — and marks the preset `SERVER_XEPS`
+  list supported/unsupported (green/red) via the pure
+  `evaluate_server_xeps(ctx)`. XEP-0163 is read from the account's
+  `pubsub`+`publish-options` (ejabberd does not announce `#pep`), XEP-0402 from
+  the `#compat`/`#compat-pep` features, XEP-0401 from the ad-hoc commands and
+  XEP-0490 only from the account's `urn:xmpp:mds:server-assist:0` (the
+  `displayed:0` node is a client PEP feature). [`tests/test_server_features.py`]
 - **Client identity / caps branding**: `JabberClient.__init__` adds a named
   disco identity (`client`/`pc`, `name=APP_NAME`) and overrides
   `xep_0115.caps_node` to the human-readable `Stanza IM <VERSION>` (slixmpp's
