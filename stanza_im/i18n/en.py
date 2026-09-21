@@ -318,6 +318,7 @@ STRINGS = {
     "vcard_room_unavailable": "This conference does not provide a vCard.",
     "vcard_edit_title": "My vCard",
     "vcard_edit": "Edit",
+    "vcard_refresh": "Refresh",
     "vcard_edit_room_title": "Conference vCard",
     "vcard_field_fn": "Full name",
     "vcard_field_nickname": "Nickname",

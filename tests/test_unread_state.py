@@ -67,7 +67,13 @@ check("restored jids",
       win._unread_jids == {"bob@example.com", "room@conf.example"})
 check("restored displayed sid",
       win._unread_displayed == {"bob@example.com": "sid-old"})
-check("tray blinking restored", win._tray._blink_active)
+check("tray does not blink before login", not win._tray._blink_active)
+
+win._on_session_started()
+check("tray blinks after login", win._tray._blink_active)
+win._on_disconnected()
+check("tray stops blinking on disconnect", not win._tray._blink_active)
+win._on_session_started()
 
 win._add_roster_item({"jid": "bob@example.com", "name": "Bob",
                       "groups": ["Friends"]})

@@ -106,6 +106,59 @@ check("room vCard dialogs parent to the chat window",
       "parent = self._chat_dialog_parent() if is_room else self" in _mw_src
       and "VCardEditDialog(data, parent or self" in _mw_src)
 
+# 6. "Refresh" button + in-place update ---------------------------------------
+from stanza_im.i18n import tr
+
+dlg = VCardInfoDialog("a@b", {"jid": "a@b", "fn": "Old"})
+ref = []
+dlg.refresh_requested.connect(ref.append)
+dlg._refresh_btn.click()
+check("refresh button emits refresh_requested", ref == ["a@b"])
+check("refresh button is localized",
+      dlg._refresh_btn.text() == tr("vcard_refresh")
+      and tr("vcard_refresh") != "vcard_refresh")
+dlg.update_card({"jid": "a@b", "fn": "New"})
+texts = [label.text() for label in dlg._content.findChildren(QtWidgets.QLabel)]
+check("update_card rebuilds the content in place",
+      "New" in texts and "Old" not in texts)
+dlg.deleteLater()
+
+# 7. MainWindow refreshes the cache and reuses the open window ----------------
+class _FakeVCardClient:
+    def __init__(self):
+        self.calls = []
+        self.pep_data = {}
+
+    def get_vcard(self, jid, force=False):
+        self.calls.append((jid, force))
+
+    def probe_entity(self, jid):
+        pass
+
+    def get_contact(self, jid):
+        return type("C", (), {"show": "online", "status": ""})()
+
+    def fetch_pep(self, jid):
+        pass
+
+
+saved_client = win._client
+win._client = _FakeVCardClient()
+win._refresh_vcard("x@y")
+check("refresh requests a fresh vCard with force=True",
+      win._client.calls == [("x@y", True)])
+
+win._open_vcard_info("x@y", {"jid": "x@y", "fn": "First"})
+first = win._vcard_dialogs.get("x@y")
+win._open_vcard_info("x@y", {"jid": "x@y", "fn": "Second"})
+check("a second profile request reuses the open window",
+      len(win._vcard_dialogs) == 1 and win._vcard_dialogs["x@y"] is first)
+texts = [label.text() for label in first.findChildren(QtWidgets.QLabel)]
+check("the reused window shows the refreshed card", "Second" in texts)
+win._vcard_dialogs.pop("x@y", None)
+first.close()
+win._client = saved_client
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

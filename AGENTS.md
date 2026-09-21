@@ -127,6 +127,10 @@ menu and auto-join/leave rooms (`_handle_bookmarks2_event`).
 The conference browser uses the names and metadata returned by the service's
 `disco#items` response and does not issue one `disco#info` request per room.
 vCard information dialogs are opened non-modally from async callbacks.
+`VCardInfoDialog` carries a "Обновить"/"Refresh" button (`refresh_requested`
+→ `MainWindow._refresh_vcard` → `get_vcard(force=True)`); when the vCard
+arrives, `_open_vcard_info` rebuilds the already-open window in place
+(`update_card`) instead of opening a second one.
 Chat and MUC tabs use separate `ChatThemeFactory` instances, while emoticon
 sets are discovered from `resources/emoticons/*/smileys*.cfg`. Preferences
 show a live preview of the selected emoticon set.
@@ -464,11 +468,15 @@ topmost roster contact with `unread_count > 0`, then `_reset_unread` +
 nothing is left.
 
 Unread counters are persisted per contact (`core/unread_state.py` →
-`$XDG_DATA_HOME/stanza-im/unread.json`) so the badges and tray blinking survive
-a restart: `MainWindow` loads them at startup, applies them when building
+`$XDG_DATA_HOME/stanza-im/unread.json`) so the badges survive a restart:
+`MainWindow` loads them at startup, applies them when building
 roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
 in `_bump_unread`/`_reset_unread` and flushes them to disk with a 1 s debounce
-plus on quit. Alongside each count the file stores the last displayed MDS
+plus on quit. The **tray only blinks while logged in**: `_sync_tray_blink`
+(called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
+`_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it
+so the offline icon is visible — restored counters do not blink on the login
+screen. Alongside each count the file stores the last displayed MDS
 stanza-id (`{"count": N, "displayed": "sid"}`; the legacy `{"jid": N}` format is
 still read); `_flush_unread` collects it from the client's `_mds_local` and
 `_on_login` seeds it back via `client.set_displayed_state`, so the startup

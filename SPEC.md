@@ -91,6 +91,9 @@ refresh the Bookmarks menu and auto-join/leave the affected rooms.
 The conference browser consumes room names and metadata directly from
 `disco#items`; it does not probe every room individually. Contact and room
 vCard dialogs are opened asynchronously without nested modal event loops.
+`VCardInfoDialog` has a "Обновить"/"Refresh" button (`refresh_requested` →
+`MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
+rebuilds the open window in place (`update_card`) rather than opening another.
 Appearance settings support independent ordinary-chat and conference theme
 variants, arranged in the «Темы», «Ростер», «Шрифты», «Цвет» and «Разное» tabs
 («Разное» holds the media-preview size, the preview cache TTL/limit and the MUC
@@ -997,10 +1000,14 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   contact with unread messages and marks it read, so each subsequent
   middle-click advances to the next unread contact until none remain
   (`MainWindow._on_tray_cycle_unread`)
-- Blinking: alternates between icon and blank every 500ms when unread messages exist
+- Blinking: alternates between icon and blank every 500ms when unread messages
+  exist. It is active **only while logged in** (`MainWindow._sync_tray_blink`,
+  started on `session_started`/`stream_resumed` and on new unread, stopped on
+  `disconnected`/`sm_failed`), so restored counters do not blink on the login
+  screen.
 - Unread counters are persisted (`$XDG_DATA_HOME/stanza-im/unread.json`,
-  `core/unread_state.py`) and restored on startup: roster badges and tray
-  blinking come back exactly as before the restart (`MainWindow._unread_counts`,
+  `core/unread_state.py`) and restored on startup: the roster badges come back
+  exactly as before the restart (`MainWindow._unread_counts`,
   applied in `_add_roster_item`/`_sync_conference_roster`, saved with a 1 s
   debounce and on quit). The file entry is `{"count": N, "displayed": "<sid>"}`
   (legacy `{"jid": N}` is still read): the displayed sid is the last XEP-0490

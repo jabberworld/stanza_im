@@ -41,6 +41,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
     """Read-only summary of a contact's vCard."""
 
     edit_requested = QtCore.pyqtSignal(str)   # jid
+    refresh_requested = QtCore.pyqtSignal(str)  # jid
 
     def __init__(self, jid: str, card: dict, status: dict | None = None,
                  parent=None, show_edit: bool = False,
@@ -51,6 +52,38 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._jid = card.get("jid") or jid
 
         layout = QtWidgets.QVBoxLayout(self)
+        self._content = self._build_content(card, status or {})
+        layout.addWidget(self._content, 1)
+
+        btn = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Close)
+        btn.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
+            tr("dialog_ok"))
+        btn.rejected.connect(self.reject)
+        btn.clicked.connect(self.accept)
+        self._refresh_btn = btn.addButton(
+            tr("vcard_refresh"),
+            QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
+        self._refresh_btn.setIcon(QtGui.QIcon(
+            os.path.join(ACTIONS_DIR_16, "reload.png")))
+        self._refresh_btn.clicked.connect(
+            lambda: self.refresh_requested.emit(self._jid))
+        self._edit_btn = btn.addButton(
+            tr("vcard_edit"), QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
+        self._edit_btn.setIcon(QtGui.QIcon(
+            os.path.join(ACTIONS_DIR_16, "edit.png")))
+        self._edit_btn.setVisible(bool(show_edit))
+        self._edit_btn.setEnabled(bool(can_edit))
+        self._edit_btn.clicked.connect(
+            lambda: self.edit_requested.emit(self._jid))
+        layout.addWidget(btn)
+
+    def _build_content(self, card: dict,
+                       status: dict) -> QtWidgets.QWidget:
+        """Build the head + tabs block (rebuilt in place by update_card)."""
+        content = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         head = QtWidgets.QHBoxLayout()
         pic = QtWidgets.QLabel()
@@ -58,9 +91,9 @@ class VCardInfoDialog(QtWidgets.QDialog):
         pic.setPixmap(_photo_pixmap(card).pixmap(96, 96))
         head.addWidget(pic, 0, QtCore.Qt.AlignmentFlag.AlignTop)
 
-        title = QtWidgets.QLabel(card.get("fn") or jid)
+        title = QtWidgets.QLabel(card.get("fn") or self._jid)
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        subtitle = QtWidgets.QLabel(card.get("jid") or jid)
+        subtitle = QtWidgets.QLabel(card.get("jid") or self._jid)
         subtitle.setStyleSheet("color: gray;")
         copy_btn = QtWidgets.QToolButton()
         copy_btn.setIcon(QtGui.QIcon(
@@ -94,7 +127,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         tabs.addTab(self._fields_page(card, ("description",)),
                     tr("vcard_tab_about"))
         status_data = dict(status or {})
-        status_data.setdefault("jid", card.get("jid") or jid)
+        status_data.setdefault("jid", card.get("jid") or self._jid)
         status_data.setdefault("vcard_updated", card.get("fetched_at", ""))
         self._status_data = status_data
         self._status_index = tabs.addTab(self._fields_page(status_data, (
@@ -104,22 +137,15 @@ class VCardInfoDialog(QtWidgets.QDialog):
             "software_version", "os", "ping"), hide_empty=True),
             tr("vcard_tab_status"))
         layout.addWidget(tabs)
+        return content
 
-        btn = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Close)
-        btn.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
-            tr("dialog_ok"))
-        btn.rejected.connect(self.reject)
-        btn.clicked.connect(self.accept)
-        self._edit_btn = btn.addButton(
-            tr("vcard_edit"), QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
-        self._edit_btn.setIcon(QtGui.QIcon(
-            os.path.join(ACTIONS_DIR_16, "edit.png")))
-        self._edit_btn.setVisible(bool(show_edit))
-        self._edit_btn.setEnabled(bool(can_edit))
-        self._edit_btn.clicked.connect(
-            lambda: self.edit_requested.emit(self._jid))
-        layout.addWidget(btn)
+    def update_card(self, card: dict, status: dict | None = None) -> None:
+        """Rebuild the dialog content in place (after a vCard refresh)."""
+        self._jid = card.get("jid") or self._jid
+        new_content = self._build_content(card, status or {})
+        self.layout().replaceWidget(self._content, new_content)
+        self._content.deleteLater()
+        self._content = new_content
 
     def _copy_jid(self):
         from stanza_im.include.xmpp_uri import make_xmpp_uri

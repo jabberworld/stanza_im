@@ -266,8 +266,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_counts, self._unread_displayed = unread_state.load_state()
         self._unread_total = sum(self._unread_counts.values())
         self._unread_jids: set[str] = set(self._unread_counts)
-        if self._unread_total > 0 and self._config.notifications.tray_blink:
-            self._tray.start_blinking()
+        # The tray only blinks once logged in (see _sync_tray_blink); restored
+        # unread counters still show as roster badges before that.
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_moderation: dict[str, bool] = {}
         self._muc_moderation_pending: set[str] = set()
@@ -1794,6 +1794,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
         self._republish_pep()
+        self._sync_tray_blink()
 
     def _on_auth_failed(self):
         self._login.set_error(tr("login_auth_failed"))
@@ -1810,6 +1811,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_disconnected(self):
         # With stream management a transient drop is usually resumed, so
         # avoid a scary "Disconnected" message until resumption fails.
+        self._tray.stop_blinking()
         if self._client is not None and self._client.resume_expected():
             self._resume_pending = True
             self._tray.show_message(APP_NAME, tr("login_reconnecting"))
@@ -1825,9 +1827,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._visible:
             self._tray.show_message(APP_NAME, tr("login_reconnected"))
         self._update_csi()
+        self._sync_tray_blink()
 
     def _on_sm_failed(self):
         self._resume_pending = False
+        self._tray.stop_blinking()
         self._tray.show_message(APP_NAME, tr("login_disconnected"))
 
     def _on_sm_disabled(self):
@@ -1925,6 +1929,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._vcard_requested.add(jid)
         self._client.get_vcard(jid, force=force)
+
+    def _refresh_vcard(self, jid: str):
+        """Refetch a vCard from the server (vCard dialog "Refresh")."""
+        if not self._client:
+            return
+        self._pending_profile.add(jid)
+        self._request_vcard(jid, force=True)
 
     def _refresh_avatar(self, jid: str, path: str) -> None:
         """Apply a cached avatar *path* to the roster, contacts and MUCs."""
@@ -2024,6 +2035,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 if summary.get(key):
                     status[key] = summary[key]
             self._client.fetch_pep(bare)
+        existing = self._vcard_dialogs.get(jid)
+        if existing is not None and existing.isVisible():
+            # A refresh (or a second profile request): rebuild in place.
+            existing.update_card(card, status)
+            existing.raise_()
+            existing.activateWindow()
+            if self._client:
+                self._client.probe_entity(jid)
+            return
         bare = jid.split("/", 1)[0]
         is_room = bool(bare in self._conference_roster
                        or bare in self._muc_self_nicks)
@@ -2034,6 +2054,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._vcard_dialogs[jid] = dlg
         dlg.finished.connect(lambda _result, key=jid:
                              self._vcard_dialogs.pop(key, None))
+        dlg.refresh_requested.connect(self._refresh_vcard)
         if is_room:
             dlg.edit_requested.connect(
                 lambda _j, room=bare, c=card, p=parent:
@@ -3058,6 +3079,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.remove_contact(jid)
             self._roster.remove_user(jid)
 
+    def _sync_tray_blink(self):
+        """Blink the tray only while logged in and unread messages exist."""
+        if self._unread_total > 0 and self._config.notifications.tray_blink:
+            self._tray.start_blinking()
+        else:
+            self._tray.stop_blinking()
+
     def _bump_unread(self, jid: str):
         """Increment the unread counter for a roster contact."""
         self._unread_jids.add(jid)
@@ -3081,8 +3109,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 break
         self._unread_total = sum(self._unread_counts.values())
         self._schedule_unread_save()
-        if self._unread_total == 0:
-            self._tray.stop_blinking()
+        self._sync_tray_blink()
 
     def _schedule_unread_save(self) -> None:
         """Coalesce unread-counter writes to disk."""
@@ -3195,8 +3222,7 @@ class MainWindow(QtWidgets.QMainWindow):
                   and self._chat_window.current_jid() == bare_jid)
         if not active:
             self._bump_unread(bare_jid)
-            if self._config.notifications.tray_blink:
-                self._tray.start_blinking()
+            self._sync_tray_blink()
         if active and self._client:
             self._client.mds_mark_displayed(bare_jid)
         if self._config.notifications.popups and not active:
