@@ -67,6 +67,33 @@ check("XEPs.md marks itself a living document",
       "living document" in xeps_md.lower())
 
 
+# ── CHECKLIST.md (XEP-0479 compliance) structure ──────────────────
+
+_CHECKLIST = os.path.join(_ROOT, "CHECKLIST.md")
+with open(_CHECKLIST, encoding="utf-8") as fh:
+    checklist_md = fh.read()
+
+check("CHECKLIST.md has the Client category", "## Client" in checklist_md)
+check("CHECKLIST.md has the Advanced Client category",
+      "## Advanced Client" in checklist_md)
+check("CHECKLIST.md lists not-implemented extensions per category",
+      checklist_md.count("### Not implemented") >= 2)
+check("CHECKLIST.md has the maintenance rule", "## Maintenance" in checklist_md)
+check("CHECKLIST.md marks itself a living document",
+      "living document" in checklist_md.lower())
+
+# Every extension the checklist marks as supported (✅) must also be
+# documented in XEPs.md; ⚠️/❌ entries are deliberately not required there.
+supported = set()
+for line in checklist_md.splitlines():
+    if "XEP-" in line and "✅" in line:
+        supported.update(int(num) for num in re.findall(r"XEP-(\d{4})", line))
+missing_supported = sorted(num for num in supported if num not in documented)
+check("supported CHECKLIST XEPs are documented in XEPs.md (%s)"
+      % (", ".join("XEP-%04d" % num for num in missing_supported) or "none"),
+      not missing_supported)
+
+
 print("\nAll tests passed ✓" if not FAILURES
       else f"\n{len(FAILURES)} failures")
 sys.exit(1 if FAILURES else 0)

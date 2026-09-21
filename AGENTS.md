@@ -108,6 +108,7 @@ pyproject.toml                   # Package config (distribution: stanza-im)
 AGENTS.md                        # This architecture guide (living document)
 SPEC.md                          # Detailed specification (living document)
 XEPs.md                          # Supported XEP list (living document)
+CHECKLIST.md                     # XEP-0479 Client/Advanced Client checklist
 ```
 
 Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`,
@@ -1309,10 +1310,12 @@ unintended files; check `git status` before committing. Specification updates
 
 ## Documentation Maintenance
 
-`AGENTS.md`, `SPEC.md` and `XEPs.md` are living documents and MUST be updated in
-the same logical unit of work as any change that makes them stale:
+`AGENTS.md`, `SPEC.md`, `XEPs.md` and `CHECKLIST.md` are living documents and
+MUST be updated in the same logical unit of work as any change that makes them
+stale:
 
-- supported XEP added/removed or used differently → `XEPs.md` (+ `SPEC.md` §14);
+- supported XEP added/removed or used differently → `XEPs.md` (+ `SPEC.md` §14)
+  and, when it is a XEP-0479 compliance extension, `CHECKLIST.md`;
 - configuration keys, defaults or persisted paths → `AGENTS.md` (XDG) and
   `SPEC.md` §4;
 - new/removed modules or files → both directory-structure blocks
@@ -1322,8 +1325,8 @@ the same logical unit of work as any change that makes them stale:
 
 Before committing, check `git status`: when a change affects any of the above,
 the corresponding spec file must appear in the same commit. `tests/test_spec_sync.py`
-guards the XEP list automatically. Record the documentation update in
-`.opencode/work-state.md` (`Completed`).
+guards the XEP list and the `CHECKLIST.md` structure automatically. Record the
+documentation update in `.opencode/work-state.md` (`Completed`).
 
 ## Session State Protocol
 

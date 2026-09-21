@@ -1319,7 +1319,8 @@ Registers XEP plugins (conditionally where noted):
   `_http_upload_flow` emits `http_upload_oversize(jid, path)` instead of an
   error; `MainWindow` retries that file over P2P with the SOCKS5 method.
 
-See `XEPs.md` for the full supported-extensions matrix.
+See `XEPs.md` for the full supported-extensions matrix and `CHECKLIST.md` for
+the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 
 ### 14.5.1 Jingle P2P File Transfer (XEP-0234/0260/0261, `xmpp/jingle.py`)
 
