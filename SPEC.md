@@ -1691,6 +1691,31 @@ client.leave_muji(room)
   (`_started` guard, cleared when the room record drops). All call/Muji code
   logs via `stanza_im.call*` with `CALL[…]` / `MUJI[…]` markers.
 
+### 14.10.3 User Avatars (XEP-0084 / XEP-0153 / XEP-0398)
+
+- `xep_0153` advertises our vCard avatar hash in outgoing presence
+  (`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`) and fires
+  `vcard_avatar_update` when a contact's advertised hash changes;
+  `JabberClient._on_vcard_avatar_update` then refetches the vCard
+  (`get_vcard(bare, force=True)`), unless the hash already matches
+  `_avatar_ids`.
+- `xep_0084` publishes our avatar to the PEP nodes `urn:xmpp:avatar:data` /
+  `urn:xmpp:avatar:metadata` (`_publish_own_avatar_async`, with the image type
+  and dimensions from `include/avatars.image_mime`/`image_size`) whenever
+  `set_own_vcard` stores a PHOTO, and it registers the `avatar:metadata`
+  PEP interest. Incoming `urn:xmpp:avatar:metadata` events (routed through
+  `_maybe_pep_event`) trigger `_retrieve_avatar` → `_avatar_data_from_iq` →
+  cache.
+- XEP-0398 bridges the two: `JabberClient._apply_avatar(jid, raw)` is the
+  single sink for both the vCard and PEP paths, keyed by the SHA-1 of the
+  image so an unchanged avatar is not reapplied; it saves the image via
+  `include/avatars.save_avatar` and emits `avatar_updated(jid, path)`.
+  `MainWindow._on_avatar_updated` reuses `_refresh_avatar` (the avatar-only
+  part of `_on_vcard_received`) to update the roster row, contacts and MUC
+  occupant avatars — no new UI.
+- `_ensure_pep_subscription` also requests the `urn:xmpp:avatar:metadata`
+  node as a fallback for servers that need an explicit PEP subscription.
+
 ### 14.11 Data Classes
 
 ```python

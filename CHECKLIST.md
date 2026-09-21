@@ -56,8 +56,8 @@ the additional features are listed here.
 |---------|-----------|--------|-------|
 | Direct TLS | XEP-0368 | ✅ | `_xmpps-client._tcp` SRV, "TLS only"/"Prefer TLS" |
 | Event publishing | XEP-0163 | ✅ | MDS node + extended presence (`+notify`) |
-| User Avatars | XEP-0084 | ❌ | avatars are read from the vCard PHOTO (XEP-0054), not the PEP avatar node |
-| User Avatar Compatibility | XEP-0398, XEP-0153 | ⚠️ | vCard PHOTO avatars are shown, but the `vcard-temp:x:update` presence hash protocol and the XEP-0398 conversion are not implemented |
+| User Avatars | XEP-0084 | ✅ | own avatar published to `avatar:data`/`metadata`; contacts' metadata notifications fetch and cache the image |
+| User Avatar Compatibility | XEP-0398, XEP-0153 | ✅ | vCard PHOTO also publishes the PEP avatar and updates the presence hash; avatars from either source share one SHA-1-keyed cache |
 | User Blocking | XEP-0191 | ❌ | no blocking command/UI |
 | Advanced Group Chat | XEP-0048, XEP-0313, XEP-0402, XEP-0410 | ⚠️ | bookmarks via XEP-0048 stored through XEP-0223 pubsub (or XEP-0049 fallback), not PEP-native XEP-0402; XEP-0410 self-ping not implemented |
 | Persistent Storage of Private Data via PubSub | XEP-0223 | ✅ | bookmark storage backend |
@@ -73,12 +73,6 @@ the additional features are listed here.
 
 ### Not implemented
 
-- **XEP-0084 (User Avatar)** — the PEP avatar node is not used; avatars come
-  from the vCard PHOTO (XEP-0054).
-- **XEP-0398 (User Avatar to vCard-Based Avatars Conversion)** and **XEP-0153
-  (vCard-Based Avatars)** — the avatar *data* is taken from the vCard, but the
-  presence hash/update protocol and the XEP-0084↔vCard conversion are not
-  implemented, so "User Avatar Compatibility" is only partially met.
 - **XEP-0191 (Blocking Command)** — not implemented.
 - **XEP-0402 (PEP Native Bookmarks)** — bookmarks use XEP-0048 via XEP-0223
   pubsub storage (XEP-0049 private XML as a fallback).

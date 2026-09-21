@@ -15,6 +15,9 @@ whenever a new XEP is implemented or its usage changes.
 | XEP-0049 | Private XML Storage | Legacy bookmark store backend (when the server lacks pubsub-based XEP-0223 storage). |
 | XEP-0050 | Ad-hoc Commands | `AdHocDialog` executes remote commands exposed by a service. |
 | XEP-0054 | vCard | Displays/edits the own and contacts' vCards; avatar PHOTO data is cached by `include/avatars.py`. |
+| XEP-0084 | User Avatar (PEP) | Our avatar is published to the PEP nodes `urn:xmpp:avatar:data`/`metadata` (id, type, bytes, dimensions) and contacts' `avatar:metadata` notifications are fetched and cached; `chat.text_scale`-independent avatars are shown by the existing roster/chat rendering. |
+| XEP-0153 | vCard-Based Avatars | Our outgoing presence advertises `<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`; a contact's changed hash triggers a forced vCard refetch. |
+| XEP-0398 | User Avatar ↔ vCard Conversion | Bridges XEP-0084 and XEP-0153: setting a vCard PHOTO also publishes the PEP avatar and updates the presence hash, and incoming avatars from either source share one cache keyed by SHA-1 (dedup) via `JabberClient._apply_avatar`. |
 | XEP-0055 | Search | `SearchDialog` runs both legacy (Jabber Search) and form-based searches. |
 | XEP-0059 | Result Set Management | Brought in by XEP-0313 for MAM pagination (large archive queries). |
 | XEP-0060 | Publish-Subscribe | Transport for PEP; used by XEP-0163 to publish and receive the `urn:xmpp:mds:displayed:0` node. |

@@ -6,6 +6,7 @@ layer connects to.
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
 import hashlib
 import logging
@@ -62,6 +63,9 @@ NS_HINTS = "urn:xmpp:hints"                # XEP-0334 Message Processing Hints
 NS_CAPTCHA = "urn:xmpp:captcha"            # XEP-0158 CAPTCHA Forms
 NS_MEDIA = "urn:xmpp:media-element"        # XEP-0221 Data Forms Media Element
 NS_OOB = "jabber:x:oob"                    # XEP-0066 Out-of-Band Data
+NS_AVATAR_DATA = "urn:xmpp:avatar:data"        # XEP-0084 User Avatar
+NS_AVATAR_METADATA = "urn:xmpp:avatar:metadata"
+NS_VCARD_UPDATE = "vcard-temp:x:update"        # XEP-0153 vCard-Based Avatars
 _RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
 
 
@@ -241,6 +245,22 @@ def _resolve_bob_media(xml, bob: dict[str, str]) -> None:
         value = str(uri.text or "").strip()
         if value.startswith("cid:") and value[4:] in bob:
             uri.text = bob[value[4:]]
+
+
+def _avatar_data_from_iq(iq) -> bytes:
+    """Return the XEP-0084 ``<data/>`` payload of an avatar items IQ."""
+    xml = getattr(iq, "xml", None)
+    if xml is None:
+        return b""
+    for data in xml.iter("{%s}data" % NS_AVATAR_DATA):
+        text = (data.text or "").strip()
+        if not text:
+            continue
+        try:
+            return bytes(base64.b64decode(text))
+        except (ValueError, TypeError):
+            return b""
+    return b""
 
 
 def muc_invite_from_message(msg) -> dict | None:
@@ -688,6 +708,8 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0280")  # Message Carbons
         self.xmpp.register_plugin("xep_0163")  # PEP
         self.xmpp.register_plugin("xep_0060")  # PubSub
+        self.xmpp.register_plugin("xep_0153")  # vCard-Based Avatars
+        self.xmpp.register_plugin("xep_0084")  # User Avatar (PEP)
         self.xmpp.register_plugin("xep_0065")  # SOCKS5 Bytestreams (file proxy)
         if self.stream_management:
             self.xmpp.register_plugin("xep_0198")  # Stream Management
@@ -789,6 +811,9 @@ class JabberClient:
         self._muc_join_tasks: dict[str, asyncio.Task] = {}
         self._version_probed: set[str] = set()        # full JIDs (XEP-0092)
         self._muc_version_probed: set[tuple[str, str]] = set()
+        # bare JID -> SHA-1 of the currently applied avatar (XEP-0084/0153/0398)
+        self._avatar_ids: dict[str, str] = {}
+        self._avatar_inflight: set[str] = set()
 
         # Hook up slixmpp events
         self.xmpp.add_event_handler("session_start", self._on_session_start)
@@ -811,6 +836,8 @@ class JabberClient:
         self.xmpp.add_event_handler("receipt_received", self._on_receipt_received)
         self.xmpp.add_event_handler("carbon_received", self._on_carbon_received)
         self.xmpp.add_event_handler("carbon_sent", self._on_carbon_sent)
+        self.xmpp.add_event_handler("vcard_avatar_update",
+                                    self._on_vcard_avatar_update)
         if self.stream_management:
             self.xmpp.add_event_handler("sm_enabled", self._on_sm_enabled)
             self.xmpp.add_event_handler("session_resumed", self._on_session_resumed)
@@ -2649,6 +2676,11 @@ class JabberClient:
             try:
                 from stanza_im.include.avatars import save_avatar
                 card["avatar_path"] = save_avatar(self.jid_str, card["photo"])
+                # XEP-0398: keep the PEP avatar and the XEP-0153 presence hash
+                # in sync with the vCard PHOTO.
+                self._avatar_ids[self.jid_str] = hashlib.sha1(
+                    card["photo"]).hexdigest()
+                self._publish_own_avatar(card["photo"])
             except Exception:
                 pass
         self.emit("vcard_updated", self.jid_str, card)
@@ -3179,7 +3211,7 @@ class JabberClient:
     # ── Extended presence: XEP-0080/0107/0108/0118 ────────────────
 
     def _maybe_pep_event(self, msg) -> None:
-        """Handle a PEP notification for mood/activity/tune/geoloc."""
+        """Handle a PEP notification for mood/activity/tune/geoloc/avatar."""
         frm = str(msg["from"]).split("/")[0]
         for el in msg.xml:
             if el.tag != "{%s}event" % NS_PUBSUB_EVENT:
@@ -3188,6 +3220,9 @@ class JabberClient:
             if items is None:
                 continue
             node = items.get("node") or ""
+            if node == NS_AVATAR_METADATA:
+                self._handle_avatar_metadata(frm, items)
+                continue
             kind = pep.PEP_NODES.get(node)
             if not kind:
                 continue
@@ -3198,6 +3233,127 @@ class JabberClient:
                 if payload is None:
                     continue
                 self._store_pep(frm, kind, pep.parse_payload(node, payload))
+
+    # ── XEP-0084 / XEP-0153 / XEP-0398 avatars ────────────────────
+
+    def _handle_avatar_metadata(self, jid: str, items) -> None:
+        """React to a contact's ``urn:xmpp:avatar:metadata`` (XEP-0084)."""
+        if not jid:
+            return
+        info = None
+        for item in items:
+            if item.tag != "{%s}item" % NS_PUBSUB_EVENT:
+                continue
+            payload = next(iter(item), None)
+            if payload is None:
+                continue
+            info = payload.find("{%s}info" % NS_AVATAR_METADATA)
+            if info is not None:
+                break
+        if info is None:
+            return
+        avatar_id = str(info.get("id") or "")
+        mtype = str(info.get("type") or "")
+        if not avatar_id or avatar_id == self._avatar_ids.get(jid):
+            return
+        if jid in self._avatar_inflight:
+            return
+        self._avatar_inflight.add(jid)
+        self._start_task(self._retrieve_avatar(jid, avatar_id, mtype))
+
+    async def _retrieve_avatar(self, jid: str, avatar_id: str,
+                               mtype: str = "") -> None:
+        try:
+            result = await asyncio.wait_for(
+                self.xmpp["xep_0084"].retrieve_avatar(jid, avatar_id),
+                timeout=20)
+        except Exception:
+            logger.debug("Avatar retrieval for %s failed", jid, exc_info=True)
+            self._avatar_inflight.discard(jid)
+            return
+        self._avatar_inflight.discard(jid)
+        raw = _avatar_data_from_iq(result)
+        if raw:
+            self._apply_avatar(jid, raw)
+
+    def _apply_avatar(self, jid: str, raw: bytes) -> bool:
+        """Cache the avatar *raw* for *jid* and notify the UI (XEP-0398).
+
+        Returns ``False`` when the image is unchanged (same SHA-1), which
+        keeps the XEP-0153 (vCard) and XEP-0084 (PEP) paths from flapping.
+        """
+        if not raw:
+            return False
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare:
+            return False
+        digest = hashlib.sha1(raw).hexdigest()
+        if self._avatar_ids.get(bare) == digest:
+            return False
+        try:
+            from stanza_im.include.avatars import save_avatar
+            path = save_avatar(bare, raw)
+        except Exception:
+            logger.debug("Could not cache avatar for %s", bare, exc_info=True)
+            return False
+        self._avatar_ids[bare] = digest
+        self.emit("avatar_updated", bare, path)
+        return True
+
+    def _on_vcard_avatar_update(self, pres) -> None:
+        """XEP-0153: a contact changed the avatar hash in their presence."""
+        try:
+            bare = str(pres["from"]).split("/", 1)[0]
+            photo = str(pres["vcard_temp_update"]["photo"] or "")
+        except (KeyError, TypeError, AttributeError):
+            return
+        if not bare or not photo:
+            return
+        if self._avatar_ids.get(bare) == photo:
+            return
+        self.get_vcard(bare, force=True)
+
+    def _publish_own_avatar(self, raw: bytes) -> None:
+        """Publish our avatar to PEP (XEP-0084) and refresh the 0153 hash."""
+        self._start_task(self._publish_own_avatar_async(raw))
+
+    async def _publish_own_avatar_async(self, raw: bytes) -> None:
+        if not raw:
+            return
+        digest = hashlib.sha1(raw).hexdigest()
+        plugin = self.xmpp.plugin.get("xep_0084", None)
+        if plugin is not None:
+            try:
+                await plugin.publish_avatar(raw)
+            except Exception:
+                logger.debug("PEP avatar publish failed", exc_info=True)
+            else:
+                try:
+                    from stanza_im.include.avatars import image_mime, image_size
+                    width, height = image_size(raw)
+                    await plugin.publish_avatar_metadata([{
+                        "id": digest,
+                        "type": image_mime(raw),
+                        "bytes": len(raw),
+                        "width": width or None,
+                        "height": height or None,
+                    }])
+                except Exception:
+                    logger.debug("PEP avatar metadata publish failed",
+                                 exc_info=True)
+        self._set_vcard_avatar_hash(digest)
+
+    def _set_vcard_avatar_hash(self, digest: str) -> None:
+        """Update the XEP-0153 hash advertised in our presence."""
+        plugin = self.xmpp.plugin.get("xep_0153", None)
+        if plugin is None:
+            return
+        try:
+            self.xmpp.plugin["xep_0153"].api["set_hash"](
+                self.xmpp.boundjid, args=digest)
+        except Exception:
+            logger.debug("Could not update the vCard avatar hash",
+                         exc_info=True)
 
     def _store_pep(self, jid: str, kind: str, data: dict) -> None:
         jid = str(jid or "").split("/")[0]
@@ -3227,7 +3383,7 @@ class JabberClient:
         last_fail = self._pep_subscribe_failed.get(bare, 0.0)
         if now - last_fail < self._pep_subscribe_cooldown:
             return
-        for node in pep.PEP_NODES:
+        for node in (*pep.PEP_NODES, NS_AVATAR_METADATA):
             key = (bare, node)
             if key in self._pep_subscribe_inflight:
                 continue
@@ -4032,6 +4188,7 @@ class JabberClient:
             try:
                 from stanza_im.include.avatars import save_avatar
                 card["avatar_path"] = save_avatar(jid or bare, photo)
+                self._avatar_ids[bare] = hashlib.sha1(photo).hexdigest()
             except Exception:
                 pass
         if "/" not in jid:

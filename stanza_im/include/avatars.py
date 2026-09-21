@@ -148,14 +148,33 @@ def png_data_uri(raw: bytes) -> str | None:
     """Return an image data URI for common vCard photo formats."""
     if not raw:
         return None
-    if raw[:8] == b"\x89PNG\r\n\x1a\n":
-        mime = "image/png"
-    elif raw[:3] == b"\xff\xd8\xff":
-        mime = "image/jpeg"
-    elif raw[:6] in (b"GIF87a", b"GIF89a"):
-        mime = "image/gif"
-    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
-        mime = "image/webp"
-    else:
+    mime = image_mime(raw)
+    if mime == "application/octet-stream":
         return None
     return "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii")
+
+
+def image_mime(raw: bytes) -> str:
+    """Sniff the MIME type of a raw avatar image."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
+def image_size(raw: bytes) -> tuple[int, int]:
+    """Return the ``(width, height)`` of a raw avatar, or ``(0, 0)``."""
+    if not raw:
+        return (0, 0)
+    try:
+        image = QtGui.QImage()
+        if image.loadFromData(raw):
+            return (image.width(), image.height())
+    except Exception:
+        pass
+    return (0, 0)

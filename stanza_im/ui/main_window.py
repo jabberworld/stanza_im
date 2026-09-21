@@ -1746,6 +1746,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("csi_enabled", self._on_csi_enabled)
         c.on("subscribed", self._on_subscribed)
         c.on("vcard_received", self._on_vcard_received)
+        c.on("avatar_updated", self._on_avatar_updated)
         c.on("vcard_error", self._on_vcard_error)
         c.on("typing", self._on_typing)
         c.on("chatstate_received", self._on_chatstate_received)
@@ -1917,17 +1918,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._vcard_requested.add(jid)
         self._client.get_vcard(jid, force=force)
 
-    def _on_vcard_received(self, jid: str, card: dict):
+    def _refresh_avatar(self, jid: str, path: str) -> None:
+        """Apply a cached avatar *path* to the roster, contacts and MUCs."""
         bare_jid = jid.split("/", 1)[0]
         room_jid = (jid if jid in self._conference_roster
                     or jid in self._muc_self_nicks else "")
-        path = card.get("avatar_path") or ""
-        raw = card.get("photo")
-        if raw:
-            try:
-                path = save_avatar(jid, raw)
-            except Exception:
-                path = ""
         if path:
             if room_jid:
                 self._muc_avatar_paths[room_jid] = path
@@ -1940,12 +1935,6 @@ class MainWindow(QtWidgets.QMainWindow):
                                          avatar_path=path)
         if room_jid:
             self._sync_conference_roster(room_jid)
-        if room_jid:
-            self._muc_vcard_names[room_jid] = {
-                "fn": card.get("fn") or "",
-                "nickname": card.get("nickname") or "",
-            }
-            self._apply_muc_name(room_jid)
         for room, users in self._muc_users.items():
             changed_nicks: list[tuple[str, str]] = []
             for nick, info in users.items():
@@ -1967,6 +1956,29 @@ class MainWindow(QtWidgets.QMainWindow):
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:
                     muji.set_avatars({nick: path for nick, _ in changed_nicks})
+
+    def _on_avatar_updated(self, jid: str, path: str):
+        """A contact's avatar changed via PEP (XEP-0084)."""
+        self._refresh_avatar(jid, path)
+
+    def _on_vcard_received(self, jid: str, card: dict):
+        bare_jid = jid.split("/", 1)[0]
+        room_jid = (jid if jid in self._conference_roster
+                    or jid in self._muc_self_nicks else "")
+        path = card.get("avatar_path") or ""
+        raw = card.get("photo")
+        if raw:
+            try:
+                path = save_avatar(jid, raw)
+            except Exception:
+                path = ""
+        self._refresh_avatar(jid, path)
+        if room_jid:
+            self._muc_vcard_names[room_jid] = {
+                "fn": card.get("fn") or "",
+                "nickname": card.get("nickname") or "",
+            }
+            self._apply_muc_name(room_jid)
         if jid in self._pending_profile:
             self._pending_profile.discard(jid)
             self._open_vcard_info(jid, card)

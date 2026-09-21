@@ -831,6 +831,23 @@ an HTTP Upload slot is rejected for size (`file-too-large` /
 `resource-constraint` / `not-acceptable`), `_http_upload_flow` emits
 `http_upload_oversize(jid, path)` and MainWindow retries that file over P2P.
 
+**User avatars (XEP-0084 / XEP-0153 / XEP-0398)** (`core/client.py`,
+`include/avatars.py`): `xep_0153` advertises our vCard avatar hash in presence
+(`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`); its
+`vcard_avatar_update` event makes `_on_vcard_avatar_update` refetch a contact's
+vCard (`get_vcard(bare, force=True)`) when the hash changes. `xep_0084`
+publishes our avatar to the PEP `avatar:data`/`avatar:metadata` nodes
+(`_publish_own_avatar_async`, type and dimensions from
+`include/avatars.image_mime`/`image_size`) whenever `set_own_vcard` stores a
+PHOTO, and registers the `avatar:metadata` interest; incoming metadata events
+(routed through `_maybe_pep_event`, and the `avatar:metadata` node is also
+requested by `_ensure_pep_subscription`) fetch the image via `_retrieve_avatar`.
+XEP-0398 bridges the two: both paths funnel into `_apply_avatar(jid, raw)`,
+keyed by the SHA-1 of the image (unchanged avatars are skipped), which saves it
+and emits `avatar_updated(jid, path)`; `MainWindow._on_avatar_updated` reuses
+`_refresh_avatar` (the avatar-only part of `_on_vcard_received`) for the roster,
+contacts and MUC occupants — no new UI. [`tests/test_avatars.py`]
+
 **Extended presence (XEP-0080/0107/0108/0118)** (`include/pep.py`,
 `core/client.py`): the four PEP nodes (`geoloc`, `mood`, `activity`, `tune`)
 are advertised with `+notify` in disco. PEP notifications are bodyless
