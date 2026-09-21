@@ -66,6 +66,9 @@ NS_OOB = "jabber:x:oob"                    # XEP-0066 Out-of-Band Data
 NS_AVATAR_DATA = "urn:xmpp:avatar:data"        # XEP-0084 User Avatar
 NS_AVATAR_METADATA = "urn:xmpp:avatar:metadata"
 NS_VCARD_UPDATE = "vcard-temp:x:update"        # XEP-0153 vCard-Based Avatars
+NS_BOOKMARKS2 = "urn:xmpp:bookmarks:1"          # XEP-0402 PEP Native Bookmarks
+NS_BOOKMARKS2_COMPAT = "urn:xmpp:bookmarks:1#compat"
+NS_BOOKMARKS2_COMPAT_PEP = "urn:xmpp:bookmarks:1#compat-pep"
 _RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
 
 # XEP-0410 MUC self-ping: after this much silence from a room, verify that we
@@ -267,6 +270,58 @@ def _avatar_data_from_iq(iq) -> bytes:
         except (ValueError, TypeError):
             return b""
     return b""
+
+
+def _build_bookmarks2_conference(nick: str, password: str, autojoin: bool,
+                                 name: str) -> ET.Element:
+    """Build a XEP-0402 ``<conference/>`` payload."""
+    conf = ET.Element("{%s}conference" % NS_BOOKMARKS2)
+    if name:
+        conf.set("name", str(name))
+    conf.set("autojoin", "true" if autojoin else "false")
+    if nick:
+        ET.SubElement(conf, "{%s}nick" % NS_BOOKMARKS2).text = str(nick)
+    if password:
+        ET.SubElement(conf, "{%s}password" % NS_BOOKMARKS2).text = str(password)
+    return conf
+
+
+def _bookmarks2_publish_options(x) -> None:
+    """Fill the ``<x type='submit'/>`` publish-options of XEP-0402 §3.3."""
+    fields = (
+        ("FORM_TYPE",
+         "http://jabber.org/protocol/pubsub#publish-options", "hidden"),
+        ("pubsub#persist_items", "true", None),
+        ("pubsub#max_items", "max", None),
+        ("pubsub#send_last_published_item", "never", None),
+        ("pubsub#access_model", "whitelist", None),
+    )
+    for var, value, field_type in fields:
+        field = ET.SubElement(x, "{%s}field" % NS_DATA)
+        field.set("var", var)
+        if field_type:
+            field.set("type", field_type)
+        ET.SubElement(field, "{%s}value" % NS_DATA).text = value
+
+
+def _parse_bookmarks2(xml) -> list[dict]:
+    """Parse a XEP-0402 ``pubsub/items`` payload into bookmark dicts."""
+    out: list[dict] = []
+    if xml is None:
+        return out
+    for item in xml.iter("{%s}item" % NS_PUBSUB):
+        room = str(item.get("id") or "")
+        conf = item.find("{%s}conference" % NS_BOOKMARKS2)
+        if not room or conf is None:
+            continue
+        out.append({
+            "jid": room,
+            "nick": str(conf.findtext("{%s}nick" % NS_BOOKMARKS2) or ""),
+            "password": str(conf.findtext("{%s}password" % NS_BOOKMARKS2) or ""),
+            "autojoin": conf.get("autojoin", "") in ("1", "true"),
+            "name": str(conf.get("name") or ""),
+        })
+    return out
 
 
 def muc_invite_from_message(msg) -> dict | None:
@@ -692,6 +747,7 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0184")  # Message Receipts
         self.xmpp.register_plugin("xep_0224")  # Attention
         self.xmpp.register_plugin("xep_0048")  # Bookmarks
+        self.xmpp.register_plugin("xep_0402")  # PEP Native Bookmarks
         self.xmpp.register_plugin("xep_0050")  # Ad-hoc Commands
         self.xmpp.register_plugin("xep_0004")  # Data Forms
         self.xmpp.register_plugin("xep_0077")  # In-Band Registration
@@ -730,6 +786,8 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_RETRACT)
         # XEP-0490 Displayed Synchronization — advertise PEP notification support.
         self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
+        # XEP-0402 PEP Native Bookmarks — receive updates from other resources.
+        self.xmpp["xep_0030"].add_feature(NS_BOOKMARKS2 + "+notify")
         # Jingle file transfer (XEP-0166/0234) with SOCKS5 (XEP-0260) and
         # In-Band (XEP-0261) transports — advertise support in disco.
         self.xmpp["xep_0030"].add_feature(jingle_mod.NS_JINGLE)
@@ -823,6 +881,8 @@ class JabberClient:
         # bare JID -> SHA-1 of the currently applied avatar (XEP-0084/0153/0398)
         self._avatar_ids: dict[str, str] = {}
         self._avatar_inflight: set[str] = set()
+        # XEP-0402 server-side bookmark unification ("unified"/"dual"), cached
+        self._bookmarks2_compat: str | None = None
 
         # Hook up slixmpp events
         self.xmpp.add_event_handler("session_start", self._on_session_start)
@@ -2301,8 +2361,127 @@ class JabberClient:
         except Exception:
             pass
 
+    async def _bookmarks2_compat_mode(self) -> str:
+        """Return ``"unified"`` when the server unifies bookmarks, else ``"dual"``.
+
+        XEP-0402 §5.3/§6: ``urn:xmpp:bookmarks:1#compat`` (Private XML) and
+        ``urn:xmpp:bookmarks:1#compat-pep`` (XEP-0223) are announced when the
+        server keeps the legacy and PEP bookmark lists in sync.  Without them
+        we publish to both stores.
+        """
+        if self._bookmarks2_compat is not None:
+            return self._bookmarks2_compat
+        mode = "dual"
+        try:
+            info = await self.xmpp["xep_0030"].get_info(jid=self.jid_str)
+            features = {str(el.get("var") or "") for el in info.xml.iter()
+                        if str(el.tag).endswith("feature")}
+            if features & {NS_BOOKMARKS2_COMPAT, NS_BOOKMARKS2_COMPAT_PEP}:
+                mode = "unified"
+        except Exception:
+            logger.debug("Bookmark compatibility disco#info failed",
+                         exc_info=True)
+        self._bookmarks2_compat = mode
+        return mode
+
+    async def _bookmarks2_get(self) -> list[dict] | None:
+        """Fetch the XEP-0402 bookmark node; ``None`` when it is unavailable."""
+        try:
+            result = await self.xmpp["xep_0060"].get_items(
+                self.jid_str, NS_BOOKMARKS2)
+        except Exception:
+            logger.debug("XEP-0402 bookmarks fetch failed", exc_info=True)
+            return None
+        xml = getattr(result, "xml", None)
+        return _parse_bookmarks2(xml)
+
+    async def _bookmarks2_publish(self, room: str, nick: str, password: str,
+                                  autojoin: bool, name: str) -> None:
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        publish = ET.SubElement(pubsub, "{%s}publish" % NS_PUBSUB)
+        publish.set("node", NS_BOOKMARKS2)
+        item = ET.SubElement(publish, "{%s}item" % NS_PUBSUB)
+        item.set("id", room)
+        item.append(_build_bookmarks2_conference(nick, password, autojoin,
+                                                 name))
+        options = ET.SubElement(pubsub, "{%s}publish-options" % NS_PUBSUB)
+        form = ET.SubElement(options, "{%s}x" % NS_DATA)
+        form.set("type", "submit")
+        _bookmarks2_publish_options(form)
+        await iq.send()
+
+    async def _bookmarks2_retract(self, room: str) -> None:
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        retract = ET.SubElement(pubsub, "{%s}retract" % NS_PUBSUB)
+        retract.set("node", NS_BOOKMARKS2)
+        retract.set("notify", "true")
+        item = ET.SubElement(retract, "{%s}item" % NS_PUBSUB)
+        item.set("id", room)
+        await iq.send()
+
     async def save_bookmark(self, room: str, nick: str, password: str = "",
                             autojoin: bool = True, name: str = "") -> None:
+        """Save (or update) a conference bookmark.
+
+        XEP-0402 (PEP Native Bookmarks) is the primary store; when the server
+        does not unify bookmarks (no ``#compat``/``#compat-pep``) the legacy
+        XEP-0048 storage is updated too, so older clients keep working.
+        """
+        saved = False
+        try:
+            await self._bookmarks2_publish(room, nick, password, autojoin,
+                                           name)
+            saved = True
+        except Exception:
+            logger.debug("XEP-0402 bookmark publish failed for %s", room,
+                         exc_info=True)
+        if not saved or await self._bookmarks2_compat_mode() == "dual":
+            await self._save_bookmark_legacy(room, nick, password, autojoin,
+                                             name)
+
+    async def list_bookmarks(self) -> list[dict]:
+        """Return conference bookmarks (XEP-0402, else XEP-0048).
+
+        When the XEP-0402 node is empty but legacy bookmarks exist, they are
+        migrated into the new node on first read.
+        """
+        bookmarks = await self._bookmarks2_get()
+        if bookmarks:
+            return bookmarks
+        legacy = await self._list_bookmarks_legacy()
+        if bookmarks is None:
+            return legacy
+        if legacy:
+            for bookmark in legacy:
+                try:
+                    await self._bookmarks2_publish(
+                        bookmark["jid"], bookmark["nick"],
+                        bookmark["password"], bookmark["autojoin"],
+                        bookmark["name"])
+                except Exception:
+                    logger.debug("Bookmark migration failed for %s",
+                                 bookmark["jid"], exc_info=True)
+        return legacy
+
+    async def remove_bookmark(self, room: str) -> None:
+        """Remove a conference bookmark (XEP-0402 and legacy when needed)."""
+        removed = False
+        try:
+            await self._bookmarks2_retract(room)
+            removed = True
+        except Exception:
+            logger.debug("XEP-0402 bookmark retract failed for %s", room,
+                         exc_info=True)
+        if not removed or await self._bookmarks2_compat_mode() == "dual":
+            await self._remove_bookmark_legacy(room)
+
+    async def _save_bookmark_legacy(self, room: str, nick: str,
+                                    password: str = "", autojoin: bool = True,
+                                    name: str = "") -> None:
         """Save (or update) a conference bookmark for *room* (XEP-0048)."""
         from slixmpp.plugins.xep_0048 import Bookmarks
 
@@ -2342,7 +2521,7 @@ class JabberClient:
         except Exception:
             logger.exception("Failed to save bookmark for %s", room)
 
-    async def list_bookmarks(self) -> list[dict]:
+    async def _list_bookmarks_legacy(self) -> list[dict]:
         """Return conference bookmarks stored through XEP-0048."""
         plugin = self.xmpp.plugin["xep_0048"]
         try:
@@ -2366,7 +2545,7 @@ class JabberClient:
             logger.debug("Could not read bookmarks", exc_info=True)
             return []
 
-    async def remove_bookmark(self, room: str) -> None:
+    async def _remove_bookmark_legacy(self, room: str) -> None:
         """Remove a conference bookmark from XEP-0048 storage."""
         from slixmpp.plugins.xep_0048 import Bookmarks
 
@@ -2386,6 +2565,50 @@ class JabberClient:
             await plugin.set_bookmarks(bookmarks)
         except Exception:
             logger.exception("Failed to remove bookmark for %s", room)
+
+    def _handle_bookmarks2_event(self, jid: str, items) -> None:
+        """XEP-0402: react to our own bookmark node changes (other resources)."""
+        if jid and self.jid_str and jid != self.jid_str:
+            return
+        joins: list[tuple[str, str, str]] = []
+        leaves: list[str] = []
+        for child in items:
+            if child.tag == "{%s}item" % NS_PUBSUB_EVENT:
+                room = str(child.get("id") or "")
+                conf = child.find("{%s}conference" % NS_BOOKMARKS2)
+                if not room or conf is None:
+                    continue
+                if conf.get("autojoin", "") in ("1", "true"):
+                    nick = conf.findtext("{%s}nick" % NS_BOOKMARKS2) or ""
+                    password = (conf.findtext("{%s}password"
+                                              % NS_BOOKMARKS2) or "")
+                    joins.append((room, nick, password))
+                else:
+                    leaves.append(room)
+            elif child.tag == "{%s}retract" % NS_PUBSUB_EVENT:
+                room = str(child.get("id") or "")
+                if room:
+                    leaves.append(room)
+        self._start_task(self._bookmarks2_apply(joins, leaves))
+
+    async def _bookmarks2_apply(self, joins: list[tuple[str, str, str]],
+                                leaves: list[str]) -> None:
+        for room, nick, password in joins:
+            if room in self.groupchats:
+                continue
+            logger.info("Bookmark notification: joining %s", room)
+            self.autojoin_rooms.add(room)
+            self.join_muc(room, nick or self.jid_str.split("@")[0],
+                          password=password, save_bookmark=False)
+        for room in leaves:
+            if room in self.groupchats:
+                logger.info("Bookmark notification: leaving %s", room)
+                self.leave_muc(room)
+        try:
+            bookmarks = await self.list_bookmarks()
+        except Exception:
+            bookmarks = []
+        self.emit("bookmarks_changed", bookmarks)
 
     def leave_muc(self, room: str, reason: str = "") -> None:
         """Leave a Multi-User Chat room."""
@@ -3079,37 +3302,31 @@ class JabberClient:
         loop.create_task(self.discover_transfer_services())
 
     async def _autojoin_bookmarks(self) -> None:
-        """Join bookmarked MUC rooms flagged for auto-join (XEP-0048).
+        """Join bookmarked MUC rooms flagged for auto-join (XEP-0048/0402).
 
         Implemented here (instead of the plugin's ``auto_join`` flag) because
         the shipped slixmpp ``_autojoin`` does not await the coroutine-returning
         ``get_bookmarks``.
         """
-        plugin = self.xmpp.plugin["xep_0048"]
         if not self.auto_join_conferences:
             return
-        bookmarks = None
+        bookmarks: list[dict] = []
         for attempt in range(3):
-            try:
-                result = await plugin.get_bookmarks()
-                if plugin.storage_method == "xep_0223":
-                    bookmarks = result["pubsub"]["items"]["item"]["bookmarks"]
-                else:
-                    bookmarks = result["private"]["bookmarks"]
+            bookmarks = await self.list_bookmarks()
+            if bookmarks:
                 break
-            except Exception:
-                logger.debug("Bookmarks fetch failed (attempt %d)",
-                             attempt + 1, exc_info=True)
-                await asyncio.sleep(1 + attempt)
-        if bookmarks is None:
+            logger.debug("Bookmarks fetch failed (attempt %d)",
+                         attempt + 1)
+            await asyncio.sleep(1 + attempt)
+        if not bookmarks:
             logger.debug("No bookmarks to auto-join")
             return
-        for conf in bookmarks["conferences"]:
+        for bookmark in bookmarks:
             try:
-                room = conf["jid"]
-                autojoin = conf["autojoin"]
-                nick = conf["nick"] or self.jid_str.split("@")[0]
-                password = conf["password"] or ""
+                room = bookmark["jid"]
+                autojoin = bookmark["autojoin"]
+                nick = bookmark["nick"] or self.jid_str.split("@")[0]
+                password = bookmark["password"] or ""
             except Exception:
                 continue
             gi = self.groupchats.get(room)
@@ -3315,6 +3532,9 @@ class JabberClient:
             node = items.get("node") or ""
             if node == NS_AVATAR_METADATA:
                 self._handle_avatar_metadata(frm, items)
+                continue
+            if node == NS_BOOKMARKS2:
+                self._handle_bookmarks2_event(frm, items)
                 continue
             kind = pep.PEP_NODES.get(node)
             if not kind:

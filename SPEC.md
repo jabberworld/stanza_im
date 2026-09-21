@@ -80,6 +80,14 @@ and `ui/conference_dialog.py`. Conference discovery uses XEP-0030; used
 conference servers are stored in `connection.conference_servers`. XEP-0048
 bookmark names are preserved and used in the Bookmarks menu with a localpart
 fallback.
+Bookmarks are stored with **XEP-0402 PEP Native Bookmarks**
+(`urn:xmpp:bookmarks:1`; item id = room JID, `<conference>` payload,
+publish-options whitelist/persist/max/send-last-never). `list_bookmarks`
+migrates legacy XEP-0048 entries into the node; `save_bookmark`/`remove_bookmark`
+publish/retract items and, unless the server announces
+`urn:xmpp:bookmarks:1#compat`/`#compat-pep`, keep the legacy XEP-0048 storage
+(XEP-0223 pubsub or XEP-0049 private XML) in sync. The `+notify` node updates
+refresh the Bookmarks menu and auto-join/leave the affected rooms.
 The conference browser consumes room names and metadata directly from
 `disco#items`; it does not probe every room individually. Contact and room
 vCard dialogs are opened asynchronously without nested modal event loops.

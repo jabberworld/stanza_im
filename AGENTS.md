@@ -118,6 +118,12 @@ provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
 servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
 names are preserved and used as the menu label with a localpart fallback.
+Bookmarks are stored with XEP-0402 PEP Native Bookmarks
+(`urn:xmpp:bookmarks:1`, `core/client.py` `save_bookmark`/`list_bookmarks`/
+`remove_bookmark`): legacy XEP-0048 bookmarks are migrated into the node, and
+when the server does not announce `urn:xmpp:bookmarks:1#compat`/`#compat-pep`
+the legacy XEP-0048 storage is kept in sync too; `+notify` updates refresh the
+menu and auto-join/leave rooms (`_handle_bookmarks2_event`).
 The conference browser uses the names and metadata returned by the service's
 `disco#items` response and does not issue one `disco#info` request per room.
 vCard information dialogs are opened non-modally from async callbacks.

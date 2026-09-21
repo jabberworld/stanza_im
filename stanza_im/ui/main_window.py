@@ -688,6 +688,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     async def _load_bookmarks(self):
         bookmarks = await self._client.list_bookmarks()
+        self._apply_bookmarks(bookmarks)
+
+    def _apply_bookmarks(self, bookmarks: list[dict]):
         self._bookmarks = {}
         for item in bookmarks:
             jid = item.get("jid", "")
@@ -705,6 +708,10 @@ class MainWindow(QtWidgets.QMainWindow):
             chat = self._chat_window.get_chat(room)
             if chat:
                 chat.set_bookmarked(room in self._bookmarks)
+
+    def _on_bookmarks_changed(self, bookmarks: list[dict]):
+        """Bookmarks changed on another of our resources (XEP-0402)."""
+        self._apply_bookmarks(bookmarks)
 
     def _rebuild_bookmarks_menu(self):
         self._bookmarks_menu.clear()
@@ -1747,6 +1754,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("subscribed", self._on_subscribed)
         c.on("vcard_received", self._on_vcard_received)
         c.on("avatar_updated", self._on_avatar_updated)
+        c.on("bookmarks_changed", self._on_bookmarks_changed)
         c.on("vcard_error", self._on_vcard_error)
         c.on("typing", self._on_typing)
         c.on("chatstate_received", self._on_chatstate_received)
