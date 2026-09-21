@@ -7,6 +7,12 @@ the **Client** and **Advanced Client** columns of each category's table. The
 lists below gather, per level, every feature marked as required (✓) for a
 client, with the providers XEP-0479 names for it.
 
+Stanza IM is a **desktop** client, so the **Web** suite (XEP-0479 §2.2) and the
+**Mobile** suite (§2.4) are out of scope and are not assessed here. Only the
+Core, IM and A/V Calling suites are listed. (Features that a desktop client
+happens to share with those suites — e.g. XEP-0198 Stream Management, required
+by the IM suite anyway — are kept where the applicable suite requires them.)
+
 Legend: ✅ supported · ⚠️ partial · ❌ not implemented · — N/A (not applicable
 to a desktop client).
 
@@ -15,7 +21,8 @@ The live list of every XEP the client uses (including non-compliance ones) is
 
 ## Client
 
-Required features for the Client level (all categories).
+Required features for the Client level of the applicable suites (Core, IM,
+A/V Calling).
 
 | Feature | Providers | Status | Notes |
 |---------|-----------|--------|-------|
@@ -23,16 +30,12 @@ Required features for the Client level (all categories).
 | TLS | RFC 7590 | ✅ | STARTTLS / direct TLS |
 | Feature discovery | XEP-0030 | ✅ | `ServiceBrowserDialog`, room/variant lookups |
 | Feature broadcasts | XEP-0115 | ✅ | caps node branded "Stanza IM <version>" |
-| Web Connection Mechanisms | RFC 7395, XEP-0206 (BOSH) | ❌ | desktop client: TCP/TLS (incl. XEP-0368) and SOCKS5 only, no WebSocket/BOSH |
-| Connection Mechanism Discovery | XEP-0156 | ❌ | no host-meta discovery |
 | Core features (IM) | RFC 6121 | ✅ | roster, presence, 1:1 messaging |
 | The /me Command | XEP-0245 | ✅ | rendered as `* sender phrase` |
 | vcard-temp | XEP-0054 | ✅ | own/contact vCards, PHOTO avatars |
 | Outbound Message Synchronization | XEP-0280 | ✅ | `connection.message_carbons` |
 | Group Chat | XEP-0045, XEP-0249 | ✅ | MUC + direct invitations |
 | File Upload | XEP-0363 | ✅ | HTTP Upload with automatic P2P fallback |
-| Stream Management | XEP-0198 | ✅ | `connection.stream_management`, resume |
-| Client State Indication | XEP-0352 | ✅ | `connection.csi` |
 | Call Setup | XEP-0167, XEP-0353 | ✅ | Jingle RTP + Jingle Message Initiation |
 | Transport | XEP-0176 | ✅ | ICE-UDP |
 | Encryption | XEP-0320 | ✅ | DTLS-SRTP via aiortc (`calls` extra) |
@@ -40,18 +43,14 @@ Required features for the Client level (all categories).
 
 ### Not implemented
 
-- **RFC 7395 / XEP-0206 (BOSH)** — Stanza IM is a desktop client and only uses
-  TCP/TLS transports (direct TLS via XEP-0368, STARTTLS, and an optional SOCKS5
-  account proxy); the WebSocket/BOSH connection mechanisms are not implemented.
-- **XEP-0156 (Discovering Alternative XMPP Connection Methods)** — no
-  `host-meta`/`.well-known` lookup; the endpoint comes from SRV records and the
-  connection settings.
+None — every Client-level feature of the applicable suites (Core, IM and A/V
+Calling) is implemented.
 
 ## Advanced Client
 
-Required features for the Advanced Client level (all categories). It includes
-everything the Client level requires; only the additional features are listed
-here.
+Required features for the Advanced Client level of the applicable suites
+(Core, IM, A/V Calling). It includes everything the Client level requires; only
+the additional features are listed here.
 
 | Feature | Providers | Status | Notes |
 |---------|-----------|--------|-------|
@@ -63,12 +62,13 @@ here.
 | Advanced Group Chat | XEP-0048, XEP-0313, XEP-0402, XEP-0410 | ⚠️ | bookmarks via XEP-0048 stored through XEP-0223 pubsub (or XEP-0049 fallback), not PEP-native XEP-0402; XEP-0410 self-ping not implemented |
 | Persistent Storage of Private Data via PubSub | XEP-0223 | ✅ | bookmark storage backend |
 | Private XML Storage | XEP-0049 | ✅ | legacy bookmark backend |
+| Stream Management | XEP-0198 | ✅ | `connection.stream_management`, resume |
 | Message Acknowledgements | XEP-0184 | ✅ | delivery ✓ |
 | History Storage / Retrieval | XEP-0313 | ✅ | MAM, RSM-paginated |
 | Chat States | XEP-0085 | ✅ | typing/composing notifications |
 | Message Correction | XEP-0308 | ✅ | own-message editing |
+| File Upload | XEP-0363 | ✅ | HTTP Upload with automatic P2P fallback |
 | Direct File Transfer | XEP-0234, XEP-0261 | ✅ | Jingle FT + IBB fallback (plus SOCKS5 XEP-0260, beyond the requirement) |
-| Third Party Push Notifications | XEP-0357 | ❌ | — N/A: desktop client with a persistent connection, throttled via XEP-0352 |
 | Quality and Performance improvements | XEP-0293, XEP-0294, XEP-0338, XEP-0339 | ✅ | rtcp-fb, rtp-hdrext, BUNDLE grouping (XEP-0338, calls only), SSRC/source |
 
 ### Not implemented
@@ -84,13 +84,11 @@ here.
   pubsub storage (XEP-0049 private XML as a fallback).
 - **XEP-0410 (MUC Self-Ping)** — no self-ping; join reliability relies on
   presence, retries and XEP-0198.
-- **XEP-0357 (Push Notifications)** — N/A for a desktop client with an
-  always-on connection.
-- **XEP-0156** and **RFC 7395 / XEP-0206** — see the Client level above.
 
 ## Specifications of note
 
-Listed by XEP-0479 as useful but **not required** for compliance.
+Listed by XEP-0479 as useful but **not required** for compliance (only the
+notes of the applicable suites).
 
 | XEP | Status | Notes |
 |-----|--------|-------|
@@ -103,7 +101,6 @@ Listed by XEP-0479 as useful but **not required** for compliance.
 | XEP-0157 (Contact Addresses for XMPP Services) | ❌ | not implemented |
 | XEP-0385 (Stateless Inline Media Sharing) | ❌ | not implemented |
 | XEP-0433 (Extended Channel Search) | ❌ | not implemented |
-| XEP-0286 (Mobile Considerations on LTE) | — | N/A (desktop) |
 
 ## Future development
 
