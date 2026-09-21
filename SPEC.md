@@ -374,6 +374,16 @@ The XMPP client emits diff-based roster events:
 Presence is aggregated per **bare JID** across resources — best `show` wins
 via `SHOW_ORDER`; empty/`available` normalized to `"online"`.
 
+The roster is cached across sessions for **XEP-0237 roster versioning**
+(`core/roster_cache.py` → `$XDG_DATA_HOME/stanza-im/roster/<account>.json`,
+0600). `JabberClient` loads it at construction and `_seed_roster_cache()` (the
+start of `_on_session_start`, before `request_roster`) preloads `client_roster`
+and its `version`; the request then carries the cached `ver`, and an unchanged
+roster is answered with an empty result that keeps the seeded list. Every
+`roster_update` schedules a debounced rewrite (`_schedule_roster_save`, 1 s)
+and `flush_roster_cache()` runs on quit. A missing/corrupt cache falls back to
+the full fetch.
+
 ### 6.4 Account Registration (`ui/account_registration_dialog.py`, XEP-0077)
 
 Opened from the login window's "Создать аккаунт" link (`register_requested`) or

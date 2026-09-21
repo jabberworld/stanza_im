@@ -25,6 +25,7 @@ from slixmpp.jid import JID
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from stanza_im.core.vcard_cache import VCardCache
+from stanza_im.core import roster_cache
 from stanza_im.include.constants import APP_NAME, VERSION
 from stanza_im.i18n import current_language as _current_language
 from stanza_im.xmpp import jingle as jingle_mod
@@ -872,6 +873,9 @@ class JabberClient:
         self._mam_cursors: dict[str, str] = {}
         self._vcard_cache = VCardCache()
         self._vcard_inflight: set[str] = set()
+        # XEP-0237: cached roster items + version for the next login.
+        self._roster_cache = roster_cache.load(self.jid_str)
+        self._roster_save_handle = None
         self._muc_join_tasks: dict[str, asyncio.Task] = {}
         self._muc_last_activity: dict[str, float] = {}
         self._muc_self_ping_task: asyncio.Task | None = None
@@ -1698,6 +1702,89 @@ class JabberClient:
                 "subscription": item["subscription"],
             })
         return items
+
+    def get_roster_state(self) -> list[dict]:
+        """Return the roster with the full subscription state (roster cache)."""
+        items: list[dict] = []
+        cr = self.xmpp.client_roster
+        for jid in cr:
+            item = cr[jid]
+            items.append({
+                "jid": jid,
+                "name": item["name"],
+                "groups": list(item["groups"]),
+                "from": bool(item["from"]),
+                "to": bool(item["to"]),
+                "whitelisted": bool(item["whitelisted"]),
+                "pending_out": bool(item["pending_out"]),
+                "pending_in": bool(item["pending_in"]),
+            })
+        return items
+
+    # ── XEP-0237 roster versioning cache ─────────────────────────
+
+    def _seed_roster_cache(self) -> None:
+        """Preload the cached roster so the server can answer "no changes"."""
+        cache = getattr(self, "_roster_cache", None)
+        if not cache or not cache.get("items"):
+            return
+        try:
+            cr = self.xmpp.client_roster
+        except Exception:
+            return
+        if list(cr):
+            return  # already populated (e.g. within a resumed session)
+        seeded = 0
+        for entry in cache["items"]:
+            jid = str(entry.get("jid") or "")
+            if not jid:
+                continue
+            item = cr[jid]
+            if entry.get("name") is not None:
+                item["name"] = entry.get("name")
+            if entry.get("groups") is not None:
+                item["groups"] = list(entry.get("groups") or [])
+            item["from"] = bool(entry.get("from"))
+            item["to"] = bool(entry.get("to"))
+            item["whitelisted"] = bool(entry.get("whitelisted"))
+            item["pending_out"] = bool(entry.get("pending_out"))
+            item["pending_in"] = bool(entry.get("pending_in"))
+            seeded += 1
+        cr.version = str(cache.get("version") or "")
+        logger.info("Seeded %d cached roster items (version=%r)",
+                    seeded, cr.version)
+
+    def _schedule_roster_save(self) -> None:
+        """Coalesce roster-cache writes."""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        handle = getattr(self, "_roster_save_handle", None)
+        if handle is not None:
+            handle.cancel()
+        self._roster_save_handle = loop.call_later(
+            1.0, self._save_roster_cache)
+
+    def _save_roster_cache(self) -> None:
+        self._roster_save_handle = None
+        if not self.jid_str:
+            return
+        try:
+            version = str(self.xmpp.client_roster.version or "")
+            items = self.get_roster_state()
+        except Exception:
+            logger.debug("Could not snapshot the roster for caching",
+                         exc_info=True)
+            return
+        roster_cache.save(self.jid_str, version, items)
+
+    def flush_roster_cache(self) -> None:
+        """Persist the roster cache immediately (called on quit)."""
+        handle = getattr(self, "_roster_save_handle", None)
+        if handle is not None:
+            handle.cancel()
+        self._save_roster_cache()
 
     def get_contact(self, bare_jid: str) -> ContactInfo:
         """Return (creating if needed) the ContactInfo for a bare JID."""
@@ -3274,6 +3361,7 @@ class JabberClient:
 
     async def _on_session_start(self, event) -> None:
         logger.info("Session started, requesting roster...")
+        self._seed_roster_cache()
         self.request_roster()
         self.send_presence()
         if self.message_carbons:
@@ -4340,6 +4428,7 @@ class JabberClient:
             self.emit("roster_item_removed", jid)
             self._unsubscribe_pep(jid)
         self.emit("roster_received", items)
+        self._schedule_roster_save()
 
     def _on_groupchat_presence(self, pres) -> None:
         frm = str(pres["from"])

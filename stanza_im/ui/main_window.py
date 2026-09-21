@@ -4686,6 +4686,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._shutting_down = True
         self._flush_unread()
+        if self._client is not None:
+            self._client.flush_roster_cache()
         self._tray.hide()
         self.hide()
         self._chat_window.close()
