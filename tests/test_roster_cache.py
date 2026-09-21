@@ -119,6 +119,28 @@ client.flush_roster_cache()
 check("new version replaces the cached version",
       roster_cache.load(ACCOUNT)["version"] == "v2")
 
+# ── the cache is loaded lazily (never by the constructor) ────────
+_calls = []
+_orig_load = roster_cache.load
+
+
+def _counting_load(account):
+    _calls.append(account)
+    return _orig_load(account)
+
+
+roster_cache.load = _counting_load
+try:
+    lazy_client = JabberClient("jabber.name", "")
+    check("constructing a client does not read the roster cache",
+          _calls == [])
+    lazy_client._seed_roster_cache()
+    check("seeding reads the cache on demand",
+          _calls == ["jabber.name"])
+finally:
+    roster_cache.load = _orig_load
+
+
 # ── static wiring ────────────────────────────────────────────────
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(_root, "stanza_im", "core", "client.py"),
@@ -126,6 +148,8 @@ with open(os.path.join(_root, "stanza_im", "core", "client.py"),
     src = fh.read()
 check("session start seeds the cache before requesting",
       "self._seed_roster_cache()\n        self.request_roster()" in src)
+check("construction does not eagerly load the roster cache",
+      "self._roster_cache = roster_cache.load(self.jid_str)" not in src)
 with open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
           encoding="utf-8") as fh:
     mw = fh.read()

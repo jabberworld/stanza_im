@@ -931,8 +931,10 @@ class JabberClient:
         self._mam_cursors: dict[str, str] = {}
         self._vcard_cache = VCardCache()
         self._vcard_inflight: set[str] = set()
-        # XEP-0237: cached roster items + version for the next login.
-        self._roster_cache = roster_cache.load(self.jid_str)
+        # XEP-0237: cached roster items + version for the next login; loaded
+        # lazily by ``_seed_roster_cache`` so a throwaway registration client
+        # never touches the disk.
+        self._roster_cache = None
         self._roster_save_handle = None
         self._muc_join_tasks: dict[str, asyncio.Task] = {}
         self._muc_last_activity: dict[str, float] = {}
@@ -1868,15 +1870,16 @@ class JabberClient:
 
     def _seed_roster_cache(self) -> None:
         """Preload the cached roster so the server can answer "no changes"."""
-        cache = getattr(self, "_roster_cache", None)
-        if not cache or not cache.get("items"):
-            return
         try:
             cr = self.xmpp.client_roster
         except Exception:
             return
         if list(cr):
             return  # already populated (e.g. within a resumed session)
+        self._roster_cache = self._roster_cache or roster_cache.load(self.jid_str)
+        cache = self._roster_cache
+        if not cache or not cache.get("items"):
+            return
         seeded = 0
         for entry in cache["items"]:
             jid = str(entry.get("jid") or "")

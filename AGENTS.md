@@ -654,10 +654,10 @@ subscription changes. Presence is aggregated by **bare JID** across resources
 (best `show` wins via `SHOW_ORDER`), and empty/`available` shows are normalized
 to `"online"`. The roster is cached across sessions for
 **XEP-0237 roster versioning** (`core/roster_cache.py`,
-`$XDG_DATA_HOME/stanza-im/roster/<account>.json`, 0600): `JabberClient` loads it
-at construction and `_seed_roster_cache()` (called at the start of
-`_on_session_start`, before `request_roster`) preloads `client_roster` +
-`version`, so the server can answer an unchanged version with an empty result
+`$XDG_DATA_HOME/stanza-im/roster/<account>.json`, 0600): `_seed_roster_cache()`
+(called at the start of `_on_session_start`, before `request_roster`) loads it
+lazily and preloads `client_roster` + `version`, so the server can answer an
+unchanged version with an empty result
 instead of a full roster; `_schedule_roster_save` (1 s debounce) rewrites the
 cache after every roster update and `flush_roster_cache` on quit. A
 missing/corrupt cache falls back to the full request.
