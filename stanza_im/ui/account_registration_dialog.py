@@ -16,7 +16,9 @@ from stanza_im.i18n import tr
 from stanza_im.core.client import JabberClient
 from stanza_im.core.storage import Config
 from stanza_im.include.constants import ACTIONS_DIR_16, SERVERS_FILE
-from stanza_im.ui.data_form_widget import DataFormWidget, LegacyFormWidget
+from stanza_im.ui.data_form_widget import (
+    DataFormWidget, LegacyFormWidget, fit_dialog_to_content)
+from stanza_im.ui.registration_result_dialog import RegistrationResultDialog
 
 logger = logging.getLogger(__name__)
 
@@ -164,9 +166,14 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
     def _build_form_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget(self)
         layout = QtWidgets.QVBoxLayout(page)
-        self._form_container = QtWidgets.QVBoxLayout()
-        layout.addLayout(self._form_container)
-        layout.addStretch(1)
+        inner = QtWidgets.QWidget(page)
+        self._form_container = QtWidgets.QVBoxLayout(inner)
+        scroll = QtWidgets.QScrollArea(page)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setWidget(inner)
+        layout.addWidget(scroll, 1)
+        self._form_scroll = scroll
         return page
 
     @staticmethod
@@ -255,6 +262,8 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
             self._form_widget.media_open_requested.connect(
                 lambda url, _kind: QtGui.QDesktopServices.openUrl(
                     QtCore.QUrl(url)))
+            self._form_widget.media_ready.connect(
+                lambda: fit_dialog_to_content(self))
             self._form_container.addWidget(self._form_widget)
         elif fields:
             self._legacy_widget = LegacyFormWidget(fields)
@@ -262,6 +271,7 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         else:
             self._set_status(tr("register_none"), "red")
             self._next_btn.setEnabled(False)
+        self._form_container.addStretch(1)
 
     async def _submit(self) -> None:
         if self._form_widget is not None:
@@ -287,8 +297,14 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
             self._next_btn.setEnabled(True)
             return
         jid, password = self._credentials(values)
-        self._save_config(jid, password)
         await self._close_client()
+        result = RegistrationResultDialog(
+            jid, password, self._connection_details(),
+            self._submitted_data(values), parent=self)
+        if result.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            self.reject()
+            return
+        self._save_config(jid, password)
         self.registered.emit(jid, password)
         self.accept()
 
@@ -305,6 +321,39 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
                     password = str(value)
         jid = username if "@" in username else f"{username}@{self._server}"
         return jid, password
+
+    def _connection_details(self) -> list[tuple[str, str]]:
+        """Localized ``(label, value)`` rows for the connection settings."""
+        encryption = self._tls.currentText()
+        if self._enc.isEnabled():
+            encryption = f"{encryption} / {self._enc.currentText()}"
+        details = [(tr("registration_result_encryption"), encryption)]
+        if self._proxy_mode.currentData() == "socks5":
+            host = self._proxy_host.text().strip()
+            port = self._proxy_port.value()
+            details.append((tr("registration_result_proxy"),
+                            f"{host}:{port}" if host else ""))
+        if self._override.isChecked():
+            host = self._host.text().strip()
+            details.append((tr("prefs_host"),
+                            f"{host}:{self._port.value()}" if host else ""))
+        return details
+
+    def _submitted_data(self, values: dict) -> list[tuple[str, str]]:
+        """Localized ``(label, value)`` rows for the data sent to the server."""
+        if self._form is None:
+            return [(str(key), str(value)) for key, value in values.items()]
+        rows: list[tuple[str, str]] = []
+        for field in self._form["fields"]:
+            if str(field["type"] or "") == "hidden":
+                continue
+            var = str(field.get("var") or "")
+            label = str(field.get("label", "") or var)
+            value = field.get("value")
+            if isinstance(value, list):
+                value = ", ".join(str(item) for item in value)
+            rows.append((label or var, str(value or "")))
+        return rows
 
     def _save_config(self, jid: str, password: str) -> None:
         cfg = self._config

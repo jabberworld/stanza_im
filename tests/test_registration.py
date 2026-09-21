@@ -270,6 +270,104 @@ except TypeError:
 check("set_csi_config does not require a default arg", csi_ok)
 
 
+# ── result summary rows ──────────────────────────────────────────
+dlg._tls.setCurrentIndex(1)   # prefer
+dlg._enc.setCurrentIndex(0)   # always
+proxy_details = dict(dlg._connection_details())
+check("connection details include the encryption mode",
+      proxy_details.get(tr("registration_result_encryption"))
+      == f'{tr("conn_mode_prefer")} / {tr("enc_always")}')
+check("connection details include the proxy",
+      proxy_details.get(tr("registration_result_proxy")) == "proxy.example:1080")
+check("connection details include the host override",
+      proxy_details.get(tr("prefs_host")) == "xmpp.example.com:5223")
+
+
+class _FormField:
+    def __init__(self, **values):
+        self._values = values
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+
+dlg._form = {"fields": [
+    _FormField(type="hidden", var="FORM_TYPE", label="", value="x"),
+    _FormField(type="text-single", var="username", label="User", value="bob"),
+    _FormField(type="text-private", var="password", label="", value="pw"),
+]}
+check("submitted data skips hidden fields",
+      dlg._submitted_data({}) == [("User", "bob"), ("password", "pw")])
+dlg._form = None
+check("submitted data lists legacy fields",
+      dlg._submitted_data({"username": "bob", "password": "pw"})
+      == [("username", "bob"), ("password", "pw")])
+
+
+# ── result dialog ────────────────────────────────────────────────
+from stanza_im.ui.registration_result_dialog import (  # noqa: E402
+    RegistrationResultDialog)
+
+rd = RegistrationResultDialog("bob@example.com", "secret",
+                              [("Encryption", "Prefer TLS")],
+                              [("User", "bob")])
+summary = rd.summary()
+check("result summary carries the JID, password, details and data",
+      "bob@example.com" in summary and "secret" in summary
+      and "Encryption: Prefer TLS" in summary and "User: bob" in summary)
+check("result buttons are localized",
+      rd._copy_btn.text() == tr("registration_result_copy")
+      and rd._apply_btn.text() == tr("dialog_apply")
+      and rd._close_btn.text() == tr("dialog_close"))
+check("apply is the default button", rd._apply_btn.isDefault() is True)
+rd._copy()
+check("copy puts the summary on the clipboard",
+      QtWidgets.QApplication.clipboard().text() == summary)
+check("captcha link label is short",
+      tr("captcha_open_oob") == "Open page")
+
+
+# ── apply/close gate on the result dialog ────────────────────────
+class _FakeRegClient:
+    async def submit_registration(self, server, values, form=None):
+        return None
+
+
+class _LegacyStub:
+    @staticmethod
+    def values():
+        return {"username": "bob", "password": "pw"}
+
+
+gate = AccountRegistrationDialog(Config())
+gate._config.jid = ""
+gate._config.password = ""
+gate._server = "example.com"
+gate._client = _FakeRegClient()
+gate._legacy_widget = _LegacyStub()
+emitted = []
+gate.registered.connect(lambda jid, pw: emitted.append((jid, pw)))
+_original_exec = reg.RegistrationResultDialog.exec
+reg.RegistrationResultDialog.exec = (
+    lambda self: QtWidgets.QDialog.DialogCode.Rejected)
+asyncio.run(gate._submit())
+check("closing the result dialog keeps the account unsaved",
+      not gate._config.jid and emitted == [])
+gate._client = _FakeRegClient()
+reg.RegistrationResultDialog.exec = (
+    lambda self: QtWidgets.QDialog.DialogCode.Accepted)
+asyncio.run(gate._submit())
+check("applying the result dialog saves and announces the account",
+      gate._config.jid == "bob@example.com" and emitted
+      == [("bob@example.com", "pw")])
+check("applying the result dialog saves the connection settings",
+      gate._config.connection.tls_mode == "prefer")
+reg.RegistrationResultDialog.exec = _original_exec
+
+
 # ── static wiring ────────────────────────────────────────────────
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -278,6 +376,11 @@ def _read(*parts):
     with open(os.path.join(_root, *parts), encoding="utf-8") as fh:
         return fh.read()
 
+
+reg_src = _read("stanza_im", "ui", "account_registration_dialog.py")
+check("the result dialog gates the config write",
+      "RegistrationResultDialog" in reg_src
+      and "if result.exec()" in reg_src)
 
 mw = _read("stanza_im", "ui", "main_window.py")
 check("main window wires register_requested",

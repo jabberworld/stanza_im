@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
 import threading
 import urllib.request
 
@@ -87,6 +88,36 @@ def _field_media(field):
     return None
 
 
+def _as_url(value) -> str | None:
+    """Return *value* as a clickable ``http(s)`` URL, else ``None``."""
+    text = str(value or "").strip()
+    if text.lower().startswith(("http://", "https://")) and " " not in text:
+        return text
+    return None
+
+
+def _url_label(url: str, parent=None) -> QtWidgets.QLabel:
+    """A label rendering *url* as a clickable external link."""
+    safe = html.escape(url, quote=True)
+    label = QtWidgets.QLabel(f'<a href="{safe}">{safe}</a>', parent)
+    label.setOpenExternalLinks(True)
+    label.setTextInteractionFlags(
+        QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+    label.setWordWrap(True)
+    return label
+
+
+def fit_dialog_to_content(dialog: QtWidgets.QDialog) -> None:
+    """Grow *dialog* to fit its content, clamped to the available screen."""
+    dialog.adjustSize()
+    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
+    if screen is None:
+        return
+    available = screen.availableGeometry()
+    dialog.resize(min(dialog.width(), int(available.width() * 0.9)),
+                  min(dialog.height(), int(available.height() * 0.9)))
+
+
 def _place_button_in_row(layout: QtWidgets.QFormLayout,
                          widget: QtWidgets.QWidget,
                          button: QtWidgets.QPushButton) -> None:
@@ -104,6 +135,7 @@ class DataFormWidget(QtWidgets.QWidget):
     """Render a slixmpp XEP-0004 form and write user input back to it."""
 
     media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
+    media_ready = QtCore.pyqtSignal()  # an inline image finished loading
 
     def __init__(self, form, parent=None, media_service=None):
         super().__init__(parent)
@@ -145,6 +177,10 @@ class DataFormWidget(QtWidgets.QWidget):
             return False
 
         if ftype == "fixed":
+            fixed_url = _as_url(field["value"])
+            if fixed_url is not None:
+                layout.addRow(label, _url_label(fixed_url))
+                return True
             fixed = QtWidgets.QLabel(str(field["value"] or ""))
             fixed.setWordWrap(True)
             fixed.setTextInteractionFlags(
@@ -164,8 +200,11 @@ class DataFormWidget(QtWidgets.QWidget):
                 edit.setPlaceholderText("line1\\nline2")
             self._fields[var] = edit
             media = _field_media(field)
+            url = _as_url(initial)
             if media is not None:
-                layout.addRow(label, self._media_row(media, edit))
+                layout.addRow(label, self._media_row(media, edit, url))
+            elif url is not None:
+                layout.addRow(label, self._link_row(url, edit))
             else:
                 layout.addRow(label, edit)
             if var == "SHA-256":
@@ -229,11 +268,13 @@ class DataFormWidget(QtWidgets.QWidget):
         layout.addRow(label, edit)
         return True
 
-    def _media_row(self, media, edit):
+    def _media_row(self, media, edit, url: str | None = None):
         """A CAPTCHA challenge widget (image inline / audio-video button)."""
         container = QtWidgets.QWidget()
         column = QtWidgets.QVBoxLayout(container)
         column.setContentsMargins(0, 0, 0, 0)
+        if url is not None and url != media["url"]:
+            column.addWidget(_url_label(url))
         if media["kind"] == "image":
             label = QtWidgets.QLabel(tr("form_media_loading"))
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -275,16 +316,26 @@ class DataFormWidget(QtWidgets.QWidget):
         self._fetchers.append(fetcher)
         fetcher.fetch(url)
 
-    @staticmethod
-    def _set_media_pixmap(label, data) -> None:
+    def _link_row(self, url: str, edit):
+        """An editable field prefixed by a clickable copy of its URL."""
+        container = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(container)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(_url_label(url))
+        column.addWidget(edit)
+        return container
+
+    def _set_media_pixmap(self, label, data) -> None:
         pixmap = QtGui.QPixmap()
         if not pixmap.loadFromData(data):
             label.setText(tr("form_media_failed"))
             return
-        if pixmap.width() > 320:
+        if pixmap.width() > 640:
             pixmap = pixmap.scaledToWidth(
-                320, QtCore.Qt.TransformationMode.SmoothTransformation)
+                640, QtCore.Qt.TransformationMode.SmoothTransformation)
         label.setPixmap(pixmap)
+        label.setFixedSize(pixmap.size())
+        self.media_ready.emit()
 
     def _hidden_value(self, var: str) -> str:
         for field in self._form["fields"]:

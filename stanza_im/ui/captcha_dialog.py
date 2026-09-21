@@ -6,7 +6,8 @@ import asyncio
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
-from stanza_im.ui.data_form_widget import DataFormWidget
+from stanza_im.ui.data_form_widget import (
+    DataFormWidget, fit_dialog_to_content)
 
 
 class CaptchaDialog(QtWidgets.QDialog):
@@ -34,7 +35,13 @@ class CaptchaDialog(QtWidgets.QDialog):
             layout.addWidget(link)
         self._widget = DataFormWidget(form, self, media_service=media_service)
         self._widget.media_open_requested.connect(self._open_media)
-        layout.addWidget(self._widget, 1)
+        self._widget.media_ready.connect(
+            lambda: fit_dialog_to_content(self))
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setWidget(self._widget)
+        layout.addWidget(scroll, 1)
         self._status = QtWidgets.QLabel("")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)

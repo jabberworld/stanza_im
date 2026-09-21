@@ -60,6 +60,7 @@ stanza_im/
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
 │   ├── account_registration_dialog.py — XEP-0077 account creation wizard
+│   ├── registration_result_dialog.py — created-account summary (apply/copy)
 │   ├── xml_console.py       — Raw XML console (filtered, coloured)
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
@@ -401,13 +402,19 @@ and waits for `stream_negotiated`; the dialog then fetches the server's
 registration form with `get_registration_form(server)` (a connection failure
 shows "Could not connect", a form-fetch failure shows "server does not offer
 registration"). Step 2 renders the form (`DataFormWidget`/`LegacyFormWidget`)
-with "Зарегистрировать"/"Отмена". On success the dialog writes `jid`,
-`password`, `save_password=true` and the `connection.*` settings into the
-shared `Config`, emits `registered(jid, password)`; `MainWindow` prefills the
-login form (`LoginWidget.prefill`), returns to the login page, re-applies the
-settings and closes the Preferences window when it was open. The login widget
-shares `MainWindow._config` (passed into `LoginWidget`), so a later `save()`
-cannot revert the newly written sections.
+with "Зарегистрировать"/"Отмена". URL-looking field values (and the OOB link)
+are shown as clickable `http(s)` links, and an inline CAPTCHA image grows the
+dialog to fit (`DataFormWidget.media_ready` → `fit_dialog_to_content`, clamped
+to the screen, wrapped in a `QScrollArea`). On success the dialog opens
+`RegistrationResultDialog` showing the Jabber ID, the password, the
+encryption/proxy details and the data actually submitted ("Копировать" copies
+the summary, "Применить" applies, "Закрыть" discards). Only "Применить" writes
+`jid`, `password`, `save_password=true` and the `connection.*` settings into
+the shared `Config` and emits `registered(jid, password)`; `MainWindow`
+prefills the login form (`LoginWidget.prefill`), returns to the login page,
+re-applies the settings and closes the Preferences window when it was open. The
+login widget shares `MainWindow._config` (passed into `LoginWidget`), so a
+later `save()` cannot revert the newly written sections.
 
 ## 7. Roster (`ui/roster_widget.py` + `ui/roster_style.py`)
 

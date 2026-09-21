@@ -72,6 +72,7 @@ stanza_im/                      # Python package
 │   ├── status_message_dialog.py # Multiline presence status editor
 │   ├── captcha_dialog.py        # XEP-0158 CAPTCHA challenge prompt
 │   ├── account_registration_dialog.py  # XEP-0077 account creation wizard
+│   ├── registration_result_dialog.py   # Created-account summary (apply/copy)
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
@@ -565,9 +566,17 @@ that connection and waits for `stream_negotiated`; the dialog then fetches the
 XEP-0077 form with `get_registration_form(server)` (a connection failure and a
 "server does not offer registration" failure are reported separately). Step 2
 renders the form with `DataFormWidget`/`LegacyFormWidget`
-("Зарегистрировать"/"Отмена"). On success the dialog stores the account
+("Зарегистрировать"/"Отмена"); URL-looking field values render as clickable
+`http(s)` links (`DataFormWidget._url_label`, the OOB link text is the short
+`captcha_open_oob` label) and an inline CAPTCHA image grows the dialog to fit
+via the `media_ready` signal (`fit_dialog_to_content`, clamped to the screen,
+inside a `QScrollArea`). On success the dialog shows
+`ui/registration_result_dialog.py::RegistrationResultDialog` with the Jabber ID,
+password, encryption/proxy details and the data actually submitted
+("Копировать" copies the whole summary, "Применить" writes the account,
+"Закрыть" discards it); only on "Применить" does the dialog store the account
 (`jid`, `password`, `save_password`) and the connection/proxy settings in the
-shared `Config` and emits `registered(jid, password)`; `MainWindow` prefills
+shared `Config` and emit `registered(jid, password)`; `MainWindow` prefills
 the login form (`LoginWidget.prefill`), returns to the login page, re-applies
 the settings and closes the Preferences window if it was open. The login
 widget now shares `MainWindow._config` so the saved values cannot be

@@ -6,7 +6,8 @@ import asyncio
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
-from stanza_im.ui.data_form_widget import DataFormWidget, LegacyFormWidget
+from stanza_im.ui.data_form_widget import (
+    DataFormWidget, LegacyFormWidget, fit_dialog_to_content)
 
 
 class RegistrationDialog(QtWidgets.QDialog):
@@ -70,7 +71,13 @@ class RegistrationDialog(QtWidgets.QDialog):
             self._form_widget.media_open_requested.connect(
                 lambda url, _kind: QtGui.QDesktopServices.openUrl(
                     QtCore.QUrl(url)))
-            self._body.addWidget(self._form_widget)
+            self._form_widget.media_ready.connect(
+                lambda: fit_dialog_to_content(self))
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            scroll.setWidget(self._form_widget)
+            self._body.addWidget(scroll)
         elif fields:
             self._legacy_widget = LegacyFormWidget(fields)
             self._body.addWidget(self._legacy_widget)

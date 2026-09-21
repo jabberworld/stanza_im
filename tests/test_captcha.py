@@ -5,6 +5,7 @@ Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_captcha.py
 """
 import asyncio
+import base64
 import hashlib
 import os
 import sys
@@ -29,7 +30,7 @@ from stanza_im.core.client import (
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.data_form_widget import DataFormWidget, _HashcashSolver, \
-    _field_media
+    _field_media, fit_dialog_to_content
 
 i18n_load("en")
 
@@ -191,7 +192,42 @@ check("BOB image is rendered inline",
           for lbl in bob_labels))
 
 
-# 7. static wiring ----------------------------------------------------------
+# 7. clickable URL fields and image sizing ----------------------------------
+url_form = _form_element()
+_field(url_form, "url", "http://server.example/captcha.jpg", "text-single")
+url_widget = DataFormWidget(c._captcha_form(_challenge(url_form)))
+url_links = [lbl for lbl in url_widget.findChildren(QtWidgets.QLabel)
+             if "<a href=" in lbl.text()]
+check("a URL text field gets a clickable link",
+      len(url_links) == 1 and url_links[0].openExternalLinks() is True)
+check("the URL field keeps its editable input",
+      isinstance(url_widget._fields.get("url"), QtWidgets.QLineEdit))
+
+fixed_form = _form_element()
+_field(fixed_form, "note", "http://server.example/help", "fixed")
+fixed_widget = DataFormWidget(c._captcha_form(_challenge(fixed_form)))
+fixed_links = [lbl for lbl in fixed_widget.findChildren(QtWidgets.QLabel)
+               if "<a href=" in lbl.text()]
+check("a fixed URL value becomes a clickable link", len(fixed_links) == 1)
+
+bob_img = next(lbl for lbl in bob_labels
+               if lbl.pixmap() is not None and not lbl.pixmap().isNull())
+check("an inline image label is sized to the pixmap",
+      bob_img.minimumSize() == bob_img.pixmap().size()
+      and bob_img.maximumSize() == bob_img.pixmap().size())
+
+ready = []
+bob_widget.media_ready.connect(lambda: ready.append(True))
+bob_widget._set_media_pixmap(bob_img, base64.b64decode(_PNG_B64))
+check("setting a pixmap emits media_ready", ready == [True])
+
+fit_dlg = QtWidgets.QDialog()
+QtWidgets.QVBoxLayout(fit_dlg).addWidget(DataFormWidget(bob_form_parsed))
+fit_dialog_to_content(fit_dlg)
+check("fit_dialog_to_content runs offscreen", fit_dlg.width() > 0)
+
+
+# 8. static wiring ----------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
