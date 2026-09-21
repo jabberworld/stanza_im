@@ -54,6 +54,7 @@ NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
+NS_ROSTERX = "http://jabber.org/protocol/rosterx"  # XEP-0144 Roster Item Exchange
 NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 NS_RETRACT = "urn:xmpp:message-retract:1"   # XEP-0424 Message Retraction
@@ -390,6 +391,61 @@ def _is_captcha_message(msg) -> bool:
     if xml is None:
         return False
     return xml.find("{%s}captcha" % NS_CAPTCHA) is not None
+
+
+def _is_roster_exchange(msg) -> bool:
+    """True when *msg* carries a XEP-0144 ``<x xmlns='…rosterx'/>``."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return False
+    return xml.find("{%s}x" % NS_ROSTERX) is not None
+
+
+def parse_roster_exchange(msg) -> list[dict]:
+    """Parse a XEP-0144 ``<x/>`` into ``{action, jid, name, groups}`` rows.
+
+    The ``action`` defaults to ``add`` per XEP-0144 §3.1; items without a JID
+    are ignored.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return []
+    root = xml.find("{%s}x" % NS_ROSTERX)
+    if root is None:
+        return []
+    items: list[dict] = []
+    for el in root.findall("{%s}item" % NS_ROSTERX):
+        jid = str(el.get("jid") or "").strip()
+        if not jid:
+            continue
+        action = str(el.get("action") or "add").strip().lower()
+        if action not in ("add", "delete", "modify"):
+            action = "add"
+        groups = [str(g.text).strip()
+                  for g in el.findall("{%s}group" % NS_ROSTERX)
+                  if (g.text or "").strip()]
+        items.append({"action": action, "jid": jid,
+                      "name": str(el.get("name") or ""), "groups": groups})
+    return items
+
+
+def build_roster_exchange(items: list[dict]) -> ET.Element:
+    """Build a XEP-0144 ``<x xmlns='…rosterx'/>`` payload."""
+    root = ET.Element("{%s}x" % NS_ROSTERX)
+    for entry in items:
+        jid = str(entry.get("jid") or "").strip()
+        if not jid:
+            continue
+        item = ET.SubElement(root, "{%s}item" % NS_ROSTERX)
+        item.set("action", str(entry.get("action") or "add"))
+        item.set("jid", jid)
+        if entry.get("name"):
+            item.set("name", str(entry["name"]))
+        for group in entry.get("groups") or []:
+            if str(group).strip():
+                ET.SubElement(item, "{%s}group" % NS_ROSTERX).text = \
+                    str(group).strip()
+    return root
 
 
 def _oob_url(msg) -> str:
@@ -789,6 +845,8 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
         # XEP-0402 PEP Native Bookmarks — receive updates from other resources.
         self.xmpp["xep_0030"].add_feature(NS_BOOKMARKS2 + "+notify")
+        # XEP-0144 Roster Item Exchange.
+        self.xmpp["xep_0030"].add_feature(NS_ROSTERX)
         # Jingle file transfer (XEP-0166/0234) with SOCKS5 (XEP-0260) and
         # In-Band (XEP-0261) transports — advertise support in disco.
         self.xmpp["xep_0030"].add_feature(jingle_mod.NS_JINGLE)
@@ -976,6 +1034,11 @@ class JabberClient:
             "CAPTCHA",
             MatchXPath("%s/{%s}captcha" % (msg_ns, NS_CAPTCHA)),
             self._on_captcha_stanza))
+        # XEP-0144 roster item exchange (may be bodyless).
+        self.xmpp.register_handler(CoroutineCallback(
+            "Roster Exchange",
+            MatchXPath("%s/{%s}x" % (msg_ns, NS_ROSTERX)),
+            self._on_roster_exchange_stanza))
         # XEP-0424/0425 retractions are bodyless; slixmpp's MUC handler
         # requires a <body>, so the room's moderation broadcast would never
         # reach groupchat_message without a dedicated matcher.
@@ -1023,6 +1086,86 @@ class JabberClient:
             body = ""
         logger.info("CAPTCHA challenge from %s", jid)
         self.emit("captcha_challenge", jid, form, _oob_url(msg), body)
+
+    async def _on_roster_exchange_stanza(self, msg) -> None:
+        """A XEP-0144 roster item exchange arrived."""
+        items = parse_roster_exchange(msg)
+        if not items:
+            return
+        frm = str(msg["from"])
+        try:
+            body = str(msg["body"])
+        except (KeyError, TypeError):
+            body = ""
+        logger.info("Roster exchange from %s (%d items)", frm, len(items))
+        self.emit("roster_exchange_received", frm, items, body)
+
+    def send_roster_exchange(self, jid: str, items: list[dict],
+                             body: str = "") -> str:
+        """Send *items* to *jid* as a XEP-0144 message; returns the id."""
+        if not jid or not items:
+            return ""
+        msg = self.xmpp.Message()
+        msg["to"] = jid
+        msg["type"] = "chat"
+        if body:
+            msg["body"] = body
+        msg.xml.append(build_roster_exchange(items))
+        logger.debug("Sending roster exchange to %s (%d items)", jid,
+                     len(items))
+        msg.send()
+        return str(msg["id"])
+
+    def apply_roster_exchange(self, items: list[dict]) -> int:
+        """Apply the user-approved XEP-0144 *items* to the roster.
+
+        Returns the number of roster changes sent.  Follows the XEP-0144 §3
+        processing rules: an existing item in the suggested group is left
+        alone, a "delete" only drops the suggested group when other groups
+        remain (otherwise the contact is removed), and a "modify" only touches
+        an existing item.
+        """
+        applied = 0
+        for entry in items:
+            jid = str(entry.get("jid") or "").strip()
+            action = str(entry.get("action") or "add").lower()
+            if not jid:
+                continue
+            current = self.roster.get(jid) or {}
+            groups = [g for g in (current.get("groups") or []) if g]
+            name = current.get("name") or ""
+            suggested = [g for g in (entry.get("groups") or []) if g]
+            suggested_name = str(entry.get("name") or "")
+            if action == "add":
+                if jid in self.roster and (
+                        not suggested or set(suggested) <= set(groups)):
+                    continue  # already there, in the suggested group
+                merged = sorted(set(groups) | set(suggested),
+                                key=str.casefold)
+                if jid not in self.roster:
+                    self.add_contact(jid, suggested_name or name, merged,
+                                     request_subscription=True)
+                else:
+                    self.update_contact(jid, suggested_name or name, merged)
+                applied += 1
+            elif action == "delete":
+                if jid not in self.roster:
+                    continue
+                remaining = [g for g in groups if g not in suggested]
+                if suggested and remaining:
+                    self.update_contact(jid, name, remaining)
+                else:
+                    self.remove_contact(jid)
+                applied += 1
+            elif action == "modify":
+                if jid not in self.roster:
+                    continue
+                self.update_contact(jid, suggested_name or name,
+                                    suggested or groups)
+                applied += 1
+        if applied:
+            self.request_roster()
+        return applied
 
     @staticmethod
     def _captcha_form(msg):
@@ -3971,6 +4114,9 @@ class JabberClient:
         if _is_captcha_message(msg):
             # A XEP-0158 challenge is surfaced by its own handler (dialog).
             return
+        if _is_roster_exchange(msg):
+            # A XEP-0144 roster exchange is surfaced by its own handler.
+            return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
@@ -4033,6 +4179,9 @@ class JabberClient:
         except Exception:
             return
         if _is_muc_invite(inner):
+            return
+        if _is_roster_exchange(inner):
+            self._start_task(self._on_roster_exchange_stanza(inner))
             return
         if inner["type"] not in ("chat", "normal"):
             return

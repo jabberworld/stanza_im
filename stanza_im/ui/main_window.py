@@ -1755,6 +1755,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("vcard_received", self._on_vcard_received)
         c.on("avatar_updated", self._on_avatar_updated)
         c.on("bookmarks_changed", self._on_bookmarks_changed)
+        c.on("roster_exchange_received", self._on_roster_exchange)
         c.on("vcard_error", self._on_vcard_error)
         c.on("typing", self._on_typing)
         c.on("chatstate_received", self._on_chatstate_received)
@@ -2852,6 +2853,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         make_xmpp_uri(jid, "join"))))
         if not is_conf:
             self._build_invite_menu(menu, jid.split("/", 1)[0])
+            menu.addAction(
+                self._menu_icon("add-user.png"), tr("ctx_send_contact"),
+                lambda checked=False: defer(
+                    lambda: self._on_send_contact(jid.split("/", 1)[0])))
             menu.addSeparator()
             menu.addAction(self._menu_icon("edit.png"), tr("ctx_rename"),
                            lambda checked=False: defer(lambda: self._rename_contact(jid)))
@@ -3539,6 +3544,52 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.clipboard().setText(url or "")
 
     # ── Share (forward a URL/media/selection to contacts & conferences) ──
+
+    def _on_roster_exchange(self, sender: str, items: list, body: str = ""):
+        """A XEP-0144 roster item exchange arrived."""
+        if not self._client or not items:
+            return
+        from stanza_im.ui.roster_exchange_dialog import RosterExchangeDialog
+        name = self._roster_name(str(sender).split("/", 1)[0]) or ""
+        dlg = RosterExchangeDialog(sender, name, items, body, self)
+        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        selected = dlg.selected_items()
+        if not selected:
+            return
+        count = self._client.apply_roster_exchange(selected)
+        if count:
+            self._tray.show_message(APP_NAME,
+                                    tr("rosterx_applied", count=count))
+
+    def _on_send_contact(self, jid: str) -> None:
+        """Offer one of our contacts to other contacts (XEP-0144)."""
+        if not self._client or not jid:
+            return
+        bare = str(jid).split("/", 1)[0]
+        name = self._roster_name(bare) or ""
+        entry = self._client.roster.get(bare) or {}
+        groups = [g for g in (entry.get("groups") or []) if g]
+        item = {"action": "add", "jid": bare, "name": name, "groups": groups}
+        contacts = [(j, n) for j, n in self._share_contacts() if j != bare]
+        if not contacts:
+            return
+        from stanza_im.ui.share_dialog import ShareDialog
+        preview = tr("rosterx_share_preview", name=name or bare, jid=bare)
+        dlg = ShareDialog(contacts, [], preview, self)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            sent = 0
+            for target, _is_conf in dlg.selected_targets():
+                self._client.send_roster_exchange(target, [item], preview)
+                sent += 1
+            if sent:
+                self._tray.show_message(APP_NAME,
+                                        tr("rosterx_sent", count=sent))
+        dlg.finished.connect(finished)
+        dlg.open()
 
     def _on_share_requested(self, content: str) -> None:
         """Open the share window for a chat URL/media/selection or xmpp: body."""

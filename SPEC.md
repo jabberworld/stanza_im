@@ -517,6 +517,29 @@ avatar, name, status icon, status message, unread badge.
 
 Future: hot-swappable styles from `resources/rosterstyles/`.
 
+### 7.5 Roster Item Exchange (XEP-0144)
+
+- An incoming `<x xmlns='http://jabber.org/protocol/rosterx'/>` message (its
+  own `MatchXPath` handler for the bodyless case, plus guards in `_on_message`
+  and `_on_carbon_received`) is parsed by `parse_roster_exchange` into
+  `{action, jid, name, groups}` rows (`action` defaults to `add`) and emitted as
+  `roster_exchange_received(from, items, body)`.
+- `MainWindow._on_roster_exchange` opens the modal `RosterExchangeDialog`: a
+  three-level `QTreeWidget` — action (`Add`/`Modify`/`Delete`) → group
+  (`No group` when absent) → `jid (name)` — where the parent rows are
+  auto-tristate and the leaves are checked by default. `selected_items()`
+  returns one row per JID with the checked groups.
+- `JabberClient.apply_roster_exchange` follows XEP-0144 §3: `add` merges the
+  suggested groups into the current ones (sending a subscription request for a
+  new contact), `delete` removes only the suggested group while other groups
+  remain (otherwise removes the contact), `modify` only touches an existing
+  item; the roster is re-requested afterwards.
+- Sending: a non-conference contact's roster context menu has "Send contact…"
+  (`_on_send_contact`), which picks recipients with `ShareDialog` and calls
+  `client.send_roster_exchange(jid, items, body)` — a `<message type='chat'>`
+  with the rosterx payload and a readable body fallback. The feature
+  `http://jabber.org/protocol/rosterx` is advertised in disco.
+
 ## 8. Chat Window (`ui/chat_window.py`)
 
 ### 8.1 Modes
