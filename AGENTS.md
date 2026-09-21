@@ -50,6 +50,7 @@ stanza_im/                      # Python package
 │   ├── unread_state.py          # Persisted per-contact unread counters (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
+│   ├── server_features.py       # Server disco/stream capability report (XEP list)
 │   └── memstats.py              # Periodic memory statistics (CLI -m)
 ├── ui/
 │   ├── main_window.py           # Main window: stack (login/splash/roster)
@@ -76,6 +77,8 @@ stanza_im/                      # Python package
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
+│   ├── connection_info_dialog.py # Live connection details dialog
+│   ├── server_info_dialog.py    # Server capability report (XEP support)
 │   ├── xml_console.py           # Raw XML console (filtered, coloured)
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
@@ -1254,6 +1257,23 @@ text is kept. Returning activity (`eventFilter`) resumes
   information affordances use the glyph
   `resources/images/16x16/actions/info.svg` (a blue «i» circle) via
   `PreferencesDialog._info_icon()`.
+- **Help menu — connection / certificate / server info**: the «Справка» menu
+  carries three non-modal dialogs (disabled until `session_started`, enabled
+  again on `stream_resumed`, disabled on disconnect/auth/TLS failure via
+  `_set_info_actions_enabled`). «О подключении» (`_on_connection_info`) shows
+  `ui/connection_info_dialog.ConnectionInfoDialog`, which renders
+  `connection_info_lines(info)` — the same lines as the Preferences connection
+  tooltip. «О сертификате» (`_on_certificate_info`) reuses
+  `CertificateDialog` (a message box when no certificate is available).
+  «О сервере» (`_on_server_info`) shows
+  `ui/server_info_dialog.ServerInfoDialog`, which calls
+  `core/server_features.collect_server_features(client)` — the account domain's
+  `disco#info` features, the raw `<stream:features>` namespaces captured by
+  `_StanzaXMPP.stream_feature_ns`, the negotiated SASL mechanism, the server
+  identity/software (XEP-0092) and the XEP-0363 `max-file-size`
+  (`client.http_upload_limit()`) — and marks the preset `SERVER_XEPS` list
+  supported/unsupported (green/red) via the pure `evaluate_server_xeps(ctx)`.
+  [`tests/test_server_features.py`]
 - **Client identity / caps branding**: `JabberClient.__init__` adds a named
   disco identity (`client`/`pc`, `name=APP_NAME`) and overrides
   `xep_0115.caps_node` to the human-readable `Stanza IM <VERSION>` (slixmpp's

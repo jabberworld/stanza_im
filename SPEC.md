@@ -32,6 +32,7 @@ stanza_im/
 │   ├── unread_state.py — persisted per-contact unread counters (JSON)
 │   ├── vcard_cache.py  — vCard avatar download/cache coordination
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
+│   ├── server_features.py — server disco/stream capability report (XEP list)
 │   └── memstats.py     — periodic memory statistics (CLI -m)
 ├── ui/
 │   ├── main_window.py  — Main window (3-page stack), actions and menus
@@ -61,6 +62,8 @@ stanza_im/
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
 │   ├── account_registration_dialog.py — XEP-0077 account creation wizard
 │   ├── registration_result_dialog.py — created-account summary (apply/copy)
+│   ├── connection_info_dialog.py — Live connection details dialog
+│   ├── server_info_dialog.py — Server capability report (XEP support)
 │   ├── xml_console.py       — Raw XML console (filtered, coloured)
 │   ├── tray.py         — System tray icon
 │   └── icons.py        — LRU icon cache
@@ -324,6 +327,28 @@ and gives an `<iq>` without an `id` one before sending. The buffer is capped at
 5000 entries. Incoming non-stanza stream elements (SASL
 challenge/success/proceed, `<stream:features>`) are not part of the raw dump and
 therefore do not appear.
+
+### 5.4 Help Menu — Connection / Certificate / Server Info
+
+The «Справка» menu holds three non-modal entries, disabled until the session
+starts (`_set_info_actions_enabled`, toggled on `session_started`/
+`stream_resumed` and off on disconnect/auth/TLS failure):
+
+- «О подключении» — `ui/connection_info_dialog.ConnectionInfoDialog` renders
+  `connection_info_lines(info)` from `client.connection_info()` (the same lines
+  as the Preferences connection tooltip): mode, TLS version, cipher, SASL
+  mechanism, keep-alive, SM/CSI state and the resolved server endpoint.
+- «О сертификате» — reuses `ui/certificate_dialog.CertificateDialog` with the
+  peer certificate; a message box when no certificate is available.
+- «О сервере» — `ui/server_info_dialog.ServerInfoDialog` asks
+  `core/server_features.collect_server_features(client)` for the account
+  domain's `disco#info` features, the raw `<stream:features>` namespaces
+  (`_StanzaXMPP.stream_feature_ns`), the negotiated SASL mechanism, the server
+  identity/software (XEP-0092) and the XEP-0363 `max-file-size`
+  (`client.http_upload_limit()`), then marks the preset `SERVER_XEPS` list
+  (XEP-0045/0050/0054/0059/0060/0077/0092/0163/0191/0198/0199/0202/0215/0237/
+  0258/0280/0313/0352/0359/0363/0386/0388/0398/0401/0402/0411/0490) supported or
+  not (green/red) via the pure `evaluate_server_xeps(context)`.
 
 ## 6. Login Form (`ui/login_widget.py`)
 

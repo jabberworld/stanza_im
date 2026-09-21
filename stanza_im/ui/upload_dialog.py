@@ -14,6 +14,7 @@ import time
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.utils import format_size
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
                ".svg", ".svgz", ".tif", ".tiff", ".ico"}
@@ -25,18 +26,6 @@ def _file_size(path: str) -> int:
         return os.path.getsize(path)
     except OSError:
         return 0
-
-
-def format_size(size: int) -> str:
-    """Human-readable file size, e.g. ``0 B``, ``1.5 KB``, ``2.3 MB``."""
-    value = float(size)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if value < 1024.0 or unit == "TB":
-            if unit == "B":
-                return f"{int(value)} B"
-            return f"{value:.1f} {unit}"
-        value /= 1024.0
-    return f"{size} B"
 
 
 def format_speed(bps: float) -> str:

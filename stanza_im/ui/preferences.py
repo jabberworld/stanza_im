@@ -12,6 +12,7 @@ from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import icons as icons_mod
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
+from stanza_im.ui.connection_info_dialog import connection_info_lines
 from stanza_im.include import emoticons
 from stanza_im.include.constants import ACTIONS_DIR_16
 
@@ -813,37 +814,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     info = getter()
                 except Exception:
                     info = None
-        if not info or not info.get("sasl"):
-            self._set_certificate(info)
-            label.setToolTip(tr("conn_info_not_connected"))
-            return
         self._set_certificate(info)
-        mode_key = {"direct": "conn_info_direct",
-                    "starttls": "conn_info_starttls",
-                    "plain": "conn_info_plain"}.get(info.get("mode"),
-                                                    "conn_info_plain")
-        lines = [tr("conn_info_title") + ":"]
-        lines.append("  %s: %s" % (tr("conn_info_mode"), tr(mode_key)))
-        if info.get("tls_version"):
-            lines.append("  %s: %s" % (tr("conn_info_tls_version"),
-                                       info["tls_version"]))
-        if info.get("cipher"):
-            lines.append("  %s: %s" % (tr("conn_info_cipher"),
-                                       info["cipher"]))
-        lines.append("  %s: %s" % (tr("conn_info_sasl"), info.get("sasl", "")))
-        lines.append("  %s: %s" % (
-            tr("conn_info_keepalive"),
-            tr("conn_info_on") if info.get("keepalive") else tr("conn_info_off")))
-        if info.get("sm"):
-            lines.append("  %s: %s" % (tr("conn_info_sm"),
-                                       tr("sm_state_" + info["sm"])))
-        if info.get("csi"):
-            lines.append("  %s: %s" % (tr("conn_info_csi"),
-                                       tr("csi_state_" + info["csi"])))
-        if info.get("host"):
-            lines.append("  %s: %s:%s" % (tr("conn_info_server"),
-                                          info["host"], info.get("port", "")))
-        label.setToolTip("\n".join(lines))
+        label.setToolTip("\n".join(connection_info_lines(info)))
 
     def _set_certificate(self, info) -> None:
         """Cache the peer certificate and update the certificate info icon."""

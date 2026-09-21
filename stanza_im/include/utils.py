@@ -53,6 +53,18 @@ def unique_path(path: str) -> str:
         index += 1
 
 
+def format_size(size: int) -> str:
+    """Human-readable file size, e.g. ``0 B``, ``1.5 KB``, ``2.3 MB``."""
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024.0 or unit == "TB":
+            if unit == "B":
+                return f"{int(value)} B"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{size} B"
+
+
 def format_time(timestamp: float | None = None) -> str:
     """Return *hh:mm:ss* for *timestamp* (default: now)."""
     if timestamp is None:

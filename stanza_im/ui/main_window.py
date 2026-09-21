@@ -571,6 +571,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks_menu.aboutToShow.connect(self._refresh_bookmarks_menu)
 
         help_menu = menubar.addMenu(tr("menu_help"))
+        conn_info = help_menu.addAction(self._menu_icon("info.svg"),
+                                        tr("menu_connection_info"))
+        conn_info.triggered.connect(self._on_connection_info)
+        cert_info = help_menu.addAction(self._menu_icon("info.svg"),
+                                        tr("menu_certificate_info"))
+        cert_info.triggered.connect(self._on_certificate_info)
+        server_info = help_menu.addAction(
+            self._menu_icon("service-discovery.png"), tr("menu_server_info"))
+        server_info.triggered.connect(self._on_server_info)
+        self._info_actions = [conn_info, cert_info, server_info]
+        self._set_info_actions_enabled(False)
+        help_menu.addSeparator()
         about = help_menu.addAction(self._menu_icon("about.png"),
                                     tr("menu_about"))
         about.triggered.connect(self._on_about)
@@ -1625,6 +1637,48 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.about_dialog import AboutDialog
         AboutDialog(self).exec()
 
+    def _set_info_actions_enabled(self, enabled: bool) -> None:
+        """Enable the Help → connection/certificate/server entries."""
+        for action in getattr(self, "_info_actions", ()):
+            action.setEnabled(enabled)
+
+    def _show_info_dialog(self, dialog) -> None:
+        """Show a non-modal info dialog owned by the main window."""
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
+
+    def _on_connection_info(self):
+        if not self._client:
+            return
+        from stanza_im.ui.connection_info_dialog import ConnectionInfoDialog
+        try:
+            info = self._client.connection_info()
+        except Exception:
+            info = None
+        self._show_info_dialog(ConnectionInfoDialog(info, self))
+
+    def _on_certificate_info(self):
+        if not self._client:
+            return
+        from stanza_im.ui.certificate_dialog import CertificateDialog
+        try:
+            info = self._client.connection_info()
+        except Exception:
+            info = {}
+        cert = (info or {}).get("cert") or {}
+        if not cert.get("available"):
+            QtWidgets.QMessageBox.information(
+                self, tr("menu_certificate_info"), tr("conn_info_cert_none"))
+            return
+        self._show_info_dialog(
+            CertificateDialog((info or {}).get("host", ""), cert, self))
+
+    def _on_server_info(self):
+        if not self._client:
+            return
+        from stanza_im.ui.server_info_dialog import ServerInfoDialog
+        self._show_info_dialog(ServerInfoDialog(self._client, self))
+
     # ── Login / Connect ───────────────────────────────────────────
 
     def _on_login(self, jid: str, password: str, show: str):
@@ -1796,8 +1850,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_status_combo(self._config.last_status)
         self._republish_pep()
         self._sync_tray_blink()
+        self._set_info_actions_enabled(True)
 
     def _on_auth_failed(self):
+        self._set_info_actions_enabled(False)
         self._login.set_error(tr("login_auth_failed"))
         self._stack.setCurrentIndex(_PAGE_LOGIN)
 
@@ -1808,8 +1864,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._login.set_error(message)
         self._tray.show_message(APP_NAME, message)
         self._stack.setCurrentIndex(_PAGE_LOGIN)
+        self._set_info_actions_enabled(False)
 
     def _on_disconnected(self):
+        self._set_info_actions_enabled(False)
         # With stream management a transient drop is usually resumed, so
         # avoid a scary "Disconnected" message until resumption fails.
         self._tray.stop_blinking()
@@ -1829,11 +1887,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._tray.show_message(APP_NAME, tr("login_reconnected"))
         self._update_csi()
         self._sync_tray_blink()
+        self._set_info_actions_enabled(True)
 
     def _on_sm_failed(self):
         self._resume_pending = False
         self._tray.stop_blinking()
         self._tray.show_message(APP_NAME, tr("login_disconnected"))
+        self._set_info_actions_enabled(False)
 
     def _on_sm_disabled(self):
         self._resume_pending = False

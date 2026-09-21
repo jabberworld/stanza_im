@@ -582,6 +582,21 @@ def _format_fingerprint(der: bytes) -> str:
     return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
 
 
+def _upload_max_file_size(xml) -> int:
+    """Return the XEP-0363 ``max-file-size`` from a disco#info form, else 0."""
+    if xml is None:
+        return 0
+    for field in xml.iter("{%s}field" % NS_DATA):
+        if str(field.get("var") or "") != "max-file-size":
+            continue
+        value = field.find("{%s}value" % NS_DATA)
+        try:
+            return int(str(value.text or "0").strip())
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
 def _peer_certificate(sock) -> dict:
     """Extract the peer (server) TLS certificate of the live connection.
 
@@ -697,6 +712,13 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
             self.plugin['feature_mechanisms'].use_mechs = mechs
 
     async def _handle_stream_features(self, features):
+        # Raw namespaces advertised in <stream:features>, for the "Server
+        # info" dialog (SM, CSI, rosterver, Bind 2, SASL2, invites, ...).
+        try:
+            self.stream_feature_ns = {child.tag for child in features.xml
+                                      if isinstance(child.tag, str)}
+        except Exception:
+            self.stream_feature_ns = set()
         if (self._require_starttls and not _is_tls(getattr(self, "socket", None))
                 and 'starttls' not in features['features']):
             logger.error(
@@ -773,6 +795,7 @@ class JabberClient:
         self._mds_server_assist = False
         self._mds_pubsub_options = False
         self._upload_service_cache: str | None = None
+        self._upload_limit: int | None = None
         self._hats_support: dict[str, bool] = {}
         self._moderation_support: dict[str, bool] = {}
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
@@ -3376,6 +3399,26 @@ class JabberClient:
                 return candidate
         self._upload_service_cache = ""
         return ""
+
+    async def http_upload_limit(self) -> int | None:
+        """Return the XEP-0363 ``max-file-size`` of the upload service.
+
+        ``None`` when there is no HTTP Upload service or it does not publish
+        the limit.  The value is cached for the session.
+        """
+        if self._upload_limit is not None:
+            return self._upload_limit or None
+        limit = 0
+        service = await self._http_upload_service()
+        if service:
+            try:
+                info = await self.xmpp["xep_0030"].get_info(service)
+                limit = _upload_max_file_size(getattr(info, "xml", None))
+            except Exception:
+                logger.debug("HTTP Upload disco#info failed on %s",
+                             service, exc_info=True)
+        self._upload_limit = limit
+        return limit or None
 
     def _http_upload_request_iq(self, service: str, filename: str,
                                 size: int, content_type: str):
