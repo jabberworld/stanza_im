@@ -969,6 +969,15 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   conferences group before joining
   (`MainWindow._classify_bookmarked_conferences`, run after bookmarks load and
   on roster additions).
+- **XEP-0410 self-ping**: `JabberClient._muc_self_ping_loop` (started on
+  `session_start`/`session_resumed`, stopped on disconnect) checks joined rooms
+  every minute; after 15 minutes without inbound traffic (`_mark_muc_activity`
+  is called from groupchat presence/messages/subjects) it sends
+  `<iq type='get' to='room/nick'><ping xmlns='urn:xmpp:ping'/></iq>` with a 30 s
+  timeout. `service-unavailable`, `feature-not-implemented`, `item-not-found`,
+  `remote-server-not-found`, `remote-server-timeout` and timeouts keep the room;
+  any other error triggers `join_muc` (rejoin). A room mid-rejoin
+  (`GroupChatInfo.joined` false, e.g. a `/nick` change) is skipped.
 
 ## 12. Tray (`ui/tray.py`)
 

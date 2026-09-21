@@ -184,7 +184,16 @@ is never rendered as "X joined". Auto-joined rooms are retried on transient
 actually joined (a stale `GroupChatInfo` no longer blocks a retry; `join_muc`
 cancels a pending join task). A bookmarked room that is also a normal roster
 contact is moved to the conferences group before joining
-(`_classify_bookmarked_conferences`). [`tests/test_muc_join.py`]
+(`_classify_bookmarked_conferences`). A **XEP-0410 self-ping** rounds this
+out: `_muc_self_ping_loop` (started on `session_start`/`session_resumed`,
+stopped on disconnect) pings our own occupant JID
+(`<iq type='get' to='room/nick'><ping xmlns='urn:xmpp:ping'/></iq>`) after 15
+minutes without any inbound room traffic; `service-unavailable`/
+`feature-not-implemented`/`item-not-found`/`remote-server-timeout`/timeout keep
+the room, any other error triggers `join_muc` (a rejoin). `_mark_muc_activity`
+updates the per-room idle timer from groupchat presence/messages/subjects, and
+a room mid-rejoin (`gi.joined` false, e.g. a `/nick` change) is skipped.
+[`tests/test_muc_join.py`, `tests/test_muc_selfping.py`]
 
 The MUC toolbar's vCard button opens the **room's** vCard (`MainWindow.
 _show_muc_room_info` → `_show_profile(room)`, not our occupant's real JID). The

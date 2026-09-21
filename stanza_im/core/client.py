@@ -68,6 +68,12 @@ NS_AVATAR_METADATA = "urn:xmpp:avatar:metadata"
 NS_VCARD_UPDATE = "vcard-temp:x:update"        # XEP-0153 vCard-Based Avatars
 _RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
 
+# XEP-0410 MUC self-ping: after this much silence from a room, verify that we
+# are still an occupant; the check runs on this interval.
+_MUC_SELF_PING_IDLE = 900.0
+_MUC_SELF_PING_INTERVAL = 60.0
+NS_PING = "urn:xmpp:ping"
+
 
 class _UploadProgress:
     """Thread-safe upload fraction shared between the PUT worker thread and
@@ -809,6 +815,9 @@ class JabberClient:
         self._vcard_cache = VCardCache()
         self._vcard_inflight: set[str] = set()
         self._muc_join_tasks: dict[str, asyncio.Task] = {}
+        self._muc_last_activity: dict[str, float] = {}
+        self._muc_self_ping_task: asyncio.Task | None = None
+        self._muc_self_ping_busy: set[str] = set()
         self._version_probed: set[str] = set()        # full JIDs (XEP-0092)
         self._muc_version_probed: set[tuple[str, str]] = set()
         # bare JID -> SHA-1 of the currently applied avatar (XEP-0084/0153/0398)
@@ -2387,6 +2396,89 @@ class JabberClient:
         if task and not task.done():
             task.cancel()
         self.groupchats.pop(room, None)
+        self._muc_last_activity.pop(room, None)
+        self._muc_self_ping_busy.discard(room)
+
+    # ── XEP-0410 MUC self-ping (Schrödinger's chat) ───────────────
+
+    def _mark_muc_activity(self, room: str) -> None:
+        """Record inbound traffic from *room* (self-ping idle timer)."""
+        if not room:
+            return
+        activity = getattr(self, "_muc_last_activity", None)
+        if activity is None:
+            activity = self._muc_last_activity = {}
+        activity[room] = time.monotonic()
+
+    def _start_muc_self_ping(self) -> None:
+        if (self._muc_self_ping_task is not None
+                and not self._muc_self_ping_task.done()):
+            return
+        self._muc_self_ping_task = asyncio.get_event_loop().create_task(
+            self._muc_self_ping_loop())
+
+    def _stop_muc_self_ping(self) -> None:
+        task, self._muc_self_ping_task = self._muc_self_ping_task, None
+        if task is not None:
+            task.cancel()
+
+    async def _muc_self_ping_loop(self) -> None:
+        """Periodically verify that silent rooms still know us (XEP-0410)."""
+        while True:
+            await asyncio.sleep(_MUC_SELF_PING_INTERVAL)
+            if not self.xmpp.is_connected():
+                continue
+            now = time.monotonic()
+            for room, gi in list(self.groupchats.items()):
+                if not gi.joined or not gi.nick:
+                    continue
+                last = self._muc_last_activity.get(room)
+                if last is None:
+                    self._muc_last_activity[room] = now
+                    continue
+                if now - last < _MUC_SELF_PING_IDLE:
+                    continue
+                if room in self._muc_self_ping_busy:
+                    continue
+                self._muc_self_ping_busy.add(room)
+                self._start_task(self._self_ping_room(room))
+
+    async def _self_ping_room(self, room: str) -> None:
+        """Ping our own occupant JID; rejoin when the room does not know us."""
+        gi = self.groupchats.get(room)
+        try:
+            if gi is None or not gi.joined or not gi.nick:
+                return
+            iq = self.xmpp.Iq()
+            iq["type"] = "get"
+            iq["to"] = f"{room}/{gi.nick}"
+            ET.SubElement(iq.xml, "{%s}ping" % NS_PING)
+            try:
+                await iq.send(timeout=30)
+                logger.debug("MUC self-ping to %s succeeded", room)
+                self._mark_muc_activity(room)
+                return
+            except slixmpp.exceptions.IqTimeout:
+                # The MUC service (or another client) is unreachable: retry.
+                logger.debug("MUC self-ping to %s timed out", room)
+                return
+            except slixmpp.exceptions.IqError as exc:
+                condition = str(getattr(exc, "condition", "") or "")
+                if condition in ("service-unavailable", "feature-not-implemented",
+                                 "item-not-found", "remote-server-not-found",
+                                 "remote-server-timeout"):
+                    # Still joined (or undecidable): do not rejoin.
+                    self._mark_muc_activity(room)
+                    return
+                logger.info("MUC %s self-ping failed (%s); rejoining",
+                            room, condition or exc)
+            except Exception:
+                logger.debug("MUC self-ping to %s errored", room, exc_info=True)
+                return
+            # Any other error means we are no longer an occupant.
+            self.join_muc(room, gi.nick, password=gi.password)
+        finally:
+            self._muc_self_ping_busy.discard(room)
 
     def send_muc_message(self, room: str, body: str, reply_to: str = "",
                          reply_id: str = "", reply_ref_sender: str = "",
@@ -2975,6 +3067,7 @@ class JabberClient:
         for bare in self.contacts:
             self._ensure_pep_subscription(bare)
         self._start_pep_sweep()
+        self._start_muc_self_ping()
         self.emit("session_started")
         self.emit("connection_info", self.connection_info())
         self._sync_csi()
@@ -3678,6 +3771,7 @@ class JabberClient:
         frm = str(msg["from"])
         room = frm.split("/")[0]
         nick = frm.split("/", 1)[1] if "/" in frm else ""
+        self._mark_muc_activity(room)
         body = str(msg["body"])
         retract_ref = _retract_reference(msg)
         if retract_ref:
@@ -3741,6 +3835,7 @@ class JabberClient:
         room = str(msg["from"]).split("/")[0]
         if room not in self.groupchats:
             return
+        self._mark_muc_activity(room)
         subjects = _message_subjects(msg)
         if not subjects:
             return
@@ -4030,6 +4125,7 @@ class JabberClient:
         frm = str(pres["from"])
         room = frm.split("/")[0]
         nick = frm.split("/", 1)[1] if "/" in frm else ""
+        self._mark_muc_activity(room)
         ptype = str(pres["type"])
 
         # Error presences (nick conflict, kick, ban, ...) are delivered by
@@ -4128,6 +4224,7 @@ class JabberClient:
     def _on_disconnected(self, event) -> None:
         logger.info("Disconnected from server")
         self._stop_pep_sweep()
+        self._stop_muc_self_ping()
         self._pep_subscribed.clear()
         self.emit("disconnected")
 
@@ -4151,6 +4248,7 @@ class JabberClient:
         for bare in self.contacts:
             self._ensure_pep_subscription(bare)
         self._start_pep_sweep()
+        self._start_muc_self_ping()
         self.emit("stream_resumed")
 
     def _on_sm_failed(self, _event=None) -> None:

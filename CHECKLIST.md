@@ -59,7 +59,7 @@ the additional features are listed here.
 | User Avatars | XEP-0084 | ✅ | own avatar published to `avatar:data`/`metadata`; contacts' metadata notifications fetch and cache the image |
 | User Avatar Compatibility | XEP-0398, XEP-0153 | ✅ | vCard PHOTO also publishes the PEP avatar and updates the presence hash; avatars from either source share one SHA-1-keyed cache |
 | User Blocking | XEP-0191 | ❌ | no blocking command/UI |
-| Advanced Group Chat | XEP-0048, XEP-0313, XEP-0402, XEP-0410 | ⚠️ | bookmarks via XEP-0048 stored through XEP-0223 pubsub (or XEP-0049 fallback), not PEP-native XEP-0402; XEP-0410 self-ping not implemented |
+| Advanced Group Chat | XEP-0048, XEP-0313, XEP-0402, XEP-0410 | ⚠️ | XEP-0048/0313/0410 are implemented; bookmarks are stored through XEP-0223 pubsub (or XEP-0049 fallback), not PEP-native XEP-0402 |
 | Persistent Storage of Private Data via PubSub | XEP-0223 | ✅ | bookmark storage backend |
 | Private XML Storage | XEP-0049 | ✅ | legacy bookmark backend |
 | Stream Management | XEP-0198 | ✅ | `connection.stream_management`, resume |
@@ -76,8 +76,6 @@ the additional features are listed here.
 - **XEP-0191 (Blocking Command)** — not implemented.
 - **XEP-0402 (PEP Native Bookmarks)** — bookmarks use XEP-0048 via XEP-0223
   pubsub storage (XEP-0049 private XML as a fallback).
-- **XEP-0410 (MUC Self-Ping)** — no self-ping; join reliability relies on
-  presence, retries and XEP-0198.
 
 ## Specifications of note
 
