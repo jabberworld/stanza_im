@@ -507,7 +507,13 @@ config section (image and video viewers share it). Covered by
 
 **CAPTCHA Forms (XEP-0158, `ui/captcha_dialog.py` + XEP-0221 media)**:
 `<media xmlns='urn:xmpp:media-element'/>` on a form field is parsed from the
-field's raw XML (no XEP-0221 plugin needed). A challenge arrives either as a
+field's raw XML (no XEP-0221 plugin needed). A `cid:` media URI is resolved
+from a sibling `<data xmlns='urn:xmpp:bob'/>` payload (XEP-0231) into an inline
+`data:` URI by `_bob_data_uris`/`_resolve_bob_media` in `core/client.py`
+(applied in `get_registration_form` and `_captcha_form`), and
+`DataFormWidget._load_media_image` decodes such `data:` URIs without a network
+fetch — so captcha images embedded by ejabberd are shown inline. A challenge
+arrives either as a
 `<message>` with
 `<captcha xmlns='urn:xmpp:captcha'><x type='form'/>` (own `MatchXPath` handler;
 a guard in `_on_message` keeps it from rendering as a chat message) or inside a

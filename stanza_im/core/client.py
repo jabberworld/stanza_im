@@ -212,6 +212,37 @@ def _stanza_id(stanza, by: str) -> str:
     return ""
 
 
+def _bob_data_uris(root) -> dict[str, str]:
+    """Map XEP-0231 ``cid`` values to ``data:`` URIs.
+
+    A CAPTCHA image is often delivered as XEP-0231 Bits of Binary: the media
+    URI references a ``cid:`` and the bytes sit in a sibling
+    ``<data xmlns='urn:xmpp:bob'/>`` element.  Returning them as data URIs
+    lets the form widget render the image without any network access.
+    """
+    uris: dict[str, str] = {}
+    if root is None:
+        return uris
+    for data in root.iter("{urn:xmpp:bob}data"):
+        cid = str(data.get("cid") or "")
+        payload = (data.text or "").strip()
+        if not cid or not payload:
+            continue
+        mime = str(data.get("type") or "application/octet-stream")
+        uris[cid] = f"data:{mime};base64,{payload}"
+    return uris
+
+
+def _resolve_bob_media(xml, bob: dict[str, str]) -> None:
+    """Rewrite ``cid:`` media URIs in *xml* to the matching data URIs."""
+    if xml is None or not bob:
+        return
+    for uri in xml.iter("{urn:xmpp:media-element}uri"):
+        value = str(uri.text or "").strip()
+        if value.startswith("cid:") and value[4:] in bob:
+            uri.text = bob[value[4:]]
+
+
 def muc_invite_from_message(msg) -> dict | None:
     """Parse a MUC invitation (XEP-0249 / XEP-0045 §7.8) from *msg*.
 
@@ -905,11 +936,13 @@ class JabberClient:
                 if (child.tag == "{%s}x" % NS_DATA
                         and child.get("type") == "form"):
                     try:
-                        return Form(xml=child)
+                        form = Form(xml=child)
                     except Exception:
                         logger.debug("Could not parse CAPTCHA form",
                                      exc_info=True)
                         return None
+                    _resolve_bob_media(form.xml, _bob_data_uris(xml))
+                    return form
         return None
 
     async def _on_jingle_message_stanza(self, msg) -> None:
@@ -1853,6 +1886,8 @@ class JabberClient:
             oob = str(reg["oob"]["url"] or "")
         except (KeyError, TypeError):
             oob = ""
+        if form is not None:
+            _resolve_bob_media(form.xml, _bob_data_uris(iq.xml))
         return {"registered": bool(reg["registered"]), "form": form,
                 "fields": fields, "instructions": instructions, "oob": oob}
 

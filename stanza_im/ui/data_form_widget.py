@@ -1,6 +1,7 @@
 """Rendering of XEP-0004 data forms into a Qt widget."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import threading
 import urllib.request
@@ -254,7 +255,16 @@ class DataFormWidget(QtWidgets.QWidget):
         return container
 
     def _load_media_image(self, url: str, label) -> None:
-        if not url.lower().startswith(("http://", "https://")):
+        lower = url.lower()
+        if lower.startswith("data:"):
+            # XEP-0231 Bits of Binary resolved to an inline data URI.
+            try:
+                _header, payload = url.split(",", 1)
+                self._set_media_pixmap(label, base64.b64decode(payload))
+            except Exception:
+                label.setText(tr("form_media_failed"))
+            return
+        if not lower.startswith(("http://", "https://")):
             label.setText(url)
             return
         fetcher = _MediaFetcher(self)

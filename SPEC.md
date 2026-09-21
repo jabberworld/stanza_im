@@ -1249,10 +1249,15 @@ Registers XEP plugins (conditionally where noted):
   `chat.allow_moderation` (on by default) chooses between the tombstone and the
   "✕" marker.
 
-### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221)
+### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)
 
 - A field's `<media xmlns='urn:xmpp:media-element'/>` is parsed from its raw
-  XML (no XEP-0221 plugin needed). A challenge arrives as a `<message>` with
+  XML (no XEP-0221 plugin needed). A `cid:` media URI is resolved from a sibling
+  `<data xmlns='urn:xmpp:bob'/>` payload (XEP-0231) into an inline `data:` URI
+  by `_bob_data_uris`/`_resolve_bob_media` (`get_registration_form` and
+  `_captcha_form`); `DataFormWidget._load_media_image` decodes `data:` URIs
+  without a network fetch, so ejabberd's embedded captcha images show inline. A
+  challenge arrives as a `<message>` with
   `<captcha xmlns='urn:xmpp:captcha'><x type='form'/>` (handled by its own
   `MatchXPath`; the guard in `_on_message` keeps it out of the chat) or inside a
   CAPTCHA-protected room's join error presence. Both emit

@@ -105,6 +105,70 @@ check("config keeps the proxy settings",
       and config.connection.proxy_port == 1080)
 
 
+# ── get_registration_form resolves XEP-0231 BOB captcha media ────
+from xml.etree import ElementTree as ET  # noqa: E402
+
+NS_DATA = "jabber:x:data"
+NS_MEDIA = "urn:xmpp:media-element"
+
+
+class _FakeForm:
+    def __init__(self, xml):
+        self.xml = xml
+
+    def get_fields(self):
+        return list(self.xml.findall(f"{{{NS_DATA}}}field"))
+
+
+class _FakeRegister:
+    def __init__(self, query):
+        form_xml = query.find(f"{{{NS_DATA}}}x")
+        self.form = _FakeForm(form_xml) if form_xml is not None else None
+        self.fields = None
+        self.instructions = ""
+        self.registered = False
+        self.oob = {}
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+
+class _FakeIq:
+    def __init__(self, query):
+        self.xml = ET.Element("iq")
+        self.xml.append(query)
+        self._register = _FakeRegister(query)
+
+    def __getitem__(self, key):
+        return self._register if key == "register" else None
+
+
+class _Fake0077:
+    def __init__(self, iq):
+        self._iq = iq
+
+    async def get_registration(self, jid):
+        return self._iq
+
+
+query = ET.fromstring(
+    "<query xmlns='jabber:iq:register'>"
+    "<x xmlns='jabber:x:data' type='form'>"
+    "<field var='ocr' type='text-single' label='OCR'>"
+    "<media xmlns='urn:xmpp:media-element'>"
+    "<uri type='image/png'>cid:sha1+abc@bob.xmpp.org</uri>"
+    "</media></field></x>"
+    "<data xmlns='urn:xmpp:bob' cid='sha1+abc@bob.xmpp.org' type='image/png'>"
+    "iVBORw0KGgo=</data></query>")
+bob_client = JabberClient.__new__(JabberClient)
+bob_client.xmpp = {"xep_0077": _Fake0077(_FakeIq(query))}
+info = asyncio.run(bob_client.get_registration_form("jabber.ru"))
+uri = info["form"].xml.find(f".//{{{NS_MEDIA}}}uri")
+check("get_registration_form resolves BOB captcha media",
+      uri is not None
+      and str(uri.text or "").startswith("data:image/png;base64,"))
+
+
 # ── login widget ─────────────────────────────────────────────────
 login = LoginWidget(config)
 check("login link is localized",

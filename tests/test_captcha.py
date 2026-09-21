@@ -156,6 +156,41 @@ if solved and solved[0]:
     check("hashcash answer starts with the JID",
           solved[0].startswith("victim@example.com"))
 
+# 6. XEP-0231 Bits of Binary captcha media ----------------------------------
+NS_BOB = "urn:xmpp:bob"
+_PNG_B64 = ("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAA7"
+            "EAAAOxAGVKw4bAAAAFklEQVQImWP8z8DAwMDAxMDAwMDAAAANHQEDDMfniQAAAABJ"
+            "RU5ErkJggg==")
+
+bob_form = _form_element()
+_field(bob_form, "ocr", "", label="Enter the text",
+       media=("image/png", "cid:sha1+abc@bob.xmpp.org"))
+bob_msg = _challenge(bob_form)
+bob_data = ET.SubElement(bob_msg.xml, f"{{{NS_BOB}}}data")
+bob_data.set("cid", "sha1+abc@bob.xmpp.org")
+bob_data.set("type", "image/png")
+bob_data.text = _PNG_B64
+
+bob_form_parsed = c._captcha_form(bob_msg)
+bob_uri = (bob_form_parsed.xml.find(f".//{{{NS_MEDIA}}}uri")
+           if bob_form_parsed is not None else None)
+check("BOB captcha URI resolved to a data URI",
+      bob_uri is not None
+      and str(bob_uri.text or "").startswith("data:image/png;base64,"))
+
+bob_media = (_field_media(bob_form_parsed.get_fields()["ocr"])
+             if bob_form_parsed is not None else None)
+check("resolved BOB media is an image",
+      bob_media is not None and bob_media["kind"] == "image"
+      and bob_media["url"].startswith("data:image/png;base64,"))
+
+bob_widget = DataFormWidget(bob_form_parsed)
+bob_labels = bob_widget.findChildren(QtWidgets.QLabel)
+check("BOB image is rendered inline",
+      any(lbl.pixmap() is not None and not lbl.pixmap().isNull()
+          for lbl in bob_labels))
+
+
 # 7. static wiring ----------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
