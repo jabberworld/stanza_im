@@ -16,7 +16,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.core.client import JabberClient, NS_CAPS, _caps_node
@@ -135,6 +135,26 @@ check("a MUC occupant presence is ignored by _on_presence",
       emitted == [] and guard_client.presences == {})
 
 
+# ── music icon + MUC sidebar sizing ──────────────────────────────
+from stanza_im.include import pep  # noqa: E402
+from stanza_im.ui.chat_widget import _FadeLabel, _ParticipantList  # noqa: E402
+
+check("the tune icon exists",
+      bool(pep.tune_icon_path()) and os.path.exists(pep.tune_icon_path()))
+
+participants = _ParticipantList()
+check("the participant list fills the width (no h-scroll)",
+      participants.resizeMode() == QtWidgets.QListView.ResizeMode.Adjust
+      and participants.horizontalScrollBarPolicy()
+      == QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+fade = _FadeLabel("a very long nickname")
+check("the fade label keeps a small minimum width",
+      fade.minimumSizeHint().width() < 40
+      and fade.sizePolicy().horizontalPolicy()
+      == QtWidgets.QSizePolicy.Policy.Ignored)
+
+
 # ── static wiring ────────────────────────────────────────────────
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -182,6 +202,13 @@ check("the chat window applies the participant options",
 check("the main window applies the conference options",
       "def _apply_conference_options" in mw
       and "set_muc_participant_options" in mw)
+check("MUC rows use the fading nickname label",
+      "_FadeLabel" in chat_widget and "setTextColor" in chat_widget)
+check("the MUC sidebar width is persisted",
+      "muc_participant_width" in _read("stanza_im", "core", "storage.py")
+      and "set_muc_participant_width" in chat_window
+      and "participant_width_changed" in chat_widget
+      and "participant_width_changed" in mw)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

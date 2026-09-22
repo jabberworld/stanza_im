@@ -199,6 +199,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_clients` | `true` | Show/hide the client icon (XEP-0115 caps node → `include/clients.py` → `resources/clients/<size>/`) in roster rows, drawn right after the avatar (`UserItem.client_icon`). |
 | `appearance.muc_show_avatars` | `true` | Show/hide participant avatars in the MUC participant sidebar (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_participant_options`). |
 | `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |
+| `appearance.muc_participant_width` | `0` | Remembered MUC participant sidebar width in px (`0` = default 180); saved on splitter drag, restored for new MUC tabs. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
@@ -573,8 +574,8 @@ togglable from Preferences → Appearance → Roster
 `MainWindow._apply_roster_options` → `RosterStyle.set_options` gates them live
 without relayout. The contact tooltip marks each resource line with the client
 icon before the resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and
-prefixes its «Mood»/«Activity» lines with `pep.mood_icon_path` /
-`pep.activity_icon_path`.
+prefixes its «Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
+`pep.activity_icon_path` / `pep.tune_icon_path`.
 
 Dynamic height: 32px without status message, 52px with.
 
@@ -762,7 +763,11 @@ Single conversation tab. Layout:
   status icon and nick on the left, then (when enabled) the occupant's client
   icon (XEP-0115 caps) and the avatar on the right
   (`appearance.muc_show_clients`/`muc_show_avatars`); the participant tooltip
-  prefixes the nick with the client icon. Right-click
+  prefixes the nick with the client icon. The list never scrolls horizontally
+  (`ResizeMode.Adjust` + `ScrollBarAlwaysOff`) and a long nick is a `_FadeLabel`
+  that clips and fades its right edge into the background (Psi+ style), so the
+  status icon, client icon and avatar stay visible; the sidebar width is
+  remembered in `appearance.muc_participant_width`. Right-click
   opens the participant context menu; when the participant's real JID is
   visible it also offers «Пригласить в» (XEP-0249, §7.3).
 

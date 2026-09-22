@@ -201,6 +201,12 @@ def default_icon(kind: str) -> str:
     return candidate if os.path.isfile(candidate) else ""
 
 
+def tune_icon_path() -> str:
+    """Absolute icon path for a "now playing" (XEP-0118) status."""
+    candidate = os.path.join(IMAGES_DIR, "16x16", "emotes", "music.png")
+    return candidate if os.path.isfile(candidate) else ""
+
+
 def mood_icon_path(key: str) -> str:
     """Absolute icon path for a mood ``key`` ('' when unset)."""
     if not key or key == "none":

@@ -111,12 +111,84 @@ class _ParticipantRow(QtWidgets.QWidget):
         super().leaveEvent(event)
 
 
+class _FadeLabel(QtWidgets.QWidget):
+    """A text label that fades its right edge into the background (Psi+ style).
+
+    The nick is drawn clipped to the available width and its last pixels are
+    made transparent with a gradient, so a long nick never widens the list and
+    no ellipsis is needed.  Only the text alpha is reduced, so the row's
+    background (base color or selection highlight) shows through the fade.
+    """
+
+    _FADE = 18
+    _MIN_WIDTH = 24
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(parent)
+        self._text = str(text or "")
+        self._color: QtGui.QColor | None = None
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                           QtWidgets.QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(self._MIN_WIDTH)
+        self.setMouseTracking(True)
+
+    def setText(self, text: str) -> None:
+        self._text = str(text or "")
+        self.update()
+
+    def text(self) -> str:
+        return self._text
+
+    def setTextColor(self, color) -> None:
+        self._color = QtGui.QColor(color) if color else None
+        self.update()
+
+    def sizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(self._MIN_WIDTH + 16, self.fontMetrics().height())
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(self._MIN_WIDTH, self.fontMetrics().height())
+
+    def paintEvent(self, event) -> None:
+        if not self._text:
+            return
+        color = self._color or self.palette().color(
+            QtGui.QPalette.ColorRole.Text)
+        pixmap = QtGui.QPixmap(self.size())
+        pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(pixmap)
+        painter.setPen(color)
+        painter.drawText(self.rect(),
+                         QtCore.Qt.AlignmentFlag.AlignVCenter
+                         | QtCore.Qt.AlignmentFlag.AlignLeft,
+                         self._text)
+        fade = min(self._FADE, self.width())
+        gradient = QtGui.QLinearGradient(self.width() - fade, 0.0,
+                                         float(self.width()), 0.0)
+        gradient.setColorAt(0.0, QtGui.QColor(0, 0, 0, 255))
+        gradient.setColorAt(1.0, QtGui.QColor(0, 0, 0, 0))
+        painter.setCompositionMode(
+            QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+        painter.fillRect(self.rect(), gradient)
+        painter.end()
+        target = QtGui.QPainter(self)
+        target.drawPixmap(0, 0, pixmap)
+
+
 class _ParticipantList(QtWidgets.QListWidget):
     """MUC participant sidebar list.
 
     A single click selects a row; a left click on empty space clears the
-    selection (QListWidget keeps it by default).
+    selection (QListWidget keeps it by default).  Rows are resized to the
+    viewport width (no horizontal scrolling) and long nicks are faded out.
     """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
+        self.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setWordWrap(False)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if (event.button() == QtCore.Qt.MouseButton.LeftButton
@@ -283,6 +355,7 @@ class ChatWidget(QtWidgets.QWidget):
     set_subject_requested = QtCore.pyqtSignal(str)         # MUC room
     nick_change_requested = QtCore.pyqtSignal(str, str)    # MUC room, nick
     participant_clicked = QtCore.pyqtSignal(str, str)      # room, nick
+    participant_width_changed = QtCore.pyqtSignal(int)     # MUC sidebar width
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)                            # room, nick, global pos
     vcard_requested = QtCore.pyqtSignal(str)                # jid
@@ -627,6 +700,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._content_splitter.setStretchFactor(0, 1)
         self._content_splitter.setStretchFactor(1, 0)
         self._content_splitter.setSizes([self.width() - 180, 180])
+        self._content_splitter.splitterMoved.connect(self._on_splitter_moved)
         layout.addWidget(self._content_splitter, stretch=1)
 
         self._typing_timer = QtCore.QTimer(self)
@@ -1880,13 +1954,12 @@ class ChatWidget(QtWidgets.QWidget):
         status.setMouseTracking(True)
         status.setPixmap(self._status_icon(user.get("show", "offline"))
                          .pixmap(16, 16))
-        text = QtWidgets.QLabel(label, row)
-        text.setMouseTracking(True)
+        text = _FadeLabel(label, row)
         if self._colored_muc_nicks:
             color = self._nick_colors.color_for(
                 self._user_color_key(user))
             if color:
-                text.setStyleSheet(f"color: {color};")
+                text.setTextColor(color)
         layout.addWidget(status)
         layout.addWidget(text, 1)
         if self._show_muc_clients:
@@ -1914,7 +1987,7 @@ class ChatWidget(QtWidgets.QWidget):
             layout.addWidget(avatar)
         item = QtWidgets.QListWidgetItem()
         item.setData(QtCore.Qt.ItemDataRole.UserRole, nick)
-        item.setSizeHint(row.sizeHint())
+        item.setSizeHint(QtCore.QSize(0, row.sizeHint().height()))
         self._users_list.addItem(item)
         self._users_list.setItemWidget(item, row)
 
@@ -2172,6 +2245,18 @@ class ChatWidget(QtWidgets.QWidget):
         self._users_list.setFont(base)
         if self.is_muc:
             self._render_muc_users()
+
+    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        if self.is_muc:
+            self.participant_width_changed.emit(self._users_list.width())
+
+    def set_participant_width(self, width: int) -> None:
+        """Size the MUC sidebar to *width* px (0 = keep the default)."""
+        width = int(width or 0)
+        if width <= 0:
+            return
+        total = max(self._content_splitter.width(), width + 200)
+        self._content_splitter.setSizes([total - width, width])
 
     def set_muc_participant_options(self, show_avatars: bool = True,
                                     show_clients: bool = True) -> None:

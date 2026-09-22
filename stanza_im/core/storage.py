@@ -133,6 +133,7 @@ class Config:
                         "roster_show_clients": True,
                         "muc_show_avatars": True,
                         "muc_show_clients": True,
+                        "muc_participant_width": 0,
                         "interface_mode": "separate",
                         "roster_font": "", "roster_font_size": 0,
                         "chat_font": "", "chat_font_size": 0,

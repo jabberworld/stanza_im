@@ -342,13 +342,20 @@ longest caps prefix; `icon_path`, size fallback) to an icon under
 badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`. The
 contact tooltip marks each resource line with the client icon before the
 resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and prefixes the
-«Mood»/«Activity» lines with `pep.mood_icon_path`/`pep.activity_icon_path`.
+«Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
+`pep.activity_icon_path` / `pep.tune_icon_path`.
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
 before the nick; the conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients` (Preferences → Appearance →
 «Конференции», both `true`; a participant's caps node is captured in
-`_on_groupchat_presence`). The data file
+`_on_groupchat_presence`). The sidebar never scrolls horizontally: the list
+uses `QListView.ResizeMode.Adjust` + `ScrollBarAlwaysOff` and the nick is a
+`_FadeLabel` that clips the text and fades its right edge into the background
+(Psi+ style), so the status icon, client icon and avatar always stay visible.
+Its width is remembered in `appearance.muc_participant_width`
+(`ChatWidget.participant_width_changed` → `ChatWindow.set_muc_participant_width`)
+and restored for new MUC tabs. The data file
 `resources/clients/clients.txt` (`caps⇥name⇥icon`, both http/https variants)
 is generated from the bundled `index.html` by
 `resources/clients/build_clients.py`. [`tests/test_clients.py`]

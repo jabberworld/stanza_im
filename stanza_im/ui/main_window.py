@@ -182,6 +182,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_colored_muc_nicks(
             bool(self._config.appearance.colored_muc_nicks))
         self._apply_conference_options()
+        self._chat_window.set_muc_participant_width(
+            int(getattr(self._config.appearance, "muc_participant_width", 0)
+                or 0))
+        self._chat_window.participant_width_changed.connect(
+            self._on_muc_participant_width)
         self._chat_window.set_tab_title_length(
             self._config.chat.tab_title_length)
         self._chat_window.set_chat_options(self._config.chat)
@@ -1389,6 +1394,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "mood": pep.mood_icon_path(str(mood.get("key") or "")),
                 "activity": pep.activity_icon_path(str(
                     activity.get("sub") or activity.get("group") or "")),
+                "tune": pep.tune_icon_path(),
             }
             for kind, label in (("mood", tr("pep_mood")),
                                 ("activity", tr("pep_activity")),
@@ -1485,6 +1491,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if roster is not None:
             roster.update()
         self._apply_conference_options()
+
+    def _on_muc_participant_width(self, width: int) -> None:
+        """Remember the MUC sidebar width (persisted with the config on quit)."""
+        self._config.appearance.muc_participant_width = int(width or 0)
 
     def _apply_conference_options(self) -> None:
         """Apply the conference participant avatars / client icons toggles."""

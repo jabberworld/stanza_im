@@ -67,6 +67,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._participant_font = ("", 0)
         self._colored_muc_nicks = True
         self._muc_participant_options = (True, True)  # avatars, client icons
+        self._muc_participant_width = 0               # 0 = default width
         self._muc_leave_confirm: Callable[[str], bool] | None = None
 
         self.setWindowTitle(APP_NAME)
@@ -225,6 +226,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_chat_options(self._chat_options)
         widget.set_participant_font(*self._participant_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
+        widget.set_participant_width(self._muc_participant_width)
+        widget.participant_width_changed.connect(
+            self.participant_width_changed.emit)
         widget.set_colored_muc_nicks(self._colored_muc_nicks)
         widget.message_sent.connect(self._on_groupchat_message_sent)
         widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
@@ -329,6 +333,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_chat_options(self._chat_options)
         widget.set_participant_font(*self._participant_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
+        widget.set_participant_width(self._muc_participant_width)
+        widget.participant_width_changed.connect(
+            self.participant_width_changed.emit)
         widget.set_colored_muc_nicks(self._colored_muc_nicks)
 
     def reload_themes(self, variant: str = "", muc_variant: str | None = None):
@@ -367,6 +374,13 @@ class ChatWindow(QtWidgets.QMainWindow):
             if widget.is_muc:
                 widget.set_muc_participant_options(
                     *self._muc_participant_options)
+
+    def set_muc_participant_width(self, width: int) -> None:
+        """Remember and apply the MUC participant sidebar width (0 = auto)."""
+        self._muc_participant_width = int(width or 0)
+        for widget in self._tabs.values():
+            if widget.is_muc:
+                widget.set_participant_width(self._muc_participant_width)
 
     def set_colored_muc_nicks(self, enabled: bool):
         """Apply and remember the per-participant MUC nickname colors."""
@@ -563,6 +577,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave
     typing_changed = QtCore.pyqtSignal(str, bool)       # jid, is_typing
+    participant_width_changed = QtCore.pyqtSignal(int)  # MUC sidebar width
     link_clicked = QtCore.pyqtSignal(str)               # unhandled chat link
     xmpp_link_clicked = QtCore.pyqtSignal(str)          # XEP-0147 xmpp: URI
     clear_history_requested = QtCore.pyqtSignal(str)    # jid
