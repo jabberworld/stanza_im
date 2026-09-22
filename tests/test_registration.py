@@ -169,6 +169,51 @@ check("get_registration_form resolves BOB captcha media",
       and str(uri.text or "").startswith("data:image/png;base64,"))
 
 
+# ── legacy fields are a {name: value} map (slixmpp returns a set) ─
+class _RegisterIq:
+    def __init__(self, register):
+        self.xml = ET.Element("iq")
+        self._register = register
+
+    def __getitem__(self, key):
+        return self._register if key == "register" else None
+
+
+class _LegacyRegister:
+    def __init__(self, fields, form=None):
+        self.form = form
+        self.fields = set(fields)
+        self.instructions = ""
+        self.registered = False
+        self.oob = {}
+
+    def __getitem__(self, key):
+        if key in ("fields", "form", "instructions", "registered", "oob"):
+            return getattr(self, key)
+        return "" if key in self.fields else None
+
+
+legacy_client = JabberClient.__new__(JabberClient)
+legacy_client.xmpp = {"xep_0077": _Fake0077(
+    _RegisterIq(_LegacyRegister(["nick"])))}
+legacy_info = asyncio.run(legacy_client.get_registration_form("example.com"))
+check("legacy fields become a {name: value} map",
+      legacy_info["form"] is None and legacy_info["fields"] == {"nick": ""})
+
+form_query = ET.fromstring(
+    "<query xmlns='jabber:iq:register'><nick/>"
+    "<x xmlns='jabber:x:data' type='form'>"
+    "<field var='muc#register_roomnick' type='text-single'>"
+    "<required/></field></x></query>")
+form_register = _LegacyRegister(["nick"],
+                                form=_FakeForm(form_query.find(f"{{{NS_DATA}}}x")))
+form_client = JabberClient.__new__(JabberClient)
+form_client.xmpp = {"xep_0077": _Fake0077(_RegisterIq(form_register))}
+form_info = asyncio.run(form_client.get_registration_form("conference.example.com"))
+check("a data form ignores the legacy fields set (no dict crash)",
+      form_info["form"] is not None and form_info["fields"] is None)
+
+
 # ── login widget ─────────────────────────────────────────────────
 login = LoginWidget(config)
 check("login link is localized",

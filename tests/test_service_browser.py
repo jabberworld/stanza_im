@@ -127,6 +127,31 @@ check("no statistics yields an empty list",
       asyncio.run(empty_client.get_server_stats("example.com")) == [])
 
 
+class _RaisingIq:
+    def __init__(self):
+        self.xml = ET.Element("iq")
+        self.attrs = {}
+
+    def __setitem__(self, key, value):
+        self.attrs[key] = value
+
+    async def send(self, *args, **kwargs):
+        raise RuntimeError("service-unavailable")
+
+
+class _RaisingXmpp:
+    def Iq(self):
+        return _RaisingIq()
+
+
+fail_client = JabberClient.__new__(JabberClient)
+fail_client.xmpp = _RaisingXmpp()
+check("a failing uptime query is swallowed",
+      asyncio.run(fail_client.get_server_uptime("example.com")) is None)
+check("a failing statistics query is swallowed",
+      asyncio.run(fail_client.get_server_stats("example.com")) == [])
+
+
 # ── service_details (features + XEP-0157 contacts) ───────────────
 NS_DATA = "jabber:x:data"
 SERVER_INFO = "http://jabber.org/network/serverinfo"

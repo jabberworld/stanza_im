@@ -2270,7 +2270,12 @@ class JabberClient:
         iq = await self.xmpp["xep_0077"].get_registration(jid)
         reg = iq["register"]
         form = reg["form"] if reg["form"] and reg["form"].get_fields() else None
-        fields = dict(reg["fields"]) if reg["fields"] else None
+        # ``reg["fields"]`` is a set of field names (slixmpp), not pairs; build
+        # the legacy {name: value} map and only when there is no data form.
+        fields = None
+        if form is None and reg["fields"]:
+            fields = {str(name): str(reg[name] or "")
+                      for name in reg["fields"]}
         instructions = str(reg["instructions"] or "")
         oob = ""
         try:
@@ -2490,8 +2495,8 @@ class JabberClient:
             ET.SubElement(query, "{%s}stat" % NS_STATS).set("name", name)
         try:
             result = await iq.send(timeout=10)
-        except Exception:
-            logger.debug("Statistics query failed for %s", jid, exc_info=True)
+        except Exception as exc:
+            logger.debug("Statistics query failed for %s: %s", jid, exc)
             return []
         return [{"name": str(el.get("name") or ""),
                  "units": str(el.get("units") or ""),
@@ -2507,8 +2512,8 @@ class JabberClient:
         ET.SubElement(iq.xml, "{%s}query" % NS_STATS)
         try:
             result = await iq.send(timeout=10)
-        except Exception:
-            logger.debug("Statistics list failed for %s", jid, exc_info=True)
+        except Exception as exc:
+            logger.debug("Statistics list failed for %s: %s", jid, exc)
             return []
         return [str(el.get("name") or "") for el in
                 result.xml.iter("{%s}stat" % NS_STATS) if el.get("name")]
@@ -2521,9 +2526,8 @@ class JabberClient:
         ET.SubElement(iq.xml, "{%s}query" % NS_LAST)
         try:
             result = await iq.send(timeout=10)
-        except Exception:
-            logger.debug("Last-activity query failed for %s", jid,
-                         exc_info=True)
+        except Exception as exc:
+            logger.debug("Last-activity query failed for %s: %s", jid, exc)
             return None
         for el in result.xml.iter("{%s}query" % NS_LAST):
             seconds = el.get("seconds")
