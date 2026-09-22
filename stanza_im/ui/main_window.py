@@ -2952,7 +2952,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._client:
                 menu.addAction(self._menu_icon("reload.png"), tr("ctx_resend_auth"),
                                lambda: self._client.resend_subscription(jid))
-            if self._client and self._client.supports_blocking():
+            if getattr(self._client, "supports_blocking", lambda: False)():
                 bare = jid.split("/", 1)[0]
                 blocked = bare in self._blocked_jids
                 block_action = menu.addAction(
@@ -2962,7 +2962,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         lambda: self._on_toggle_block(bare)))
                 block_action.setCheckable(True)
                 block_action.setChecked(blocked)
-                if self._client.supports_reports():
+                if getattr(self._client, "supports_reports", lambda: False)():
                     menu.addAction(
                         self._menu_icon("report.svg"), tr("ctx_report"),
                         lambda checked=False: defer(
