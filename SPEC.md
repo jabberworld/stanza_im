@@ -360,7 +360,12 @@ starts (`_set_info_actions_enabled`, toggled on `session_started`/
   the account's `pubsub`+`publish-options` (ejabberd does not announce
   `#pep`), XEP-0402 the `#compat`/`#compat-pep` features, XEP-0401 the ad-hoc
   commands and XEP-0490 only `urn:xmpp:mds:server-assist:0` (its `displayed:0`
-  node is a client PEP feature).
+  node is a client PEP feature). The same dialog shows the XEP-0157 server
+  contact addresses: `parse_server_contacts` reads the
+  `http://jabber.org/network/serverinfo` data form from the domain's
+  `disco#info` (falling back to the node query) and renders a «Контакты
+  сервера» group above the table, values as clickable links (`xmpp:` ones
+  emitted via `ServerInfoDialog.contact_uri_clicked` → `MainWindow._on_xmpp_uri`).
 
 ### 5.5 Privacy Lists & Blocking (XEP-0016 / XEP-0191 / XEP-0377)
 

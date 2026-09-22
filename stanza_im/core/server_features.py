@@ -19,10 +19,16 @@ import logging
 from typing import NamedTuple
 
 from stanza_im.core.client import (
-    NS_DISCO_INFO, _upload_max_file_size)
+    NS_DATA, NS_DISCO_INFO, _upload_max_file_size)
 from stanza_im.include.utils import format_size
 
 logger = logging.getLogger(__name__)
+
+# XEP-0157: server contact addresses (disco#info serverinfo data form).
+SERVER_INFO_NODE = "http://jabber.org/network/serverinfo"
+CONTACT_FIELDS = ("abuse-addresses", "admin-addresses", "feedback-addresses",
+                  "sales-addresses", "security-addresses", "status-addresses",
+                  "support-addresses")
 
 
 class ServerXep(NamedTuple):
@@ -130,6 +136,39 @@ def evaluate_server_xeps(context: dict) -> list[dict]:
     return rows
 
 
+def parse_server_contacts(xml) -> list[tuple[str, list[str]]]:
+    """XEP-0157 contact addresses: ``[(field, [value, …]), …]``.
+
+    Looks for the ``jabber:x:data`` form whose FORM_TYPE is
+    ``http://jabber.org/network/serverinfo`` and returns the known
+    ``*-addresses`` fields in the XEP's order (empty fields are skipped).
+    """
+    if xml is None:
+        return []
+    form = None
+    for candidate in xml.iter("{%s}x" % NS_DATA):
+        form_type = ""
+        for field in candidate.findall("{%s}field" % NS_DATA):
+            if str(field.get("var") or "") != "FORM_TYPE":
+                continue
+            value = field.find("{%s}value" % NS_DATA)
+            form_type = str(value.text or "") if value is not None else ""
+        if form_type == SERVER_INFO_NODE:
+            form = candidate
+            break
+    if form is None:
+        return []
+    by_var: dict[str, list[str]] = {}
+    for field in form.findall("{%s}field" % NS_DATA):
+        var = str(field.get("var") or "")
+        if var not in CONTACT_FIELDS:
+            continue
+        values = [str(value.text or "").strip()
+                  for value in field.findall("{%s}value" % NS_DATA)]
+        by_var[var] = [value for value in values if value]
+    return [(var, by_var[var]) for var in CONTACT_FIELDS if by_var.get(var)]
+
+
 async def _disco(client, jid: str) -> tuple[set[str], dict, object]:
     """Return ``(features, server_identity, xml)`` for *jid*."""
     features: set[str] = set()
@@ -177,15 +216,15 @@ async def _software(client, domain: str, identity: dict) -> str:
 async def collect_server_features(client) -> dict:
     """Gather everything the "Server info" dialog needs to render."""
     domain = client.jid_str.split("@")[-1]
-    (domain_feats, identity, _), (account_feats, _, _), muc, upload, commands = \
-        await asyncio.gather(
-            _disco(client, domain),
-            _disco(client, client.jid_str),
-            _safe(client.discover_conference_service(), ""),
-            _safe(client._http_upload_service(), ""),
-            _safe(client.get_commands_list(domain), []),
-            return_exceptions=True,
-        )
+    ((domain_feats, identity, domain_xml), (account_feats, _, _), muc, upload,
+     commands) = await asyncio.gather(
+        _disco(client, domain),
+        _disco(client, client.jid_str),
+        _safe(client.discover_conference_service(), ""),
+        _safe(client._http_upload_service(), ""),
+        _safe(client.get_commands_list(domain), []),
+        return_exceptions=True,
+    )
     features = set(domain_feats) | set(account_feats)
     if muc:
         muc_feats, _, _ = await _disco(client, muc)
@@ -203,7 +242,18 @@ async def collect_server_features(client) -> dict:
     except Exception:
         login = ""
     software = await _software(client, domain, identity)
+    contacts = parse_server_contacts(domain_xml)
+    if not contacts:
+        info_xml = await _safe(_server_info_xml(client, domain), None)
+        contacts = parse_server_contacts(info_xml)
     return {"domain": domain, "disco": features, "account": set(account_feats),
             "stream": stream, "commands": command_nodes, "login": login,
             "identity": identity, "software": software,
-            "upload_max": upload_max}
+            "upload_max": upload_max, "contacts": contacts}
+
+
+async def _server_info_xml(client, domain: str):
+    """Fetch the XEP-0157 serverinfo node when the plain disco#info lacks it."""
+    info = await client.xmpp["xep_0030"].get_info(jid=domain,
+                                                  node=SERVER_INFO_NODE)
+    return getattr(info, "xml", None)

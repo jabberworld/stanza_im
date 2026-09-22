@@ -22,7 +22,8 @@ from PyQt6 import QtWidgets
 from stanza_im.i18n import load as i18n_load
 from stanza_im.core.client import _stream_feature_namespaces
 from stanza_im.core.server_features import (
-    SERVER_XEPS, collect_server_features, evaluate_server_xeps)
+    SERVER_INFO_NODE, SERVER_XEPS, collect_server_features,
+    evaluate_server_xeps, parse_server_contacts)
 from stanza_im.ui.connection_info_dialog import connection_info_lines
 
 i18n_load("en")
@@ -130,13 +131,28 @@ NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
 UPLOAD_MAX = 25 * 1024 * 1024
 
 
-def _features_xml(features, server_name=""):
+def _serverinfo_form(contacts):
+    form = ET.Element(f"{{{NS_DATA}}}x", type="result")
+    fmt = ET.SubElement(form, f"{{{NS_DATA}}}field", var="FORM_TYPE",
+                        type="hidden")
+    ET.SubElement(fmt, f"{{{NS_DATA}}}value").text = SERVER_INFO_NODE
+    for var, values in contacts.items():
+        field = ET.SubElement(form, f"{{{NS_DATA}}}field", var=var,
+                              type="list-multi")
+        for value in values:
+            ET.SubElement(field, f"{{{NS_DATA}}}value").text = value
+    return form
+
+
+def _features_xml(features, server_name="", contacts=None):
     x = ET.Element(f"{{{NS_DISCO_INFO}}}query")
     for var in features:
         ET.SubElement(x, f"{{{NS_DISCO_INFO}}}feature", var=var)
     if server_name:
         ET.SubElement(x, f"{{{NS_DISCO_INFO}}}identity", category="server",
                       type="im", name=server_name)
+    if contacts:
+        x.append(_serverinfo_form(contacts))
     return x
 
 
@@ -154,7 +170,10 @@ def _upload_xml(max_size):
 _MAPPING = {
     "example.com": _features_xml(
         {"http://jabber.org/protocol/commands", "urn:xmpp:blocking",
-         "urn:xmpp:mam:2", "urn:xmpp:carbons:2"}, server_name="ejabberd"),
+         "urn:xmpp:mam:2", "urn:xmpp:carbons:2"}, server_name="ejabberd",
+        contacts={"abuse-addresses": ["xmpp:abuse@example.com",
+                                      "mailto:abuse@example.com"],
+                  "support-addresses": ["https://example.com/support"]}),
     "me@example.com": _features_xml(
         {"http://jabber.org/protocol/pubsub",
          "http://jabber.org/protocol/pubsub#publish-options",
@@ -176,7 +195,7 @@ class _FakeDisco:
     def __init__(self, mapping):
         self._mapping = mapping
 
-    async def get_info(self, jid=None):
+    async def get_info(self, jid=None, node=None):
         return _FakeInfo(self._mapping.get(jid))
 
 
@@ -236,6 +255,17 @@ check("collect builds the software string",
       collected["software"] == "ejabberd 24.06")
 check("collect keeps the upload limit",
       collected["upload_max"] == UPLOAD_MAX)
+check("collect keeps the XEP-0157 server contacts",
+      collected["contacts"] == [
+          ("abuse-addresses", ["xmpp:abuse@example.com",
+                               "mailto:abuse@example.com"]),
+          ("support-addresses", ["https://example.com/support"])])
+
+check("server contacts parse in the XEP field order",
+      parse_server_contacts(_MAPPING["example.com"]) == collected["contacts"])
+check("a missing serverinfo form yields no contacts",
+      parse_server_contacts(None) == []
+      and parse_server_contacts(ET.Element("iq")) == [])
 
 collected_rows = {row["xep"]: row for row in
                   evaluate_server_xeps(collected)}
@@ -281,6 +311,9 @@ async def _dialog_smoke():
 server_dialog = asyncio.run(_dialog_smoke())
 check("the server dialog lists every preset XEP",
       server_dialog._tree.topLevelItemCount() == len(SERVER_XEPS))
+check("the server dialog renders the contacts section",
+      len(server_dialog._contacts) == 2
+      and server_dialog._contacts_box.isVisibleTo(server_dialog))
 check("the server dialog header names the software",
       "ejabberd" in server_dialog._header.text()
       and "SCRAM-SHA-256" in server_dialog._header.text())

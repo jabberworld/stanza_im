@@ -1285,7 +1285,13 @@ text is kept. Returning activity (`eventFilter`) resumes
   `pubsub`+`publish-options` (ejabberd does not announce `#pep`), XEP-0402 from
   the `#compat`/`#compat-pep` features, XEP-0401 from the ad-hoc commands and
   XEP-0490 only from the account's `urn:xmpp:mds:server-assist:0` (the
-  `displayed:0` node is a client PEP feature). [`tests/test_server_features.py`]
+  `displayed:0` node is a client PEP feature). The same dialog shows the
+  XEP-0157 server contact addresses (`parse_server_contacts` reads the
+  `http://jabber.org/network/serverinfo` data form from the domain's
+  `disco#info`, falling back to the node query): a «Контакты сервера» group
+  above the table with clickable links, `xmpp:` ones routed through
+  `MainWindow._on_xmpp_uri` (`ServerInfoDialog.contact_uri_clicked`).
+  [`tests/test_server_features.py`]
 - **Privacy lists & blocking (XEP-0016/0191/0377)**: Preferences → Connection →
   «Подключение» carries two buttons gated on the account domain's disco
   (`supports_privacy`/`supports_blocking`, probed by `refresh_server_features`

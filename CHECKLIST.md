@@ -88,7 +88,7 @@ notes of the applicable suites).
 | XEP-0393 (Message Styling) | ✅ | `*bold*`/`_em_`/`` `code` ``/quote/pre |
 | XEP-0424 (Message Retraction) | ✅ | own-message retraction + tombstones |
 | XEP-0425 (Moderated Message Retraction) | ✅ | MUC moderator retraction |
-| XEP-0157 (Contact Addresses for XMPP Services) | ❌ | not implemented |
+| XEP-0157 (Contact Addresses for XMPP Services) | ✅ | server contacts shown in «О сервере» |
 | XEP-0385 (Stateless Inline Media Sharing) | ❌ | not implemented |
 | XEP-0433 (Extended Channel Search) | ❌ | not implemented |
 

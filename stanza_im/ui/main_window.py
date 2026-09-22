@@ -1679,7 +1679,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         from stanza_im.ui.server_info_dialog import ServerInfoDialog
-        self._show_info_dialog(ServerInfoDialog(self._client, self))
+        dialog = ServerInfoDialog(self._client, self)
+        dialog.contact_uri_clicked.connect(self._on_xmpp_uri)
+        self._show_info_dialog(dialog)
 
     # ── Login / Connect ───────────────────────────────────────────
 

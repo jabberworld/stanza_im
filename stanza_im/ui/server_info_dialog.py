@@ -1,14 +1,15 @@
 """Non-modal "Server info" dialog.
 
-Shows the account domain's server software and a preset list of XEPs marked
-as supported or not, based on the domain's ``disco#info`` features and the
-advertised stream features.
+Shows the account domain's server software, the XEP-0157 contact addresses and
+a preset list of XEPs marked as supported or not, based on the domain's
+``disco#info`` features and the advertised stream features.
 """
 from __future__ import annotations
 
 import asyncio
+import html
 
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core.server_features import (
     collect_server_features, evaluate_server_xeps)
@@ -17,21 +18,42 @@ from stanza_im.i18n import tr
 _GREEN = "#1b8a2f"
 _RED = "#c0392b"
 
+_CONTACT_LABELS = {
+    "abuse-addresses": "server_contact_abuse",
+    "admin-addresses": "server_contact_admin",
+    "feedback-addresses": "server_contact_feedback",
+    "sales-addresses": "server_contact_sales",
+    "security-addresses": "server_contact_security",
+    "status-addresses": "server_contact_status",
+    "support-addresses": "server_contact_support",
+}
+
 
 class ServerInfoDialog(QtWidgets.QDialog):
     """Request the server capabilities and render them as a table."""
+
+    contact_uri_clicked = QtCore.pyqtSignal(str)
 
     def __init__(self, client, parent=None):
         super().__init__(parent)
         self._client = client
         self._header_text = tr("server_info_loading")
         self.setWindowTitle(tr("server_info_title"))
-        self.setMinimumSize(560, 420)
+        self.setMinimumSize(560, 480)
         layout = QtWidgets.QVBoxLayout(self)
 
         self._header = QtWidgets.QLabel(self._header_text)
         self._header.setWordWrap(True)
         layout.addWidget(self._header)
+
+        self._contacts: list[tuple[str, list[str]]] = []
+        self._contacts_box = QtWidgets.QGroupBox(tr("server_contacts_title"),
+                                                 self)
+        self._contacts_form = QtWidgets.QFormLayout(self._contacts_box)
+        self._contacts_form.setFieldGrowthPolicy(
+            QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self._contacts_box.setVisible(False)
+        layout.addWidget(self._contacts_box)
 
         self._tree = QtWidgets.QTreeWidget(self)
         self._tree.setColumnCount(3)
@@ -78,6 +100,8 @@ class ServerInfoDialog(QtWidgets.QDialog):
         self._header_text = "\n".join(head)
         self._header.setText(self._header_text)
 
+        self._render_contacts(context.get("contacts") or [])
+
         self._tree.clear()
         for row in evaluate_server_xeps(context):
             name = row["name"]
@@ -96,8 +120,42 @@ class ServerInfoDialog(QtWidgets.QDialog):
         self._tree.resizeColumnToContents(1)
         self._tree.resizeColumnToContents(2)
 
+    def _render_contacts(self, contacts: list) -> None:
+        self._contacts = list(contacts)
+        while self._contacts_form.rowCount():
+            self._contacts_form.removeRow(0)
+        self._contacts_box.setVisible(bool(contacts))
+        for var, values in contacts:
+            container = QtWidgets.QWidget(self._contacts_box)
+            column = QtWidgets.QVBoxLayout(container)
+            column.setContentsMargins(0, 0, 0, 0)
+            for uri in values:
+                column.addWidget(self._contact_label(uri))
+            self._contacts_form.addRow(
+                tr(_CONTACT_LABELS.get(var, var)), container)
+
+    def _contact_label(self, uri: str) -> QtWidgets.QLabel:
+        safe = html.escape(uri)
+        label = QtWidgets.QLabel(f'<a href="{safe}">{safe}</a>',
+                                 self._contacts_box)
+        label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+        label.setWordWrap(True)
+        if uri.lower().startswith("xmpp:"):
+            label.linkActivated.connect(self.contact_uri_clicked.emit)
+        else:
+            label.setOpenExternalLinks(True)
+        return label
+
     def _on_copy(self) -> None:
         lines = [self._header_text, ""] if self._header_text else []
+        if self._contacts:
+            lines.append(tr("server_contacts_title") + ":")
+            for var, values in self._contacts:
+                lines.append("  %s: %s"
+                             % (tr(_CONTACT_LABELS.get(var, var)),
+                                ", ".join(values)))
+            lines.append("")
         for index in range(self._tree.topLevelItemCount()):
             item = self._tree.topLevelItem(index)
             lines.append("%s: %s — %s" % (item.text(0), item.text(1),
