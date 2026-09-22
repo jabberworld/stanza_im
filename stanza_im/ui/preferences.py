@@ -930,8 +930,6 @@ class PreferencesDialog(QtWidgets.QDialog):
         chat, chat_form = self._page()
         chat_form.addRow(self._check("show_status", tr("prefs_show_status")))
         chat_form.addRow(self._check("show_receipts", tr("prefs_show_receipts")))
-        chat_form.addRow(self._check("show_mood", tr("prefs_show_mood"), False))
-        chat_form.addRow(self._check("show_music", tr("prefs_show_music"), False))
         chat_form.addRow(self._check("show_avatars", tr("prefs_show_avatars")))
         chat_form.addRow(self._check("message_styling",
                                      tr("prefs_message_styling")))
@@ -1012,6 +1010,12 @@ class PreferencesDialog(QtWidgets.QDialog):
         roster_form.addRow(self._check("roster_show_clients",
                                        tr("prefs_roster_show_clients")))
 
+        conferences, conf_form = self._page()
+        conf_form.addRow(self._check("muc_show_avatars",
+                                     tr("prefs_muc_show_avatars")))
+        conf_form.addRow(self._check("muc_show_clients",
+                                     tr("prefs_muc_show_clients")))
+
         fonts, font_form = self._page()
         font_form.addRow(tr("prefs_zoom"), self._zoom_control("text_scale"))
         default_family, default_size = self._default_app_font()
@@ -1085,6 +1089,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         return self._tabs([(tr("prefs_appearance_themes"), themes),
                            (tr("prefs_appearance_roster"), roster),
+                           (tr("prefs_appearance_muc"), conferences),
                            (tr("prefs_appearance_fonts"), fonts),
                            (tr("prefs_color_tab"), colors),
                            (tr("prefs_appearance_misc"), misc)])
@@ -1276,8 +1281,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "allow_incoming_deletions": getattr(
                 chat, "allow_incoming_deletions", True),
             "confirm_retraction": getattr(chat, "confirm_retraction", False),
-            "show_receipts": chat.show_receipts, "show_mood": chat.show_mood,
-            "show_music": chat.show_music, "show_avatars": chat.show_avatars,
+            "show_receipts": chat.show_receipts,
+            "show_avatars": chat.show_avatars,
             "message_styling": chat.message_styling,
             "media_preview": chat.media_preview,
             "idle_unload_minutes": int(getattr(chat, "idle_unload_minutes", 10) or 0),
@@ -1341,6 +1346,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "roster_show_mood": getattr(appearance, "roster_show_mood", True),
             "roster_show_clients": getattr(
                 appearance, "roster_show_clients", True),
+            "muc_show_avatars": getattr(appearance, "muc_show_avatars", True),
+            "muc_show_clients": getattr(appearance, "muc_show_clients", True),
             "file_auto_accept": bool(getattr(files, "auto_accept", False)),
             "file_download_notifications": bool(
                 getattr(files, "download_notifications", True)),
@@ -1392,8 +1399,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.connection.message_carbons = self._value("message_carbons")
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)
-        for key in ("send_ctrl_enter", "show_status", "show_receipts", "show_mood",
-                    "show_music", "show_avatars", "message_styling",
+        for key in ("send_ctrl_enter", "show_status", "show_receipts",
+                    "show_avatars", "message_styling",
                     "muc_show_presence",
                     "muc_show_status", "muc_show_status_text",
                     "muc_auto_nick", "muc_confirm_leave",
@@ -1438,7 +1445,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",
                     "roster_show_avatars", "roster_show_activity",
-                    "roster_show_mood", "roster_show_clients"):
+                    "roster_show_mood", "roster_show_clients",
+                    "muc_show_avatars", "muc_show_clients"):
             cfg.appearance[key] = self._value(key)
         if not hasattr(cfg, "files"):
             cfg.set("files", {"auto_accept": False,

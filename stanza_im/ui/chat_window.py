@@ -66,6 +66,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._chat_options = {}
         self._participant_font = ("", 0)
         self._colored_muc_nicks = True
+        self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_leave_confirm: Callable[[str], bool] | None = None
 
         self.setWindowTitle(APP_NAME)
@@ -223,6 +224,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
         widget.set_participant_font(*self._participant_font)
+        widget.set_muc_participant_options(*self._muc_participant_options)
         widget.set_colored_muc_nicks(self._colored_muc_nicks)
         widget.message_sent.connect(self._on_groupchat_message_sent)
         widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
@@ -326,6 +328,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.resume()
         widget.set_chat_options(self._chat_options)
         widget.set_participant_font(*self._participant_font)
+        widget.set_muc_participant_options(*self._muc_participant_options)
         widget.set_colored_muc_nicks(self._colored_muc_nicks)
 
     def reload_themes(self, variant: str = "", muc_variant: str | None = None):
@@ -354,6 +357,16 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_participant_font(*self._participant_font)
+
+    def set_muc_participant_options(self, show_avatars: bool = True,
+                                    show_clients: bool = True) -> None:
+        """Apply and remember the MUC participant avatars / client icons."""
+        self._muc_participant_options = (bool(show_avatars),
+                                         bool(show_clients))
+        for widget in self._tabs.values():
+            if widget.is_muc:
+                widget.set_muc_participant_options(
+                    *self._muc_participant_options)
 
     def set_colored_muc_nicks(self, enabled: bool):
         """Apply and remember the per-participant MUC nickname colors."""

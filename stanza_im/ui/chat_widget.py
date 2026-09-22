@@ -23,6 +23,7 @@ from stanza_im.include.constants import (
     ACTIONS_DIR_16, ACTIONS_DIR_22, CATEGORIES_DIR_16, STATUS_DIR_32,
     PLACES_DIR_22, IMAGES_DIR,
 )
+from stanza_im.include import clients as clients_mod
 from stanza_im.include.avatars import (
     avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
 )
@@ -305,6 +306,8 @@ class ChatWidget(QtWidgets.QWidget):
         self.display_name = display_name
         self.is_muc = is_muc
         self._show_avatars = True
+        self._show_muc_avatars = True
+        self._show_muc_clients = True
         self._send_ctrl_enter = False
         self._confirm_retraction = False
         self._moderation_enabled = False
@@ -1886,16 +1889,29 @@ class ChatWidget(QtWidgets.QWidget):
                 text.setStyleSheet(f"color: {color};")
         layout.addWidget(status)
         layout.addWidget(text, 1)
-        avatar = QtWidgets.QLabel(row)
-        avatar.setMouseTracking(True)
-        avatar.setFixedSize(28, 28)
-        path = user.get("avatar_path", "") or default_avatar()
-        pix = QtGui.QPixmap(path)
-        if not pix.isNull():
-            avatar.setPixmap(pix.scaled(
-                28, 28, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation))
-        layout.addWidget(avatar)
+        if self._show_muc_clients:
+            icon = clients_mod.client_icon_for(
+                str(user.get("caps_node") or ""), 16)
+            if icon:
+                client_label = QtWidgets.QLabel(row)
+                client_label.setMouseTracking(True)
+                client_pix = QtGui.QPixmap(icon)
+                if not client_pix.isNull():
+                    client_label.setPixmap(client_pix.scaled(
+                        16, 16, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                        QtCore.Qt.TransformationMode.SmoothTransformation))
+                    layout.addWidget(client_label)
+        if self._show_muc_avatars:
+            avatar = QtWidgets.QLabel(row)
+            avatar.setMouseTracking(True)
+            avatar.setFixedSize(28, 28)
+            path = user.get("avatar_path", "") or default_avatar()
+            pix = QtGui.QPixmap(path)
+            if not pix.isNull():
+                avatar.setPixmap(pix.scaled(
+                    28, 28, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation))
+            layout.addWidget(avatar)
         item = QtWidgets.QListWidgetItem()
         item.setData(QtCore.Qt.ItemDataRole.UserRole, nick)
         item.setSizeHint(row.sizeHint())
@@ -1906,7 +1922,11 @@ class ChatWidget(QtWidgets.QWidget):
         """Rich-text tooltip for a MUC participant row."""
         from stanza_im.include.utils import escape_html
         nick = user.get("nick", "")
-        lines = [f"<b>{escape_html(nick)}</b>"]
+        icon = (clients_mod.client_icon_for(
+            str(user.get("caps_node") or ""), 16)
+            if self._show_muc_clients else "")
+        prefix = f'<img src="{icon}" width="16" height="16"> ' if icon else ""
+        lines = [f"{prefix}<b>{escape_html(nick)}</b>"]
         real_jid = user.get("real_jid", "")
         if real_jid:
             lines.append(f"{tr('tooltip_real_jid')}: {escape_html(real_jid)}")
@@ -2150,6 +2170,14 @@ class ChatWidget(QtWidgets.QWidget):
         if size > 0:
             base.setPointSize(int(size))
         self._users_list.setFont(base)
+        if self.is_muc:
+            self._render_muc_users()
+
+    def set_muc_participant_options(self, show_avatars: bool = True,
+                                    show_clients: bool = True) -> None:
+        """Toggle participant avatars / client icons in the MUC sidebar."""
+        self._show_muc_avatars = bool(show_avatars)
+        self._show_muc_clients = bool(show_clients)
         if self.is_muc:
             self._render_muc_users()
 

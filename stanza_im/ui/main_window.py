@@ -181,6 +181,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._applied_participant_font = participant_font
         self._chat_window.set_colored_muc_nicks(
             bool(self._config.appearance.colored_muc_nicks))
+        self._apply_conference_options()
         self._chat_window.set_tab_title_length(
             self._config.chat.tab_title_length)
         self._chat_window.set_chat_options(self._config.chat)
@@ -1366,29 +1367,39 @@ class MainWindow(QtWidgets.QMainWindow):
             key=lambda item: (-item[1].get("priority", 0),
                               item[0].casefold()))
         for resource, info in resources:
+            icon = clients_mod.client_icon_for(
+                str(info.get("caps_node") or ""), 16)
+            marker = (f'<img src="{icon}" width="16" height="16">&nbsp;'
+                      if icon else "&nbsp;&nbsp;&middot;&nbsp;")
             parts = [f"<b>{escape_html(resource or '*')}</b>"]
             client = info.get("client", "") or ""
             if client:
-                icon = clients_mod.client_icon_for(
-                    str(info.get("caps_node") or ""), 16)
-                prefix = (f'<img src="{icon}" width="16" height="16"> '
-                          if icon else "")
-                parts.append(prefix + tr("tooltip_client") + ": "
-                             + escape_html(client))
-            lines.append("&nbsp;&nbsp;&middot;&nbsp; " + " &mdash; ".join(parts))
+                parts.append(tr("tooltip_client") + ": " + escape_html(client))
+            lines.append(marker + " " + " &mdash; ".join(parts))
         if contact.status:
             lines.append("<i>"
                          + escape_html(contact.status).replace("\n", "<br>")
                          + "</i>")
         if self._client:
-            summary = pep.format_summary(self._client.pep_data.get(jid, {}))
+            entry = self._client.pep_data.get(jid, {})
+            summary = pep.format_summary(entry)
+            mood = entry.get("mood") or {}
+            activity = entry.get("activity") or {}
+            pep_icons = {
+                "mood": pep.mood_icon_path(str(mood.get("key") or "")),
+                "activity": pep.activity_icon_path(str(
+                    activity.get("sub") or activity.get("group") or "")),
+            }
             for kind, label in (("mood", tr("pep_mood")),
                                 ("activity", tr("pep_activity")),
                                 ("tune", tr("pep_now_playing")),
                                 ("location", tr("pep_location"))):
                 value = summary.get(kind)
                 if value:
-                    lines.append(f"{label}: {escape_html(value)}")
+                    icon = pep_icons.get(kind, "")
+                    prefix = (f'<img src="{icon}" width="16" height="16"> '
+                              if icon else "")
+                    lines.append(prefix + f"{label}: {escape_html(value)}")
         return "<br>".join(lines), contact.avatar_path
 
     def _on_preferences(self):
@@ -1473,6 +1484,17 @@ class MainWindow(QtWidgets.QMainWindow):
         roster = getattr(self, "_roster", None)
         if roster is not None:
             roster.update()
+        self._apply_conference_options()
+
+    def _apply_conference_options(self) -> None:
+        """Apply the conference participant avatars / client icons toggles."""
+        chat_window = getattr(self, "_chat_window", None)
+        if chat_window is None:
+            return
+        appearance = self._config.appearance
+        chat_window.set_muc_participant_options(
+            bool(getattr(appearance, "muc_show_avatars", True)),
+            bool(getattr(appearance, "muc_show_clients", True)))
 
     def _apply_roster_colors(self) -> None:
         """Apply the configured roster background and group-stripe colors."""
@@ -3496,6 +3518,14 @@ class MainWindow(QtWidgets.QMainWindow):
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
 
+    def _muc_caps_node(self, room: str, nick: str, previous: dict) -> str:
+        """The occupant's XEP-0115 caps node (from the client's groupchat)."""
+        if not self._client:
+            return previous.get("caps_node", "")
+        gi = self._client.groupchats.get(room)
+        node = gi.users.get(nick, {}).get("caps_node", "") if gi else ""
+        return node or previous.get("caps_node", "")
+
     def _on_groupchat_presence(self, room: str, nick: str, show: str,
                                status: str, role: str = "",
                                affiliation: str = "", real_jid: str = "",
@@ -3514,6 +3544,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "avatar_jid": previous.get("avatar_jid", ""),
                 "avatar_path": previous.get("avatar_path", ""),
                 "client": previous.get("client", ""),
+                "caps_node": self._muc_caps_node(room, nick, previous),
                 "hats": (list(hats) if hats is not None
                          else previous.get("hats", [])),
                 "status_updated": time.strftime("%Y-%m-%d %H:%M:%S"),

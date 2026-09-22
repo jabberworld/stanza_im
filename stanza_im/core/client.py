@@ -4613,6 +4613,12 @@ class JabberClient:
         self.emit("muc_subject_changed", room, list(subjects))
 
     def _on_presence(self, pres) -> None:
+        # MUC occupant presence is handled by ``_on_groupchat_presence``; the
+        # generic handler also runs for it, and aggregating it here would give
+        # a room the caps/client icon of a random participant.
+        xml = getattr(pres, "xml", None)
+        if xml is not None and xml.find("{%s}x" % NS_MUC_USER) is not None:
+            return
         frm = str(pres["from"])
         bare, _, resource = frm.partition("/")
         ptype = str(pres["type"])
@@ -4759,8 +4765,8 @@ class JabberClient:
         The best online resource wins; resources without a known caps node are
         skipped so a second resource can still provide an icon.
         """
-        if not bare:
-            return ""
+        if not bare or bare in self.groupchats:
+            return ""  # conferences never carry a client icon
         resources = self.get_contact(bare).resources
         candidates = sorted(
             resources.values(),
@@ -4968,6 +4974,7 @@ class JabberClient:
                 "affiliation": affiliation,
                 "real_jid": real_jid,
                 "client": previous_client,
+                "caps_node": _caps_node(pres),
                 "hats": hats,
             }
             if real_jid and (room, nick) not in self._muc_version_probed:

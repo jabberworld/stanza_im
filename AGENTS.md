@@ -332,14 +332,23 @@ is togglable from Preferences → Appearance → «Ростер» via
 `RosterStyle.set_options` gates rendering live, no relayout.
 
 **Client icon (XEP-0115)**: each presence's `<c node=…/>` is captured by
-`_on_presence` (`_caps_node`) into `contact.resources[res]["caps_node"]`;
-`JabberClient.client_icon(bare)` picks the best resource with a known node and
-maps it through `include/clients.py` (`find_client`, longest caps prefix;
-`icon_path`, size fallback) to an icon under `resources/clients/<size>/`.
-`UserItem.client_icon` is drawn by `RosterStyle.paint_user` right after the
-avatar (16px, before the unread badge/mood/activity) and refreshed on
-`presence_changed`/`contact_caps`; the contact tooltip prefixes its client line
-with the same icon (`<img src="{abs path}">`). The data file
+`_on_presence` (`_caps_node`) into `contact.resources[res]["caps_node"]`
+(a MUC occupant presence is skipped there — it would otherwise give the room a
+participant's icon); `JabberClient.client_icon(bare)` picks the best resource
+with a known node and maps it through `include/clients.py` (`find_client`,
+longest caps prefix; `icon_path`, size fallback) to an icon under
+`resources/clients/<size>/`. `UserItem.client_icon` is drawn by
+`RosterStyle.paint_user` right after the avatar (16px, before the unread
+badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`. The
+contact tooltip marks each resource line with the client icon before the
+resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and prefixes the
+«Mood»/«Activity» lines with `pep.mood_icon_path`/`pep.activity_icon_path`.
+The MUC participant sidebar shows the same client icon before the avatar
+(`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
+before the nick; the conference toggles are
+`appearance.muc_show_avatars`/`muc_show_clients` (Preferences → Appearance →
+«Конференции», both `true`; a participant's caps node is captured in
+`_on_groupchat_presence`). The data file
 `resources/clients/clients.txt` (`caps⇥name⇥icon`, both http/https variants)
 is generated from the bundled `index.html` by
 `resources/clients/build_clients.py`. [`tests/test_clients.py`]
@@ -1144,8 +1153,9 @@ markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled.
 
 Preferences use icon navigation and nested tabs. The Appearance page is split
-into «Темы», «Ростер», «Шрифты», «Цвет» and «Разное» («Ростер» toggles the
-roster avatars/activity/mood, see §3; «Разное» holds the media-preview size,
+into «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and «Разное» («Ростер»
+toggles the roster avatars/activity/mood/client, see §3; «Конференции» toggles
+the MUC participant avatars/client icons; «Разное» holds the media-preview size,
 the preview cache TTL/limit and the MUC mention highlight mode). `Apply` applies
 settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Up (empty input) to reply to the last incoming message, Down to cancel an

@@ -96,6 +96,7 @@ check("a presence without caps yields an empty node",
 
 client = JabberClient.__new__(JabberClient)
 client.contacts = {}
+client.groupchats = {}
 contact = client.get_contact("alice@example.com")
 contact.resources["phone"] = {"show": "away", "priority": 5,
                               "caps_node": "urn:unknown"}
@@ -106,6 +107,32 @@ check("client_icon picks the best resource with a known caps node",
           os.path.join("16x16", "psi.png")))
 check("client_icon is empty without a known caps node",
       client.client_icon("bob@example.com") == "")
+
+client.groupchats = {"room@conf.example": object()}
+check("client_icon is empty for conferences",
+      client.client_icon("room@conf.example") == "")
+
+
+# ── MUC presence must not pollute a room's resources ─────────────
+class _FakePres:
+    def __init__(self, xml):
+        self.xml = xml
+
+    def __getitem__(self, key):
+        return {"from": "room@conf.example/nick", "type": "available"}.get(
+            key, "")
+
+
+muc_xml = ET.Element("presence")
+ET.SubElement(muc_xml, "{http://jabber.org/protocol/muc#user}x")
+emitted = []
+guard_client = JabberClient.__new__(JabberClient)
+guard_client.emit = lambda *args: emitted.append(args)
+guard_client.presences = {}
+guard_client.contacts = {}
+guard_client._on_presence(_FakePres(muc_xml))
+check("a MUC occupant presence is ignored by _on_presence",
+      emitted == [] and guard_client.presences == {})
 
 
 # ── static wiring ────────────────────────────────────────────────
@@ -137,6 +164,24 @@ prefs = _read("stanza_im", "ui", "preferences.py")
 check("the preferences roster tab has the clients checkbox",
       'roster_show_clients' in prefs
       and 'prefs_roster_show_clients' in prefs)
+check("the preferences appearance page has the conferences tab",
+      'prefs_appearance_muc' in prefs
+      and '"muc_show_avatars"' in prefs and '"muc_show_clients"' in prefs)
+check("the dead chat mood/music options are removed",
+      '"show_mood"' not in prefs and '"show_music"' not in prefs)
+
+chat_widget = _read("stanza_im", "ui", "chat_widget.py")
+check("MUC participant rows can show client icons",
+      "client_icon_for" in chat_widget and "_show_muc_clients" in chat_widget
+      and "set_muc_participant_options" in chat_widget)
+
+chat_window = _read("stanza_im", "ui", "chat_window.py")
+check("the chat window applies the participant options",
+      "set_muc_participant_options" in chat_window)
+
+check("the main window applies the conference options",
+      "def _apply_conference_options" in mw
+      and "set_muc_participant_options" in mw)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

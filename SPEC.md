@@ -105,9 +105,11 @@ vCard dialogs are opened asynchronously without nested modal event loops.
 `MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
 rebuilds the open window in place (`update_card`) rather than opening another.
 Appearance settings support independent ordinary-chat and conference theme
-variants, arranged in the «Темы», «Ростер», «Шрифты», «Цвет» and «Разное» tabs
-(«Разное» holds the media-preview size, the preview cache TTL/limit and the MUC
-mention highlight mode; «Ростер» toggles avatars/activity/mood in the roster).
+variants, arranged in the «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and
+«Разное» tabs («Разное» holds the media-preview size, the preview cache
+TTL/limit and the MUC mention highlight mode; «Ростер» toggles
+avatars/activity/mood/client in the roster; «Конференции» toggles the MUC
+participant avatars/client icons).
 Emoticon sets are discovered from cfg files under
 `resources/emoticons`, and the settings dialog previews up to ten images from
 the selected set.
@@ -195,6 +197,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_activity` | `true` | Show/hide the PEP activity icon (XEP-0108) in roster rows, drawn from the same icon set as the mood/activity picker (`pep.activity_icon_path`). |
 | `appearance.roster_show_mood` | `true` | Show/hide the PEP mood icon (XEP-0107) in roster rows (`pep.mood_icon_path`). |
 | `appearance.roster_show_clients` | `true` | Show/hide the client icon (XEP-0115 caps node → `include/clients.py` → `resources/clients/<size>/`) in roster rows, drawn right after the avatar (`UserItem.client_icon`). |
+| `appearance.muc_show_avatars` | `true` | Show/hide participant avatars in the MUC participant sidebar (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_participant_options`). |
+| `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
@@ -567,8 +571,10 @@ togglable from Preferences → Appearance → Roster
 (`appearance.roster_show_avatars` / `roster_show_activity` / `roster_show_mood`
 / `roster_show_clients`, all default `true`):
 `MainWindow._apply_roster_options` → `RosterStyle.set_options` gates them live
-without relayout. The contact tooltip prefixes the client line with the same
-icon (`client_icon_for`).
+without relayout. The contact tooltip marks each resource line with the client
+icon before the resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and
+prefixes its «Mood»/«Activity» lines with `pep.mood_icon_path` /
+`pep.activity_icon_path`.
 
 Dynamic height: 32px without status message, 52px with.
 
@@ -752,9 +758,13 @@ Single conversation tab. Layout:
   single click selects a row (highlight only), a double-click opens the private
   chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,
   falling back to `room/nick`), and a left click on empty list space clears the
-  selection (`_ParticipantList.mousePressEvent`). Right-click opens the
-  participant context menu; when the participant's real JID is visible it also
-  offers «Пригласить в» (XEP-0249, §7.3).
+  selection (`_ParticipantList.mousePressEvent`). Each row shows the occupant's
+  status icon and nick on the left, then (when enabled) the occupant's client
+  icon (XEP-0115 caps) and the avatar on the right
+  (`appearance.muc_show_clients`/`muc_show_avatars`); the participant tooltip
+  prefixes the nick with the client icon. Right-click
+  opens the participant context menu; when the participant's real JID is
+  visible it also offers «Пригласить в» (XEP-0249, §7.3).
 
 ### 9.1 Slash Commands
 
