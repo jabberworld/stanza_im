@@ -379,6 +379,11 @@ optimistic until the probe returns):
   slixmpp's `xep_0016` writes `presence-in` for `presence-out`).
 - «Заблокированные контакты» (`ui/blocked_contacts_dialog.py`) — the XEP-0191
   blocklist: list/add (roster completion or an arbitrary JID)/unblock/report.
+  The list is read with `get_blocked()` and its items parsed from the raw XML
+  (`_block_items`), so it works with slixmpp 1.10 (`get_blocked`, set of JIDs)
+  and 1.17 (iterable items); the same parsing handles the `blocked`/`unblocked`
+  pushes. Reports are offered whenever blocking is supported, because servers
+  that process reports often do not announce `urn:xmpp:reporting:1`.
 
 The roster contact context menu (non-conference, between «Повторить запрос
 авторизации» and «Очистить историю») offers a checkable

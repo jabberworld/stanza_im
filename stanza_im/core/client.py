@@ -598,6 +598,20 @@ def _stream_feature_namespaces(features) -> set[str]:
         return set()
 
 
+def _block_items(xml) -> set[str]:
+    """JIDs of the ``<item/>`` children of a ``urn:xmpp:blocking`` element.
+
+    Works with the XML of a ``<blocklist>`` reply and of the ``<block>`` /
+    ``<unblock>`` pushes alike; slixmpp changed the stanza's ``items`` shape
+    between versions (a set of JIDs in 1.10, iterable items in 1.17), so the
+    XML is read directly.
+    """
+    if xml is None:
+        return set()
+    return {str(el.get("jid") or "") for el in
+            xml.iter("{%s}item" % NS_BLOCKING) if el.get("jid")}
+
+
 def _upload_max_file_size(xml) -> int:
     """Return the XEP-0363 ``max-file-size`` from a disco#info form, else 0."""
     if xml is None:
@@ -868,8 +882,11 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0153")  # vCard-Based Avatars
         self.xmpp.register_plugin("xep_0084")  # User Avatar (PEP)
         self.xmpp.register_plugin("xep_0065")  # SOCKS5 Bytestreams (file proxy)
-        self.xmpp.register_plugin("xep_0191")  # Blocking Command
-        self.xmpp.register_plugin("xep_0377")  # Blocking Command Reports
+        for _block_plugin in ("xep_0191", "xep_0377"):  # blocking + reports
+            try:
+                self.xmpp.register_plugin(_block_plugin)
+            except Exception:
+                logger.warning("Could not register %s", _block_plugin)
         if self.stream_management:
             self.xmpp.register_plugin("xep_0198")  # Stream Management
         if self.csi:
@@ -2482,8 +2499,13 @@ class JabberClient:
         return self._server_feature(NS_BLOCKING)
 
     def supports_reports(self) -> bool:
-        """XEP-0377 reports (`urn:xmpp:reporting:1`)."""
-        return self._server_feature(NS_REPORTING)
+        """XEP-0377 reports.
+
+        Offered whenever blocking works: a report is a block with a nested
+        ``<report/>``, and servers that support reports often do not announce
+        ``urn:xmpp:reporting:1``.
+        """
+        return self.supports_blocking()
 
     async def refresh_server_features(self) -> None:
         """Cache the account domain's disco#info features for the gates."""
@@ -2526,12 +2548,16 @@ class JabberClient:
         await self._privacy_iq(privacy.active_query(name), "set")
 
     async def get_blocked_jids(self) -> set[str]:
-        """XEP-0191: fetch the blocklist and cache it."""
+        """XEP-0191: fetch the blocklist and cache it.
+
+        Uses ``get_blocked()`` and reads the items from the XML, because
+        ``get_blocked_jids()`` only exists in newer slixmpp.
+        """
         if not self.supports_blocking():
             return set()
         try:
-            blocked = {str(jid) for jid
-                       in await self.xmpp["xep_0191"].get_blocked_jids()}
+            result = await self.xmpp["xep_0191"].get_blocked()
+            blocked = _block_items(getattr(result, "xml", None))
         except Exception:
             logger.debug("Blocklist fetch failed", exc_info=True)
             return set(self._blocked)
@@ -2553,8 +2579,8 @@ class JabberClient:
     async def report_contact(self, jid: str, reason: str = "spam",
                              text: str = "") -> None:
         """XEP-0377: block *jid* while attaching a spam/abuse report."""
-        plugin = self.xmpp["xep_0377"]
-        report_reason = plugin.ABUSE if reason == "abuse" else plugin.SPAM
+        report_reason = ("urn:xmpp:reporting:abuse" if reason == "abuse"
+                         else "urn:xmpp:reporting:spam")
         iq = self.xmpp.Iq()
         iq["type"] = "set"
         block = ET.SubElement(iq.xml, "{%s}block" % NS_BLOCKING)
@@ -2580,12 +2606,10 @@ class JabberClient:
 
     def _apply_block_push(self, iq, tag: str) -> None:
         """XEP-0191 §5: a push carries the full blocklist."""
-        try:
-            items = iq[tag]["items"]
-            self._blocked = {str(item["jid"]) for item in items}
-        except Exception:
-            logger.debug("Could not parse the %s push", tag, exc_info=True)
+        xml = getattr(iq, "xml", None)
+        if xml is None:
             return
+        self._blocked = _block_items(xml)
         self.emit("blocklist_updated", set(self._blocked))
 
     async def _load_blocklist(self) -> None:

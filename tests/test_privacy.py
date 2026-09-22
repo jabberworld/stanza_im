@@ -22,7 +22,7 @@ from PyQt6 import QtWidgets
 from stanza_im.i18n import load as i18n_load
 from stanza_im.core import privacy
 from stanza_im.core.client import (
-    NS_BLOCKING, NS_PRIVACY, NS_REPORTING, JabberClient)
+    NS_BLOCKING, NS_PRIVACY, NS_REPORTING, JabberClient, _block_items)
 
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -96,31 +96,32 @@ check("feature gates are optimistic before the probe",
       and client.supports_reports())
 client._server_features = {NS_PRIVACY, NS_BLOCKING}
 check("feature gates follow the probed features",
-      client.supports_privacy() and client.supports_blocking()
-      and not client.supports_reports())
+      client.supports_privacy() and client.supports_blocking())
+check("reports are offered whenever blocking is supported",
+      client.supports_reports())
+client._server_features = {NS_PRIVACY}
+check("reports follow blocking (unsupported without it)",
+      not client.supports_blocking() and not client.supports_reports())
 
 
 # ── client: blocklist pushes ─────────────────────────────────────
-class _Jid:
-    def __init__(self, value):
-        self._value = value
-
-    def __str__(self):
-        return self._value
-
-
 class _PushIq:
-    def __init__(self, items):
-        self._items = items
+    def __init__(self, jids):
+        self.xml = ET.Element("iq")
+        block = ET.SubElement(self.xml, f"{{{NS_BLOCKING}}}block")
+        for jid in jids:
+            ET.SubElement(block, f"{{{NS_BLOCKING}}}item").set("jid", jid)
 
-    def __getitem__(self, key):
-        return {"items": self._items}
 
+check("_block_items reads the item JIDs from the XML",
+      _block_items(ET.fromstring(
+          '<iq><blocklist xmlns="urn:xmpp:blocking">'
+          '<item jid="a@b"/><item jid="c@d"/></blocklist></iq>'))
+      == {"a@b", "c@d"})
 
 events = []
 client.emit = lambda name, *args: events.append((name, args))
-client._apply_block_push(_PushIq([{"jid": _Jid("a@b")},
-                                  {"jid": _Jid("c@d")}]), "block")
+client._apply_block_push(_PushIq(["a@b", "c@d"]), "block")
 check("a block push replaces the blocklist",
       client._blocked == {"a@b", "c@d"}
       and events[-1] == ("blocklist_updated", ({"a@b", "c@d"},)))
@@ -129,6 +130,11 @@ check("an unblock push clears the blocklist", client._blocked == set())
 
 
 # ── client: block/unblock/report ─────────────────────────────────
+class _Result:
+    def __init__(self, xml):
+        self.xml = xml
+
+
 class _FakeBlocking:
     def __init__(self):
         self.calls = []
@@ -139,10 +145,11 @@ class _FakeBlocking:
     async def unblock(self, jid):
         self.calls.append(("unblock", str(jid)))
 
-
-class _FakeReports:
-    SPAM = "urn:xmpp:reporting:spam"
-    ABUSE = "urn:xmpp:reporting:abuse"
+    async def get_blocked(self):
+        xml = ET.Element("iq")
+        blocklist = ET.SubElement(xml, f"{{{NS_BLOCKING}}}blocklist")
+        ET.SubElement(blocklist, f"{{{NS_BLOCKING}}}item").set("jid", "x@y")
+        return _Result(xml)
 
 
 class _FakeIq:
@@ -162,8 +169,7 @@ class _FakeIq:
 
 class _FakeXmpp:
     def __init__(self):
-        self.plugins = {"xep_0191": _FakeBlocking(),
-                        "xep_0377": _FakeReports()}
+        self.plugins = {"xep_0191": _FakeBlocking()}
         self.sent = []
 
     def __getitem__(self, key):
@@ -176,6 +182,11 @@ class _FakeXmpp:
 
 
 client.xmpp = _FakeXmpp()
+client._blocked = set()
+client._server_features = {NS_BLOCKING}
+check("get_blocked_jids parses the blocklist XML",
+      asyncio.run(client.get_blocked_jids()) == {"x@y"}
+      and client._blocked == {"x@y"})
 client._blocked = set()
 asyncio.run(client.block_contact("a@b"))
 check("block_contact calls XEP-0191 and records the JID",

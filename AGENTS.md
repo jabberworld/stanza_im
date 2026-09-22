@@ -1303,8 +1303,14 @@ text is kept. Returning activity (`eventFilter`) resumes
   (blocked contacts are struck through via `UserItem.blocked` /
   `RosterWidget.set_blocked`) and «Пожаловаться» (`ui/report_dialog.py`,
   `client.report_contact` → XEP-0377 `<block><item><report reason=…><text/>`).
-  `ui/blocked_contacts_dialog.py` lists/adds/removes blocked JIDs; server
-  pushes (`blocked`/`unblocked`) and the local operations emit
+  The blocklist is read with `get_blocked()` and the items parsed from the raw
+  XML (`_block_items`), because `get_blocked_jids()` only exists in newer
+  slixmpp (1.10 ships `get_blocked` and returns a set of JIDs, 1.17 iterable
+  items); the same XML parsing handles the `blocked`/`unblocked` pushes.
+  Reports are offered whenever blocking is supported (`supports_reports()` →
+  `supports_blocking()`), since servers that process reports often do not
+  announce `urn:xmpp:reporting:1`. `ui/blocked_contacts_dialog.py`
+  lists/adds/removes blocked JIDs; server pushes and the local operations emit
   `blocklist_updated`, which refreshes the roster. [`tests/test_privacy.py`]
 - **Client identity / caps branding**: `JabberClient.__init__` adds a named
   disco identity (`client`/`pc`, `name=APP_NAME`) and overrides
