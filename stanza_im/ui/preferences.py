@@ -571,6 +571,19 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(self._check("message_carbons", tr("prefs_message_carbons")))
         form.addRow(self._check("save_status_message", tr("prefs_save_status_message")))
 
+        privacy_row = QtWidgets.QHBoxLayout()
+        self._btn_privacy_lists = QtWidgets.QPushButton(
+            tr("prefs_privacy_lists"), connection)
+        self._btn_privacy_lists.clicked.connect(self._on_privacy_lists)
+        privacy_row.addWidget(self._btn_privacy_lists)
+        self._btn_blocked = QtWidgets.QPushButton(
+            tr("prefs_blocked_contacts"), connection)
+        self._btn_blocked.clicked.connect(self._on_blocked_contacts)
+        privacy_row.addWidget(self._btn_blocked)
+        privacy_row.addStretch(1)
+        form.addRow(privacy_row)
+        self._sync_privacy_buttons()
+
         advanced, advanced_form = self._page()
         resource = self._line("resource")
         resource_mode = self._combo("resource_mode", [
@@ -816,6 +829,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     info = None
         self._set_certificate(info)
         label.setToolTip("\n".join(connection_info_lines(info)))
+        self._sync_privacy_buttons()
 
     def _set_certificate(self, info) -> None:
         """Cache the peer certificate and update the certificate info icon."""
@@ -842,6 +856,35 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _on_connection_info(self, *_args):
         self._refresh_connection_info()
+        self._sync_privacy_buttons()
+
+    def _sync_privacy_buttons(self) -> None:
+        """Enable the privacy entries only when the server supports them."""
+        client = self._client
+        checks = (("_btn_privacy_lists", "supports_privacy"),
+                  ("_btn_blocked", "supports_blocking"))
+        for attr, method in checks:
+            button = getattr(self, attr, None)
+            if button is None:
+                continue
+            supported = bool(client) and callable(getattr(client, method, None))
+            button.setEnabled(supported and getattr(client, method)())
+
+    def _on_privacy_lists(self) -> None:
+        if not self._client:
+            return
+        from stanza_im.ui.privacy_lists_dialog import PrivacyListsDialog
+        dialog = PrivacyListsDialog(self._client, self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
+
+    def _on_blocked_contacts(self) -> None:
+        if not self._client:
+            return
+        from stanza_im.ui.blocked_contacts_dialog import BlockedContactsDialog
+        dialog = BlockedContactsDialog(self._client, self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
 
     def _on_refresh_discovery(self):
         if self._client is None or not hasattr(self._client, "refresh_services"):

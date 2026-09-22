@@ -87,6 +87,16 @@ class RosterWidget(QtWidgets.QWidget):
                 self.update()
                 return
 
+    def set_blocked(self, jid: str, blocked: bool) -> None:
+        """Mark every row of *jid* (all groups) as blocked and repaint."""
+        changed = False
+        for user in self._users:
+            if user.jid == jid and user.blocked != blocked:
+                user.blocked = blocked
+                changed = True
+        if changed:
+            self.update()
+
     def remove_user(self, jid: str) -> None:
         self._users = [u for u in self._users if u.jid != jid]
         self._rebuild_sorted()

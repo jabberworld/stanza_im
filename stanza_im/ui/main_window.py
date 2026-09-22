@@ -259,6 +259,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── XMPP client (created on connect) ─────────────────────
         self._client = None
         self._xml_console = None
+        # XEP-0191: JIDs blocked on the server (roster strikethrough).
+        self._blocked_jids: set[str] = set()
 
         # ── State ────────────────────────────────────────────────
         self._visible = True
@@ -1776,6 +1778,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _connect_client_signals(self):
         c = self._client
         c.on("session_started", self._on_session_started)
+        c.on("blocklist_updated", self._on_blocklist_updated)
         c.on("roster_received", self._on_roster_received)
         c.on("roster_item_added", self._on_roster_item_added)
         c.on("roster_item_removed", self._on_roster_item_removed)
@@ -1980,6 +1983,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 activity=((activity_data.get("sub")
                            or activity_data.get("group")) or ""),
                 unread_count=self._unread_counts.get(jid, 0),
+                blocked=jid in self._blocked_jids,
             )
             self._roster.add_user(user)
         self._request_vcard(jid)
@@ -2948,6 +2952,21 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._client:
                 menu.addAction(self._menu_icon("reload.png"), tr("ctx_resend_auth"),
                                lambda: self._client.resend_subscription(jid))
+            if self._client and self._client.supports_blocking():
+                bare = jid.split("/", 1)[0]
+                blocked = bare in self._blocked_jids
+                block_action = menu.addAction(
+                    self._menu_icon("block.svg"),
+                    tr("ctx_unblock") if blocked else tr("ctx_block"),
+                    lambda checked=False: defer(
+                        lambda: self._on_toggle_block(bare)))
+                block_action.setCheckable(True)
+                block_action.setChecked(blocked)
+                if self._client.supports_reports():
+                    menu.addAction(
+                        self._menu_icon("report.svg"), tr("ctx_report"),
+                        lambda checked=False: defer(
+                            lambda: self._on_report_contact(bare)))
         menu.addSeparator()
         menu.addAction(self._menu_icon("process-stop.png"),
                        tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
@@ -3004,6 +3023,34 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.history_cleared()
+
+    # ── Blocking / reporting (XEP-0191 / XEP-0377) ────────────────
+
+    def _on_blocklist_updated(self, jids) -> None:
+        self._blocked_jids = {str(jid) for jid in jids}
+        known = {user.jid for user in self._roster._users}
+        for jid in known | self._blocked_jids:
+            self._roster.set_blocked(jid, jid in self._blocked_jids)
+
+    def _on_toggle_block(self, jid: str) -> None:
+        if not self._client:
+            return
+        bare = jid.split("/", 1)[0]
+        if bare in self._blocked_jids:
+            self._start_task(self._client.unblock_contact(bare))
+        else:
+            self._start_task(self._client.block_contact(bare))
+
+    def _on_report_contact(self, jid: str) -> None:
+        if not self._client:
+            return
+        from stanza_im.ui.report_dialog import ReportDialog
+        bare = jid.split("/", 1)[0]
+        dialog = ReportDialog(bare, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self._start_task(self._client.report_contact(
+            bare, dialog.reason(), dialog.text()))
 
     # ── History manager ───────────────────────────────────────────
 

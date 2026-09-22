@@ -50,6 +50,7 @@ stanza_im/                      # Python package
 │   ├── unread_state.py          # Persisted per-contact unread counters (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
+│   ├── privacy.py               # XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py       # Server disco/stream capability report (XEP list)
 │   └── memstats.py              # Periodic memory statistics (CLI -m)
 ├── ui/
@@ -79,6 +80,10 @@ stanza_im/                      # Python package
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
 │   ├── connection_info_dialog.py # Live connection details dialog
 │   ├── server_info_dialog.py    # Server capability report (XEP support)
+│   ├── privacy_lists_dialog.py  # XEP-0016 privacy-list manager
+│   ├── privacy_rule_dialog.py   # XEP-0016 rule add/edit dialog
+│   ├── blocked_contacts_dialog.py # XEP-0191 blocklist editor
+│   ├── report_dialog.py         # XEP-0377 spam/abuse report dialog
 │   ├── xml_console.py           # Raw XML console (filtered, coloured)
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
@@ -1281,6 +1286,26 @@ text is kept. Returning activity (`eventFilter`) resumes
   the `#compat`/`#compat-pep` features, XEP-0401 from the ad-hoc commands and
   XEP-0490 only from the account's `urn:xmpp:mds:server-assist:0` (the
   `displayed:0` node is a client PEP feature). [`tests/test_server_features.py`]
+- **Privacy lists & blocking (XEP-0016/0191/0377)**: Preferences → Connection →
+  «Подключение» carries two buttons gated on the account domain's disco
+  (`supports_privacy`/`supports_blocking`, probed by `refresh_server_features`
+  at `session_started`; `_server_feature` stays optimistic until then).
+  «Списки приватности» opens `ui/privacy_lists_dialog.py` — the active-list
+  selector, the list editor (create/rename/delete) and the localized rule list
+  with priority arrows and add/edit/delete/apply. The wire format is built as
+  raw IQs by `core/privacy.py` (`jabber:iq:privacy`) because slixmpp's
+  `xep_0016` writes `presence-in` for `presence-out`; a rule is
+  `jid`/`group`/`subscription`/all × `message`/`iq`/`presence-in`/
+  `presence-out` × `allow`/`deny`, and an item without stanza flags means all
+  (`ui/privacy_rule_dialog.py` + `describe_item`). Blocking uses XEP-0191
+  (`xep_0191`): the roster context menu (between «Повторить запрос авторизации»
+  and «Очистить историю») has a checkable «Заблокировать»/«Разблокировать»
+  (blocked contacts are struck through via `UserItem.blocked` /
+  `RosterWidget.set_blocked`) and «Пожаловаться» (`ui/report_dialog.py`,
+  `client.report_contact` → XEP-0377 `<block><item><report reason=…><text/>`).
+  `ui/blocked_contacts_dialog.py` lists/adds/removes blocked JIDs; server
+  pushes (`blocked`/`unblocked`) and the local operations emit
+  `blocklist_updated`, which refreshes the roster. [`tests/test_privacy.py`]
 - **Client identity / caps branding**: `JabberClient.__init__` adds a named
   disco identity (`client`/`pc`, `name=APP_NAME`) and overrides
   `xep_0115.caps_node` to the human-readable `Stanza IM <VERSION>` (slixmpp's

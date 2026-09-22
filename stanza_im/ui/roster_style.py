@@ -40,6 +40,7 @@ class UserItem:
     activity: str = ""
     tune: str = ""
     location: str = ""
+    blocked: bool = False
     meta_parent_jid: str | None = None
     meta_children: list | None = None
 
@@ -256,9 +257,16 @@ class RosterStyle:
         name_rect = QtCore.QRect(name_x, y + 2, avail_right - name_x, 16)
         painter.setPen(text_color)
         display_name = item.name if item.name else item.jid
+        name_font = painter.font()
+        if getattr(item, "blocked", False):
+            name_font.setStrikeOut(True)
+            painter.setFont(name_font)
         painter.drawText(name_rect,
                          QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
                          display_name)
+        if name_font.strikeOut():
+            name_font.setStrikeOut(False)
+            painter.setFont(name_font)
 
         # Status message (if present): first line only, aligned to the bottom
         # edge of the status icon.
