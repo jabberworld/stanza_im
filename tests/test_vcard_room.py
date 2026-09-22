@@ -141,6 +141,9 @@ class _FakeVCardClient:
     def fetch_pep(self, jid):
         pass
 
+    def subscription(self, bare):
+        return ""
+
 
 saved_client = win._client
 win._client = _FakeVCardClient()

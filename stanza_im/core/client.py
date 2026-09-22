@@ -1921,6 +1921,15 @@ class JabberClient:
             })
         return items
 
+    def subscription(self, bare: str) -> str:
+        """Roster subscription of *bare*: ``none``/``to``/``from``/``both``.
+
+        Returns ``""`` when the JID is not in the roster.
+        """
+        jid = str(bare or "").split("/", 1)[0]
+        item = self.roster.get(jid)
+        return str(item.get("subscription") or "") if item else ""
+
     def get_roster_state(self) -> list[dict]:
         """Return the roster with the full subscription state (roster cache)."""
         items: list[dict] = []

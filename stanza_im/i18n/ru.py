@@ -879,6 +879,7 @@ STRINGS = {
                               "Ctrl+W — закрыть текущую вкладку"),
     # Tooltips
     "tooltip_jid": "JID",
+    "tooltip_subscription": "Подписка",
     "tooltip_resource": "Ресурс",
     "tooltip_client": "Клиент",
     "tooltip_status": "Статус",
@@ -915,6 +916,7 @@ STRINGS = {
     'vcard_field_activity': 'Занятие',
     'vcard_field_tune': 'Сейчас играет',
     'vcard_field_location': 'Местоположение',
+    'vcard_field_subscription': 'Подписка',
     "mood_afraid": 'Испуган',
     "mood_amazed": 'Изумлён',
     "mood_angry": 'Злой',

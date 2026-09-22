@@ -990,7 +990,10 @@ the tray status menu. An `edit.png` button opens
 `status.message`) whose result is sent with presence (`MainWindow._send_presence`).
 Contacts' mood/activity/tune/location are shown in the roster tooltip
 (`_roster_tooltip`) and on the vCard "Status" tab (`mood`/`activity`/`tune`/
-`location` fields, updated live through `_on_contact_pep_updated`).
+`location` fields, updated live through `_on_contact_pep_updated`). Both also
+show the roster subscription state (`client.subscription(bare)` →
+`privacy_sub_none/to/from/both`, the tooltip under the JID and the vCard
+`subscription` field).
 
 **A/V calls & Muji** (`xmpp/jingle_rtp.py`, `xmpp/media.py`,
 `xmpp/muji.py`, `ui/call_window.py`): 1:1 audio/video calls use Jingle RTP
@@ -1029,7 +1032,10 @@ per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
 (XEP-0215 `urn:xmpp:extdisco:2` → the connection settings' STUN/TURN endpoint →
 SRV discovery). The «Звонок» call menu is a submenu in the roster contact
 context menu and an icon-only button in the chat toolbar (both enabled only for
-capable contacts). For a **conference** contact the roster «Звонок» submenu
+capable contacts). Because `set_call_support` is otherwise driven by the
+`contact_caps` event (which never fires again once the caps were resolved
+before the tab opened), `MainWindow._apply_call_support(jid)` re-applies it from
+the current caps whenever a 1:1 tab opens. For a **conference** contact the roster «Звонок» submenu
 instead starts a Muji call (`_join_muji`, enabled only when
 `client.rtp_calls.available`), while the 1:1 Jingle call is offered for
 non-conference contacts. The toolbar button on a **MUC** tab instead starts a Muji

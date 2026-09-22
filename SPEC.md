@@ -573,9 +573,11 @@ togglable from Preferences → Appearance → Roster
 / `roster_show_clients`, all default `true`):
 `MainWindow._apply_roster_options` → `RosterStyle.set_options` gates them live
 without relayout. The contact tooltip marks each resource line with the client
-icon before the resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and
+icon before the resource name (`<img …>&nbsp;<b>resource</b> — Client: …`),
 prefixes its «Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
-`pep.activity_icon_path` / `pep.tune_icon_path`.
+`pep.activity_icon_path` / `pep.tune_icon_path`, and shows the roster
+subscription (`client.subscription(bare)` → `privacy_sub_*`) under the JID. The
+vCard "Status" tab carries the same `subscription` field.
 
 Dynamic height: 32px without status message, 52px with.
 
@@ -1766,7 +1768,10 @@ client.leave_muji(room)
 - Capability gating mirrors Conversations: `client.supports_calls(bare, video)`
   checks the peer's XEP-0115 caps (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 +
   rtp:audio [+ rtp:video]`). The roster contact context menu and the chat
-  toolbar show a "Call → Audio/Video" menu enabled only for capable contacts.
+  toolbar show a "Call → Audio/Video" menu enabled only for capable contacts;
+  since `set_call_support` otherwise depends on the `contact_caps` event,
+  `MainWindow._apply_call_support(jid)` re-applies it from the current caps
+  whenever a 1:1 tab opens.
 - STUN/TURN: `client.ice_servers()` merges XEP-0215 `urn:xmpp:extdisco:2`
   services (with credentials) with `connection.stun_turn_*` and SRV discovery.
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;

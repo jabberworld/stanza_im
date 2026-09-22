@@ -1367,6 +1367,10 @@ class MainWindow(QtWidgets.QMainWindow):
         name = self._roster_name(jid) or jid.split("@", 1)[0]
         lines = [f"<b>{escape_html(name)}</b>",
                  f"{tr('tooltip_jid')}: {escape_html(jid)}"]
+        sub = self._client.subscription(jid)
+        if sub in ("none", "to", "from", "both"):
+            lines.append(f"{tr('tooltip_subscription')}: "
+                         + escape_html(tr(f"privacy_sub_{sub}")))
         resources = sorted(
             contact.resources.items(),
             key=lambda item: (-item[1].get("priority", 0),
@@ -2127,6 +2131,9 @@ class MainWindow(QtWidgets.QMainWindow):
             status["presence"] = getattr(contact, "show", "")
             status["status_message"] = getattr(contact, "status", "")
             status["resource"] = jid.split("/", 1)[1] if "/" in jid else ""
+            sub = self._client.subscription(bare)
+            if sub in ("none", "to", "from", "both"):
+                status["subscription"] = tr(f"privacy_sub_{sub}")
         for room, users in self._muc_users.items():
             for nick, info in users.items():
                 if (info.get("real_jid", "") == jid
@@ -2260,6 +2267,23 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.debug("CALL caps %s: audio=%s video=%s", bare, audio, video)
         self._chat_window.set_call_support(bare, audio, video)
         self._roster.set_client_icon(bare, self._client.client_icon(bare))
+
+    def _apply_call_support(self, jid: str) -> None:
+        """Apply a 1:1 tab's call support from the already-resolved caps.
+
+        ``set_call_support`` is otherwise driven by the ``contact_caps`` event,
+        which never fires again once the caps were resolved before the tab
+        opened — the button would stay disabled although the roster menu offers
+        the call.
+        """
+        if not self._client:
+            return
+        bare = jid.split("/", 1)[0]
+        if bare in self._conference_roster or bare in self._muc_self_nicks:
+            return
+        self._chat_window.set_call_support(
+            jid, self._client.supports_calls(bare),
+            self._client.supports_calls(bare, video=True))
 
     def _on_call_incoming(self, sid: str, peer: str, kind: str) -> None:
         if not self._client:
@@ -2865,6 +2889,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)
+        self._apply_call_support(jid)
         chat_show = next((user.status for user in self._roster._users
                           if user.jid == jid), None)
         self._chat_window.set_contact_status(jid, chat_show)
@@ -3000,6 +3025,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 menu.addAction(self._menu_icon("reload.png"), tr("ctx_resend_auth"),
                                lambda: self._client.resend_subscription(jid))
             if getattr(self._client, "supports_blocking", lambda: False)():
+                menu.addSeparator()
                 bare = jid.split("/", 1)[0]
                 blocked = bare in self._blocked_jids
                 block_action = menu.addAction(
@@ -3357,6 +3383,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if not self._chat_window.has_chat(bare_jid):
             self._chat_window.open_chat(bare_jid, sender_name, focus=False)
+            self._apply_call_support(bare_jid)
 
         chat = self._chat_window.get_chat(bare_jid)
         if chat:
@@ -3439,6 +3466,7 @@ class MainWindow(QtWidgets.QMainWindow):
             target = f"{room}/{nick}"
         self._remember_contact(target, name=nick, is_conference=True)
         chat = self._chat_window.open_chat(target, nick)
+        self._apply_call_support(target)
         chat.add_message(sender=nick, body=body,
                          timestamp=ts or _current_timestamp(), direction="incoming",
                          unstyled=unstyled,
@@ -4261,6 +4289,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
         chat = self._chat_window.open_chat(target, nick)
+        self._apply_call_support(target)
         if not chat._history:
             self._load_history(target)
 

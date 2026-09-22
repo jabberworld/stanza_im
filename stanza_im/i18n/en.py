@@ -878,6 +878,7 @@ STRINGS = {
                               "Ctrl+W — close current tab"),
     # Tooltips
     "tooltip_jid": "JID",
+    "tooltip_subscription": "Subscription",
     "tooltip_resource": "Resource",
     "tooltip_client": "Client",
     "tooltip_status": "Status",
@@ -914,6 +915,7 @@ STRINGS = {
     'vcard_field_activity': 'Activity',
     'vcard_field_tune': 'Now playing',
     'vcard_field_location': 'Location',
+    'vcard_field_subscription': 'Subscription',
     "mood_afraid": 'afraid',
     "mood_amazed": 'amazed',
     "mood_angry": 'angry',

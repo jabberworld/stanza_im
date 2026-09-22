@@ -112,6 +112,13 @@ client.groupchats = {"room@conf.example": object()}
 check("client_icon is empty for conferences",
       client.client_icon("room@conf.example") == "")
 
+client.roster = {"alice@example.com": {"subscription": "to"}}
+check("the roster subscription is exposed",
+      client.subscription("alice@example.com") == "to"
+      and client.subscription("alice@example.com/phone") == "to")
+check("an unknown JID has no subscription",
+      client.subscription("bob@example.com") == "")
+
 
 # ── MUC presence must not pollute a room's resources ─────────────
 class _FakePres:
@@ -209,6 +216,15 @@ check("the MUC sidebar width is persisted",
       and "set_muc_participant_width" in chat_window
       and "participant_width_changed" in chat_widget
       and "participant_width_changed" in mw)
+check("the roster tooltip and vCard show the subscription",
+      "tooltip_subscription" in mw
+      and '"subscription"' in _read("stanza_im", "ui", "vcard_dialog.py")
+      and "def subscription" in _read("stanza_im", "core", "client.py"))
+check("a 1:1 chat applies the peer's call support on open",
+      "def _apply_call_support" in mw and "_apply_call_support(jid)" in mw)
+check("the block/report menu section is separated",
+      'supports_blocking", lambda: False)():\n                menu.addSeparator()'
+      in mw)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
