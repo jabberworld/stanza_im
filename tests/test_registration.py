@@ -430,6 +430,12 @@ check("registration fits the dialog to the form content",
       "QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))"
       in reg_src)
 
+service_src = _read("stanza_im", "ui", "registration_dialog.py")
+check("the service registration dialog re-fits when shown",
+      "def showEvent" in service_src
+      and "QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))"
+      in service_src)
+
 form_src = _read("stanza_im", "ui", "data_form_widget.py")
 check("data forms render read-only URLs as links only",
       "_link_fields" in form_src and "def _link_label" in form_src

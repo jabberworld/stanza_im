@@ -254,9 +254,17 @@ bob_widget._set_media_pixmap(bob_img, base64.b64decode(_PNG_B64))
 check("setting a pixmap emits media_ready", ready == [True])
 
 fit_dlg = QtWidgets.QDialog()
-QtWidgets.QVBoxLayout(fit_dlg).addWidget(DataFormWidget(bob_form_parsed))
+fit_form = DataFormWidget(bob_form_parsed)
+fit_scroll = QtWidgets.QScrollArea()
+fit_scroll.setWidgetResizable(True)
+fit_scroll.setWidget(fit_form)
+QtWidgets.QVBoxLayout(fit_dlg).addWidget(fit_scroll)
+fit_dlg._form_scroll = fit_scroll
 fit_dialog_to_content(fit_dlg)
 check("fit_dialog_to_content runs offscreen", fit_dlg.width() > 0)
+check("the fitted dialog covers the whole form (no scrolling needed)",
+      fit_dlg.width() >= fit_form.sizeHint().width()
+      and fit_dlg.height() >= fit_form.sizeHint().height())
 
 
 # 8. static wiring ----------------------------------------------------------

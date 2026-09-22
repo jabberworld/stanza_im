@@ -87,6 +87,10 @@ class RegistrationDialog(QtWidgets.QDialog):
         self._btn_remove.setEnabled(self._registered)
         QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))
+
     def _on_submit(self) -> None:
         asyncio.get_event_loop().create_task(self._submit())
 

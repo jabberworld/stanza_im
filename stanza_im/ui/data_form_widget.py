@@ -118,25 +118,28 @@ def fit_dialog_to_content(dialog: QtWidgets.QDialog) -> None:
     """Grow *dialog* to fit its content, clamped to the available screen.
 
     ``QScrollArea`` caches the inner widget's size hint, so ``adjustSize``
-    would size the dialog to a stale value; the required size is computed
-    from the live inner widget (``dialog._form_scroll``) instead.  If the
-    content is larger than the screen the dialog stays clamped and the
-    scroll area provides the scrolling.
+    would size the dialog to a stale value.  The full content size is
+    reserved on the scroll area for the duration of the ``adjustSize`` call
+    (so the measurement never depends on the current viewport or on whether
+    the dialog has been laid out yet), then released.  If the content is
+    larger than the screen the dialog stays clamped and the scroll area
+    provides the scrolling.
     """
     layout = dialog.layout()
     if layout is not None:
         layout.activate()
     scroll = getattr(dialog, "_form_scroll", None)
     inner = scroll.widget() if scroll is not None else None
-    if scroll is not None and inner is not None and scroll.viewport().width() > 0:
-        extra_w = dialog.width() - scroll.viewport().width()
-        extra_h = dialog.height() - scroll.viewport().height()
-        for _ in range(2):
-            hint = inner.sizeHint()
-            dialog.resize(max(dialog.width(), hint.width() + extra_w),
-                          max(dialog.height(), hint.height() + extra_h))
-            if layout is not None:
-                layout.activate()
+    if scroll is not None and inner is not None:
+        hint = inner.sizeHint()
+        frame = 2 * scroll.frameWidth()
+        scroll.setMinimumSize(hint.width() + frame, hint.height() + frame)
+        if layout is not None:
+            layout.activate()
+        dialog.adjustSize()
+        scroll.setMinimumSize(0, 0)
+        if layout is not None:
+            layout.activate()
     else:
         dialog.adjustSize()
     screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
