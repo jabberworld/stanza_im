@@ -621,6 +621,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.conference_requested.connect(self._on_service_conference)
         dlg.vcard_requested.connect(self._show_profile)
         dlg.servers_updated.connect(self._on_service_servers)
+        dlg.xmpp_uri_requested.connect(self._on_xmpp_uri)
         dlg.open()
 
     def _on_service_servers(self, servers: list[str]):

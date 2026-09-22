@@ -57,6 +57,8 @@ NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
 NS_ROSTERX = "http://jabber.org/protocol/rosterx"  # XEP-0144 Roster Item Exchange
 NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
+NS_STATS = "http://jabber.org/protocol/stats"  # XEP-0039 Statistics Gathering
+NS_LAST = "jabber:iq:last"                # XEP-0012 Last Activity (uptime)
 NS_RETRACT = "urn:xmpp:message-retract:1"   # XEP-0424 Message Retraction
 NS_RETRACT_LEGACY = "urn:xmpp:message-retract:0"
 NS_MODERATE = "urn:xmpp:message-moderate:1"  # XEP-0425 Moderated Message Retraction
@@ -2470,6 +2472,67 @@ class JabberClient:
         except Exception:
             logger.debug("Software version unavailable for %s", jid)
         return info
+
+    async def get_server_stats(self, jid: str) -> list[dict]:
+        """XEP-0039 statistics of *jid*: ``[{name, units, value}]``.
+
+        Asks the entity which statistics it supports and then requests their
+        values in one query.  Returns ``[]`` when the entity does not answer.
+        """
+        names = await self._server_stat_names(jid)
+        if not names:
+            return []
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        query = ET.SubElement(iq.xml, "{%s}query" % NS_STATS)
+        for name in names:
+            ET.SubElement(query, "{%s}stat" % NS_STATS).set("name", name)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception:
+            logger.debug("Statistics query failed for %s", jid, exc_info=True)
+            return []
+        return [{"name": str(el.get("name") or ""),
+                 "units": str(el.get("units") or ""),
+                 "value": str(el.get("value") or "")}
+                for el in result.xml.iter("{%s}stat" % NS_STATS)
+                if el.get("name")]
+
+    async def _server_stat_names(self, jid: str) -> list[str]:
+        """The statistics names *jid* advertises (XEP-0039)."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        ET.SubElement(iq.xml, "{%s}query" % NS_STATS)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception:
+            logger.debug("Statistics list failed for %s", jid, exc_info=True)
+            return []
+        return [str(el.get("name") or "") for el in
+                result.xml.iter("{%s}stat" % NS_STATS) if el.get("name")]
+
+    async def get_server_uptime(self, jid: str) -> int | None:
+        """XEP-0012: the entity's uptime in seconds (``None`` if unknown)."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        ET.SubElement(iq.xml, "{%s}query" % NS_LAST)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception:
+            logger.debug("Last-activity query failed for %s", jid,
+                         exc_info=True)
+            return None
+        for el in result.xml.iter("{%s}query" % NS_LAST):
+            seconds = el.get("seconds")
+            if seconds is not None:
+                try:
+                    return int(seconds)
+                except (TypeError, ValueError):
+                    return None
+        return None
 
     async def get_commands_list(self, jid: str) -> list[dict]:
         """Return the XEP-0050 ad-hoc command list of a service."""

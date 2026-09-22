@@ -57,6 +57,7 @@ stanza_im/
 │   ├── muc_config_dialog.py — XEP-0045 room management (affiliations + config)
 │   ├── hats_dialog.py       — XEP-0317 hats tab + create/assign/unassign dialogs
 │   ├── service_browser.py   — XEP-0030 service discovery browser
+│   ├── service_info_dialog.py — service info (version/stats/caps/contacts)
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── history_manager.py   — Per-contact history browser
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
@@ -399,6 +400,26 @@ spam/abuse reason + optional comment → `client.report_contact`, which sends a
 XEP-0377 `<block><item><report reason=…><text/></report></item></block>` and
 therefore also blocks the JID). Server pushes (`blocked`/`unblocked`) and the
 local operations emit `blocklist_updated`, refreshing the roster.
+
+### 5.6 Service Browser Info Dialog (`ui/service_browser.py`, `ui/service_info_dialog.py`)
+
+The service browser's server-load button is «Обзор»; an `info.svg` tool button
+next to it opens `ServiceInfoDialog` for the selected tree node (or the combo
+server when nothing is selected), non-modally. It has three tabs and one
+«Копировать» button that copies the active tab:
+
+- «Информация» — «Версия сервера» (XEP-0092 `get_entity_version`),
+  «Статистика» (XEP-0039: `client.get_server_stats` first asks which statistics
+  are supported, then requests their values) and «Аптайм» (XEP-0012
+  `client.get_server_uptime`, `jabber:iq:last`); each block is queried only
+  when the service announces the matching feature, otherwise «не
+  поддерживается».
+- «Возможности» — the announced `disco#info` features mapped by
+  `server_features.describe_features` to `XEP-XXXX: Name` (a curated exact +
+  prefix map), unknown namespaces shown verbatim.
+- «Контакты» — the XEP-0157 contact addresses (like the server info dialog);
+  `xmpp:` links are forwarded through `ServiceBrowserDialog.xmpp_uri_requested`
+  → `MainWindow._on_xmpp_uri`.
 
 ## 6. Login Form (`ui/login_widget.py`)
 

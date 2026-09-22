@@ -77,6 +77,7 @@ stanza_im/                      # Python package
 │   ├── registration_result_dialog.py   # Created-account summary (apply/copy)
 │   ├── history_manager.py       # Per-contact history browser
 │   ├── service_browser.py       # XEP-0030 service discovery browser
+│   ├── service_info_dialog.py   # Service info (version/stats/caps/contacts)
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
 │   ├── connection_info_dialog.py # Live connection details dialog
 │   ├── server_info_dialog.py    # Server capability report (XEP support)
@@ -252,7 +253,16 @@ and runs the full join flow (server persistence, bookmark support).
 `MainWindow._join_muc(..., server=…)` accepts the room localpart and server
 separately and assembles `room@server` when the room carries no `@` — both
 dialog callers pass `data["server"]`, so a join never sends a bare localpart
-or a `remote-server-not-found` disco to the room name alone.
+or a `remote-server-not-found` disco to the room name alone. The server-load
+button is «Обзор» (`service_browse_action`); next to it an `info.svg` tool
+button opens `ui/service_info_dialog.ServiceInfoDialog` for the selected node
+(or the combo server): tabs «Информация» (XEP-0092 version, XEP-0039
+statistics via `client.get_server_stats`, XEP-0012 uptime via
+`client.get_server_uptime`, each gated on the announced feature),
+«Возможности» (`describe_features` maps the announced namespaces to
+`XEP-XXXX: Name`) and «Контакты» (XEP-0157, `xmpp:` links forwarded through
+`ServiceBrowserDialog.xmpp_uri_requested` → `MainWindow._on_xmpp_uri`); one
+«Копировать» button copies the active tab. [`tests/test_service_browser.py`]
 Chat avatar `<img>` elements carry `class="avatar"`; `ChatView.update_sender_avatar`
 updates only `img.avatar`, never emoticon images in the same message.
 `HistoryManagerDialog` (opened from the roster contact context menu and the

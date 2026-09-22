@@ -72,6 +72,7 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
     conference_requested = QtCore.pyqtSignal(str)
     vcard_requested = QtCore.pyqtSignal(str)
     servers_updated = QtCore.pyqtSignal(list)
+    xmpp_uri_requested = QtCore.pyqtSignal(str)
 
     def __init__(self, client, servers: list[str], parent=None):
         super().__init__(parent)
@@ -94,8 +95,15 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         self._server = QtWidgets.QComboBox(); self._server.setEditable(True)
         self._server.addItems(self._server_values)
         top.addWidget(self._server, 1)
-        ok = QtWidgets.QPushButton(tr("dialog_ok")); ok.clicked.connect(self._browse)
+        ok = QtWidgets.QPushButton(tr("service_browse_action"))
+        ok.clicked.connect(self._browse)
         top.addWidget(ok)
+        self._info_btn = QtWidgets.QToolButton()
+        self._info_btn.setIcon(self._icon("info.svg"))
+        self._info_btn.setToolTip(tr("service_info_tooltip"))
+        self._info_btn.setAutoRaise(True)
+        self._info_btn.clicked.connect(self._open_info)
+        top.addWidget(self._info_btn)
         layout.addLayout(top)
         self._tree = QtWidgets.QTreeWidget()
         self._tree.setHeaderLabels([tr("service_name"), tr("service_jid")])
@@ -361,6 +369,21 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         server = self._server.currentText().strip()
         if server:
             asyncio.get_event_loop().create_task(self._load(server))
+
+    def _open_info(self) -> None:
+        """Show the info dialog for the selected node or the server."""
+        data = self._current_data()
+        if data and data.get("jid"):
+            jid, node = data["jid"], data.get("node", "")
+        else:
+            jid, node = self._server.currentText().strip(), ""
+        if not jid:
+            return
+        from stanza_im.ui.service_info_dialog import ServiceInfoDialog
+        dialog = ServiceInfoDialog(self._client, jid, node, self)
+        dialog.contact_uri_clicked.connect(self.xmpp_uri_requested.emit)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.show()
 
     def _on_auto_toggled(self, checked: bool) -> None:
         if not checked:
