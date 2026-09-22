@@ -1009,6 +1009,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                                        tr("prefs_roster_show_activity")))
         roster_form.addRow(self._check("roster_show_mood",
                                        tr("prefs_roster_show_mood")))
+        roster_form.addRow(self._check("roster_show_clients",
+                                       tr("prefs_roster_show_clients")))
 
         fonts, font_form = self._page()
         font_form.addRow(tr("prefs_zoom"), self._zoom_control("text_scale"))
@@ -1337,6 +1339,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "roster_show_activity": getattr(
                 appearance, "roster_show_activity", True),
             "roster_show_mood": getattr(appearance, "roster_show_mood", True),
+            "roster_show_clients": getattr(
+                appearance, "roster_show_clients", True),
             "file_auto_accept": bool(getattr(files, "auto_accept", False)),
             "file_download_notifications": bool(
                 getattr(files, "download_notifications", True)),
@@ -1434,7 +1438,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",
                     "roster_show_avatars", "roster_show_activity",
-                    "roster_show_mood"):
+                    "roster_show_mood", "roster_show_clients"):
             cfg.appearance[key] = self._value(key)
         if not hasattr(cfg, "files"):
             cfg.set("files", {"auto_accept": False,

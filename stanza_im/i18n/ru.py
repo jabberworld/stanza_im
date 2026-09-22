@@ -825,6 +825,7 @@ STRINGS = {
     "prefs_roster_show_avatars": "Показывать аватары",
     "prefs_roster_show_activity": "Показывать активность",
     "prefs_roster_show_mood": "Показывать настроение",
+    "prefs_roster_show_clients": "Показывать клиенты",
     "prefs_message_styling": "Форматировать текст сообщений (XEP-0393)",
     "prefs_media_preview": "Предпросмотр:",
     "prefs_interface_mode": "Расположение окон:",

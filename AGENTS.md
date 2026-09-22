@@ -104,6 +104,7 @@ stanza_im/                      # Python package
 │   ├── geo.py                   # RFC 5870 geo: URIs, Mercator math, track, tile cache
 │   ├── xmpp_uri.py              # XEP-0147 xmpp: URI parse/build (RFC 5122)
 │   ├── hats.py                  # XEP-0317 Hats + XEP-0392 HSLuv colour generation
+│   ├── clients.py               # XEP-0115 caps node → client name/icon mapping
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -324,11 +325,24 @@ and activity (XEP-0108) icons, drawn at 16px between the name and the unread
 badge/avatar from the same icon set as the bottom-bar mood/activity picker
 (`pep.mood_icon_path`/`pep.activity_icon_path`). `UserItem.mood`/`activity` are
 seeded by `MainWindow._add_roster_item` from `client.pep_data` and kept live by
-`MainWindow._on_contact_pep_updated`. Each element (avatar/activity/mood) is
-togglable from Preferences → Appearance → «Ростер» via
-`appearance.roster_show_avatars`/`roster_show_activity`/`roster_show_mood`
-(default all `true`): `MainWindow._apply_roster_options` → `RosterStyle.set_options`
-gates rendering live, no relayout.
+`MainWindow._on_contact_pep_updated`. Each element (avatar/activity/mood/client)
+is togglable from Preferences → Appearance → «Ростер» via
+`appearance.roster_show_avatars`/`roster_show_activity`/`roster_show_mood`/
+`roster_show_clients` (default all `true`): `MainWindow._apply_roster_options` →
+`RosterStyle.set_options` gates rendering live, no relayout.
+
+**Client icon (XEP-0115)**: each presence's `<c node=…/>` is captured by
+`_on_presence` (`_caps_node`) into `contact.resources[res]["caps_node"]`;
+`JabberClient.client_icon(bare)` picks the best resource with a known node and
+maps it through `include/clients.py` (`find_client`, longest caps prefix;
+`icon_path`, size fallback) to an icon under `resources/clients/<size>/`.
+`UserItem.client_icon` is drawn by `RosterStyle.paint_user` right after the
+avatar (16px, before the unread badge/mood/activity) and refreshed on
+`presence_changed`/`contact_caps`; the contact tooltip prefixes its client line
+with the same icon (`<img src="{abs path}">`). The data file
+`resources/clients/clients.txt` (`caps⇥name⇥icon`, both http/https variants)
+is generated from the bundled `index.html` by
+`resources/clients/build_clients.py`. [`tests/test_clients.py`]
 
 ### 4. Chat Rendering via QWebEngineView (`chat_view.py`)
 

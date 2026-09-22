@@ -41,6 +41,7 @@ class UserItem:
     tune: str = ""
     location: str = ""
     blocked: bool = False
+    client_icon: str = ""
     meta_parent_jid: str | None = None
     meta_children: list | None = None
 
@@ -68,26 +69,30 @@ class RosterStyle:
     STATUS_ICON_DRAW = 24        # rendered status icon size (source 32x32)
     AVATAR_SIZE = 24
     MOOD_ACTIVITY_SIZE = 16
+    CLIENT_ICON_SIZE = 16
     MARGIN_LEFT = 6
     STATUS_MSG_MAX_WIDTH = 180
 
     def __init__(self, bg_color: str = "", group_bg_color: str = "",
                  show_avatars: bool = True, show_activity: bool = True,
-                 show_mood: bool = True):
+                 show_mood: bool = True, show_clients: bool = True):
         self._bg_color: QtGui.QColor | None = None
         self._group_bg_color: QtGui.QColor | None = None
         self._show_avatars = bool(show_avatars)
         self._show_activity = bool(show_activity)
         self._show_mood = bool(show_mood)
+        self._show_clients = bool(show_clients)
         self.set_colors(bg_color, group_bg_color)
 
     def set_options(self, show_avatars: bool = True,
-                    show_activity: bool = True, show_mood: bool = True) -> None:
-        """Configure which roster elements are rendered:
-        vCard avatar, PEP activity and mood icons."""
+                    show_activity: bool = True, show_mood: bool = True,
+                    show_clients: bool = True) -> None:
+        """Configure which roster elements are rendered: vCard avatar, PEP
+        activity and mood icons, and the client (XEP-0115 caps) icon."""
         self._show_avatars = bool(show_avatars)
         self._show_activity = bool(show_activity)
         self._show_mood = bool(show_mood)
+        self._show_clients = bool(show_clients)
 
     @staticmethod
     def _parse(value) -> QtGui.QColor | None:
@@ -218,6 +223,19 @@ class RosterStyle:
                 ay = y + (rect.height() - self.AVATAR_SIZE) // 2
                 painter.drawPixmap(ax, ay, scaled)
                 avail_right -= self.AVATAR_SIZE + 6
+
+        # Client (XEP-0115 caps) icon, between the avatar and the other icons.
+        if self._show_clients and item.client_icon and icons:
+            cpix = icons.get(item.client_icon)
+            if not cpix.isNull():
+                scaled = cpix.scaled(
+                    self.CLIENT_ICON_SIZE, self.CLIENT_ICON_SIZE,
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation)
+                cx = avail_right - self.CLIENT_ICON_SIZE
+                cy = y + (rect.height() - self.CLIENT_ICON_SIZE) // 2
+                painter.drawPixmap(cx, cy, scaled)
+                avail_right -= self.CLIENT_ICON_SIZE + 4
 
         if item.unread_count > 0:
             badge_text = str(item.unread_count)

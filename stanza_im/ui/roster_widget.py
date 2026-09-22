@@ -97,6 +97,16 @@ class RosterWidget(QtWidgets.QWidget):
         if changed:
             self.update()
 
+    def set_client_icon(self, jid: str, path: str) -> None:
+        """Set the client (caps) icon on every row of *jid* and repaint."""
+        changed = False
+        for user in self._users:
+            if user.jid == jid and user.client_icon != path:
+                user.client_icon = path
+                changed = True
+        if changed:
+            self.update()
+
     def remove_user(self, jid: str) -> None:
         self._users = [u for u in self._users if u.jid != jid]
         self._rebuild_sorted()

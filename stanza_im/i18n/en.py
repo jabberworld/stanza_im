@@ -824,6 +824,7 @@ STRINGS = {
     "prefs_roster_show_avatars": "Show avatars",
     "prefs_roster_show_activity": "Show activity",
     "prefs_roster_show_mood": "Show mood",
+    "prefs_roster_show_clients": "Show clients",
     "prefs_message_styling": "Format message text (XEP-0393)",
     "prefs_media_preview": "Media preview:",
     "prefs_interface_mode": "Window layout:",

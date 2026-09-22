@@ -36,6 +36,7 @@ from stanza_im.xmpp import muji as muji_mod
 from stanza_im.xmpp.muji import MujiManager
 from stanza_im.include import pep
 from stanza_im.include import hats as hats_mod
+from stanza_im.include import clients as clients_mod
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ NS_VCARD_UPDATE = "vcard-temp:x:update"        # XEP-0153 vCard-Based Avatars
 NS_BOOKMARKS2 = "urn:xmpp:bookmarks:1"          # XEP-0402 PEP Native Bookmarks
 NS_BOOKMARKS2_COMPAT = "urn:xmpp:bookmarks:1#compat"
 NS_BOOKMARKS2_COMPAT_PEP = "urn:xmpp:bookmarks:1#compat-pep"
+NS_CAPS = "http://jabber.org/protocol/caps"    # XEP-0115 Entity Capabilities
 NS_PRIVACY = "jabber:iq:privacy"                # XEP-0016 Privacy Lists
 NS_BLOCKING = "urn:xmpp:blocking"               # XEP-0191 Blocking Command
 NS_REPORTING = "urn:xmpp:reporting:1"           # XEP-0377 Blocking Command Reports
@@ -612,6 +614,15 @@ def _block_items(xml) -> set[str]:
         return set()
     return {str(el.get("jid") or "") for el in
             xml.iter("{%s}item" % NS_BLOCKING) if el.get("jid")}
+
+
+def _caps_node(pres) -> str:
+    """The XEP-0115 ``<c node=…/>`` of a presence stanza ("" when absent)."""
+    xml = getattr(pres, "xml", None)
+    if xml is None:
+        return ""
+    element = xml.find("{%s}c" % NS_CAPS)
+    return str(element.get("node") or "") if element is not None else ""
 
 
 def _upload_max_file_size(xml) -> int:
@@ -4615,8 +4626,10 @@ class JabberClient:
             priority = int(pres.get("priority", 0) or 0)
         except (TypeError, ValueError):
             priority = 0
+        caps_node = _caps_node(pres)
         self.presences[frm] = {"show": show, "status": status, "type": ptype,
-                               "priority": priority, "client": ""}
+                               "priority": priority, "client": "",
+                               "caps_node": caps_node}
 
         contact = self.get_contact(bare)
         if ptype != "available":
@@ -4626,7 +4639,7 @@ class JabberClient:
             previous_client = contact.resources.get(resource, {}).get("client", "")
             contact.resources[resource] = {
                 "show": show, "status": status, "priority": priority,
-                "client": previous_client,
+                "client": previous_client, "caps_node": caps_node,
             }
             if resource and frm not in self._version_probed:
                 self._version_probed.add(frm)
@@ -4739,6 +4752,28 @@ class JabberClient:
                 return set(caps.get("features") or [])
             except Exception:
                 return set()
+
+    def client_icon(self, bare: str) -> str:
+        """Absolute client icon path for *bare* (XEP-0115 caps), else ``""``.
+
+        The best online resource wins; resources without a known caps node are
+        skipped so a second resource can still provide an icon.
+        """
+        if not bare:
+            return ""
+        resources = self.get_contact(bare).resources
+        candidates = sorted(
+            resources.values(),
+            key=lambda info: (SHOW_ORDER.get(info.get("show", "offline"), 99),
+                              -int(info.get("priority", 0) or 0)))
+        for info in candidates:
+            node = str(info.get("caps_node") or "")
+            if not node:
+                continue
+            path = clients_mod.client_icon_for(node, 16)
+            if path:
+                return path
+        return ""
 
     def _on_entity_caps(self, pres) -> None:
         """slixmpp processed a caps presence — resolve our feature cache."""

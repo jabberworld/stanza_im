@@ -26,6 +26,10 @@ THEMES_DIR = os.path.join(RESOURCES_DIR, "themes")
 # Optional list of suggested registration servers (one domain per line).
 SERVERS_FILE = os.path.join(RESOURCES_DIR, "servers.txt")
 
+# Jabber client icons (16x16/22x22/32x32/64x64) and the caps mapping file.
+CLIENTS_DIR = os.path.join(RESOURCES_DIR, "clients")
+CLIENTS_FILE = os.path.join(CLIENTS_DIR, "clients.txt")
+
 STATUS_DIR_16 = os.path.join(IMAGES_DIR, "16x16", "status")
 STATUS_DIR_32 = os.path.join(IMAGES_DIR, "32x32", "status")
 STATUS_DIR_48 = os.path.join(IMAGES_DIR, "48x48", "status")

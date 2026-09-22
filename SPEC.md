@@ -81,7 +81,7 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392)
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon)
 └── plugins/            — (future)
 ```
 
@@ -194,6 +194,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_avatars` | `true` | Show/hide vCard avatars in roster rows. Applied live via `MainWindow._apply_roster_options` → `RosterStyle.set_options`; gated in `RosterStyle.paint_user`. |
 | `appearance.roster_show_activity` | `true` | Show/hide the PEP activity icon (XEP-0108) in roster rows, drawn from the same icon set as the mood/activity picker (`pep.activity_icon_path`). |
 | `appearance.roster_show_mood` | `true` | Show/hide the PEP mood icon (XEP-0107) in roster rows (`pep.mood_icon_path`). |
+| `appearance.roster_show_clients` | `true` | Show/hide the client icon (XEP-0115 caps node → `include/clients.py` → `resources/clients/<size>/`) in roster rows, drawn right after the avatar (`UserItem.client_icon`). |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
@@ -559,10 +560,15 @@ current XEP-0107 mood / XEP-0108 activity (`UserItem.mood`/`activity`, fed by
 `MainWindow._on_contact_pep_updated` and seeded in `_add_roster_item` from
 `client.pep_data`). Their artwork is the same icon set as the bottom-bar
 mood/activity picker (`pep.mood_icon_path`/`pep.activity_icon_path`).
-Each element is togglable from Preferences → Appearance → Roster
-(`appearance.roster_show_avatars` / `roster_show_activity` / `roster_show_mood`,
-all default `true`): `MainWindow._apply_roster_options` → `RosterStyle.set_options`
-gates the avatar and the two icons live without relayout.
+A client icon (16px, from the contact's XEP-0115 `caps_node` via
+`include/clients.py`) is drawn right after the avatar, before the badge/mood/
+activity (`UserItem.client_icon`, `JabberClient.client_icon`). Each element is
+togglable from Preferences → Appearance → Roster
+(`appearance.roster_show_avatars` / `roster_show_activity` / `roster_show_mood`
+/ `roster_show_clients`, all default `true`):
+`MainWindow._apply_roster_options` → `RosterStyle.set_options` gates them live
+without relayout. The contact tooltip prefixes the client line with the same
+icon (`client_icon_for`).
 
 Dynamic height: 32px without status message, 52px with.
 

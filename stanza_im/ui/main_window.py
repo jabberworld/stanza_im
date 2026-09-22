@@ -27,6 +27,7 @@ from stanza_im.include.constants import (APP_NAME, VERSION,
                                       STATUS_DIR_32,
                                       PLACES_DIR_22, IMAGES_DIR)
 from stanza_im.include import pep
+from stanza_im.include import clients as clients_mod
 from stanza_im.core.storage import Config
 from stanza_im.core import unread_state
 from stanza_im.ui.icons import init_icons
@@ -1368,7 +1369,11 @@ class MainWindow(QtWidgets.QMainWindow):
             parts = [f"<b>{escape_html(resource or '*')}</b>"]
             client = info.get("client", "") or ""
             if client:
-                parts.append(tr("tooltip_client") + ": "
+                icon = clients_mod.client_icon_for(
+                    str(info.get("caps_node") or ""), 16)
+                prefix = (f'<img src="{icon}" width="16" height="16"> '
+                          if icon else "")
+                parts.append(prefix + tr("tooltip_client") + ": "
                              + escape_html(client))
             lines.append("&nbsp;&nbsp;&middot;&nbsp; " + " &mdash; ".join(parts))
         if contact.status:
@@ -1457,11 +1462,12 @@ class MainWindow(QtWidgets.QMainWindow):
         roster.update()
 
     def _apply_roster_options(self) -> None:
-        """Apply the roster element toggles (avatars / activity / mood)."""
+        """Apply the roster element toggles (avatars / activity / mood / clients)."""
         opts = (
             bool(getattr(self._config.appearance, "roster_show_avatars", True)),
             bool(getattr(self._config.appearance, "roster_show_activity", True)),
-            bool(getattr(self._config.appearance, "roster_show_mood", True)))
+            bool(getattr(self._config.appearance, "roster_show_mood", True)),
+            bool(getattr(self._config.appearance, "roster_show_clients", True)))
         self._roster_style.set_options(*opts)
         self._applied_roster_options = opts
         roster = getattr(self, "_roster", None)
@@ -1987,6 +1993,8 @@ class MainWindow(QtWidgets.QMainWindow):
                            or activity_data.get("group")) or ""),
                 unread_count=self._unread_counts.get(jid, 0),
                 blocked=jid in self._blocked_jids,
+                client_icon=(self._client.client_icon(jid)
+                             if self._client else ""),
             )
             self._roster.add_user(user)
         self._request_vcard(jid)
@@ -2219,6 +2227,7 @@ class MainWindow(QtWidgets.QMainWindow):
         video = self._client.supports_calls(bare, video=True)
         logger.debug("CALL caps %s: audio=%s video=%s", bare, audio, video)
         self._chat_window.set_call_support(bare, audio, video)
+        self._roster.set_client_icon(bare, self._client.client_icon(bare))
 
     def _on_call_incoming(self, sid: str, peer: str, kind: str) -> None:
         if not self._client:
@@ -2771,6 +2780,9 @@ class MainWindow(QtWidgets.QMainWindow):
                          if user.jid == bare_jid), "offline")
         self._roster.update_user(bare_jid, status=show, status_message=status,
                                  icon_key=show_to_icon_key(show))
+        if self._client:
+            self._roster.set_client_icon(bare_jid,
+                                         self._client.client_icon(bare_jid))
         chat = self._chat_window.get_chat(bare_jid)
         if chat and self._config.chat.show_status and old_show != show:
             chat.add_status(tr("status_changed", status=tr(f"status_{show}")),
