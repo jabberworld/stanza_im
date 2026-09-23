@@ -300,6 +300,9 @@ class _FakeClient:
         contact.status = "hello"
         return contact
 
+    def subscription(self, _jid):
+        return "both"
+
     def send_presence(self, **kwargs):
         self.presence.append(kwargs)
 
