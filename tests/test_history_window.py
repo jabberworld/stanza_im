@@ -103,6 +103,21 @@ _cw_src = open(os.path.join(_root, "stanza_im", "ui", "chat_widget.py"),
 check("marker uses the stanza-load control class",
       'class="stanza-load"' in _cw_src)
 
+# 6. clear() wipes the SQLite rows and the legacy JSONL file -----------------
+from stanza_im.core import history
+from stanza_im.core.storage import history_path
+
+_clear_jid = "clearme@example.com"
+history.store_message(_clear_jid, "incoming", "hello")
+_legacy = history_path(_clear_jid)
+with open(_legacy, "w", encoding="utf-8") as _fh:
+    _fh.write('{"direction": "incoming", "body": "legacy"}\n')
+check("clear: history present before",
+      history.count_messages(_clear_jid) == 1 and os.path.isfile(_legacy))
+history.clear(_clear_jid)
+check("clear: SQLite emptied", history.count_messages(_clear_jid) == 0)
+check("clear: legacy JSONL removed", not os.path.isfile(_legacy))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

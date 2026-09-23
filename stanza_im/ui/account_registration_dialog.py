@@ -15,7 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 from stanza_im.core.client import JabberClient
 from stanza_im.core.storage import Config
-from stanza_im.include.constants import ACTIONS_DIR_16, SERVERS_FILE
+from stanza_im.include.constants import SERVERS_FILE, find_icon
 from stanza_im.ui.data_form_widget import (
     DataFormWidget, LegacyFormWidget, _link_label, fit_dialog_to_content)
 from stanza_im.ui.registration_result_dialog import RegistrationResultDialog
@@ -179,7 +179,7 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
     @staticmethod
     def _info_icon(tooltip: str, parent=None) -> QtWidgets.QLabel:
         label = QtWidgets.QLabel(parent)
-        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.svg"))
+        icon = QtGui.QIcon(find_icon("info.svg"))
         if not icon.isNull():
             label.setPixmap(icon.pixmap(16, 16))
         label.setToolTip(tooltip)

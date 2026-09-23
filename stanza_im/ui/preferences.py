@@ -11,12 +11,16 @@ from stanza_im.core.discovery import DiscoveryCache, HAS_AIODNS
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import icons as icons_mod
+from stanza_im.ui.tray import normalize_popups_mode
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
 from stanza_im.ui.connection_info_dialog import connection_info_lines
 from stanza_im.include import emoticons
-from stanza_im.include.constants import ACTIONS_DIR_16
+from stanza_im.include.constants import find_icon
 
 CONNECTION_FIELD_WIDTH = 300
+# Uniform widths so numeric selectors and combo boxes line up across pages.
+SPIN_WIDTH = 90
+COMBO_WIDTH = 260
 
 
 def _default_download_dir() -> str:
@@ -187,21 +191,21 @@ class PreferencesDialog(QtWidgets.QDialog):
         outer.addWidget(buttons)
 
         sections = (
-            ("prefs_application", "gtk-preferences", self._page_application),
+            ("prefs_application", "stanza-im", self._page_application),
             ("prefs_connection", "transports", self._page_connection),
             ("prefs_devices", "camera-web", self._page_devices),
             ("prefs_chat", "muc", self._page_chat),
-            ("prefs_privacy", "system-users", self._page_privacy),
-            ("prefs_appearance", "gtk-preferences", self._page_appearance),
-            ("prefs_plugins", "event", self._page_plugins),
+            ("prefs_privacy", "privacy", self._page_privacy),
+            ("prefs_appearance", "draw-brush", self._page_appearance),
+            ("prefs_plugins", "plugins", self._page_plugins),
             ("prefs_notifications", "event", self._page_notifications),
-            ("prefs_status", "system-users", self._page_status),
-            ("prefs_shortcuts", "gtk-preferences", self._page_shortcuts),
+            ("prefs_status", "status", self._page_status),
+            ("prefs_shortcuts", "shortcuts", self._page_shortcuts),
         )
         for key, icon_name, page_factory in sections:
             icon = QtGui.QIcon()
             if icons_mod.icons:
-                pixmap = icons_mod.icons.get_category_icon(icon_name)
+                pixmap = icons_mod.icons.get_category_icon(icon_name, 24)
                 if not pixmap.isNull():
                     icon = QtGui.QIcon(pixmap)
             self._sections.addItem(QtWidgets.QListWidgetItem(icon, tr(key)))
@@ -247,6 +251,7 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _spin(self, key: str, minimum: int, maximum: int) -> QtWidgets.QSpinBox:
         widget = QtWidgets.QSpinBox()
         widget.setRange(minimum, maximum)
+        widget.setFixedWidth(SPIN_WIDTH)
         self._controls[key] = widget
         return widget
 
@@ -255,13 +260,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         widget = QtWidgets.QComboBox()
         for label_key, data in options:
             widget.addItem(tr(label_key), data)
+        widget.setFixedWidth(COMBO_WIDTH)
         self._controls[key] = widget
         return widget
 
     def _page_application(self):
         general, form = self._page()
         form.addRow(self._check("close_to_tray", tr("prefs_close_to_tray")))
-        form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length", 10, 120))
 
         files, file_form = self._page()
         file_form.addRow(self._check("file_auto_accept",
@@ -321,7 +326,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 button.setToolTip(tr("prefs_device_mic_test_tip"))
                 button.toggled.connect(self._on_mic_toggled)
                 self._mic_test_button = button
-                controls += [level, button]
+                controls += [button, level]
             elif kind == "audio_output":
                 button = QtWidgets.QToolButton()
                 button.setAutoRaise(True)
@@ -421,7 +426,7 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _device_test_icon(name: str) -> QtGui.QIcon:
         """16px glyph for the icon-only device self-test buttons."""
         for ext in ("png", "svg"):
-            icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, f"{name}.{ext}"))
+            icon = QtGui.QIcon(find_icon(f"{name}.{ext}"))
             if not icon.isNull():
                 return icon
         return QtGui.QIcon()
@@ -430,7 +435,7 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _info_icon() -> QtGui.QIcon:
         """Blue "i" glyph for the information affordances/tooltips."""
         for ext in ("svg", "png"):
-            icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, f"info.{ext}"))
+            icon = QtGui.QIcon(find_icon(f"info.{ext}"))
             if not icon.isNull():
                 return icon
         return QtGui.QIcon()
@@ -438,7 +443,7 @@ class PreferencesDialog(QtWidgets.QDialog):
     @staticmethod
     def _change_password_icon() -> QtGui.QIcon:
         """Key glyph for the icon-only "Change password" button."""
-        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "change-password.svg"))
+        icon = QtGui.QIcon(find_icon("change-password.svg"))
         if not icon.isNull():
             return icon
         if icons_mod.icons is not None:
@@ -448,10 +453,19 @@ class PreferencesDialog(QtWidgets.QDialog):
     @staticmethod
     def _register_icon() -> QtGui.QIcon:
         """Glyph for the icon-only "Create account" button."""
-        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "register.png"))
+        icon = QtGui.QIcon(find_icon("register.png"))
         if not icon.isNull():
             return icon
-        return QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "add-user.svg"))
+        return QtGui.QIcon(find_icon("add-user.svg"))
+
+    def _info_label(self, tooltip: str) -> QtWidgets.QLabel:
+        """A non-clickable info glyph carrying an explanatory tooltip."""
+        label = QtWidgets.QLabel()
+        icon = self._info_icon()
+        if not icon.isNull():
+            label.setPixmap(icon.pixmap(16, 16))
+        label.setToolTip(tooltip)
+        return label
 
     @staticmethod
     def _row(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
@@ -691,7 +705,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                        and hasattr(self._client, "refresh_services"))
         self._btn_discovery_refresh = QtWidgets.QPushButton(
             tr("prefs_discovery_refresh"))
-        refresh_icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "reload.png"))
+        refresh_icon = QtGui.QIcon(find_icon("reload.png"))
         if not refresh_icon.isNull():
             self._btn_discovery_refresh.setIcon(refresh_icon)
         self._btn_discovery_refresh.setEnabled(can_refresh)
@@ -933,7 +947,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         chat_form.addRow(self._check("show_avatars", tr("prefs_show_avatars")))
         chat_form.addRow(self._check("message_styling",
                                      tr("prefs_message_styling")))
-        chat_form.addRow(tr("prefs_tab_title_length"), self._spin("tab_title_length_chat", 10, 120))
+        chat_form.addRow(
+            tr("prefs_tab_title_length"),
+            self._row(self._spin("tab_title_length_chat", 10, 120),
+                      self._info_label(tr("prefs_tab_title_length_info"))))
 
         muc, muc_form = self._page()
         muc_show_status = self._check("muc_show_status",
@@ -950,11 +967,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_muc_name_from_name", "from_name"),
             ("prefs_muc_name_from_vcard", "from_vcard"),
         ])
-        name_source_info = QtWidgets.QLabel()
-        info_icon = self._info_icon()
-        if not info_icon.isNull():
-            name_source_info.setPixmap(info_icon.pixmap(16, 16))
-        name_source_info.setToolTip(tr("prefs_muc_name_source_info"))
+        name_source_info = self._info_label(tr("prefs_muc_name_source_info"))
         muc_form.addRow(tr("prefs_muc_name_source"),
                         self._row(name_source, name_source_info))
         muc_form.addRow(self._check("muc_confirm_leave",
@@ -980,17 +993,20 @@ class PreferencesDialog(QtWidgets.QDialog):
         for name in self._theme_factory.variant_names():
             theme.addItem(name, name)
         theme.insertItem(0, tr("prefs_theme_default"), "")
+        theme.setFixedWidth(COMBO_WIDTH)
         self._controls["chat_theme"] = theme
         muc_theme = QtWidgets.QComboBox()
         for name in self._theme_factory.variant_names():
             muc_theme.addItem(name, name)
         muc_theme.insertItem(0, tr("prefs_theme_default"), "")
+        muc_theme.setFixedWidth(COMBO_WIDTH)
         self._controls["muc_theme"] = muc_theme
         form.addRow(tr("prefs_chat_theme"), theme)
         form.addRow(tr("prefs_muc_theme"), muc_theme)
         emoticon_theme = QtWidgets.QComboBox()
         for item in emoticons.discover_sets():
             emoticon_theme.addItem(item["name"], item["id"])
+        emoticon_theme.setFixedWidth(COMBO_WIDTH)
         self._controls["emoticon_theme"] = emoticon_theme
         form.addRow(tr("prefs_emoticon_theme"), emoticon_theme)
         self._emoticon_preview = QtWidgets.QHBoxLayout()
@@ -1153,7 +1169,11 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         tray, tray_form = self._page()
         tray_form.addRow(self._check("tray_blink", tr("prefs_tray_blink")))
-        tray_form.addRow(self._check("popups", tr("prefs_popups")))
+        tray_form.addRow(tr("prefs_popups"), self._combo("popups", [
+            ("prefs_popups_off", "off"),
+            ("prefs_popups_system", "system"),
+            ("prefs_popups_system_messages", "system_messages"),
+        ]))
         tabs = self._tabs([(tr("prefs_sounds"), sounds),
                            (tr("prefs_osd"), osd),
                            (tr("prefs_tray"), tray)])
@@ -1238,7 +1258,6 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _load_values(self):
         cfg = self._config
-        app = cfg.application
         connection = cfg.connection
         chat = cfg.chat
         privacy = cfg.privacy
@@ -1249,7 +1268,6 @@ class PreferencesDialog(QtWidgets.QDialog):
         values = {
             "close_to_tray": cfg.ui.close_to_tray,
             "history_limit_chat": chat.history_limit,
-            "tab_title_length": app.tab_title_length or chat.tab_title_length,
             "tab_title_length_chat": chat.tab_title_length,
             "jid": cfg.jid, "password": cfg.password, "save_password": cfg.save_password,
             "auto_connect": cfg.auto_connect,
@@ -1307,7 +1325,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "media_cache_mb": appearance.media_cache_mb,
             "muc_highlight": getattr(appearance, "muc_highlight", "both"),
             "interface_mode": getattr(appearance, "interface_mode", "separate"),
-            "tray_blink": notifications.tray_blink, "popups": notifications.popups,
+            "tray_blink": notifications.tray_blink,
+            "popups": normalize_popups_mode(notifications.popups),
             "osd_enabled": notifications.osd_enabled,
             "osd_duration": notifications.osd_duration,
             "osd_max": notifications.osd_max,

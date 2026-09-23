@@ -7,7 +7,8 @@ import time
 from PyQt6 import QtGui, QtCore
 
 from stanza_im.include.constants import (
-    STATUS_DIR_16, STATUS_DIR_32, ACTIONS_DIR_16, CATEGORIES_DIR_16,
+    STATUS_DIR_16, STATUS_DIR_32, ICON_DIRS_ACTIONS, ICON_DIRS_CATEGORIES,
+    find_icon,
 )
 
 
@@ -52,12 +53,23 @@ class IconCache:
         return self.get(os.path.join(base, filename))
 
     def get_action_icon(self, name: str) -> QtGui.QPixmap:
-        """Return an icon from images/16x16/actions/."""
-        return self.get(os.path.join(ACTIONS_DIR_16, f"{name}.png"))
+        """Return an action icon (scalable/actions first, then sized dirs)."""
+        path = find_icon(f"{name}.png", ICON_DIRS_ACTIONS)
+        return self.get(path) if path else QtGui.QPixmap()
 
-    def get_category_icon(self, name: str) -> QtGui.QPixmap:
-        """Return an icon from images/16x16/categories/."""
-        return self.get(os.path.join(CATEGORIES_DIR_16, f"{name}.png"))
+    def get_category_icon(self, name: str,
+                          size: int = 16) -> QtGui.QPixmap:
+        """Return a category icon (scalable SVG preferred, rendered at *size*)."""
+        for ext in ("svg", "png"):
+            path = find_icon(f"{name}.{ext}", ICON_DIRS_CATEGORIES)
+            if not path:
+                continue
+            if ext == "svg":
+                pixmap = QtGui.QIcon(path).pixmap(size, size)
+                if not pixmap.isNull():
+                    return pixmap
+            return self.get(path)
+        return QtGui.QPixmap()
 
     def clear(self) -> None:
         """Drop all cached pixmaps."""

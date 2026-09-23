@@ -266,6 +266,8 @@ info_text = dialog._info_edit.toPlainText()
 check("the information tab shows version, stats and uptime",
       "ejabberd" in info_text and "time/uptime" in info_text
       and "3054635" in info_text)
+check("the information tab shows the entity category/type",
+      "Entity:" in info_text and "server / im" in info_text)
 check("the capabilities tab maps features to XEPs",
       "XEP-0092: Software Version" in dialog._caps_edit.toPlainText())
 check("the contacts tab lists the XEP-0157 address",
@@ -295,6 +297,14 @@ check("the browser forwards xmpp: contact links",
       "xmpp_uri_requested" in browser
       and "dialog.contact_uri_clicked.connect(self.xmpp_uri_requested.emit)"
       in browser)
+check("weather gateways get the weather icon",
+      ServiceBrowserDialog._icon_for(
+          None, {"category": "gateway", "type": "weather"})
+      == "weather-online.png")
+check("rss gateways keep the rss icon",
+      ServiceBrowserDialog._icon_for(
+          None, {"category": "gateway", "type": "rss"})
+      == "rss-online.png")
 
 mw = _read("stanza_im", "ui", "main_window.py")
 check("the main window routes the browser's xmpp: links",

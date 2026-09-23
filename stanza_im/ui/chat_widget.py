@@ -21,7 +21,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 from stanza_im.include.constants import (
     ACTIONS_DIR_16, ACTIONS_DIR_22, CATEGORIES_DIR_16, STATUS_DIR_32,
-    PLACES_DIR_22, IMAGES_DIR,
+    PLACES_DIR_22, IMAGES_DIR, find_icon,
 )
 from stanza_im.include import clients as clients_mod
 from stanza_im.include.avatars import (
@@ -564,7 +564,7 @@ class ChatWidget(QtWidgets.QWidget):
         actions_row.setSpacing(2)
 
         self._clear_btn = QtWidgets.QToolButton(self)
-        self._clear_btn.setIcon(self._chat_icon("process-stop.png"))
+        self._clear_btn.setIcon(self._chat_icon("clear.png"))
         self._clear_btn.setToolTip(tr("chat_clear"))
         self._clear_btn.setAutoRaise(True)
         self._clear_btn.clicked.connect(
@@ -2084,33 +2084,33 @@ class ChatWidget(QtWidgets.QWidget):
 
     @staticmethod
     def _chat_icon(filename: str) -> QtGui.QIcon:
-        for directory in (ACTIONS_DIR_16, ACTIONS_DIR_22, CATEGORIES_DIR_16,
-                          STATUS_DIR_32, PLACES_DIR_22):
-            pix = QtGui.QPixmap(os.path.join(directory, filename))
+        path = find_icon(filename)
+        if path:
+            pix = QtGui.QPixmap(path)
             if not pix.isNull():
                 return QtGui.QIcon(pix)
         return QtGui.QIcon()
 
     @staticmethod
     def _call_icon() -> QtGui.QIcon:
-        for candidate in (os.path.join(ACTIONS_DIR_16, "call.svg"),
-                          os.path.join(ACTIONS_DIR_16, "call.png"),
+        for candidate in (find_icon("call.svg"),
+                          find_icon("call.png"),
                           os.path.join(IMAGES_DIR, "22x22", "emotes",
                                        "phone.png"),
                           os.path.join(IMAGES_DIR, "16x16", "emotes",
                                        "phone.png"),
                           os.path.join(ACTIONS_DIR_22, "message.png")):
-            pix = QtGui.QPixmap(candidate)
+            pix = QtGui.QPixmap(candidate) if candidate else QtGui.QPixmap()
             if not pix.isNull():
                 return QtGui.QIcon(pix)
         return QtGui.QIcon()
 
     @staticmethod
     def _muji_active_icon() -> QtGui.QIcon:
-        for candidate in (os.path.join(ACTIONS_DIR_16, "call-accept.svg"),
-                          os.path.join(ACTIONS_DIR_16, "call-accept.png"),
-                          os.path.join(ACTIONS_DIR_16, "call.svg"),
-                          os.path.join(ACTIONS_DIR_16, "call.png")):
+        for candidate in (find_icon("call-accept.svg"),
+                          find_icon("call-accept.png"),
+                          find_icon("call.svg"),
+                          find_icon("call.png")):
             pix = QtGui.QPixmap(candidate)
             if not pix.isNull():
                 return QtGui.QIcon(pix)

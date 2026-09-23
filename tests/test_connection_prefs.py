@@ -27,7 +27,7 @@ from stanza_im.core.client import (JabberClient, tls_flags, order_tls_first,
                                     filter_plus_mechs)
 from stanza_im.i18n import load as load_i18n
 from stanza_im.i18n import tr
-from stanza_im.include.constants import ACTIONS_DIR_16
+from stanza_im.include.constants import find_icon
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.preferences import PreferencesDialog
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
@@ -328,6 +328,9 @@ check("default csi_keep_active_for_typing_osd=False",
 
 # ── preferences apply and preserve manual values ──────────────────
 
+from stanza_im.ui import icons as _icons_mod
+
+_icons_mod.init_icons()
 dlg = PreferencesDialog(cfg, ChatThemeFactory(), client=None)
 controls = dlg._controls
 
@@ -340,7 +343,7 @@ check("pep sweep options are 0/30/60/120/300 s",
 
 # ── info icon on the information affordances ──────────────────────
 check("info.svg exists and loads",
-      not QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.svg")).isNull())
+      not QtGui.QIcon(find_icon("info.svg")).isNull())
 check("PreferencesDialog._info_icon is not null",
       not PreferencesDialog._info_icon().isNull())
 check("certificate button uses the info icon",
@@ -352,6 +355,25 @@ check("STUN/TURN info label uses the info icon",
 check("CSI keep-active option has an info tooltip",
       hasattr(dlg, "_csi_keep_info")
       and bool(dlg._csi_keep_info.toolTip()))
+
+# ── section icons / tab title length / popups / widths ─────────────
+_secs = dlg._sections
+check("the renamed sections carry icons",
+      all(not _secs.item(i).icon().isNull() for i in (0, 4, 5, 6, 8, 9)))
+check("tab title length left the application page",
+      "tab_title_length" not in controls
+      and "tab_title_length_chat" in controls)
+check("popups is a three-option selector",
+      isinstance(controls["popups"], QtWidgets.QComboBox)
+      and [controls["popups"].itemData(i)
+           for i in range(controls["popups"].count())]
+      == ["off", "system", "system_messages"])
+check("numeric selectors share a fixed width",
+      controls["idle_unload_minutes"].maximumWidth() == 90
+      and controls["history_limit_chat"].maximumWidth() == 90)
+check("combo selectors share a fixed width",
+      controls["osd_status"].maximumWidth() == 260
+      and controls["devices_video_input"].maximumWidth() == 260)
 
 controls["file_proxy_mode"].setCurrentIndex(
     controls["file_proxy_mode"].findData("manual"))

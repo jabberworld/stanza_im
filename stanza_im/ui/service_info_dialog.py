@@ -50,6 +50,7 @@ class ServiceInfoDialog(QtWidgets.QDialog):
         self._node = node
         self._features: list[str] = []
         self._contacts: list[tuple[str, list[str]]] = []
+        self._identity: dict = {"name": "", "category": "", "type": ""}
         self._info_text = tr("service_info_loading")
         self._caps_text = ""
         self._contacts_text = ""
@@ -111,6 +112,7 @@ class ServiceInfoDialog(QtWidgets.QDialog):
         details = await service_details(self._client, self._jid, self._node)
         self._features = details["features"]
         self._contacts = details["contacts"]
+        self._identity = details.get("identity") or self._identity
 
         self._caps_text = ("\n".join(describe_features(self._features))
                            or tr("service_info_caps_empty"))
@@ -124,6 +126,15 @@ class ServiceInfoDialog(QtWidgets.QDialog):
         features = set(self._features)
         lines: list[str] = []
 
+        lines.append(tr("service_info_entity") + ":")
+        category = str(self._identity.get("category") or "")
+        type_ = str(self._identity.get("type") or "")
+        if category or type_:
+            lines.append("  " + " / ".join(p for p in (category, type_) if p))
+        else:
+            lines.append("  " + tr("service_info_unavailable"))
+
+        lines.append("")
         lines.append(tr("service_info_version") + ":")
         if "jabber:iq:version" in features:
             info = await self._client.get_entity_version(self._jid)

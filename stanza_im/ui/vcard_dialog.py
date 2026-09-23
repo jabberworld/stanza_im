@@ -6,7 +6,7 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
-from stanza_im.include.constants import ACTIONS_DIR_16
+from stanza_im.include.constants import ACTIONS_DIR_16, find_icon
 
 
 def _photo_pixmap(card: dict, size: int = 96) -> QtGui.QIcon:
@@ -96,8 +96,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         subtitle = QtWidgets.QLabel(card.get("jid") or self._jid)
         subtitle.setStyleSheet("color: gray;")
         copy_btn = QtWidgets.QToolButton()
-        copy_btn.setIcon(QtGui.QIcon(
-            os.path.join(ACTIONS_DIR_16, "copy.svg")))
+        copy_btn.setIcon(QtGui.QIcon(find_icon("copy.svg")))
         copy_btn.setIconSize(QtCore.QSize(16, 16))
         copy_btn.setAutoRaise(True)
         copy_btn.setToolTip(tr("vcard_copy_jid"))

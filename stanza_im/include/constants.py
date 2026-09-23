@@ -47,10 +47,40 @@ APP_ICON_16 = os.path.join(IMAGES_DIR, "16x16", "apps")
 APP_ICON_22 = os.path.join(IMAGES_DIR, "22x22", "apps")
 APP_ICON_32 = os.path.join(IMAGES_DIR, "32x32", "apps")
 APP_ICON_48 = os.path.join(IMAGES_DIR, "48x48", "apps")
-APP_ICON_SVG = os.path.join(IMAGES_DIR, "scalable", "apps", "stanza-im.svg")
 
-LOGO_SVG = os.path.join(IMAGES_DIR, "scalable", "logo.svg")
+# Scalable (SVG) source icons.  Icons authored for the project live here under
+# a category matching the sized directories; the sized directories keep the
+# rasterised/legacy art.  ``find_icon`` prefers the scalable copy.
+SCALABLE_DIR = os.path.join(IMAGES_DIR, "scalable")
+SCALABLE_ACTIONS_DIR = os.path.join(SCALABLE_DIR, "actions")
+SCALABLE_CATEGORIES_DIR = os.path.join(SCALABLE_DIR, "categories")
+SCALABLE_PLACES_DIR = os.path.join(SCALABLE_DIR, "places")
+SCALABLE_APPS_DIR = os.path.join(SCALABLE_DIR, "apps")
+
+APP_ICON_SVG = os.path.join(SCALABLE_APPS_DIR, "stanza-im.svg")
+
+LOGO_SVG = os.path.join(SCALABLE_DIR, "logo.svg")
 LOGO_PNG = os.path.join(IMAGES_DIR, "logo.png")
+
+# Ordered icon search paths (scalable first, then the sized directories).
+ICON_DIRS_ACTIONS = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_16, ACTIONS_DIR_22)
+ICON_DIRS_CATEGORIES = (SCALABLE_CATEGORIES_DIR, CATEGORIES_DIR_16,
+                        SCALABLE_APPS_DIR, APP_ICON_16)
+ICON_DIRS_ALL = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_16, ACTIONS_DIR_22,
+                 SCALABLE_CATEGORIES_DIR, CATEGORIES_DIR_16,
+                 SCALABLE_PLACES_DIR, PLACES_DIR_22,
+                 STATUS_DIR_32, PLACES_DIR_16, STATUS_DIR_16)
+
+
+def find_icon(filename: str, directories=ICON_DIRS_ALL) -> str:
+    """Return the first existing icon path for *filename*, or ""."""
+    if not filename:
+        return ""
+    for directory in directories:
+        path = os.path.join(directory, filename)
+        if os.path.isfile(path):
+            return path
+    return ""
 
 
 # ── XDG Base Directory Specification ───────────────────────────────

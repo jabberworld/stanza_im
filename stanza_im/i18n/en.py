@@ -233,6 +233,7 @@ STRINGS = {
     "service_info_version": "Server version",
     "service_info_stats": "Statistics",
     "service_info_uptime": "Uptime",
+    "service_info_entity": "Entity",
     "service_info_unsupported": "not supported",
     "service_info_unavailable": "unavailable",
     "service_info_loading": "Requesting information…",
@@ -316,6 +317,7 @@ STRINGS = {
     "ctx_group_name": "Group name:",
     "ctx_resend_auth": "Resend authorization request",
     "ctx_clear_history": "Clear History",
+    "ctx_clear_history_confirm": "Delete the local message history for {jid}? This cannot be undone.",
     "ctx_remove_contact": "Remove Contact",
     "ctx_leave_conference": "Leave Conference",
     "xmpp_uri_unhandled": "The \"{action}\" XMPP link action is not supported.",
@@ -867,8 +869,12 @@ STRINGS = {
     "prefs_theme_default": "Default",
     "prefs_history_limit": "History messages to load:",
     "prefs_tab_title_length": "Tab title length:",
+    "prefs_tab_title_length_info": "Maximum number of characters shown in a chat tab title; longer names are shortened.",
     "prefs_tray_blink": "Blink tray icon on new messages",
     "prefs_popups": "Show notification popups",
+    "prefs_popups_off": "Off",
+    "prefs_popups_system": "System only",
+    "prefs_popups_system_messages": "System + messages",
     "prefs_no_plugins": "No plugins installed yet.",
     "prefs_shortcuts_list": ("Enter / Ctrl+Enter — send according to the setting\n"
                               "Shift+Enter — new line\n"

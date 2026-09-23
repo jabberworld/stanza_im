@@ -25,7 +25,7 @@ from stanza_im.include.enumerators import (populate_translations,
 from stanza_im.include.constants import (APP_NAME, VERSION,
                                       ACTIONS_DIR_16, CATEGORIES_DIR_16,
                                       STATUS_DIR_32,
-                                      PLACES_DIR_22, IMAGES_DIR)
+                                      PLACES_DIR_22, IMAGES_DIR, find_icon)
 from stanza_im.include import pep
 from stanza_im.include import clients as clients_mod
 from stanza_im.core.storage import Config
@@ -253,6 +253,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tray.settings_requested.connect(self._on_preferences)
         self._tray.status_requested.connect(self._on_tray_status)
         self._tray.cycle_unread_requested.connect(self._on_tray_cycle_unread)
+        self._tray.set_popups_mode(self._config.notifications.popups)
         self._set_tray_status_icon(self._config.last_status)
         self._tray.show()
 
@@ -519,9 +520,9 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _menu_icon(filename: str) -> QtGui.QIcon:
         """Load an action/category/status icon for menus from resources."""
-        for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32,
-                          PLACES_DIR_22):
-            pix = QtGui.QPixmap(os.path.join(directory, filename))
+        path = find_icon(filename)
+        if path:
+            pix = QtGui.QPixmap(path)
             if not pix.isNull():
                 return QtGui.QIcon(pix)
         return QtGui.QIcon()
@@ -1541,6 +1542,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if csi != bool(self._client.csi):
                 self._client.set_csi_config(csi)
             self._update_csi()
+        self._tray.set_popups_mode(self._config.notifications.popups)
         self._apply_interface_mode()
         self._refresh_muc_names()
         self._apply_roster_font()
@@ -3041,7 +3043,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         lambda checked=False: defer(
                             lambda: self._on_report_contact(bare)))
         menu.addSeparator()
-        menu.addAction(self._menu_icon("process-stop.png"),
+        menu.addAction(self._menu_icon("clear.png"),
                        tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
         if is_conf:
             menu.addAction(self._menu_icon("process-stop.png"),
@@ -3091,6 +3093,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_contact_groups(jid, [name.strip()])
 
     def _on_clear_history(self, jid: str):
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("ctx_clear_history"),
+            tr("ctx_clear_history_confirm", jid=jid))
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
         from stanza_im.core import history
         history.clear(jid)
         chat = self._chat_window.get_chat(jid)
@@ -3411,11 +3418,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sync_tray_blink()
         if active and self._client:
             self._client.mds_mark_displayed(bare_jid)
-        if self._config.notifications.popups and not active:
+        if not active:
             popup_body = (f"* {sender_name} {body[4:]}"
                           if isinstance(body, str) and body.startswith("/me ")
                           else body)
-            self._tray.show_message(sender_name, popup_body)
+            self._tray.show_message(sender_name, popup_body, kind="message")
         self._maybe_osd_message(sender_name, body, bare_jid)
         if not carbon:
             self._request_vcard(bare_jid)

@@ -7,18 +7,36 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import (
-    ACTIONS_DIR_16, APP_ICON_16, APP_ICON_22, APP_ICON_32, APP_ICON_48,
-    APP_ICON_SVG, APP_NAME, CATEGORIES_DIR_16, PLACES_DIR_22, STATUS_DIR_32,
+    APP_ICON_16, APP_ICON_22, APP_ICON_32, APP_ICON_48,
+    APP_ICON_SVG, APP_NAME, find_icon,
 )
 
 _STATUS_KEYS = ("online", "chat", "away", "xa", "dnd", "offline")
 
+# Tray popup ("balloon") modes.
+POPUPS_OFF = "off"
+POPUPS_SYSTEM = "system"
+POPUPS_SYSTEM_MESSAGES = "system_messages"
+
+
+def normalize_popups_mode(value) -> str:
+    """Coerce a stored ``notifications.popups`` value to a mode string.
+
+    Legacy configs stored a bool (``True`` = message popups shown); a missing
+    or unknown value falls back to the "system only" default.
+    """
+    if value in (POPUPS_OFF, POPUPS_SYSTEM, POPUPS_SYSTEM_MESSAGES):
+        return value
+    if isinstance(value, bool):
+        return POPUPS_SYSTEM_MESSAGES if value else POPUPS_OFF
+    return POPUPS_SYSTEM
+
 
 def _menu_icon(filename: str) -> QtGui.QIcon:
     """Load an action/category/status icon for menus from resources."""
-    for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32,
-                      PLACES_DIR_22):
-        pix = QtGui.QPixmap(os.path.join(directory, filename))
+    path = find_icon(filename)
+    if path:
+        pix = QtGui.QPixmap(path)
         if not pix.isNull():
             return QtGui.QIcon(pix)
     return QtGui.QIcon()
@@ -65,6 +83,7 @@ class TrayIcon(QtCore.QObject):
         self._current_status = "offline"
         self._status_actions: dict[str, QtGui.QAction] = {}
         self._normal_icon = build_app_icon()
+        self._popups_mode = POPUPS_SYSTEM
         self._tray = QtWidgets.QSystemTrayIcon(self._normal_icon)
         self._tray.setToolTip(APP_NAME)
         self._tray.activated.connect(self._on_activated)
@@ -89,10 +108,27 @@ class TrayIcon(QtCore.QObject):
         if not self._blink_active:
             self._tray.setIcon(icon)
 
+    def set_popups_mode(self, mode) -> None:
+        """Set the tray popup mode (off / system / system_messages)."""
+        self._popups_mode = normalize_popups_mode(mode)
+
+    def popups_mode(self) -> str:
+        return self._popups_mode
+
     def show_message(self, title: str, message: str,
                      icon: QtWidgets.QSystemTrayIcon.MessageIcon =
                      QtWidgets.QSystemTrayIcon.MessageIcon.Information,
-                     duration: int = 4000):
+                     duration: int = 4000, kind: str = "system"):
+        """Show a tray balloon, honouring the popups mode.
+
+        ``kind="message"`` is the incoming-message preview; it is shown only in
+        the ``system_messages`` mode.  System balloons are hidden only when the
+        mode is ``off``.
+        """
+        if self._popups_mode == POPUPS_OFF:
+            return
+        if kind == "message" and self._popups_mode != POPUPS_SYSTEM_MESSAGES:
+            return
         self._tray.showMessage(title, message, icon, duration)
 
     def start_blinking(self):

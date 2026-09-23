@@ -420,7 +420,8 @@ next to it opens `ServiceInfoDialog` for the selected tree node (or the combo
 server when nothing is selected), non-modally. It has three tabs and one
 «Копировать» button that copies the active tab:
 
-- «Информация» — «Версия сервера» (XEP-0092 `get_entity_version`),
+- «Информация» — «Сущность» (the `disco#info` identity `category / type` from
+  `service_details`), «Версия сервера» (XEP-0092 `get_entity_version`),
   «Статистика» (XEP-0039: `client.get_server_stats` first asks which statistics
   are supported, then requests their values) and «Аптайм» (XEP-0012
   `client.get_server_uptime`, `jabber:iq:last`); each block is queried only
@@ -1187,7 +1188,12 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   replayed. Messages received while
   the client was offline are delivered by the server on reconnect and counted
   as unread in the new session (no MAM catch-up).
-- Notifications: `showMessage()` for connection status, errors
+- Notifications: `showMessage()` for connection status, errors. The balloon
+  mode is `notifications.popups` (`off`/`system`/`system_messages`, default
+  `system`; a legacy bool is coerced by `tray.normalize_popups_mode`):
+  `TrayIcon.show_message(..., kind="message")` is the incoming-message preview
+  (shown only in `system_messages`), system balloons are hidden only in `off`.
+  `MainWindow` re-applies the mode from `_on_settings_applied`.
 
 ## 12A. OSD Notifications (`ui/osd.py`)
 
@@ -1276,8 +1282,12 @@ LRU cache for QPixmap icons:
 - Max 200 entries
 - 60-second stale TTL
 - Auto-eviction timer every 30 seconds
-- Methods: `get(path)`, `get_status_icon(show)`, `get_action_icon(name)`, `get_category_icon(name)`
+- Methods: `get(path)`, `get_status_icon(show)`, `get_action_icon(name)`, `get_category_icon(name, size=16)`
 - Avatars NOT cached long-term — loaded on-demand in paintEvent
+- Project-authored SVG icons live under `resources/images/scalable/<category>/`
+  (`actions`, `categories`, `places`, `apps`); `include.constants.find_icon`
+  resolves scalable first, then the sized dirs, and `get_category_icon`
+  renders a scalable SVG at the requested size
 
 ## 14. XMPP Client (`core/client.py`)
 

@@ -142,7 +142,7 @@ class Config:
                         "osd_opacity": 92,
                         "nick_font": "", "nick_font_size": 0,
                         "participant_font": "", "participant_font_size": 0},
-        "notifications": {"tray_blink": True, "popups": True,
+        "notifications": {"tray_blink": True, "popups": "system",
                            "sound_any_message": False,
                            "sound_first_message": False,
                            "sound_login": False, "sound_file_transfer": False,

@@ -127,16 +127,14 @@ class PrivacyListsDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _arrow_icon(direction: str) -> QtGui.QIcon:
-        from stanza_im.include.constants import ACTIONS_DIR_16
-        import os
-        return QtGui.QIcon(os.path.join(ACTIONS_DIR_16, f"arrow-{direction}.svg"))
+        from stanza_im.include.constants import find_icon
+        return QtGui.QIcon(find_icon(f"arrow-{direction}.svg"))
 
     @staticmethod
     def _info_icon(tooltip: str, parent=None) -> QtWidgets.QLabel:
-        from stanza_im.include.constants import ACTIONS_DIR_16
-        import os
+        from stanza_im.include.constants import find_icon
         label = QtWidgets.QLabel(parent)
-        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.svg"))
+        icon = QtGui.QIcon(find_icon("info.svg"))
         if not icon.isNull():
             label.setPixmap(icon.pixmap(16, 16))
         label.setToolTip(tooltip)

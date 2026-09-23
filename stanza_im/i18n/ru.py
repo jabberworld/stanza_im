@@ -233,6 +233,7 @@ STRINGS = {
     "service_info_version": "Версия сервера",
     "service_info_stats": "Статистика",
     "service_info_uptime": "Аптайм",
+    "service_info_entity": "Сущность",
     "service_info_unsupported": "не поддерживается",
     "service_info_unavailable": "недоступно",
     "service_info_loading": "Запрос сведений…",
@@ -316,6 +317,7 @@ STRINGS = {
     "ctx_group_name": "Название группы:",
     "ctx_resend_auth": "Повторить запрос авторизации",
     "ctx_clear_history": "Очистить историю",
+    "ctx_clear_history_confirm": "Удалить локальную историю сообщений для {jid}? Это действие необратимо.",
     "ctx_remove_contact": "Удалить контакт",
     "ctx_leave_conference": "Покинуть конференцию",
     "xmpp_uri_unhandled": "Действие «{action}» в XMPP-ссылке не поддерживается.",
@@ -868,8 +870,12 @@ STRINGS = {
     "prefs_theme_default": "По умолчанию",
     "prefs_history_limit": "Загружать сообщений истории:",
     "prefs_tab_title_length": "Длина заголовка вкладки:",
+    "prefs_tab_title_length_info": "Максимальное число символов в заголовке вкладки чата; длинные имена сокращаются.",
     "prefs_tray_blink": "Мигать иконкой в трее при новых сообщениях",
     "prefs_popups": "Показывать всплывающие уведомления",
+    "prefs_popups_off": "Отключить",
+    "prefs_popups_system": "Только системные",
+    "prefs_popups_system_messages": "Системные + сообщения",
     "prefs_no_plugins": "Плагинов пока нет.",
     "prefs_shortcuts_list": ("Enter / Ctrl+Enter — отправить сообщение (согласно настройке)\n"
                               "Shift+Enter — перенос строки\n"

@@ -629,7 +629,12 @@ def older_available(jid: str, before_id: int) -> bool:
 
 
 def clear(jid: str) -> None:
-    """Delete all locally stored history for *jid*."""
+    """Delete all locally stored history for *jid*.
+
+    Wipes the SQLite messages and removes the legacy JSON-lines file, so a
+    reopened chat cannot reload the deleted history from disk (the server
+    archive may still refill it via MAM).
+    """
     try:
         with _lock:
             conn = _connection(jid)
@@ -637,6 +642,13 @@ def clear(jid: str) -> None:
             conn.commit()
     except sqlite3.Error as exc:
         logger.warning("Could not clear history for %s: %s", jid, exc)
+    try:
+        from stanza_im.core.storage import history_path
+        legacy = history_path(jid)
+        if os.path.isfile(legacy):
+            os.remove(legacy)
+    except OSError as exc:
+        logger.warning("Could not remove legacy history for %s: %s", jid, exc)
 
 
 def close(jid: str) -> None:

@@ -244,7 +244,9 @@ shows a tentative expand arrow, and expanding or clicking a node issues its
 own `disco#items` before the branch contents are drawn — nodes that return no
 children lose their arrow. Deep items inherit the parent's icon (no per-child
 `disco#info`); only the top level is classified via `disco#info` to drive the
-category grouping. Disco requests (items/info) pass the parent's
+category grouping. A gateway whose identity `type` is `weather` gets the
+`weather-online.png` icon (and `rss` the `rss-online.png` one) via
+`_icon_for`. Disco requests (items/info) pass the parent's
 `node` attribute so node-scoped services (e.g. gateways) resolve fully, and
 items that equal their own parent (`jid`+`node`) are dropped to prevent
 self-referencing loops. `Автообзор` recursively pre-loads the tree (bounded
@@ -271,12 +273,17 @@ Actions menu) groups contacts with history by their roster groups or the
 `core/known_contacts.py` registry (persisted JID → name/groups/conference flag
 so removed contacts keep their names), shows per-day bold dates in a
 `QCalendarWidget`, and supports day-scoped and all-time substring search
-(`core/history.dates/load_day/search_dates`).
+(`core/history.dates/load_day/search_dates`). The roster context menu's
+«Очистить историю» and the chat toolbar's clear button both run
+`MainWindow._on_clear_history`: after a confirmation it calls `history.clear`
+(wipes the SQLite messages **and** the legacy JSONL file) and resets the open
+tab; the server archive (MAM) is untouched, so a reopened chat may refill from
+it.
 
 UI convention: context menus and menu-bar menus always use icons. Load them via
-`MainWindow._menu_icon(name)` (search order: `ACTIONS_DIR_16` →
-`CATEGORIES_DIR_16` → `STATUS_DIR_32` → `PLACES_DIR_22`); `SearchDialog._icon`
-mirrors the first three dirs.
+`MainWindow._menu_icon(name)`, which resolves through
+`include.constants.find_icon` (scalable dirs first, then the sized dirs);
+`SearchDialog._icon` mirrors it.
 
 ## Key Design Patterns
 
@@ -514,7 +521,12 @@ and use plain alpha. The tray icon's middle click
 user walk unread conversations: `MainWindow._on_tray_cycle_unread` opens the
 topmost roster contact with `unread_count > 0`, then `_reset_unread` +
 `mds_mark_displayed` mark it read so each further middle click advances until
-nothing is left.
+nothing is left. Tray balloons are gated by `notifications.popups`
+(`off`/`system`/`system_messages`, default `system`; a legacy bool is coerced by
+`tray.normalize_popups_mode`): `TrayIcon.show_message(..., kind="message")` is
+the incoming-message preview and is shown only in `system_messages`, while
+system balloons (connection/calls/invites/errors) are hidden only in `off`;
+`MainWindow` re-applies the mode from `_on_settings_applied`.
 
 Unread counters are persisted per contact (`core/unread_state.py` →
 `$XDG_DATA_HOME/stanza-im/unread.json`) so the badges survive a restart:
@@ -687,6 +699,13 @@ rejected, and a busy nick reverts without the auto-underscore retry.
 Pixmaps are cached with a 200-entry max and 60-second TTL. A `QTimer(30s)` evicts
 stale entries. Avatars are stored as file paths only — `QPixmap` is created on-demand
 during `paintEvent()` and never persisted in `UserItem`.
+
+**SVG icon convention**: icons authored for the project live as SVG under
+`resources/images/scalable/<category>/` (`actions`, `categories`, `places`,
+`apps`); the sized directories keep the rasterised/legacy art. All icon
+resolvers go through `include.constants.find_icon` (scalable first, then the
+sized dirs), and `IconCache.get_category_icon(name, size)` renders the scalable
+SVG at the requested size.
 
 ### 6. Lightweight i18n (`i18n/`)
 
@@ -1168,7 +1187,16 @@ own capture opens the device. Debug logging uses `stanza_im.call*` with `CALL[�
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled.
 
-Preferences use icon navigation and nested tabs. The Appearance page is split
+Preferences use icon navigation and nested tabs. The section icons come from
+`IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
+icon, «Внешний вид» `draw-brush`, «Приватность» the shield, «Плагины» the
+puzzle piece, «Статус» the speech bubble and «Горячие клавиши» the keyboard.
+«Длина заголовка вкладки» lives only on the Chat tab (with an info glyph) and
+sets `application.tab_title_length` + `chat.tab_title_length` together. Numeric
+spinners and combo boxes share a uniform fixed width (`SPIN_WIDTH`/`COMBO_WIDTH`)
+so selectors line up across pages; the tray popup mode is a three-option
+selector (`notifications.popups` = `off`/`system`/`system_messages`, see the
+tray paragraph). The Appearance page is split
 into «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and «Разное» («Ростер»
 toggles the roster avatars/activity/mood/client, see §3; «Конференции» toggles
 the MUC participant avatars/client icons; «Разное» holds the media-preview size,

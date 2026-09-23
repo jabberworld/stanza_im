@@ -15,7 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.avatars import default_avatar
-from stanza_im.include.constants import ACTIONS_DIR_16
+from stanza_im.include.constants import find_icon
 
 logger = logging.getLogger("stanza_im.call.ui")
 
@@ -28,8 +28,8 @@ def _icon(name: str) -> QtGui.QIcon:
     if icon is None:
         icon = QtGui.QIcon()
         for ext in ("svg", "png"):
-            path = os.path.join(ACTIONS_DIR_16, f"{name}.{ext}")
-            if os.path.exists(path):
+            path = find_icon(f"{name}.{ext}")
+            if path:
                 candidate = QtGui.QIcon(path)
                 if not candidate.isNull():
                     icon = candidate

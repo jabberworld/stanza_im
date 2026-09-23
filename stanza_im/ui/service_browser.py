@@ -19,8 +19,7 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
-from stanza_im.include.constants import (ACTIONS_DIR_16, CATEGORIES_DIR_16,
-                                      STATUS_DIR_32)
+from stanza_im.include.constants import find_icon
 
 logger = logging.getLogger(__name__)
 
@@ -158,10 +157,9 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _icon(filename: str) -> QtGui.QIcon:
-        if not filename:
-            return QtGui.QIcon()
-        for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32):
-            pix = QtGui.QPixmap(os.path.join(directory, filename))
+        path = find_icon(filename)
+        if path:
+            pix = QtGui.QPixmap(path)
             if not pix.isNull():
                 return QtGui.QIcon(pix)
         return QtGui.QIcon()
@@ -180,8 +178,11 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         return button
 
     def _icon_for(self, item: dict) -> str:
-        if (item.get("type") or "").lower() == "rss":
+        type_ = (item.get("type") or "").lower()
+        if type_ == "rss":
             return "rss-online.png"
+        if type_ == "weather":
+            return "weather-online.png"
         category = item.get("category", "")
         return (_CAT_ICONS.get(category.lower(), _DEFAULT_ICON)
                 if category else _DEFAULT_ICON)
