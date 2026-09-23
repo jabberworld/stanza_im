@@ -220,6 +220,9 @@ class XmlConsoleDialog(QtWidgets.QDialog):
             QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
         layout.addWidget(self._output, 1)
 
+        self._legend = self._build_legend()
+        layout.addWidget(self._legend)
+
         filters = QtWidgets.QGroupBox(tr("xml_console_filter"), self)
         row = QtWidgets.QHBoxLayout(filters)
         self._kind_boxes: dict[str, QtWidgets.QCheckBox] = {}
@@ -259,6 +262,48 @@ class XmlConsoleDialog(QtWidgets.QDialog):
         for button in (export, clear, send, close):
             bottom.addWidget(button)
         layout.addLayout(bottom)
+
+    # ── colour legend ───────────────────────────────────────────
+
+    @staticmethod
+    def _color_swatch(color: str, parent=None) -> QtWidgets.QLabel:
+        """A small solid square showing *color* (the per-stanza text colour)."""
+        label = QtWidgets.QLabel(parent)
+        label.setFixedSize(12, 12)
+        label.setStyleSheet(
+            f"background-color: {color};"
+            " border: 1px solid #666666; border-radius: 2px;")
+        return label
+
+    @staticmethod
+    def _legend_arrow(incoming: bool, parent=None) -> QtWidgets.QLabel:
+        """Direction marker: ↓ for incoming, ↑ for outgoing."""
+        return QtWidgets.QLabel("↓" if incoming else "↑", parent)
+
+    def _build_legend(self) -> QtWidgets.QWidget:
+        """One-line legend: per kind a coloured square ↓ (in) / ↑ (out)."""
+        legend = QtWidgets.QWidget(self)
+        legend.setToolTip(tr("xml_console_legend_hint"))
+        row = QtWidgets.QHBoxLayout(legend)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(3)
+        self._legend_swatches: list[tuple[str, bool, QtWidgets.QLabel]] = []
+        for index, (kind, key) in enumerate((
+                ("message", "xml_console_messages"),
+                ("presence", "xml_console_presences"),
+                ("iq", "xml_console_iq"),
+                ("sm", "xml_console_sm"),
+                ("other", "xml_console_other"))):
+            if index:
+                row.addSpacing(10)
+            row.addWidget(QtWidgets.QLabel(tr(key), legend))
+            for incoming in (True, False):
+                square = self._color_swatch(COLORS[(kind, incoming)], legend)
+                row.addWidget(square)
+                row.addWidget(self._legend_arrow(incoming, legend))
+                self._legend_swatches.append((kind, incoming, square))
+        row.addStretch(1)
+        return legend
 
     # ── capture plumbing ────────────────────────────────────────
 

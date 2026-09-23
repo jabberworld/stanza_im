@@ -23,7 +23,7 @@ from stanza_im.i18n import load as i18n_load
 from stanza_im.i18n import tr
 from stanza_im.core.client import JabberClient
 from stanza_im.ui import xml_console
-from stanza_im.ui.xml_console import (COLORS, XmlConsoleDialog, classify,
+from stanza_im.ui.xml_console import (COLORS, KINDS, XmlConsoleDialog, classify,
                                       format_xml, jid_matches)
 
 i18n_load("en")
@@ -250,6 +250,23 @@ check("export writes the visible text",
 dlg._enable.setChecked(False)
 check("disabling detaches the logger", dlg._log_handler not in logger.handlers)
 check("disabling restores the logger level", logger.level == level_before)
+
+# ── colour legend ────────────────────────────────────────────────
+check("the dialog carries a colour legend", dlg._legend is not None)
+main_layout = dlg.layout()
+check("the legend sits directly under the output",
+      main_layout.indexOf(dlg._legend) == main_layout.indexOf(dlg._output) + 1)
+legend_swatches = dlg._legend_swatches
+check("the legend has a square per kind and direction",
+      len(legend_swatches) == 10
+      and [(k, i) for k, i, _ in legend_swatches]
+      == [(k, i) for k in KINDS for i in (True, False)])
+check("every legend square uses the stanza colour",
+      all(COLORS[(k, i)] in sw.styleSheet() for k, i, sw in legend_swatches))
+check("the legend is a single row",
+      isinstance(dlg._legend.layout(), QtWidgets.QHBoxLayout))
+check("legend hint translated",
+      tr("xml_console_legend_hint") != "xml_console_legend_hint")
 
 # input dialog text round-trip
 entry = xml_console.XmlInputDialog(None)

@@ -34,6 +34,7 @@ STRINGS = {
     # XML console
     "xml_console_title": "XML Console",
     "xml_console_filter": "Filter",
+    "xml_console_legend_hint": "↓ — incoming, ↑ — outgoing",
     "xml_console_messages": "Messages",
     "xml_console_presences": "Presences",
     "xml_console_iq": "IQ",

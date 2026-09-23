@@ -316,6 +316,7 @@ each payload through the dialog's `stanza_captured` signal.
 | Element | Behaviour |
 |---------|-----------|
 | Output | Read-only `QPlainTextEdit`, monospace, dark background; selectable/copyable |
+| Legend | One full-width row under the output: per kind a coloured square with ↓ (incoming) / ↑ (outgoing); tooltip `xml_console_legend_hint` |
 | Filter | Checkboxes Сообщения / Присутствия / IQ / SM / Прочее (all on) + substring JID field; re-renders the buffer live |
 | Enable | Off by default; remembers the logger level, sets `slixmpp.xmlstream` to DEBUG and adds the handler; disabling/closing removes it and restores the level (no-op under `-x`/`-l`) |
 | Export | Writes the currently displayed text to a file |
@@ -333,7 +334,9 @@ stanzas), `urn:xmpp:sm:*` → SM, everything else (CSI, stream header/footer) �
 «Прочее». Each stanza is pretty-printed with `minidom` (two-space indents,
 text-only elements stay on one line, unparseable payloads unchanged). Colours —
 incoming: message red, presence orange, iq turquoise, sm blue; outgoing:
-message yellow, presence green, iq light blue, sm purple; other grey.
+message yellow, presence green, iq light blue, sm purple; other grey — are
+repeated by the legend row under the output (coloured square + ↓ incoming /
+↑ outgoing, per kind).
 `send_raw_xml` accepts several top-level elements, strips an XML declaration
 and gives an `<iq>` without an `id` one before sending. The buffer is capped at
 5000 entries. Incoming non-stanza stream elements (SASL

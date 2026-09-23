@@ -655,7 +655,10 @@ text-only elements stay on one line, unparseable payloads pass through
 unchanged) and renders it coloured by direction/kind in a read-only
 `QPlainTextEdit` (incoming: message red, presence orange, iq turquoise, sm
 blue; outgoing: message yellow, presence green, iq light blue, sm purple; other
-grey; dark background). Five filter checkboxes (Сообщения/Присутствия/IQ/SM/
+grey; dark background). A one-line colour legend directly under the output
+(`_build_legend`, full width) repeats that palette per kind — a coloured square
+with ↓ for incoming and ↑ for outgoing, with a tooltip — so the colours are
+self-explanatory. Five filter checkboxes (Сообщения/Присутствия/IQ/SM/
 Прочее, all on) and a substring JID field re-render the whole buffer live
 (unchecking hides already-captured stanzas, rechecking restores them; the JID
 field is a case-insensitive substring match over the full `from`/`to`, so
