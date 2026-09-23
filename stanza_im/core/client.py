@@ -2634,6 +2634,10 @@ class JabberClient:
         """Make *name* the active privacy list ("" deactivates)."""
         await self._privacy_iq(privacy.active_query(name), "set")
 
+    async def set_default_privacy_list(self, name: str) -> None:
+        """Make *name* the default privacy list ("" clears it)."""
+        await self._privacy_iq(privacy.default_query(name), "set")
+
     async def get_blocked_jids(self) -> set[str]:
         """XEP-0191: fetch the blocklist and cache it.
 

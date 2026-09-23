@@ -76,6 +76,11 @@ check("presence-out is written (slixmpp writes presence-in)",
 check("the active query carries the name",
       privacy.active_query("blocked").find(
           f"{{{NS_PRIVACY}}}active").get("name") == "blocked")
+check("the default query carries the name or clears it",
+      privacy.default_query("blocked").find(
+          f"{{{NS_PRIVACY}}}default").get("name") == "blocked"
+      and privacy.default_query("").find(
+          f"{{{NS_PRIVACY}}}default").get("name") is None)
 check("an empty list query removes the list",
       len(list(privacy.list_query("x", []))) == 1
       and len(list(privacy.list_query("x", []).find(
@@ -261,7 +266,8 @@ check("the report dialog defaults to spam",
 class _FakePrivacyClient:
     def __init__(self):
         self._blocked = {"a@b"}
-        self.active = "blocked"
+        self.active = ""
+        self.default = "blocked"
         self.lists = ["blocked", "friends"]
         self.items = {
             "blocked": [{"type": "jid", "value": "a@b", "action": "deny",
@@ -272,7 +278,7 @@ class _FakePrivacyClient:
         self.calls = []
 
     async def get_privacy_lists(self):
-        return {"active": self.active, "default": "",
+        return {"active": self.active, "default": self.default,
                 "lists": list(self.lists)}
 
     async def get_privacy_list(self, name):
@@ -289,6 +295,10 @@ class _FakePrivacyClient:
     async def set_active_privacy_list(self, name):
         self.calls.append(("active", name))
         self.active = name
+
+    async def set_default_privacy_list(self, name):
+        self.calls.append(("default", name))
+        self.default = name
 
     def get_roster_snapshot(self):
         return [{"jid": "a@b", "name": "Alice", "groups": ["Friends"]},
@@ -323,9 +333,14 @@ async def _privacy_dialog_smoke():
 privacy_dialog = asyncio.run(_privacy_dialog_smoke())
 check("the privacy dialog lists the server lists",
       privacy_dialog._list_combo.count() == 2
-      and privacy_dialog._active_combo.findData("blocked") >= 0)
-check("the privacy dialog renders the localized rules",
-      privacy_dialog._rules.count() == 1
+      and privacy_dialog._active_combo.findData("blocked") >= 0
+      and privacy_dialog._default_combo.findData("blocked") >= 0)
+check("the privacy dialog shows the active and default lists",
+      privacy_dialog._active_combo.currentData() == ""
+      and privacy_dialog._default_combo.currentData() == "blocked")
+check("the dialog opens the effective (default) list",
+      privacy_dialog._current == "blocked"
+      and privacy_dialog._rules.count() == 1
       and 'JID "a@b"' in privacy_dialog._rules.item(0).text())
 
 

@@ -381,10 +381,13 @@ domain's `disco#info` (`client.supports_privacy`/`supports_blocking`/
 `supports_reports`, cached by `refresh_server_features` at `session_started`;
 optimistic until the probe returns):
 
-- «Списки приватности» (`ui/privacy_lists_dialog.py`) — the active-list
-  selector (changing it sends `<active name=…/>`), the list editor
-  (create/rename/delete) and the localized rules of the selected list with
-  priority arrows and add/edit/delete/apply. `ui/privacy_rule_dialog.py` edits
+- «Списки приватности» (`ui/privacy_lists_dialog.py`) — the active-list and
+  default-list selectors (changing them sends `<active name=…/>` /
+  `<default name=…/>`, an empty name clearing it; per XEP-0016 the default
+  applies when no active list is set), the list editor (create/rename/delete)
+  and the localized rules of the selected list with priority arrows and
+  add/edit/delete/apply; the editor opens on the effective list (active, else
+  default, else the first one). `ui/privacy_rule_dialog.py` edits
   one rule: `jid`/`group`/`subscription`/`*` × `deny`/`allow` ×
   `message`/`iq`/`presence-in`/`presence-out` (none = all). The
   `jabber:iq:privacy` XML is parsed/built by `core/privacy.py` (raw IQs, since

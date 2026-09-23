@@ -1343,9 +1343,13 @@ text is kept. Returning activity (`eventFilter`) resumes
   «Подключение» carries two buttons gated on the account domain's disco
   (`supports_privacy`/`supports_blocking`, probed by `refresh_server_features`
   at `session_started`; `_server_feature` stays optimistic until then).
-  «Списки приватности» opens `ui/privacy_lists_dialog.py` — the active-list
-  selector, the list editor (create/rename/delete) and the localized rule list
-  with priority arrows and add/edit/delete/apply. The wire format is built as
+  «Списки приватности» opens `ui/privacy_lists_dialog.py` — the active-list and
+  default-list selectors (`set_active_privacy_list` / `set_default_privacy_list`
+  → `<active/>` / `<default/>`; the default applies per XEP-0016 when no active
+  list is set, with an info glyph explaining that), the list editor
+  (create/rename/delete) and the localized rule list
+  with priority arrows and add/edit/delete/apply; the editor opens on the
+  effective list (active, else default, else the first one). The wire format is built as
   raw IQs by `core/privacy.py` (`jabber:iq:privacy`) because slixmpp's
   `xep_0016` writes `presence-in` for `presence-out`; a rule is
   `jid`/`group`/`subscription`/all × `message`/`iq`/`presence-in`/

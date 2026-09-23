@@ -108,13 +108,22 @@ def list_query(name: str, items: list[dict]) -> ET.Element:
     return query
 
 
+def _named_query(tag: str, name: str) -> ET.Element:
+    query = ET.Element(f"{{{NS_PRIVACY}}}query")
+    element = ET.SubElement(query, f"{{{NS_PRIVACY}}}{tag}")
+    if name:
+        element.set("name", name)
+    return query
+
+
 def active_query(name: str) -> ET.Element:
     """A ``<query/>`` activating (or, with an empty name, deactivating) a list."""
-    query = ET.Element(f"{{{NS_PRIVACY}}}query")
-    active = ET.SubElement(query, f"{{{NS_PRIVACY}}}active")
-    if name:
-        active.set("name", name)
-    return query
+    return _named_query("active", name)
+
+
+def default_query(name: str) -> ET.Element:
+    """A ``<query/>`` setting (or, with an empty name, clearing) the default."""
+    return _named_query("default", name)
 
 
 def sort_items(items: list[dict]) -> list[dict]:

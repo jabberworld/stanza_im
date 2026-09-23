@@ -24,6 +24,7 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         self._names: list[str] = []
         self._server_names: set[str] = set()
         self._active = ""
+        self._default = ""
         self._current = ""
         self._items: list[dict] = []
         self._dirty = False
@@ -44,8 +45,19 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         self._active_combo.setMinimumWidth(220)
         self._active_combo.currentIndexChanged.connect(self._on_active_changed)
         active_row.addWidget(self._active_combo)
+        active_row.addWidget(self._info_icon(tr("privacy_default_hint"), self))
         active_row.addStretch(1)
         layout.addLayout(active_row)
+
+        default_row = QtWidgets.QHBoxLayout()
+        default_row.addWidget(QtWidgets.QLabel(tr("privacy_default_list")))
+        self._default_combo = QtWidgets.QComboBox(self)
+        self._default_combo.setMinimumWidth(220)
+        self._default_combo.currentIndexChanged.connect(
+            self._on_default_changed)
+        default_row.addWidget(self._default_combo)
+        default_row.addStretch(1)
+        layout.addLayout(default_row)
 
         group = QtWidgets.QGroupBox(tr("privacy_editor"), self)
         box = QtWidgets.QVBoxLayout(group)
@@ -119,6 +131,17 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         import os
         return QtGui.QIcon(os.path.join(ACTIONS_DIR_16, f"arrow-{direction}.svg"))
 
+    @staticmethod
+    def _info_icon(tooltip: str, parent=None) -> QtWidgets.QLabel:
+        from stanza_im.include.constants import ACTIONS_DIR_16
+        import os
+        label = QtWidgets.QLabel(parent)
+        icon = QtGui.QIcon(os.path.join(ACTIONS_DIR_16, "info.svg"))
+        if not icon.isNull():
+            label.setPixmap(icon.pixmap(16, 16))
+        label.setToolTip(tooltip)
+        return label
+
     def _set_status(self, text: str, error: bool = False) -> None:
         self._status.setText(text)
         self._status.setStyleSheet("color: #c0392b;" if error else "")
@@ -134,11 +157,17 @@ class PrivacyListsDialog(QtWidgets.QDialog):
             self._set_status(tr("privacy_load_error", error=str(exc)), True)
             return
         self._active = data["active"]
+        self._default = data["default"]
         self._names = list(data["lists"])
         self._server_names = set(self._names)
         self._refresh_combos()
         self._loading = False
-        if self._names:
+        # Open the editor on the list that is actually applied (the active one,
+        # or the default one when no active list is set — XEP-0016).
+        effective = self._active or self._default
+        if effective in self._names:
+            self._select_list(effective)
+        elif self._names:
             self._select_list(self._names[0])
         else:
             self._current = ""
@@ -154,6 +183,15 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         index = self._active_combo.findData(self._active)
         self._active_combo.setCurrentIndex(max(index, 0))
         self._active_combo.blockSignals(False)
+
+        self._default_combo.blockSignals(True)
+        self._default_combo.clear()
+        self._default_combo.addItem(tr("privacy_none"), "")
+        for name in self._names:
+            self._default_combo.addItem(name, name)
+        index = self._default_combo.findData(self._default)
+        self._default_combo.setCurrentIndex(max(index, 0))
+        self._default_combo.blockSignals(False)
 
         self._list_combo.blockSignals(True)
         self._list_combo.clear()
@@ -221,6 +259,21 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         self._active = name
         self._set_status(tr("privacy_active_set", name=name or tr("privacy_none")))
 
+    def _on_default_changed(self, _index: int) -> None:
+        if self._loading:
+            return
+        name = str(self._default_combo.currentData() or "")
+        asyncio.create_task(self._apply_default(name))
+
+    async def _apply_default(self, name: str) -> None:
+        try:
+            await self._client.set_default_privacy_list(name)
+        except Exception as exc:
+            self._set_status(tr("privacy_load_error", error=str(exc)), True)
+            return
+        self._default = name
+        self._set_status(tr("privacy_default_set", name=name or tr("privacy_none")))
+
     def _on_list_changed(self, _index: int) -> None:
         if self._loading:
             return
@@ -268,6 +321,9 @@ class PrivacyListsDialog(QtWidgets.QDialog):
             if self._active == old:
                 await self._client.set_active_privacy_list(name)
                 self._active = name
+            if self._default == old:
+                await self._client.set_default_privacy_list(name)
+                self._default = name
         except Exception as exc:
             self._set_status(tr("privacy_load_error", error=str(exc)), True)
             return
@@ -298,6 +354,8 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         self._names = [n for n in self._names if n != name]
         if self._active == name:
             self._active = ""
+        if self._default == name:
+            self._default = ""
         self._current = self._names[0] if self._names else ""
         self._refresh_combos()
         if self._current:
