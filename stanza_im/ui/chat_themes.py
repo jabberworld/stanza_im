@@ -18,6 +18,24 @@ _logger = logging.getLogger(__name__)
 
 _HIGHLIGHT_COLOR = "#e53935"
 
+
+def mention_pattern(nick: str) -> "re.Pattern[str]":
+    """Compile the MUC mention matcher for *nick*.
+
+    A mention is bounded on both sides by a non-letter/non-digit (Unicode
+    aware), so punctuation stays allowed ("rain:", "rain?") while substrings
+    of longer words ("brain", "Ukraine") never match.
+    """
+    return re.compile(r"(?<![^\W_])(%s)(?![^\W_])" % re.escape(nick),
+                      re.IGNORECASE)
+
+
+def mentions_nick(text: str, nick: str) -> bool:
+    """True when *text* mentions *nick* (the same rule as the highlight)."""
+    if not nick or not text:
+        return False
+    return mention_pattern(nick).search(text) is not None
+
 _MEDIA_CSS = """
 .stanza-media { display: inline-block; margin: 3px 0; vertical-align: top; }
 .stanza-media-thumb { border-radius: 6px; max-width: 100%; height: auto;
@@ -340,10 +358,8 @@ class ChatThemeFactory:
             style += "font-weight:bold;"
         if self._highlight_mode in ("color", "both"):
             style += "color:%s;" % self._highlight_color
-        pattern = re.compile(r"(?<![^\W_])(%s)(?![^\W_])"
-                             % re.escape(nick), re.IGNORECASE)
-        return pattern.sub('<span style="%s">\\1</span>' % style.rstrip(";"),
-                           text)
+        return mention_pattern(nick).sub(
+            '<span style="%s">\\1</span>' % style.rstrip(";"), text)
 
     def _tokenize_urls(self, text: str, geo_ref: str = ""
                        ) -> tuple[str, list[str]]:

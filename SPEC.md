@@ -72,6 +72,7 @@ stanza_im/
 │   ├── report_dialog.py     — XEP-0377 spam/abuse report dialog
 │   ├── xml_console.py       — Raw XML console (filtered, coloured)
 │   ├── tray.py         — System tray icon
+│   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
 │                          jingle.py = XEP-0234/0260/0261 file transfer,
@@ -81,7 +82,7 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon)
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing)
 └── plugins/            — (future)
 ```
 
@@ -260,6 +261,21 @@ compatibility shim in `xmpp/media.py`).
 
 The tile cache lives under `$XDG_CACHE_HOME/stanza-im/tiles/` (mirrors the
 media cache layout: `{z}/{x}/{y}.png` + `index.json`).
+
+### 4.6 Notification Settings (`notifications.*`)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `notifications.popups` | `system` | Tray balloons: `off`/`system`/`system_messages` (a legacy bool is coerced by `tray.normalize_popups_mode`). See §12. |
+| `notifications.sound_theme` | `default` | Sound theme id from `resources/sounds/` |
+| `notifications.sound_first_message` | `false` | Play `new_message` when a 1:1/PM arrives and no tab is open |
+| `notifications.sound_any_message` | `false` | Play `message` when a 1:1/PM arrives with the tab open but unfocused |
+| `notifications.sound_muc_mention` | `false` | Play `message` on a MUC mention of our nick |
+| `notifications.sound_on_send` | `false` | Play `message_send` when we send a message (1:1/PM/MUC) |
+| `notifications.sound_ft_start` | `false` | Play `ft_start` on an incoming Jingle file transfer |
+| `notifications.sound_ft_finish` | `false` | Play `ft_finish` when a transfer finishes |
+| `notifications.sound_contact_online` | `false` | Play `contact_online` on an offline→online transition |
+| `notifications.sound_contact_offline` | `false` | Play `contact_offline` on an online→offline transition |
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -1274,6 +1290,32 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   in-memory LRU budget (`GeoMapWidget._MEM_PIXMAP_BYTES`), flushed by
   `set_zoom` on a zoom-level change. No tiles / empty `map.tiles_url`: the
   window still paints the markers, track, coordinates and status.
+
+## 12C. Sound Notifications (`include/sounds.py`, `ui/sounds.py`)
+
+- Themes live in `resources/sounds/<id>/default.cfg` (`[header] name`,
+  `[sounds] event=file`); `include.sounds.discover_themes()`/`theme_sounds()`
+  parse them. Events: `new_message`, `message`, `message_send`, `ft_start`,
+  `ft_finish`, `contact_online`, `contact_offline`, `start` (unused).
+- `ui.sounds.SoundPlayer` plays a theme's WAV for an event with one cached
+  `QSoundEffect` per file; a no-op when Qt Multimedia is unavailable.
+  `MainWindow._sounds` is created in `__init__` and re-themed in
+  `_on_settings_applied`.
+- Preferences → Notifications → «Звуки»: a «Звуковая тема» selector
+  (`notifications.sound_theme`, default `default`), one checkbox per event
+  (all off by default) and a note-icon preview button before each option that
+  plays that event's sound from the currently selected theme.
+- Triggers (each gated by its `notifications.sound_*` flag):
+  `new_message`/`message` via `MainWindow._notify_incoming_message` (1:1 and
+  MUC private; called before the tab opens, so "no tab" → `new_message`,
+  "tab open but unfocused" → `message`; carbons and the focused conversation
+  are silent); `message` on a MUC mention of our nick
+  (`chat_themes.mentions_nick`); `message_send` from the 1:1/PM/MUC send,
+  reply and edit handlers; `ft_start` on an incoming Jingle transfer start and
+  `ft_finish` on its `done`; `contact_online`/`contact_offline` on a real
+  presence transition, the first presence per JID after login being recorded
+  silently (`_presence_sound_seen`, cleared on
+  `session_started`/`disconnected`).
 
 ## 13. Icon Cache (`ui/icons.py`)
 

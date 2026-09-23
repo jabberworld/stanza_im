@@ -88,6 +88,7 @@ stanza_im/                      # Python package
 │   ├── xml_console.py           # Raw XML console (filtered, coloured)
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
+│   ├── sounds.py                # Sound-effect player (QSoundEffect)
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
 ├── xmpp/
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
@@ -105,6 +106,7 @@ stanza_im/                      # Python package
 │   ├── xmpp_uri.py              # XEP-0147 xmpp: URI parse/build (RFC 5122)
 │   ├── hats.py                  # XEP-0317 Hats + XEP-0392 HSLuv colour generation
 │   ├── clients.py               # XEP-0115 caps node → client name/icon mapping
+│   ├── sounds.py                # Sound-theme discovery/parsing (resources/sounds)
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -527,6 +529,31 @@ nothing is left. Tray balloons are gated by `notifications.popups`
 the incoming-message preview and is shown only in `system_messages`, while
 system balloons (connection/calls/invites/errors) are hidden only in `off`;
 `MainWindow` re-applies the mode from `_on_settings_applied`.
+
+**Sound notifications** (`include/sounds.py`, `ui/sounds.py`): themes live in
+`resources/sounds/<id>/default.cfg` (`[header] name`, `[sounds] event=file`);
+`include.sounds` discovers/parses them (`discover_themes`, `theme_sounds`;
+events `new_message`/`message`/`message_send`/`ft_start`/`ft_finish`/
+`contact_online`/`contact_offline`/`start`). `ui.sounds.SoundPlayer` plays a
+theme's WAV for an event with one cached `QSoundEffect` per file, and degrades
+to a no-op when Qt Multimedia (libpulse) is unavailable. `MainWindow._sounds`
+is created in `__init__`, its theme re-applied in `_on_settings_applied` and
+passed to `PreferencesDialog`. Triggers, each gated by
+`notifications.sound_*` (all off by default; `sound_theme` default `default`):
+`_notify_incoming_message` (called by `_on_message_received` — skipped for
+carbons — and `_on_muc_private_message`, *before* the tab opens) plays
+`new_message` when no tab is open and `message` when the tab is open but not
+focused; `_on_groupchat_message` plays `message` on a mention of our nick
+(`chat_themes.mentions_nick`, the same rule as the highlight) when
+`sound_muc_mention` is on; the six send handlers (1:1/PM/MUC, incl. reply/edit)
+play `message_send`; `_on_file_transfer_progress` plays `ft_start` on an
+incoming `start` and `ft_finish` on `done`; `_on_presence_changed` plays
+`contact_online`/`contact_offline` on a real transition, the first presence per
+JID after login being recorded silently (`_presence_sound_seen`, cleared on
+`session_started`/`disconnected`). The Preferences → Notifications → Sounds tab
+has a «Звуковая тема» selector, eight per-event checkboxes (label without the
+old leading «Звук») and a note-icon preview button before each
+(`prefs_sound_preview_tip`). [`tests/test_sounds.py`]
 
 Unread counters are persisted per contact (`core/unread_state.py` →
 `$XDG_DATA_HOME/stanza-im/unread.json`) so the badges survive a restart:
@@ -1189,8 +1216,9 @@ without it the engine is a `NullMediaEngine` and calling is disabled.
 
 Preferences use icon navigation and nested tabs. The section icons come from
 `IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
-icon, «Внешний вид» `draw-brush`, «Приватность» the shield, «Плагины» the
-puzzle piece, «Статус» the speech bubble and «Горячие клавиши» the keyboard.
+icon, «Устройства» the headset, «Внешний вид» `draw-brush`, «Приватность» the
+shield, «Плагины» the puzzle piece, «Статус» the speech bubble and «Горячие
+клавиши» the keyboard.
 «Длина заголовка вкладки» lives only on the Chat tab (with an info glyph) and
 sets `application.tab_title_length` + `chat.tab_title_length` together. Numeric
 spinners and combo boxes share a uniform fixed width (`SPIN_WIDTH`/`COMBO_WIDTH`)

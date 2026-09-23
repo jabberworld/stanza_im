@@ -11,7 +11,9 @@ from stanza_im.core.discovery import DiscoveryCache, HAS_AIODNS
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import icons as icons_mod
+from stanza_im.ui.sounds import SoundPlayer
 from stanza_im.ui.tray import normalize_popups_mode
+from stanza_im.include import sounds as sounds_mod
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
 from stanza_im.ui.connection_info_dialog import connection_info_lines
 from stanza_im.include import emoticons
@@ -134,12 +136,14 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def __init__(self, config: Config, theme_factory: ChatThemeFactory,
                  osd_manager=None, parent=None,
-                 client=None):
+                 client=None, sound_player=None):
         super().__init__(parent)
         self._config = config
         self._theme_factory = theme_factory
         self._osd_manager = osd_manager
         self._client = client
+        self._sound_player = (sound_player if sound_player is not None
+                              else SoundPlayer())
         self.setWindowTitle(tr("prefs_title"))
         self.setMinimumSize(760, 540)
         self._controls: dict[str, QtWidgets.QWidget] = {}
@@ -193,7 +197,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         sections = (
             ("prefs_application", "stanza-im", self._page_application),
             ("prefs_connection", "transports", self._page_connection),
-            ("prefs_devices", "camera-web", self._page_devices),
+            ("prefs_devices", "devices", self._page_devices),
             ("prefs_chat", "muc", self._page_chat),
             ("prefs_privacy", "privacy", self._page_privacy),
             ("prefs_appearance", "draw-brush", self._page_appearance),
@@ -466,6 +470,23 @@ class PreferencesDialog(QtWidgets.QDialog):
             label.setPixmap(icon.pixmap(16, 16))
         label.setToolTip(tooltip)
         return label
+
+    def _sound_button(self, event: str) -> QtWidgets.QToolButton:
+        """A note glyph that previews the *event*'s sound (current theme)."""
+        button = QtWidgets.QToolButton()
+        icon = QtGui.QIcon(find_icon("sound.svg"))
+        if not icon.isNull():
+            button.setIcon(icon)
+        button.setIconSize(QtCore.QSize(16, 16))
+        button.setAutoRaise(True)
+        button.setToolTip(tr("prefs_sound_preview_tip"))
+        button.clicked.connect(lambda: self._play_sound(event))
+        return button
+
+    def _play_sound(self, event: str) -> None:
+        theme = self._controls.get("sound_theme")
+        theme_id = theme.currentData() if theme is not None else None
+        self._sound_player.play(event, theme_id)
 
     @staticmethod
     def _row(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
@@ -1141,9 +1162,24 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _page_notifications(self):
         sounds, sound_form = self._page()
-        for key in ("sound_any_message", "sound_first_message", "sound_login",
-                    "sound_file_transfer"):
-            sound_form.addRow(self._check(key, tr(f"prefs_{key}"), False))
+        theme_combo = QtWidgets.QComboBox()
+        for item in (sounds_mod.discover_themes()
+                     or [{"id": "default", "name": "default"}]):
+            theme_combo.addItem(item["name"], item["id"])
+        theme_combo.setFixedWidth(COMBO_WIDTH)
+        self._controls["sound_theme"] = theme_combo
+        sound_form.addRow(tr("prefs_sound_theme"), theme_combo)
+        for key, event in (
+                ("sound_first_message", "new_message"),
+                ("sound_any_message", "message"),
+                ("sound_muc_mention", "message"),
+                ("sound_on_send", "message_send"),
+                ("sound_ft_start", "ft_start"),
+                ("sound_ft_finish", "ft_finish"),
+                ("sound_contact_online", "contact_online"),
+                ("sound_contact_offline", "contact_offline")):
+            sound_form.addRow(self._row(self._sound_button(event),
+                                        self._check(key, tr(f"prefs_{key}"))))
 
         osd, osd_form = self._page()
         osd_form.addRow(self._check("osd_enabled", tr("prefs_osd_enabled")))
@@ -1378,8 +1414,13 @@ class PreferencesDialog(QtWidgets.QDialog):
             "devices_video_input": getattr(
                 getattr(cfg, "devices", None), "video_input", "") or "",
         }
-        for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
-            values[key] = getattr(notifications, key)
+        values["sound_theme"] = getattr(notifications, "sound_theme",
+                                        "default") or "default"
+        for key in ("sound_first_message", "sound_any_message",
+                    "sound_muc_mention", "sound_on_send", "sound_ft_start",
+                    "sound_ft_finish", "sound_contact_online",
+                    "sound_contact_offline"):
+            values[key] = bool(getattr(notifications, key, False))
         for key, value in values.items():
             if key in self._controls:
                 self._set(key, value)
@@ -1451,7 +1492,11 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "osd_typing", "osd_status", "osd_conference",
                     "osd_topdown"):
             cfg.notifications[key] = self._value(key)
-        for key in ("sound_any_message", "sound_first_message", "sound_login", "sound_file_transfer"):
+        cfg.notifications.sound_theme = self._value("sound_theme") or "default"
+        for key in ("sound_first_message", "sound_any_message",
+                    "sound_muc_mention", "sound_on_send", "sound_ft_start",
+                    "sound_ft_finish", "sound_contact_online",
+                    "sound_contact_offline"):
             cfg.notifications[key] = self._value(key)
         for key in ("auto_away", "away_minutes", "auto_xa", "xa_minutes"):
             cfg.status[key] = self._value(key)

@@ -35,10 +35,11 @@ from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.roster_widget import RosterWidget, UserItem
 from stanza_im.ui.chat_window import ChatWindow
 from stanza_im.ui.chat_widget import _HISTORY_PAGE, _HISTORY_WINDOW_MAX
-from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
 from stanza_im.ui.roster_style import RosterStyle
 from stanza_im.ui.subject_dialog import SubjectDialog
 from stanza_im.ui.tray import TrayIcon
+from stanza_im.ui.sounds import SoundPlayer
 from stanza_im.ui.osd import OsdManager
 from stanza_im.ui.chat_view import HAS_WEBENGINE
 from stanza_im.include.media import MediaCache, filename_from_url
@@ -260,6 +261,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── OSD notifications ─────────────────────────────────────
         self._osd = OsdManager(self._config, self._icons)
         self._osd_status_seen: set[str] = set()
+
+        # ── Sound notifications ───────────────────────────────────
+        self._sounds = SoundPlayer()
+        self._sounds.set_theme(
+            getattr(self._config.notifications, "sound_theme", "default"))
+        # Contacts whose first presence after login already happened, so the
+        # initial sync does not fire a burst of online/offline sounds.
+        self._presence_sound_seen: set[str] = set()
 
         # ── UI ───────────────────────────────────────────────────
         self._build_ui()
@@ -1422,7 +1431,8 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.preferences import PreferencesDialog
         dlg = PreferencesDialog(self._config, self._theme_factory,
                                 osd_manager=self._osd, parent=self,
-                                client=self._client)
+                                client=self._client,
+                                sound_player=self._sounds)
         dlg.settings_applied.connect(self._on_settings_applied)
         dlg.password_changed.connect(self._on_password_changed)
         dlg.register_requested.connect(self._on_create_account)
@@ -1543,6 +1553,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.set_csi_config(csi)
             self._update_csi()
         self._tray.set_popups_mode(self._config.notifications.popups)
+        self._sounds.set_theme(
+            getattr(self._config.notifications, "sound_theme", "default"))
         self._apply_interface_mode()
         self._refresh_muc_names()
         self._apply_roster_font()
@@ -1896,6 +1908,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_session_started(self):
         logger.info("Session started, roster arriving...")
+        self._presence_sound_seen.clear()
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
         self._republish_pep()
@@ -1917,6 +1930,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_info_actions_enabled(False)
 
     def _on_disconnected(self):
+        self._presence_sound_seen.clear()
         self._set_info_actions_enabled(False)
         # With stream management a transient drop is usually resumed, so
         # avoid a scary "Disconnected" message until resumption fails.
@@ -2848,6 +2862,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_contact_status(bare_jid, show)
         self._schedule_roster_repaint()
         self._maybe_osd_status(bare_jid, show, old_show)
+        self._notify_presence_sound(bare_jid, old_show, show)
 
     def _on_subscribed(self, jid: str):
         """A new contact was added (our subscribe was accepted)."""
@@ -3388,6 +3403,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember_contact(bare_jid, name=sender_name,
                                is_conference=False)
 
+        # Sound decision must run before the tab is opened (``carbon`` copies
+        # from our other devices stay silent).
+        if not carbon:
+            self._notify_incoming_message(bare_jid, body)
+
         if not self._chat_window.has_chat(bare_jid):
             self._chat_window.open_chat(bare_jid, sender_name, focus=False)
             self._apply_call_support(bare_jid)
@@ -3472,6 +3492,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
         self._remember_contact(target, name=nick, is_conference=True)
+        self._notify_incoming_message(target, body)
         chat = self._chat_window.open_chat(target, nick)
         self._apply_call_support(target)
         chat.add_message(sender=nick, body=body,
@@ -3511,6 +3532,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 timestamp=_current_timestamp(), sender="Me",
                 origin_id=message_id, message_id=message_id))
             self._remember_contact(jid)
+            self._play_sound("message_send", "sound_on_send")
 
     # ── Groupchat ─────────────────────────────────────────────────
 
@@ -3556,6 +3578,10 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_groupchat(room, nick, body)
+        self_nick = self._muc_self_nicks.get(room, "")
+        if (self_nick and nick != self_nick
+                and mentions_nick(body, self_nick)):
+            self._play_sound("message", "sound_muc_mention")
         if (self._client and self._chat_area_visible()
                 and self._chat_window.current_jid() == room):
             self._client.mds_mark_displayed(room)
@@ -3645,6 +3671,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._touch_tab_activity(room)
         if self._client:
             self._client.send_muc_message(room, body)
+            self._play_sound("message_send", "sound_on_send")
 
     # ── XEP-0461 reply sends ──────────────────────────────────────
 
@@ -3672,6 +3699,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=message_id, message_id=message_id,
             reply_to=reply_to, reply_id=reply_id))
         self._remember_contact(jid)
+        self._play_sound("message_send", "sound_on_send")
 
     def _on_groupchat_reply_send(self, room: str, body: str, reply_to: str,
                                  reply_id: str, ref_sender: str,
@@ -3680,6 +3708,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.send_muc_message(
                 room, body, reply_to=reply_to, reply_id=reply_id,
                 reply_ref_sender=ref_sender, reply_ref_body=ref_body)
+            self._play_sound("message_send", "sound_on_send")
 
     def _on_message_edit_send(self, jid: str, body: str, edit_id: str):
         """Send a XEP-0308 correction (1:1) and replace it locally."""
@@ -3694,10 +3723,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_task(history.replace_message_async(
             jid, edit_id, body))
         self._remember_contact(jid)
+        self._play_sound("message_send", "sound_on_send")
 
     def _on_groupchat_edit_send(self, room: str, body: str, edit_id: str):
         if self._client:
             self._client.edit_message(room, body, edit_id, mtype="groupchat")
+            self._play_sound("message_send", "sound_on_send")
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
@@ -4107,6 +4138,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if chat and direction == "out":
                 chat.add_status(tr("ft_p2p_started", file=name),
                                 time.strftime("%H:%M:%S"))
+            if direction == "in":
+                self._play_sound("ft_start", "sound_ft_start")
             return
         if direction == "out":
             self._file_upload_states.pop((jid, path), None)
@@ -4117,6 +4150,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if chat:
                 key = "ft_recv_saved" if direction == "in" else "ft_p2p_done"
                 chat.add_status(tr(key, file=name), time.strftime("%H:%M:%S"))
+            self._play_sound("ft_finish", "sound_ft_finish")
         elif phase == "error":
             if dlg is not None and index >= 0:
                 dlg.set_row_failed(index, detail or "")
@@ -4663,6 +4697,52 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._osd.show(QtGui.QIcon(), sender or tr("osd_file"),
                        tr("osd_file", filename=filename or ""))
+
+    # ── Sound notifications ───────────────────────────────────────
+
+    def _sound_on(self, key: str) -> bool:
+        return bool(getattr(self._config.notifications, key, False))
+
+    def _play_sound(self, event: str, if_key: str = "") -> None:
+        """Play *event* from the sound theme when the *if_key* option is on."""
+        if if_key and not self._sound_on(if_key):
+            return
+        self._sounds.play(event)
+
+    def _notify_incoming_message(self, target: str, body: str) -> None:
+        """Play the ``new_message``/``message`` sound for an incoming 1:1/PM.
+
+        ``new_message`` (first message, no open tab) is preferred over
+        ``message`` (tab open but not focused); a focused conversation is
+        silent.  Must be called *before* the tab is opened/focused.
+        """
+        active = (self._chat_area_visible()
+                  and self._chat_window.current_jid() == target)
+        if active:
+            return
+        if self._chat_window.has_chat(target):
+            self._play_sound("message", "sound_any_message")
+        else:
+            self._play_sound("new_message", "sound_first_message")
+
+    def _notify_presence_sound(self, jid: str, old_show: str,
+                               new_show: str) -> None:
+        """Play contact online/offline on a real transition.
+
+        The first presence per JID after login is the server's initial sync and
+        is recorded silently, so a login does not fire a burst of sounds.
+        """
+        if jid not in self._presence_sound_seen:
+            self._presence_sound_seen.add(jid)
+            return
+        if old_show == new_show:
+            return
+        was_offline = old_show == "offline"
+        is_offline = new_show == "offline"
+        if was_offline and not is_offline:
+            self._play_sound("contact_online", "sound_contact_online")
+        elif is_offline and not was_offline:
+            self._play_sound("contact_offline", "sound_contact_offline")
 
     def _set_status_combo(self, show: str):
         """Sync the roster status combo without retriggering presence."""
