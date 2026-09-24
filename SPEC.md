@@ -1231,12 +1231,16 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   opacity still looks transparent rather than black. At 100 % opacity the whole
   rectangle is filled with the bubble color (straight corners) and no snapshot
   is taken. Wayland/unknown platforms always composite with plain alpha.
-- All windows dock to a saved base position (`notifications.osd_x/osd_y`, the
-  position of the first notification) and stack from it: top-down when
-  `osd_topdown` is on (second below, third below that), otherwise upward
-  (newest above). Positions are recomputed on add/dismiss; `stack_position()` is
-  a pure function. The max on-screen count is `osd_max` (oldest is evicted) and
-  each window auto-hides after `osd_duration` seconds.
+- All windows dock to a saved base position (`notifications.osd_x/osd_y`) and
+  stack from it: top-down when `osd_topdown` is on (`osd_y` = top of the first,
+  second below, third below that), otherwise upward with `osd_y` = the **bottom
+  line** — each notification is anchored by its bottom edge (`stack_position`
+  subtracts the window's own height), so a tall one grows upward instead of
+  overlapping the notification below it or overflowing the screen; the
+  draggable preview stores its bottom (`_preview_moved`). Positions are
+  recomputed on add/dismiss; `stack_position()` is a pure function. The max
+  on-screen count is `osd_max` (oldest is evicted) and each window auto-hides
+  after `osd_duration` seconds.
 - Preferences → Notifications → OSD shows a draggable preview at the saved
   base position; dragging moves it by grabbing the mouse and calling
   `move()` on X11 (works even when the window manager ignores the

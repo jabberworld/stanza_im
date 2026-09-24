@@ -150,8 +150,35 @@ check("topdown below", stack_position(1, 100, [40, 60], True) ==
       100 + 40 + osd_mod._OSD_GAP)
 check("topdown third", stack_position(2, 100, [40, 60, 40], True) ==
       100 + 40 + osd_mod._OSD_GAP + 60 + osd_mod._OSD_GAP)
+# Bottom-up: ``base_y`` is the bottom line; index 0 sits on it and a tall
+# upper notification grows upward (its bottom stays on the line above the
+# window below it, ``top_below - gap``).
+check("bottom-up base sits on the bottom line",
+      stack_position(0, 100, [40], False) == 100 - 40)
 check("bottom-up above", stack_position(1, 100, [40, 40], False) ==
-      100 - 40 - osd_mod._OSD_GAP)
+      100 - (40 + osd_mod._OSD_GAP) - 40)
+check("bottom-up bottom stays above the window below",
+      stack_position(0, 100, [40, 120], False) + 40 == 100
+      and stack_position(1, 100, [40, 120], False) + 120
+      == stack_position(0, 100, [40, 120], False) - osd_mod._OSD_GAP)
+
+# 2b. bottom-up restack: tall windows grow upward, no overlap ----------------
+bu = OsdManager(make_cfg(osd_topdown=False, osd_x=120, osd_y=300))
+bu.show(None, "one", "first")
+bu.show(None, "two", "second")
+_r0, _r1 = bu._windows[0]["window"], bu._windows[1]["window"]
+_r0.setFixedHeight(40)
+_r1.setFixedHeight(120)
+bu._restack()
+_base_y = bu._externalize(bu._base_point()).y()
+check("bottom-up: lowest bottom on the base line",
+      _r0.y() + _r0.height() == _base_y)
+check("bottom-up: tall upper bottom just above the lower top",
+      _r1.y() + _r1.height()
+      == _r0.y() - osd_mod._OSD_GAP)
+check("bottom-up: tall upper does not overlap the lower",
+      _r1.y() < _r0.y() and _r1.y() + _r1.height() <= _r0.y())
+bu.dismiss_all()
 
 # 3. manager: disabled gate --------------------------------------------------
 m = OsdManager(make_cfg(osd_enabled=False))
@@ -298,8 +325,11 @@ _release9 = QtGui.QMouseEvent(
 QtWidgets.QApplication.sendEvent(_win9, _release9)
 check("preview drags while settings open",
       (_win9.x(), _win9.y()) == (150, 85))
-check("drag persists while settings open",
-      p_mgr._cfg.osd_x == 150 and p_mgr._cfg.osd_y == 85)
+# p_mgr is bottom-up: osd_y is the bottom line, so the preview stores its
+# bottom (dragged top + height) instead of the top.
+check("drag persists while settings open (bottom-up stores the bottom)",
+      p_mgr._cfg.osd_x == 150
+      and p_mgr._cfg.osd_y == 85 + _win9.height())
 p_dlg2.close()
 p_mgr.hide_preview()
 

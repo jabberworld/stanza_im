@@ -500,7 +500,11 @@ window managers that ignore `_NET_WM_MOVERESIZE`, e.g. Trinity) and uses
 dialog is opened non-modally so the preview keeps receiving input. Stacking
 is top-down or bottom-up per `osd_topdown`, capped by `osd_max` (oldest evicted),
 auto-hiding after `osd_duration`; a pure `stack_position()` keeps the math
-unit-testable. MainWindow triggers gate on `notifications.osd_enabled` and the
+unit-testable. In bottom-up mode `osd_y` is the **bottom line**: every
+notification is anchored by its bottom edge (via `stack_position` subtracting
+its own height) so a tall one grows upward instead of overlapping the one below
+or overflowing the screen; the draggable preview stores its bottom
+(`_preview_moved`). MainWindow triggers gate on `notifications.osd_enabled` and the
 per-event toggles: `osd_message` (1:1 + private, only while the chat window is
 not the active window on that conversation), `osd_typing`, `osd_status`
 (`never`/`available`/`any`, skipping the initial presence sync),

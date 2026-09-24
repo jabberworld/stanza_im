@@ -148,18 +148,22 @@ def _grab_region(pos: QtCore.QPoint, size: QtCore.QSize):
 
 def stack_position(index: int, base_y: int, heights,
                    topdown: bool = True, gap: int = _OSD_GAP) -> int:
-    """Absolute Y for the OSD at *index* docked to *base_y*.
+    """Absolute top Y for the OSD at *index* docked to *base_y*.
 
-    Index 0 is the base itself.  In top-down mode the rest appear below it,
-    otherwise (newest above) they appear above the base.
+    Index 0 is the base itself.  In top-down mode ``base_y`` is the top of the
+    stack and the rest appear below it.  In bottom-up mode ``base_y`` is the
+    **bottom** line of the stack: each notification is anchored by its bottom
+    edge, so a tall one grows upward instead of overlapping the notification
+    below it or overflowing the screen.
     """
     heights = list(heights or [])
-    if index <= 0:
-        return base_y
+    own = heights[index] if 0 <= index < len(heights) else 0
     offset = 0
-    for i in range(index):
+    for i in range(max(0, index)):
         offset += (heights[i] if i < len(heights) else 0) + gap
-    return base_y + offset if topdown else base_y - offset
+    if topdown:
+        return base_y + offset
+    return base_y - offset - own
 
 
 class _OsdWindow(QtWidgets.QWidget):
@@ -524,7 +528,14 @@ class OsdManager:
 
     def _preview_moved(self, x: int, y: int) -> None:
         self._cfg.osd_x = int(x)
-        self._cfg.osd_y = int(y)
+        if bool(getattr(self._cfg, "osd_topdown", True)):
+            self._cfg.osd_y = int(y)
+        else:
+            # Bottom-up: ``osd_y`` is the bottom line, so store the preview's
+            # bottom — otherwise it would jump up on the next restack.
+            rec = self._preview
+            height = rec["window"].height() if rec is not None else 0
+            self._cfg.osd_y = int(y) + height
 
     def _clicked(self, rec: dict) -> None:
         cb = rec.get("on_click")
