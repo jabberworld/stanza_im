@@ -45,6 +45,7 @@ stanza_im/
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
 │   ├── nick_colors.py  — Session MUC nickname → color allocation
+│   ├── font_zoom.py    — Ctrl+wheel font-size helper (input/roster/MUC list)
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
 │   ├── media_preview.py — Inline image/audio/video previews
 │   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom)
@@ -104,7 +105,10 @@ The conference browser consumes room names and metadata directly from
 vCard dialogs are opened asynchronously without nested modal event loops.
 `VCardInfoDialog` has a "Обновить"/"Refresh" button (`refresh_requested` →
 `MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
-rebuilds the open window in place (`update_card`) rather than opening another.
+rebuilds the open window in place (`update_card`) rather than opening another:
+`_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
+"open a new dialog" `_pending_profile`) so the result updates the visible
+window.
 Appearance settings support independent ordinary-chat and conference theme
 variants, arranged in the «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and
 «Разное» tabs («Разное» holds the media-preview size, the preview cache
@@ -188,7 +192,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
-| `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. |
+| `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. Ctrl+wheel over the list changes only the size. |
+| `appearance.input_font` / `input_font_size` | `""` / `0` | Message input font (`ChatWidget.set_input_font`, remembered per `ChatWindow`); defaults to the chat font. Ctrl+wheel over the input changes only the size. |
+| `appearance.tooltip_avatar_size` | `64` | Avatar size (px, 32–128) in the shared rich-text tooltip (`ui/tooltip.set_avatar_size`); used by the roster and MUC participant tooltips. |
 | `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
 | `appearance.roster_group_bg_color` | `#ececec` | Roster group header stripe color, drawn by `RosterStyle.paint_group`. |
 | `appearance.chat_bg_color` | `#ffffff` | Chat background override injected as `body { background-color: … !important; background-image: none !important }` by `ChatThemeFactory.set_chat_bg_color` (clears skin tile images); applied to both 1:1 and MUC theme factories. |
@@ -300,7 +306,15 @@ Login → (connect) → Splash → (success) → Roster
 Splash → (failure) → Login (with error message)
 Roster → (close) → Tray (hidden)
 Tray → (show) → Roster
+Roster → («Действия» → «Завершить сеанс») → Login (client dropped)
 ```
+
+The Actions menu carries «Завершить сеанс» (above «Выход», same
+`gtk-quit.png` icon) → `MainWindow._logout`: flush unread/roster cache,
+disconnect the client and drop it, clear the per-account UI state
+(`_reset_account_ui`) and return to the login page with the saved JID
+prefilled. The unread counters stay on disk (bound to the account) and the
+application keeps running, unlike «Выход» (`_quit`).
 
 ### 5.2 Auto-Status
 
@@ -606,7 +620,9 @@ Dynamic height: 32px without status message, 52px with.
 
 The roster typeface is taken live from `appearance.roster_font` /
 `roster_font_size` (empty/0 = Qt default) and applied to the same QPainter
-pass by `MainWindow._apply_roster_font` — no relayout/rebuild.
+pass by `MainWindow._apply_roster_font` — no relayout/rebuild. Ctrl+wheel over
+the roster changes only the size (`RosterWidget.wheelEvent` →
+`roster_font_zoom_requested`).
 
 The roster background and the group-header stripe colorized per
 `appearance.roster_bg_color` / `appearance.roster_group_bg_color`
@@ -961,7 +977,16 @@ label in Preferences (a real chat font wins, otherwise the system font).
 `ChatWindow.set_participant_font` remembers it in `_participant_font` and
 applies it to every new MUC tab (so the sidebar keeps the stored typeface
 across reconnects). Re-renders the participant list (`_render_muc_users`) so
-section headers pick up the family too.
+section headers pick up the family too. Ctrl+wheel changes only the size
+(`_ParticipantList.wheelEvent` → `participant_font_zoom_requested`).
+
+**Message input font**: `ChatWidget.set_input_font(family, size)` (from
+`appearance.input_font` / `input_font_size`, defaulting to the chat font) sets
+the input's font; `ChatWindow.set_input_font` remembers it in `_input_font` and
+applies it to new tabs. Ctrl+wheel changes only the size
+(`_ChatInput.wheelEvent` → `input_font_zoom_requested`). All three widgets use
+`ui/font_zoom.py` (`FontZoomMixin`, 6–48 pt); MainWindow persists the size and
+calls `PreferencesDialog.sync_font_size` so the dialog spin box follows.
 
 **Preferences defaults**: on the «Шрифты» tab, empty/zero values display the
 *real* font that would be used: the family combo's first entry reads
@@ -1164,10 +1189,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   that actually joined (`GroupChatInfo.joined`), so a stale entry from a failed
   attempt does not block the retry; `client.join_muc` cancels a pending join
   task before starting a new one.
-- A bookmarked room that is also a plain roster contact is moved to the
-  conferences group before joining
-  (`MainWindow._classify_bookmarked_conferences`, run after bookmarks load and
-  on roster additions).
+- `MainWindow._classify_bookmarked_conferences` (run after bookmarks load and on
+  roster additions) moves a bookmarked room that is also a plain roster contact
+  into the conferences group only when the room is actually joined or its
+  bookmark asks for auto-join; a plain (non-autojoin, unjoined) bookmark is not
+  forced into the Conferences group and stays in its own contact group.
 - **XEP-0410 self-ping**: `JabberClient._muc_self_ping_loop` (started on
   `session_start`/`session_resumed`, stopped on disconnect) checks joined rooms
   every minute; after 15 minutes without inbound traffic (`_mark_muc_activity`
@@ -1203,7 +1229,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   catch-up does not clear unread that arrived after it. OSD popups are not
   replayed. Messages received while
   the client was offline are delivered by the server on reconnect and counted
-  as unread in the new session (no MAM catch-up).
+  as unread in the new session (no MAM catch-up). The file also stores the
+  owning account JID (`account`; legacy files without it still load), and
+  `load_state(account)` ignores counters from another account, so switching
+  accounts never keeps the previous account's tray blinking.
 - Notifications: `showMessage()` for connection status, errors. The balloon
   mode is `notifications.popups` (`off`/`system`/`system_messages`, default
   `system`; a legacy bool is coerced by `tray.normalize_popups_mode`):

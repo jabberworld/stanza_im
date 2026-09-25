@@ -30,6 +30,7 @@ from stanza_im.include.avatars import (
 from stanza_im.ui.chat_view import ChatView
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
+from stanza_im.ui.font_zoom import FontZoomMixin
 from stanza_im.ui import tooltip as tooltip_mod
 
 logger = logging.getLogger(__name__)
@@ -175,12 +176,17 @@ class _FadeLabel(QtWidgets.QWidget):
         target.drawPixmap(0, 0, pixmap)
 
 
-class _ParticipantList(QtWidgets.QListWidget):
+class _ChatInput(FontZoomMixin, QtWidgets.QPlainTextEdit):
+    """The message input; Ctrl+wheel changes its font size."""
+
+
+class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
     """MUC participant sidebar list.
 
     A single click selects a row; a left click on empty space clears the
     selection (QListWidget keeps it by default).  Rows are resized to the
     viewport width (no horizontal scrolling) and long nicks are faded out.
+    Ctrl+wheel changes the participant font size.
     """
 
     def __init__(self, parent=None):
@@ -364,6 +370,8 @@ class ChatWidget(QtWidgets.QWidget):
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
+    input_font_zoom_requested = QtCore.pyqtSignal(int)   # new size (pt)
+    participant_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)             # url
@@ -381,6 +389,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_avatars = True
         self._show_muc_avatars = True
         self._show_muc_clients = True
+        self._participant_font: tuple[str, int] = ("", 0)
+        self._input_font: tuple[str, int] = ("", 0)
         self._send_ctrl_enter = False
         self._confirm_retraction = False
         self._moderation_enabled = False
@@ -650,7 +660,7 @@ class ChatWidget(QtWidgets.QWidget):
         # Input area
         input_row = QtWidgets.QHBoxLayout()
         input_row.setContentsMargins(4, 2, 4, 2)
-        self._input = QtWidgets.QPlainTextEdit()
+        self._input = _ChatInput()
         self._input_height = 60
         self._input.setMinimumHeight(40)
         self._input.setMaximumHeight(240)
@@ -658,6 +668,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._input.setPlaceholderText(tr("chat_send"))
         self._input.installEventFilter(self)
         self._input.textChanged.connect(self._on_input_changed)
+        self._input.font_zoom_requested.connect(self._on_input_font_zoom)
         input_row.addWidget(self._input, stretch=1)
 
         self._send_btn = QtWidgets.QToolButton()
@@ -686,6 +697,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._users_list.setMaximumWidth(420)
         self._users_list.setAcceptDrops(False)
         self._users_list.setVisible(self.is_muc)
+        self._users_list.font_zoom_requested.connect(
+            self._on_participant_font_zoom)
         self._users_list.setContextMenuPolicy(
             QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self._users_list.itemDoubleClicked.connect(
@@ -1995,15 +2008,20 @@ class ChatWidget(QtWidgets.QWidget):
         """Rich-text tooltip for a MUC participant row."""
         from stanza_im.include.utils import escape_html
         nick = user.get("nick", "")
-        icon = (clients_mod.client_icon_for(
-            str(user.get("caps_node") or ""), 16)
-            if self._show_muc_clients else "")
+        caps_node = str(user.get("caps_node") or "")
+        icon = (clients_mod.client_icon_for(caps_node, 16)
+                if self._show_muc_clients else "")
         prefix = f'<img src="{icon}" width="16" height="16"> ' if icon else ""
         lines = [f"{prefix}<b>{escape_html(nick)}</b>"]
         real_jid = user.get("real_jid", "")
         if real_jid:
             lines.append(f"{tr('tooltip_real_jid')}: {escape_html(real_jid)}")
+        # Client name: the XEP-0092 answer first, then the XEP-0115 caps
+        # mapping (the same fallback the roster tooltip uses).
         client = user.get("client", "")
+        if not client:
+            found = clients_mod.find_client(caps_node)
+            client = found[0] if found else ""
         if client:
             lines.append(f"{tr('tooltip_client')}: {escape_html(client)}")
         role = user.get("role", "")
@@ -2237,6 +2255,7 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_participant_font(self, family: str = "", size: int = 0):
         """Set the MUC participant sidebar font (empty = system default)."""
+        self._participant_font = (family or "", int(size or 0))
         base = QtGui.QFont(QtWidgets.QApplication.font())
         if family:
             base.setFamily(family)
@@ -2245,6 +2264,32 @@ class ChatWidget(QtWidgets.QWidget):
         self._users_list.setFont(base)
         if self.is_muc:
             self._render_muc_users()
+
+    def _on_participant_font_zoom(self, size: int) -> None:
+        """Ctrl+wheel over the participant list: change only the size."""
+        family, old = self._participant_font
+        if int(size) == old:
+            return
+        self.set_participant_font(family, int(size))
+        self.participant_font_zoom_requested.emit(int(size))
+
+    def set_input_font(self, family: str = "", size: int = 0):
+        """Set the message input font (empty = application font)."""
+        self._input_font = (family or "", int(size or 0))
+        base = QtGui.QFont(QtWidgets.QApplication.font())
+        if family:
+            base.setFamily(family)
+        if size > 0:
+            base.setPointSize(int(size))
+        self._input.setFont(base)
+
+    def _on_input_font_zoom(self, size: int) -> None:
+        """Ctrl+wheel over the input: change only the size."""
+        family, old = getattr(self, "_input_font", ("", 0))
+        if int(size) == old:
+            return
+        self.set_input_font(family, int(size))
+        self.input_font_zoom_requested.emit(int(size))
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self.is_muc:

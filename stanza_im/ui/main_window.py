@@ -213,6 +213,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_muc_config_requested)
         self._chat_window.input_height_changed.connect(
             self._on_input_height_changed)
+        self._chat_window.input_font_zoom_requested.connect(
+            self._on_input_font_zoom)
+        self._chat_window.participant_font_zoom_requested.connect(
+            self._on_participant_font_zoom)
         self._chat_window.text_scale_changed.connect(
             self._on_text_scale_changed)
         self._chat_window.window_closed.connect(self._on_chat_window_closed)
@@ -282,7 +286,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── State ────────────────────────────────────────────────
         self._visible = True
         self._shutting_down = False
-        self._unread_counts, self._unread_displayed = unread_state.load_state()
+        (self._unread_counts,
+         self._unread_displayed) = unread_state.load_state(self._config.jid)
         self._unread_total = sum(self._unread_counts.values())
         self._unread_jids: set[str] = set(self._unread_counts)
         # The tray only blinks once logged in (see _sync_tray_blink); restored
@@ -307,6 +312,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
         self._pending_profile: set[str] = set()
+        # JIDs whose *already open* vCard dialog is being refreshed in place.
+        self._vcard_refreshing: set[str] = set()
         self._vcard_dialogs: dict[str, object] = {}
         self._history_manager: object | None = None
         self._last_activity = time.monotonic()
@@ -396,6 +403,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.set_trailing_groups({tr("roster_group_conferences")})
         self._apply_roster_font()
         self._roster.set_tooltip_provider(self._roster_tooltip)
+        self._roster.roster_font_zoom_requested.connect(
+            self._on_roster_font_zoom)
         self._show_offline_action.toggled.connect(self._roster.set_show_offline)
         self._roster.contact_double_clicked.connect(self._on_contact_open)
         self._roster.contact_context_menu.connect(self._on_contact_context)
@@ -571,6 +580,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._menu_icon("xml-konzole.svg"), tr("menu_xml_console"))
         xml_console.triggered.connect(self._on_xml_console)
         actions_menu.addSeparator()
+        logout_act = actions_menu.addAction(self._menu_icon("gtk-quit.png"),
+                                            tr("menu_logout"))
+        logout_act.triggered.connect(self._logout)
         quit_act = actions_menu.addAction(self._menu_icon("gtk-quit.png"),
                                           tr("menu_quit"))
         quit_act.triggered.connect(self._quit)
@@ -862,32 +874,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sync_conference_roster(room)
 
     def _classify_bookmarked_conferences(self) -> None:
-        """Show bookmarked rooms under Conferences even before joining.
+        """Group bookmarked rooms under Conferences while they are active.
 
-        A bookmark that is also present as a normal roster contact would
-        otherwise stay in the contacts group until the room is joined.
+        Only a room we are actually **in**, or one whose bookmark asks for
+        auto-join, belongs in the Conferences group.  A plain bookmarked room
+        that is not joined must not appear there (e.g. a room with auto-join
+        turned off) — and when such a room is also a normal roster contact it
+        stays in its own contact group.
         """
-        import dataclasses
         group = tr("roster_group_conferences")
-        changed = False
         for room in list(self._bookmarks):
-            if room in self._muc_self_nicks:
+            if room in self._muc_self_nicks or room in self._conference_roster:
                 continue
+            bookmark = self._bookmarks.get(room) or {}
+            if not bool(bookmark.get("autojoin")):
+                continue
+            # An auto-join bookmark may also exist as a plain roster contact;
+            # move it to the Conferences group before the join happens.
             existing = next(
                 (user for user in self._roster._users
                  if user.jid == room and user.group != group), None)
             if existing is not None:
+                import dataclasses
                 moved = dataclasses.replace(existing, group=group)
                 self._roster.remove_user(room)
                 self._roster.add_user(moved)
-                changed = True
-            if room not in self._conference_roster:
-                self._conference_roster.add(room)
-                self._remember_contact(room, name=self._muc_display_name(room),
-                                       groups=[group], is_conference=True)
-        if changed:
-            self._roster.sort_and_update()
-            self._schedule_roster_repaint()
+                self._roster.sort_and_update()
+                self._schedule_roster_repaint()
+            self._remember_contact(room, name=self._muc_display_name(room),
+                                   groups=[group], is_conference=True)
 
     def _apply_muji_support(self, room: str) -> None:
         """Enable the MUC tab's call menu when aiortc is available.
@@ -1613,6 +1628,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if participant_font != getattr(self, "_applied_participant_font", ("", 0)):
             self._chat_window.set_participant_font(*participant_font)
             self._applied_participant_font = participant_font
+        input_font = (
+            getattr(self._config.appearance, "input_font", "") or "",
+            int(getattr(self._config.appearance, "input_font_size", 0) or 0))
+        if input_font != getattr(self, "_applied_input_font", ("", 0)):
+            self._chat_window.set_input_font(*input_font)
+            self._applied_input_font = input_font
+        tooltip_avatar = int(getattr(
+            self._config.appearance, "tooltip_avatar_size", 64) or 64)
+        if tooltip_avatar != getattr(self, "_applied_tooltip_avatar", 0):
+            from stanza_im.ui import tooltip as tooltip_mod
+            tooltip_mod.set_avatar_size(tooltip_avatar)
+            self._applied_tooltip_avatar = tooltip_avatar
         osd_font = (getattr(self._config.appearance, "osd_font", "") or "",
                     int(getattr(self._config.appearance, "osd_font_size", 0) or 0))
         if osd_font != getattr(self, "_applied_osd_font", ("", 0)):
@@ -2059,10 +2086,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._client.get_vcard(jid, force=force)
 
     def _refresh_vcard(self, jid: str):
-        """Refetch a vCard from the server (vCard dialog "Refresh")."""
+        """Refetch a vCard from the server (vCard dialog "Refresh").
+
+        The open dialog (if any) is refreshed **in place** — it must not be
+        closed and reopened.  The result is routed to
+        :meth:`_update_open_vcard` rather than through ``_pending_profile``
+        (which is the "open a new dialog" path).
+        """
         if not self._client:
             return
-        self._pending_profile.add(jid)
+        dialog = self._vcard_dialogs.get(jid)
+        if dialog is not None and dialog.isVisible():
+            self._vcard_refreshing.add(jid)
+        else:
+            self._pending_profile.add(jid)
         self._request_vcard(jid, force=True)
 
     def _refresh_avatar(self, jid: str, path: str) -> None:
@@ -2126,12 +2163,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 "nickname": card.get("nickname") or "",
             }
             self._apply_muc_name(room_jid)
+        if jid in self._vcard_refreshing:
+            self._vcard_refreshing.discard(jid)
+            dialog = self._vcard_dialogs.get(jid)
+            if dialog is not None and dialog.isVisible():
+                dialog.update_card(card, self._vcard_status(jid, card))
+                dialog.raise_()
+                dialog.activateWindow()
+                if self._client:
+                    self._client.probe_entity(jid)
+                return
         if jid in self._pending_profile:
             self._pending_profile.discard(jid)
             self._open_vcard_info(jid, card)
 
-    def _open_vcard_info(self, jid: str, card: dict):
-        from stanza_im.ui.vcard_dialog import VCardInfoDialog
+    def _vcard_status(self, jid: str, card: dict) -> dict:
+        """Presence/PEP status block for the vCard info dialog."""
         status = {
             "jid": card.get("jid") or jid,
             "presence": "",
@@ -2166,6 +2213,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 if summary.get(key):
                     status[key] = summary[key]
             self._client.fetch_pep(bare)
+        return status
+
+    def _open_vcard_info(self, jid: str, card: dict):
+        from stanza_im.ui.vcard_dialog import VCardInfoDialog
+        status = self._vcard_status(jid, card)
         existing = self._vcard_dialogs.get(jid)
         if existing is not None and existing.isVisible():
             # A refresh (or a second profile request): rebuild in place.
@@ -2221,10 +2273,11 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(box_parent, APP_NAME,
                                           tr("vcard_save_error"))
             return
-        existing = self._vcard_dialogs.pop(room, None)
-        if existing is not None:
-            existing.close()
-        self._open_vcard_info(room, card)
+        existing = self._vcard_dialogs.get(room)
+        if existing is not None and existing.isVisible():
+            existing.update_card(card, self._vcard_status(room, card))
+        else:
+            self._open_vcard_info(room, card)
         QtWidgets.QMessageBox.information(box_parent, APP_NAME,
                                           tr("vcard_saved"))
 
@@ -3334,7 +3387,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if sid:
                     displayed[jid] = sid
         self._unread_displayed = displayed
-        unread_state.save(self._unread_counts, displayed)
+        unread_state.save(self._unread_counts, displayed,
+                          account=self._config.jid or "")
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -3742,6 +3796,34 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_input_height_changed(self, jid: str, height: int):
         self._config.chat.input_height = max(40, min(240, int(height)))
         self._config.save()
+
+    def _on_roster_font_zoom(self, size: int):
+        self._config.appearance.roster_font_size = int(size)
+        self._config.save()
+        self._apply_roster_font()
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.sync_font_size("roster_font", int(size))
+
+    def _on_input_font_zoom(self, size: int):
+        self._config.appearance.input_font_size = int(size)
+        self._config.save()
+        self._applied_input_font = (
+            getattr(self._config.appearance, "input_font", "") or "",
+            int(size))
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.sync_font_size("input_font", int(size))
+
+    def _on_participant_font_zoom(self, size: int):
+        self._config.appearance.participant_font_size = int(size)
+        self._config.save()
+        self._applied_participant_font = (
+            getattr(self._config.appearance, "participant_font", "") or "",
+            int(size))
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.sync_font_size("participant_font", int(size))
 
     def _on_text_scale_changed(self, jid: str, factor: float):
         try:
@@ -5010,6 +5092,54 @@ class MainWindow(QtWidgets.QMainWindow):
             self.activateWindow()
             self._visible = True
         self._update_csi()
+
+    def _logout(self):
+        """Log out of the current account and return to the login form.
+
+        The unread counters stay on disk (bound to this account), but the
+        in-memory totals are cleared and the tray stops blinking, so the login
+        screen never shows the previous account's activity.  The application
+        itself keeps running.
+        """
+        if self._shutting_down or self._client is None:
+            return
+        self._flush_unread()
+        if self._client is not None:
+            self._client.flush_roster_cache()
+            self._start_task(self._disconnect_for_logout(self._client))
+        self._client = None
+        self._reset_account_ui()
+        self._stack.setCurrentIndex(_PAGE_LOGIN)
+        self._login.prefill(self._config.jid or "", "")
+        self._login.set_status_text("")
+
+    async def _disconnect_for_logout(self, client):
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=3.0)
+        except Exception:
+            logger.debug("Logout disconnect did not finish cleanly",
+                         exc_info=True)
+
+    def _reset_account_ui(self) -> None:
+        """Drop per-account UI state (roster, tabs, MUC maps, unread, tray)."""
+        # Unread counters remain on disk; clear only the live totals/blink.
+        self._unread_total = 0
+        self._unread_jids = set()
+        self._tray.stop_blinking()
+        self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
+        self._tray.set_current_status("offline")
+        self._presence_sound_seen.clear()
+        self._blocked_jids = set()
+        self._conference_roster = set()
+        self._muc_self_nicks.clear()
+        self._muc_users.clear()
+        self._muc_vcard_names.clear()
+        self._muc_avatar_paths.clear()
+        self._bookmarks = {}
+        self._roster.clear()
+        self._roster.sort_and_update()
+        self._schedule_roster_repaint()
+        self._chat_window.close_all()
 
     def _quit(self):
         if self._shutting_down:

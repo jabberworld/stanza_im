@@ -4,10 +4,11 @@ from __future__ import annotations
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.ui import tooltip as tooltip_mod
+from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
 from stanza_im.ui.roster_style import RosterStyle, GroupItem, UserItem
 
 
-class RosterWidget(QtWidgets.QWidget):
+class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
     """A fully custom-painted contact list.
 
     Renders groups and contacts using QPainter.  Supports:
@@ -21,6 +22,7 @@ class RosterWidget(QtWidgets.QWidget):
     contact_clicked = QtCore.pyqtSignal(str)         # jid
     contact_double_clicked = QtCore.pyqtSignal(str)   # jid
     contact_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)  # jid, global_pos
+    roster_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,6 +53,15 @@ class RosterWidget(QtWidgets.QWidget):
         """Set a callable ``(jid) -> (html, avatar_path|None)`` used for
         contact tooltips (default: no tooltips)."""
         self._tooltip_provider = provider
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        """Ctrl+wheel over the roster changes the roster font size."""
+        size = wheel_font_size(self.font(), event)
+        if size is not None:
+            self.roster_font_zoom_requested.emit(size)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def _group_sort_key(self, name: str):
         """Sort contact groups alphabetically, trailing groups last."""

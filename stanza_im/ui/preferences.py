@@ -1065,21 +1065,24 @@ class PreferencesDialog(QtWidgets.QDialog):
         font_form.addRow(tr("prefs_font_participants"),
                          self._font_row("participant_font", default_family,
                                         default_size))
+        font_form.addRow(tr("prefs_font_input"),
+                         self._font_row("input_font", default_family,
+                                        default_size))
         font_form.addRow(tr("prefs_font_osd"),
                          self._font_row("osd_font", default_family, default_size))
 
-        # The nickname "default" follows the chat font (a real value picks
-        # the chat family/size; an empty one falls through to the system
-        # font), so its default label tracks the chat row live.
+        # The nickname and input "default" follow the chat font (a real value
+        # picks the chat family/size; an empty one falls through to the system
+        # font), so their default labels track the chat row live.
         def _sync_nick_default():
-            nick_combo = self._controls["nick_font"]
             family = self._controls["chat_font"].currentData() or default_family
             size = (self._controls["chat_font_size"].value()
                     or default_size)
-            nick_combo.setItemText(
-                0, tr("prefs_font_default", family=family))
-            self._controls["nick_font_size"].setSpecialValueText(
-                tr("prefs_font_size_default", size=f"{size:g}"))
+            for key in ("nick_font", "input_font"):
+                self._controls[key].setItemText(
+                    0, tr("prefs_font_default", family=family))
+                self._controls[key + "_size"].setSpecialValueText(
+                    tr("prefs_font_size_default", size=f"{size:g}"))
 
         self._controls["chat_font"].currentIndexChanged.connect(
             _sync_nick_default)
@@ -1107,6 +1110,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         color_form.addRow(tr("prefs_color_osd_opacity"), osd_opacity)
 
         misc, misc_form = self._page()
+        misc_form.addRow(tr("prefs_tooltip_avatar_size"),
+                         self._spin("tooltip_avatar_size", 32, 128))
         misc_form.addRow(tr("prefs_media_preview_size"),
                          self._spin("media_preview_size", 64, 512))
         misc_form.addRow(tr("prefs_media_cache_days"),
@@ -1292,6 +1297,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         if "text_scale" in self._controls:
             self._set("text_scale", factor)
 
+    def sync_font_size(self, key: str, size: int) -> None:
+        """Reflect a font size changed live (Ctrl+wheel) into its spin box."""
+        spin_key = key + "_size"
+        spin = self._controls.get(spin_key)
+        if spin is not None:
+            spin.setValue(int(size))
+
     def _load_values(self):
         cfg = self._config
         connection = cfg.connection
@@ -1389,6 +1401,10 @@ class PreferencesDialog(QtWidgets.QDialog):
             "nick_font_size": getattr(appearance, "nick_font_size", 0),
             "participant_font": getattr(appearance, "participant_font", ""),
             "participant_font_size": getattr(appearance, "participant_font_size", 0),
+            "input_font": getattr(appearance, "input_font", ""),
+            "input_font_size": getattr(appearance, "input_font_size", 0),
+            "tooltip_avatar_size": getattr(
+                appearance, "tooltip_avatar_size", 64) or 64,
             "roster_bg_color": getattr(appearance, "roster_bg_color", "#ffffff"),
             "roster_group_bg_color": getattr(appearance, "roster_group_bg_color", "#ececec"),
             "chat_bg_color": getattr(appearance, "chat_bg_color", "#ffffff"),
@@ -1505,6 +1521,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
                     "osd_font", "osd_font_size", "nick_font", "nick_font_size",
                     "participant_font", "participant_font_size",
+                    "input_font", "input_font_size", "tooltip_avatar_size",
                     "osd_bg_color", "osd_font_color", "osd_opacity",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",

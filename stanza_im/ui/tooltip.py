@@ -11,6 +11,15 @@ _SHOW_DELAY_MS = 350
 _OFFSET = QtCore.QPoint(16, 14)
 _MARGIN = 8
 
+# Avatar size in logical px (configurable via ``set_avatar_size``).
+_AVATAR_SIZE = [64]
+
+
+def set_avatar_size(size: int) -> None:
+    """Set the avatar size (px) used by the shared tooltip popup."""
+    value = int(size or 0)
+    _AVATAR_SIZE[0] = value if value >= 16 else 64
+
 
 class _ToolTipWindow(QtWidgets.QWidget):
     """Frameless rich-text popup with an optional avatar image."""
@@ -49,8 +58,9 @@ class _ToolTipWindow(QtWidgets.QWidget):
         self._label.setText(html)
         if avatar_path:
             pix = QtGui.QPixmap(avatar_path)
+            size = _AVATAR_SIZE[0]
             avatar = pix if pix.isNull() else pix.scaled(
-                32, 32, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                size, size, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                 QtCore.Qt.TransformationMode.SmoothTransformation)
             self._avatar.setPixmap(avatar)
             self._avatar.show()

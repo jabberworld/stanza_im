@@ -31,6 +31,8 @@ def _parse(data) -> tuple[dict[str, int], dict[str, str]]:
     if not isinstance(data, dict):
         return counts, displayed
     for jid, value in data.items():
+        if jid == "account":
+            continue
         jid = str(jid or "")
         if not jid:
             continue
@@ -49,24 +51,46 @@ def _parse(data) -> tuple[dict[str, int], dict[str, str]]:
     return counts, displayed
 
 
-def load_state() -> tuple[dict[str, int], dict[str, str]]:
-    """Return ``({jid: count}, {jid: displayed-sid})`` from disk."""
+def load_account() -> str:
+    """Return the account JID the stored unread belong to ("" = legacy)."""
+    try:
+        with open(path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if isinstance(data, dict) and isinstance(data.get("account"), str):
+        return data["account"]
+    return ""
+
+
+def load_state(account: str | None = None
+               ) -> tuple[dict[str, int], dict[str, str]]:
+    """Return ``({jid: count}, {jid: displayed-sid})`` from disk.
+
+    When *account* is given, counters stored for a **different** account are
+    ignored (the tray must not blink with another account's unread).
+    """
     try:
         with open(path(), "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
         logger.debug("Could not read %s: %s", path(), exc)
         return {}, {}
+    if account is not None and isinstance(data, dict):
+        stored = str(data.get("account") or "")
+        if stored and stored != account:
+            return {}, {}
     return _parse(data)
 
 
-def load() -> dict[str, int]:
+def load(account: str | None = None) -> dict[str, int]:
     """Return the stored ``{jid: count}`` (only positive entries)."""
-    return load_state()[0]
+    return load_state(account)[0]
 
 
-def save(counts: dict[str, int], displayed: dict[str, str] | None = None) -> None:
-    """Persist *counts* and their last-displayed sids (atomic write, 0600)."""
+def save(counts: dict[str, int], displayed: dict[str, str] | None = None,
+         account: str = "") -> None:
+    """Persist *counts*, their last-displayed sids and the *account* JID."""
     displayed = displayed or {}
     clean: dict[str, dict] = {}
     for jid, value in (counts or {}).items():
@@ -81,11 +105,14 @@ def save(counts: dict[str, int], displayed: dict[str, str] | None = None) -> Non
         if isinstance(sid, str) and sid:
             entry["displayed"] = sid
         clean[str(jid)] = entry
+    payload: dict = dict(clean)
+    if account:
+        payload["account"] = str(account)
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         tmp = path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(clean, fh, ensure_ascii=False, indent=1)
+            json.dump(payload, fh, ensure_ascii=False, indent=1)
         os.replace(tmp, path())
         os.chmod(path(), 0o600)
     except OSError as exc:

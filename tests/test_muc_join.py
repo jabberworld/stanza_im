@@ -126,9 +126,8 @@ try:
 finally:
     QtCore.QTimer.singleShot = _orig_single_shot
 
-# 3. bookmarked rooms are classified as conferences even before joining ------
+# 3. bookmarked rooms join the conferences group only when auto-joined -------
 win._client = None
-win._bookmarks = {"room@conf.example": {"jid": "room@conf.example"}}
 win._conference_roster = set()
 win._muc_self_nicks = {}
 win._muc_display_name = lambda room: "Room"
@@ -137,12 +136,23 @@ win._schedule_roster_repaint = lambda: None
 win._roster.clear()
 win._roster.add_user(UserItem(jid="room@conf.example", name="Room",
                               group="Friends"))
+
+# A plain (non-autojoin) bookmark that is a normal contact stays put.
+win._bookmarks = {"room@conf.example": {"jid": "room@conf.example"}}
 win._classify_bookmarked_conferences()
 users = [u for u in win._roster._users if u.jid == "room@conf.example"]
-check("bookmarked room moved to the conferences group",
+check("a non-autojoin bookmark stays in its contact group",
+      users and users[0].group == "Friends")
+check("a non-autojoin bookmark is not registered as a conference",
+      "room@conf.example" not in win._conference_roster)
+
+# An auto-join bookmark is moved to the conferences group before the join.
+win._bookmarks = {"room@conf.example": {"jid": "room@conf.example",
+                                        "autojoin": True}}
+win._classify_bookmarked_conferences()
+users = [u for u in win._roster._users if u.jid == "room@conf.example"]
+check("an auto-join bookmark moves to the conferences group",
       users and users[0].group == "Conferences")
-check("bookmarked room registered as a conference",
-      "room@conf.example" in win._conference_roster)
 
 # 4. static wiring ------------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

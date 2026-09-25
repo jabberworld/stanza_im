@@ -201,6 +201,24 @@ chat_widget = _read("stanza_im", "ui", "chat_widget.py")
 check("MUC participant rows can show client icons",
       "client_icon_for" in chat_widget and "_show_muc_clients" in chat_widget
       and "set_muc_participant_options" in chat_widget)
+check("the participant tooltip falls back to the caps client name",
+      "find_client(caps_node)" in chat_widget)
+
+# ── participant tooltip shows the client (icon + name) ───────────
+from stanza_im.ui.chat_widget import ChatWidget  # noqa: E402
+from stanza_im.ui.chat_themes import ChatThemeFactory  # noqa: E402
+
+cw = ChatWidget("room@conf.example", "Room", ChatThemeFactory(), is_muc=True)
+_unknown = "urn:xmpp:client:unknown"
+html = cw._participant_tooltip({"nick": "bob", "caps_node": _unknown})
+check("an unknown caps node leaves the tooltip without a client line",
+      tr_client not in html if (tr_client := __import__(
+          "stanza_im.i18n", fromlist=["tr"]).tr("tooltip_client")) else True)
+html2 = cw._participant_tooltip(
+    {"nick": "bob", "caps_node": "http://psi-im.org/caps"})
+check("a known caps node adds the client name to the tooltip",
+      "Psi" in html2)
+cw.detach()
 
 chat_window = _read("stanza_im", "ui", "chat_window.py")
 check("the chat window applies the participant options",

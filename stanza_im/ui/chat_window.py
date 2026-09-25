@@ -65,6 +65,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_status: dict[str, str] = {}   # jid -> latest show
         self._chat_options = {}
         self._participant_font = ("", 0)
+        self._input_font = ("", 0)
         self._colored_muc_nicks = True
         self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_participant_width = 0               # 0 = default width
@@ -188,6 +189,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.vcard_requested.connect(self.vcard_requested)
         widget.files_upload_requested.connect(self.files_upload_requested)
         widget.input_height_changed.connect(self._on_widget_input_height_changed)
+        widget.input_font_zoom_requested.connect(self.input_font_zoom_requested)
+        widget.participant_font_zoom_requested.connect(
+            self.participant_font_zoom_requested)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
@@ -250,6 +254,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.vcard_requested.connect(self.vcard_requested)
         widget.files_upload_requested.connect(self.files_upload_requested)
         widget.input_height_changed.connect(self._on_widget_input_height_changed)
+        widget.input_font_zoom_requested.connect(self.input_font_zoom_requested)
+        widget.participant_font_zoom_requested.connect(
+            self.participant_font_zoom_requested)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
@@ -297,6 +304,11 @@ class ChatWindow(QtWidgets.QMainWindow):
         if not self._tabs and not self._embedded:
             self.hide()
         self._update_title()
+
+    def close_all(self) -> None:
+        """Close every open chat tab (e.g. on logout/account switch)."""
+        for jid in list(self._tabs):
+            self.close_chat(jid)
 
     def has_chat(self, jid: str) -> bool:
         return jid in self._tabs
@@ -364,6 +376,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_participant_font(*self._participant_font)
+
+    def set_input_font(self, family: str = "", size: int = 0):
+        """Apply and remember the message input font."""
+        self._input_font = (family or "", int(size or 0))
+        for widget in self._tabs.values():
+            widget.set_input_font(*self._input_font)
 
     def set_muc_participant_options(self, show_avatars: bool = True,
                                     show_clients: bool = True) -> None:
@@ -594,6 +612,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
+    input_font_zoom_requested = QtCore.pyqtSignal(int)         # new size (pt)
+    participant_font_zoom_requested = QtCore.pyqtSignal(int)   # new size (pt)
     text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)              # url

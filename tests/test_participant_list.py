@@ -120,7 +120,7 @@ check("wiring uses itemDoubleClicked",
       and "self._on_muc_user_double_clicked)" in src)
 check("no itemClicked wiring remains", "itemClicked.connect" not in src)
 check("participant list subclass present",
-      "class _ParticipantList(QtWidgets.QListWidget)" in src
+      "class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget)" in src
       and "self.itemAt(event.position().toPoint()) is None" in src)
 
 print("\nAll tests passed" if not FAILURES

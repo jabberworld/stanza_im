@@ -51,6 +51,16 @@ counts, displayed = unread_state.load_state()
 check("legacy int format still loads",
       counts == {"x@y": 5} and displayed == {})
 
+# Account-bound state: another account's counters must be ignored.
+unread_state.save({"me@here": 4}, account="me@here")
+check("account is persisted", unread_state.load_account() == "me@here")
+check("matching account loads",
+      unread_state.load_state("me@here")[0] == {"me@here": 4})
+check("foreign account is ignored",
+      unread_state.load_state("other@there") == ({}, {}))
+check("the account key does not leak into the counts",
+      "account" not in unread_state.load())
+
 # Seed a "previous session" state before the window starts.
 unread_state.save({"bob@example.com": 2, "room@conf.example": 1},
                   {"bob@example.com": "sid-old"})
@@ -122,8 +132,9 @@ check("roster rows carry the stored counters",
 check("quit flushes unread state", "self._flush_unread()" in _mw_src)
 check("startup seeds the displayed state",
       "set_displayed_state(self._unread_displayed)" in _mw_src)
-check("flush persists the displayed sids",
-      "unread_state.save(self._unread_counts, displayed)" in _mw_src)
+check("flush persists the displayed sids and the account",
+      "unread_state.save(self._unread_counts, displayed," in _mw_src
+      and "account=self._config.jid" in _mw_src)
 
 print()
 if FAILURES:

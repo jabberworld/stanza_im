@@ -63,6 +63,7 @@ stanza_im/                      # Python package
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
 │   ├── chat_themes.py           # Adium-style theme HTML generator
 │   ├── nick_colors.py           # Session MUC nickname → color allocation
+│   ├── font_zoom.py             # Ctrl+wheel font-size helper (input/roster/MUC)
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
@@ -207,7 +208,10 @@ is never rendered as "X joined". Auto-joined rooms are retried on transient
 actually joined (a stale `GroupChatInfo` no longer blocks a retry; `join_muc`
 cancels a pending join task). A bookmarked room that is also a normal roster
 contact is moved to the conferences group before joining
-(`_classify_bookmarked_conferences`). A **XEP-0410 self-ping** rounds this
+(`_classify_bookmarked_conferences`) — only when it is actually joined or its
+bookmark asks for auto-join; a plain (non-autojoin, unjoined) bookmark is not
+forced into the Conferences group, and a room that is also a roster contact
+stays in its own contact group. A **XEP-0410 self-ping** rounds this
 out: `_muc_self_ping_loop` (started on `session_start`/`session_resumed`,
 stopped on disconnect) pings our own occupant JID
 (`<iq type='get' to='room/nick'><ping xmlns='urn:xmpp:ping'/></iq>`) after 15
@@ -286,6 +290,14 @@ UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)`, which resolves through
 `include.constants.find_icon` (scalable dirs first, then the sized dirs);
 `SearchDialog._icon` mirrors it.
+
+The shared rich-text tooltip (`ui/tooltip.py`) is a frameless popup used by the
+roster and the MUC participant list; its avatar is scaled to
+`notifications`-independent `appearance.tooltip_avatar_size`
+(`tooltip.set_avatar_size`, Preferences → Appearance → «Разное», 32–128 px,
+default 64). The MUC participant tooltip names the occupant's client the way the
+roster does: the XEP-0092 `client` if known, otherwise the XEP-0115 caps mapping
+(`clients.find_client(caps_node)`), with the caps icon before the nick.
 
 ## Key Design Patterns
 
@@ -574,7 +586,20 @@ still read); `_flush_unread` collects it from the client's `_mds_local` and
 `_on_login` seeds it back via `client.set_displayed_state`, so the startup
 XEP-0490 catch-up cannot clear unread messages that arrived after our own last
 displayed point (a genuinely newer remote state still clears them). OSD popups
-are not replayed. [`tests/test_unread_state.py`]
+are not replayed. The file also stores the owning account JID
+(`unread_state.save(..., account=cfg.jid)`); `load_state(cfg.jid)` ignores
+counters written for a different account, so switching accounts never keeps the
+previous account's tray blinking (legacy account-less files still load). OSD
+popups are not replayed. [`tests/test_unread_state.py`]
+
+**Session logout**: the Actions menu's «Завершить сеанс» (above «Выход», same
+`gtk-quit.png` icon) calls `MainWindow._logout`: it flushes unread/roster cache,
+disconnects the client and drops `self._client`, clears the per-account UI
+state (`_reset_account_ui`: roster, chat tabs via `ChatWindow.close_all`, MUC
+maps, bookmarks, live unread totals, tray blink/offline icon) and returns to
+the login page with the saved JID prefilled. The unread counters stay on disk
+(bound to that account), so logging back in restores them; the application
+keeps running (unlike `_quit`).
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The
@@ -1268,8 +1293,9 @@ range) is bidirectionally synced with the live factor via
 that snaps user drags/clicks/keys to the 10 % grid without touching
 programmatic `setValue` (zoom sync from the wheel stays exact).
 
-**Widget fonts** (`appearance.{roster,chat,osd,nick,participant}_font` +
-`{...}_font_size`, pt; `""`/`0` = Qt default): applied live from Preferences.
+**Widget fonts** (`appearance.{roster,chat,osd,nick,participant,input}_font` +
+`{...}_font_size`, pt; `""`/`0` = Qt default; the input font defaults to the
+chat font): applied live from Preferences.
 Roster rendering uses the QSS typeface via `MainWindow._apply_roster_font`
 (same raster pass); chat text sets `ChatThemeFactory.set_chat_font(family,
 size)`, which injects a `body { font-family: … !important; font-size: …pt
@@ -1290,6 +1316,13 @@ entry reads «По умолчанию — <family>» (for nicknames following th
 font live) and the size spin shows «<size> pt (по умолчанию)» via
 `setSpecialValueText`, both resolved from `QApplication.font()` by
 `PreferencesDialog._default_app_font` while the stored value stays `""`/`0`.
+The message input gets `ChatWidget.set_input_font` (hosted by
+`ChatWindow.set_input_font`, remembered as `_input_font`). **Ctrl+wheel** over
+the input, the roster or the MUC participant list changes only that widget's
+**font size** (`ui/font_zoom.py` `FontZoomMixin`/`wheel_font_size`, 6–48 pt,
+family unchanged); the widget emits `*_font_zoom_requested(size)`, MainWindow
+persists it (`appearance.*_font_size`) and pushes it back into the open
+Preferences dialog via `PreferencesDialog.sync_font_size(key, size)`.
 Fonts affect text only — avatars/images scale solely with the text-scale
 slider. Changing the chat font re-renders open tabs via
 `ChatWindow.rerender_messages`.

@@ -158,6 +158,21 @@ check("a second profile request reuses the open window",
       len(win._vcard_dialogs) == 1 and win._vcard_dialogs["x@y"] is first)
 texts = [label.text() for label in first.findChildren(QtWidgets.QLabel)]
 check("the reused window shows the refreshed card", "Second" in texts)
+
+# "Refresh" on an open dialog must update it in place (no reopen).
+win._client = _FakeVCardClient()
+win._refresh_vcard("x@y")
+check("refresh keeps the same open window",
+      win._vcard_dialogs.get("x@y") is first
+      and "x@y" in win._vcard_refreshing)
+win._on_vcard_received("x@y", {"jid": "x@y", "fn": "Third",
+                               "fetched_at": 1.0})
+check("refresh updated the window in place",
+      win._vcard_dialogs.get("x@y") is first
+      and any(label.text() == "Third"
+              for label in first.findChildren(QtWidgets.QLabel))
+      and "x@y" not in win._vcard_refreshing)
+
 win._vcard_dialogs.pop("x@y", None)
 first.close()
 win._client = saved_client
