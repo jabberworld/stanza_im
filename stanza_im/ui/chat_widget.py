@@ -30,7 +30,7 @@ from stanza_im.include.avatars import (
 from stanza_im.ui.chat_view import ChatView
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
-from stanza_im.ui.font_zoom import FontZoomMixin
+from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
 from stanza_im.ui import tooltip as tooltip_mod
 
 logger = logging.getLogger(__name__)
@@ -86,15 +86,33 @@ class _ParticipantRow(QtWidgets.QWidget):
     the rich custom tooltip (Qt tooltips are plain-text only).
 
     Child labels ignore mouse move events, which then propagate to this row.
+    A Ctrl+wheel over the row (or any of its child labels, which do not handle
+    wheel events themselves) changes the participant font size via *on_wheel*.
     """
 
     def __init__(self, parent=None, on_hover=None, on_leave=None,
-                 on_press=None):
+                 on_press=None, on_wheel=None):
         super().__init__(parent)
         self._on_hover = on_hover
         self._on_leave = on_leave
         self._on_press = on_press
+        self._on_wheel = on_wheel
         self.setMouseTracking(True)
+
+    def watch_wheel(self, widget: QtWidgets.QWidget) -> None:
+        """Forward *widget*'s wheel events to this row's handler."""
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.Wheel and self._on_wheel is not None:
+            if self._on_wheel(event):
+                return True
+        return super().eventFilter(obj, event)
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        if self._on_wheel is not None and self._on_wheel(event):
+            return
+        super().wheelEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if self._on_hover is not None:
@@ -1959,7 +1977,8 @@ class ChatWidget(QtWidgets.QWidget):
             self._users_list,
             on_hover=lambda pos: self._muc_user_hover(nick, pos),
             on_leave=self._muc_user_leave,
-            on_press=tooltip_mod.hide)
+            on_press=tooltip_mod.hide,
+            on_wheel=self._participant_wheel_font_zoom)
         layout = QtWidgets.QHBoxLayout(row)
         layout.setContentsMargins(2, 1, 2, 1)
         layout.setSpacing(4)
@@ -1998,11 +2017,24 @@ class ChatWidget(QtWidgets.QWidget):
                     28, 28, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                     QtCore.Qt.TransformationMode.SmoothTransformation))
             layout.addWidget(avatar)
+        # The child labels swallow wheel events; forward them to the row so a
+        # Ctrl+wheel over any part of the row changes the participant font.
+        for child in row.findChildren(QtWidgets.QWidget):
+            row.watch_wheel(child)
         item = QtWidgets.QListWidgetItem()
         item.setData(QtCore.Qt.ItemDataRole.UserRole, nick)
         item.setSizeHint(QtCore.QSize(0, row.sizeHint().height()))
         self._users_list.addItem(item)
         self._users_list.setItemWidget(item, row)
+
+    def _participant_wheel_font_zoom(self, event) -> bool:
+        """Handle a Ctrl+wheel over a participant row; True when consumed."""
+        size = wheel_font_size(self._users_list.font(), event)
+        if size is None:
+            return False
+        self._on_participant_font_zoom(size)
+        event.accept()
+        return True
 
     def _participant_tooltip(self, user: dict) -> str:
         """Rich-text tooltip for a MUC participant row."""

@@ -173,6 +173,36 @@ check("refresh updated the window in place",
               for label in first.findChildren(QtWidgets.QLabel))
       and "x@y" not in win._vcard_refreshing)
 
+# The content widget and the current tab must survive a refresh (no rebuild,
+# no jump to the Status tab).
+_content_before = first._content
+first._tabs.setCurrentIndex(1)  # Work tab
+win._refresh_vcard("x@y")
+win._on_vcard_received("x@y", {"jid": "x@y", "fn": "Fourth",
+                               "fetched_at": 2.0})
+check("refresh keeps the same content widget", first._content is _content_before)
+check("refresh keeps the active tab",
+      first._tabs.currentIndex() == 1)
+check("refresh updates the header title",
+      first._title_label.text() == "Fourth")
+
+# Re-probing (XEP-0092/version) refreshes the Status tab without switching.
+first._tabs.setCurrentIndex(0)
+first.update_status({"software": "Psi", "version": "1.5"})
+check("update_status does not switch the active tab",
+      first._tabs.currentIndex() == 0)
+check("update_status still merges the values",
+      first._status_data.get("software") == "Psi")
+
+# A result arriving under a different key for the same bare JID reuses the
+# open window instead of opening a second one.
+first._tabs.setCurrentIndex(0)
+win._open_vcard_info("x@y/resource", {"jid": "x@y", "fn": "Fifth"})
+check("a bare/full key mismatch reuses the open window",
+      len(win._vcard_dialogs) == 1
+      and any(label.text() == "Fifth"
+              for label in first.findChildren(QtWidgets.QLabel)))
+
 win._vcard_dialogs.pop("x@y", None)
 first.close()
 win._client = saved_client

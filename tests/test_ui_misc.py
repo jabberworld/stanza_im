@@ -91,6 +91,21 @@ cw._input.wheelEvent(_wheel(120, ctrl=False))
 check("a plain wheel does not change the input font",
       shown.count(("input", 12)) == 1)
 
+# Ctrl+wheel over a participant *row* (a setItemWidget child) must work too.
+cw.update_muc_users(
+    [{"nick": "bob", "show": "online", "role": "participant"}], self_nick="")
+from stanza_im.ui.chat_widget import _ParticipantRow, _FadeLabel  # noqa: E402
+row = cw._users_list.findChildren(_ParticipantRow)[0]
+row_label = row.findChild(_FadeLabel)
+cw.set_participant_font("", 20)
+cw._users_list.setFont(QtGui.QFont("", 20))
+before = shown.count(("part", 21))
+cw._participant_wheel_font_zoom(_wheel(120))
+check("Ctrl+wheel over a participant row emits the new size",
+      shown.count(("part", 21)) > before)
+check("the row watches its child labels for wheel events",
+      row_label is not None)  # the filter is installed in _add_muc_user_row
+
 roster = RosterWidget()
 roster_shown = []
 roster.roster_font_zoom_requested.connect(roster_shown.append)
@@ -98,6 +113,19 @@ roster.setFont(QtGui.QFont("", 11))
 roster.wheelEvent(_wheel(120))
 check("Ctrl+wheel on the roster emits the new size", roster_shown == [12])
 cw.detach()
+
+# New tabs inherit the remembered input font (Ctrl+wheel persistence).
+from stanza_im.ui.chat_window import ChatWindow  # noqa: E402
+cw_win = ChatWindow(ChatThemeFactory(), ChatThemeFactory())
+cw_win.set_input_font("", 19)
+tab = cw_win.open_chat("bob@example.com", "Bob")
+check("a new 1:1 tab inherits the input font",
+      tab._input.font().pointSize() == 19)
+cw_win.set_participant_font("", 17)
+muc = cw_win.open_groupchat("room@conf.example", "me", "Room")
+check("a new MUC tab inherits the input font",
+      muc._input.font().pointSize() == 19)
+cw_win.close_all()
 
 
 # 3. tooltip avatar size ------------------------------------------------------
@@ -109,6 +137,13 @@ check("a zero size falls back to the default 64",
       tooltip_mod._AVATAR_SIZE[0] == 64)
 check("the config default tooltip avatar size is 64",
       Config().appearance.tooltip_avatar_size == 64)
+
+# The spin range reaches 256 (Preferences → Appearance → «Разное»).
+from stanza_im.ui.preferences import PreferencesDialog  # noqa: E402
+_pdlg = PreferencesDialog(Config(), ChatThemeFactory())
+check("the tooltip avatar spin allows up to 256",
+      _pdlg._controls["tooltip_avatar_size"].maximum() == 256)
+_pdlg.deleteLater()
 
 
 # 4. logout returns to the login page -----------------------------------------
@@ -158,6 +193,20 @@ check("logout stops the tray blink", not win._tray._blink_active)
 check("logout keeps the unread counters on disk",
       __import__("stanza_im.core.unread_state",
                  fromlist=["load"]).load() == {"bob@example.com": 3})
+win._chat_window.close()
+
+# Logout refills the saved password on the login form.
+win._config.jid = "bob@example.com"
+win._config.password = "s3cret"
+win._config.save_password = True
+win._client = _FakeClient()
+win._start_task = _capture
+win._logout()
+win._start_task = _orig_start
+check("logout refills the saved password",
+      win._login._pw_edit.text() == "s3cret")
+win._config.save_password = False
+win._config.password = ""
 win._chat_window.close()
 
 print()

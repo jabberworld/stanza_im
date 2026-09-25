@@ -1111,7 +1111,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         misc, misc_form = self._page()
         misc_form.addRow(tr("prefs_tooltip_avatar_size"),
-                         self._spin("tooltip_avatar_size", 32, 128))
+                         self._spin("tooltip_avatar_size", 32, 256))
         misc_form.addRow(tr("prefs_media_preview_size"),
                          self._spin("media_preview_size", 64, 512))
         misc_form.addRow(tr("prefs_media_cache_days"),

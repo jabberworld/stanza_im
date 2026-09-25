@@ -50,6 +50,10 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self.setWindowTitle(tr("vcard_info_title"))
         self.setMinimumWidth(360)
         self._jid = card.get("jid") or jid
+        # ``{field key: value QLabel}`` and its owning form, so a refresh
+        # updates the text/visibility in place instead of rebuilding.
+        self._field_labels: dict[str, QtWidgets.QLabel] = {}
+        self._field_forms: dict[str, QtWidgets.QFormLayout] = {}
 
         layout = QtWidgets.QVBoxLayout(self)
         self._content = self._build_content(card, status or {})
@@ -89,12 +93,15 @@ class VCardInfoDialog(QtWidgets.QDialog):
         pic = QtWidgets.QLabel()
         pic.setFixedSize(96, 96)
         pic.setPixmap(_photo_pixmap(card).pixmap(96, 96))
+        self._photo_label = pic
         head.addWidget(pic, 0, QtCore.Qt.AlignmentFlag.AlignTop)
 
         title = QtWidgets.QLabel(card.get("fn") or self._jid)
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self._title_label = title
         subtitle = QtWidgets.QLabel(card.get("jid") or self._jid)
         subtitle.setStyleSheet("color: gray;")
+        self._subtitle_label = subtitle
         copy_btn = QtWidgets.QToolButton()
         copy_btn.setIcon(QtGui.QIcon(find_icon("copy.svg")))
         copy_btn.setIconSize(QtCore.QSize(16, 16))
@@ -114,7 +121,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
         tabs = QtWidgets.QTabWidget()
         self._tabs = tabs
-        tabs.addTab(self._fields_page(card, (
+        self._general_index = tabs.addTab(self._fields_page(card, (
             "fn", "nickname", "bday", "tel", "url", "email")),
             tr("vcard_tab_general"))
         tabs.addTab(self._fields_page(card, (
@@ -139,39 +146,62 @@ class VCardInfoDialog(QtWidgets.QDialog):
         return content
 
     def update_card(self, card: dict, status: dict | None = None) -> None:
-        """Rebuild the dialog content in place (after a vCard refresh)."""
+        """Refresh the open dialog **in place** (no rebuild, no tab jump)."""
         self._jid = card.get("jid") or self._jid
-        new_content = self._build_content(card, status or {})
-        self.layout().replaceWidget(self._content, new_content)
-        self._content.deleteLater()
-        self._content = new_content
+        # Header: avatar, title and address.
+        self._photo_label.setPixmap(_photo_pixmap(card).pixmap(96, 96))
+        self._title_label.setText(card.get("fn") or self._jid)
+        self._subtitle_label.setText(card.get("jid") or self._jid)
+        # General/work/address/about fields.
+        for key in ("fn", "nickname", "bday", "tel", "url", "email",
+                    "org", "orgunit", "title", "role",
+                    "street", "locality", "region", "pcode", "country",
+                    "description"):
+            self._set_field(key, card.get(key))
+        if status:
+            self.update_status(status)
 
     def _copy_jid(self):
         from stanza_im.include.xmpp_uri import make_xmpp_uri
         QtWidgets.QApplication.clipboard().setText(make_xmpp_uri(self._jid))
 
     def update_status(self, values: dict):
+        """Merge *values* and refresh the Status tab in place (no tab switch)."""
         self._status_data.update({key: value for key, value in values.items()
                                   if value not in (None, "")})
-        page = self._fields_page(self._status_data, (
-            "jid", "presence", "subscription", "status_message", "mood", "activity",
-            "tune", "location", "resource",
-            "status_updated", "vcard_updated", "client_time", "software",
-            "software_version", "os", "ping"), hide_empty=True)
-        self._tabs.removeTab(self._status_index)
-        self._status_index = self._tabs.addTab(page, tr("vcard_tab_status"))
-        self._tabs.setCurrentIndex(self._status_index)
+        for key in (
+                "jid", "presence", "subscription", "status_message", "mood",
+                "activity", "tune", "location", "resource", "status_updated",
+                "vcard_updated", "client_time", "software",
+                "software_version", "os", "ping"):
+            self._set_field(key, self._status_data.get(key),
+                            hide_empty=(key != "jid"
+                                        and key != "vcard_updated"))
 
-    @staticmethod
-    def _fields_page(values: dict, keys: tuple[str, ...],
-                     hide_empty: bool = False):
+    def _set_field(self, key: str, value, hide_empty: bool = False) -> None:
+        """Update a field label in place (toggle its row for the Status tab)."""
+        label = self._field_labels.get(key)
+        if label is None:
+            return
+        has_value = bool(value) and str(value) != "-"
+        label.setText(str(value) if has_value else "-")
+        form = self._field_forms.get(key)
+        if form is not None:
+            form.setRowVisible(label, has_value if hide_empty else True)
+
+    def _fields_page(self, values: dict, keys: tuple[str, ...],
+                     hide_empty: bool = False) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(page)
         for key in keys:
-            if hide_empty and not values.get(key):
-                continue
-            form.addRow(f"{tr(f'vcard_field_{key}')}:" ,
-                        QtWidgets.QLabel(str(values.get(key) or "-")))
+            label = QtWidgets.QLabel(str(values.get(key) or "-"))
+            form.addRow(f"{tr(f'vcard_field_{key}')}:", label)
+            self._field_labels[key] = label
+            self._field_forms[key] = form
+            has_value = bool(values.get(key))
+            if (hide_empty and not has_value
+                    and key not in ("jid", "vcard_updated")):
+                form.setRowVisible(label, False)
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))

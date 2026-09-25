@@ -105,10 +105,14 @@ The conference browser consumes room names and metadata directly from
 vCard dialogs are opened asynchronously without nested modal event loops.
 `VCardInfoDialog` has a "Обновить"/"Refresh" button (`refresh_requested` →
 `MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
-rebuilds the open window in place (`update_card`) rather than opening another:
+updates the open window's header and field labels in place (`update_card`, no
+content rebuild and no tab switch) rather than opening another, and
+`probe_entity` is re-issued so the Status tab (version/ping) refreshes too
+(`update_status` merges values without changing the active tab).
 `_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
 "open a new dialog" `_pending_profile`) so the result updates the visible
-window.
+window; `_find_open_vcard` matches by bare JID to tolerate a bare/full-JID key
+mismatch.
 Appearance settings support independent ordinary-chat and conference theme
 variants, arranged in the «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and
 «Разное» tabs («Разное» holds the media-preview size, the preview cache
@@ -194,7 +198,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
 | `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. Ctrl+wheel over the list changes only the size. |
 | `appearance.input_font` / `input_font_size` | `""` / `0` | Message input font (`ChatWidget.set_input_font`, remembered per `ChatWindow`); defaults to the chat font. Ctrl+wheel over the input changes only the size. |
-| `appearance.tooltip_avatar_size` | `64` | Avatar size (px, 32–128) in the shared rich-text tooltip (`ui/tooltip.set_avatar_size`); used by the roster and MUC participant tooltips. |
+| `appearance.tooltip_avatar_size` | `64` | Avatar size (px, 32–256) in the shared rich-text tooltip (`ui/tooltip.set_avatar_size`); used by the roster and MUC participant tooltips. |
 | `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
 | `appearance.roster_group_bg_color` | `#ececec` | Roster group header stripe color, drawn by `RosterStyle.paint_group`. |
 | `appearance.chat_bg_color` | `#ffffff` | Chat background override injected as `body { background-color: … !important; background-image: none !important }` by `ChatThemeFactory.set_chat_bg_color` (clears skin tile images); applied to both 1:1 and MUC theme factories. |

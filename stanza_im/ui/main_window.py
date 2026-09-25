@@ -2095,8 +2095,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if not self._client:
             return
-        dialog = self._vcard_dialogs.get(jid)
-        if dialog is not None and dialog.isVisible():
+        if self._find_open_vcard(jid) is not None:
             self._vcard_refreshing.add(jid)
         else:
             self._pending_profile.add(jid)
@@ -2165,8 +2164,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._apply_muc_name(room_jid)
         if jid in self._vcard_refreshing:
             self._vcard_refreshing.discard(jid)
-            dialog = self._vcard_dialogs.get(jid)
-            if dialog is not None and dialog.isVisible():
+            dialog = self._find_open_vcard(jid)
+            if dialog is not None:
                 dialog.update_card(card, self._vcard_status(jid, card))
                 dialog.raise_()
                 dialog.activateWindow()
@@ -2176,6 +2175,22 @@ class MainWindow(QtWidgets.QMainWindow):
         if jid in self._pending_profile:
             self._pending_profile.discard(jid)
             self._open_vcard_info(jid, card)
+
+    def _find_open_vcard(self, jid: str):
+        """The open vCard dialog for *jid*, matched by bare JID as a fallback.
+
+        A refresh result may arrive under a slightly different key (bare vs
+        full JID), which would otherwise open a second window.
+        """
+        dialog = self._vcard_dialogs.get(jid)
+        if dialog is not None and dialog.isVisible():
+            return dialog
+        bare = jid.split("/", 1)[0]
+        for key, candidate in self._vcard_dialogs.items():
+            if (key.split("/", 1)[0] == bare and candidate is not None
+                    and candidate.isVisible()):
+                return candidate
+        return None
 
     def _vcard_status(self, jid: str, card: dict) -> dict:
         """Presence/PEP status block for the vCard info dialog."""
@@ -2218,9 +2233,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_vcard_info(self, jid: str, card: dict):
         from stanza_im.ui.vcard_dialog import VCardInfoDialog
         status = self._vcard_status(jid, card)
-        existing = self._vcard_dialogs.get(jid)
-        if existing is not None and existing.isVisible():
-            # A refresh (or a second profile request): rebuild in place.
+        existing = self._find_open_vcard(jid)
+        if existing is not None:
+            # A refresh (or a second profile request): update in place.
             existing.update_card(card, status)
             existing.raise_()
             existing.activateWindow()
@@ -5110,7 +5125,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._client = None
         self._reset_account_ui()
         self._stack.setCurrentIndex(_PAGE_LOGIN)
-        self._login.prefill(self._config.jid or "", "")
+        saved_password = (self._config.password
+                          if getattr(self._config, "save_password", False)
+                          else "")
+        self._login.prefill(self._config.jid or "", saved_password)
         self._login.set_status_text("")
 
     async def _disconnect_for_logout(self, client):

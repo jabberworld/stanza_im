@@ -143,8 +143,13 @@ The conference browser uses the names and metadata returned by the service's
 vCard information dialogs are opened non-modally from async callbacks.
 `VCardInfoDialog` carries a "Обновить"/"Refresh" button (`refresh_requested`
 → `MainWindow._refresh_vcard` → `get_vcard(force=True)`); when the vCard
-arrives, `_open_vcard_info` rebuilds the already-open window in place
-(`update_card`) instead of opening a second one.
+arrives, `_open_vcard_info` updates the already-open window in place
+(`update_card`: header + field labels rewritten, the content widget is not
+recreated and the active tab is preserved) instead of opening a second one,
+and re-issues `probe_entity` so the Status tab (version/ping) refreshes too
+(`update_status` merges values without switching tabs). `_find_open_vcard`
+matches an open dialog by bare JID so a bare/full-JID key mismatch never opens
+a second window.
 Chat and MUC tabs use separate `ChatThemeFactory` instances, while emoticon
 sets are discovered from `resources/emoticons/*/smileys*.cfg`. Preferences
 show a live preview of the selected emoticon set.
@@ -294,7 +299,7 @@ UI convention: context menus and menu-bar menus always use icons. Load them via
 The shared rich-text tooltip (`ui/tooltip.py`) is a frameless popup used by the
 roster and the MUC participant list; its avatar is scaled to
 `notifications`-independent `appearance.tooltip_avatar_size`
-(`tooltip.set_avatar_size`, Preferences → Appearance → «Разное», 32–128 px,
+(`tooltip.set_avatar_size`, Preferences → Appearance → «Разное», 32–256 px,
 default 64). The MUC participant tooltip names the occupant's client the way the
 roster does: the XEP-0092 `client` if known, otherwise the XEP-0115 caps mapping
 (`clients.find_client(caps_node)`), with the caps icon before the nick.

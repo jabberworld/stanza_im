@@ -170,6 +170,7 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
+        widget.set_input_font(*self._input_font)
         widget.message_sent.connect(self._on_message_sent)
         widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.message_edit_sent.connect(self._on_message_edit_sent)
@@ -228,6 +229,7 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
+        widget.set_input_font(*self._input_font)
         widget.set_participant_font(*self._participant_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
         widget.set_participant_width(self._muc_participant_width)
