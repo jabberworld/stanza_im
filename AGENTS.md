@@ -267,7 +267,22 @@ and runs the full join flow (server persistence, bookmark support).
 `MainWindow._join_muc(..., server=…)` accepts the room localpart and server
 separately and assembles `room@server` when the room carries no `@` — both
 dialog callers pass `data["server"]`, so a join never sends a bare localpart
-or a `remote-server-not-found` disco to the room name alone. The server-load
+or a `remote-server-not-found` disco to the room name alone.
+The Actions menu's first item «Создать конференцию»
+(`ui/create_conference_dialog.py`, `conference-add.svg`) collects the room
+**address** (required, the part before «@», with an info glyph), an optional
+**name** and the **server** (required, prefilled with the account's
+`discover_conference_service()`), plus the initial room settings — «Постоянная»
+/ «Невидимая» / «Для своих» / «Анонимная» (each with an info glyph) and three
+presets (Публичная / Звонки/OMEMO / Частная).  The room is joined and, only
+when this join created it (XEP-0045 status code `201`, read from
+`presence['muc']['status_codes']` and passed through the `muc_joined` event),
+`MainWindow._apply_created_room_config` submits
+`client.muc_creation_values(opts)` via `client.muc_set_config`
+(`muc#roomconfig_persistentroom`, `_publicroom` = not «Невидимая`,
+`_membersonly` = «Для своих», `_whois` = moderators/anyone per «Анонимная»,
+`_roomname` when set). A pre-existing room is left untouched (even for an
+owner). [`tests/test_create_conference.py`] The server-load
 button is «Обзор» (`service_browse_action`); next to it an `info.svg` tool
 button opens `ui/service_info_dialog.ServiceInfoDialog` for the selected node
 (or the combo server): tabs «Информация» (XEP-0092 version, XEP-0039

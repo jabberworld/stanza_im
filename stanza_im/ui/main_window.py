@@ -307,6 +307,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._hats_assign_dialogs: dict[str, object] = {}
         self._captcha_dialogs: dict[str, object] = {}
         self._muc_base_nicks: dict[str, str] = {}
+        # Room configuration to apply once a room we are creating is joined.
+        self._muc_create_opts: dict[str, dict] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
         self._bookmarks: dict[str, dict] = {}
@@ -555,6 +557,10 @@ class MainWindow(QtWidgets.QMainWindow):
         menubar = self.menuBar()
 
         actions_menu = menubar.addMenu(tr("menu_actions"))
+        create_room = actions_menu.addAction(
+            self._menu_icon("conference-add.svg"),
+            tr("menu_create_conference"))
+        create_room.triggered.connect(self._on_create_conference)
         join_room = actions_menu.addAction(self._menu_icon("muc.png"),
                                            tr("menu_join_groupchat"))
         join_room.triggered.connect(self._on_join_groupchat_dialog)
@@ -687,6 +693,36 @@ class MainWindow(QtWidgets.QMainWindow):
                            bookmark_name=data["name"],
                            autojoin=data["autojoin"],
                            server=data["server"])
+        dlg.finished.connect(finished)
+        dlg.open()
+
+    def _on_create_conference(self):
+        if not self._client:
+            return
+        self._start_task(self._open_create_conference_dialog())
+
+    async def _open_create_conference_dialog(self):
+        from stanza_im.ui.create_conference_dialog import CreateConferenceDialog
+        servers = list(self._config.connection.conference_servers or [])
+        default_server = servers[0] if servers else ""
+        if not default_server:
+            try:
+                default_server = await self._client.discover_conference_service()
+            except Exception:
+                default_server = ""
+        dlg = CreateConferenceDialog(servers, default_server, self)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            data = dlg.collect()
+            if data["server"] and data["server"] not in servers:
+                servers.append(data["server"])
+                self._config.connection.conference_servers = servers
+                self._config.save()
+            nick = self._client.jid_str.split("@", 1)[0]
+            self._join_muc(data["room"], nick, "", server=data["server"],
+                           create_opts=data)
         dlg.finished.connect(finished)
         dlg.open()
 
@@ -1016,11 +1052,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _join_muc(self, room: str, nick: str, password: str = "",
                    save_bookmark: bool = False, bookmark_name: str = "",
-                   autojoin: bool = False, server: str = ""):
+                   autojoin: bool = False, server: str = "",
+                   create_opts: dict | None = None):
         if not self._client:
             return
         if server and "@" not in room:
             room = f"{room}@{server}"
+        if create_opts is not None:
+            self._muc_create_opts[room] = dict(create_opts)
         display_name = self._muc_display_name(room)
         is_new = not self._chat_window.has_chat(room)
         if is_new:
@@ -1069,6 +1108,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_joined.discard(room)
         self._muc_join_grace.pop(room, None)
         self._muc_base_nicks.pop(room, None)
+        self._muc_create_opts.pop(room, None)
         if self._client:
             self._client.autojoin_rooms.discard(room)
         if room in self._conference_roster:
@@ -1108,12 +1148,20 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return room in getattr(client, "autojoin_rooms", set())
 
-    def _on_muc_joined(self, room: str, subject: str, occupants):
+    def _on_muc_joined(self, room: str, subject: str, occupants,
+                       created: bool = False):
         self._muc_join_tries.pop(room, None)
         self._muc_autojoin_tries.pop(room, None)
         self._muc_user_nick_change_from.pop(room, None)
         self._muc_joined.add(room)
         self._muc_join_grace[room] = time.monotonic()
+        # A room we just created is configured to the requested options; an
+        # already existing room is left untouched (XEP-0045 code 201).
+        opts = self._muc_create_opts.pop(room, None)
+        if created and opts is not None:
+            self._start_task(self._apply_created_room_config(room, opts))
+        elif opts is not None:
+            logger.debug("Room %s already existed; skipping config", room)
         if room not in self._muc_self_nicks:
             info = self._client.groupchats.get(room) if self._client else None
             nick = info.nick if info else (
@@ -1160,6 +1208,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.get_vcard(real_jid or f"{room}/{nick}")
             self._client.get_muc_info(room)
         self._sync_conference_roster(room)
+
+    async def _apply_created_room_config(self, room: str, opts: dict) -> None:
+        """Apply the "create conference" options to a room we just created."""
+        if not self._client:
+            return
+        values = self._client.muc_creation_values(opts)
+        try:
+            await self._client.muc_set_config(room, values)
+        except Exception as exc:
+            logger.warning("Could not configure new room %s: %s", room, exc)
+            self._tray.show_message(
+                APP_NAME, tr("conference_create_error", error=str(exc)))
+            return
+        name = str(opts.get("name") or "").strip()
+        if name:
+            self._muc_names[room] = name
+            self._apply_muc_name(room)
 
     def _on_muc_subject_changed(self, room: str, subjects):
         if self._client:

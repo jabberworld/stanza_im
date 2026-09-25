@@ -2144,6 +2144,13 @@ class JabberClient:
             return
 
         pres, subject_msg, occupants, _history = result
+        # XEP-0045 §10.1.3: status code 201 marks a room we just created.
+        created = False
+        try:
+            codes = pres["muc"]["status_codes"] or set()
+            created = 201 in codes
+        except Exception:
+            created = False
         subjects = _message_subjects(subject_msg)
         subject = next((t for lang, t in subjects if not lang), "")
         if not subject and subjects:
@@ -2153,10 +2160,12 @@ class JabberClient:
             gi.subject = subject
             gi.pending_history = _history or []
         self._muc_subjects[room] = subjects or [("", subject)]
-        self._emit_muc_joined(room, subject, list(occupants or []))
+        self._emit_muc_joined(room, subject, list(occupants or []),
+                              created=created)
 
     def _emit_muc_joined(self, room: str, subject: str = "",
-                         occupants: list | None = None) -> None:
+                         occupants: list | None = None,
+                         created: bool = False) -> None:
         gi = self.groupchats.get(room)
         if not gi:
             return
@@ -2167,9 +2176,9 @@ class JabberClient:
             return
         gi.joined = True
         occupants = occupants if occupants is not None else list(gi.users)
-        logger.info("Joined room %s as %s (%d occupants)",
-                    room, gi.nick, len(occupants))
-        self.emit("muc_joined", room, subject or gi.subject, occupants)
+        logger.info("Joined room %s as %s (%d occupants)%s",
+                    room, gi.nick, len(occupants), " [created]" if created else "")
+        self.emit("muc_joined", room, subject or gi.subject, occupants, created)
         subjects = self._muc_subjects.get(
             room, [("", subject or gi.subject)])
         self.emit("muc_subject_changed", room, list(subjects))
@@ -3273,6 +3282,29 @@ class JabberClient:
             form.append(field)
         muc = self.xmpp.plugin["xep_0045"]
         await muc.set_room_config(room, form)
+
+    @staticmethod
+    def muc_creation_values(opts: dict) -> dict:
+        """Map the "create conference" options to XEP-0045 config values.
+
+        * ``persistent``    → ``muc#roomconfig_persistentroom``
+        * ``invisible``     → ``muc#roomconfig_publicroom`` (negated)
+        * ``members_only``  → ``muc#roomconfig_membersonly``
+        * ``anonymous``     → ``muc#roomconfig_whois`` (moderators/anyone)
+        * ``name``          → ``muc#roomconfig_roomname`` (when non-empty)
+        """
+        opts = opts or {}
+        values: dict = {
+            "muc#roomconfig_persistentroom": 1 if opts.get("persistent") else 0,
+            "muc#roomconfig_publicroom": 0 if opts.get("invisible") else 1,
+            "muc#roomconfig_membersonly": 1 if opts.get("members_only") else 0,
+            "muc#roomconfig_whois": ("moderators" if opts.get("anonymous")
+                                     else "anyone"),
+        }
+        name = str(opts.get("name") or "").strip()
+        if name:
+            values["muc#roomconfig_roomname"] = name
+        return values
 
     async def muc_get_affiliations(self, room: str) -> dict:
         """Return ``{affiliation: [{"jid", "nick", "reason"}]}`` for *room*.

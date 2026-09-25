@@ -138,6 +138,19 @@ conference pre-fills both room and server in the join dialog, which completes
 the standard join flow (server persistence and bookmark support); the join
 assembles `room@server` (`MainWindow._join_muc(..., server=)`) when the room
 carries no `@`, so a bare localpart never reaches the XMPP layer as a JID.
+The Actions menu's first item «Создать конференцию»
+(`ui/create_conference_dialog.py`) collects the room address (required, the
+part before «@»), an optional name and the server (required, defaulted to
+`client.discover_conference_service()`), plus the initial settings «Постоянная»
+/ «Невидимая» / «Для своих» / «Анонимная» and three presets (Публичная /
+Звонки/OMEMO / Частная).  The room is joined and configured **only when the
+join created it** (XEP-0045 status `201` in
+`presence['muc']['status_codes']`, propagated via the `muc_joined` event):
+`client.muc_creation_values(opts)` maps the options to
+`muc#roomconfig_persistentroom` / `_publicroom` (negated «Невидимая») /
+`_membersonly` / `_whois` (`moderators` when «Анонимная», else `anyone`) /
+`_roomname`, submitted with `client.muc_set_config`.  A pre-existing room is
+left untouched. [`tests/test_create_conference.py`]
 Emoticon
 replacement uses one non-overlapping match pass so generated image HTML is not
 processed again as text. Chat avatar images are tagged `class="avatar"` so
