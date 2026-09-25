@@ -989,8 +989,14 @@ section headers pick up the family too. Ctrl+wheel changes only the size
 the input's font; `ChatWindow.set_input_font` remembers it in `_input_font` and
 applies it to new tabs. Ctrl+wheel changes only the size
 (`_ChatInput.wheelEvent` → `input_font_zoom_requested`). All three widgets use
-`ui/font_zoom.py` (`FontZoomMixin`, 6–48 pt); MainWindow persists the size and
-calls `PreferencesDialog.sync_font_size` so the dialog spin box follows.
+`ui/font_zoom.py` (`FontZoomMixin`, 6–48 pt); MainWindow persists the size,
+calls `ChatWindow.set_input_font`/`set_participant_font`/`_apply_roster_font`
+so every open tab and every new tab picks it up, and calls
+`PreferencesDialog.sync_font_size` so the dialog spin box follows.
+`MainWindow.__init__` ends with `_on_settings_applied()`, so the saved fonts
+(and every other setting) are active from the first frame. The participant nick
+is drawn by `_FadeLabel.paintEvent`, which sets `self.font()` on the pixmap
+painter so the nick actually resizes with the list font.
 
 **Preferences defaults**: on the «Шрифты» tab, empty/zero values display the
 *real* font that would be used: the family combo's first entry reads

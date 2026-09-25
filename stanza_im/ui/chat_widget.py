@@ -176,6 +176,10 @@ class _FadeLabel(QtWidgets.QWidget):
         pixmap = QtGui.QPixmap(self.size())
         pixmap.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(pixmap)
+        # The paint device is a bare pixmap, so the painter has no parent
+        # widget font — set this label's own (inherited) font explicitly,
+        # otherwise the nick is drawn at the application default size.
+        painter.setFont(self.font())
         painter.setPen(color)
         painter.drawText(self.rect(),
                          QtCore.Qt.AlignmentFlag.AlignVCenter

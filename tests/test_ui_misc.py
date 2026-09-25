@@ -127,6 +127,24 @@ check("a new MUC tab inherits the input font",
       muc._input.font().pointSize() == 19)
 cw_win.close_all()
 
+# _FadeLabel draws the text with its own font (a painter on a bare pixmap
+# otherwise uses the application default, so the nick never resized).
+from stanza_im.ui.chat_widget import _FadeLabel  # noqa: E402
+_fl = _FadeLabel("Xg")
+_f = QtGui.QFont(); _f.setPointSize(24); _fl.setFont(_f)
+_pm = QtGui.QPixmap(120, 60); _pm.fill(QtCore.Qt.GlobalColor.transparent)
+_p = QtGui.QPainter(_pm)
+_p.setFont(_fl.font())
+_p.drawText(QtCore.QRect(0, 0, 120, 60),
+            QtCore.Qt.AlignmentFlag.AlignVCenter
+            | QtCore.Qt.AlignmentFlag.AlignLeft, "Xg")
+_p.end()
+_img = _pm.toImage()
+_rows = [y for y in range(60)
+         if any(_img.pixelColor(x, y).alpha() > 0 for x in range(120))]
+check("the fade label font is large enough to matter",
+      _fl.font().pointSize() == 24 and (_rows and max(_rows) - min(_rows) > 6))
+
 
 # 3. tooltip avatar size ------------------------------------------------------
 tooltip_mod.set_avatar_size(96)
@@ -144,6 +162,36 @@ _pdlg = PreferencesDialog(Config(), ChatThemeFactory())
 check("the tooltip avatar spin allows up to 256",
       _pdlg._controls["tooltip_avatar_size"].maximum() == 256)
 _pdlg.deleteLater()
+
+
+# 3b. saved fonts are applied at startup --------------------------------------
+_start_cfg = Config()
+_start_cfg.appearance.input_font_size = 21
+_start_cfg.appearance.participant_font_size = 23
+_start_cfg.save()
+_swin = MainWindow(app)
+_swin._idle_timer.stop()
+_swin._suspend_timer.stop()
+_swin._memory_timer.stop()
+_start_tab = _swin._chat_window.open_chat("x@example.com", "X")
+check("the saved input font is applied at startup (new tab)",
+      _start_tab._input.font().pointSize() == 21)
+check("the saved participant font is applied at startup",
+      _swin._chat_window._participant_font == ("", 23))
+# A zoom handler pushes the change to ChatWindow (all tabs + new ones).
+_swin._on_input_font_zoom(27)
+check("input zoom updates ChatWindow for new tabs",
+      _swin._chat_window._input_font == ("", 27))
+check("input zoom updates the open tab",
+      _start_tab._input.font().pointSize() == 27)
+_swin._on_participant_font_zoom(29)
+check("participant zoom updates ChatWindow",
+      _swin._chat_window._participant_font == ("", 29))
+# Restore the default state for the logout checks below.
+_start_cfg.appearance.input_font_size = 0
+_start_cfg.appearance.participant_font_size = 0
+_start_cfg.save()
+_swin._chat_window.close_all()
 
 
 # 4. logout returns to the login page -----------------------------------------

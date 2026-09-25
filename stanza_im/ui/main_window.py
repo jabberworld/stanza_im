@@ -348,6 +348,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.typing_changed.connect(self._on_typing_local)
         self._chat_window.activity_changed.connect(self._on_chat_activity)
 
+        # Apply the saved settings once, so everything (fonts including the
+        # input font, colors, themes, interface mode) matches the config from
+        # the first frame instead of only after the Preferences are used.
+        self._on_settings_applied()
+
         # ── Auto-connect (if configured) delayed until loop runs ──
         QtCore.QTimer.singleShot(100, self.try_auto_connect)
 
@@ -3821,24 +3826,28 @@ class MainWindow(QtWidgets.QMainWindow):
             dlg.sync_font_size("roster_font", int(size))
 
     def _on_input_font_zoom(self, size: int):
-        self._config.appearance.input_font_size = int(size)
+        size = int(size)
+        family = getattr(self._config.appearance, "input_font", "") or ""
+        self._config.appearance.input_font_size = size
         self._config.save()
-        self._applied_input_font = (
-            getattr(self._config.appearance, "input_font", "") or "",
-            int(size))
+        # Apply to every open tab and remember it for new ones.
+        self._chat_window.set_input_font(family, size)
+        self._applied_input_font = (family, size)
         dlg = getattr(self, "_prefs_dialog", None)
         if dlg is not None and dlg.isVisible():
-            dlg.sync_font_size("input_font", int(size))
+            dlg.sync_font_size("input_font", size)
 
     def _on_participant_font_zoom(self, size: int):
-        self._config.appearance.participant_font_size = int(size)
+        size = int(size)
+        family = getattr(self._config.appearance, "participant_font", "") or ""
+        self._config.appearance.participant_font_size = size
         self._config.save()
-        self._applied_participant_font = (
-            getattr(self._config.appearance, "participant_font", "") or "",
-            int(size))
+        # Apply to every open MUC tab and remember it for new ones.
+        self._chat_window.set_participant_font(family, size)
+        self._applied_participant_font = (family, size)
         dlg = getattr(self, "_prefs_dialog", None)
         if dlg is not None and dlg.isVisible():
-            dlg.sync_font_size("participant_font", int(size))
+            dlg.sync_font_size("participant_font", size)
 
     def _on_text_scale_changed(self, jid: str, factor: float):
         try:
