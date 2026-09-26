@@ -1128,7 +1128,8 @@ affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
   category is left empty.
 - «Шапки» — XEP-0317 hats, see §11.7.1 (always shown; owner/admin only).
 - «Настройки» — enabled for the owner only; fetches the `muc#owner` room form
-  (`client.muc_get_config`) into a `DataFormWidget`.
+  (`client.muc_get_config`) into a `DataFormWidget`, whose `list-single`
+  selectors are all sized to the widest one (`_align_selectors`).
 
 Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
 `client.muc_set_config`); «Отмена» discards them. Only what changed is sent:

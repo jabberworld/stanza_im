@@ -5026,7 +5026,16 @@ class JabberClient:
                 self._muc_version_probed.add((room, nick))
                 self._start_task(self._prefetch_muc_version(room, nick, real_jid))
         if nick == gi.nick and show != "unavailable":
-            self._emit_muc_joined(room, gi.subject, list(gi.users))
+            # The self-presence arrives before ``join_muc_wait`` returns; read
+            # the XEP-0045 status code here so a room we just created (201) is
+            # flagged even on this earlier path.
+            created = False
+            try:
+                created = 201 in (pres["muc"]["status_codes"] or set())
+            except Exception:
+                created = False
+            self._emit_muc_joined(room, gi.subject, list(gi.users),
+                                  created=created)
         self.emit("groupchat_presence", room, nick, show, status, role,
                   affiliation, real_jid, hats)
 

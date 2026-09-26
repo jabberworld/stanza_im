@@ -51,7 +51,10 @@ class CreateConferenceDialog(QtWidgets.QDialog):
         form.addRow(self._star_label(tr("conference_address")), address_row)
 
         self._name = QtWidgets.QLineEdit()
-        form.addRow(tr("conference_name"), self._name)
+        name_row = self._row(self._name,
+                             self._info_icon(tr("conference_name_info")),
+                             stretch_index=0)
+        form.addRow(tr("conference_name"), name_row)
 
         self._server = QtWidgets.QComboBox()
         self._server.setEditable(True)
@@ -59,7 +62,8 @@ class CreateConferenceDialog(QtWidgets.QDialog):
         if default_server:
             self._server.setCurrentText(default_server)
         server_row = self._row(self._server,
-                               self._info_icon(tr("conference_server_info")))
+                               self._info_icon(tr("conference_server_info")),
+                               stretch_index=0)
         form.addRow(self._star_label(tr("conference_server")), server_row)
         layout.addLayout(form)
 
@@ -125,13 +129,14 @@ class CreateConferenceDialog(QtWidgets.QDialog):
         return label
 
     @staticmethod
-    def _row(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
+    def _row(*widgets: QtWidgets.QWidget,
+             stretch_index: int | None = None) -> QtWidgets.QWidget:
         box = QtWidgets.QWidget()
         row = QtWidgets.QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
-        for widget in widgets:
-            row.addWidget(widget)
+        for index, widget in enumerate(widgets):
+            row.addWidget(widget, 1 if index == stretch_index else 0)
         return box
 
     # ── Presets ───────────────────────────────────────────────────
@@ -139,6 +144,7 @@ class CreateConferenceDialog(QtWidgets.QDialog):
     def _preset_public(self) -> None:
         self._anonymous.setChecked(True)
         self._invisible.setChecked(False)
+        self._members_only.setChecked(False)
 
     def _preset_calls(self) -> None:
         self._members_only.setChecked(True)
@@ -147,6 +153,7 @@ class CreateConferenceDialog(QtWidgets.QDialog):
     def _preset_private(self) -> None:
         self._invisible.setChecked(True)
         self._members_only.setChecked(True)
+        self._anonymous.setChecked(False)
 
     # ── Validation / result ───────────────────────────────────────
 

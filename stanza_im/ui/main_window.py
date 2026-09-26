@@ -1128,7 +1128,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Ask before leaving a MUC when the preference is enabled."""
         if self._shutting_down or not self._config.chat.muc_confirm_leave:
             return True
-        box = QtWidgets.QMessageBox(self)
+        # Show over the conference (the chat window), not the roster.
+        box = QtWidgets.QMessageBox(self._chat_dialog_parent())
         box.setIcon(QtWidgets.QMessageBox.Icon.Question)
         box.setWindowTitle(tr("muc_leave"))
         box.setText(tr("muc_leave_confirm",

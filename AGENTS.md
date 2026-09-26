@@ -164,7 +164,8 @@ with «Jabber ID» and «Примечание» columns (the note is the XEP-004
 and Add/Edit/Delete buttons (Delete sets affiliation `none`); «Шапки» —
 XEP-0317 hats (see below); «Настройки» —
 enabled for the owner only and hosts the `muc#owner` room-configuration
-`DataFormWidget`. Edits are collected and applied on «Ок» via
+`DataFormWidget` (its `list-single` selectors are aligned to one width via
+`_align_selectors`). Edits are collected and applied on «Ок» via
 `client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
 only JIDs). [`tests/test_muc_config.py`]
@@ -274,15 +275,18 @@ The Actions menu's first item «Создать конференцию»
 **name** and the **server** (required, prefilled with the account's
 `discover_conference_service()`), plus the initial room settings — «Постоянная»
 / «Невидимая» / «Для своих» / «Анонимная» (each with an info glyph) and three
-presets (Публичная / Звонки/OMEMO / Частная).  The room is joined and, only
-when this join created it (XEP-0045 status code `201`, read from
-`presence['muc']['status_codes']` and passed through the `muc_joined` event),
-`MainWindow._apply_created_room_config` submits
-`client.muc_creation_values(opts)` via `client.muc_set_config`
-(`muc#roomconfig_persistentroom`, `_publicroom` = not «Невидимая`,
+presets (Публичная = anonymous on, invisible/members off; Звонки/OMEMO =
+members-only on, anonymous off; Частная = invisible + members-only on,
+anonymous off).  The room is joined and, only when this join created it
+(XEP-0045 status code `201` — read both in `_join_muc_task` **and** in
+`_on_groupchat_presence` for the self-presence that arrives first, then passed
+through the `muc_joined` event), `MainWindow._apply_created_room_config`
+submits `client.muc_creation_values(opts)` via `client.muc_set_config`
+(`muc#roomconfig_persistentroom`, `_publicroom` = not «Невидимая»,
 `_membersonly` = «Для своих», `_whois` = moderators/anyone per «Анонимная»,
 `_roomname` when set). A pre-existing room is left untouched (even for an
-owner). [`tests/test_create_conference.py`] The server-load
+owner). The «Название» field carries an info glyph and the server combo fills
+the row width. [`tests/test_create_conference.py`] The server-load
 button is «Обзор» (`service_browse_action`); next to it an `info.svg` tool
 button opens `ui/service_info_dialog.ServiceInfoDialog` for the selected node
 (or the combo server): tabs «Информация» (XEP-0092 version, XEP-0039
@@ -517,8 +521,9 @@ context menu offers «Пригласить в» (XEP-0249) when the participant'
 visible. `Esc` in the chat
 window collapses a conference back to the roster without leaving the room (the
 tab is removed, the room stays joined, other tabs keep the window open); on a
-1:1 tab Esc closes it. `Ctrl+W` leaves a conference (with the optional confirm)
-and closes a 1:1 tab.
+1:1 tab Esc closes it. `Ctrl+W` leaves a conference (with the optional confirm,
+`MainWindow._confirm_muc_leave`, shown over the chat window via
+`_chat_dialog_parent`) and closes a 1:1 tab.
 
 **OSD notifications** (`ui/osd.py`): `OsdManager` owns a stack of translucent
 frameless always-on-top windows (flags include `X11BypassWindowManagerHint`,

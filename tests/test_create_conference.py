@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.core.client import JabberClient
-from stanza_im.i18n import load as i18n_load
+from stanza_im.i18n import load as i18n_load, tr
 from stanza_im.ui.create_conference_dialog import CreateConferenceDialog
 
 i18n_load("en")
@@ -72,20 +72,30 @@ check("option defaults: persistent off, invisible off, members off, anon on",
       data["persistent"] is False and data["invisible"] is False
       and data["members_only"] is False and data["anonymous"] is True)
 
+dlg._members_only.setChecked(True)
 dlg._preset_public()
 c = dlg.collect()
-check("the Public preset enables anonymity and disables invisible",
-      c["anonymous"] is True and c["invisible"] is False)
+check("the Public preset enables anonymity, disables invisible and members",
+      c["anonymous"] is True and c["invisible"] is False
+      and c["members_only"] is False)
 
 dlg._preset_calls()
 c = dlg.collect()
 check("the Calls/OMEMO preset enables members-only and disables anonymity",
       c["members_only"] is True and c["anonymous"] is False)
 
+dlg._anonymous.setChecked(True)
 dlg._preset_private()
 c = dlg.collect()
-check("the Private preset enables invisible and members-only",
-      c["invisible"] is True and c["members_only"] is True)
+check("the Private preset enables invisible+members-only, disables anonymity",
+      c["invisible"] is True and c["members_only"] is True
+      and c["anonymous"] is False)
+
+# The name field carries an info icon.
+check("the name field has an info icon",
+      any(icon.toolTip() == tr("conference_name_info")
+          for icon in dlg.findChildren(QtWidgets.QLabel)
+          if icon.toolTip()))
 
 dlg._address.setText("")
 dlg._validate()
@@ -156,6 +166,75 @@ asyncio.get_event_loop().run_until_complete(
 joined = next((e for e in seen if e and e[0] == "muc_joined"), None)
 check("an existing room emits created=False",
       joined is not None and joined[4] is False)
+
+# ── the self-presence path also flags a newly created room ───────
+# The self-presence arrives before join_muc_wait returns, so the earlier
+# muc_joined emission must carry created=True (status code 201).
+class _SelfPresence:
+    tag = "{jabber:client}presence"
+
+    def __init__(self, codes):
+        self._codes = codes
+
+    def __getitem__(self, key):
+        if key == "from":
+            return "room@conf.example/me"
+        if key == "type":
+            return "available"
+        if key in ("show", "status"):
+            return ""
+        if key == "muc":
+            return {"status_codes": self._codes, "role": "moderator",
+                    "affiliation": "owner", "item": {"jid": "me@example.com"}}
+        raise KeyError(key)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def find(self, *args, **kwargs):
+        return None
+
+
+client.xmpp = _FakeXmpp()
+client.groupchats = {"room@conf.example": GroupChatInfo(
+    room="room@conf.example", nick="me")}
+client._muc_version_probed = set()
+seen.clear()
+client._on_groupchat_presence(_SelfPresence({201, 110}))
+joined = next((e for e in seen if e and e[0] == "muc_joined"), None)
+check("the self-presence path flags created=True on 201",
+      joined is not None and joined[4] is True)
+
+client.groupchats = {"room@conf.example": GroupChatInfo(
+    room="room@conf.example", nick="me")}
+seen.clear()
+client._on_groupchat_presence(_SelfPresence({110}))
+joined = next((e for e in seen if e and e[0] == "muc_joined"), None)
+check("the self-presence path flags created=False without 201",
+      joined is not None and joined[4] is False)
+
+# ── the config form aligns its list-single selectors ─────────────
+from stanza_im.ui.data_form_widget import DataFormWidget  # noqa: E402
+
+_form = {"title": "", "instructions": "", "fields": [
+    {"var": "a", "type": "list-single", "label": "A", "required": False,
+     "value": "x",
+     "options": [{"label": "x", "value": "x"},
+                 {"label": "a much longer option label", "value": "y"}]},
+    {"var": "b", "type": "list-single", "label": "B", "required": False,
+     "value": "z",
+     "options": [{"label": "z", "value": "z"}, {"label": "q", "value": "q"}]},
+]}
+_widget = DataFormWidget(_form)
+_widget.show()
+app.processEvents()
+_widths = [combo.width() for combo in _widget._combos]
+check("the config selectors share one width",
+      len(_widths) == 2 and len(set(_widths)) == 1)
+_widget.deleteLater()
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

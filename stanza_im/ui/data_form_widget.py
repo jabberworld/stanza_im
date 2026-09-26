@@ -178,6 +178,7 @@ class DataFormWidget(QtWidgets.QWidget):
         self._fields: dict[str, object] = {}
         self._multi_fields: dict[str, list] = {}
         self._link_fields: set[str] = set()
+        self._combos: list[QtWidgets.QComboBox] = []
         form_layout = QtWidgets.QFormLayout(self)
         self._form_layout = form_layout
         form_layout.setFieldGrowthPolicy(
@@ -196,6 +197,15 @@ class DataFormWidget(QtWidgets.QWidget):
         for field in form["fields"]:
             if not self._build_field(form_layout, field):
                 continue
+        self._align_selectors()
+
+    def _align_selectors(self) -> None:
+        """Give every list-single selector the same width (widest value)."""
+        if not self._combos:
+            return
+        width = max(combo.sizeHint().width() for combo in self._combos)
+        for combo in self._combos:
+            combo.setFixedWidth(width)
 
     def _build_field(self, layout: QtWidgets.QFormLayout, field) -> bool:
         ftype = str(field["type"] or "text-single")
@@ -275,6 +285,7 @@ class DataFormWidget(QtWidgets.QWidget):
             if field["required"]:
                 combo.setEditable(False)
             self._fields[var] = combo
+            self._combos.append(combo)
             layout.addRow(label, combo)
             return True
 
