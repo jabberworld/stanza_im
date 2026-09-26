@@ -351,6 +351,10 @@ Everything follows the XDG Base Directory spec:
 | Unread counters (JSON) | `$XDG_DATA_HOME/stanza-im/unread.json` (0600) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
+The minimal TOML writer (`Config._write_toml`) serialises scalars with
+`json.dumps(..., ensure_ascii=False)`: the file is UTF-8, so non-BMP characters
+(emoji in `emoji.recent`) are stored literally — `ensure_ascii=True` would emit
+single-surrogate escapes (`\ud83d`) that TOML parsers reject.
 Passwords are stored plaintext per user request (file is 0600). History is
 appended line-by-line as JSON, keyed by bare JID, one file per contact.
 

@@ -85,6 +85,7 @@ class Config:
                         "x": 0, "y": 0, "maximized": False},
         "media_viewer": {"width": 900, "height": 680,
                          "x": 0, "y": 0, "maximized": False},
+        "emoji": {"recent": []},
         "map": {"tiles_url": "https://tile.openstreetmap.org",
                 "tile_cache_mb": 64, "tile_cache_days": 14.0,
                 "follow": True,
@@ -220,7 +221,12 @@ class Config:
                 if prefix:
                     fh.write(f"[{prefix}]\n")
                 for key, value in scalars.items():
-                    fh.write(f"{key} = {json.dumps(value)}\n")
+                    # ensure_ascii=False keeps non-BMP characters (emoji) as
+                    # literal UTF-8: escape sequences like "\ud83d" are single
+                    # surrogates and rejected by TOML parsers.  The file is
+                    # already opened with encoding="utf-8".
+                    fh.write(
+                        f"{key} = {json.dumps(value, ensure_ascii=False)}\n")
                 fh.write("\n")
             for key, value in tables.items():
                 _write(fh, value, f"{prefix}.{key}" if prefix else key)

@@ -173,6 +173,10 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 
 - Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
 - Password stored **plaintext** (explicit user decision); file permissions 0600
+- The TOML writer serialises scalars with `json.dumps(..., ensure_ascii=False)`;
+  since the file is UTF-8, non-BMP characters (emoji in `emoji.recent`) are
+  literal — `ensure_ascii=True` would emit single-surrogate escapes (`\ud83d`)
+  that TOML parsers reject.
 - History appended line-by-line as JSON, one file per bare JID
 
 ### 4.1 Connection Settings (`connection.*`)
