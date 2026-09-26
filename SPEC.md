@@ -542,7 +542,11 @@ The roster is cached across sessions for **XEP-0237 roster versioning**
 roster is answered with an empty result that keeps the seeded list. Every
 `roster_update` schedules a debounced rewrite (`_schedule_roster_save`, 1 s)
 and `flush_roster_cache()` runs on quit. A missing/corrupt cache falls back to
-the full fetch.
+the full fetch. slixmpp's `basexmpp._handle_available`
+(`roster[pres['to']][pres['from']]`) creates a pseudo roster item for a room's
+own presence; `JabberClient._known_rooms` filters those JIDs out of
+`get_roster_snapshot`/`get_roster_state` and `_seed_roster_cache`, so rooms are
+never shown as contacts nor cached.
 
 ### 6.4 Account Registration (`ui/account_registration_dialog.py`, XEP-0077)
 

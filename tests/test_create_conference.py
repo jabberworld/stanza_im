@@ -238,5 +238,48 @@ check("the config selectors share one width",
       len(_widths) == 2 and len(set(_widths)) == 1)
 _widget.deleteLater()
 
+# ── a room's slixmpp pseudo roster item is filtered out ──────────
+# slixmpp's basexmpp._handle_available adds an item for a room's own
+# presence; it must never reach the roster snapshot/state (and thus the
+# cache) — see JabberClient._known_rooms.
+class _RosterNode:
+    def __init__(self, items):
+        self._items = items
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def __getitem__(self, key):
+        return self._items[key]
+
+
+class _RosterXmpp(_FakeXmpp):
+    def __init__(self):
+        super().__init__()
+        self.client_roster = _RosterNode({
+            "friend@example.com": {
+                "name": "Friend", "groups": ["Friends"],
+                "subscription": "both", "from": True, "to": True,
+                "whitelisted": False, "pending_out": False,
+                "pending_in": False},
+            "room@conf.example": {
+                "name": "", "groups": [], "subscription": "none",
+                "from": False, "to": False, "whitelisted": False,
+                "pending_out": False, "pending_in": False},
+        })
+
+
+client2 = JabberClient.__new__(JabberClient)
+client2.jid_str = "me@example.com"
+client2.xmpp = _RosterXmpp()
+client2._known_rooms = {"room@conf.example"}
+client2.contacts = {}
+snapshot = client2.get_roster_snapshot()
+state = client2.get_roster_state()
+check("the roster snapshot hides a room's pseudo item",
+      [i["jid"] for i in snapshot] == ["friend@example.com"])
+check("the roster state (cache) hides a room's pseudo item",
+      [i["jid"] for i in state] == ["friend@example.com"])
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

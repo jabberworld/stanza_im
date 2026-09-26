@@ -1915,6 +1915,11 @@ class JabberClient:
         items: list[dict] = []
         cr = self.xmpp.client_roster
         for jid in cr:
+            if jid in self._known_rooms:
+                # slixmpp creates a pseudo roster item for a room's *own*
+                # presence (``basexmpp._handle_available``); it is not a
+                # contact and must never be shown in the roster.
+                continue
             item = cr[jid]
             items.append({
                 "jid": jid,
@@ -1938,6 +1943,8 @@ class JabberClient:
         items: list[dict] = []
         cr = self.xmpp.client_roster
         for jid in cr:
+            if jid in self._known_rooms:
+                continue  # a room's pseudo roster item (see snapshot)
             item = cr[jid]
             items.append({
                 "jid": jid,
@@ -1969,6 +1976,9 @@ class JabberClient:
         for entry in cache["items"]:
             jid = str(entry.get("jid") or "")
             if not jid:
+                continue
+            if jid in self._known_rooms:
+                # Never resurrect a room's pseudo roster item.
                 continue
             item = cr[jid]
             if entry.get("name") is not None:
@@ -2012,6 +2022,15 @@ class JabberClient:
             return
         logger.debug("ROSTER[save] ver=%r items=%s", version,
                      [i.get("jid") for i in items])
+        try:
+            cr = self.xmpp.client_roster
+            for jid in [str(j) for j in cr]:
+                logger.debug(
+                    "ROSTER[state] jid=%s in_roster=%s in_contacts=%s "
+                    "in_rooms=%s", jid, cr[jid]["subscription"],
+                    jid in self.contacts, jid in self._known_rooms)
+        except Exception:
+            logger.debug("ROSTER[state] snapshot failed", exc_info=True)
         roster_cache.save(self.jid_str, version, items)
 
     def flush_roster_cache(self) -> None:
@@ -4680,6 +4699,15 @@ class JabberClient:
             return
         frm = str(pres["from"])
         bare, _, resource = frm.partition("/")
+        # The room's *own* presence (``from="room@conf"`` with no resource) is
+        # not a contact: skip it so it never becomes a roster/contact
+        # pseudo-entry or gets PEP subscriptions.  (slixmpp itself would add a
+        # pseudo roster item via ``basexmpp._handle_available``.)
+        logger.debug("ROSTER[presence] frm=%s bare=%s res=%r type=%s",
+                     frm, bare, resource, str(pres["type"]))
+        if not resource and bare in self._known_rooms:
+            logger.debug("ROSTER[presence] ignored room presence %s", bare)
+            return
         ptype = str(pres["type"])
         show = str(pres.get("show", ""))
         if ptype != "available":

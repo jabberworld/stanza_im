@@ -817,11 +817,18 @@ lazily and preloads `client_roster` + `version`, so the server can answer an
 unchanged version with an empty result
 instead of a full roster; `_schedule_roster_save` (1 s debounce) rewrites the
 cache after every roster update and `flush_roster_cache` on quit. A
-missing/corrupt cache falls back to the full request. Diagnostic `ROSTER[…]`
-DEBUG lines trace the roster end to end (`ROSTER[update]` in
-`_on_roster_update`, `ROSTER[seed]`/`[save]` in the cache path,
-`ROSTER[cache]` in `roster_cache.py`, `ROSTER[contact]` in `get_contact`,
-`ROSTER[presence]` in `_on_presence`, `ROSTER[ui]` in the roster rebuild).
+missing/corrupt cache falls back to the full request. **Room pseudo items**:
+slixmpp's `basexmpp._handle_available` does `roster[pres['to']][pres['from']]`
+for every presence, so a room's *own* presence (`from="room@conf"`, no
+resource, no `muc#user`) creates a pseudo roster item inside `client_roster`.
+`JabberClient._known_rooms` (filled on `join_muc` and any groupchat presence)
+is filtered out in `get_roster_snapshot`/`get_roster_state` and in
+`_seed_roster_cache`, so such rooms never appear as contacts nor get written to
+the cache; `_on_presence` also ignores them. Diagnostic `ROSTER[…]` DEBUG lines
+trace the roster end to end (`ROSTER[update]` in `_on_roster_update`,
+`ROSTER[seed]`/`[save]`/`[state]` in the cache path, `ROSTER[cache]` in
+`roster_cache.py`, `ROSTER[contact]` in `get_contact`, `ROSTER[presence]` in
+`_on_presence`, `ROSTER[ui]` in the roster rebuild).
 
 Roster Item Exchange (XEP-0144): an incoming `<x xmlns='http://jabber.org/protocol/rosterx'/>` (in a message, bodyless included — its own `MatchXPath` handler, and a guard in `_on_message`/`_on_carbon_received`) is parsed by `parse_roster_exchange` and emitted as `roster_exchange_received(from, items, body)`. `MainWindow._on_roster_exchange` opens `RosterExchangeDialog` — a three-level `Add/Modify/Delete → group ("No group") → jid (name)` `QTreeWidget` whose parents are auto-tristate and whose leaves are checked by default — and applies the checked rows through `client.apply_roster_exchange` following XEP-0144 §3: an `add` merges the suggested groups (subscribing for a new contact), a `delete` drops only the suggested group while other groups remain (otherwise removes the contact), and a `modify` touches existing items only. A contact's roster context menu also offers "Send contact…" (`_on_send_contact` → `ShareDialog` → `client.send_roster_exchange`, a `<message>` with the rosterx payload plus a readable body).
 [`tests/test_rosterx.py`]
