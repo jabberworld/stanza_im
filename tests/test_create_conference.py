@@ -38,12 +38,14 @@ def check(name, cond):
 values = JabberClient.muc_creation_values(
     {"persistent": True, "invisible": True, "members_only": True,
      "anonymous": False, "name": "Team"})
+check("every value is a string (slixmpp serialises with str methods)",
+      all(isinstance(v, str) for v in values.values()))
 check("persistent maps to persistentroom",
-      values["muc#roomconfig_persistentroom"] == 1)
+      values["muc#roomconfig_persistentroom"] == "1")
 check("invisible negates the public room flag",
-      values["muc#roomconfig_publicroom"] == 0)
+      values["muc#roomconfig_publicroom"] == "0")
 check("members-only maps to membersonly",
-      values["muc#roomconfig_membersonly"] == 1)
+      values["muc#roomconfig_membersonly"] == "1")
 check("non-anonymous opens the whois to anyone",
       values["muc#roomconfig_whois"] == "anyone")
 check("the name is included when set",
@@ -51,9 +53,9 @@ check("the name is included when set",
 
 defaults = JabberClient.muc_creation_values({})
 check("defaults: persistent/members off, public on, whois anyone",
-      defaults["muc#roomconfig_persistentroom"] == 0
-      and defaults["muc#roomconfig_publicroom"] == 1
-      and defaults["muc#roomconfig_membersonly"] == 0
+      defaults["muc#roomconfig_persistentroom"] == "0"
+      and defaults["muc#roomconfig_publicroom"] == "1"
+      and defaults["muc#roomconfig_membersonly"] == "0"
       and defaults["muc#roomconfig_whois"] == "anyone")
 check("no empty room-name field is sent",
       "muc#roomconfig_roomname" not in defaults)

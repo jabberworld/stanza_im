@@ -60,6 +60,8 @@ def load(account: str) -> dict | None:
         if not isinstance(entry, dict) or not entry.get("jid"):
             continue
         clean.append({key: entry.get(key) for key in ("jid",) + _STATE_FIELDS})
+    logger.debug("ROSTER[cache] load %s n=%d ver=%r", path(account),
+                 len(clean), str(data.get("version") or ""))
     return {"version": str(data.get("version") or ""), "items": clean}
 
 
@@ -76,6 +78,8 @@ def save(account: str, version: str, items: list[dict]) -> None:
         ],
     }
     target = path(account)
+    logger.debug("ROSTER[cache] save %s n=%d ver=%r", target,
+                 len(payload["items"]), payload["version"])
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         tmp = target + ".tmp"

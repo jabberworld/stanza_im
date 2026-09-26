@@ -178,6 +178,7 @@ STRINGS = {
     "conference_address": "Адрес",
     "conference_address_placeholder": "комната",
     "conference_address_info": "Часть Jabber ID до \u00ab@\u00bb. Полный адрес \u2014 адрес@сервер.",
+    "conference_name_info": "Название комнаты, отображаемое участникам.",
     "conference_server_info": "Сервис конференций, на котором будет создана комната. Обязательный параметр.",
     "conference_settings": "Настройки",
     "conference_persistent": "Постоянная",

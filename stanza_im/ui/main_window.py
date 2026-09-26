@@ -2113,6 +2113,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _rebuild_roster(self, items):
         self._roster.clear()
+        logger.debug("ROSTER[ui] rebuild n=%d jids=%s", len(items),
+                     [i.get("jid") for i in items])
         for item in items:
             self._add_roster_item(item)
 
@@ -2122,6 +2124,7 @@ class MainWindow(QtWidgets.QMainWindow):
         groups = item["groups"]
         if not groups:
             groups = [tr("roster_group_ungrouped")]
+        logger.debug("ROSTER[ui] add jid=%s groups=%s", jid, groups)
         contact = self._client.get_contact(jid) if self._client else None
         show = contact.show if contact else "offline"
         status = contact.status if contact else ""

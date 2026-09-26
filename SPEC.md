@@ -149,8 +149,11 @@ join created it** (XEP-0045 status `201` in
 `client.muc_creation_values(opts)` maps the options to
 `muc#roomconfig_persistentroom` / `_publicroom` (negated «Невидимая») /
 `_membersonly` / `_whois` (`moderators` when «Анонимная», else `anyone`) /
-`_roomname`, submitted with `client.muc_set_config`.  A pre-existing room is
-left untouched. [`tests/test_create_conference.py`]
+`_roomname`, submitted with `client.muc_set_config`.  All values are strings
+(`"1"`/`"0"` for booleans — slixmpp serialises fields with str methods, an int
+raised `'int' object has no attribute 'replace'`; `muc_set_config` also calls
+`str()` on non-str values).  A pre-existing room is left untouched.
+[`tests/test_create_conference.py`]
 Emoticon
 replacement uses one non-overlapping match pass so generated image HTML is not
 processed again as text. Chat avatar images are tagged `class="avatar"` so

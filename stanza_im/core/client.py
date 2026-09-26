@@ -981,6 +981,9 @@ class JabberClient:
         self.roster: dict[str, Any] = {}  # {jid_str: roster_entry}
         self.contacts: dict[str, ContactInfo] = {}
         self.groupchats: dict[str, GroupChatInfo] = {}
+        # Bare JIDs known to be MUC rooms (joined or seen), so the room's own
+        # presence is never mistaken for a contact.
+        self._known_rooms: set[str] = set()
         self.presences: dict[str, dict] = {}  # {full_jid: {show, status, ...}}
         # Extended presence (XEP-0080/0107/0108/0118): bare JID -> parsed kinds
         self.pep_data: dict[str, dict] = {}
@@ -1981,6 +1984,8 @@ class JabberClient:
         cr.version = str(cache.get("version") or "")
         logger.info("Seeded %d cached roster items (version=%r)",
                     seeded, cr.version)
+        logger.debug("ROSTER[seed] ver=%r items=%s", cr.version,
+                     [str(e.get("jid") or "") for e in cache["items"]])
 
     def _schedule_roster_save(self) -> None:
         """Coalesce roster-cache writes."""
@@ -2005,6 +2010,8 @@ class JabberClient:
             logger.debug("Could not snapshot the roster for caching",
                          exc_info=True)
             return
+        logger.debug("ROSTER[save] ver=%r items=%s", version,
+                     [i.get("jid") for i in items])
         roster_cache.save(self.jid_str, version, items)
 
     def flush_roster_cache(self) -> None:
@@ -2018,6 +2025,7 @@ class JabberClient:
         """Return (creating if needed) the ContactInfo for a bare JID."""
         jid = str(bare_jid).split("/")[0]
         if jid not in self.contacts:
+            logger.debug("ROSTER[contact] new=%s", jid)
             self.contacts[jid] = ContactInfo(jid)
         return self.contacts[jid]
 
@@ -2085,6 +2093,7 @@ class JabberClient:
         ``muc_join_error`` event; success emits ``muc_joined`` with the room
         subject and the initial occupant list.
         """
+        self._known_rooms.add(room)
         gi = self.groupchats.setdefault(
             room, GroupChatInfo(room=room, nick=nick))
         gi.nick = nick
@@ -3278,7 +3287,10 @@ class JabberClient:
         for var, value in values.items():
             field = FormField()
             field["var"] = var
-            field["value"] = value
+            # slixmpp serialises form values as strings (it calls str methods
+            # on them), so an int here raises "'int' object has no attribute
+            # 'replace'" — always submit strings.
+            field["value"] = value if isinstance(value, str) else str(value)
             form.append(field)
         muc = self.xmpp.plugin["xep_0045"]
         await muc.set_room_config(room, form)
@@ -3294,10 +3306,12 @@ class JabberClient:
         * ``name``          → ``muc#roomconfig_roomname`` (when non-empty)
         """
         opts = opts or {}
+        # Boolean XEP-0045 fields are submitted as "1"/"0" strings (see
+        # ``muc_set_config``); the whois selector is a value string.
         values: dict = {
-            "muc#roomconfig_persistentroom": 1 if opts.get("persistent") else 0,
-            "muc#roomconfig_publicroom": 0 if opts.get("invisible") else 1,
-            "muc#roomconfig_membersonly": 1 if opts.get("members_only") else 0,
+            "muc#roomconfig_persistentroom": "1" if opts.get("persistent") else "0",
+            "muc#roomconfig_publicroom": "0" if opts.get("invisible") else "1",
+            "muc#roomconfig_membersonly": "1" if opts.get("members_only") else "0",
             "muc#roomconfig_whois": ("moderators" if opts.get("anonymous")
                                      else "anyone"),
         }
@@ -4952,6 +4966,9 @@ class JabberClient:
 
         self.roster = {item["jid"]: item for item in items}
 
+        logger.debug("ROSTER[update] got=%d added=%s removed=%s total=%d",
+                     len(items), [i["jid"] for i in added], removed,
+                     len(self.roster))
         for item in added:
             self.emit("roster_item_added", item)
             self._ensure_pep_subscription(str(item["jid"]))
@@ -4965,6 +4982,8 @@ class JabberClient:
         frm = str(pres["from"])
         room = frm.split("/")[0]
         nick = frm.split("/", 1)[1] if "/" in frm else ""
+        if room:
+            self._known_rooms.add(room)
         self._mark_muc_activity(room)
         ptype = str(pres["type"])
 

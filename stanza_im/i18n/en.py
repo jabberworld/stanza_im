@@ -178,6 +178,7 @@ STRINGS = {
     "conference_address": "Address",
     "conference_address_placeholder": "room",
     "conference_address_info": "The part of the Jabber ID before \u201c@\u201d. The full address is address@server.",
+    "conference_name_info": "The room name shown to participants.",
     "conference_server_info": "The conference service that will host the room. Required.",
     "conference_settings": "Settings",
     "conference_persistent": "Persistent",

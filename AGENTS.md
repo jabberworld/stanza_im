@@ -284,7 +284,10 @@ through the `muc_joined` event), `MainWindow._apply_created_room_config`
 submits `client.muc_creation_values(opts)` via `client.muc_set_config`
 (`muc#roomconfig_persistentroom`, `_publicroom` = not «Невидимая»,
 `_membersonly` = «Для своих», `_whois` = moderators/anyone per «Анонимная»,
-`_roomname` when set). A pre-existing room is left untouched (even for an
+`_roomname` when set). All values are **strings** (`"1"`/`"0"` for booleans):
+slixmpp serialises form values with string methods, so an int raised
+`'int' object has no attribute 'replace'`; `muc_set_config` also coerces any
+non-str value with `str()`. A pre-existing room is left untouched (even for an
 owner). The «Название» field carries an info glyph and the server combo fills
 the row width. [`tests/test_create_conference.py`] The server-load
 button is «Обзор» (`service_browse_action`); next to it an `info.svg` tool
@@ -379,7 +382,10 @@ is togglable from Preferences → Appearance → «Ростер» via
 **Client icon (XEP-0115)**: each presence's `<c node=…/>` is captured by
 `_on_presence` (`_caps_node`) into `contact.resources[res]["caps_node"]`
 (a MUC occupant presence is skipped there — it would otherwise give the room a
-participant's icon); `JabberClient.client_icon(bare)` picks the best resource
+participant's icon; the room's **own** presence, `from="room@conf"` with no
+resource and no `muc#user`, is skipped too via `_known_rooms` so a room never
+becomes a roster/contact pseudo-entry or gets PEP subscriptions);
+`JabberClient.client_icon(bare)` picks the best resource
 with a known node and maps it through `include/clients.py` (`find_client`,
 longest caps prefix; `icon_path`, size fallback) to an icon under
 `resources/clients/<size>/`. `UserItem.client_icon` is drawn by
@@ -811,7 +817,11 @@ lazily and preloads `client_roster` + `version`, so the server can answer an
 unchanged version with an empty result
 instead of a full roster; `_schedule_roster_save` (1 s debounce) rewrites the
 cache after every roster update and `flush_roster_cache` on quit. A
-missing/corrupt cache falls back to the full request.
+missing/corrupt cache falls back to the full request. Diagnostic `ROSTER[…]`
+DEBUG lines trace the roster end to end (`ROSTER[update]` in
+`_on_roster_update`, `ROSTER[seed]`/`[save]` in the cache path,
+`ROSTER[cache]` in `roster_cache.py`, `ROSTER[contact]` in `get_contact`,
+`ROSTER[presence]` in `_on_presence`, `ROSTER[ui]` in the roster rebuild).
 
 Roster Item Exchange (XEP-0144): an incoming `<x xmlns='http://jabber.org/protocol/rosterx'/>` (in a message, bodyless included — its own `MatchXPath` handler, and a guard in `_on_message`/`_on_carbon_received`) is parsed by `parse_roster_exchange` and emitted as `roster_exchange_received(from, items, body)`. `MainWindow._on_roster_exchange` opens `RosterExchangeDialog` — a three-level `Add/Modify/Delete → group ("No group") → jid (name)` `QTreeWidget` whose parents are auto-tristate and whose leaves are checked by default — and applies the checked rows through `client.apply_roster_exchange` following XEP-0144 §3: an `add` merges the suggested groups (subscribing for a new contact), a `delete` drops only the suggested group while other groups remain (otherwise removes the contact), and a `modify` touches existing items only. A contact's roster context menu also offers "Send contact…" (`_on_send_contact` → `ShareDialog` → `client.send_roster_exchange`, a `<message>` with the rosterx payload plus a readable body).
 [`tests/test_rosterx.py`]
