@@ -121,6 +121,8 @@ STRINGS = {
     "reaction_tooltip": "Reactions",
     "reaction_count": "{emoji} × {count}",
     "reaction_more": "+{n}",
+    "reaction_list_title": "All reactions",
+    "reaction_list_empty": "No reactions",
     "reaction_category_recent": "Recent",
     "reaction_category_smileys": "Smileys",
     "reaction_category_gestures": "Gestures",

@@ -69,6 +69,7 @@ stanza_im/                      # Python package
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── emoji_picker_dialog.py   # XEP-0444 reaction picker (search/categories/recent)
+│   ├── reactions_list_dialog.py # XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)

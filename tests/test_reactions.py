@@ -162,6 +162,34 @@ check("MUC own reaction detected by occupant-id",
       next(c for c in mchips if c["emoji"] == "😀")["mine"] is True)
 
 
+# 4b. Removing our own reaction (click on a data-mine chip) --------------------
+w3 = _make_widget()
+e3 = {"sender": "Bob", "direction": "incoming",
+      "origin_id": "ORIG3", "message_id": "",
+      "reactions": [{"by": "Me", "emojis": ["😀", "👍"], "at": "10:00"}]}
+w3._messages.append(e3)
+check("our chip is marked mine before removal",
+      next(c for c in w3.compute_reactions(e3) if c["emoji"] == "😀")["mine"])
+check("set_reactions finds a message by origin_id",
+      w3.set_reactions("ORIG3", []) is True)
+check("our reaction entry is removed", e3["reactions"] == [])
+check("no chips remain after removal", w3.compute_reactions(e3) == [])
+
+# The reverse: removing one of two emoji keeps the other.
+w3b = _make_widget()
+e3b = {"sender": "Bob", "direction": "incoming",
+       "origin_id": "ORIG4", "message_id": "ORIG4",
+       "reactions": [{"by": "Me", "emojis": ["😀", "👍"], "at": "10:00"}]}
+w3b._messages.append(e3b)
+_kept = [e for e in e3b["reactions"][0]["emojis"] if e != "😀"]
+w3b.set_reactions("ORIG4",
+                  [{"by": "Me", "emojis": _kept, "at": "10:00"}])
+chips_left = w3b.compute_reactions(e3b)
+check("removing one emoji keeps the other",
+      len(chips_left) == 1 and chips_left[0]["emoji"] == "👍"
+      and chips_left[0]["mine"] is True)
+
+
 # 5. Chip rendering -----------------------------------------------------------
 html = chat_themes._render_reactions_chips(
     [{"emoji": "😀", "count": 3, "mine": True, "title": "t"},
@@ -181,6 +209,8 @@ capped = chat_themes._render_reactions_chips(many)
 check("chip list is capped",
       capped.count('class="stanza-reaction"') >= 6)
 check("overflow shows a more-chip", "reaction-more" in capped)
+check("more-chip is clickable (marker present)",
+      'data-reactions-more="1"' in capped)
 
 
 # 6. Emoji catalogue ----------------------------------------------------------
@@ -256,7 +286,6 @@ def _signal_arity(signal):
 
 from stanza_im.ui.chat_window import ChatWindow
 
-_check = _CW.reaction_requested
 check("ChatWidget.reaction_requested carries 4 args",
       _signal_arity(_CW.reaction_requested) == 4)
 check("ChatWidget/ChatWindow reaction_requested arity matches",
@@ -265,18 +294,48 @@ check("ChatWidget/ChatWindow reaction_requested arity matches",
 check("ChatWidget/ChatWindow unreaction_requested arity matches",
       _signal_arity(_CW.unreaction_requested)
       == _signal_arity(ChatWindow.unreaction_requested))
+check("ChatWidget/ChatWindow reactions_list_requested arity matches",
+      _signal_arity(_CW.reactions_list_requested) == 2
+      and _signal_arity(_CW.reactions_list_requested)
+      == _signal_arity(ChatWindow.reactions_list_requested))
 
-# The MainWindow slot must accept exactly what ChatWindow emits.
+
+def _slot_accepts(slot, arity):
+    """True when *slot* (an unbound function) can take *arity* arguments.
+
+    ``self`` is excluded; a slot with optional trailing arguments accepts any
+    count between its required and total positional parameters.
+    """
+    params = [p for p in inspect.signature(slot).parameters.values()
+              if p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)][1:]
+    required = [p for p in params if p.default is inspect.Parameter.empty]
+    return len(required) <= arity <= len(params)
+
+
 from stanza_im.ui.main_window import MainWindow
 
-_slot = inspect.signature(MainWindow._on_reaction_requested)
-_required = [p for p in _slot.parameters.values()
-             if p.default is inspect.Parameter.empty
-             and p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]
-check("MainWindow._on_reaction_requested accepts the emitted arity",
-      len(_required) <= _signal_arity(ChatWindow.reaction_requested)
-      <= len([p for p in _slot.parameters.values()
-              if p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]))
+check("MainWindow slot accepts ChatWindow.reaction_requested arity",
+      _slot_accepts(MainWindow._on_reaction_requested,
+                    _signal_arity(ChatWindow.reaction_requested)))
+check("MainWindow slot accepts ChatWindow.unreaction_requested arity",
+      _slot_accepts(MainWindow._on_unreaction_requested,
+                    _signal_arity(ChatWindow.unreaction_requested)))
+check("MainWindow slot accepts ChatWindow.reactions_list_requested arity",
+      _slot_accepts(MainWindow._on_reactions_list_requested,
+                    _signal_arity(ChatWindow.reactions_list_requested)))
+
+
+# 9. "+k / list" relay --------------------------------------------------------
+w4 = _make_widget()
+seen = []
+w4.reactions_list_requested.connect(lambda *a: seen.append(a))
+w4._open_link("stanza:reactions:" + "MsgID")
+check("stanza:reactions relays reactions_list_requested",
+      seen == [("alice@example.com", "MsgID")])
+seen2 = []
+w4.reactions_list_requested.connect(lambda *a: seen2.append(a))
+w4._open_link("stanza:reactions:")
+check("an empty reactions ref is ignored", not seen2)
 
 
 print()

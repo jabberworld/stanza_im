@@ -178,6 +178,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_moderate_sent.connect(self.message_moderate_requested)
         widget.reaction_requested.connect(self.reaction_requested)
         widget.unreaction_requested.connect(self.unreaction_requested)
+        widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -246,6 +247,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_moderate_sent.connect(self.message_moderate_requested)
         widget.reaction_requested.connect(self.reaction_requested)
         widget.unreaction_requested.connect(self.unreaction_requested)
+        widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -603,6 +605,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     message_retract_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
+    reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_requested = QtCore.pyqtSignal(str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current

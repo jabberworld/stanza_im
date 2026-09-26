@@ -51,6 +51,7 @@ stanza_im/
 │   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
 │   ├── emoji_picker_dialog.py — XEP-0444 reaction picker (search/categories/recent)
+│   ├── reactions_list_dialog.py — XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
@@ -1615,8 +1616,13 @@ Registers XEP plugins (conditionally where noted):
   message text (past the avatar in `minimal-mod`, under the body box in
   `candy`). A chip rendered with `data-mine="1"` (our own reaction) is
   clickable: `stanza:unreact:<id>/<emoji>` removes just that emoji from our set
-  and re-sends. History stores reactions in the `reactions` JSON column (SQLite
-  migration).
+  and re-sends. The "+k" overflow chip (`data-reactions-more="1"`) opens
+  `ui/reactions_list_dialog.ReactionsListDialog`, a flat newest-first list of
+  every reaction on the message (`emoji who — when`, read from the stored
+  `reactions` entries) via `stanza:reactions:<id>` →
+  `reactions_list_requested(jid, ref_id)`. All these relays fall back to
+  `data-reply-id` when `data-stanza-id` is missing. History stores reactions in
+  the `reactions` JSON column (SQLite migration).
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)
 

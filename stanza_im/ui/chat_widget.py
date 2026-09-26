@@ -374,6 +374,7 @@ class ChatWidget(QtWidgets.QWidget):
     message_retract_sent = QtCore.pyqtSignal(str, str)    # jid, ref_id (XEP-0424)
     reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
+    reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_sent = QtCore.pyqtSignal(str, str, str)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
@@ -779,6 +780,11 @@ class ChatWidget(QtWidgets.QWidget):
             emoji = unquote(raw_emoji)
             if ref and sep and emoji:
                 self.unreaction_requested.emit(self.jid, ref, emoji)
+            return
+        if url.startswith("stanza:reactions:"):
+            ref = unquote(url[len("stanza:reactions:"):])
+            if ref:
+                self.reactions_list_requested.emit(self.jid, ref)
             return
         if url.startswith("stanza:jump:"):
             self._jump_to_message(unquote(url[len("stanza:jump:"):]))

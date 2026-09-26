@@ -207,6 +207,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_reaction_requested)
         self._chat_window.unreaction_requested.connect(
             self._on_unreaction_requested)
+        self._chat_window.reactions_list_requested.connect(
+            self._on_reactions_list_requested)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
@@ -4549,6 +4551,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _unreact_all(self, jid: str, ref_id: str) -> None:
         self._send_reactions(jid, ref_id, [])
+
+    def _on_reactions_list_requested(self, jid: str, ref_id: str) -> None:
+        """Show every reaction of a message in a flat newest-first list."""
+        if not ref_id:
+            return
+        from stanza_im.ui.reactions_list_dialog import ReactionsListDialog
+        from stanza_im.include.utils import ts_to_time
+        rows: list[dict] = []
+        for item in self._reaction_state(jid, ref_id):
+            who = str(item.get("by") or item.get("occupant_id") or "")
+            at = str(item.get("at") or "")
+            for emoji in (item.get("emojis") or []):
+                rows.append({
+                    "emoji": str(emoji),
+                    "who": who,
+                    "at": ts_to_time(at) if at else "",
+                })
+        dlg = ReactionsListDialog(rows, self._chat_dialog_parent())
+        self._place_dialog_over(dlg, self._chat_dialog_parent())
+        dlg.show()
 
     @staticmethod
     def _our_emojis(entries: list[dict], my_keys: set[str]) -> list[str]:

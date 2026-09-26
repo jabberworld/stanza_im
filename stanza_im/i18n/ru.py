@@ -121,6 +121,8 @@ STRINGS = {
     "reaction_tooltip": "Реакции",
     "reaction_count": "{emoji} × {count}",
     "reaction_more": "+{n}",
+    "reaction_list_title": "Все реакции",
+    "reaction_list_empty": "Реакций нет",
     "reaction_category_recent": "Недавние",
     "reaction_category_smileys": "Смайлы",
     "reaction_category_gestures": "Жесты",

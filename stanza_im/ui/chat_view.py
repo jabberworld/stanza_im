@@ -735,6 +735,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaModerateRef = '';
             window.__stanzaReactRef = '';
             window.__stanzaUnreactRef = '';
+            window.__stanzaReactionsRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -975,14 +976,34 @@ window.__stanzaMentionRef = '';
                         [rr.left, rr.top, rr.width, rr.height];
                     return;
                 }
+                // The "+k" overflow chip opens the full reaction list.
+                var more = t && t.closest
+                    ? t.closest('.stanza-reaction.reaction-more') : null;
+                if (more) {
+                    e.preventDefault();
+                    var mwrap = more.closest('.stanza-message');
+                    var mid = '';
+                    if (mwrap) {
+                        mid = mwrap.getAttribute('data-stanza-id')
+                            || mwrap.getAttribute('data-reply-id') || '';
+                    }
+                    if (mid) {
+                        window.__stanzaReactionsRef =
+                            'stanza:reactions:' + encodeURIComponent(mid);
+                    }
+                    return;
+                }
                 // Clicking our own reaction chip removes that reaction.
                 var chip = t && t.closest
                     ? t.closest('.stanza-reaction[data-mine="1"]') : null;
                 if (chip) {
                     e.preventDefault();
                     var wrap = chip.closest('.stanza-message');
-                    var sid = wrap
-                        ? (wrap.getAttribute('data-stanza-id') || '') : '';
+                    var sid = '';
+                    if (wrap) {
+                        sid = wrap.getAttribute('data-stanza-id')
+                            || wrap.getAttribute('data-reply-id') || '';
+                    }
                     var emoji = chip.getAttribute('data-emoji') || '';
                     if (sid && emoji) {
                         window.__stanzaUnreactRef = 'stanza:unreact:'
@@ -1106,7 +1127,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaModerateRef || '',"
                 " window.__stanzaReactRef || '',"
                 " window.__stanzaUnreactRef || '',"
-                " window.__stanzaReactRect || '']",
+                " window.__stanzaReactRect || '',"
+                " window.__stanzaReactionsRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1328,6 +1350,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_unreact_ref = ""
+            if len(value) > 18 and isinstance(value[18], str) and value[18]:
+                self._clear_reactions_request()
+                requested = value[18]
+                if requested != getattr(self, "_last_reactions_ref", ""):
+                    self._last_reactions_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_reactions_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])

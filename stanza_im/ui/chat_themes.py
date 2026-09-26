@@ -131,8 +131,10 @@ def _render_reactions_chips(reactions) -> str:
                count))
     extra = len(ordered) - len(shown)
     if extra > 0:
-        out.append('<span class="stanza-reaction reaction-more">%s</span>'
-                   % escape_html(tr("reaction_more", n=extra)))
+        out.append('<span class="stanza-reaction reaction-more"'
+                   ' data-reactions-more="1" title="%s">%s</span>'
+                   % (html_escape(tr("reaction_list_title"), quote=True),
+                      escape_html(tr("reaction_more", n=extra))))
     return "".join(out)
 
 
