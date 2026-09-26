@@ -139,3 +139,6 @@
 	background: rgba(0, 0, 0, 0.08);
 	border-radius: 3px;
 }
+/* XEP-0444 reaction chips sit under the body box; match its 10px padding
+   (this skin has no avatars, so no extra indent is needed). */
+.stanza-reactions { margin: 2px 0 0 10px; }

@@ -17,6 +17,7 @@ loop while the synchronous API keeps working unchanged for UI-side callers.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -150,6 +151,8 @@ def _connection(jid: str) -> sqlite3.Connection:
             for col in ("retract_reason", "retract_by"):
                 if col not in columns:
                     conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
+            if "reactions" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN reactions TEXT")
             _migrate_dedup(conn)
             conn.commit()
         except sqlite3.Error:
@@ -168,7 +171,7 @@ def _connection(jid: str) -> sqlite3.Connection:
 def _row_to_entry(row) -> dict:
     _id, direction, sender, body, timestamp, archive_id, origin_id, \
         reply_to, reply_id, message_id, edited, retracted, retract_marker, \
-        retract_reason, retract_by = row
+        retract_reason, retract_by, reactions = row
     return {
         "id": _id,
         "direction": direction,
@@ -185,6 +188,7 @@ def _row_to_entry(row) -> dict:
         "retract_marker": bool(retract_marker),
         "retract_reason": retract_reason or "",
         "retract_by": retract_by or "",
+        "reactions": _parse_reactions(reactions),
     }
 
 
@@ -334,6 +338,89 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
         return 0
 
 
+def _parse_reactions(raw) -> list[dict]:
+    """Decode the stored ``reactions`` JSON (a list of reactor entries)."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        emojis = [str(e) for e in (entry.get("emojis") or []) if str(e)]
+        if not emojis:
+            continue
+        out.append({
+            "by": str(entry.get("by") or ""),
+            "occupant_id": str(entry.get("occupant_id") or ""),
+            "emojis": emojis,
+            "at": str(entry.get("at") or ""),
+        })
+    return out
+
+
+def set_reactions(jid: str, ref_id: str, by: str, emojis: list[str],
+                  at: str = "", occupant_id: str = "") -> bool:
+    """Store *by*'s XEP-0444 reaction *emojis* for the message *ref_id*.
+
+    The set replaces any previous set by the same reactor (matched by
+    ``occupant_id`` when known, else by ``by``); an empty *emojis* removes the
+    reactor's entry.  Matches the message by ``message_id``/``origin_id``.
+    """
+    if not ref_id or not by:
+        return False
+    clean = [str(e).strip() for e in (emojis or []) if str(e).strip()]
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT reactions FROM messages "
+                "WHERE message_id = ? OR origin_id = ? "
+                "ORDER BY id LIMIT 1", (ref_id, ref_id)).fetchone()
+            if row is None:
+                return False
+            entries = _parse_reactions(row[0])
+            key = occupant_id or by
+            entries = [e for e in entries
+                       if (e.get("occupant_id") or e.get("by")) != key]
+            if clean:
+                entries.append({"by": by, "occupant_id": occupant_id,
+                                "emojis": clean, "at": at})
+            payload = json.dumps(entries, ensure_ascii=False) if entries else None
+            conn.execute("UPDATE messages SET reactions = ? "
+                         "WHERE (message_id = ? OR origin_id = ?)",
+                         (payload, ref_id, ref_id))
+            conn.commit()
+            return True
+    except sqlite3.Error as exc:
+        logger.warning("Could not store reactions for %s: %s", jid, exc)
+        return False
+
+
+def reactions(jid: str, ref_id: str) -> list[dict]:
+    """Return the stored XEP-0444 reaction entries for the message *ref_id*."""
+    if not ref_id:
+        return []
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT reactions FROM messages "
+                "WHERE message_id = ? OR origin_id = ? "
+                "ORDER BY id LIMIT 1", (ref_id, ref_id)).fetchone()
+    except sqlite3.Error as exc:
+        logger.warning("Could not read reactions for %s: %s", jid, exc)
+        return []
+    if row is None:
+        return []
+    return _parse_reactions(row[0])
+
+
 def retract_message(jid: str, ref_id: str, marker: bool = False,
                     sender: str = "", reason: str = "",
                     by: str = "") -> bool:
@@ -415,7 +502,8 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
                 f"SELECT * FROM ("
                 f"SELECT id, direction, sender, body, timestamp, archive_id,"
                 f" origin_id, reply_to, reply_id, message_id, edited,"
-                f" retracted, retract_marker, retract_reason, retract_by FROM messages"
+                f" retracted, retract_marker, retract_reason, retract_by,"
+                f" reactions FROM messages"
                 f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 f"ORDER BY timestamp ASC, id ASC",
                 params)
@@ -438,7 +526,8 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
                 "SELECT * FROM ("
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker, retract_reason, retract_by FROM messages "
+                " retracted, retract_marker, retract_reason, retract_by,"
+                " reactions FROM messages "
                 "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (str(int(before_id)), str(int(limit))))
             rows = cur.fetchall()
@@ -456,7 +545,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
             cur = conn.execute(
                 "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker, retract_reason, retract_by "
+                " retracted, retract_marker, retract_reason, retract_by, reactions "
                 "FROM messages WHERE timestamp < ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
@@ -537,7 +626,8 @@ def load_day(jid: str, date: str) -> list[dict]:
             cur = conn.execute(
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker, retract_reason, retract_by "
+                " retracted, retract_marker, retract_reason, retract_by,"
+                " reactions "
                 "FROM messages "
                 "WHERE substr(timestamp, 1, 10) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
@@ -747,6 +837,17 @@ async def retract_message_async(jid: str, ref_id: str, marker: bool = False,
                                 by: str = "") -> bool:
     return await asyncio.to_thread(retract_message, jid, ref_id, marker,
                                    sender, reason, by)
+
+
+async def set_reactions_async(jid: str, ref_id: str, by: str,
+                              emojis: list[str], at: str = "",
+                              occupant_id: str = "") -> bool:
+    return await asyncio.to_thread(set_reactions, jid, ref_id, by, emojis,
+                                   at, occupant_id)
+
+
+async def reactions_async(jid: str, ref_id: str) -> list[dict]:
+    return await asyncio.to_thread(reactions, jid, ref_id)
 
 
 async def load_history_async(jid: str, limit: int = 200,

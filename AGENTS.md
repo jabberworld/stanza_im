@@ -68,6 +68,7 @@ stanza_im/                      # Python package
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
+│   ├── emoji_picker_dialog.py   # XEP-0444 reaction picker (search/categories/recent)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
@@ -102,6 +103,7 @@ stanza_im/                      # Python package
 ├── include/
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
 │   ├── enumerators.py           # XMPP show/icon/mood/activity maps
+│   ├── emoji_data.py            # XEP-0444 emoji catalogue (categories + search)
 │   ├── pep.py                   # XEP-0080/0107/0108/0118 payloads + icon packs
 │   ├── geo.py                   # RFC 5870 geo: URIs, Mercator math, track, tile cache
 │   ├── xmpp_uri.py              # XEP-0147 xmpp: URI parse/build (RFC 5122)
@@ -923,6 +925,40 @@ tombstone renders "Отозвано модератором" with the reason and 
 «Конференции», default on) is a receive-side switch between the tombstone and
 the "✕" marker. [`tests/test_moderation.py`]
 
+**Message Reactions (XEP-0444, `urn:xmpp:reactions:0`)**: the first situational
+message button is a smiley (`a.action-react`, inserted before Reply in every
+skin template) whose click is kept in-page (`window.__stanzaReactRef` through the
+`_ACTION_JS` handler + the always-running scroll poll, `stanza:react:<id>`, never
+a navigation). The view first reports the button rectangle through
+`reaction_anchor` (JS `getBoundingClientRect` delivered by the scroll poll and
+mapped to screen coordinates), so `ChatWidget.reaction_requested(jid, ref_id,
+x, y)` carries the screen position. `MainWindow._on_reaction_requested` opens
+`ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup` anchored
+**above** the 🙂 button (`_place_popup_above`, falling back below/clamped to the
+screen): a search field, a «Недавние» (Recent) area above the tabs and the
+eight `include/emoji_data.py` category tabs below it. Emoji are drawn with an
+auto-detected colour-emoji font (`emoji_font`/`emoji_font_family` try
+Noto/Apple/Segoe/Twemoji/Symbola/…), applied to the grid buttons and to the
+chat chips via the page CSS. Clicking an emoji → `_apply_reaction` appends it to
+our current set, remembers it in `emoji.recent` and re-sends the full set. The
+picker's «Убрать реакцию» button (shown when we already reacted) clears it. `client.
+send_reactions(target, target_id, emojis)` sends a bodyless `<message><reactions
+id='<target>'><reaction>😀</reaction>…</reactions></message>` (1:1 `type='chat'`,
+MUC `type='groupchat'`; an empty set removes our entry); `_reactions()` parses
+incoming stanzas and the bodyless `MatchXPath` handler routes them (`_on_message`
+→ `message_reactions`; `_on_groupchat_message` → `groupchat_message_reactions`,
+carrying the reactor's XEP-0421 occupant-id). Each reactor's set replaces its
+previous set (keyed by occupant-id in MUC — `_occupant_id(pres)` is stored in
+`gi.users[nick]["occupant_id"]` — else nickname/JID). `MainWindow` persists via
+`history.set_reactions` (SQLite `reactions` JSON column, migration) and refreshes
+the open tab in place with `ChatWindow.update_reactions` → `ChatWidget.
+set_reactions`. `ChatWidget.compute_reactions` aggregates chips
+`{emoji, count, mine, title}` (title lists reactors + timestamps) and
+`chat_themes._render_reactions_chips` renders `.stanza-reaction` spans under the
+body (sorted by count desc, capped at 6 with a "+k" chip); a `data-mine="1"` chip
+is clickable (`stanza:unreact:<id>/<emoji>`, same in-page relay) and removes just
+that emoji. Feature advertised as `urn:xmpp:reactions:0`. [`tests/test_reactions.py`]
+
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside
 `tokenize_urls` — with a resolvable message id the anchor becomes
@@ -1708,19 +1744,45 @@ updated: <ISO-8601>   HEAD: <hash> <subject>
 
 ## Headless Test Environment
 
-This sandbox has no root, so PyQt6's system deps (libGL, libglib, libx11, etc.)
-were extracted from Debian `.deb` packages into `~/.local/qtlibs` and loaded via
-`LD_LIBRARY_PATH`:
+This sandbox has no root, so the Python packages are installed into the user
+site (`~/.local`) and PyQt6's system deps (libGL, libglib, libx11, etc.) are
+extracted from Debian `.deb` packages into `~/.local/qtlibs`, loaded via
+`LD_LIBRARY_PATH`.
 
 ```bash
-export LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+# 1. Python packages (slixmpp pinned to the target machine's 1.10.0)
+python3 -m pip install --user --break-system-packages \
+  "PyQt6>=6.5" "PyQt6-WebEngine>=6.5" "slixmpp==1.10.0" \
+  defusedxml qasync aiodns aiortc
+
+# 2. System Qt libraries (rootless).  Download the bookworm .deb files from
+#    http://deb.debian.org/debian/pool/main/ and unpack them:
+mkdir -p ~/.local/qtlibs
+for f in *.deb; do dpkg-deb -x "$f" ~/.local/qtlibs; done
+#    Needed: libgl1 libglvnd0 libglx0 libegl1 libgles2 libglib2.0-0 libx11-6
+#    libxcb1 libxcb-dri3-0 libxext6 libxrender1 libxkbcommon0 libfontconfig1
+#    libfreetype6 libpng16-16 libharfbuzz0b libgraphite2-3 libbrotli1
+#    libpcre2-8-0 libexpat1 libdbus-1-3 libgbm1 libdrm2 libxcomposite1
+#    libxdamage1 libxfixes3 libxrandr2 libxtst6 libxkbfile1 libxau6 libxdmcp6
+#    libxshmfence1 libx11-xcb1 libasound2 libpulse0 libnss3 libnspr4
+#    libsndfile1 libasyncns0 libwayland-server0 libwayland-client0 libpcsclite1
+
+# 3. Environment
+export LD_LIBRARY_PATH="$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu:\
+$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu/pulseaudio:\
+$HOME/.local/qtlibs/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
 export QT_QPA_PLATFORM=offscreen   # run GUI without a display
 python main.py
 ```
 
-Note: `QtWebEngine` cannot load here (missing `libnss3` on the local apt mirror),
-but `chat_view.py` falls back to `QTextBrowser` gracefully. All other Qt modules
-(core, gui, widgets, webchannel) work offscreen.
+`QtWebEngine` now loads (all deps present). Note the **test suite was written
+for the `QTextBrowser` fallback** in some places (`test_history_window`,
+`test_jump_button`, `test_xep0461` call `toHtml`/`toPlainText`/`_jump_button`);
+with a working WebEngine those specific checks fail on the WebEngine class —
+pre-existing, unrelated to feature work.
+
+The test runner detects success by `All tests passed`, `FAILURES: none` or
+`All <x> tests passed` (a few print `FAILURES: <list>` on failure).
 
 <!-- CODE_BRAIN_MANDATORY -->
 ## Code Brain MCP - Mandatory when loaded

@@ -334,6 +334,7 @@ if HAS_WEBENGINE:
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
         share_requested = QtCore.pyqtSignal(str)            # shared content
+        reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
 
         _LOAD_RETRY_LIMIT = 5
         _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
@@ -732,6 +733,8 @@ window.__stanzaMentionRef = '';
             window.__stanzaJumpRef = '';
             window.__stanzaDeleteRef = '';
             window.__stanzaModerateRef = '';
+            window.__stanzaReactRef = '';
+            window.__stanzaUnreactRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -959,6 +962,34 @@ window.__stanzaMentionRef = '';
                         delref.getAttribute('href') || '';
                     return;
                 }
+                // Reaction (XEP-0444): the 🙂 button opens the picker; the
+                // href is handed to the scroll poll like reply/delete/edit.
+                var reactbtn = t && t.closest
+                    ? t.closest('a.action-react') : null;
+                if (reactbtn) {
+                    e.preventDefault();
+                    window.__stanzaReactRef =
+                        reactbtn.getAttribute('href') || '';
+                    var rr = reactbtn.getBoundingClientRect();
+                    window.__stanzaReactRect =
+                        [rr.left, rr.top, rr.width, rr.height];
+                    return;
+                }
+                // Clicking our own reaction chip removes that reaction.
+                var chip = t && t.closest
+                    ? t.closest('.stanza-reaction[data-mine="1"]') : null;
+                if (chip) {
+                    e.preventDefault();
+                    var wrap = chip.closest('.stanza-message');
+                    var sid = wrap
+                        ? (wrap.getAttribute('data-stanza-id') || '') : '';
+                    var emoji = chip.getAttribute('data-emoji') || '';
+                    if (sid && emoji) {
+                        window.__stanzaUnreactRef = 'stanza:unreact:'
+                            + encodeURIComponent(sid + '/' + emoji);
+                    }
+                    return;
+                }
                 // MUC mention: never navigate. A stanza: navigation can
                 // otherwise replace the chat document and blank the whole
                 // conversation.  Leave the href for the always-running scroll
@@ -1072,7 +1103,10 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaJumpRef || '', window.__stanzaJumpPress ? 1 : 0,"
                 " window.__stanzaLoadRef || '',"
                 " window.__stanzaDeleteRef || '',"
-                " window.__stanzaModerateRef || '']",
+                " window.__stanzaModerateRef || '',"
+                " window.__stanzaReactRef || '',"
+                " window.__stanzaUnreactRef || '',"
+                " window.__stanzaReactRect || '']",
                 self._on_scroll_position,
             )
 
@@ -1139,6 +1173,41 @@ window.__stanzaMentionRef = '';
         def _clear_moderate_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaModerateRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_react_request(self):
+            try:
+                self._page.runJavaScript(
+                    "window.__stanzaReactRef = '';"
+                    " window.__stanzaReactRect = '';")
+            except RuntimeError:
+                pass
+
+        def _emit_reaction_anchor(self, value) -> None:
+            """Emit the clicked 🙂 button's global top-left (XEP-0444 popup).
+
+            The JS rect is in CSS/viewport coordinates; map it to the screen so
+            the picker can be anchored next to the button.
+            """
+            if len(value) <= 17 or not isinstance(value[17], list):
+                return
+            rect = value[17]
+            if len(rect) < 4:
+                return
+            try:
+                x, y = float(rect[0]), float(rect[1])
+            except (TypeError, ValueError):
+                return
+            try:
+                point = self.mapToGlobal(QtCore.QPoint(int(x), int(y)))
+            except Exception:  # noqa: BLE001
+                return
+            self.reaction_anchor.emit(point.x(), point.y())
+
+        def _clear_unreact_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaUnreactRef = '';")
             except RuntimeError:
                 pass
 
@@ -1242,6 +1311,23 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_moderate_ref = ""
+            if len(value) > 15 and isinstance(value[15], str) and value[15]:
+                self._clear_react_request()
+                requested = value[15]
+                if requested != getattr(self, "_last_react_ref", ""):
+                    self._last_react_ref = requested
+                    self._emit_reaction_anchor(value)
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_react_ref = ""
+            if len(value) > 16 and isinstance(value[16], str) and value[16]:
+                self._clear_unreact_request()
+                requested = value[16]
+                if requested != getattr(self, "_last_unreact_ref", ""):
+                    self._last_unreact_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_unreact_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1322,7 +1408,8 @@ window.__stanzaMentionRef = '';
                                 retract_marker: bool = False,
                                 retract_reason: str = "",
                                 retract_by: str = "",
-                                moderatable: bool = False) -> str:
+                                moderatable: bool = False,
+                                reactions=None) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -1336,7 +1423,8 @@ window.__stanzaMentionRef = '';
                     edited=edited, highlight_nick=self.highlight_nick,
                     geo_ref=reply_able_id or "", hats=hats,
                     retracted=retracted, retract_marker=retract_marker,
-                    retract_reason=retract_reason, retract_by=retract_by)
+                    retract_reason=retract_reason, retract_by=retract_by,
+                    reactions=reactions)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -1359,7 +1447,8 @@ window.__stanzaMentionRef = '';
                         retract_marker: bool = False,
                         retract_reason: str = "",
                         retract_by: str = "",
-                        moderatable: bool = False):
+                        moderatable: bool = False,
+                        reactions=None):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -1370,7 +1459,7 @@ window.__stanzaMentionRef = '';
                 sender_color, user_icon_path, message_id, unstyled,
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
                 outgoing, edited, hats, retracted, retract_marker,
-                retract_reason, retract_by, moderatable)
+                retract_reason, retract_by, moderatable, reactions)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -1386,6 +1475,24 @@ window.__stanzaMentionRef = '';
                     "var n = document.querySelector('[data-stanza-id=' +"
                     " JSON.stringify(ref) + ']');"
                     "if (n) n.outerHTML = " + json.dumps(html_node) + ";")
+            except RuntimeError:
+                pass
+
+        def update_reactions(self, ref_id: str, reactions_html: str) -> None:
+            """Update a message's ``.stanza-reactions`` box in place (XEP-0444)."""
+            if not ref_id:
+                return
+            try:
+                self.page().runJavaScript(
+                    "var ref = " + json.dumps(str(ref_id)) + ";"
+                    "var n = document.querySelector('[data-stanza-id=' +"
+                    " JSON.stringify(ref) + ']');"
+                    "if (!n) { n = document.querySelector('[data-reply-id=' +"
+                    " JSON.stringify(ref) + ']'); }"
+                    "if (n) { var box = n.querySelector('.stanza-reactions');"
+                    " if (!box) { box = document.createElement('div');"
+                    " box.className = 'stanza-reactions'; n.appendChild(box); }"
+                    " box.innerHTML = " + json.dumps(reactions_html) + "; }")
             except RuntimeError:
                 pass
 
@@ -1440,6 +1547,7 @@ window.__stanzaMentionRef = '';
                         retract_marker=entry.get("retract_marker", False),
                         retract_reason=entry.get("retract_reason", ""),
                         retract_by=entry.get("retract_by", ""),
+                        reactions=entry.get("reactions"),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:
@@ -1508,6 +1616,9 @@ window.__stanzaMentionRef = '';
             if "%DELETE_TARGET%" in content:
                 content = content.replace(
                     "%DELETE_TARGET%", quote(node_id, safe="") if node_id else "")
+            if "%REACT_TARGET%" in content:
+                content = content.replace(
+                    "%REACT_TARGET%", quote(node_id, safe="") if node_id else "")
             marker = (' data-stanza-id="' + html.escape(node_id, quote=True) + '"'
                       if node_id else "")
             stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'
@@ -1631,6 +1742,7 @@ else:
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
         share_requested = QtCore.pyqtSignal(str)            # shared content
+        reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)

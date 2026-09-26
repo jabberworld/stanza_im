@@ -2,6 +2,7 @@
 	<div class="next_message">
 		<span class="timestamp">%time%</span>
 		<span class="message_actions">
+        <a class="action-react" href="stanza:react:%REACT_TARGET%" title="%react_title%">🙂</a>
 			<a class="action-reply" href="stanza:reply:%REPLY_TARGET%" title="%reply_title%">↰</a>
 			<a class="action-delete" href="stanza:delete:%DELETE_TARGET%" title="%delete_title%">✕</a>
 			<button type="button" data-action="menu" data-copy-label="%copy_label%">...</button>
@@ -9,3 +10,4 @@
 		%message%
 	</div>
 	<div id="insert"></div>
+<div class="stanza-reactions"></div>

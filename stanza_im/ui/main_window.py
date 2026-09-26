@@ -203,6 +203,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_message_retract_send)
         self._chat_window.message_moderate_requested.connect(
             self._on_message_moderate_send)
+        self._chat_window.reaction_requested.connect(
+            self._on_reaction_requested)
+        self._chat_window.unreaction_requested.connect(
+            self._on_unreaction_requested)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
@@ -1948,6 +1952,9 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("message_retracted", self._on_message_retracted)
         c.on("message_retracted_own", self._on_message_retracted_own)
         c.on("groupchat_message_retracted", self._on_groupchat_message_retracted)
+        c.on("message_reactions", self._on_message_reactions)
+        c.on("groupchat_message_reactions",
+             self._on_groupchat_message_reactions)
         c.on("moderation_failed", self._on_moderation_failed)
         c.on("file_upload_progress", self._on_file_upload_progress)
         c.on("http_upload_oversize", self._on_http_upload_oversize)
@@ -3740,6 +3747,15 @@ class MainWindow(QtWidgets.QMainWindow):
         node = gi.users.get(nick, {}).get("caps_node", "") if gi else ""
         return node or previous.get("caps_node", "")
 
+    def _muc_occupant_id(self, room: str, nick: str) -> str:
+        """The occupant's XEP-0421 occupant-id (from the client's groupchat)."""
+        if not self._client:
+            return ""
+        gi = self._client.groupchats.get(room)
+        if gi is None:
+            return ""
+        return str(gi.users.get(nick, {}).get("occupant_id") or "")
+
     def _on_groupchat_presence(self, room: str, nick: str, show: str,
                                status: str, role: str = "",
                                affiliation: str = "", real_jid: str = "",
@@ -3751,6 +3767,7 @@ class MainWindow(QtWidgets.QMainWindow):
             users.pop(nick, None)
         else:
             previous = users.get(nick, {})
+            occupant_id = self._muc_occupant_id(room, nick)
             users[nick] = {
                 "nick": nick, "show": show, "status": status,
                 "role": role, "affiliation": affiliation,
@@ -3759,6 +3776,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "avatar_path": previous.get("avatar_path", ""),
                 "client": previous.get("client", ""),
                 "caps_node": self._muc_caps_node(room, nick, previous),
+                "occupant_id": occupant_id or previous.get("occupant_id", ""),
                 "hats": (list(hats) if hats is not None
                          else previous.get("hats", [])),
                 "status_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -4170,6 +4188,28 @@ class MainWindow(QtWidgets.QMainWindow):
         geo = window.geometry()
         dlg.move(geo.center() - dlg.rect().center())
 
+    @staticmethod
+    def _place_popup_above(popup, x: int, y: int) -> None:
+        """Open *popup* above the (screen) point *x*, *y*, keeping it visible.
+
+        Used for the XEP-0444 emoji picker anchored to the 🙂 button: it grows
+        upward from *y* with its left edge at *x*; if there is not enough room
+        above, it drops below the point, and it is clamped to the screen.
+        """
+        screen = QtWidgets.QApplication.screenAt(QtCore.QPoint(int(x), int(y)))
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 0, 0)
+        size = popup.sizeHint()
+        px = int(x)
+        py = int(y) - size.height()
+        if area.isValid():
+            if py < area.top():
+                py = int(y)
+            px = max(area.left(), min(px, area.right() - size.width()))
+            py = max(area.top(), min(py, area.bottom() - size.height()))
+        popup.move(px, py)
+
     def _on_chat_files_upload(self, jid: str, paths: list, method: str,
                               parent=None):
         if not self._client:
@@ -4419,6 +4459,154 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.edit_message_by_ref(ref_id, body)
         from stanza_im.core import history
         self._start_task(history.replace_message_async(room, ref_id, body))
+
+    # ── XEP-0444 Message Reactions ────────────────────────────────
+
+    def _recent_emoji(self) -> list[str]:
+        try:
+            return [str(e) for e in (self._config.emoji.recent or []) if e]
+        except (AttributeError, TypeError):
+            return []
+
+    def _remember_emoji(self, emoji: str) -> None:
+        recent = [e for e in self._recent_emoji() if e != emoji]
+        recent.insert(0, emoji)
+        try:
+            self._config.emoji.recent = recent[:24]
+            self._config.save()
+        except Exception:
+            logger.debug("Could not persist emoji recent list",
+                         exc_info=True)
+
+    def _my_reaction_keys(self, jid: str) -> set[str]:
+        """Keys identifying our own reactions for *jid* (occupant-id/nick/JID)."""
+        keys: set[str] = set()
+        if jid in self._muc_self_nicks:
+            nick = self._muc_self_nicks.get(jid, "")
+            if nick:
+                keys.add(nick)
+            info = self._muc_users.get(jid, {}).get(nick, {})
+            occ = str(info.get("occupant_id") or "")
+            if occ:
+                keys.add(occ)
+        else:
+            keys.add("Me")
+        return keys
+
+    def _reaction_state(self, jid: str, ref_id: str) -> list[dict]:
+        """The stored reaction entries for a message (from the open tab)."""
+        chat = self._chat_window.get_chat(jid)
+        if chat is None:
+            return []
+        for entry in list(chat._messages) + list(chat._history):
+            if (str(entry.get("message_id") or "") == ref_id
+                    or str(chat._reply_target_id(entry) or "") == ref_id):
+                return list(entry.get("reactions") or [])
+        return []
+
+    def _on_reaction_requested(self, jid: str, ref_id: str, x: int = 0,
+                               y: int = 0) -> None:
+        from stanza_im.ui.emoji_picker_dialog import EmojiPickerDialog
+        my_keys = self._my_reaction_keys(jid)
+        existing = self._reaction_state(jid, ref_id)
+        can_remove = any(
+            (item.get("occupant_id") or item.get("by")) in my_keys
+            for item in existing)
+        parent = self._chat_dialog_parent()
+        dlg = EmojiPickerDialog(self._recent_emoji(), can_remove=can_remove,
+                                parent=parent)
+        dlg.setWindowFlags(
+            QtCore.Qt.WindowType.Popup | QtCore.Qt.WindowType.FramelessWindowHint)
+        dlg.emoji_chosen.connect(
+            lambda emoji: self._apply_reaction(jid, ref_id, emoji))
+        dlg.remove_requested.connect(
+            lambda: (dlg.reject(), self._unreact_all(jid, ref_id)))
+        dlg.adjustSize()
+        self._place_popup_above(dlg, x, y)
+        dlg.show()
+
+    def _apply_reaction(self, jid: str, ref_id: str, emoji: str) -> None:
+        """Add *emoji* to our reaction set of the message *ref_id*."""
+        if self._client is None or not ref_id or not emoji:
+            return
+        my_keys = self._my_reaction_keys(jid)
+        entries = self._reaction_state(jid, ref_id)
+        current = self._our_emojis(entries, my_keys)
+        if emoji not in current:
+            current.append(emoji)
+        self._remember_emoji(emoji)
+        self._send_reactions(jid, ref_id, current)
+
+    def _on_unreaction_requested(self, jid: str, ref_id: str,
+                                 emoji: str) -> None:
+        """Remove *emoji* from our reaction set of the message *ref_id*."""
+        if self._client is None or not ref_id or not emoji:
+            return
+        my_keys = self._my_reaction_keys(jid)
+        entries = self._reaction_state(jid, ref_id)
+        current = [e for e in self._our_emojis(entries, my_keys) if e != emoji]
+        self._send_reactions(jid, ref_id, current)
+
+    def _unreact_all(self, jid: str, ref_id: str) -> None:
+        self._send_reactions(jid, ref_id, [])
+
+    @staticmethod
+    def _our_emojis(entries: list[dict], my_keys: set[str]) -> list[str]:
+        for item in entries:
+            key = item.get("occupant_id") or item.get("by")
+            if key in my_keys:
+                return [str(e) for e in (item.get("emojis") or [])]
+        return []
+
+    def _send_reactions(self, jid: str, ref_id: str,
+                        emojis: list[str]) -> None:
+        self._client.send_reactions(jid, ref_id, emojis)
+        # Local echo: the server never echoes our own resource's reaction in a
+        # 1:1 chat; in a MUC the room echo will update it, but reflecting at
+        # once keeps the UI responsive.
+        key = self._muc_self_nicks.get(jid) or "Me"
+        occ = ""
+        if jid in self._muc_self_nicks:
+            info = self._muc_users.get(jid, {}).get(
+                self._muc_self_nicks.get(jid, ""), {})
+            occ = str(info.get("occupant_id") or "")
+        self._start_task(self._store_reactions(
+            jid, ref_id, key, emojis, occ))
+
+    async def _store_reactions(self, jid: str, ref_id: str, by: str,
+                               emojis: list[str], occupant_id: str = "") -> None:
+        from stanza_im.core import history
+        await history.set_reactions_async(
+            jid, ref_id, by, emojis,
+            at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+            occupant_id=occupant_id)
+        await self._refresh_reactions(jid, ref_id)
+
+    def _on_message_reactions(self, frm: str, target_id: str,
+                              emojis: list[str]) -> None:
+        """A 1:1 reaction arrived (XEP-0444)."""
+        bare = frm.split("/")[0]
+        by = "Me" if (self._client and bare == self._client.jid_str) else frm
+        self._start_task(self._store_reactions(bare, target_id, by, emojis))
+
+    def _on_groupchat_message_reactions(self, room: str, nick: str, frm: str,
+                                        target_id: str, emojis: list[str],
+                                        occupant_id: str = "") -> None:
+        """A MUC reaction arrived (XEP-0444)."""
+        if nick == self._muc_self_nicks.get(room):
+            occ = occupant_id or str(
+                self._muc_users.get(room, {}).get(nick, {}).get(
+                    "occupant_id", ""))
+            self._start_task(self._store_reactions(
+                room, target_id, nick, emojis, occ))
+            return
+        self._start_task(self._store_reactions(
+            room, target_id, nick, emojis, occupant_id))
+
+    async def _refresh_reactions(self, jid: str, ref_id: str) -> None:
+        from stanza_im.core import history
+        entries = await history.reactions_async(jid, ref_id)
+        self._chat_window.update_reactions(jid, ref_id, entries)
 
     # ── XEP-0424 Message Retraction ───────────────────────────────
 

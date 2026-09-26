@@ -176,6 +176,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.message_edit_sent.connect(self._on_message_edit_sent)
         widget.message_retract_sent.connect(self.message_retract_requested)
         widget.message_moderate_sent.connect(self.message_moderate_requested)
+        widget.reaction_requested.connect(self.reaction_requested)
+        widget.unreaction_requested.connect(self.unreaction_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -242,6 +244,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             self._on_groupchat_message_edit_sent)
         widget.message_retract_sent.connect(self.message_retract_requested)
         widget.message_moderate_sent.connect(self.message_moderate_requested)
+        widget.reaction_requested.connect(self.reaction_requested)
+        widget.unreaction_requested.connect(self.unreaction_requested)
         widget.typing_changed.connect(self.typing_changed)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
@@ -384,6 +388,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._input_font = (family or "", int(size or 0))
         for widget in self._tabs.values():
             widget.set_input_font(*self._input_font)
+
+    def update_reactions(self, jid: str, ref_id: str,
+                         reactions: list[dict]) -> None:
+        """Apply XEP-0444 reactions to the open tab of *jid* (if any)."""
+        widget = self._tabs.get(jid)
+        if widget is not None:
+            widget.set_reactions(ref_id, reactions)
 
     def set_muc_participant_options(self, show_avatars: bool = True,
                                     show_clients: bool = True) -> None:
@@ -590,6 +601,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     message_edit_to_send = QtCore.pyqtSignal(str, str, str)      # jid, body, id
     groupchat_message_edit_to_send = QtCore.pyqtSignal(str, str, str)
     message_retract_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
+    reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
+    unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_requested = QtCore.pyqtSignal(str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current

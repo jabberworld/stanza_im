@@ -53,6 +53,8 @@ NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
 NS_DISCO_ITEMS = "http://jabber.org/protocol/disco#items"
 NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
+NS_REACTIONS = "urn:xmpp:reactions:0"      # XEP-0444 Message Reactions
+NS_OCCUPANT_ID = "urn:xmpp:occupant-id:0"  # XEP-0421 Occupant IDs
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
 NS_ROSTERX = "http://jabber.org/protocol/rosterx"  # XEP-0144 Roster Item Exchange
@@ -625,6 +627,34 @@ def _caps_node(pres) -> str:
     return str(element.get("node") or "") if element is not None else ""
 
 
+def _occupant_id(pres) -> str:
+    """The XEP-0421 ``<occupant-id id=…/>`` of a MUC presence ("" if absent)."""
+    xml = getattr(pres, "xml", None)
+    if xml is None:
+        return ""
+    element = xml.find("{%s}occupant-id" % NS_OCCUPANT_ID)
+    return str(element.get("id") or "") if element is not None else ""
+
+
+def _reactions(msg) -> tuple[str, list[str]] | None:
+    """Parse a XEP-0444 ``<reactions/>`` child of *msg*.
+
+    Returns ``(target_id, [emoji…])`` or ``None`` when the message carries no
+    reactions.  An empty list means "remove all reactions".
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    element = xml.find("{%s}reactions" % NS_REACTIONS)
+    if element is None:
+        return None
+    target_id = str(element.get("id") or "")
+    emojis = [str(child.text or "").strip()
+              for child in element.findall("{%s}reaction" % NS_REACTIONS)]
+    emojis = [emoji for emoji in emojis if emoji]
+    return target_id, emojis
+
+
 def _upload_max_file_size(xml) -> int:
     """Return the XEP-0363 ``max-file-size`` from a disco#info form, else 0."""
     if xml is None:
@@ -917,6 +947,8 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_BOOKMARKS2 + "+notify")
         # XEP-0144 Roster Item Exchange.
         self.xmpp["xep_0030"].add_feature(NS_ROSTERX)
+        # XEP-0444 Message Reactions.
+        self.xmpp["xep_0030"].add_feature(NS_REACTIONS)
         # XEP-0191 blocklist pushes (XEP-0191 §5 carries the full list).
         self.xmpp.add_event_handler("blocked", self._on_blocked_push)
         self.xmpp.add_event_handler("unblocked", self._on_unblocked_push)
@@ -1128,6 +1160,18 @@ class JabberClient:
             "Message Retraction (legacy)",
             MatchXPath("%s/{%s}retract" % (msg_ns, NS_RETRACT_LEGACY)),
             self._on_bodyless_retract_stanza))
+        # XEP-0444 reactions are bodyless too.
+        self.xmpp.register_handler(CoroutineCallback(
+            "Message Reactions",
+            MatchXPath("%s/{%s}reactions" % (msg_ns, NS_REACTIONS)),
+            self._on_bodyless_reactions_stanza))
+
+    async def _on_bodyless_reactions_stanza(self, msg) -> None:
+        """Route a bodyless XEP-0444 ``<reactions/>`` to the right handler."""
+        if str(msg["type"] or "") == "groupchat":
+            self._on_groupchat_message(msg)
+        else:
+            self._on_message(msg)
 
     async def _on_bodyless_retract_stanza(self, msg) -> None:
         """Route a bodyless XEP-0424/0425 retraction to the right handler.
@@ -1743,6 +1787,50 @@ class JabberClient:
                      mtype, jid, reply_id, body[:200])
         msg.send()
         return message_id
+
+    def _build_reactions(self, target: str, target_id: str, emojis: list[str],
+                         mtype: str = "", msg_id: str = ""):
+        """Build (but do not send) a XEP-0444 reaction message; used by tests.
+
+        Returns ``None`` for an invalid target/id.  *emojis* is the full current
+        set of the sender (an empty list removes our entry).  The ``type``
+        defaults to ``groupchat`` for a known room, else ``chat``.
+        """
+        if not isinstance(target, str) or not target.strip() or not target_id:
+            return None
+        target = target.strip()
+        if not mtype:
+            mtype = ("groupchat" if target.split("/")[0] in self.groupchats
+                     else "chat")
+        msg = self.xmpp.Message()
+        msg["to"] = target
+        msg["type"] = mtype
+        msg["id"] = msg_id or uuid.uuid4().hex
+        reactions = ET.SubElement(msg.xml, "{%s}reactions" % NS_REACTIONS)
+        reactions.set("id", str(target_id))
+        for emoji in emojis or []:
+            emoji = str(emoji).strip()
+            if emoji:
+                ET.SubElement(reactions, "{%s}reaction" % NS_REACTIONS).text = emoji
+        return msg
+
+    def send_reactions(self, target: str, target_id: str, emojis: list[str],
+                       mtype: str = "") -> str:
+        """Send a XEP-0444 reaction set for *target_id* (return the new id).
+
+        *emojis* is the full current set of the sender: it replaces any
+        previous reactions by us for that stanza.  An empty list removes them.
+        The ``type`` defaults to ``groupchat`` for a known room, else ``chat``.
+        """
+        msg = self._build_reactions(target, target_id, emojis, mtype)
+        if msg is None:
+            logger.warning("Skipping reactions (target=%r id=%r)",
+                           target, target_id)
+            return ""
+        logger.debug("Sending %d reaction(s) to %s for %s (%s)",
+                     len(emojis or []), target, target_id, msg["type"])
+        msg.send()
+        return str(msg["id"])
 
     def _build_retraction(self, jid: str, target_id: str, mtype: str = "chat",
                           msg_id: str = ""):
@@ -4505,6 +4593,12 @@ class JabberClient:
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
+            reactions = _reactions(msg)
+            if reactions is not None:
+                # XEP-0444: reactions never render the (absent) body.
+                target_id, emojis = reactions
+                self.emit("message_reactions", frm, target_id, emojis)
+                return
             retract_ref = _retract_reference(msg)
             if retract_ref:
                 # XEP-0424: a retraction must never render its fallback body.
@@ -4572,6 +4666,11 @@ class JabberClient:
             return
         body = str(inner["body"])
         frm = str(inner["from"])
+        reactions = _reactions(inner)
+        if reactions is not None:
+            target_id, emojis = reactions
+            self.emit("message_reactions", frm, target_id, emojis)
+            return
         retract_ref = _retract_reference(inner)
         if retract_ref:
             self.emit("message_retracted", frm, retract_ref)
@@ -5067,6 +5166,7 @@ class JabberClient:
                 "real_jid": real_jid,
                 "client": previous_client,
                 "caps_node": _caps_node(pres),
+                "occupant_id": _occupant_id(pres),
                 "hats": hats,
             }
             if real_jid and (room, nick) not in self._muc_version_probed:

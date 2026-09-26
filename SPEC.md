@@ -50,6 +50,7 @@ stanza_im/
 │   ├── media_preview.py — Inline image/audio/video previews
 │   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
+│   ├── emoji_picker_dialog.py — XEP-0444 reaction picker (search/categories/recent)
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
@@ -83,7 +84,7 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing)
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue)
 └── plugins/            — (future)
 ```
 
@@ -212,6 +213,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.allow_incoming_deletions` | `true` | Apply a peer's XEP-0424 retraction (Preferences → Chat → «Общие»/«General»). On: the message becomes a tombstone; off: it keeps its body and gains a "✕" marker. Applied live to the client from `_on_settings_applied`. |
 | `chat.allow_moderation` | `true` | Apply a moderator's XEP-0425 retraction (Preferences → Chat → «Конференции»/«Conferences»). On: the message becomes a "Retracted by a moderator" tombstone with the reason; off: it keeps its body and gains a "✕" marker. It only governs the receive side — the moderator action in the message menu is unaffected. |
 | `chat.confirm_retraction` | `false` | Ask for confirmation before retracting one of our own messages (message menu "Delete" / inline "✕"). |
+| `emoji.recent` | `[]` | Most recently used XEP-0444 reaction emoji (up to 24, most recent first), shown in the picker's «Недавние» area above the category tabs. Updated by `MainWindow._remember_emoji`. Stored as literal UTF-8 emoji (the TOML writer uses `ensure_ascii=False`). |
 | `chat.muc_name_source` | `from_name` | Conference display-name source (Preferences → Chat → «Конференции» + info label tooltip): `from_name` = bookmark name → room/disco name → JID localpart; `from_vcard` = bookmark name → vCard `fn` → vCard `nickname` → room/disco name → JID localpart. A bookmark name equal to the room JID is ignored. Applied live by `MainWindow._refresh_muc_names` (tab title + roster). |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
 | `appearance.chat_font` / `chat_font_size` | `""` / `0` | Chat font (pt) injected as a `body { font-family; font-size; } !important` override by `ChatThemeFactory.set_chat_font`; avatars/images are unaffected. |
@@ -1429,6 +1431,10 @@ Registers XEP plugins (conditionally where noted):
 - XEP-0461 Message Replies advertised via disco feature `urn:xmpp:reply:0`
   (manual `<reply/>` handling in `client._on_message`/`_attach_reply` —
   slixmpp has no plugin for it)
+- XEP-0444 Message Reactions advertised via disco feature
+  `urn:xmpp:reactions:0` (manual `<reactions/>` handling in
+  `client.send_reactions`/`_build_reactions`/`_reactions`; slixmpp has no
+  plugin for it)
 
 ### 14.2 Message Carbons (XEP-0280)
 
@@ -1563,6 +1569,54 @@ Registers XEP plugins (conditionally where noted):
   the reason and moderator (`retract_reason`/`retract_by`).
   `chat.allow_moderation` (on by default) chooses between the tombstone and the
   "✕" marker.
+
+### 14.4.3 Message Reactions (XEP-0444)
+
+- The first situational message action is a smiley (`a.action-react`, inserted
+  before Reply in every skin template) whose click is kept in-page
+  (`window.__stanzaReactRef` through the `_ACTION_JS` handler and the
+  always-running scroll poll, `stanza:react:<id>`), so the chat document is
+  never reset.
+- The view reports the button rectangle (`getBoundingClientRect` → the
+  `reaction_anchor` signal, mapped to screen coordinates), so
+  `ChatWidget.reaction_requested(jid, ref_id, x, y)` carries the position.
+- `MainWindow._on_reaction_requested` opens
+  `ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup` anchored
+  above the 🙂 button (`MainWindow._place_popup_above`; it drops below when
+  there is no room above and is clamped to the screen): a search field, a
+  «Недавние» (Recent) area above the tabs and the eight
+  `include/emoji_data.py` category tabs below it. Emoji are rendered with an
+  auto-detected colour-emoji font (`emoji_font_family`, tried in order
+  Noto Color Emoji / Apple Color Emoji / Segoe UI Emoji / Twemoji / Symbola…),
+  used both for the grid buttons and, via the page CSS, for the chat chips.
+  Clicking an emoji emits `emoji_chosen` → `_apply_reaction`, which appends the
+  emoji to our current set for that message, remembers it in `emoji.recent`
+  (config) and re-sends the full set. A «Убрать реакцию» button (shown when we
+  already reacted) clears it.
+- Reactions are sent as a bodyless
+  `<message><reactions xmlns='urn:xmpp:reactions:0' id='<target>'><reaction>😀
+  </reaction>…</reactions></message>` (1:1 `type='chat'`, MUC `type='groupchat'`)
+  by `client.send_reactions` (a thin wrapper over `client._build_reactions`,
+  which builds the stanza without sending it — used by tests like
+  `_build_retraction`); an empty set removes our entry. The `id` is the
+  referenced message's `origin-id`/`id` (1:1) or server `stanza-id` (MUC).
+- On receive, `_reactions()` parses the stanza and the bodyless `MatchXPath`
+  handler routes it (`_on_message` → `message_reactions`; `_on_groupchat_message`
+  → `groupchat_message_reactions`, carrying the reactor's XEP-0421 occupant-id).
+  `MainWindow` persists it with `history.set_reactions` (matched by
+  `message_id`/`origin_id`) and refreshes the open tab in place via
+  `ChatWindow.update_reactions` → `ChatWidget.set_reactions`.
+- Each reactor's set **replaces** its previous set (keyed by occupant-id in MUC,
+  else nickname/JID). Chips are aggregated by `ChatWidget.compute_reactions`
+  into `{emoji, count, mine, title}` and rendered as `.stanza-reaction` spans
+  under the body by `chat_themes._render_reactions_chips` (sorted by count
+  desc, capped at `_MAX_REACTION_CHIPS` = 6 with a "+k" chip; the tooltip lists
+  the reactors and their timestamps). The chips are indented to line up with the
+  message text (past the avatar in `minimal-mod`, under the body box in
+  `candy`). A chip rendered with `data-mine="1"` (our own reaction) is
+  clickable: `stanza:unreact:<id>/<emoji>` removes just that emoji from our set
+  and re-sends. History stores reactions in the `reactions` JSON column (SQLite
+  migration).
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)
 

@@ -372,6 +372,8 @@ class ChatWidget(QtWidgets.QWidget):
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
     message_edit_sent = QtCore.pyqtSignal(str, str, str)  # jid, body, edit_id
     message_retract_sent = QtCore.pyqtSignal(str, str)    # jid, ref_id (XEP-0424)
+    reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
+    unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_sent = QtCore.pyqtSignal(str, str, str)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
@@ -456,6 +458,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.mention_senders = self.is_muc
         view.link_clicked.connect(self._open_link)
         view.link_clicked.connect(self.link_clicked)
+        view.reaction_anchor.connect(self._on_reaction_anchor)
         view.reply_requested.connect(self._on_reply_requested)
         view.document_lost.connect(self._restore_after_document_lost)
         view.zoom_changed.connect(
@@ -589,6 +592,7 @@ class ChatWidget(QtWidgets.QWidget):
         chat_col.addWidget(self._edit_ctx)
         self._editing_id = ""
         self._editing_previous = ""
+        self._reaction_anchor = (0, 0)
 
         # ── Input bar buttons ─────────────────────────────────────
         actions_row = QtWidgets.QHBoxLayout()
@@ -760,6 +764,21 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:moderate:"):
             self._handle_moderate_uri(url)
+            return
+        if url.startswith("stanza:react:"):
+            ref = unquote(url[len("stanza:react:"):])
+            if ref:
+                x, y = self._reaction_anchor
+                self._reaction_anchor = (0, 0)
+                self.reaction_requested.emit(self.jid, ref, x, y)
+            return
+        if url.startswith("stanza:unreact:"):
+            payload = url[len("stanza:unreact:"):]
+            raw_ref, sep, raw_emoji = payload.partition("/")
+            ref = unquote(raw_ref)
+            emoji = unquote(raw_emoji)
+            if ref and sep and emoji:
+                self.unreaction_requested.emit(self.jid, ref, emoji)
             return
         if url.startswith("stanza:jump:"):
             self._jump_to_message(unquote(url[len("stanza:jump:"):]))
@@ -1194,6 +1213,14 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is not None:
             self._begin_edit(entry)
 
+    def _on_reaction_anchor(self, x: int, y: int) -> None:
+        """Remember the 🙂 button's screen position for the reaction popup.
+
+        Emitted by the view just before the ``stanza:react:`` click, so the
+        picker can be anchored above the button.
+        """
+        self._reaction_anchor = (int(x), int(y))
+
     def _handle_delete_uri(self, url: str) -> None:
         """Retract our own message from a ``stanza:delete:<id>`` click."""
         ref = unquote(url[len("stanza:delete:"):])
@@ -1321,6 +1348,25 @@ class ChatWidget(QtWidgets.QWidget):
                 continue
             if value == from_sender or value.split("/")[0] == target_bare:
                 return True
+        return False
+
+    def set_reactions(self, ref_id: str, reactions: list[dict]) -> bool:
+        """Apply XEP-0444 reactions to the message *ref_id* (in place)."""
+        if not ref_id:
+            return False
+        for entry in list(self._messages) + list(self._history):
+            if not (str(entry.get("message_id") or "") == ref_id
+                    or str(self._reply_target_id(entry) or "") == ref_id):
+                continue
+            entry["reactions"] = reactions
+            try:
+                from stanza_im.ui.chat_themes import _render_reactions_chips
+                self._view.update_reactions(
+                    ref_id, _render_reactions_chips(
+                        self.compute_reactions(entry)))
+            except Exception:
+                logger.debug("Could not update reactions", exc_info=True)
+            return True
         return False
 
     def retract_message_by_ref(self, ref_id: str, marker: bool = False,
@@ -1456,7 +1502,64 @@ class ChatWidget(QtWidgets.QWidget):
             "moderatable": self._can_moderate_entry(entry),
             "sender_color": self._sender_color(entry),
             "hats": self._user_hats(entry),
+            "reactions": self.compute_reactions(entry),
         }
+
+    def compute_reactions(self, entry: dict) -> list[dict]:
+        """Aggregate stored XEP-0444 reactions into render-ready chips."""
+        stored = entry.get("reactions") or []
+        counts: dict[str, int] = {}
+        reactors: dict[str, list[str]] = {}
+        mine: set[str] = set()
+        my_keys = self._my_reaction_keys()
+        from stanza_im.include.utils import ts_to_time
+        for item in stored:
+            emojis = [str(e) for e in (item.get("emojis") or []) if str(e)]
+            who = str(item.get("by") or "")
+            at = ts_to_time(str(item.get("at") or "")) \
+                if item.get("at") else ""
+            key = item.get("occupant_id") or who
+            label = who or str(item.get("occupant_id") or "")
+            for emoji in emojis:
+                counts[emoji] = counts.get(emoji, 0) + 1
+                reactors.setdefault(emoji, []).append(
+                    f"{label} — {at}" if at else label)
+                if key and key in my_keys:
+                    mine.add(emoji)
+        chips = []
+        for emoji, count in counts.items():
+            times = [r for r in reactors.get(emoji, []) if r]
+            chips.append({
+                "emoji": emoji,
+                "count": count,
+                "mine": emoji in mine,
+                "title": tr("reaction_tooltip") + "\n" + "\n".join(times),
+            })
+        chips.sort(key=lambda c: (-c["count"], c["emoji"]))
+        return chips
+
+    def _my_reaction_keys(self) -> set[str]:
+        """Keys identifying our own reactions (occupant-id and/or nick)."""
+        keys: set[str] = set()
+        if self.is_muc:
+            me = self._self_nick or ""
+            if me:
+                keys.add(me)
+            occ = self._muc_self_occupant_id()
+            if occ:
+                keys.add(occ)
+        else:
+            keys.add("Me")
+        return keys
+
+    def _muc_self_occupant_id(self) -> str:
+        me = self._self_nick or ""
+        if not me:
+            return ""
+        for user in self._users:
+            if self._same_nick(user.get("nick", ""), me):
+                return str(user.get("occupant_id") or "")
+        return ""
 
     def _render_entry(self, entry: dict):
         self._view.add_message(**self._entry_view_kwargs(entry))

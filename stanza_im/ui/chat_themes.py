@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from html import escape as html_escape
 from urllib.parse import quote
 
 from PyQt6 import QtCore, QtGui
@@ -63,6 +64,76 @@ _DELETE_CSS = """
 .stanza-message[data-retracted="1"] .message_actions a.action-delete
     { display: none; }
 """
+
+# XEP-0444: reaction chips under a message; the reaction action button sits
+# first among the situational message actions.
+_REACTION_CSS = """
+.stanza-reactions { display: block; margin: 2px 0 0 4px; line-height: 1.4; }
+/* Align the chips with the message text, i.e. past the avatar when the skin
+   floats one (minimal-mod); skins without avatars (candy) override this. */
+.placeholder ~ .stanza-reactions,
+.placeholder_next ~ .stanza-reactions { margin-left: 30px; }
+.placeholder[visible*="buddy_icon.png"] ~ .stanza-reactions,
+.placeholder_next[visible*="buddy_icon.png"] ~ .stanza-reactions { margin-left: 0; }
+.stanza-reaction { display: inline-block; margin: 0 3px 2px 0; padding: 0 6px;
+                   border-radius: 9px; font-size: 12px; cursor: pointer;
+                   background: rgba(0,0,0,.08); white-space: nowrap; }
+.stanza-reaction:hover { background: rgba(0,0,0,.16); }
+.stanza-reaction[data-mine="1"] { background: rgba(42,111,176,.22); }
+.stanza-reaction .reaction-count { font-size: 10px; color: #555;
+                                   margin-left: 3px; }
+"""
+
+_MAX_REACTION_CHIPS = 6
+
+_emoji_font_family_cache: str | None = None
+
+
+def _emoji_font_family() -> str:
+    """Colour-emoji font family for reaction chips (``""`` when absent).
+
+    Resolved lazily through :func:`stanza_im.ui.emoji_picker_dialog.
+    emoji_font_family` so the chat chips match the picker; the result is cached
+    because it is read on every page render.
+    """
+    global _emoji_font_family_cache
+    if _emoji_font_family_cache is None:
+        try:
+            from stanza_im.ui.emoji_picker_dialog import emoji_font_family
+            _emoji_font_family_cache = emoji_font_family()
+        except Exception:  # noqa: BLE001 - Qt may be unavailable (tests)
+            _emoji_font_family_cache = ""
+    return _emoji_font_family_cache
+
+
+def _render_reactions_chips(reactions) -> str:
+    """Render XEP-0444 reaction chips (emoji + count), capped with a "+k".
+
+    *reactions* is a list of ``{"emoji", "count", "mine", "title"}`` dicts.
+    """
+    if not reactions:
+        return ""
+    # Order by count (desc); ties keep the caller's order (emoji codepoint).
+    ordered = sorted(reactions, key=lambda r: -int(r.get("count", 0)))
+    shown = ordered[:_MAX_REACTION_CHIPS]
+    out = []
+    for item in shown:
+        emoji = str(item.get("emoji") or "")
+        if not emoji:
+            continue
+        count = max(1, int(item.get("count", 1)))
+        mine = ' data-mine="1"' if item.get("mine") else ""
+        tip = html_escape(str(item.get("title") or emoji), quote=True)
+        out.append(
+            '<span class="stanza-reaction" data-emoji="%s"%s title="%s">%s'
+            '<span class="reaction-count">%d</span></span>'
+            % (html_escape(emoji, quote=True), mine, tip, escape_html(emoji),
+               count))
+    extra = len(ordered) - len(shown)
+    if extra > 0:
+        out.append('<span class="stanza-reaction reaction-more">%s</span>'
+                   % escape_html(tr("reaction_more", n=extra)))
+    return "".join(out)
 
 
 def _qwebchannel_js() -> str:
@@ -306,6 +377,11 @@ class ChatThemeFactory:
         if self._chat_bg_color:
             css += (f"\nbody {{ background-color: {self._chat_bg_color} "
                     f"!important; background-image: none !important; }}")
+        family = _emoji_font_family()
+        if family:
+            safe = family.replace("\\", "\\\\").replace("'", "\\'")
+            css += (f"\n#chat .stanza-reaction {{ font-family: '{safe}' "
+                    f"!important; }}")
         return css
 
     def _transform_body(self, body: str, styled: bool = True,
@@ -388,7 +464,8 @@ class ChatThemeFactory:
                        retracted: bool = False,
                        retract_marker: bool = False,
                        retract_reason: str = "",
-                       retract_by: str = "") -> str:
+                       retract_by: str = "",
+                       reactions=None) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -455,10 +532,15 @@ class ChatThemeFactory:
                        .replace("%senderColor%", sender_color) \
                        .replace("%userIconPath%", user_icon_path) \
                        .replace("%reply_title%", tr("chat_reply")) \
+                       .replace("%react_title%", tr("chat_react")) \
                        .replace("%copy_label%", tr("chat_copy")) \
                        .replace("%delete_title%", tr("chat_delete"))
         if "{body}" in html:
             html = html.replace("{body}", body_html)
+        if "<div class=\"stanza-reactions\"></div>" in html:
+            html = html.replace(
+                '<div class="stanza-reactions"></div>',
+                '<div class="stanza-reactions">%s</div>' % _render_reactions_chips(reactions))
         return html
 
     @staticmethod
@@ -586,6 +668,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {_MEDIA_CSS}
 {_HATS_CSS}
 {_DELETE_CSS}
+{_REACTION_CSS}
 {self._font_override_css()}
 </style>
 </head>
@@ -629,6 +712,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {_MEDIA_CSS}
 {_HATS_CSS}
 {_DELETE_CSS}
+{_REACTION_CSS}
 {self._font_override_css()}
 </style>
 </head>
