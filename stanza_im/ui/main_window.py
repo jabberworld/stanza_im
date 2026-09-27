@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import math
 import os
 import socket
 import time
@@ -406,8 +407,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stack.addWidget(splash)
 
         # Page 2: Roster
-        roster_page = QtWidgets.QWidget()
-        roster_layout = QtWidgets.QVBoxLayout(roster_page)
+        roster_content = QtWidgets.QWidget()
+        roster_layout = QtWidgets.QVBoxLayout(roster_content)
         roster_layout.setContentsMargins(0, 0, 0, 0)
 
         # Search bar
@@ -464,12 +465,231 @@ class MainWindow(QtWidgets.QMainWindow):
 
         roster_layout.addLayout(status_bar)
 
+        roster_page = self._build_roster_tabs(roster_content)
         self._add_roster_page(roster_page)
 
         # Start on login page
         self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     # ── Interface mode (separate / unified chat layout) ───────────
+
+    def _build_roster_tabs(self, roster_content: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        """Wrap the roster content in an icon-only tab bar (roster/bookmarks/
+        events) and return the host widget placed in the stack/splitter."""
+        host = QtWidgets.QWidget()
+        host_layout = QtWidgets.QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+
+        self._roster_tabs = QtWidgets.QTabBar()
+        self._roster_tabs.setExpanding(False)
+        self._roster_tabs.setDrawBase(False)
+        icons = {
+            "roster": self._tab_icon("system-users.png"),
+            "bookmarks": self._tab_icon("muc.png"),
+            "events": self._tab_icon("event.svg"),
+        }
+        tips = {
+            "roster": tr("roster_tab_roster"),
+            "bookmarks": tr("roster_tab_bookmarks"),
+            "events": tr("roster_tab_events"),
+        }
+        for key in ("roster", "bookmarks", "events"):
+            index = self._roster_tabs.addTab(icons[key], "")
+            self._roster_tabs.setTabToolTip(index, tips[key])
+        self._roster_tabs.currentChanged.connect(self._on_roster_tab_changed)
+        host_layout.addWidget(self._roster_tabs)
+
+        self._roster_stack = QtWidgets.QStackedWidget()
+        self._roster_stack.addWidget(roster_content)          # 0 roster
+        self._roster_stack.addWidget(self._build_bookmarks_tab())  # 1
+        self._roster_stack.addWidget(self._build_events_tab())     # 2
+        host_layout.addWidget(self._roster_stack, stretch=1)
+
+        self._roster_tabs.setCurrentIndex(0)
+        self._roster_stack.setCurrentIndex(0)
+        return host
+
+    def _tab_icon(self, filename: str) -> QtGui.QIcon:
+        """Icon for a roster tab (scalable/sized dirs through find_icon)."""
+        icon = self._menu_icon(filename)
+        if icon.isNull() and self._icons is not None:
+            name = filename.rsplit(".", 1)[0]
+            pixmap = self._icons.get_category_icon(name, 16)
+            if not pixmap.isNull():
+                icon = QtGui.QIcon(pixmap)
+        return icon
+
+    def _build_bookmarks_tab(self) -> QtWidgets.QWidget:
+        """Conference bookmarks as a searchable list (join / autojoin / remove)."""
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._bookmarks_search = QtWidgets.QLineEdit()
+        self._bookmarks_search.setPlaceholderText(
+            tr("bookmarks_search_placeholder"))
+        self._bookmarks_search.textChanged.connect(self._filter_bookmarks)
+        layout.addWidget(self._bookmarks_search)
+
+        self._bookmarks_list = QtWidgets.QListWidget()
+        self._bookmarks_list.itemDoubleClicked.connect(self._on_bookmark_activated)
+        self._bookmarks_list.setContextMenuPolicy(
+            QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self._bookmarks_list.customContextMenuRequested.connect(
+            self._on_bookmark_context_menu)
+        layout.addWidget(self._bookmarks_list, stretch=1)
+        return page
+
+    def _build_events_tab(self) -> QtWidgets.QWidget:
+        """System events (scaffold): search box and an empty list."""
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._events_search = QtWidgets.QLineEdit()
+        self._events_search.setPlaceholderText(tr("events_search_placeholder"))
+        layout.addWidget(self._events_search)
+
+        self._events_list = QtWidgets.QListWidget()
+        self._events_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
+        self._events_list.setEnabled(False)
+        layout.addWidget(self._events_list, stretch=1)
+
+        # Scaffold for the tab-icon blink on new system events.
+        self._event_unread = 0
+        self._event_blink_active = False
+        self._event_blink_elapsed = 0.0
+        self._event_blink_period_ms = 1000
+        self._event_blink_interval_ms = 40
+        self._event_blink_pixmap = QtGui.QPixmap()
+        self._event_blink_timer = QtCore.QTimer(self)
+        self._event_blink_timer.timeout.connect(self._event_blink_step)
+        self._push_system_event("", "")  # render the empty-state row
+        return page
+
+    def _push_system_event(self, title: str, detail: str = "") -> None:
+        """Scaffold: record a system event and start blinking the tab icon.
+
+        Nothing calls this yet; the events UI is not implemented.  It resets
+        the empty-state row, appends the event and (for a real event) starts
+        the tab-icon blink.
+        """
+        if (self._events_list.count() == 1
+                and self._events_list.item(0).text() == tr("events_empty")):
+            self._events_list.clear()
+        if title:
+            self._events_list.addItem(title)
+            self._event_unread += 1
+            self._start_event_blink()
+        elif self._events_list.count() == 0:
+            self._events_list.addItem(tr("events_empty"))
+
+    def _start_event_blink(self) -> None:
+        if self._event_blink_active:
+            return
+        self._event_blink_active = True
+        self._event_blink_elapsed = 0.0
+        self._event_blink_pixmap = self._events_tab_pixmap()
+        self._event_blink_timer.start(self._event_blink_interval_ms)
+
+    def _stop_event_blink(self) -> None:
+        self._event_blink_active = False
+        self._event_blink_timer.stop()
+        index = self._tab_index("events")
+        if index >= 0:
+            self._roster_tabs.setTabIcon(index, self._tab_icon("event.svg"))
+        self._event_unread = 0
+
+    def _events_tab_pixmap(self) -> QtGui.QPixmap:
+        icon = self._tab_icon("event.svg")
+        return icon.pixmap(16, 16)
+
+    def _event_blink_step(self) -> None:
+        """Fade the events tab icon out and back in (like the tray icon)."""
+        self._event_blink_elapsed = (
+            self._event_blink_elapsed + self._event_blink_interval_ms
+        ) % self._event_blink_period_ms
+        if self._event_blink_pixmap.isNull():
+            self._event_blink_pixmap = self._events_tab_pixmap()
+        if self._event_blink_pixmap.isNull():
+            return
+        phase = self._event_blink_elapsed / float(self._event_blink_period_ms)
+        alpha = 0.5 * (1.0 + math.cos(2.0 * math.pi * phase))
+        faded = QtGui.QPixmap(self._event_blink_pixmap.size())
+        faded.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(faded)
+        painter.setOpacity(max(0.0, min(1.0, alpha)))
+        painter.drawPixmap(0, 0, self._event_blink_pixmap)
+        painter.end()
+        index = self._tab_index("events")
+        if index >= 0:
+            self._roster_tabs.setTabIcon(index, QtGui.QIcon(faded))
+
+    def _tab_index(self, key: str) -> int:
+        return {"roster": 0, "bookmarks": 1, "events": 2}.get(key, -1)
+
+    def _on_roster_tab_changed(self, index: int) -> None:
+        if not hasattr(self, "_roster_stack"):
+            return
+        self._roster_stack.setCurrentIndex(index)
+        if index == self._tab_index("bookmarks") and self._client:
+            self._start_task(self._load_bookmarks())
+        elif index == self._tab_index("events"):
+            self._stop_event_blink()
+
+    def _on_bookmark_activated(self, item: QtWidgets.QListWidgetItem) -> None:
+        bookmark = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if bookmark:
+            self._join_bookmark(bookmark)
+
+    def _on_bookmark_context_menu(self, pos: QtCore.QPoint) -> None:
+        item = self._bookmarks_list.itemAt(pos)
+        if item is None:
+            return
+        bookmark = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if not bookmark:
+            return
+        menu = QtWidgets.QMenu(self._bookmarks_list)
+        join = menu.addAction(self._menu_icon("muc.png"), tr("bookmark_join"))
+        join.triggered.connect(lambda: self._join_bookmark(bookmark))
+        auto = menu.addAction(tr("bookmark_autojoin"))
+        auto.setCheckable(True)
+        auto.setChecked(bool(bookmark.get("autojoin")))
+        auto.toggled.connect(
+            lambda value: self._set_bookmark_autojoin(bookmark, value))
+        remove = menu.addAction(self._menu_icon("process-stop.png"),
+                                tr("bookmark_remove"))
+        remove.triggered.connect(
+            lambda: self._remove_bookmark(bookmark.get("jid", "")))
+        menu.exec(self._bookmarks_list.mapToGlobal(pos))
+
+    def _filter_bookmarks(self, text: str) -> None:
+        needle = (text or "").strip().casefold()
+        for i in range(self._bookmarks_list.count()):
+            item = self._bookmarks_list.item(i)
+            bookmark = item.data(QtCore.Qt.ItemDataRole.UserRole) or {}
+            name = str(bookmark.get("name") or "")
+            jid = str(bookmark.get("jid") or "")
+            hay = f"{name} {jid}".casefold()
+            item.setHidden(bool(needle) and needle not in hay)
+
+    def _rebuild_bookmarks_view(self) -> None:
+        """Fill the bookmarks tab list from ``self._bookmarks``."""
+        if not hasattr(self, "_bookmarks_list"):
+            return
+        self._bookmarks_list.clear()
+        for room, bookmark in sorted(self._bookmarks.items()):
+            name = bookmark.get("name") or ""
+            if not name or name == room:
+                name = room.split("@", 1)[0]
+            label = name + (" (%s)" % room if name != room else "")
+            item = QtWidgets.QListWidgetItem(self._menu_icon("muc.png"), label)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, dict(bookmark))
+            item.setToolTip(room)
+            self._bookmarks_list.addItem(item)
+        self._filter_bookmarks(self._bookmarks_search.text())
 
     def _add_roster_page(self, roster_page: QtWidgets.QWidget) -> None:
         """Add the roster page to the stack, embedding the chat if unified."""
@@ -622,9 +842,6 @@ class MainWindow(QtWidgets.QMainWindow):
         show_transports.setCheckable(True)
         show_transports.setEnabled(False)
 
-        self._bookmarks_menu = menubar.addMenu(tr("menu_bookmarks"))
-        self._bookmarks_menu.aboutToShow.connect(self._refresh_bookmarks_menu)
-
         help_menu = menubar.addMenu(tr("menu_help"))
         conn_info = help_menu.addAction(self._menu_icon("info.svg"),
                                         tr("menu_connection_info"))
@@ -773,17 +990,6 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.finished.connect(finished)
         dlg.open()
 
-    def _refresh_bookmarks_menu(self):
-        """Refresh the server-side conference bookmarks before displaying it."""
-        self._bookmarks_menu.clear()
-        if not self._client:
-            action = self._bookmarks_menu.addAction(tr("menu_bookmarks_empty"))
-            action.setEnabled(False)
-            return
-        loading = self._bookmarks_menu.addAction(tr("bookmarks_loading"))
-        loading.setEnabled(False)
-        self._start_task(self._load_bookmarks())
-
     async def _load_bookmarks(self):
         bookmarks = await self._client.list_bookmarks()
         self._apply_bookmarks(bookmarks)
@@ -799,7 +1005,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 # slixmpp substitutes the JID when a bookmark has no name.
                 name = ""
             self._bookmarks[jid] = {**item, "name": name}
-        self._rebuild_bookmarks_menu()
+        self._rebuild_bookmarks_view()
         self._classify_bookmarked_conferences()
         self._refresh_muc_names()
         for room in self._muc_self_nicks:
@@ -810,33 +1016,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_bookmarks_changed(self, bookmarks: list[dict]):
         """Bookmarks changed on another of our resources (XEP-0402)."""
         self._apply_bookmarks(bookmarks)
-
-    def _rebuild_bookmarks_menu(self):
-        self._bookmarks_menu.clear()
-        if not self._bookmarks:
-            action = self._bookmarks_menu.addAction(tr("menu_bookmarks_empty"))
-            action.setEnabled(False)
-            return
-        for room, bookmark in sorted(self._bookmarks.items()):
-            name = bookmark.get("name") or ""
-            if not name or name == room:
-                name = room.split("@", 1)[0]
-            label = name
-            submenu = self._bookmarks_menu.addMenu(self._menu_icon("muc.png"),
-                                                   label)
-            join = submenu.addAction(self._menu_icon("muc.png"),
-                                     tr("bookmark_join"))
-            join.triggered.connect(
-                lambda checked=False, item=bookmark: self._join_bookmark(item))
-            auto = submenu.addAction(tr("bookmark_autojoin"))
-            auto.setCheckable(True)
-            auto.setChecked(bool(bookmark.get("autojoin")))
-            auto.toggled.connect(
-                lambda value, item=bookmark: self._set_bookmark_autojoin(item, value))
-            remove = submenu.addAction(self._menu_icon("process-stop.png"),
-                                       tr("bookmark_remove"))
-            remove.triggered.connect(
-                lambda checked=False, jid=room: self._remove_bookmark(jid))
 
     def _join_bookmark(self, bookmark: dict):
         room = bookmark.get("jid", "")
@@ -863,7 +1042,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.set_bookmarked(False)
         self._refresh_muc_names()
         self._start_task(self._client.remove_bookmark(room))
-        self._rebuild_bookmarks_menu()
+        self._rebuild_bookmarks_view()
 
     def _toggle_bookmark(self, room: str):
         if not self._client:
@@ -878,6 +1057,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.set_bookmarked(True)
         self._refresh_muc_names()
+        self._rebuild_bookmarks_view()
         self._start_task(self._client.save_bookmark(
             room, nick, "", autojoin=False))
 

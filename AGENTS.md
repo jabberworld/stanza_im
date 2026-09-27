@@ -140,7 +140,23 @@ Bookmarks are stored with XEP-0402 PEP Native Bookmarks
 `remove_bookmark`): legacy XEP-0048 bookmarks are migrated into the node, and
 when the server does not announce `urn:xmpp:bookmarks:1#compat`/`#compat-pep`
 the legacy XEP-0048 storage is kept in sync too; `+notify` updates refresh the
-menu and auto-join/leave rooms (`_handle_bookmarks2_event`).
+tab and auto-join/leave rooms (`_handle_bookmarks2_event`).
+
+The roster window is a **tabbed host** (`MainWindow._build_roster_tabs`): an
+icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` with three tabs —
+**Contacts** (the whole existing roster content), **Bookmarks** and **Events**.
+The Contacts tab (icon `system-users.png`) is active at startup and is the
+`self._roster_page` placed in the stack/`QSplitter` (the `unified` layout wraps
+only this left part). The Bookmarks tab (icon `muc.png`, like "Join conference")
+replaces the old menu: a search field plus a `QListWidget` of the conferences
+(`_rebuild_bookmarks_view`), where a double click joins (`_join_bookmark`) and
+the right-click menu offers Join / Auto-join (checkable) / Remove
+(`_set_bookmark_autojoin`/`_remove_bookmark`); it loads the server bookmarks on
+tab activation (`_on_roster_tab_changed` → `_load_bookmarks`). The Events tab
+(icon `event`) is a scaffold — a search field and an empty list (`events_empty`)
+— with `MainWindow._push_system_event` (not wired to anything yet) and a smooth
+tab-icon blink (`_start_event_blink`/`_event_blink_step`, the same cosine fade
+as the tray) that stops and clears when the tab is shown.
 The conference browser uses the names and metadata returned by the service's
 `disco#items` response and does not issue one `disco#info` request per room.
 vCard information dialogs are opened non-modally from async callbacks.

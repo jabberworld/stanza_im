@@ -68,6 +68,25 @@ check("tile cache is lazy at startup", win._tile_cache is None)
 check("tile cache is created on demand",
       win._ensure_tile_cache() is win._tile_cache and win._tile_cache is not None)
 
+# 1b. roster window tabs (roster / bookmarks / events) ----------------------
+check("roster has three tabs", win._roster_tabs.count() == 3)
+check("tab titles are icon-only",
+      all(win._roster_tabs.tabText(i) == "" for i in range(3)))
+check("tab tooltips present",
+      all(win._roster_tabs.tabToolTip(i) for i in range(3)))
+check("tab icons present",
+      all(not win._roster_tabs.tabIcon(i).isNull() for i in range(3)))
+check("roster tab is active at start",
+      win._roster_tabs.currentIndex() == 0
+      and win._roster_stack.currentIndex() == 0)
+check("bookmarks menu removed",
+      not hasattr(win, "_bookmarks_menu"))
+check("bookmarks tab has a search field",
+      hasattr(win, "_bookmarks_search") and hasattr(win, "_bookmarks_list"))
+check("events tab scaffold present",
+      hasattr(win, "_events_list") and win._events_list.count() == 1)
+check("events tab has a search field", hasattr(win, "_events_search"))
+
 win._config.appearance.interface_mode = "unified"
 win._apply_interface_mode()
 check("unified: splitter created", win._chat_splitter is not None)

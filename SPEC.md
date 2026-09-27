@@ -92,8 +92,16 @@ stanza_im/
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
 and `ui/conference_dialog.py`. Conference discovery uses XEP-0030; used
 conference servers are stored in `connection.conference_servers`. XEP-0048
-bookmark names are preserved and used in the Bookmarks menu with a localpart
+bookmark names are preserved and used in the Bookmarks tab with a localpart
 fallback.
+The roster window is a tabbed host (`MainWindow._build_roster_tabs`): an
+icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` — **Contacts**
+(existing roster content; icon `system-users.png`; active at startup), **Bookmarks**
+(icon `muc.png`; a search field plus a list of the conference bookmarks, double
+click joins, right-click menu Join / Auto-join / Remove; replaces the old menu)
+and **Events** (icon `event`; scaffold with a search field and an empty list, plus
+`MainWindow._push_system_event` and a smooth tab-icon blink for future system
+events).
 Bookmarks are stored with **XEP-0402 PEP Native Bookmarks**
 (`urn:xmpp:bookmarks:1`; item id = room JID, `<conference>` payload,
 publish-options whitelist/persist/max/send-last-never). `list_bookmarks`
@@ -101,7 +109,7 @@ migrates legacy XEP-0048 entries into the node; `save_bookmark`/`remove_bookmark
 publish/retract items and, unless the server announces
 `urn:xmpp:bookmarks:1#compat`/`#compat-pep`, keep the legacy XEP-0048 storage
 (XEP-0223 pubsub or XEP-0049 private XML) in sync. The `+notify` node updates
-refresh the Bookmarks menu and auto-join/leave the affected rooms.
+refresh the Bookmarks tab and auto-join/leave the affected rooms.
 The conference browser consumes room names and metadata directly from
 `disco#items`; it does not probe every room individually. Contact and room
 vCard dialogs are opened asynchronously without nested modal event loops.
