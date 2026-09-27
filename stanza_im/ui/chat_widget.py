@@ -415,6 +415,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_avatars = True
         self._show_muc_avatars = True
         self._show_muc_clients = True
+        self._show_muc_hats = True
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
         self._send_ctrl_enter = False
@@ -2499,14 +2500,24 @@ class ChatWidget(QtWidgets.QWidget):
         return self._nick_colors.color_for(self._color_key(nick))
 
     def _user_hats(self, entry: dict) -> list:
-        """Return the XEP-0317 hats worn by the message sender (MUC only)."""
-        if not self.is_muc:
+        """Return the XEP-0317 hats worn by the message sender (MUC only).
+
+        Empty when the "show hats in chat" option is off; the participant
+        tooltip reads the raw hats independently, so it still lists them.
+        """
+        if not self.is_muc or not self._show_muc_hats:
             return []
         nick = entry.get("sender", "")
         for user in self._users:
             if self._same_nick(user.get("nick", ""), nick):
                 return list(user.get("hats") or [])
         return []
+
+    def set_muc_hats_visible(self, visible: bool) -> None:
+        """Toggle the XEP-0317 hat chips under messages in a MUC tab."""
+        self._show_muc_hats = bool(visible)
+        if self.is_muc:
+            self._render_all()
 
     def _color_key(self, nick: str, real_jid: str = "") -> str:
         key = normalize_nick(nick or "")

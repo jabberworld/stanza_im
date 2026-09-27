@@ -97,11 +97,14 @@ fallback.
 The roster window is a tabbed host (`MainWindow._build_roster_tabs`): an
 icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` — **Contacts**
 (existing roster content; icon `system-users.png`; active at startup), **Bookmarks**
-(icon `muc.png`; a search field plus a list of the conference bookmarks, double
-click joins, right-click menu Join / Auto-join / Remove; replaces the old menu)
-and **Events** (icon `event`; scaffold with a search field and an empty list, plus
-`MainWindow._push_system_event` and a smooth tab-icon blink for future system
-events).
+(icon `muc.png`; a search field plus a list of the conference bookmarks showing
+the name only, JID in the tooltip; double click joins, right-click menu
+Join / Auto-join / Remove; replaces the old menu; Ctrl+wheel font zoom and
+click-on-empty clears the selection) and **Events** (icon `event`; scaffold with
+a search field and an empty list, plus `MainWindow._push_system_event` and a
+smooth tab-icon blink for future system events). In the `separate` layout
+Ctrl+PgUp/PgDn cycles the roster tabs while the main window is active; in
+`unified` the chat owns the shortcut.
 Bookmarks are stored with **XEP-0402 PEP Native Bookmarks**
 (`urn:xmpp:bookmarks:1`; item id = room JID, `<conference>` payload,
 publish-options whitelist/persist/max/send-last-never). `list_bookmarks`
@@ -241,6 +244,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_clients` | `true` | Show/hide the client icon (XEP-0115 caps node → `include/clients.py` → `resources/clients/<size>/`) in roster rows, drawn right after the avatar (`UserItem.client_icon`). |
 | `appearance.muc_show_avatars` | `true` | Show/hide participant avatars in the MUC participant sidebar (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_participant_options`). |
 | `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |
+| `appearance.muc_show_hats` | `true` | Show/hide XEP-0317 hat chips under messages in a MUC chat (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_hats_visible`). Off keeps the hats in the participant tooltip. |
 | `appearance.muc_participant_width` | `0` | Remembered MUC participant sidebar width in px (`0` = default 180); saved on splitter drag, restored for new MUC tabs. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `ui.language` | `""` | UI language code (`en`/`ru`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |

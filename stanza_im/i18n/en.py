@@ -891,6 +891,7 @@ STRINGS = {
     "prefs_roster_show_clients": "Show clients",
     "prefs_muc_show_avatars": "Show avatars",
     "prefs_muc_show_clients": "Show clients",
+    "prefs_muc_show_hats": "Show hats in chat",
     "prefs_message_styling": "Format message text (XEP-0393)",
     "prefs_media_preview": "Media preview:",
     "prefs_interface_mode": "Window layout:",

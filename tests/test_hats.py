@@ -312,6 +312,16 @@ check("1:1 chats never carry hats",
       ChatWidget("u@x", "U", ChatThemeFactory())._user_hats(
           {"sender": "Bob"}) == [])
 
+# "Show hats in chat" off: no chips, but the participant tooltip keeps them.
+widget.set_muc_hats_visible(False)
+check("hats option off hides the chat chip",
+      widget._user_hats({"sender": "Bob"}) == [])
+check("hats option off keeps the tooltip hats",
+      "Host" in widget._participant_tooltip(widget._users[0]))
+widget.set_muc_hats_visible(True)
+check("hats option back on restores the chip",
+      widget._user_hats({"sender": "Bob"})[0]["title"] == "Host")
+
 # 8. static wiring ------------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

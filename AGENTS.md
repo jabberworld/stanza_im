@@ -152,11 +152,16 @@ replaces the old menu: a search field plus a `QListWidget` of the conferences
 (`_rebuild_bookmarks_view`), where a double click joins (`_join_bookmark`) and
 the right-click menu offers Join / Auto-join (checkable) / Remove
 (`_set_bookmark_autojoin`/`_remove_bookmark`); it loads the server bookmarks on
-tab activation (`_on_roster_tab_changed` → `_load_bookmarks`). The Events tab
+tab activation (`_on_roster_tab_changed` → `_load_bookmarks`). The list shows the
+name (JID only in the tooltip) and shares the roster font settings
+(`_apply_roster_font`); `_ZoomListWidget` gives Ctrl+wheel font zoom and clears
+the selection on a click over empty space. The Events tab
 (icon `event`) is a scaffold — a search field and an empty list (`events_empty`)
 — with `MainWindow._push_system_event` (not wired to anything yet) and a smooth
 tab-icon blink (`_start_event_blink`/`_event_blink_step`, the same cosine fade
-as the tray) that stops and clears when the tab is shown.
+as the tray) that stops and clears when the tab is shown. Ctrl+PgUp/PgDn cycles
+the roster tabs only in the `separate` layout with the main window active
+(`_cycle_roster_tab`); in `unified` the chat keeps the shortcut for its own tabs.
 The conference browser uses the names and metadata returned by the service's
 `disco#items` response and does not issue one `disco#info` request per room.
 vCard information dialogs are opened non-modally from async callbacks.
@@ -421,9 +426,12 @@ resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and prefixes th
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
 before the nick; the conference toggles are
-`appearance.muc_show_avatars`/`muc_show_clients` (Preferences → Appearance →
-«Конференции», both `true`; a participant's caps node is captured in
-`_on_groupchat_presence`). The sidebar never scrolls horizontally: the list
+`appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →
+Appearance → «Конференции», all `true`; a participant's caps node is captured in
+`_on_groupchat_presence`). `muc_show_hats` gates the XEP-0317 hat chips under
+messages (`ChatWidget._user_hats` returns none when off, `set_muc_hats_visible`
+re-renders) while the participant tooltip keeps listing the hats.
+The sidebar never scrolls horizontally: the list
 uses `QListView.ResizeMode.Adjust` + `ScrollBarAlwaysOff` and the nick is a
 `_FadeLabel` that clips the text and fades its right edge into the background
 (Psi+ style), so the status icon, client icon and avatar always stay visible.

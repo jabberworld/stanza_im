@@ -1065,6 +1065,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                                      tr("prefs_muc_show_avatars")))
         conf_form.addRow(self._check("muc_show_clients",
                                      tr("prefs_muc_show_clients")))
+        conf_form.addRow(self._check("muc_show_hats",
+                                     tr("prefs_muc_show_hats")))
 
         fonts, font_form = self._page()
         font_form.addRow(tr("prefs_zoom"), self._zoom_control("text_scale"))
@@ -1433,6 +1435,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 appearance, "roster_show_clients", True),
             "muc_show_avatars": getattr(appearance, "muc_show_avatars", True),
             "muc_show_clients": getattr(appearance, "muc_show_clients", True),
+            "muc_show_hats": getattr(appearance, "muc_show_hats", True),
             "file_auto_accept": bool(getattr(files, "auto_accept", False)),
             "file_download_notifications": bool(
                 getattr(files, "download_notifications", True)),
@@ -1542,7 +1545,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_highlight_color", "colored_muc_nicks",
                     "roster_show_avatars", "roster_show_activity",
                     "roster_show_mood", "roster_show_clients",
-                    "muc_show_avatars", "muc_show_clients"):
+                    "muc_show_avatars", "muc_show_clients", "muc_show_hats"):
             cfg.appearance[key] = self._value(key)
         if not hasattr(cfg, "files"):
             cfg.set("files", {"auto_accept": False,

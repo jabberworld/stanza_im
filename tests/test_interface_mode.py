@@ -86,6 +86,17 @@ check("bookmarks tab has a search field",
 check("events tab scaffold present",
       hasattr(win, "_events_list") and win._events_list.count() == 1)
 check("events tab has a search field", hasattr(win, "_events_search"))
+check("tab→search spacing matches search→list",
+      win._roster_tabs.parentWidget().layout().spacing() == 6)
+check("bookmarks/events lists support font zoom",
+      hasattr(win._bookmarks_list, "font_zoom_requested")
+      and hasattr(win._events_list, "font_zoom_requested"))
+win._bookmarks["room@conf"] = {"jid": "room@conf", "name": "My Room"}
+win._rebuild_bookmarks_view()
+check("bookmarks label omits the JID",
+      win._bookmarks_list.item(0).text() == "My Room")
+check("hats option default is on",
+      getattr(win._config.appearance, "muc_show_hats", None) is True)
 
 win._config.appearance.interface_mode = "unified"
 win._apply_interface_mode()

@@ -71,6 +71,27 @@ _MUC_TRANSIENT_JOIN_ERRORS = {
 }
 
 
+class _ZoomListWidget(QtWidgets.QListWidget):
+    """A list that supports Ctrl+wheel font zoom and clears selection on a
+    click over empty space."""
+
+    font_zoom_requested = QtCore.pyqtSignal(int)
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        from stanza_im.ui.font_zoom import wheel_font_size
+        size = wheel_font_size(self.font(), event)
+        if size is not None:
+            self.font_zoom_requested.emit(size)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self.itemAt(event.position().toPoint()) is None:
+            self.clearSelection()
+        super().mousePressEvent(event)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     """Top-level window that owns the roster, chat window, tray and XMPP client."""
 
@@ -479,7 +500,9 @@ class MainWindow(QtWidgets.QMainWindow):
         host = QtWidgets.QWidget()
         host_layout = QtWidgets.QVBoxLayout(host)
         host_layout.setContentsMargins(0, 0, 0, 0)
-        host_layout.setSpacing(0)
+        # Match the gap the roster content uses between its search box and the
+        # list, so "tabs → search" and "search → list" look alike.
+        host_layout.setSpacing(6)
 
         self._roster_tabs = QtWidgets.QTabBar()
         self._roster_tabs.setExpanding(False)
@@ -508,7 +531,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._roster_tabs.setCurrentIndex(0)
         self._roster_stack.setCurrentIndex(0)
+
+        # Ctrl+PgUp/PgDn cycles the roster tabs, but only while the main window
+        # is active and the layout is "separate" (in "unified" the chat owns the
+        # shortcut for its own tabs).
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+PgUp"), self,
+                        activated=lambda: self._cycle_roster_tab(-1))
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+PgDown"), self,
+                        activated=lambda: self._cycle_roster_tab(1))
         return host
+
+    def _cycle_roster_tab(self, step: int) -> None:
+        if getattr(self, "_unified", False) or not self.isActiveWindow():
+            return
+        count = self._roster_tabs.count()
+        if count > 1:
+            self._roster_tabs.setCurrentIndex(
+                (self._roster_tabs.currentIndex() + step) % count)
 
     def _tab_icon(self, filename: str) -> QtGui.QIcon:
         """Icon for a roster tab (scalable/sized dirs through find_icon)."""
@@ -532,8 +571,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks_search.textChanged.connect(self._filter_bookmarks)
         layout.addWidget(self._bookmarks_search)
 
-        self._bookmarks_list = QtWidgets.QListWidget()
+        self._bookmarks_list = _ZoomListWidget()
         self._bookmarks_list.itemDoubleClicked.connect(self._on_bookmark_activated)
+        self._bookmarks_list.font_zoom_requested.connect(self._on_roster_font_zoom)
         self._bookmarks_list.setContextMenuPolicy(
             QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self._bookmarks_list.customContextMenuRequested.connect(
@@ -551,10 +591,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._events_search.setPlaceholderText(tr("events_search_placeholder"))
         layout.addWidget(self._events_search)
 
-        self._events_list = QtWidgets.QListWidget()
+        self._events_list = _ZoomListWidget()
         self._events_list.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self._events_list.setEnabled(False)
+        self._events_list.font_zoom_requested.connect(self._on_roster_font_zoom)
         layout.addWidget(self._events_list, stretch=1)
 
         # Scaffold for the tab-icon blink on new system events.
@@ -684,8 +725,7 @@ class MainWindow(QtWidgets.QMainWindow):
             name = bookmark.get("name") or ""
             if not name or name == room:
                 name = room.split("@", 1)[0]
-            label = name + (" (%s)" % room if name != room else "")
-            item = QtWidgets.QListWidgetItem(self._menu_icon("muc.png"), label)
+            item = QtWidgets.QListWidgetItem(self._menu_icon("muc.png"), name)
             item.setData(QtCore.Qt.ItemDataRole.UserRole, dict(bookmark))
             item.setToolTip(room)
             self._bookmarks_list.addItem(item)
@@ -1763,14 +1803,22 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         family = getattr(self._config.appearance, "roster_font", "") or ""
         size = int(getattr(self._config.appearance, "roster_font_size", 0) or 0)
-        if not family and not size:
-            roster.setFont(QtGui.QFont())
-        else:
-            font = QtGui.QFont(family) if family else QtGui.QFont(roster.font())
+
+        def _font(base: QtGui.QFont) -> QtGui.QFont:
+            if not family and not size:
+                return QtGui.QFont()
+            font = QtGui.QFont(family) if family else QtGui.QFont(base)
             if size:
                 font.setPointSize(size)
-            roster.setFont(font)
+            return font
+
+        roster.setFont(_font(roster.font()))
         roster.update()
+        # The bookmarks/events lists share the roster font settings.
+        for name in ("_bookmarks_list", "_events_list"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setFont(_font(widget.font()))
 
     def _apply_roster_options(self) -> None:
         """Apply the roster element toggles (avatars / activity / mood / clients)."""
@@ -1799,6 +1847,8 @@ class MainWindow(QtWidgets.QMainWindow):
         chat_window.set_muc_participant_options(
             bool(getattr(appearance, "muc_show_avatars", True)),
             bool(getattr(appearance, "muc_show_clients", True)))
+        chat_window.set_muc_hats_visible(
+            bool(getattr(appearance, "muc_show_hats", True)))
 
     def _apply_roster_colors(self) -> None:
         """Apply the configured roster background and group-stripe colors."""

@@ -134,6 +134,7 @@ class Config:
                         "roster_show_clients": True,
                         "muc_show_avatars": True,
                         "muc_show_clients": True,
+                        "muc_show_hats": True,
                         "muc_participant_width": 0,
                         "interface_mode": "separate",
                         "roster_font": "", "roster_font_size": 0,
