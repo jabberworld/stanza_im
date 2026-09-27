@@ -304,6 +304,12 @@ check("viewer wires a WebChannel fullscreen bridge",
       and 'registerObject("bridge"' in _mv_src)
 check("viewer matches viewer-fs by whole URL (not path)",
       "url.toString()" in _mv_src and "viewer-fs" in _mv_src)
+check("viewer toggles play/pause on a single click",
+      'addEventListener("click",clk)' in _mv_src
+      and "v.paused" in _mv_src and "v.play()" in _mv_src)
+check("viewer cancels the click toggle on a double click",
+      "clearTimeout(clickTimer)" in _mv_src
+      and "clickTimer=setTimeout" in _mv_src)
 
 # The scheme check must fire for the URL Chromium actually delivers.
 from stanza_im.ui import media_viewer as _mv_mod

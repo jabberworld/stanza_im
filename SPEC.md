@@ -1658,7 +1658,8 @@ Registers XEP plugins (conditionally where noted):
   zoomed image by dragging it with the left mouse button.
 - An inline `<video>` preview (class on the `.stanza-media-video` wrapper span)
   toggles play/pause on a single click and opens the fullscreen viewer on a
-  double click; the video viewer window keeps native `controls` and its
+  double click; the video viewer window keeps native `controls`, a single click
+  toggles play/pause (a 250 ms timer the double click cancels), and its
   double-click asks Python through a QWebChannel `bridge.toggle_fullscreen()`
   (`stanza:viewer-fs` navigation matched by whole URL is the fallback).
 

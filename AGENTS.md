@@ -662,10 +662,12 @@ session with many images cannot grow the thumbnail cache without limit.
 `thumbnail_ready` is pushed into every open
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
-to the window; video in a WebEngine `<video>` window with native `controls`,
-`F11`/double-click fullscreen — the double-click asks Python through a
-QWebChannel `bridge.toggle_fullscreen()` (a `stanza:viewer-fs` navigation,
-matched by its whole URL, is a fallback); `Esc`
+to the window; video in a WebEngine `<video>` window with native `controls`
+(a single click on the video toggles play/pause via a 250 ms timer that the
+double click cancels, so the pair never fights), `F11`/double-click fullscreen —
+the double-click asks Python through a QWebChannel `bridge.toggle_fullscreen()`
+(a `stanza:viewer-fs` navigation, matched by its whole URL, is a fallback);
+`Esc`
 closes the viewer, `Ctrl+wheel` zooms the image (0.1–8×, `Ctrl+0`/double-click
 resets to fit) and the zoomed image is dragged to pan with the left mouse
 button (open/closed hand cursor)); the
