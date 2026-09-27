@@ -1614,12 +1614,16 @@ Registers XEP plugins (conditionally where noted):
   desc, capped at `_MAX_REACTION_CHIPS` = 6 with a "+k" chip; the tooltip lists
   the reactors and their timestamps). The chips are indented to line up with the
   message text (past the avatar in `minimal-mod`, under the body box in
-  `candy`). A chip rendered with `data-mine="1"` (our own reaction) is
-  clickable: `stanza:unreact:<id>/<emoji>` removes just that emoji from our set
-  and re-sends. The "+k" overflow chip (`data-reactions-more="1"`) opens
+  `candy`). Clicking a chip is context-sensitive: our own (`data-mine="1"`)
+  removes just that emoji (`stanza:unreact:<id>/<emoji>`), a foreign one adds
+  the same emoji from us without opening the picker
+  (`stanza:react-like:<id>/<emoji>` → `reaction_like_requested` →
+  `MainWindow._on_reaction_like_requested` → `_apply_reaction`). The "+k"
+  overflow chip (`data-reactions-more="1"`) opens
   `ui/reactions_list_dialog.ReactionsListDialog`, a flat newest-first list of
   every reaction on the message (`emoji who — when`, read from the stored
-  `reactions` entries) via `stanza:reactions:<id>` →
+  `reactions` entries and drawn with the same auto-detected colour-emoji font as
+  the picker) via `stanza:reactions:<id>` →
   `reactions_list_requested(jid, ref_id)`. All these relays fall back to
   `data-reply-id` when `data-stanza-id` is missing. History stores reactions in
   the `reactions` JSON column (SQLite migration).

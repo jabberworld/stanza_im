@@ -956,9 +956,18 @@ the open tab in place with `ChatWindow.update_reactions` → `ChatWidget.
 set_reactions`. `ChatWidget.compute_reactions` aggregates chips
 `{emoji, count, mine, title}` (title lists reactors + timestamps) and
 `chat_themes._render_reactions_chips` renders `.stanza-reaction` spans under the
-body (sorted by count desc, capped at 6 with a "+k" chip); a `data-mine="1"` chip
-is clickable (`stanza:unreact:<id>/<emoji>`, same in-page relay) and removes just
-that emoji. Feature advertised as `urn:xmpp:reactions:0`. [`tests/test_reactions.py`]
+body (sorted by count desc, capped at 6 with a "+k" chip). Clicking a chip is
+context-sensitive: our own (`data-mine="1"`) removes just that emoji
+(`stanza:unreact:<id>/<emoji>`), a foreign one adds the same emoji from us
+without the picker (`stanza:react-like:<id>/<emoji>` →
+`reaction_like_requested` → `MainWindow._on_reaction_like_requested` →
+`_apply_reaction`); the "+k" chip (`data-reactions-more="1"`) opens
+`ui/reactions_list_dialog.ReactionsListDialog` — a flat, newest-first list of
+every reaction (`emoji who — when`, drawn with the same auto-detected
+colour-emoji font as the picker) via `stanza:reactions:<id>` →
+`reactions_list_requested`. All these relays fall back to `data-reply-id` when
+`data-stanza-id` is absent. Feature advertised as `urn:xmpp:reactions:0`.
+[`tests/test_reactions.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside

@@ -8,6 +8,7 @@ from __future__ import annotations
 from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui.emoji_picker_dialog import emoji_font_family
 
 
 class ReactionsListDialog(QtWidgets.QDialog):
@@ -23,6 +24,13 @@ class ReactionsListDialog(QtWidgets.QDialog):
         self._list.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self._list.setUniformItemSizes(True)
+        # Draw emoji with a colour font (falling back to the widget's own
+        # families for the "who — when" text), or they show as tofu boxes.
+        family = emoji_font_family()
+        if family:
+            font = self._list.font()
+            font.setFamilies([family] + list(font.families()))
+            self._list.setFont(font)
         layout.addWidget(self._list, 1)
 
         self.set_reactions(rows or [])

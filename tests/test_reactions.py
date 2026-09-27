@@ -327,6 +327,9 @@ check("MainWindow slot accepts ChatWindow.unreaction_requested arity",
 check("MainWindow slot accepts ChatWindow.reactions_list_requested arity",
       _slot_accepts(MainWindow._on_reactions_list_requested,
                     _signal_arity(ChatWindow.reactions_list_requested)))
+check("MainWindow slot accepts ChatWindow.reaction_like_requested arity",
+      _slot_accepts(MainWindow._on_reaction_like_requested,
+                    _signal_arity(ChatWindow.reaction_like_requested)))
 
 
 # 9. "+k / list" relay --------------------------------------------------------
@@ -356,6 +359,39 @@ w5.unreaction_requested.connect(lambda *a: un2.append(a))
 w5._open_link("stanza:unreact:a4532a%2F%F0%9F%8F%B3%EF%B8%8F")
 check("unreact with a pre-encoded pair still parses",
       un2 == [("alice@example.com", "a4532a", "🏳️")])
+
+
+# 11. Foreign chip adds the same reaction --------------------------------------
+w6 = _make_widget()
+liked = []
+w6.reaction_like_requested.connect(lambda *a: liked.append(a))
+w6._open_link("stanza:react-like:a4532a/" + "%F0%9F%98%80")
+check("react-like relays reaction_like_requested",
+      liked == [("alice@example.com", "a4532a", "😀")])
+liked2 = []
+w6.reaction_like_requested.connect(lambda *a: liked2.append(a))
+w6._open_link("stanza:react-like:a4532a%2F%F0%9F%98%80")
+check("react-like tolerates a pre-encoded pair",
+      liked2 == [("alice@example.com", "a4532a", "😀")])
+liked3 = []
+w6.reaction_like_requested.connect(lambda *a: liked3.append(a))
+w6._open_link("stanza:react-like:a4532a")
+check("react-like without emoji is ignored", not liked3)
+
+
+# 12. Reactions list dialog applies an emoji font ------------------------------
+from stanza_im.ui.reactions_list_dialog import ReactionsListDialog
+from stanza_im.ui.emoji_picker_dialog import emoji_font_family
+
+_rl = ReactionsListDialog([{"emoji": "😀", "who": "Bob", "at": "10:00"}])
+check("reactions list dialog builds", _rl._list.count() == 1)
+_fam = emoji_font_family()
+if _fam:
+    check("reactions list uses the emoji font family",
+          _fam in _rl._list.font().families())
+else:
+    check("reactions list builds without an emoji font (fallback)",
+          bool(_rl._list.font().families()))
 
 
 print()

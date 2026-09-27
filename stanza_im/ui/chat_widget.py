@@ -375,6 +375,7 @@ class ChatWidget(QtWidgets.QWidget):
     reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
+    reaction_like_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_sent = QtCore.pyqtSignal(str, str, str)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
@@ -783,6 +784,14 @@ class ChatWidget(QtWidgets.QWidget):
                          self.jid, ref, emoji)
             if ref and sep and emoji:
                 self.unreaction_requested.emit(self.jid, ref, emoji)
+            return
+        if url.startswith("stanza:react-like:"):
+            payload = unquote(url[len("stanza:react-like:"):])
+            ref, sep, emoji = payload.partition("/")
+            logger.debug("REACT[react-like] jid=%s ref=%r emoji=%r",
+                         self.jid, ref, emoji)
+            if ref and sep and emoji:
+                self.reaction_like_requested.emit(self.jid, ref, emoji)
             return
         if url.startswith("stanza:reactions:"):
             ref = unquote(url[len("stanza:reactions:"):])

@@ -209,6 +209,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_unreaction_requested)
         self._chat_window.reactions_list_requested.connect(
             self._on_reactions_list_requested)
+        self._chat_window.reaction_like_requested.connect(
+            self._on_reaction_like_requested)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
@@ -4538,6 +4540,11 @@ class MainWindow(QtWidgets.QMainWindow):
             current.append(emoji)
         self._remember_emoji(emoji)
         self._send_reactions(jid, ref_id, current)
+
+    def _on_reaction_like_requested(self, jid: str, ref_id: str,
+                                    emoji: str) -> None:
+        """A foreign reaction chip was clicked: add the same emoji from us."""
+        self._apply_reaction(jid, ref_id, emoji)
 
     def _on_unreaction_requested(self, jid: str, ref_id: str,
                                  emoji: str) -> None:

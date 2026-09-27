@@ -735,6 +735,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaModerateRef = '';
             window.__stanzaReactRef = '';
             window.__stanzaUnreactRef = '';
+            window.__stanzaReactLikeRef = '';
             window.__stanzaReactionsRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -1129,7 +1130,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaReactRef || '',"
                 " window.__stanzaUnreactRef || '',"
                 " window.__stanzaReactRect || '',"
-                " window.__stanzaReactionsRef || '']",
+                " window.__stanzaReactionsRef || '',"
+                " window.__stanzaReactLikeRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1237,6 +1239,12 @@ window.__stanzaMentionRef = '';
         def _clear_reactions_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaReactionsRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_react_like_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaReactLikeRef = '';")
             except RuntimeError:
                 pass
 
@@ -1367,6 +1375,15 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_reactions_ref = ""
+            if len(value) > 19 and isinstance(value[19], str) and value[19]:
+                self._clear_react_like_request()
+                requested = value[19]
+                logger.debug("REACT[poll] react-like=%r", requested)
+                if requested != getattr(self, "_last_react_like_ref", ""):
+                    self._last_react_like_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_react_like_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
