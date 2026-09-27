@@ -165,7 +165,7 @@ class Config:
                    "auto_xa": False, "xa_minutes": 15,
                    "auto_status_message": "",
                    "message": "", "mood": "", "activity": ""},
-        "ui": {"close_to_tray": True},
+        "ui": {"close_to_tray": True, "language": ""},
     }
 
     def __init__(self):

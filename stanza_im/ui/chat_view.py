@@ -727,6 +727,7 @@ if HAS_WEBENGINE:
             window.stanzaCloseMenu = closeMenu;
             window.__stanzaReplyRef = '';
             window.__stanzaMediaRef = '';
+            window.__stanzaMediaFsRef = '';
 window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
             window.__stanzaForwardRef = '';
@@ -943,6 +944,21 @@ window.__stanzaMentionRef = '';
                         media.getAttribute('href') || '';
                     return;
                 }
+                // A double-click on an inline video opens it fullscreen in the
+                // media viewer (single clicks keep the native play/pause).
+                var vid = t && t.closest ? t.closest('video.stanza-media') : null;
+                if (vid) {
+                    if (e.detail >= 2) {
+                        e.preventDefault();
+                        var vsrc = vid.getAttribute('data-media-url')
+                            || vid.getAttribute('src') || '';
+                        if (vsrc) {
+                            window.__stanzaMediaFsRef = 'stanza:view:video_fs/'
+                                + encodeURIComponent(vsrc);
+                        }
+                    }
+                    return;
+                }
                 // Reply button: never navigate. Leave the stanza:reply target
                 // for the always-running scroll poll, which delivers it to
                 // Python (exactly like the edit reference), so the chat
@@ -994,9 +1010,10 @@ window.__stanzaMentionRef = '';
                     }
                     return;
                 }
-                // Clicking our own reaction chip removes that reaction.
+                // A reaction chip: our own removes that reaction, a foreign
+                // one adds the same emoji from us (no picker).
                 var chip = t && t.closest
-                    ? t.closest('.stanza-reaction[data-mine="1"]') : null;
+                    ? t.closest('.stanza-reaction[data-emoji]') : null;
                 if (chip) {
                     e.preventDefault();
                     var wrap = chip.closest('.stanza-message');
@@ -1007,9 +1024,15 @@ window.__stanzaMentionRef = '';
                     }
                     var emoji = chip.getAttribute('data-emoji') || '';
                     if (sid && emoji) {
-                        window.__stanzaUnreactRef = 'stanza:unreact:'
-                            + encodeURIComponent(sid) + '/'
-                            + encodeURIComponent(emoji);
+                        if (chip.getAttribute('data-mine') === '1') {
+                            window.__stanzaUnreactRef = 'stanza:unreact:'
+                                + encodeURIComponent(sid) + '/'
+                                + encodeURIComponent(emoji);
+                        } else {
+                            window.__stanzaReactLikeRef = 'stanza:react-like:'
+                                + encodeURIComponent(sid) + '/'
+                                + encodeURIComponent(emoji);
+                        }
                     }
                     return;
                 }
@@ -1131,7 +1154,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaUnreactRef || '',"
                 " window.__stanzaReactRect || '',"
                 " window.__stanzaReactionsRef || '',"
-                " window.__stanzaReactLikeRef || '']",
+                " window.__stanzaReactLikeRef || '',"
+                " window.__stanzaMediaFsRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1245,6 +1269,12 @@ window.__stanzaMentionRef = '';
         def _clear_react_like_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaReactLikeRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_media_fs_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaMediaFsRef = '';")
             except RuntimeError:
                 pass
 
@@ -1384,6 +1414,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_react_like_ref = ""
+            if len(value) > 20 and isinstance(value[20], str) and value[20]:
+                self._clear_media_fs_request()
+                requested = value[20]
+                if requested != getattr(self, "_last_media_fs_ref", ""):
+                    self._last_media_fs_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_media_fs_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1535,9 +1573,16 @@ window.__stanzaMentionRef = '';
                 pass
 
         def update_reactions(self, ref_id: str, reactions_html: str) -> None:
-            """Update a message's ``.stanza-reactions`` box in place (XEP-0444)."""
+            """Update a message's ``.stanza-reactions`` box in place (XEP-0444).
+
+            Adding a reaction can grow the last message, which would otherwise
+            leave the view a few pixels short of the bottom and pop up the
+            "jump to end" button even though the user was at the bottom; if we
+            were at the bottom, scroll back down afterwards.
+            """
             if not ref_id:
                 return
+            stick = 1 if self._fraction >= 0.999 else 0
             try:
                 self.page().runJavaScript(
                     "var ref = " + json.dumps(str(ref_id)) + ";"
@@ -1548,7 +1593,9 @@ window.__stanzaMentionRef = '';
                     "if (n) { var box = n.querySelector('.stanza-reactions');"
                     " if (!box) { box = document.createElement('div');"
                     " box.className = 'stanza-reactions'; n.appendChild(box); }"
-                    " box.innerHTML = " + json.dumps(reactions_html) + "; }")
+                    " box.innerHTML = " + json.dumps(reactions_html) + "; }"
+                    "if (" + str(stick) + ") window.scrollTo(0,"
+                    " document.body.scrollHeight);")
             except RuntimeError:
                 pass
 

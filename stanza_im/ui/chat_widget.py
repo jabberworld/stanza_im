@@ -852,11 +852,19 @@ class ChatWidget(QtWidgets.QWidget):
         self._input.setFocus()
 
     def _handle_media_view_uri(self, url: str) -> None:
-        """Open a ``stanza:view:<kind>/<url>`` target in the media viewer."""
+        """Open a ``stanza:view:<kind>/<url>`` target in the media viewer.
+
+        The ``video_fs`` kind requests fullscreen video playback.
+        """
         rest = url[len("stanza:view:"):]
         kind, _sep, encoded = rest.partition("/")
         target = unquote(encoded) if encoded else ""
-        if target:
+        if not target:
+            return
+        fullscreen = kind == "video_fs"
+        if fullscreen:
+            self.media_view_requested.emit(target, "video", True)
+        else:
             self.media_view_requested.emit(target, kind or "image", False)
 
     def _handle_forward_uri(self, url: str) -> None:

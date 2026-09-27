@@ -618,7 +618,9 @@ plus on quit. The **tray only blinks while logged in**: `_sync_tray_blink`
 (called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
 `_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it
 so the offline icon is visible — restored counters do not blink on the login
-screen. Alongside each count the file stores the last displayed MDS
+screen. The blink is **smooth** (`TrayIcon._blink_step`): a ~25 fps timer fades
+the icon out and back in over a 1 s period following a cosine curve (the icon is
+painted at the current opacity, so it pulses instead of toggling on/off). Alongside each count the file stores the last displayed MDS
 stanza-id (`{"count": N, "displayed": "sid"}`; the legacy `{"jid": N}` format is
 still read); `_flush_unread` collects it from the client's `_mds_local` and
 `_on_login` seeds it back via `client.set_displayed_state`, so the startup
@@ -646,7 +648,9 @@ keeps running (unlike `_quit`).
 size)` makes `_body_fragment` replace a media URL's `<a>` with an embed —
 `MediaPreviewService.markup()` returns an `<a class="stanza-media"
 href="stanza:view:image/<urlenc>">` wrapping an `<img>` (cached thumbnail as a
-PNG data-URI), or a native HTML5 `<audio>`/`<video controls>`. Image originals
+PNG data-URI), or a native HTML5 `<audio>`/`<video controls>` (a double-click
+on the inline video opens it fullscreen in the `MediaViewer`; single clicks keep
+the native play/pause). Image originals
 are downloaded in a worker (`asyncio.to_thread`/thread) and resized to
 `appearance.media_preview_size`; thumbnails and originals live in
 `MediaCache` (`$XDG_CACHE_HOME/stanza-im/media/`, `index.json`, last-access
@@ -658,7 +662,8 @@ session with many images cannot grow the thumbnail cache without limit.
 `thumbnail_ready` is pushed into every open
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
-to the window; video in a WebEngine `<video>` window, `F11` fullscreen; `Esc`
+to the window; video in a WebEngine `<video>` window with native `controls`,
+`F11`/double-click fullscreen; `Esc`
 closes the viewer, `Ctrl+wheel` zooms the image (0.1–8×, `Ctrl+0`/double-click
 resets to fit) and the zoomed image is dragged to pan with the left mouse
 button (open/closed hand cursor)); the
@@ -962,12 +967,15 @@ context-sensitive: our own (`data-mine="1"`) removes just that emoji
 without the picker (`stanza:react-like:<id>/<emoji>` →
 `reaction_like_requested` → `MainWindow._on_reaction_like_requested` →
 `_apply_reaction`); the "+k" chip (`data-reactions-more="1"`) opens
-`ui/reactions_list_dialog.ReactionsListDialog` — a flat, newest-first list of
-every reaction (`emoji who — when`, drawn with the same auto-detected
-colour-emoji font as the picker) via `stanza:reactions:<id>` →
-`reactions_list_requested`. All these relays fall back to `data-reply-id` when
-`data-stanza-id` is absent. Feature advertised as `urn:xmpp:reactions:0`.
-[`tests/test_reactions.py`]
+`ui/reactions_list_dialog.ReactionsListDialog` via `stanza:reactions:<id>` →
+`reactions_list_requested`. The list is flat and newest-first; each row is a
+custom widget (reactor nick/JID with the date/time beneath on the left, the
+emoji on the right drawn with `emoji_font`, so the reactor text keeps the normal
+font). `ChatView.update_reactions` keeps the view pinned to the bottom when a
+reaction grows the last message, so the "jump to end" button never pops up for a
+message the user was already reading at the end. All these relays fall back to
+`data-reply-id` when `data-stanza-id` is absent. Feature advertised as
+`urn:xmpp:reactions:0`. [`tests/test_reactions.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside
@@ -1341,7 +1349,12 @@ icon, «Устройства» the headset, «Внешний вид» `draw-brus
 shield, «Плагины» the puzzle piece, «Статус» the speech bubble and «Горячие
 клавиши» the keyboard.
 «Длина заголовка вкладки» lives only on the Chat tab (with an info glyph) and
-sets `application.tab_title_length` + `chat.tab_title_length` together. Numeric
+sets `application.tab_title_length` + `chat.tab_title_length` together. The
+«Stanza IM» → «Общие» page carries the «Язык приложения» selector
+(`ui.language`, default `""` = system locale; its options come from
+`i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or
+None)` right after constructing `Config`, so a chosen language applies on the
+next start (an info glyph notes the restart). Numeric
 spinners and combo boxes share a uniform fixed width (`SPIN_WIDTH`/`COMBO_WIDTH`)
 so selectors line up across pages; the tray popup mode is a three-option
 selector (`notifications.popups` = `off`/`system`/`system_messages`, see the

@@ -15,6 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 
 try:
+    from PyQt6 import QtWebEngineCore
     from PyQt6 import QtWebEngineWidgets
     _HAS_WEBENGINE = True
 except ImportError:
@@ -36,6 +37,24 @@ class _ImageScroll(QtWidgets.QScrollArea):
                 event.accept()
                 return
         super().wheelEvent(event)
+
+
+if _HAS_WEBENGINE:
+
+    class _VideoPage(QtWebEngineCore.QWebEnginePage):
+        """Video page that turns the ``stanza:viewer-fs`` navigation into a
+        fullscreen toggle (the JS double-click handler clicks such an anchor)."""
+
+        def __init__(self, view, on_fullscreen, parent=None):
+            super().__init__(parent)
+            self._view = view
+            self._on_fullscreen = on_fullscreen
+
+        def acceptNavigationRequest(self, url, _type, is_main_frame):
+            if url.scheme() == "stanza" and url.path().startswith("viewer-fs"):
+                self._on_fullscreen()
+                return False
+            return super().acceptNavigationRequest(url, _type, is_main_frame)
 
 
 class MediaViewer(QtWidgets.QMainWindow):
@@ -251,12 +270,19 @@ class MediaViewer(QtWidgets.QMainWindow):
             self.setCentralWidget(label)
             return
         view = QtWebEngineWidgets.QWebEngineView(self)
+        view.setPage(_VideoPage(view, self._toggle_fullscreen))
         page = (
             '<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<style>html,body{margin:0;height:100%;background:#000;}'
             'video{width:100%;height:100%;}</style></head><body>'
             f'<video src="{html.escape(self._url, quote=True)}" '
-            'controls autoplay></video></body></html>')
+            'controls autoplay></video>'
+            '<script>var v=document.querySelector("video");'
+            'if(v){v.addEventListener("dblclick",function(e){'
+            'e.preventDefault();'
+            'var u=document.createElement("a");'
+            'u.href="stanza:viewer-fs";u.click();});}</script>'
+            '</body></html>')
         view.setHtml(page, QtCore.QUrl("about:blank"))
         self.setCentralWidget(view)
 

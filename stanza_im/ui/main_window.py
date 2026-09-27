@@ -79,9 +79,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── Initialise subsystems ─────────────────────────────────
         load_i18n()
+        self._config = Config()
+        # Apply the saved application language (empty = system default); it is
+        # loaded after Config so a language chosen in Preferences takes effect.
+        saved_lang = getattr(self._config.ui, "language", "") or ""
+        if saved_lang:
+            load_i18n(saved_lang)
         populate_translations(tr)
         self._icons = init_icons()
-        self._config = Config()
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
         self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
         self._call_windows: dict[str, object] = {}      # sid -> CallWindow

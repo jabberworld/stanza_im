@@ -385,13 +385,27 @@ from stanza_im.ui.emoji_picker_dialog import emoji_font_family
 
 _rl = ReactionsListDialog([{"emoji": "😀", "who": "Bob", "at": "10:00"}])
 check("reactions list dialog builds", _rl._list.count() == 1)
+_row = _rl._list.itemWidget(_rl._list.item(0))
+check("reactions list row has a custom widget", _row is not None)
+_labels = _row.findChildren(QtWidgets.QLabel)
+_texts = [lb.text() for lb in _labels]
+check("row shows the reactor", any("Bob" in t for t in _texts))
+check("row shows the time", any("10:00" in t for t in _texts))
+check("row shows the emoji", any("😀" in t for t in _texts))
 _fam = emoji_font_family()
+_emoji_label = next(lb for lb in _labels if "😀" in lb.text())
+_name_label = next(lb for lb in _labels if "Bob" in lb.text())
 if _fam:
-    check("reactions list uses the emoji font family",
-          _fam in _rl._list.font().families())
+    check("emoji label uses the emoji font family",
+          _fam in _emoji_label.font().families())
+    check("reactor label does not force the emoji font",
+          _fam not in _name_label.font().families())
 else:
-    check("reactions list builds without an emoji font (fallback)",
-          bool(_rl._list.font().families()))
+    check("emoji label builds without an emoji font", True)
+_empty = ReactionsListDialog([])
+check("empty reaction list shows the notice",
+      _empty._list.count() == 1
+      and _empty._list.itemWidget(_empty._list.item(0)) is None)
 
 
 print()

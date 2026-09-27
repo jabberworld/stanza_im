@@ -235,6 +235,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |
 | `appearance.muc_participant_width` | `0` | Remembered MUC participant sidebar width in px (`0` = default 180); saved on splitter drag, restored for new MUC tabs. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
+| `ui.language` | `""` | UI language code (`en`/`ru`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
 | `appearance.osd_font_color` | `#ffffff` | OSD text color applied to all OSD labels (`_OsdWindow._stylesheet`). |
@@ -1620,11 +1621,13 @@ Registers XEP plugins (conditionally where noted):
   (`stanza:react-like:<id>/<emoji>` → `reaction_like_requested` →
   `MainWindow._on_reaction_like_requested` → `_apply_reaction`). The "+k"
   overflow chip (`data-reactions-more="1"`) opens
-  `ui/reactions_list_dialog.ReactionsListDialog`, a flat newest-first list of
-  every reaction on the message (`emoji who — when`, read from the stored
-  `reactions` entries and drawn with the same auto-detected colour-emoji font as
-  the picker) via `stanza:reactions:<id>` →
-  `reactions_list_requested(jid, ref_id)`. All these relays fall back to
+  `ui/reactions_list_dialog.ReactionsListDialog` via `stanza:reactions:<id>` →
+  `reactions_list_requested(jid, ref_id)`. The list is flat and newest-first;
+  each row is a custom widget (reactor nick/JID with the date/time beneath on
+  the left in the normal font, the emoji on the right drawn with `emoji_font`).
+  `ChatView.update_reactions` re-pins the view to the bottom when a reaction
+  grows the last message (so the "jump to end" button does not appear for a
+  message the user was reading at the end). All these relays fall back to
   `data-reply-id` when `data-stanza-id` is missing. History stores reactions in
   the `reactions` JSON column (SQLite migration).
 

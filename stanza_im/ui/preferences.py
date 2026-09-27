@@ -272,6 +272,19 @@ class PreferencesDialog(QtWidgets.QDialog):
         general, form = self._page()
         form.addRow(self._check("close_to_tray", tr("prefs_close_to_tray")))
 
+        from stanza_im.i18n import available_languages
+        lang_options = [("prefs_language_default", "")] + [
+            (None, code) for code, _name in available_languages()]
+        lang = self._combo("language", lang_options)
+        # The non-default entries need the native language name, which the
+        # ``_combo`` helper (key-based) cannot express; rewrite them here.
+        lang.clear()
+        lang.addItem(tr("prefs_language_default"), "")
+        for code, name in available_languages():
+            lang.addItem(name, code)
+        form.addRow(self._row(QtWidgets.QLabel(tr("prefs_language")), lang),
+                    self._info_label(tr("prefs_language_restart_tip")))
+
         files, file_form = self._page()
         file_form.addRow(self._check("file_auto_accept",
                                      tr("prefs_file_auto_accept")))
@@ -1315,6 +1328,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         files = getattr(cfg, "files", None)
         values = {
             "close_to_tray": cfg.ui.close_to_tray,
+            "language": getattr(cfg.ui, "language", "") or "",
             "history_limit_chat": chat.history_limit,
             "tab_title_length_chat": chat.tab_title_length,
             "jid": cfg.jid, "password": cfg.password, "save_password": cfg.save_password,
@@ -1448,6 +1462,7 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _apply_settings(self):
         cfg = self._config
         cfg.ui.close_to_tray = self._value("close_to_tray")
+        cfg.ui.language = self._value("language") or ""
         cfg.application.close_to_tray = self._value("close_to_tray")
         cfg.application.history_limit = self._value("history_limit_chat")
         cfg.application.tab_title_length = self._value("tab_title_length_chat")

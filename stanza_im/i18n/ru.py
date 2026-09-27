@@ -1,4 +1,5 @@
 """Russian translation strings for Stanza IM."""
+LANGUAGE_NAME = "Русский"
 STRINGS = {
     # Status
     "status_online": "В сети",
@@ -872,6 +873,9 @@ STRINGS = {
     "prefs_save": "Сохранить",
     "prefs_cancel": "Отмена",
     "prefs_close_to_tray": "Закрывать в трей",
+    "prefs_language": "Язык приложения",
+    "prefs_language_default": "По умолчанию (системный)",
+    "prefs_language_restart_tip": "Новый язык применится после перезапуска Stanza IM.",
     "prefs_auto_connect": "Автоподключение",
     "prefs_save_password": "Запоминать пароль",
     "prefs_change_password": "Смена пароля...",

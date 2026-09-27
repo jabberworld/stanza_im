@@ -1,4 +1,5 @@
 """English translation strings for Stanza IM."""
+LANGUAGE_NAME = "English"
 STRINGS = {
     # Status
     "status_online": "Online",
@@ -871,6 +872,9 @@ STRINGS = {
     "prefs_save": "Save",
     "prefs_cancel": "Cancel",
     "prefs_close_to_tray": "Close to system tray",
+    "prefs_language": "Application language",
+    "prefs_language_default": "Default (system)",
+    "prefs_language_restart_tip": "The new language is applied after restarting Stanza IM.",
     "prefs_auto_connect": "Connect automatically",
     "prefs_save_password": "Remember password",
     "prefs_change_password": "Change password...",

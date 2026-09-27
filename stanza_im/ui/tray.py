@@ -1,6 +1,7 @@
 """System tray icon with context menu and notification blinking."""
 from __future__ import annotations
 
+import math
 import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -88,10 +89,15 @@ class TrayIcon(QtCore.QObject):
         self._tray.setToolTip(APP_NAME)
         self._tray.activated.connect(self._on_activated)
 
+        # Smooth blink: fade the icon out and back in over one period using a
+        # sine curve, redrawing at ~25 fps.
         self._blink_timer = QtCore.QTimer(self)
-        self._blink_timer.timeout.connect(self._toggle_blink)
-        self._blink_visible = True
+        self._blink_timer.timeout.connect(self._blink_step)
         self._blink_active = False
+        self._blink_elapsed = 0.0
+        self._blink_period_ms = 1000   # full fade-out + fade-in
+        self._blink_interval_ms = 40
+        self._blink_pixmap = QtGui.QPixmap()
 
         self._menu = QtWidgets.QMenu()
         self._menu.aboutToShow.connect(self._sync_status_checks)
@@ -105,6 +111,7 @@ class TrayIcon(QtCore.QObject):
 
     def set_icon(self, icon: QtGui.QIcon):
         self._normal_icon = icon
+        self._blink_pixmap = QtGui.QPixmap()
         if not self._blink_active:
             self._tray.setIcon(icon)
 
@@ -134,19 +141,39 @@ class TrayIcon(QtCore.QObject):
     def start_blinking(self):
         if not self._blink_active:
             self._blink_active = True
-            self._blink_timer.start(500)
+            self._blink_elapsed = 0.0
+            self._blink_pixmap = self._source_pixmap()
+            self._blink_timer.start(self._blink_interval_ms)
 
     def stop_blinking(self):
         self._blink_active = False
         self._blink_timer.stop()
         self._tray.setIcon(self._normal_icon)
 
-    def _toggle_blink(self):
-        self._blink_visible = not self._blink_visible
-        if self._blink_visible:
-            self._tray.setIcon(self._normal_icon)
-        else:
-            self._tray.setIcon(QtGui.QIcon())
+    def _source_pixmap(self) -> QtGui.QPixmap:
+        """The opaque icon pixmap at a sensible tray size."""
+        size = self._tray.geometry().size()
+        side = size.width() if size.width() > 0 else 22
+        return self._normal_icon.pixmap(side, side)
+
+    def _blink_step(self):
+        """Advance the fade by one frame and repaint the tray icon."""
+        self._blink_elapsed = (self._blink_elapsed
+                               + self._blink_interval_ms) % self._blink_period_ms
+        if self._blink_pixmap.isNull():
+            self._blink_pixmap = self._source_pixmap()
+        # alpha: 1.0 -> 0.0 -> 1.0 over one period (cosine, starts opaque).
+        phase = self._blink_elapsed / float(self._blink_period_ms)
+        alpha = 0.5 * (1.0 + math.cos(2.0 * math.pi * phase))
+        if self._blink_pixmap.isNull():
+            return
+        faded = QtGui.QPixmap(self._blink_pixmap.size())
+        faded.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(faded)
+        painter.setOpacity(max(0.0, min(1.0, alpha)))
+        painter.drawPixmap(0, 0, self._blink_pixmap)
+        painter.end()
+        self._tray.setIcon(QtGui.QIcon(faded))
 
     def _build_menu(self):
         self._menu.addAction(QtGui.QIcon(), tr("tray_show"), self._on_show)
