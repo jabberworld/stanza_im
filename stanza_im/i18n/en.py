@@ -870,6 +870,7 @@ STRINGS = {
     "add_contact_gateway_error": "Translation error: {error}",
     "add_contact_jid": "Jabber ID",
     "add_contact_nick": "Nickname",
+    "add_contact_fill_nick": "Fill nickname",
     "add_contact_group": "Group",
     "add_contact_subscribe": "Request subscription",
     "add_contact_message": "Message:",

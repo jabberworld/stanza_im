@@ -871,6 +871,7 @@ STRINGS = {
     "add_contact_gateway_error": "Ошибка трансляции: {error}",
     "add_contact_jid": "Jabber ID",
     "add_contact_nick": "Ник",
+    "add_contact_fill_nick": "Заполнить ник",
     "add_contact_group": "Группа",
     "add_contact_subscribe": "Запросить подписку",
     "add_contact_message": "Сообщение:",

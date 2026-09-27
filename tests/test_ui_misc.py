@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core.storage import Config
-from stanza_im.i18n import load as i18n_load
+from stanza_im.i18n import load as i18n_load, tr
 from stanza_im.ui import font_zoom
 from stanza_im.ui import icons as icons_mod
 from stanza_im.ui import tooltip as tooltip_mod
@@ -281,6 +281,76 @@ finally:
     _acd_mod.AddContactDialog = _orig_acd
     win._client = None
 check("add-contact tolerates a non-str jid (bool)", len(_built) == 1)
+
+# Icon buttons: vCard viewer + nickname autofill.
+_d = AddContactDialog(["g"], None, jid="bob@example.com")
+check("add-contact has a vCard icon button",
+      not _d._vcard_btn.icon().isNull()
+      and _d._vcard_btn.toolTip() == tr("chat_vcard"))
+check("add-contact has a fill-nick icon button",
+      not _d._nick_btn.icon().isNull()
+      and _d._nick_btn.toolTip() == tr("add_contact_fill_nick"))
+_made = []
+_d.vcard_requested.connect(_made.append)
+_d._vcard_btn.click()
+check("vCard button emits the entered JID", _made == ["bob@example.com"])
+_d._jid.setText("")
+_d._vcard_btn.click()
+check("vCard button ignores an empty JID", _made == ["bob@example.com"])
+_d._jid.setText("")
+_d._nick_btn.click()  # must not raise with no JID
+check("fill-nick ignores an empty JID", _d._name.text() == "")
+check("gateway get button does not stretch",
+      _d._gateway_button.sizePolicy().horizontalPolicy()
+      == QtWidgets.QSizePolicy.Policy.Fixed)
+_d.deleteLater()
+
+# The nickname comes from the vCard: nickname, else fn, else the localpart.
+import asyncio as _asyncio  # noqa: E402
+from xml.etree import ElementTree as _ET  # noqa: E402
+
+
+class _VCardIq:
+    """Minimal slixmpp-Iq stand-in for :func:`parse_vcard`."""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def get_payload(self):
+        return self._payload
+
+    def get(self, key, default=None):
+        return default
+
+
+def _vcard_iq(nick="", fn=""):
+    payload = _ET.fromstring(
+        "<vCard xmlns='vcard-temp'>"
+        + (f"<FN>{fn}</FN>" if fn else "")
+        + (f"<NICKNAME>{nick}</NICKNAME>" if nick else "")
+        + "</vCard>")
+    return _VCardIq(payload)
+
+
+for _nick, _fn, _want in (("Nick", "Full", "Nick"),
+                          ("", "Full", "Full"),
+                          ("", "", "bob")):
+    _dc = AddContactDialog(["g"], None, jid="bob@example.com")
+    _iq = _vcard_iq(_nick, _fn)
+
+    class _Stub:
+        def __init__(self):
+            self.xmpp = type("X", (), {})()
+            self.xmpp.plugin = {"xep_0054": self}
+
+        async def get_vcard(self, jid):
+            return _iq
+
+    _dc._client = _Stub()
+    _asyncio.get_event_loop().run_until_complete(
+        _dc._fill_nick_async("bob@example.com"))
+    check(f"fill-nick picks {_want!r}", _dc._name.text() == _want)
+    _dc.deleteLater()
 
 print()
 if FAILURES:

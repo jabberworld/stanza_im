@@ -915,6 +915,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                                tr("roster_group_ungrouped"))},
                         key=str.casefold)
         dlg = AddContactDialog(groups, self._client, self, jid=jid)
+        dlg.vcard_requested.connect(self._show_profile)
         if not dlg.exec():
             return
         data = dlg.collect()

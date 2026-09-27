@@ -90,7 +90,13 @@ stanza_im/
 ```
 
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
-and `ui/conference_dialog.py`. Conference discovery uses XEP-0030; used
+and `ui/conference_dialog.py`. The add-contact dialog keeps the "Service ID
+translator" compact (description over a prompt + a fixed-size "Get XMPP address"
+button) and gives the Jabber ID and Nickname fields 16px icon buttons: a vCard
+button (`v-card.png`, `chat_vcard`) that opens the entered address's profile, and
+a fill-nickname button (`nick-fill.svg`, `add_contact_fill_nick`) that fills the
+nickname from the vCard (`nickname`, else `fn`, else the JID localpart).
+Conference discovery uses XEP-0030; used
 conference servers are stored in `connection.conference_servers`. XEP-0048
 bookmark names are preserved and used in the Bookmarks tab with a localpart
 fallback.

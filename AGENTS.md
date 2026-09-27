@@ -130,7 +130,14 @@ CHECKLIST.md                     # XEP-0479 Client/Advanced Client checklist
 
 Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`,
 `ui/conference_dialog.py`, `ui/muc_config_dialog.py` and
-`ui/hats_dialog.py`. The conference dialog
+`ui/hats_dialog.py`. The add-contact dialog has a compact "Service ID
+translator" group (a `QVBoxLayout`: description over a `prompt` + fixed-size
+"Get XMPP address" button, so the field grows); each of the Jabber ID and
+Nickname fields carries a 16px icon button — `v-card.png` (tooltip `chat_vcard`)
+emits `vcard_requested(jid)` for the entered address (`MainWindow._on_add_contact`
+connects it to `_show_profile`), and `nick-fill.svg` (tooltip
+`add_contact_fill_nick`) fetches the vCard and fills the nickname from `nickname`,
+else `fn`, else the JID localpart. The conference dialog
 provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
 servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
