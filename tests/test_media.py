@@ -127,6 +127,10 @@ check("action JS matches the video wrapper", ".stanza-media-video" in _cv_src)
 check("action JS toggles play/pause",
       "vid.paused" in _cv_src and "vid.play()" in _cv_src)
 check("action JS relays fullscreen", "__stanzaMediaFsRef" in _cv_src)
+check("action JS defers the inline toggle and cancels it on dblclick",
+      "__stanzaVideoClickTimer" in _cv_src
+      and "clearTimeout(window.__stanzaVideoClickTimer)" in _cv_src
+      and "addEventListener('dblclick'" in _cv_src)
 service.set_mode("none")
 check("none mode -> no markup", service.markup(url) is None)
 service.set_mode("images")

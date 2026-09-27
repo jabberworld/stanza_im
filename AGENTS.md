@@ -650,7 +650,8 @@ size)` makes `_body_fragment` replace a media URL's `<a>` with an embed —
 href="stanza:view:image/<urlenc>">` wrapping an `<img>` (cached thumbnail as a
 PNG data-URI), or a native HTML5 `<audio>`/`<video controls>` (the class sits on
 a `.stanza-media-video` wrapper span — a single click on the video toggles
-play/pause, a double click opens it fullscreen in the `MediaViewer`). Image originals
+play/pause through a 250 ms timer that the document-level double-click handler
+cancels, and the double click opens it fullscreen in the `MediaViewer`). Image originals
 are downloaded in a worker (`asyncio.to_thread`/thread) and resized to
 `appearance.media_preview_size`; thumbnails and originals live in
 `MediaCache` (`$XDG_CACHE_HOME/stanza-im/media/`, `index.json`, last-access

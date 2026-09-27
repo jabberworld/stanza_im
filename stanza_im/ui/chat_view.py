@@ -944,10 +944,11 @@ window.__stanzaMentionRef = '';
                         media.getAttribute('href') || '';
                     return;
                 }
-                // An inline video: a single click toggles play/pause (the
-                // native controls stay, so no preventDefault), a double click
-                // opens it fullscreen in the media viewer.  The class lives on
-                // the wrapper span, so look it up from there.
+                // An inline video: a single click toggles play/pause, a double
+                // click opens it fullscreen.  The two must not fight, so the
+                // single-click toggle is deferred and cancelled by the
+                // document-level dblclick handler below (the class lives on the
+                // wrapper span, so look the video up from there).
                 var vwrap = t && t.closest
                     ? t.closest('.stanza-media-video') : null;
                 var vid = null;
@@ -957,16 +958,12 @@ window.__stanzaMentionRef = '';
                     vid = t.closest('video');
                 }
                 if (vid) {
-                    e.preventDefault();
-                    if (e.detail >= 2) {
-                        var vsrc = vid.getAttribute('data-media-url')
-                            || vid.currentSrc || vid.getAttribute('src') || '';
-                        if (vsrc) {
-                            window.__stanzaMediaFsRef = 'stanza:view:video_fs/'
-                                + encodeURIComponent(vsrc);
-                        }
-                    } else {
-                        if (vid.paused) { vid.play(); } else { vid.pause(); }
+                    if (e.detail <= 1 && e.target.nodeName === 'VIDEO') {
+                        // The native controls stay usable, so no preventDefault.
+                        clearTimeout(window.__stanzaVideoClickTimer);
+                        window.__stanzaVideoClickTimer = setTimeout(function () {
+                            if (vid.paused) { vid.play(); } else { vid.pause(); }
+                        }, 250);
                     }
                     return;
                 }
@@ -1086,6 +1083,24 @@ window.__stanzaMentionRef = '';
                 e.preventDefault();
                 if ((btn.getAttribute('data-action') || 'menu') === 'menu') {
                     openMenu(btn, e.clientX, e.clientY);
+                }
+            });
+            // Double-click on an inline video: cancel the pending play/pause
+            // toggle and open the video fullscreen in the media viewer.
+            document.addEventListener('dblclick', function (e) {
+                var t = e.target;
+                var wrap = t && t.closest
+                    ? t.closest('.stanza-media-video') : null;
+                var vid = wrap ? wrap.querySelector('video')
+                               : (t && t.closest ? t.closest('video') : null);
+                if (!vid) return;
+                e.preventDefault();
+                clearTimeout(window.__stanzaVideoClickTimer);
+                var vsrc = vid.getAttribute('data-media-url')
+                    || vid.currentSrc || vid.getAttribute('src') || '';
+                if (vsrc) {
+                    window.__stanzaMediaFsRef = 'stanza:view:video_fs/'
+                        + encodeURIComponent(vsrc);
                 }
             });
             document.addEventListener('keydown', function (e) {
