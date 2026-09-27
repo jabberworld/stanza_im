@@ -839,7 +839,8 @@ class MainWindow(QtWidgets.QMainWindow):
         join_room.triggered.connect(self._on_join_groupchat_dialog)
         add_contact = actions_menu.addAction(self._menu_icon("add-user.png"),
                                              tr("menu_add_contact"))
-        add_contact.triggered.connect(self._on_add_contact)
+        add_contact.triggered.connect(
+            lambda checked=False: self._on_add_contact())
         service_discovery = actions_menu.addAction(
             self._menu_icon("service-discovery.png"), tr("menu_service_discovery"))
         service_discovery.triggered.connect(self._on_service_browser)
@@ -902,6 +903,9 @@ class MainWindow(QtWidgets.QMainWindow):
     # ── Menu actions ─────────────────────────────────────────────
 
     def _on_add_contact(self, jid: str = ""):
+        if not isinstance(jid, str):
+            # ``QAction.triggered`` passes a ``checked`` bool; ignore it.
+            jid = ""
         if not self._client:
             return
         from stanza_im.ui.add_contact_dialog import AddContactDialog

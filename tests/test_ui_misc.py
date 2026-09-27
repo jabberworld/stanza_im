@@ -257,6 +257,31 @@ win._config.save_password = False
 win._config.password = ""
 win._chat_window.close()
 
+# The Add-contact dialog must not crash when a QAction passes its bool arg.
+from stanza_im.ui.add_contact_dialog import AddContactDialog  # noqa: E402
+_acd_probe = AddContactDialog([], None, jid=False)
+check("AddContactDialog coerces a bool jid", _acd_probe._jid.text() == "")
+_acd_probe.deleteLater()
+_orig_acd = AddContactDialog
+_built = []
+
+
+class _RecordingACD(_orig_acd):
+    def exec(self):
+        _built.append(self)
+        return 0  # reject, so nothing is sent
+
+
+import stanza_im.ui.add_contact_dialog as _acd_mod  # noqa: E402
+win._client = _FakeClient()
+_acd_mod.AddContactDialog = _RecordingACD
+try:
+    win._on_add_contact(False)   # emulates QAction.triggered(bool)
+finally:
+    _acd_mod.AddContactDialog = _orig_acd
+    win._client = None
+check("add-contact tolerates a non-str jid (bool)", len(_built) == 1)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

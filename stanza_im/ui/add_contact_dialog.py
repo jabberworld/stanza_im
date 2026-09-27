@@ -56,7 +56,7 @@ class AddContactDialog(QtWidgets.QDialog):
         form.addRow(self._subscribe)
         form.addRow(tr("add_contact_message"), self._message)
         layout.addLayout(form)
-        self._jid.setText(jid)
+        self._jid.setText(jid if isinstance(jid, str) else "")
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
