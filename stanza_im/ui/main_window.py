@@ -4547,6 +4547,9 @@ class MainWindow(QtWidgets.QMainWindow):
         my_keys = self._my_reaction_keys(jid)
         entries = self._reaction_state(jid, ref_id)
         current = [e for e in self._our_emojis(entries, my_keys) if e != emoji]
+        logger.debug("REACT[on_unreact] jid=%s ref=%r emoji=%r keys=%r "
+                     "entries=%r current=%r",
+                     jid, ref_id, emoji, my_keys, entries, current)
         self._send_reactions(jid, ref_id, current)
 
     def _unreact_all(self, jid: str, ref_id: str) -> None:

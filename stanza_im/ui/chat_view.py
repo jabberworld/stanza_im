@@ -1233,6 +1233,12 @@ window.__stanzaMentionRef = '';
             except RuntimeError:
                 pass
 
+        def _clear_reactions_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaReactionsRef = '';")
+            except RuntimeError:
+                pass
+
         def _on_bridge_near_top(self):
             if self._near_top_hit:
                 return
@@ -1345,6 +1351,7 @@ window.__stanzaMentionRef = '';
             if len(value) > 16 and isinstance(value[16], str) and value[16]:
                 self._clear_unreact_request()
                 requested = value[16]
+                logger.debug("REACT[poll] unreact=%r", requested)
                 if requested != getattr(self, "_last_unreact_ref", ""):
                     self._last_unreact_ref = requested
                     self.link_clicked.emit(requested)
@@ -1353,6 +1360,7 @@ window.__stanzaMentionRef = '';
             if len(value) > 18 and isinstance(value[18], str) and value[18]:
                 self._clear_reactions_request()
                 requested = value[18]
+                logger.debug("REACT[poll] reactions=%r", requested)
                 if requested != getattr(self, "_last_reactions_ref", ""):
                     self._last_reactions_ref = requested
                     self.link_clicked.emit(requested)

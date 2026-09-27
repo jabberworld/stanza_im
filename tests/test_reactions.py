@@ -250,6 +250,10 @@ check("ChatWidget declares reaction signals",
       and hasattr(_CW, "unreaction_requested"))
 check("ChatView declares the picker anchor signal",
       hasattr(ChatView, "reaction_anchor"))
+check("ChatView defines the reaction-ref clearers",
+      hasattr(ChatView, "_clear_reactions_request")
+      and hasattr(ChatView, "_clear_unreact_request")
+      and hasattr(ChatView, "_clear_react_request"))
 
 from stanza_im.ui import emoji_picker_dialog as picker
 check("picker exposes an emoji font helper",

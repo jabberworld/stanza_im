@@ -778,6 +778,8 @@ class ChatWidget(QtWidgets.QWidget):
             raw_ref, sep, raw_emoji = payload.partition("/")
             ref = unquote(raw_ref)
             emoji = unquote(raw_emoji)
+            logger.debug("REACT[unreact] jid=%s ref=%r emoji=%r",
+                         self.jid, ref, emoji)
             if ref and sep and emoji:
                 self.unreaction_requested.emit(self.jid, ref, emoji)
             return
@@ -1542,6 +1544,9 @@ class ChatWidget(QtWidgets.QWidget):
                 "title": tr("reaction_tooltip") + "\n" + "\n".join(times),
             })
         chips.sort(key=lambda c: (-c["count"], c["emoji"]))
+        if stored:
+            logger.debug("REACT[chips] keys=%r stored=%r mine=%r",
+                         sorted(my_keys), stored, sorted(mine))
         return chips
 
     def _my_reaction_keys(self) -> set[str]:
