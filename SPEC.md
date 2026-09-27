@@ -125,7 +125,8 @@ content rebuild and no tab switch) rather than opening another, and
 `_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
 "open a new dialog" `_pending_profile`) so the result updates the visible
 window; `_find_open_vcard` matches by bare JID to tolerate a bare/full-JID key
-mismatch.
+mismatch. Only the Close button accepts the dialog (`QDialogButtonBox.clicked`
+fires for every button, so Refresh/Edit must not close the window).
 Appearance settings support independent ordinary-chat and conference theme
 variants, arranged in the «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and
 «Разное» tabs («Разное» holds the media-preview size, the preview cache

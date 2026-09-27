@@ -171,7 +171,10 @@ arrives, `_open_vcard_info` updates the already-open window in place
 (`update_card`: header + field labels rewritten, the content widget is not
 recreated and the active tab is preserved) instead of opening a second one,
 and re-issues `probe_entity` so the Status tab (version/ping) refreshes too
-(`update_status` merges values without switching tabs). `_find_open_vcard`
+(`update_status` merges values without switching tabs). Only the Close button
+accepts the dialog — the `QDialogButtonBox.clicked` signal fires for every
+button, so it must not be connected wholesale (a refresh would otherwise
+close the window). `_find_open_vcard`
 matches an open dialog by bare JID so a bare/full-JID key mismatch never opens
 a second window.
 Chat and MUC tabs use separate `ChatThemeFactory` instances, while emoticon

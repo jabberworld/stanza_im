@@ -112,11 +112,19 @@ from stanza_im.i18n import tr
 dlg = VCardInfoDialog("a@b", {"jid": "a@b", "fn": "Old"})
 ref = []
 dlg.refresh_requested.connect(ref.append)
+_finished = []
+dlg.finished.connect(_finished.append)
 dlg._refresh_btn.click()
 check("refresh button emits refresh_requested", ref == ["a@b"])
 check("refresh button is localized",
       dlg._refresh_btn.text() == tr("vcard_refresh")
       and tr("vcard_refresh") != "vcard_refresh")
+check("refresh does not close the dialog (no accept)",
+      _finished == [] and dlg.result() != QtWidgets.QDialog.DialogCode.Accepted)
+dlg.show()
+dlg._refresh_btn.click()
+check("refresh keeps a shown dialog visible", dlg.isVisible())
+dlg.hide()
 dlg.update_card({"jid": "a@b", "fn": "New"})
 texts = [label.text() for label in dlg._content.findChildren(QtWidgets.QLabel)]
 check("update_card rebuilds the content in place",

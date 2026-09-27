@@ -61,10 +61,13 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
         btn = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close)
-        btn.button(QtWidgets.QDialogButtonBox.StandardButton.Close).setText(
-            tr("dialog_ok"))
-        btn.rejected.connect(self.reject)
-        btn.clicked.connect(self.accept)
+        # Accept only on the Close button itself: ``QDialogButtonBox.clicked``
+        # fires for *every* button (Refresh/Edit included), so connecting it
+        # wholesale would close the dialog on a refresh.
+        close_btn = btn.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Close)
+        close_btn.setText(tr("dialog_ok"))
+        close_btn.clicked.connect(self.accept)
         self._refresh_btn = btn.addButton(
             tr("vcard_refresh"),
             QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
