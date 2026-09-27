@@ -341,6 +341,22 @@ w4.reactions_list_requested.connect(lambda *a: seen2.append(a))
 w4._open_link("stanza:reactions:")
 check("an empty reactions ref is ignored", not seen2)
 
+# 10. unreact payload encoding (regression) ------------------------------------
+# New format: sid and emoji percent-encoded separately.
+w5 = _make_widget()
+un = []
+w5.unreaction_requested.connect(lambda *a: un.append(a))
+w5._open_link("stanza:unreact:a4532a/" + "%F0%9F%8F%B3%EF%B8%8F")
+check("unreact with separately-encoded parts parses",
+      un == [("alice@example.com", "a4532a", "🏳️")])
+
+# Legacy format: the whole 'sid/emoji' pair encoded (separator was %2F).
+un2 = []
+w5.unreaction_requested.connect(lambda *a: un2.append(a))
+w5._open_link("stanza:unreact:a4532a%2F%F0%9F%8F%B3%EF%B8%8F")
+check("unreact with a pre-encoded pair still parses",
+      un2 == [("alice@example.com", "a4532a", "🏳️")])
+
 
 print()
 if FAILURES:

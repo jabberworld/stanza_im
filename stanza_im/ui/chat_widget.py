@@ -774,10 +774,11 @@ class ChatWidget(QtWidgets.QWidget):
                 self.reaction_requested.emit(self.jid, ref, x, y)
             return
         if url.startswith("stanza:unreact:"):
-            payload = url[len("stanza:unreact:"):]
-            raw_ref, sep, raw_emoji = payload.partition("/")
-            ref = unquote(raw_ref)
-            emoji = unquote(raw_emoji)
+            # The payload is ``<sid>/<emoji>``.  Older builds encoded the whole
+            # pair (so the separator arrived as ``%2F``); decode first, then
+            # split, so both forms parse.
+            payload = unquote(url[len("stanza:unreact:"):])
+            ref, sep, emoji = payload.partition("/")
             logger.debug("REACT[unreact] jid=%s ref=%r emoji=%r",
                          self.jid, ref, emoji)
             if ref and sep and emoji:

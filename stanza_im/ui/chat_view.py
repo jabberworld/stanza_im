@@ -1007,7 +1007,8 @@ window.__stanzaMentionRef = '';
                     var emoji = chip.getAttribute('data-emoji') || '';
                     if (sid && emoji) {
                         window.__stanzaUnreactRef = 'stanza:unreact:'
-                            + encodeURIComponent(sid + '/' + emoji);
+                            + encodeURIComponent(sid) + '/'
+                            + encodeURIComponent(emoji);
                     }
                     return;
                 }
