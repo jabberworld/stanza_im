@@ -112,6 +112,21 @@ check("audio markup", audio_html and "<audio" in audio_html
 video_html = service.markup("https://h/v/clip.mp4")
 check("video markup", video_html and "<video" in video_html
       and "stanza:view:video/" in video_html)
+check("inline video wrapped in .stanza-media-video",
+      'class="stanza-media stanza-media-video"' in video_html)
+check("inline video keeps native controls",
+      "<video controls" in video_html)
+
+# Inline-video click handling: the class is on the wrapper, so the JS branch
+# must look the video up from .stanza-media-video (regression: it used
+# ``video.stanza-media``, which never matched).
+_cv_src = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "stanza_im", "ui", "chat_view.py"),
+    encoding="utf-8").read()
+check("action JS matches the video wrapper", ".stanza-media-video" in _cv_src)
+check("action JS toggles play/pause",
+      "vid.paused" in _cv_src and "vid.play()" in _cv_src)
+check("action JS relays fullscreen", "__stanzaMediaFsRef" in _cv_src)
 service.set_mode("none")
 check("none mode -> no markup", service.markup(url) is None)
 service.set_mode("images")
@@ -284,6 +299,25 @@ _mv_src = open(os.path.join(_root, "stanza_im", "ui", "media_viewer.py"),
 check("viewer defers initial image fit",
       "def showEvent" in _mv_src
       and "QtCore.QTimer.singleShot(0, self._fit_image)" in _mv_src)
+check("viewer wires a WebChannel fullscreen bridge",
+      "_VideoBridge" in _mv_src and "setWebChannel" in _mv_src
+      and 'registerObject("bridge"' in _mv_src)
+check("viewer matches viewer-fs by whole URL (not path)",
+      "url.toString()" in _mv_src and "viewer-fs" in _mv_src)
+
+# The scheme check must fire for the URL Chromium actually delivers.
+from stanza_im.ui import media_viewer as _mv_mod
+if _mv_mod._HAS_WEBENGINE:
+    _fired = []
+    _page = _mv_mod._VideoPage(None, lambda: _fired.append(1))
+    _allowed = _page.acceptNavigationRequest(
+        QtCore.QUrl("stanza:viewer-fs"), None, True)
+    check("viewer-fs navigation is denied and toggles fullscreen",
+          _allowed is False and _fired == [1])
+    _allowed2 = _page.acceptNavigationRequest(
+        QtCore.QUrl("stanza://viewer-fs"), None, True)
+    check("viewer-fs with an authority still denied",
+          _allowed2 is False and _fired == [1, 1])
 
 
 class _StubService:

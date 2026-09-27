@@ -648,9 +648,9 @@ keeps running (unlike `_quit`).
 size)` makes `_body_fragment` replace a media URL's `<a>` with an embed —
 `MediaPreviewService.markup()` returns an `<a class="stanza-media"
 href="stanza:view:image/<urlenc>">` wrapping an `<img>` (cached thumbnail as a
-PNG data-URI), or a native HTML5 `<audio>`/`<video controls>` (a double-click
-on the inline video opens it fullscreen in the `MediaViewer`; single clicks keep
-the native play/pause). Image originals
+PNG data-URI), or a native HTML5 `<audio>`/`<video controls>` (the class sits on
+a `.stanza-media-video` wrapper span — a single click on the video toggles
+play/pause, a double click opens it fullscreen in the `MediaViewer`). Image originals
 are downloaded in a worker (`asyncio.to_thread`/thread) and resized to
 `appearance.media_preview_size`; thumbnails and originals live in
 `MediaCache` (`$XDG_CACHE_HOME/stanza-im/media/`, `index.json`, last-access
@@ -663,7 +663,9 @@ session with many images cannot grow the thumbnail cache without limit.
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window with native `controls`,
-`F11`/double-click fullscreen; `Esc`
+`F11`/double-click fullscreen — the double-click asks Python through a
+QWebChannel `bridge.toggle_fullscreen()` (a `stanza:viewer-fs` navigation,
+matched by its whole URL, is a fallback); `Esc`
 closes the viewer, `Ctrl+wheel` zooms the image (0.1–8×, `Ctrl+0`/double-click
 resets to fit) and the zoomed image is dragged to pan with the left mouse
 button (open/closed hand cursor)); the

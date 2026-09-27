@@ -944,18 +944,29 @@ window.__stanzaMentionRef = '';
                         media.getAttribute('href') || '';
                     return;
                 }
-                // A double-click on an inline video opens it fullscreen in the
-                // media viewer (single clicks keep the native play/pause).
-                var vid = t && t.closest ? t.closest('video.stanza-media') : null;
+                // An inline video: a single click toggles play/pause (the
+                // native controls stay, so no preventDefault), a double click
+                // opens it fullscreen in the media viewer.  The class lives on
+                // the wrapper span, so look it up from there.
+                var vwrap = t && t.closest
+                    ? t.closest('.stanza-media-video') : null;
+                var vid = null;
+                if (vwrap) {
+                    vid = vwrap.querySelector('video');
+                } else if (t && t.closest) {
+                    vid = t.closest('video');
+                }
                 if (vid) {
+                    e.preventDefault();
                     if (e.detail >= 2) {
-                        e.preventDefault();
                         var vsrc = vid.getAttribute('data-media-url')
-                            || vid.getAttribute('src') || '';
+                            || vid.currentSrc || vid.getAttribute('src') || '';
                         if (vsrc) {
                             window.__stanzaMediaFsRef = 'stanza:view:video_fs/'
                                 + encodeURIComponent(vsrc);
                         }
+                    } else {
+                        if (vid.paused) { vid.play(); } else { vid.pause(); }
                     }
                     return;
                 }

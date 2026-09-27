@@ -15,6 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 
 try:
+    from PyQt6 import QtWebChannel
     from PyQt6 import QtWebEngineCore
     from PyQt6 import QtWebEngineWidgets
     _HAS_WEBENGINE = True
@@ -41,9 +42,18 @@ class _ImageScroll(QtWidgets.QScrollArea):
 
 if _HAS_WEBENGINE:
 
+    class _VideoBridge(QtCore.QObject):
+        """Bridge for the video page: the JS double-click asks for fullscreen."""
+
+        fullscreen_requested = QtCore.pyqtSignal()
+
+        @QtCore.pyqtSlot()
+        def toggle_fullscreen(self):
+            self.fullscreen_requested.emit()
+
     class _VideoPage(QtWebEngineCore.QWebEnginePage):
-        """Video page that turns the ``stanza:viewer-fs`` navigation into a
-        fullscreen toggle (the JS double-click handler clicks such an anchor)."""
+        """Video page that turns a ``stanza:viewer-fs`` navigation into a
+        fullscreen toggle (a fallback for the JS double-click handler)."""
 
         def __init__(self, view, on_fullscreen, parent=None):
             super().__init__(parent)
@@ -51,7 +61,10 @@ if _HAS_WEBENGINE:
             self._on_fullscreen = on_fullscreen
 
         def acceptNavigationRequest(self, url, _type, is_main_frame):
-            if url.scheme() == "stanza" and url.path().startswith("viewer-fs"):
+            # The scheme uses Qt's ``Path`` syntax, so ``path()`` may be empty
+            # for ``stanza://viewer-fs``; check the whole string instead.
+            text = url.toString()
+            if str(url.scheme()) == "stanza" and "viewer-fs" in text:
                 self._on_fullscreen()
                 return False
             return super().acceptNavigationRequest(url, _type, is_main_frame)
@@ -270,19 +283,35 @@ class MediaViewer(QtWidgets.QMainWindow):
             self.setCentralWidget(label)
             return
         view = QtWebEngineWidgets.QWebEngineView(self)
-        view.setPage(_VideoPage(view, self._toggle_fullscreen))
+        view.setPage(_VideoPage(view, self._toggle_fullscreen, parent=view))
+        # The double-click asks Python for fullscreen through the WebChannel
+        # (reliable); ``stanza:viewer-fs`` navigation stays a harmless fallback.
+        bridge = _VideoBridge(self)
+        bridge.fullscreen_requested.connect(self._toggle_fullscreen)
+        channel = QtWebChannel.QWebChannel(self)
+        channel.registerObject("bridge", bridge)
+        view.page().setWebChannel(channel)
+        from stanza_im.ui.chat_themes import _qwebchannel_js
+        glue = _qwebchannel_js()
         page = (
             '<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<style>html,body{margin:0;height:100%;background:#000;}'
             'video{width:100%;height:100%;}</style></head><body>'
             f'<video src="{html.escape(self._url, quote=True)}" '
             'controls autoplay></video>'
-            '<script>var v=document.querySelector("video");'
-            'if(v){v.addEventListener("dblclick",function(e){'
-            'e.preventDefault();'
-            'var u=document.createElement("a");'
-            'u.href="stanza:viewer-fs";u.click();});}</script>'
-            '</body></html>')
+            f'<script>{glue}</script>'
+            '<script>'
+            'var dbl=function(e){e.preventDefault();'
+            'if(window.bridge&&window.bridge.toggle_fullscreen)'
+            '{window.bridge.toggle_fullscreen();}'
+            'else{var u=document.createElement("a");'
+            'u.href="stanza:viewer-fs";u.click();}};'
+            'var v=document.querySelector("video");'
+            'if(v){v.addEventListener("dblclick",dbl);}'
+            'if(window.QWebChannel&&window.qt&&window.qt.webChannelTransport)'
+            '{new QWebChannel(qt.webChannelTransport,function(ch){'
+            'window.bridge=ch.objects.bridge;});}'
+            '</script></body></html>')
         view.setHtml(page, QtCore.QUrl("about:blank"))
         self.setCentralWidget(view)
 

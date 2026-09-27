@@ -1656,6 +1656,11 @@ Registers XEP plugins (conditionally where noted):
   way and shows the query-level `<instructions>`/OOB URL. The media viewer zooms
   images with Ctrl+wheel (0.1–8×, Ctrl+0/double-click resets to fit) and pans a
   zoomed image by dragging it with the left mouse button.
+- An inline `<video>` preview (class on the `.stanza-media-video` wrapper span)
+  toggles play/pause on a single click and opens the fullscreen viewer on a
+  double click; the video viewer window keeps native `controls` and its
+  double-click asks Python through a QWebChannel `bridge.toggle_fullscreen()`
+  (`stanza:viewer-fs` navigation matched by whole URL is the fallback).
 
 ### 14.5 HTTP File Upload (XEP-0363)
 
