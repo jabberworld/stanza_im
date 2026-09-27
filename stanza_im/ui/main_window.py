@@ -92,6 +92,45 @@ class _ZoomListWidget(QtWidgets.QListWidget):
         super().mousePressEvent(event)
 
 
+class _SubscriptionRequestRow(QtWidgets.QWidget):
+    """Events tab row: an authorization request with Approve/Reject buttons."""
+
+    approved = QtCore.pyqtSignal(str)
+    rejected = QtCore.pyqtSignal(str)
+
+    def __init__(self, jid: str, nick: str = "", name: str = "",
+                 groups=None, parent=None):
+        super().__init__(parent)
+        self.jid = jid
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(3)
+
+        who = name or nick or jid
+        title = QtWidgets.QLabel(tr("event_subscription_request", who=who))
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        if who != jid:
+            sub = QtWidgets.QLabel(jid)
+            sub.setStyleSheet("color: #888; font-size: 90%;")
+            layout.addWidget(sub)
+        if groups:
+            layout.addWidget(QtWidgets.QLabel(tr("event_groups",
+                                                 groups=", ".join(groups))))
+
+        buttons = QtWidgets.QHBoxLayout()
+        approve = QtWidgets.QPushButton(tr("event_approve"), self)
+        approve.setIcon(QtGui.QIcon(find_icon("ok.png")))
+        approve.clicked.connect(lambda: self.approved.emit(self.jid))
+        reject = QtWidgets.QPushButton(tr("event_deny"), self)
+        reject.setIcon(QtGui.QIcon(find_icon("process-stop.png")))
+        reject.clicked.connect(lambda: self.rejected.emit(self.jid))
+        buttons.addWidget(approve)
+        buttons.addWidget(reject)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     """Top-level window that owns the roster, chat window, tray and XMPP client."""
 
@@ -594,7 +633,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._events_list = _ZoomListWidget()
         self._events_list.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
-        self._events_list.setEnabled(False)
+        self._events_list.setWordWrap(True)
         self._events_list.font_zoom_requested.connect(self._on_roster_font_zoom)
         layout.addWidget(self._events_list, stretch=1)
 
@@ -610,22 +649,71 @@ class MainWindow(QtWidgets.QMainWindow):
         self._push_system_event("", "")  # render the empty-state row
         return page
 
-    def _push_system_event(self, title: str, detail: str = "") -> None:
-        """Scaffold: record a system event and start blinking the tab icon.
-
-        Nothing calls this yet; the events UI is not implemented.  It resets
-        the empty-state row, appends the event and (for a real event) starts
-        the tab-icon blink.
-        """
+    def _clear_events_placeholder(self) -> None:
         if (self._events_list.count() == 1
-                and self._events_list.item(0).text() == tr("events_empty")):
+                and self._events_list.itemWidget(self._events_list.item(0))
+                is None):
             self._events_list.clear()
-        if title:
-            self._events_list.addItem(title)
-            self._event_unread += 1
-            self._start_event_blink()
-        elif self._events_list.count() == 0:
+
+    def _ensure_events_placeholder(self) -> None:
+        if self._events_list.count() == 0:
             self._events_list.addItem(tr("events_empty"))
+
+    def _push_system_event(self, title: str, detail: str = "") -> None:
+        """Append an informational system event and blink the tab icon."""
+        if not title:
+            self._ensure_events_placeholder()
+            return
+        self._clear_events_placeholder()
+        self._events_list.addItem(title)
+        self._event_unread += 1
+        self._start_event_blink()
+
+    def _on_subscription_request(self, jid: str, nick: str = "",
+                                 name: str = "", groups=None) -> None:
+        """A contact/transport asks for presence authorization (XEP-0045).
+
+        Surfaced in the Events tab with Approve/Reject buttons.
+        """
+        self._clear_events_placeholder()
+        item = QtWidgets.QListWidgetItem(self._events_list)
+        widget = _SubscriptionRequestRow(
+            jid, nick=nick, name=name, groups=groups, parent=self._events_list)
+        widget.approved.connect(self._on_subscription_approved)
+        widget.rejected.connect(self._on_subscription_rejected)
+        item.setSizeHint(widget.sizeHint())
+        self._events_list.setItemWidget(item, widget)
+        self._event_unread += 1
+        self._start_event_blink()
+
+    def _on_subscription_approved(self, jid: str) -> None:
+        if self._client:
+            self._client.approve_subscription(jid)
+        self._remove_event_for_jid(jid)
+
+    def _on_subscription_rejected(self, jid: str) -> None:
+        if self._client:
+            self._client.reject_subscription(jid)
+        self._remove_event_for_jid(jid)
+
+    def _remove_event_for_jid(self, jid: str) -> None:
+        for i in range(self._events_list.count()):
+            item = self._events_list.item(i)
+            widget = self._events_list.itemWidget(item)
+            if isinstance(widget, _SubscriptionRequestRow) and widget.jid == jid:
+                self._events_list.takeItem(i)
+                break
+        self._ensure_events_placeholder()
+
+    def _on_subscription_cancelled(self, jid: str) -> None:
+        name = ""
+        if self._client:
+            try:
+                name = getattr(self._client.get_contact(jid), "name", "") or ""
+            except Exception:  # noqa: BLE001
+                name = ""
+        self._push_system_event(
+            tr("event_unsubscribed", who=name or jid))
 
     def _start_event_blink(self) -> None:
         if self._event_blink_active:
@@ -2217,6 +2305,8 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("sm_disabled", self._on_sm_disabled)
         c.on("csi_enabled", self._on_csi_enabled)
         c.on("subscribed", self._on_subscribed)
+        c.on("subscription_requested", self._on_subscription_request)
+        c.on("subscription_cancelled", self._on_subscription_cancelled)
         c.on("vcard_received", self._on_vcard_received)
         c.on("avatar_updated", self._on_avatar_updated)
         c.on("bookmarks_changed", self._on_bookmarks_changed)

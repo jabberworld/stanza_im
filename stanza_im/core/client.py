@@ -1064,6 +1064,10 @@ class JabberClient:
         self.xmpp.add_event_handler("presence_unavailable", self._on_presence)
         self.xmpp.add_event_handler("presence_subscribed", self._on_subscribed)
         self.xmpp.add_event_handler("presence_unsubscribed", self._on_unsubscribed)
+        self.xmpp.add_event_handler("presence_subscribe",
+                                    self._on_subscription_request)
+        self.xmpp.add_event_handler("presence_unsubscribe",
+                                    self._on_unsubscribe_request)
         self.xmpp.add_event_handler("groupchat_message", self._on_groupchat_message)
         self.xmpp.add_event_handler("groupchat_subject", self._on_groupchat_subject)
         self.xmpp.add_event_handler("groupchat_presence", self._on_groupchat_presence)
@@ -3958,16 +3962,72 @@ class JabberClient:
             logger.info("Service %s supports MUC", service)
 
     def approve_subscription(self, jid: str) -> None:
-        """Approve a presence subscription request."""
+        """Approve a presence subscription request.
+
+        Sends ``subscribed``; when we do not yet receive the peer's presence
+        (no ``to`` subscription) a ``subscribe`` is sent too, so a bidirectional
+        (``both``) subscription is established (needed e.g. for transports).
+        """
         self.xmpp.send_presence_subscription(
             pto=jid, pfrom=self._full_jid, ptype="subscribed"
         )
+        if self.subscription(jid) in ("none", "from", ""):
+            self.xmpp.send_presence_subscription(
+                pto=jid, pfrom=self._full_jid, ptype="subscribe"
+            )
+        logger.info("SUB[approve] sent 'subscribed' to %s", jid)
 
     def reject_subscription(self, jid: str) -> None:
         """Reject a presence subscription request."""
         self.xmpp.send_presence_subscription(
             pto=jid, pfrom=self._full_jid, ptype="unsubscribed"
         )
+        logger.info("SUB[reject] sent 'unsubscribed' to %s", jid)
+
+    def _on_subscription_request(self, pres) -> None:
+        """A contact/transport requested a presence subscription (XEP-0045-ish).
+
+        If we already receive the peer's presence (``to``/``both``) the request
+        is a duplicate and is auto-approved; otherwise it is surfaced as a
+        system event so the user can approve or reject it.
+        """
+        jid = str(pres["from"]).split("/", 1)[0]
+        if not jid:
+            return
+        sub = self.subscription(jid)
+        logger.info("SUB[request] from %s (current=%s)", jid, sub)
+        if sub in ("to", "both"):
+            self.approve_subscription(jid)
+            return
+        # A subscription request may carry the asker's nickname in a raw
+        # ``<nick>`` element (not part of slixmpp's Presence interfaces).
+        nick = ""
+        xml = getattr(pres, "xml", None)
+        if xml is not None:
+            node = xml.find("nick")
+            if node is not None and node.text:
+                nick = node.text.strip()
+        name, groups = "", []
+        try:
+            contact = self.get_contact(jid)
+            name = getattr(contact, "name", "") or ""
+            groups = list(getattr(contact, "groups", []) or [])
+        except Exception:  # noqa: BLE001 - presentation only
+            pass
+        self.emit("subscription_requested", jid, nick, name, groups)
+
+    def _on_unsubscribe_request(self, pres) -> None:
+        """A contact asked us to stop our subscription to it.
+
+        Standard behaviour is to answer ``unsubscribed`` (remove the ``to``
+        subscription); the user is informed through a system event.
+        """
+        jid = str(pres["from"]).split("/", 1)[0]
+        if not jid:
+            return
+        logger.info("SUB[unsubscribe] from %s", jid)
+        self.reject_subscription(jid)
+        self.emit("subscription_cancelled", jid)
 
     # ── Internal event handlers ───────────────────────────────────
 
@@ -5207,8 +5267,9 @@ class JabberClient:
 
     def _on_unsubscribed(self, pres) -> None:
         frm = str(pres["from"])
-        logger.info("Unsubscribed from %s", frm)
+        logger.info("SUB[unsubscribed] from %s", frm)
         self.emit("unsubscribed", frm)
+        self.emit("subscription_cancelled", frm.split("/", 1)[0])
 
     def _on_got_online(self, pres) -> None:
         frm = str(pres["from"])

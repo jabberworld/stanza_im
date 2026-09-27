@@ -884,6 +884,19 @@ trace the roster end to end (`ROSTER[update]` in `_on_roster_update`,
 Roster Item Exchange (XEP-0144): an incoming `<x xmlns='http://jabber.org/protocol/rosterx'/>` (in a message, bodyless included — its own `MatchXPath` handler, and a guard in `_on_message`/`_on_carbon_received`) is parsed by `parse_roster_exchange` and emitted as `roster_exchange_received(from, items, body)`. `MainWindow._on_roster_exchange` opens `RosterExchangeDialog` — a three-level `Add/Modify/Delete → group ("No group") → jid (name)` `QTreeWidget` whose parents are auto-tristate and whose leaves are checked by default — and applies the checked rows through `client.apply_roster_exchange` following XEP-0144 §3: an `add` merges the suggested groups (subscribing for a new contact), a `delete` drops only the suggested group while other groups remain (otherwise removes the contact), and a `modify` touches existing items only. A contact's roster context menu also offers "Send contact…" (`_on_send_contact` → `ShareDialog` → `client.send_roster_exchange`, a `<message>` with the rosterx payload plus a readable body).
 [`tests/test_rosterx.py`]
 
+**Presence subscription requests** (`presence_subscribe`): an incoming
+`<presence type='subscribe'/>` (e.g. from an RSS/gateway transport) is handled by
+`JabberClient._on_subscription_request` — if the peer is already `to`/`both` it
+is auto-approved, otherwise it is emitted as `subscription_requested(jid, nick,
+name, groups)` (nick from a raw `<nick>` element) and shown in the **Events**
+tab as a `_SubscriptionRequestRow` with «Разрешить» (`ok.png`) / «Отклонить»
+(`process-stop.png`) buttons. `client.approve_subscription` sends `subscribed`
+and, when `to` is still missing, a `subscribe` too (so a transport gets `both`);
+`reject_subscription` sends `unsubscribed`. An incoming `unsubscribe` is
+auto-answered with `unsubscribed` and surfaced as an event, and an incoming
+`unsubscribed` emits `subscription_cancelled(jid)` (an informational event).
+The handlers log `SUB[...]`. [`tests/test_subscriptions.py`]
+
 Message Carbons (XEP-0280, `connection.message_carbons`, default on) are enabled
 after initial presence; forwarded 1:1 copies from other of our resources are
 picked out of `<received>`/`<sent>` with `_carbon_inner` and emitted as

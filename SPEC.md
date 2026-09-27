@@ -754,6 +754,22 @@ Future: hot-swappable styles from `resources/rosterstyles/`.
   with the rosterx payload and a readable body fallback. The feature
   `http://jabber.org/protocol/rosterx` is advertised in disco.
 
+### 7.6 Presence Subscription Requests
+
+- An incoming `<presence type='subscribe'/>` is handled by
+  `JabberClient._on_subscription_request`: a peer already subscribed
+  (`to`/`both`) is auto-approved; otherwise it is emitted as
+  `subscription_requested(jid, nick, name, groups)` (the nickname read from a
+  raw `<nick>` element) and shown in the **Events** tab as a
+  `_SubscriptionRequestRow` with «Разрешить»/«Отклонить» buttons.
+- `client.approve_subscription(jid)` sends `subscribed` and, when `to` is still
+  missing, also a `subscribe` (so transports end up with a `both` subscription,
+  which is what makes their presence reach the client); `reject_subscription`
+  sends `unsubscribed`.
+- An incoming `unsubscribe` is auto-answered with `unsubscribed` and surfaced as
+  an event; an incoming `unsubscribed` emits `subscription_cancelled(jid)`.
+  Handlers log `SUB[...]`.
+
 ## 8. Chat Window (`ui/chat_window.py`)
 
 ### 8.1 Modes
