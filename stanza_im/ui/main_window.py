@@ -626,8 +626,71 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self._bookmarks_list.customContextMenuRequested.connect(
             self._on_bookmark_context_menu)
+        self._bookmarks_list.itemSelectionChanged.connect(
+            self._update_bookmark_actions)
         layout.addWidget(self._bookmarks_list, stretch=1)
+
+        actions = QtWidgets.QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        self._bookmark_join_btn = self._bookmark_button(
+            "ok.png", tr("bookmark_join"), self._on_bookmark_join_clicked)
+        self._bookmark_new_btn = self._bookmark_button(
+            "about.png", tr("bookmark_new"), self._on_bookmark_new)
+        self._bookmark_edit_btn = self._bookmark_button(
+            "edit.png", tr("bookmark_edit"), self._on_bookmark_edit_clicked)
+        self._bookmark_del_btn = self._bookmark_button(
+            "process-stop.png", tr("bookmark_remove"),
+            self._on_bookmark_remove_clicked)
+        for button in (self._bookmark_join_btn, self._bookmark_new_btn,
+                       self._bookmark_edit_btn, self._bookmark_del_btn):
+            actions.addWidget(button, stretch=1)
+        layout.addLayout(actions)
+        self._update_bookmark_actions()
         return page
+
+    @staticmethod
+    def _bookmark_button(icon_name: str, tooltip: str, slot) -> QtWidgets.QToolButton:
+        """A wide (2:1) icon-only button for the bookmarks toolbar."""
+        button = QtWidgets.QToolButton()
+        button.setIcon(QtGui.QIcon(find_icon(icon_name)))
+        button.setIconSize(QtCore.QSize(16, 16))
+        button.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setAutoRaise(True)
+        button.setToolTip(tooltip)
+        button.setFixedHeight(16)
+        button.setMinimumWidth(32)
+        button.clicked.connect(slot)
+        return button
+
+    def _update_bookmark_actions(self) -> None:
+        has_selection = self._selected_bookmark() is not None
+        for name in ("_bookmark_join_btn", "_bookmark_edit_btn",
+                     "_bookmark_del_btn"):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setEnabled(has_selection)
+
+    def _selected_bookmark(self) -> dict | None:
+        item = self._bookmarks_list.currentItem()
+        if item is None:
+            return None
+        return item.data(QtCore.Qt.ItemDataRole.UserRole) or None
+
+    def _on_bookmark_join_clicked(self) -> None:
+        bookmark = self._selected_bookmark()
+        if bookmark:
+            self._join_bookmark(bookmark)
+
+    def _on_bookmark_edit_clicked(self) -> None:
+        bookmark = self._selected_bookmark()
+        if bookmark:
+            self._edit_bookmark(bookmark)
+
+    def _on_bookmark_remove_clicked(self) -> None:
+        bookmark = self._selected_bookmark()
+        if bookmark:
+            self._remove_bookmark_confirmed(bookmark)
 
     def _build_events_tab(self) -> QtWidgets.QWidget:
         """System events (scaffold): search box and an empty list."""
@@ -794,8 +857,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not bookmark:
             return
         menu = QtWidgets.QMenu(self._bookmarks_list)
-        join = menu.addAction(self._menu_icon("muc.png"), tr("bookmark_join"))
+        join = menu.addAction(self._menu_icon("ok.png"), tr("bookmark_join"))
         join.triggered.connect(lambda: self._join_bookmark(bookmark))
+        edit = menu.addAction(self._menu_icon("edit.png"), tr("bookmark_edit"))
+        edit.triggered.connect(lambda: self._edit_bookmark(bookmark))
         auto = menu.addAction(tr("bookmark_autojoin"))
         auto.setCheckable(True)
         auto.setChecked(bool(bookmark.get("autojoin")))
@@ -804,7 +869,7 @@ class MainWindow(QtWidgets.QMainWindow):
         remove = menu.addAction(self._menu_icon("process-stop.png"),
                                 tr("bookmark_remove"))
         remove.triggered.connect(
-            lambda: self._remove_bookmark(bookmark.get("jid", "")))
+            lambda: self._remove_bookmark_confirmed(bookmark))
         menu.exec(self._bookmarks_list.mapToGlobal(pos))
 
     def _filter_bookmarks(self, text: str) -> None:
@@ -1189,6 +1254,74 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_muc_names()
         self._start_task(self._client.remove_bookmark(room))
         self._rebuild_bookmarks_view()
+
+    def _remove_bookmark_confirmed(self, bookmark: dict) -> None:
+        """Ask for confirmation, then remove the bookmark."""
+        room = bookmark.get("jid", "")
+        if not room:
+            return
+        name = bookmark.get("name") or room.split("@", 1)[0]
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("bookmark_remove"),
+            tr("bookmark_delete_confirm", name=name))
+        if answer == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._remove_bookmark(room)
+
+    def _conference_servers(self) -> list[str]:
+        servers = list(self._config.connection.conference_servers or [])
+        if self._client:
+            domain = self._client.jid_str.split("@", 1)[-1]
+            if domain and domain not in servers:
+                servers.insert(0, domain)
+        return servers
+
+    def _default_nick(self) -> str:
+        if self._client:
+            return self._client.jid_str.split("@", 1)[0]
+        return ""
+
+    def _on_bookmark_new(self) -> None:
+        from stanza_im.ui.bookmark_dialog import BookmarkDialog
+        dlg = BookmarkDialog(self._conference_servers(),
+                             default_nick=self._default_nick(), parent=self)
+        if not dlg.exec():
+            return
+        self._save_bookmark_values(dlg.collect())
+
+    def _edit_bookmark(self, bookmark: dict) -> None:
+        from stanza_im.ui.bookmark_dialog import BookmarkDialog
+        dlg = BookmarkDialog(self._conference_servers(), bookmark=bookmark,
+                             parent=self)
+        if not dlg.exec():
+            return
+        old_room = bookmark.get("jid", "")
+        data = dlg.collect()
+        new_room = data["jid"]
+        if old_room and new_room and old_room != new_room:
+            # The room address changed: drop the old bookmark, add the new one.
+            self._remove_bookmark(old_room)
+        self._save_bookmark_values(data)
+
+    def _save_bookmark_values(self, data: dict) -> None:
+        room = data.get("jid", "")
+        if not room or not self._client:
+            return
+        bookmark = {
+            "jid": room,
+            "name": data.get("name", ""),
+            "nick": data.get("nick", ""),
+            "password": data.get("password", ""),
+            "autojoin": bool(data.get("autojoin")),
+        }
+        self._bookmarks[room] = bookmark
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            chat.set_bookmarked(True)
+        self._refresh_muc_names()
+        self._rebuild_bookmarks_view()
+        self._start_task(self._client.save_bookmark(
+            room, bookmark["nick"], bookmark["password"],
+            autojoin=bookmark["autojoin"], name=bookmark["name"]))
 
     def _toggle_bookmark(self, room: str):
         if not self._client:

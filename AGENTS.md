@@ -157,10 +157,19 @@ The Contacts tab (icon `system-users.png`) is active at startup and is the
 only this left part). The Bookmarks tab (icon `bookmarks.svg`)
 replaces the old menu: a search field plus a `QListWidget` of the conferences
 (`_rebuild_bookmarks_view`), where a double click joins (`_join_bookmark`) and
-the right-click menu offers Join / Auto-join (checkable) / Remove
-(`_set_bookmark_autojoin`/`_remove_bookmark`); it loads the server bookmarks on
-tab activation (`_on_roster_tab_changed` → `_load_bookmarks`). The list shows the
-name (JID only in the tooltip) and shares the roster font settings
+the right-click menu offers Join (`ok.png`) / Edit (`edit.png`) / Auto-join
+(checkable) / Remove (`_set_bookmark_autojoin`/`_remove_bookmark_confirmed`);
+it loads the server bookmarks on tab activation (`_on_roster_tab_changed` →
+`_load_bookmarks`). Below the list a toolbar of four wide (2:1) icon-only
+buttons — Join (`ok.png`), Create (`about.png`), Edit (`edit.png`) and Remove
+(`process-stop.png`) — covers the same actions; Join/Edit/Remove are enabled
+only while a bookmark is selected (`_update_bookmark_actions`). Create and Edit
+open `ui/bookmark_dialog.py::BookmarkDialog` (name / nickname / room / server /
+password / auto-join) and save via `client.save_bookmark`
+(`_save_bookmark_values`); editing to a different room address removes the old
+bookmark first, and removal always asks for confirmation
+(`_remove_bookmark_confirmed`). The list shows the name (JID only in the
+tooltip) and shares the roster font settings
 (`_apply_roster_font`); `_ZoomListWidget` gives Ctrl+wheel font zoom and clears
 the selection on a click over empty space. The Events tab
 (icon `event`) is a scaffold — a search field and an empty list (`events_empty`)

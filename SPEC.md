@@ -57,6 +57,7 @@ stanza_im/
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
 │   ├── device_test.py  — Devices self-tests (mic meter/tone/camera)
 │   ├── conference_dialog.py — Join + XEP-0030 conference browser
+│   ├── bookmark_dialog.py — Conference bookmark create/edit dialog
 │   ├── muc_config_dialog.py — XEP-0045 room management (affiliations + config)
 │   ├── hats_dialog.py       — XEP-0317 hats tab + create/assign/unassign dialogs
 │   ├── service_browser.py   — XEP-0030 service discovery browser
@@ -105,8 +106,12 @@ icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` — **Contacts**
 (existing roster content; icon `system-users.png`; active at startup), **Bookmarks**
 (icon `bookmarks.svg`; a search field plus a list of the conference bookmarks showing
 the name only, JID in the tooltip; double click joins, right-click menu
-Join / Auto-join / Remove; replaces the old menu; Ctrl+wheel font zoom and
-click-on-empty clears the selection) and **Events** (icon `event`; scaffold with
+Join / Edit / Auto-join / Remove; a toolbar of four wide (2:1) icon-only
+buttons Join / Create / Edit / Remove below the list, with Join/Edit/Remove
+enabled only for a selected bookmark; Create and Edit open
+`ui/bookmark_dialog.py::BookmarkDialog`; removal always confirms; replaces the
+old menu; Ctrl+wheel font zoom and click-on-empty clears the selection) and
+**Events** (icon `event`; scaffold with
 a search field and an empty list, plus `MainWindow._push_system_event` and a
 smooth tab-icon blink for future system events). In the `separate` layout
 Ctrl+PgUp/PgDn cycles the roster tabs while the main window is active; in
