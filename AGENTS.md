@@ -164,8 +164,8 @@ it loads the server bookmarks on tab activation (`_on_roster_tab_changed` →
 buttons — Join (`ok.png`), Create (`about.png`), Edit (`edit.png`) and Remove
 (`process-stop.png`) — covers the same actions; Join/Edit/Remove are enabled
 only while a bookmark is selected (`_update_bookmark_actions`). Create and Edit
-open `ui/bookmark_dialog.py::BookmarkDialog` (name / nickname / room / server /
-password / auto-join) and save via `client.save_bookmark`
+open `ui/bookmark_dialog.py::BookmarkDialog` (name / nickname / room / free-text
+server / password / auto-join) and save via `client.save_bookmark`
 (`_save_bookmark_values`); editing to a different room address removes the old
 bookmark first, and removal always asks for confirmation
 (`_remove_bookmark_confirmed`). The list shows the name (JID only in the

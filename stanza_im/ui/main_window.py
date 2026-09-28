@@ -88,7 +88,10 @@ class _ZoomListWidget(QtWidgets.QListWidget):
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if self.itemAt(event.position().toPoint()) is None:
+            # ``clearSelection`` alone leaves the *current* item set, so a
+            # ``currentItem()``-based lookup would keep the selection alive.
             self.clearSelection()
+            self.setCurrentItem(None)
         super().mousePressEvent(event)
 
 
@@ -672,10 +675,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 button.setEnabled(has_selection)
 
     def _selected_bookmark(self) -> dict | None:
-        item = self._bookmarks_list.currentItem()
-        if item is None:
+        items = self._bookmarks_list.selectedItems()
+        if not items:
             return None
-        return item.data(QtCore.Qt.ItemDataRole.UserRole) or None
+        return items[0].data(QtCore.Qt.ItemDataRole.UserRole) or None
 
     def _on_bookmark_join_clicked(self) -> None:
         bookmark = self._selected_bookmark()

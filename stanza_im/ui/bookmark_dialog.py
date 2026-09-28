@@ -17,6 +17,7 @@ class BookmarkDialog(QtWidgets.QDialog):
                  bookmark: dict | None = None, default_nick: str = "",
                  parent=None):
         super().__init__(parent)
+        _ = servers  # kept for caller compatibility; the field is free text
         self._bookmark = dict(bookmark or {})
         editing = bool(self._bookmark)
         self.setWindowTitle(tr("bookmark_edit_title") if editing
@@ -34,14 +35,7 @@ class BookmarkDialog(QtWidgets.QDialog):
         self._nick = QtWidgets.QLineEdit(
             str(self._bookmark.get("nick") or "") or default_nick)
         self._room = QtWidgets.QLineEdit(room)
-        self._server = QtWidgets.QComboBox()
-        self._server.setEditable(True)
-        values = list(dict.fromkeys(servers or []))
-        if server and server not in values:
-            values.insert(0, server)
-        self._server.addItems(values)
-        if server:
-            self._server.setCurrentText(server)
+        self._server = QtWidgets.QLineEdit(server)
         self._password = QtWidgets.QLineEdit(
             str(self._bookmark.get("password") or ""))
         self._password.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
@@ -70,7 +64,7 @@ class BookmarkDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
 
     def _validate(self) -> None:
-        if not self._room.text().strip() or not self._server.currentText().strip():
+        if not self._room.text().strip() or not self._server.text().strip():
             QtWidgets.QMessageBox.warning(
                 self, self.windowTitle(), tr("bookmark_room_required"))
             return
@@ -78,7 +72,7 @@ class BookmarkDialog(QtWidgets.QDialog):
 
     def collect(self) -> dict:
         room = self._room.text().strip()
-        server = self._server.currentText().strip()
+        server = self._server.text().strip()
         return {
             "jid": f"{room}@{server}" if server else room,
             "name": self._name.text().strip(),

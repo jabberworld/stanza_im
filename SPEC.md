@@ -107,9 +107,11 @@ icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` — **Contacts**
 (icon `bookmarks.svg`; a search field plus a list of the conference bookmarks showing
 the name only, JID in the tooltip; double click joins, right-click menu
 Join / Edit / Auto-join / Remove; a toolbar of four wide (2:1) icon-only
-buttons Join / Create / Edit / Remove below the list, with Join/Edit/Remove
-enabled only for a selected bookmark; Create and Edit open
-`ui/bookmark_dialog.py::BookmarkDialog`; removal always confirms; replaces the
+buttons Join / Create / Edit / Remove below the list, sized like the roster
+status bar (same height, full width), with Join/Edit/Remove enabled only for a
+selected bookmark; Create and Edit open
+`ui/bookmark_dialog.py::BookmarkDialog` (room + free-text server);
+removal always confirms; replaces the
 old menu; Ctrl+wheel font zoom and click-on-empty clears the selection) and
 **Events** (icon `event`; scaffold with
 a search field and an empty list, plus `MainWindow._push_system_event` and a

@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui.bookmark_dialog import BookmarkDialog
@@ -37,7 +37,7 @@ def check(name, cond):
 dlg = BookmarkDialog(["conf.example"], default_nick="me")
 dlg._name.setText("Room")
 dlg._room.setText("chat")
-dlg._server.setCurrentText("conf.example")
+dlg._server.setText("conf.example")
 dlg._password.setText("pw")
 dlg._autojoin.setChecked(True)
 collected = dlg.collect()
@@ -51,7 +51,7 @@ bookmark = {"jid": "old@conf.example", "name": "Old", "nick": "nick",
             "password": "secret", "autojoin": True}
 dlg2 = BookmarkDialog(["conf.example"], bookmark=bookmark)
 check("edit mode splits the JID",
-      dlg2._room.text() == "old" and dlg2._server.currentText() == "conf.example")
+      dlg2._room.text() == "old" and dlg2._server.text() == "conf.example")
 check("edit mode preloads the fields",
       dlg2._name.text() == "Old" and dlg2._nick.text() == "nick"
       and dlg2._password.text() == "secret"
@@ -59,6 +59,9 @@ check("edit mode preloads the fields",
 _fresh = BookmarkDialog([])
 check("new bookmark defaults autojoin off",
       _fresh._autojoin.isChecked() is False)
+check("the server field is a plain line edit",
+      isinstance(_fresh._server, QtWidgets.QLineEdit)
+      and _fresh._server.text() == "")
 _fresh.deleteLater()
 
 
@@ -127,6 +130,26 @@ check("selection enables join/edit/delete",
       buttons["join"].isEnabled() and buttons["edit"].isEnabled()
       and buttons["del"].isEnabled())
 
+# A click over empty space must clear the selection (and disable the buttons).
+win.show()
+app.processEvents()
+win._bookmarks_list.setCurrentRow(0)
+app.processEvents()
+_rect = win._bookmarks_list.rect()
+_pos = QtCore.QPointF(5, _rect.bottom() - 2)
+_event = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonPress, _pos, _pos,
+    QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+win._bookmarks_list.mousePressEvent(_event)
+app.processEvents()
+check("an empty-area click clears the selection",
+      win._bookmarks_list.currentRow() == -1
+      and not win._bookmarks_list.selectedItems())
+check("an empty-area click disables join/edit/delete",
+      not buttons["join"].isEnabled() and not buttons["edit"].isEnabled()
+      and not buttons["del"].isEnabled())
+
 # 3. Create/Edit call save_bookmark ------------------------------------------
 win._save_bookmark_values({"jid": "new@conf.example", "name": "New",
                            "nick": "me", "password": "p", "autojoin": True})
@@ -183,7 +206,7 @@ try:
     # Simulate the dialog returning a new JID.
     dlg3 = BookmarkDialog(["conf.example"], bookmark=bookmark)
     dlg3._room.setText("renamed")
-    dlg3._server.setCurrentText("conf.example")
+    dlg3._server.setText("conf.example")
     data = dlg3.collect()
     old_room = bookmark.get("jid", "")
     new_room = data["jid"]
