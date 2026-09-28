@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.ui import tooltip as tooltip_mod
 from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
 from stanza_im.ui.roster_style import RosterStyle, GroupItem, UserItem
@@ -37,6 +38,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._search_text: str = ""
         self._filter: str = ""
         self._show_offline = True
+        self._sort_by_status = True
 
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -143,6 +145,14 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._recalc_heights()
         self.update()
 
+    def set_sort_by_status(self, value: bool) -> None:
+        """Sort contacts by presence first (chat→online→away→xa→dnd→offline)
+        instead of alphabetically inside each group."""
+        self._sort_by_status = value
+        self._rebuild_sorted()
+        self._recalc_heights()
+        self.update()
+
     def sort_and_update(self) -> None:
         self._rebuild_sorted()
         self._recalc_heights()
@@ -154,8 +164,17 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._sorted_users.clear()
         for user in self._users:
             self._sorted_users.setdefault(user.group, []).append(user)
+        if self._sort_by_status:
+            def _key(user: UserItem):
+                # presence rank first, then the name alphabetically
+                status = user.status or "online"
+                return (SHOW_ORDER.get(status, SHOW_ORDER["offline"]),
+                        user.name.casefold())
+        else:
+            def _key(user: UserItem):
+                return user.name.casefold()
         for group in self._sorted_users:
-            self._sorted_users[group].sort(key=lambda u: u.name.casefold())
+            self._sorted_users[group].sort(key=_key)
 
     def _visible_items(self) -> list[tuple[str, GroupItem | UserItem]]:
         """Return the list of items currently visible (respecting group

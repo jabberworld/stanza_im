@@ -503,7 +503,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.set_tooltip_provider(self._roster_tooltip)
         self._roster.roster_font_zoom_requested.connect(
             self._on_roster_font_zoom)
-        self._show_offline_action.toggled.connect(self._roster.set_show_offline)
+        self._roster.set_show_offline(self._show_offline_action.isChecked())
+        self._roster.set_sort_by_status(
+            self._sort_by_status_action.isChecked())
         self._roster.contact_double_clicked.connect(self._on_contact_open)
         self._roster.contact_context_menu.connect(self._on_contact_context)
         scroll = QtWidgets.QScrollArea()
@@ -1058,10 +1060,21 @@ class MainWindow(QtWidgets.QMainWindow):
         quit_act.triggered.connect(self._quit)
 
         view_menu = menubar.addMenu(tr("menu_view"))
+        sort_by_status = view_menu.addAction(
+            self._menu_icon("jabber-online.svg"),
+            tr("menu_sort_by_status"))
+        sort_by_status.setCheckable(True)
+        sort_by_status.setChecked(
+            bool(getattr(self._config.appearance, "roster_sort_by_status",
+                         True)))
+        sort_by_status.toggled.connect(self._on_sort_by_status_toggled)
+        self._sort_by_status_action = sort_by_status
         show_offline = view_menu.addAction(self._menu_icon("aim-offline.png"),
                                            tr("menu_show_offline"))
         show_offline.setCheckable(True)
-        show_offline.setChecked(True)
+        show_offline.setChecked(
+            bool(getattr(self._config.appearance, "roster_show_offline", True)))
+        show_offline.toggled.connect(self._on_show_offline_toggled)
         self._show_offline_action = show_offline
         show_transports = view_menu.addAction(self._menu_icon("transports.png"),
                                               tr("menu_show_transports"))
@@ -4452,6 +4465,16 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg = getattr(self, "_prefs_dialog", None)
         if dlg is not None and dlg.isVisible():
             dlg.sync_font_size("roster_font", int(size))
+
+    def _on_sort_by_status_toggled(self, checked: bool) -> None:
+        self._config.appearance.roster_sort_by_status = bool(checked)
+        self._config.save()
+        self._roster.set_sort_by_status(bool(checked))
+
+    def _on_show_offline_toggled(self, checked: bool) -> None:
+        self._config.appearance.roster_show_offline = bool(checked)
+        self._config.save()
+        self._roster.set_show_offline(bool(checked))
 
     def _on_input_font_zoom(self, size: int):
         size = int(size)

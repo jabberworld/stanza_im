@@ -75,6 +75,7 @@ STRINGS = {
     "xml_console_invalid_xml": "Введённый XML не является корректным.",
     "xml_console_send_failed": "Не удалось отправить XML: {error}",
     "menu_show_offline": "Показывать оффлайн-контакты",
+    "menu_sort_by_status": "Сортировать по статусу",
     "menu_show_transports": "Показывать транспорты",
     # Login
     "login_title": "Jabber ID:",

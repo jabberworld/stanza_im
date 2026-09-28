@@ -412,6 +412,12 @@ and allows full visual control (avatars, status icons, unread badges, mood icons
 flat lists and sorted dicts. Hit-testing iterates items by accumulated Y offset.
 Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
 used by `MainWindow` for the conferences group) which always come last.
+Contacts sort alphabetically inside a group by default; `set_sort_by_status`
+(the View menu's «Сортировать по статусу», default on) instead ranks them by
+presence — chat («free for chat») → online → away → xa → dnd → offline — with
+the name as the tie-break (both flags live in `appearance.roster_sort_by_status`
+/ `roster_show_offline` and are applied/toggled from the View menu, which also
+drives `set_show_offline`).
 
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.

@@ -75,6 +75,7 @@ STRINGS = {
     "xml_console_invalid_xml": "The entered XML is not well-formed.",
     "xml_console_send_failed": "Could not send the XML: {error}",
     "menu_show_offline": "Show &offline contacts",
+    "menu_sort_by_status": "Sort by status",
     "menu_show_transports": "Show &transports",
     # Login
     "login_title": "Jabber ID:",
