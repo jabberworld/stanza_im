@@ -875,7 +875,13 @@ resource, no `muc#user`) creates a pseudo roster item inside `client_roster`.
 `JabberClient._known_rooms` (filled on `join_muc` and any groupchat presence)
 is filtered out in `get_roster_snapshot`/`get_roster_state` and in
 `_seed_roster_cache`, so such rooms never appear as contacts nor get written to
-the cache; `_on_presence` also ignores them. Diagnostic `ROSTER[…]` DEBUG lines
+the cache; `_on_presence` also ignores them. `_on_presence` is subscribed to the
+generic `presence` event (not just `presence_available`): slixmpp folds a bare
+`<show>` value into the presence `type`, so a transport/RSS presence with
+`<show>away</show>` and no `type` arrives as `presence_away`; the handler treats
+show-based types as available (with that show) and filters out the service types
+(`subscribe`/`subscribed`/`unsubscribe`/`unsubscribed`/`probe`/`error`).
+Diagnostic `ROSTER[…]` DEBUG lines
 trace the roster end to end (`ROSTER[update]` in `_on_roster_update`,
 `ROSTER[seed]`/`[save]`/`[state]` in the cache path, `ROSTER[cache]` in
 `roster_cache.py`, `ROSTER[contact]` in `get_contact`, `ROSTER[presence]` in

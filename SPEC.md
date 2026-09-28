@@ -559,7 +559,13 @@ The XMPP client emits diff-based roster events:
 | `roster_item_removed(jid)` | Contact removed |
 
 Presence is aggregated per **bare JID** across resources — best `show` wins
-via `SHOW_ORDER`; empty/`available` normalized to `"online"`.
+via `SHOW_ORDER`; empty/`available` normalized to `"online"`. `_on_presence`
+listens on the generic `presence` event rather than `presence_available`:
+slixmpp folds a bare `<show>` value into the presence `type`, so a transport
+presence carrying `<show>away</show>` without a `type` arrives as
+`presence_away`; such show-based types are handled as available, while the
+service types (`subscribe`/`subscribed`/`unsubscribe`/`unsubscribed`/`probe`/
+`error`) are ignored.
 
 The roster is cached across sessions for **XEP-0237 roster versioning**
 (`core/roster_cache.py` → `$XDG_DATA_HOME/stanza-im/roster/<account>.json`,

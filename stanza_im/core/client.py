@@ -1060,8 +1060,11 @@ class JabberClient:
         self.xmpp.add_event_handler("session_start", self._on_session_start)
         self.xmpp.add_event_handler("disco_info", self._on_disco_info)
         self.xmpp.add_event_handler("message", self._on_message)
-        self.xmpp.add_event_handler("presence_available", self._on_presence)
-        self.xmpp.add_event_handler("presence_unavailable", self._on_presence)
+        # slixmpp folds a bare <show> value into the presence ``type`` (so a
+        # transport presence with ``<show>away</show>`` but no ``type`` emits
+        # ``presence_away``, not ``presence_available``).  Subscribe to the
+        # generic ``presence`` event instead and filter in the handler.
+        self.xmpp.add_event_handler("presence", self._on_presence)
         self.xmpp.add_event_handler("presence_subscribed", self._on_subscribed)
         self.xmpp.add_event_handler("presence_unsubscribed", self._on_unsubscribed)
         self.xmpp.add_event_handler("presence_subscribe",
@@ -4850,6 +4853,13 @@ class JabberClient:
         self.emit("muc_subject_changed", room, list(subjects))
 
     def _on_presence(self, pres) -> None:
+        # Subscribed to the generic ``presence`` event, so it also fires for
+        # ``subscribe``/``subscribed``/``probe``/``error`` (handled elsewhere)
+        # and for show-only types; filter those out first.
+        ptype = str(pres["type"])
+        if ptype in ("subscribe", "subscribed", "unsubscribe", "unsubscribed",
+                     "probe", "error"):
+            return
         # MUC occupant presence is handled by ``_on_groupchat_presence``; the
         # generic handler also runs for it, and aggregating it here would give
         # a room the caps/client icon of a random participant.
@@ -4863,16 +4873,22 @@ class JabberClient:
         # pseudo-entry or gets PEP subscriptions.  (slixmpp itself would add a
         # pseudo roster item via ``basexmpp._handle_available``.)
         logger.debug("ROSTER[presence] frm=%s bare=%s res=%r type=%s",
-                     frm, bare, resource, str(pres["type"]))
+                     frm, bare, resource, ptype)
         if not resource and bare in self._known_rooms:
             logger.debug("ROSTER[presence] ignored room presence %s", bare)
             return
-        ptype = str(pres["type"])
+        # slixmpp maps a bare <show> value into the ``type`` (chat/away/xa/dnd);
+        # treat those as an available presence with that show.
         show = str(pres.get("show", ""))
-        if ptype != "available":
+        if ptype in ("chat", "away", "xa", "dnd"):
+            if not show:
+                show = ptype
+            ptype = "available"
+        if ptype == "available":
+            if show in ("", "available", "None"):
+                show = "online"
+        else:
             show = "offline"
-        elif show in ("", "available", "None"):
-            show = "online"
         status = str(pres.get("status", ""))
         try:
             priority = int(pres.get("priority", 0) or 0)
