@@ -1497,7 +1497,10 @@ popups); the MUC participant sidebar gets `ChatWidget.set_participant_font`
 `ChatWindow._participant_font`); the MUC subject header («Тема:» + the topic
 text, not the room name) gets `ChatWidget.set_subject_font`
 (`appearance.muc_subject_font`/`_size`, hosted by `ChatWindow.set_subject_font`,
-remembered as `_subject_font`). In the preferences «Шрифты» tab, empty/zero
+remembered as `_subject_font`; `_SubjectButton`/`_SubjectEdit` use
+`FontZoomMixin`, so Ctrl+wheel over the header emits
+`subject_font_zoom_requested` → `MainWindow._on_subject_font_zoom` persists and
+applies it). In the preferences «Шрифты» tab, empty/zero
 values show the *real* font Qt would use instead: the family combo's first
 entry reads «По умолчанию — <family>» (for nicknames following the chat
 font live) and the size spin shows «<size> pt (по умолчанию)» via

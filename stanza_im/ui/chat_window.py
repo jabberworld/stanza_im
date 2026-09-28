@@ -199,6 +199,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.input_font_zoom_requested.connect(self.input_font_zoom_requested)
         widget.participant_font_zoom_requested.connect(
             self.participant_font_zoom_requested)
+        widget.subject_font_zoom_requested.connect(
+            self.subject_font_zoom_requested)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
@@ -271,6 +273,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.input_font_zoom_requested.connect(self.input_font_zoom_requested)
         widget.participant_font_zoom_requested.connect(
             self.participant_font_zoom_requested)
+        widget.subject_font_zoom_requested.connect(
+            self.subject_font_zoom_requested)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         widget.media_view_requested.connect(self.media_view_requested)
         widget.media_save_requested.connect(self.media_save_requested)
@@ -655,6 +659,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
     input_font_zoom_requested = QtCore.pyqtSignal(int)         # new size (pt)
     participant_font_zoom_requested = QtCore.pyqtSignal(int)   # new size (pt)
+    subject_font_zoom_requested = QtCore.pyqtSignal(int)       # new size (pt)
     text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)              # url

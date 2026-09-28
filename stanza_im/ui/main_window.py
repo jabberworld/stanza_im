@@ -306,6 +306,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_input_font_zoom)
         self._chat_window.participant_font_zoom_requested.connect(
             self._on_participant_font_zoom)
+        self._chat_window.subject_font_zoom_requested.connect(
+            self._on_subject_font_zoom)
         self._chat_window.text_scale_changed.connect(
             self._on_text_scale_changed)
         self._chat_window.window_closed.connect(self._on_chat_window_closed)
@@ -4474,6 +4476,18 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg = getattr(self, "_prefs_dialog", None)
         if dlg is not None and dlg.isVisible():
             dlg.sync_font_size("participant_font", size)
+
+    def _on_subject_font_zoom(self, size: int):
+        size = int(size)
+        family = getattr(self._config.appearance, "muc_subject_font", "") or ""
+        self._config.appearance.muc_subject_font_size = size
+        self._config.save()
+        # Apply to every open MUC tab and remember it for new ones.
+        self._chat_window.set_subject_font(family, size)
+        self._applied_subject_font = (family, size)
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.sync_font_size("muc_subject_font", size)
 
     def _on_text_scale_changed(self, jid: str, factor: float):
         try:

@@ -202,6 +202,10 @@ class _ChatInput(FontZoomMixin, QtWidgets.QPlainTextEdit):
     """The message input; Ctrl+wheel changes its font size."""
 
 
+class _SubjectButton(FontZoomMixin, QtWidgets.QToolButton):
+    """The MUC "Subject:" button; Ctrl+wheel changes the subject font size."""
+
+
 class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
     """MUC participant sidebar list.
 
@@ -273,11 +277,12 @@ class _InputHandle(QtWidgets.QFrame):
         self._press_y = None
 
 
-class _SubjectEdit(QtWidgets.QLineEdit):
+class _SubjectEdit(FontZoomMixin, QtWidgets.QLineEdit):
     """Read-only MUC subject field with the app's rich tooltip.
 
     The native QToolTip renders as a black block over the WebEngine surface,
     so hover/leave are forwarded to the custom tooltip popup instead.
+    Ctrl+wheel changes the subject-header font size.
     """
 
     def __init__(self, text, parent=None, on_hover=None, on_leave=None):
@@ -398,6 +403,7 @@ class ChatWidget(QtWidgets.QWidget):
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
     input_font_zoom_requested = QtCore.pyqtSignal(int)   # new size (pt)
     participant_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
+    subject_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
     media_save_requested = QtCore.pyqtSignal(str)             # url
@@ -492,13 +498,15 @@ class ChatWidget(QtWidgets.QWidget):
         header.addWidget(self._name_label)
         header.addWidget(self._status_label)
 
-        self._subject_btn = QtWidgets.QToolButton(self)
+        self._subject_btn = _SubjectButton(self)
         self._subject_btn.setText(tr("muc_subject_label"))
         self._subject_btn.setAutoRaise(True)
         self._subject_btn.setToolTip(tr("muc_set_subject_title"))
         self._subject_btn.setVisible(self.is_muc)
         self._subject_btn.clicked.connect(
             lambda: self.set_subject_requested.emit(self.jid))
+        self._subject_btn.font_zoom_requested.connect(
+            self._on_subject_font_zoom)
         header.addWidget(self._subject_btn)
 
         self._subject_edit = _SubjectEdit(
@@ -506,6 +514,8 @@ class ChatWidget(QtWidgets.QWidget):
             on_hover=self._subject_tooltip,
             on_leave=tooltip_mod.hide)
         self._subject_edit.setReadOnly(True)
+        self._subject_edit.font_zoom_requested.connect(
+            self._on_subject_font_zoom)
         self._subject_edit.setStyleSheet(
             "border: none; background: transparent; padding-left: 2px;")
         self._subject_edit.setMinimumWidth(120)
@@ -2455,6 +2465,14 @@ class ChatWidget(QtWidgets.QWidget):
             self._subject_btn.setFont(base)
         if getattr(self, "_subject_edit", None) is not None:
             self._subject_edit.setFont(base)
+
+    def _on_subject_font_zoom(self, size: int) -> None:
+        """Ctrl+wheel over the subject header: change only the size."""
+        family, old = self._subject_font
+        if int(size) == old:
+            return
+        self.set_subject_font(family, int(size))
+        self.subject_font_zoom_requested.emit(int(size))
 
     def set_input_font(self, family: str = "", size: int = 0):
         """Set the message input font (empty = application font)."""

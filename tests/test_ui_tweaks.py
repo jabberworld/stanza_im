@@ -97,6 +97,32 @@ cw.set_subject_font("DejaVu Sans", 17)
 check("subject font applies to the label and the field",
       cw._subject_btn.font().pointSize() == 17
       and cw._subject_edit.font().pointSize() == 17)
+
+from PyQt6 import QtCore, QtGui  # noqa: E402
+
+
+def _wheel(delta=120, ctrl=True):
+    return QtGui.QWheelEvent(
+        QtCore.QPointF(5, 5), QtCore.QPointF(5, 5),
+        QtCore.QPoint(0, 0), QtCore.QPoint(0, delta),
+        QtCore.Qt.MouseButton.NoButton,
+        (QtCore.Qt.KeyboardModifier.ControlModifier if ctrl
+         else QtCore.Qt.KeyboardModifier.NoModifier),
+        QtCore.Qt.ScrollPhase.NoScrollPhase, False)
+
+
+zoomed = []
+cw.subject_font_zoom_requested.connect(zoomed.append)
+cw._subject_edit.wheelEvent(_wheel())
+check("Ctrl+wheel on the subject field zoom requests the new size",
+      zoomed == [18] and cw._subject_edit.font().pointSize() == 18)
+zoomed.clear()
+cw._subject_btn.wheelEvent(_wheel())
+check("Ctrl+wheel on the subject button zoom requests the new size",
+      zoomed == [19])
+zoomed.clear()
+cw._subject_edit.wheelEvent(_wheel(ctrl=False))
+check("a plain wheel over the subject does not zoom", zoomed == [])
 cw.detach()
 
 print()
