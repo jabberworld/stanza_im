@@ -166,24 +166,31 @@ approve.click()
 app.processEvents()
 check("Approve calls the client",
       win._client.approved == ["rss@transport"])
-check("the row is removed and the placeholder returns",
+check("the row stays after approving",
       win._events_list.count() == 1
-      and win._events_list.itemWidget(win._events_list.item(0)) is None)
+      and isinstance(win._events_list.itemWidget(win._events_list.item(0)),
+                     _SubscriptionRequestRow))
+check("the approved row shows the result and hides the buttons",
+      row._approve.isVisible() is False
+      and row._result.text() == "Approved")
 
 win._on_subscription_request("spam@example")
 app.processEvents()
-row = win._events_list.itemWidget(win._events_list.item(0))
+row = win._events_list.itemWidget(win._events_list.item(1))
 reject = next(b for b in row.findChildren(QtWidgets.QPushButton)
               if b.text() == "Reject")
 reject.click()
 app.processEvents()
 check("Reject calls the client",
       win._client.rejected == ["spam@example"])
+check("the rejected row shows the result",
+      row._result.text() == "Rejected")
 
 win._on_subscription_cancelled("bob@example")
 app.processEvents()
+_last = win._events_list.item(win._events_list.count() - 1)
 check("unsubscribed shows an info event",
-      "bob@example" in win._events_list.item(0).text())
+      "bob@example" in _last.text())
 win.close()
 
 print()

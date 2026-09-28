@@ -118,17 +118,26 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
             layout.addWidget(QtWidgets.QLabel(tr("event_groups",
                                                  groups=", ".join(groups))))
 
-        buttons = QtWidgets.QHBoxLayout()
-        approve = QtWidgets.QPushButton(tr("event_approve"), self)
-        approve.setIcon(QtGui.QIcon(find_icon("ok.png")))
-        approve.clicked.connect(lambda: self.approved.emit(self.jid))
-        reject = QtWidgets.QPushButton(tr("event_deny"), self)
-        reject.setIcon(QtGui.QIcon(find_icon("process-stop.png")))
-        reject.clicked.connect(lambda: self.rejected.emit(self.jid))
-        buttons.addWidget(approve)
-        buttons.addWidget(reject)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
+        self._buttons = QtWidgets.QHBoxLayout()
+        self._approve = QtWidgets.QPushButton(tr("event_approve"), self)
+        self._approve.setIcon(QtGui.QIcon(find_icon("ok.png")))
+        self._approve.clicked.connect(lambda: self.approved.emit(self.jid))
+        self._reject = QtWidgets.QPushButton(tr("event_deny"), self)
+        self._reject.setIcon(QtGui.QIcon(find_icon("process-stop.png")))
+        self._reject.clicked.connect(lambda: self.rejected.emit(self.jid))
+        self._buttons.addWidget(self._approve)
+        self._buttons.addWidget(self._reject)
+        self._buttons.addStretch(1)
+        layout.addLayout(self._buttons)
+        self._result = QtWidgets.QLabel("", self)
+        layout.addWidget(self._result)
+
+    def mark(self, approved: bool) -> None:
+        """Show the decision in place of the buttons (the row stays)."""
+        self._approve.setVisible(False)
+        self._reject.setVisible(False)
+        self._result.setText(tr("event_approved") if approved
+                             else tr("event_rejected"))
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -548,7 +557,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster_tabs.setDrawBase(False)
         icons = {
             "roster": self._tab_icon("system-users.png"),
-            "bookmarks": self._tab_icon("muc.png"),
+            "bookmarks": self._tab_icon("bookmarks.svg"),
             "events": self._tab_icon("event.svg"),
         }
         tips = {
@@ -689,21 +698,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_subscription_approved(self, jid: str) -> None:
         if self._client:
             self._client.approve_subscription(jid)
-        self._remove_event_for_jid(jid)
+        self._mark_event_for_jid(jid, approved=True)
 
     def _on_subscription_rejected(self, jid: str) -> None:
         if self._client:
             self._client.reject_subscription(jid)
-        self._remove_event_for_jid(jid)
+        self._mark_event_for_jid(jid, approved=False)
 
-    def _remove_event_for_jid(self, jid: str) -> None:
+    def _mark_event_for_jid(self, jid: str, approved: bool) -> None:
+        """Record the decision on the request row, keeping it in the list.
+
+        The Events list is kept in memory (and lost on restart) so the search
+        box stays useful; the row shows the result instead of disappearing.
+        """
         for i in range(self._events_list.count()):
             item = self._events_list.item(i)
             widget = self._events_list.itemWidget(item)
             if isinstance(widget, _SubscriptionRequestRow) and widget.jid == jid:
-                self._events_list.takeItem(i)
+                widget.mark(approved)
                 break
-        self._ensure_events_placeholder()
 
     def _on_subscription_cancelled(self, jid: str) -> None:
         name = ""
@@ -3522,8 +3535,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 tr("ctx_create_group"),
                 lambda checked=False: defer(lambda: self._create_contact_group(jid)))
             if self._client:
-                menu.addAction(self._menu_icon("reload.png"), tr("ctx_resend_auth"),
-                               lambda: self._client.resend_subscription(jid))
+                self._build_subscription_menu(menu, jid.split("/", 1)[0])
             if getattr(self._client, "supports_blocking", lambda: False)():
                 menu.addSeparator()
                 bare = jid.split("/", 1)[0]
@@ -3551,6 +3563,38 @@ class MainWindow(QtWidgets.QMainWindow):
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_remove_contact"), lambda: self._on_remove_contact(jid))
         menu.exec(pos)
+
+    def _build_subscription_menu(self, parent_menu, jid: str) -> None:
+        """Add a subscription submenu reflecting the current subscription."""
+        client = self._client
+        if client is None:
+            return
+        sub = client.subscription(jid)
+        ask = ""
+        try:
+            item = client.xmpp.client_roster.get(jid) or {}
+            ask = str(item.get("ask") or "")
+        except Exception:  # noqa: BLE001 - presentation only
+            ask = ""
+        submenu = parent_menu.addMenu(self._menu_icon("reload.png"),
+                                      tr("ctx_subscription"))
+        showed = False
+        if ask == "subscribe":
+            submenu.addAction(self._menu_icon("arrow-down.svg"),
+                              tr("ctx_subscription_send"),
+                              lambda: client.send_subscription(jid))
+            showed = True
+        if sub in ("none", "from", "") and ask != "subscribe":
+            submenu.addAction(self._menu_icon("arrow-up.svg"),
+                              tr("ctx_subscription_request"),
+                              lambda: client.request_subscription(jid))
+            showed = True
+        if sub in ("to", "both"):
+            submenu.addAction(self._menu_icon("remove.svg"),
+                              tr("ctx_subscription_remove"),
+                              lambda: client.remove_subscription(jid))
+            showed = True
+        submenu.setEnabled(showed)
 
     def _pick_and_send_file(self, jid: str, method: str):
         paths, _filter = QtWidgets.QFileDialog.getOpenFileNames(self)

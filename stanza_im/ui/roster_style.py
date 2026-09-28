@@ -183,6 +183,7 @@ class RosterStyle:
         """Draw a contact row: status icon (left), name, status message and,
         when available, the vCard avatar (right)."""
         painter.save()
+        base_font = painter.font()
 
         pal = self._palette()
 
@@ -252,6 +253,10 @@ class RosterStyle:
             painter.drawRoundedRect(badge_rect, 7, 7)
             painter.drawText(badge_rect, QtCore.Qt.AlignmentFlag.AlignCenter, badge_text)
             avail_right -= badge_w + 6
+            # Restore the widget font: otherwise the badge's small bold font
+            # would be used for the name/status (the roster font settings
+            # would be ignored for contacts with unread messages).
+            painter.setFont(base_font)
 
         # PEP activity/mood icons: drawn between the text and the badge/avatar
         # (visible order: name, mood, activity, badge, avatar).

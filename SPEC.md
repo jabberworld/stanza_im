@@ -103,7 +103,7 @@ fallback.
 The roster window is a tabbed host (`MainWindow._build_roster_tabs`): an
 icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` — **Contacts**
 (existing roster content; icon `system-users.png`; active at startup), **Bookmarks**
-(icon `muc.png`; a search field plus a list of the conference bookmarks showing
+(icon `bookmarks.svg`; a search field plus a list of the conference bookmarks showing
 the name only, JID in the tooltip; double click joins, right-click menu
 Join / Auto-join / Remove; replaces the old menu; Ctrl+wheel font zoom and
 click-on-empty clears the selection) and **Events** (icon `event`; scaffold with
@@ -653,7 +653,9 @@ bold group name, online/total count "(3/7)" on the right.
 
 **User item**: Status icon (16×16) + avatar placeholder (24×24) + name (bold) +
 status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect)
-+ PEP mood/activity icons (16×16 each). The icons appear between the name and the
++ PEP mood/activity icons (16×16 each). The name/status are drawn with the
++roster font (the badge sets a small bold font temporarily and restores it, so
++its size never leaks into the contact row). The icons appear between the name and the
 badge (visible order: name, mood, activity, badge, avatar) when the contact has a
 current XEP-0107 mood / XEP-0108 activity (`UserItem.mood`/`activity`, fed by
 `MainWindow._on_contact_pep_updated` and seeded in `_add_roster_item` from
@@ -775,6 +777,14 @@ Future: hot-swappable styles from `resources/rosterstyles/`.
 - An incoming `unsubscribe` is auto-answered with `unsubscribed` and surfaced as
   an event; an incoming `unsubscribed` emits `subscription_cancelled(jid)`.
   Handlers log `SUB[...]`.
+- The Events list is kept in memory (lost on restart) and a decision does **not**
+  remove the row: `_mark_event_for_jid` hides the buttons and shows
+  «Разрешено»/«Отклонено» so the search box stays useful.
+- The contact context menu carries a subscription submenu
+  (`_build_subscription_menu`) built from the current subscription and the
+  roster `ask`: Request subscription (`subscribe`, `arrow-up.svg`), Send
+  subscription (`subscribed`, `arrow-down.svg`, only while `ask='subscribe'`)
+  and Remove subscription (`unsubscribe`, `remove.svg`).
 
 ## 8. Chat Window (`ui/chat_window.py`)
 

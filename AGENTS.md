@@ -154,7 +154,7 @@ icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` with three tabs 
 **Contacts** (the whole existing roster content), **Bookmarks** and **Events**.
 The Contacts tab (icon `system-users.png`) is active at startup and is the
 `self._roster_page` placed in the stack/`QSplitter` (the `unified` layout wraps
-only this left part). The Bookmarks tab (icon `muc.png`, like "Join conference")
+only this left part). The Bookmarks tab (icon `bookmarks.svg`)
 replaces the old menu: a search field plus a `QListWidget` of the conferences
 (`_rebuild_bookmarks_view`), where a double click joins (`_join_bookmark`) and
 the right-click menu offers Join / Auto-join (checkable) / Remove
@@ -901,7 +901,16 @@ and, when `to` is still missing, a `subscribe` too (so a transport gets `both`);
 `reject_subscription` sends `unsubscribed`. An incoming `unsubscribe` is
 auto-answered with `unsubscribed` and surfaced as an event, and an incoming
 `unsubscribed` emits `subscription_cancelled(jid)` (an informational event).
-The handlers log `SUB[...]`. [`tests/test_subscriptions.py`]
+The Events list is kept **in memory** (lost on restart): a decision does not
+remove the row — `_mark_event_for_jid` calls `_SubscriptionRequestRow.mark`,
+which hides the buttons and shows «Разрешено»/«Отклонено», so the search box
+stays useful. The contact context menu carries a subscription **submenu**
+(`_build_subscription_menu`, icon `reload.png`) built from the current
+subscription and the roster `ask`: «Запросить подписку» (`arrow-up.svg`,
+`subscribe`) for `none`/`from`, «Отправить подписку» (`arrow-down.svg`,
+`subscribed`) while `ask='subscribe'`, «Удалить подписку» (`remove.svg`,
+`unsubscribe`) for `to`/`both`. The handlers log `SUB[...]`.
+[`tests/test_subscriptions.py`]
 
 Message Carbons (XEP-0280, `connection.message_carbons`, default on) are enabled
 after initial presence; forwarded 1:1 copies from other of our resources are

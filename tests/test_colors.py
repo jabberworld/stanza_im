@@ -108,6 +108,28 @@ roster = RosterWidget()
 roster.set_style(style)
 check("paint uses style colors", roster._style is style)
 
+# The unread badge must not leak its small bold font into the contact row
+# (regression: the badge did not restore the widget font).
+from stanza_im.ui.roster_style import UserItem  # noqa: E402
+from PyQt6 import QtGui as _QtGui, QtCore as _QtCore  # noqa: E402
+
+_pixmap = _QtGui.QPixmap(200, 30)
+_pixmap.fill(_QtCore.Qt.GlobalColor.white)
+_painter = _QtGui.QPainter(_pixmap)
+_base = _QtGui.QFont("DejaVu Sans")
+_base.setPointSize(14)
+_painter.setFont(_base)
+_style = RosterStyle()
+_style.set_options(False, False, False, False)  # no avatars/icons to draw
+_style.paint_user(
+    _painter,
+    UserItem(jid="a@b", name="Alice", group="G", status="online",
+             status_message="", icon_key="online", unread_count=3),
+    _QtCore.QRect(0, 0, 200, 30), False)
+check("unread badge does not change the row font",
+      _painter.font().pointSize() == 14)
+_painter.end()
+
 trailing = RosterWidget()
 trailing.set_trailing_groups({"Конференции"})
 trailing.add_group("Work")

@@ -3724,6 +3724,27 @@ class JabberClient:
             pto=jid, pfrom=self._full_jid, ptype="subscribe"
         )
 
+    def request_subscription(self, jid: str) -> None:
+        """Ask *jid* for our presence subscription (``subscribe``)."""
+        self.xmpp.send_presence_subscription(
+            pto=jid, pfrom=self._full_jid, ptype="subscribe"
+        )
+        logger.info("SUB[subscribe] sent 'subscribe' to %s", jid)
+
+    def send_subscription(self, jid: str) -> None:
+        """Grant *jid* our presence subscription (``subscribed``)."""
+        self.xmpp.send_presence_subscription(
+            pto=jid, pfrom=self._full_jid, ptype="subscribed"
+        )
+        logger.info("SUB[subscribed] sent 'subscribed' to %s", jid)
+
+    def remove_subscription(self, jid: str) -> None:
+        """Drop our presence subscription to *jid* (``unsubscribe``)."""
+        self.xmpp.send_presence_subscription(
+            pto=jid, pfrom=self._full_jid, ptype="unsubscribe"
+        )
+        logger.info("SUB[unsubscribe] sent 'unsubscribe' to %s", jid)
+
     def send_file(self, jid: str, filepath: str) -> None:
         """Send a file over Jingle SOCKS5 with IBB fallback (XEP-0234)."""
         self._start_task(self.send_file_p2p(jid, filepath, "p2p"))
