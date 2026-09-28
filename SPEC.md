@@ -75,6 +75,7 @@ stanza_im/
 │   ├── blocked_contacts_dialog.py — XEP-0191 blocklist editor
 │   ├── report_dialog.py     — XEP-0377 spam/abuse report dialog
 │   ├── xml_console.py       — Raw XML console (filtered, coloured)
+│   ├── pep_manager_dialog.py — PEP node manager (list/open/config/delete)
 │   ├── tray.py         — System tray icon
 │   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
 │   └── icons.py        — LRU icon cache
@@ -430,6 +431,25 @@ and gives an `<iq>` without an `id` one before sending. The buffer is capped at
 5000 entries. Incoming non-stanza stream elements (SASL
 challenge/success/proceed, `<stream:features>`) are not part of the raw dump and
 therefore do not appear.
+
+### 5.4 PEP Manager (`ui/pep_manager_dialog.py`)
+
+Actions → «PEP-менеджер» (right after «XML-консоль», same icon) opens a
+non-modal `PepManagerDialog` with a `QStackedWidget`:
+
+- **List**: `client.pep_list_nodes()` queries `disco#items` on the account's
+  bare JID; items without a `node` (the account's resources) are skipped. The
+  list shows node + name; the four buttons — Refresh (`reload.png`), Delete
+  (`process-stop.png`), Settings (`edit.png`), Open (`service-discovery.png`) —
+  are icon+text, and Delete/Settings/Open are enabled only for a selection.
+- **Open**: the node's items XML from `client.pep_get_node_items(node)`, pretty
+  printed with `xml_console.format_xml`; buttons «Назад» and «Копировать».
+- **Settings**: the `pubsub#owner configure` form
+  (`client.pep_get_node_config(node)`) rendered by `DataFormWidget`; buttons
+  «Назад» and «Применить» (`client.pep_set_node_config`).
+
+**Delete** confirms first (`client.pep_delete_node`). All requests run through
+`MainWindow._start_task`.
 
 ### 5.4 Help Menu — Connection / Certificate / Server Info
 

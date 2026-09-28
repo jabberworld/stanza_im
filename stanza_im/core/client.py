@@ -49,6 +49,7 @@ NS_MDS = "urn:xmpp:mds:displayed:0"          # XEP-0490 Displayed Synchronizatio
 NS_MDS_ASSIST = "urn:xmpp:mds:server-assist:0"
 NS_PUBSUB = "http://jabber.org/protocol/pubsub"
 NS_PUBSUB_EVENT = "http://jabber.org/protocol/pubsub#event"
+NS_PUBSUB_OWNER = "http://jabber.org/protocol/pubsub#owner"
 NS_DISCO_INFO = "http://jabber.org/protocol/disco#info"
 NS_DISCO_ITEMS = "http://jabber.org/protocol/disco#items"
 NS_DATA = "jabber:x:data"
@@ -3052,6 +3053,120 @@ class JabberClient:
             return None
         xml = getattr(result, "xml", None)
         return _parse_bookmarks2(xml)
+
+    # ── PEP manager (pubsub#owner / disco) ────────────────────────
+
+    async def pep_list_nodes(self) -> list[dict] | None:
+        """List our PEP nodes via ``disco#items`` on our own bare JID.
+
+        Returns ``[{node, name, jid}]`` (items without a ``node`` attribute —
+        the account's resources — are skipped), or ``None`` on failure.
+        """
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = self.jid_str
+        ET.SubElement(iq.xml, "{%s}query" % NS_DISCO_ITEMS)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception:
+            logger.debug("PEP disco#items failed", exc_info=True)
+            return None
+        nodes: list[dict] = []
+        xml = getattr(result, "xml", None)
+        if xml is not None:
+            for item in xml.iter("{%s}item" % NS_DISCO_ITEMS):
+                node = str(item.get("node") or "")
+                if not node:
+                    continue
+                nodes.append({
+                    "node": node,
+                    "name": str(item.get("name") or ""),
+                    "jid": str(item.get("jid") or ""),
+                })
+        return nodes
+
+    async def pep_get_node_items(self, node: str):
+        """Fetch the items of a PEP *node*; returns the result XML or ``None``."""
+        if not node:
+            return None
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB)
+        items = ET.SubElement(pubsub, "{%s}items" % NS_PUBSUB)
+        items.set("node", node)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception:
+            logger.debug("PEP items fetch for %s failed", node, exc_info=True)
+            return None
+        return getattr(result, "xml", None)
+
+    async def pep_get_node_config(self, node: str):
+        """Fetch a PEP node's configuration form (XEP-0060 §8.2).
+
+        Returns a slixmpp ``Form`` (for ``DataFormWidget``) or ``None``.
+        """
+        if not node:
+            return None
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        pubsub = ET.SubElement(iq.xml,
+                               "{%s}pubsub" % NS_PUBSUB_OWNER)
+        configure = ET.SubElement(pubsub,
+                                  "{%s}configure" % NS_PUBSUB_OWNER)
+        configure.set("node", node)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception:
+            logger.debug("PEP config fetch for %s failed", node, exc_info=True)
+            return None
+        xml = getattr(result, "xml", None)
+        if xml is None:
+            return None
+        from slixmpp.plugins.xep_0004.stanza import Form
+        for child in xml.iter("{%s}x" % NS_DATA):
+            if child.get("type") == "form":
+                try:
+                    return Form(xml=child)
+                except Exception:
+                    logger.debug("Could not parse PEP config form",
+                                 exc_info=True)
+                    return None
+        return None
+
+    async def pep_set_node_config(self, node: str, form) -> bool:
+        """Submit a node configuration form (``pubsub#owner configure``)."""
+        if not node or form is None:
+            return False
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB_OWNER)
+        configure = ET.SubElement(pubsub,
+                                  "{%s}configure" % NS_PUBSUB_OWNER)
+        configure.set("node", node)
+        try:
+            configure.append(form.xml)
+            await iq.send(timeout=10)
+            return True
+        except Exception:
+            logger.debug("PEP config submit for %s failed", node, exc_info=True)
+            return False
+
+    async def pep_delete_node(self, node: str) -> bool:
+        """Delete a PEP node (``pubsub#owner delete``)."""
+        if not node:
+            return False
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        pubsub = ET.SubElement(iq.xml, "{%s}pubsub" % NS_PUBSUB_OWNER)
+        delete = ET.SubElement(pubsub, "{%s}delete" % NS_PUBSUB_OWNER)
+        delete.set("node", node)
+        try:
+            await iq.send(timeout=10)
+            return True
+        except Exception:
+            logger.debug("PEP delete of %s failed", node, exc_info=True)
+            return False
 
     async def _bookmarks2_publish(self, room: str, nick: str, password: str,
                                   autojoin: bool, name: str) -> None:

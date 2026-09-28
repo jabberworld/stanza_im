@@ -371,6 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── XMPP client (created on connect) ─────────────────────
         self._client = None
         self._xml_console = None
+        self._pep_manager = None
         # XEP-0191: JIDs blocked on the server (roster strikethrough).
         self._blocked_jids: set[str] = set()
 
@@ -1051,6 +1052,9 @@ class MainWindow(QtWidgets.QMainWindow):
         xml_console = actions_menu.addAction(
             self._menu_icon("xml-konzole.svg"), tr("menu_xml_console"))
         xml_console.triggered.connect(self._on_xml_console)
+        pep_manager = actions_menu.addAction(
+            self._menu_icon("xml-konzole.svg"), tr("menu_pep_manager"))
+        pep_manager.triggered.connect(self._on_pep_manager)
         actions_menu.addSeparator()
         logout_act = actions_menu.addAction(self._menu_icon("gtk-quit.png"),
                                             tr("menu_logout"))
@@ -2045,6 +2049,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._xml_console.show()
         self._xml_console.raise_()
         self._xml_console.activateWindow()
+
+    def _on_pep_manager(self):
+        """Open (or raise) the PEP manager dialog."""
+        if not self._client:
+            return
+        if self._pep_manager is None:
+            from stanza_im.ui.pep_manager_dialog import PepManagerDialog
+            self._pep_manager = PepManagerDialog(
+                lambda: self._client, self._start_task, self)
+        self._pep_manager.show()
+        self._pep_manager.raise_()
+        self._pep_manager.activateWindow()
+        self._pep_manager.refresh()
 
     def _on_password_changed(self, new_password: str):
         """Keep the login form in sync after a successful password change."""

@@ -89,6 +89,7 @@ stanza_im/                      # Python package
 │   ├── blocked_contacts_dialog.py # XEP-0191 blocklist editor
 │   ├── report_dialog.py         # XEP-0377 spam/abuse report dialog
 │   ├── xml_console.py           # Raw XML console (filtered, coloured)
+│   ├── pep_manager_dialog.py    # PEP node manager (list/open/config/delete)
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
 │   ├── sounds.py                # Sound-effect player (QSoundEffect)
@@ -838,6 +839,17 @@ view, «Ввод XML» opens `XmlInputDialog` (multiline + Отправить/О
 elements (SASL challenge/success/proceed, `<stream:features>`) are not part of
 the raw dump and therefore do not appear.
 [`tests/test_xml_console.py`]
+
+**PEP manager (`ui/pep_manager_dialog.py`, Actions → «PEP-менеджер» right after
+«XML-консоль», same icon)**: one window with a `QStackedWidget` — a node list
+(``client.pep_list_nodes`` = ``disco#items`` on our bare JID, keeping only items
+that carry a ``node``), an "open" view (the node's items XML pretty-printed via
+`xml_console.format_xml`, «Назад»/«Копировать») and a "settings" view
+(`DataFormWidget` over the `pubsub#owner configure` form, «Назад»/«Применить» →
+`client.pep_set_node_config`). The four list buttons — Refresh (`reload.png`),
+Delete (`process-stop.png`), Settings (`edit.png`), Open
+(`service-discovery.png`) — gate Delete/Settings/Open on a selection; Delete
+confirms first (`client.pep_delete_node`). [`tests/test_pep_manager.py`]
 
 **Slash commands**: `/me` (XEP-0245) is sent as-is; bodies starting with
 `/me ` render as italic `.stanza-action` lines (`* sender phrase`) via
