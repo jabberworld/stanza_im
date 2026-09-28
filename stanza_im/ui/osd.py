@@ -260,7 +260,8 @@ class _OsdWindow(QtWidgets.QWidget):
 
     def __init__(self, icon, title: str, body: str, draggable: bool = False,
                  family: str = "", size: int = 0, bg_color: str = "",
-                 font_color: str = "", opacity: int = 92, parent=None):
+                 font_color: str = "", opacity: int = 92, width: int = _OSD_WIDTH,
+                 parent=None):
         super().__init__(None)
         self._family = family or ""
         self._size = int(size or 0)
@@ -277,7 +278,8 @@ class _OsdWindow(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setMouseTracking(True)
-        self.setFixedWidth(_OSD_WIDTH)
+        self._width = max(160, int(width or _OSD_WIDTH))
+        self.setFixedWidth(self._width)
 
         self._drag_offset: QtCore.QPoint | None = None
         self._press_global: QtCore.QPoint | None = None
@@ -502,6 +504,14 @@ class OsdManager:
             rec["window"].apply_style(bg_color=bg_color,
                                       font_color=font_color, opacity=opacity)
 
+    def apply_width(self, width: int) -> None:
+        """Re-apply the configured OSD width to live windows."""
+        width = max(160, int(width or _OSD_WIDTH))
+        for rec in list(self._windows):
+            rec["window"].setFixedWidth(width)
+            rec["window"]._width = width
+        self._restack()
+
     @property
     def _osd_font(self) -> tuple[str, int]:
         appearance = getattr(self._config, "appearance", None)
@@ -549,7 +559,9 @@ class OsdManager:
         bg_color, font_color, opacity = self._osd_colors
         win = _OsdWindow(icon, title, body, draggable=draggable,
                          family=family, size=size, bg_color=bg_color,
-                         font_color=font_color, opacity=opacity)
+                         font_color=font_color, opacity=opacity,
+                         width=int(getattr(self._cfg, "osd_width", _OSD_WIDTH)
+                                   or _OSD_WIDTH))
         rec = {"window": win, "timer": None, "preview": preview,
                "on_click": None}
         win._on_close = lambda: self._dismiss(rec)
@@ -600,7 +612,8 @@ class OsdManager:
         if screen is None:
             return point
         rect = screen.availableGeometry()
-        x = max(rect.left(), min(point.x(), rect.right() - _OSD_WIDTH - 6))
+        width = int(getattr(self._cfg, "osd_width", _OSD_WIDTH) or _OSD_WIDTH)
+        x = max(rect.left(), min(point.x(), rect.right() - width - 6))
         y = max(rect.top(), min(point.y(), rect.bottom() - _MIN_HEIGHT - 6))
         return QtCore.QPoint(x, y)
 

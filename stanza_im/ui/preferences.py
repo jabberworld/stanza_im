@@ -1080,6 +1080,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         font_form.addRow(tr("prefs_font_participants"),
                          self._font_row("participant_font", default_family,
                                         default_size))
+        font_form.addRow(tr("prefs_font_muc_subject"),
+                         self._font_row("muc_subject_font", default_family,
+                                        default_size))
         font_form.addRow(tr("prefs_font_input"),
                          self._font_row("input_font", default_family,
                                         default_size))
@@ -1206,6 +1209,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         osd_form.addRow(tr("prefs_osd_duration"),
                         self._spin("osd_duration", 1, 60))
         osd_form.addRow(tr("prefs_osd_max"), self._spin("osd_max", 1, 10))
+        osd_width = self._spin("osd_width", 160, 600)
+        osd_width.setSingleStep(10)
+        osd_width.setSuffix(" px")
+        osd_form.addRow(tr("prefs_osd_width"), osd_width)
         osd_form.addRow(self._check("osd_message", tr("prefs_osd_message")))
         osd_form.addRow(self._check("osd_file", tr("prefs_osd_file")))
         osd_form.addRow(self._check("osd_typing", tr("prefs_osd_typing")))
@@ -1394,6 +1401,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "osd_enabled": notifications.osd_enabled,
             "osd_duration": notifications.osd_duration,
             "osd_max": notifications.osd_max,
+            "osd_width": getattr(notifications, "osd_width", 280),
             "osd_message": notifications.osd_message,
             "osd_file": notifications.osd_file,
             "osd_typing": notifications.osd_typing,
@@ -1417,6 +1425,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             "nick_font_size": getattr(appearance, "nick_font_size", 0),
             "participant_font": getattr(appearance, "participant_font", ""),
             "participant_font_size": getattr(appearance, "participant_font_size", 0),
+            "muc_subject_font": getattr(appearance, "muc_subject_font", ""),
+            "muc_subject_font_size": getattr(
+                appearance, "muc_subject_font_size", 0),
             "input_font": getattr(appearance, "input_font", ""),
             "input_font_size": getattr(appearance, "input_font_size", 0),
             "tooltip_avatar_size": getattr(
@@ -1524,7 +1535,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.notifications.osd_enabled = self._value("osd_enabled")
         for key in ("osd_duration", "osd_max", "osd_message", "osd_file",
                     "osd_typing", "osd_status", "osd_conference",
-                    "osd_topdown"):
+                    "osd_topdown", "osd_width"):
             cfg.notifications[key] = self._value(key)
         cfg.notifications.sound_theme = self._value("sound_theme") or "default"
         for key in ("sound_first_message", "sound_any_message",
@@ -1539,6 +1550,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
                     "osd_font", "osd_font_size", "nick_font", "nick_font_size",
                     "participant_font", "participant_font_size",
+                    "muc_subject_font", "muc_subject_font_size",
                     "input_font", "input_font_size", "tooltip_avatar_size",
                     "osd_bg_color", "osd_font_color", "osd_opacity",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",

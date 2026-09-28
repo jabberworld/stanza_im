@@ -172,10 +172,11 @@ bookmark first, and removal always asks for confirmation
 tooltip) and shares the roster font settings
 (`_apply_roster_font`); `_ZoomListWidget` gives Ctrl+wheel font zoom and clears
 the selection on a click over empty space. The Events tab
-(icon `event`) is a scaffold — a search field and an empty list (`events_empty`)
-— with `MainWindow._push_system_event` (not wired to anything yet) and a smooth
-tab-icon blink (`_start_event_blink`/`_event_blink_step`, the same cosine fade
-as the tray) that stops and clears when the tab is shown. Ctrl+PgUp/PgDn cycles
+(icon `event`) — a search field and a list of system/subscription events; each
+entry carries its time (`_push_system_event` prefixes `HH:MM`,
+`_SubscriptionRequestRow` shows a timestamp label). A smooth tab-icon blink
+(`_start_event_blink`/`_event_blink_step`, the same cosine fade as the tray)
+stops and clears when the tab is shown. Ctrl+PgUp/PgDn cycles
 the roster tabs only in the `separate` layout with the main window active
 (`_cycle_roster_tab`); in `unified` the chat keeps the shortcut for its own tabs.
 The conference browser uses the names and metadata returned by the service's
@@ -592,7 +593,9 @@ window managers that ignore `_NET_WM_MOVERESIZE`, e.g. Trinity) and uses
 `QWindow.startSystemMove()` on Wayland, and the settings
 dialog is opened non-modally so the preview keeps receiving input. Stacking
 is top-down or bottom-up per `osd_topdown`, capped by `osd_max` (oldest evicted),
-auto-hiding after `osd_duration`; a pure `stack_position()` keeps the math
+auto-hiding after `osd_duration`, and its width is `osd_width` px (160–600,
+Preferences → Notifications → OSD; `OsdManager.apply_width` resizes live
+windows); a pure `stack_position()` keeps the math
 unit-testable. In bottom-up mode `osd_y` is the **bottom line**: every
 notification is anchored by its bottom edge (via `stack_position` subtracting
 its own height) so a tall one grows upward instead of overlapping the one below
@@ -1491,7 +1494,10 @@ their own sender class, e.g. `minimal-mod`, are never double-wrapped); OSD
 notifications get `OsdManager.apply_font(family, size)` (re-renders visible
 popups); the MUC participant sidebar gets `ChatWidget.set_participant_font`
 (hosted by `ChatWindow.set_participant_font`, remembered for new MUC tabs via
-`ChatWindow._participant_font`). In the preferences «Шрифты» tab, empty/zero
+`ChatWindow._participant_font`); the MUC subject header («Тема:» + the topic
+text, not the room name) gets `ChatWidget.set_subject_font`
+(`appearance.muc_subject_font`/`_size`, hosted by `ChatWindow.set_subject_font`,
+remembered as `_subject_font`). In the preferences «Шрифты» tab, empty/zero
 values show the *real* font Qt would use instead: the family combo's first
 entry reads «По умолчанию — <family>» (for nicknames following the chat
 font live) and the size spin shows «<size> pt (по умолчанию)» via

@@ -66,6 +66,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._chat_options = {}
         self._participant_font = ("", 0)
         self._input_font = ("", 0)
+        self._subject_font = ("", 0)
         self._colored_muc_nicks = True
         self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_hats_visible = True                 # XEP-0317 chips in chat
@@ -236,6 +237,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_chat_options(self._chat_options)
         widget.set_input_font(*self._input_font)
         widget.set_participant_font(*self._participant_font)
+        widget.set_subject_font(*self._subject_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
         widget.set_muc_hats_visible(self._muc_hats_visible)
         widget.set_participant_width(self._muc_participant_width)
@@ -356,6 +358,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.resume()
         widget.set_chat_options(self._chat_options)
         widget.set_participant_font(*self._participant_font)
+        widget.set_subject_font(*self._subject_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
         widget.set_muc_hats_visible(self._muc_hats_visible)
         widget.set_participant_width(self._muc_participant_width)
@@ -419,6 +422,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_muc_hats_visible(self._muc_hats_visible)
+
+    def set_subject_font(self, family: str = "", size: int = 0) -> None:
+        """Apply and remember the MUC subject header font."""
+        self._subject_font = (family or "", int(size or 0))
+        for widget in self._tabs.values():
+            if widget.is_muc:
+                widget.set_subject_font(*self._subject_font)
 
     def set_muc_participant_width(self, width: int) -> None:
         """Remember and apply the MUC participant sidebar width (0 = auto)."""

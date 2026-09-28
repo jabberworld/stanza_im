@@ -246,6 +246,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.nick_font` / `nick_font_size` | `""` / `0` | Message-nickname font (pt) via `ChatThemeFactory.set_nick_font`: a `.sender { … } !important` rule, plus a `<span class="sender">` wrapper around `%sender%` when the skin has no sender class (candy); `""`/`0` = inherit the chat font. |
 | `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. Ctrl+wheel over the list changes only the size. |
 | `appearance.input_font` / `input_font_size` | `""` / `0` | Message input font (`ChatWidget.set_input_font`, remembered per `ChatWindow`); defaults to the chat font. Ctrl+wheel over the input changes only the size. |
+| `appearance.muc_subject_font` / `muc_subject_font_size` | `""` / `0` | MUC subject header font — the «Тема:» button and the topic text, not the room name (`ChatWidget.set_subject_font`, remembered per `ChatWindow` as `_subject_font`). |
 | `appearance.tooltip_avatar_size` | `64` | Avatar size (px, 32–256) in the shared rich-text tooltip (`ui/tooltip.set_avatar_size`); used by the roster and MUC participant tooltips. |
 | `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
 | `appearance.roster_group_bg_color` | `#ececec` | Roster group header stripe color, drawn by `RosterStyle.paint_group`. |
@@ -266,6 +267,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
 | `appearance.osd_font_color` | `#ffffff` | OSD text color applied to all OSD labels (`_OsdWindow._stylesheet`). |
 | `appearance.osd_opacity` | `92` | OSD background opacity in percent (0–100); the alpha is `round(opacity/100*255)`. |
+| `notifications.osd_width` | `280` | OSD notification width in px (160–600, Preferences → Notifications → OSD); applied live by `OsdManager.apply_width`. |
 | `status.auto_away` / `away_minutes` | `false` / `5` | Auto-switch to Away after inactivity (see below). |
 | `status.auto_xa` / `xa_minutes` | `false` / `15` | Auto-switch to Extended Away; must be ≥ `away_minutes`. |
 | `status.auto_status_message` | `""` | Single shared status text sent with the auto Away/XA presence (`MainWindow._check_auto_status`); when empty the previous status text is kept. Returning activity resumes `status.last_status` with an empty message, so the auto text is cleared. |
@@ -1173,9 +1175,12 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   `nick: ` at the cursor and focuses the input
   (`ChatWidget._handle_mention_uri`); the action is ignored in 1:1 chats. Like
   reply/edit the mention is a plain anchor whose click is preventDefaulted by
-  the `_ACTION_JS` document handler and relayed through
-  `window.__stanzaMentionRef` by the always-running scroll poll (never a
-  navigation), so a nick click can never reset the chat document.
+   the `_ACTION_JS` document handler and relayed through
+   `window.__stanzaMentionRef` by the always-running scroll poll (never a
+   navigation), so a nick click can never reset the chat document. The mention
+   link (and the message action buttons `action-react`/`action-reply`/
+   `action-delete`) reset the skin's dashed `a` underline in their resting
+   state; the mention keeps its styling on hover.
 - `Tab` / `Shift+Tab` in a MUC input completes the nick before the cursor and
   cycles the candidate list with wrap-around on repeat presses. A nick that is
   the first token of the line is inserted as an address (`nick: ` with a

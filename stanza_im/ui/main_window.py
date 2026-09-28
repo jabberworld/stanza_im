@@ -113,6 +113,9 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
         title = QtWidgets.QLabel(tr("event_subscription_request", who=who))
         title.setWordWrap(True)
         layout.addWidget(title)
+        stamp = QtWidgets.QLabel(time.strftime("%H:%M"))
+        stamp.setStyleSheet("color: #888; font-size: 90%;")
+        layout.addWidget(stamp)
         if who != jid:
             sub = QtWidgets.QLabel(jid)
             sub.setStyleSheet("color: #888; font-size: 90%;")
@@ -750,7 +753,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._ensure_events_placeholder()
             return
         self._clear_events_placeholder()
-        self._events_list.addItem(title)
+        self._events_list.addItem(
+            "%s  %s" % (time.strftime("%H:%M"), title))
         self._event_unread += 1
         self._start_event_blink()
 
@@ -2194,6 +2198,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if participant_font != getattr(self, "_applied_participant_font", ("", 0)):
             self._chat_window.set_participant_font(*participant_font)
             self._applied_participant_font = participant_font
+        subject_font = (
+            getattr(self._config.appearance, "muc_subject_font", "") or "",
+            int(getattr(self._config.appearance, "muc_subject_font_size", 0) or 0))
+        if subject_font != getattr(self, "_applied_subject_font", ("", 0)):
+            self._chat_window.set_subject_font(*subject_font)
+            self._applied_subject_font = subject_font
         input_font = (
             getattr(self._config.appearance, "input_font", "") or "",
             int(getattr(self._config.appearance, "input_font_size", 0) or 0))
@@ -2218,6 +2228,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if osd_colors != getattr(self, "_applied_osd_colors", None):
             self._osd.apply_colors(*osd_colors)
             self._applied_osd_colors = osd_colors
+        osd_width = int(getattr(self._config.notifications, "osd_width", 280)
+                        or 280)
+        if osd_width != getattr(self, "_applied_osd_width", None):
+            self._osd.apply_width(osd_width)
+            self._applied_osd_width = osd_width
         variant = self._config.appearance.chat_theme or self._config.chat.theme
         muc_variant = self._config.appearance.muc_theme
         if (variant, muc_variant) != getattr(self, "_applied_chat_themes", ("", "")):

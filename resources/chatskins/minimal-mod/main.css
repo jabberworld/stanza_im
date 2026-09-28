@@ -86,6 +86,18 @@ a:hover{
 	border-bottom: 1px solid;
 }
 
+/* Sender nicknames/mentions and the message action buttons (react/reply) are
+   not navigable links: never show the dashed underline in their resting state
+   (hover keeps its own styling). */
+.sender a.mention, .fromstatus a.mention, .next_label a.mention {
+	border-bottom: none;
+}
+.message_actions a.action-react,
+.message_actions a.action-reply,
+.message_actions a.action-delete {
+	border-bottom: none;
+}
+
 .convo_container
 {
 	width: 100%;

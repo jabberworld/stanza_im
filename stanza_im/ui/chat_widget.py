@@ -418,6 +418,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_muc_hats = True
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
+        self._subject_font: tuple[str, int] = ("", 0)
         self._send_ctrl_enter = False
         self._confirm_retraction = False
         self._moderation_enabled = False
@@ -2441,6 +2442,19 @@ class ChatWidget(QtWidgets.QWidget):
             return
         self.set_participant_font(family, int(size))
         self.participant_font_zoom_requested.emit(int(size))
+
+    def set_subject_font(self, family: str = "", size: int = 0):
+        """Set the MUC subject header font ("Subject:" + the topic text)."""
+        self._subject_font = (family or "", int(size or 0))
+        base = QtGui.QFont(QtWidgets.QApplication.font())
+        if family:
+            base.setFamily(family)
+        if size > 0:
+            base.setPointSize(int(size))
+        if getattr(self, "_subject_btn", None) is not None:
+            self._subject_btn.setFont(base)
+        if getattr(self, "_subject_edit", None) is not None:
+            self._subject_edit.setFont(base)
 
     def set_input_font(self, family: str = "", size: int = 0):
         """Set the message input font (empty = application font)."""
