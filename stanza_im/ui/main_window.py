@@ -633,26 +633,34 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_bookmark_actions)
         layout.addWidget(self._bookmarks_list, stretch=1)
 
-        actions = QtWidgets.QHBoxLayout()
+        # The toolbar matches the roster status bar: same height (the status
+        # combo) and the four buttons stretch across the full width.
+        bar_height = max(24, self._status_combo.sizeHint().height())
+        bar = QtWidgets.QWidget()
+        bar.setFixedHeight(bar_height)
+        actions = QtWidgets.QHBoxLayout(bar)
         actions.setContentsMargins(0, 0, 0, 0)
         self._bookmark_join_btn = self._bookmark_button(
-            "ok.png", tr("bookmark_join"), self._on_bookmark_join_clicked)
+            "ok.png", tr("bookmark_join"), self._on_bookmark_join_clicked,
+            bar_height)
         self._bookmark_new_btn = self._bookmark_button(
-            "about.png", tr("bookmark_new"), self._on_bookmark_new)
+            "about.png", tr("bookmark_new"), self._on_bookmark_new, bar_height)
         self._bookmark_edit_btn = self._bookmark_button(
-            "edit.png", tr("bookmark_edit"), self._on_bookmark_edit_clicked)
+            "edit.png", tr("bookmark_edit"), self._on_bookmark_edit_clicked,
+            bar_height)
         self._bookmark_del_btn = self._bookmark_button(
             "process-stop.png", tr("bookmark_remove"),
-            self._on_bookmark_remove_clicked)
+            self._on_bookmark_remove_clicked, bar_height)
         for button in (self._bookmark_join_btn, self._bookmark_new_btn,
                        self._bookmark_edit_btn, self._bookmark_del_btn):
             actions.addWidget(button, stretch=1)
-        layout.addLayout(actions)
+        layout.addWidget(bar)
         self._update_bookmark_actions()
         return page
 
     @staticmethod
-    def _bookmark_button(icon_name: str, tooltip: str, slot) -> QtWidgets.QToolButton:
+    def _bookmark_button(icon_name: str, tooltip: str, slot,
+                         bar_height: int) -> QtWidgets.QToolButton:
         """A wide (2:1) icon-only button for the bookmarks toolbar."""
         button = QtWidgets.QToolButton()
         button.setIcon(QtGui.QIcon(find_icon(icon_name)))
@@ -661,7 +669,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setAutoRaise(True)
         button.setToolTip(tooltip)
-        button.setFixedHeight(16)
+        button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                             QtWidgets.QSizePolicy.Policy.Fixed)
+        button.setFixedHeight(bar_height)
         button.setMinimumWidth(32)
         button.clicked.connect(slot)
         return button

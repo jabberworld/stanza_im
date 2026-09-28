@@ -115,6 +115,13 @@ check("bookmark buttons are icon-only and wider than tall",
           and b.minimumWidth() > b.height()
           and not b.icon().isNull()
           for b in buttons.values()))
+check("bookmark buttons expand horizontally",
+      all(b.sizePolicy().horizontalPolicy()
+          == QtWidgets.QSizePolicy.Policy.Expanding
+          for b in buttons.values()))
+check("bookmark toolbar height matches the roster status combo",
+      buttons["join"].parentWidget().height()
+      == max(24, win._status_combo.sizeHint().height()))
 check("join/edit/delete disabled without a selection",
       not buttons["join"].isEnabled() and not buttons["edit"].isEnabled()
       and not buttons["del"].isEnabled())
