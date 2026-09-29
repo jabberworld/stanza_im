@@ -1912,6 +1912,23 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   background task after `session_start`; "Detect again" calls
   `refresh_services()`.
 
+### 14.8.1 Local History Manager (`ui/history_manager.py`, `core/history.py`)
+
+- `HistoryManagerDialog` is opened from the roster contact context menu, the
+  Actions menu and the chat toolbar's history button; it is a **reused
+  singleton** (`MainWindow._history_manager`).  Closing it calls `done()`,
+  which sets `_released`; `showEvent` and `open_for` reset that flag so a
+  reopened dialog loads again instead of staying empty (a released dialog
+  short-circuits every async load).
+- `core/history` pools one SQLite connection per JID (`WAL`).  An empty JID is
+  refused (`_connection` raises `sqlite3.OperationalError`, `_path` maps it to
+  a non-colliding name), so no nameless `<HISTORY_DIR>/.sqlite3` store is ever
+  created.
+- The manager's per-contact `_dates` are read once on selection; clicking a
+  calendar day that is not among them re-reads `history.dates_async` first
+  (`_recheck_date_async`), so days added by a MAM backfill after the dialog
+  opened are highlighted and load their messages.
+
 ### 14.9 Event System
 
 ```

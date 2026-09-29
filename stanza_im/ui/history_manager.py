@@ -80,6 +80,14 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._released = True
         super().done(result)
 
+    def showEvent(self, event):
+        # Reused as a singleton by MainWindow: ``done()`` marks the dialog
+        # released so pending async work stops, but the instance is shown
+        # again later.  Revive it on every show or all async loads would bail
+        # out immediately (empty dates and no messages).
+        self._released = False
+        super().showEvent(event)
+
     def _build_ui(self) -> None:
         layout = QtWidgets.QHBoxLayout(self)
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -203,6 +211,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def open_for(self, jid: str = "") -> None:
         """Refresh the catalog and show *jid* (or keep the current one)."""
+        self._released = False
         self._refresh()
         if jid:
             self._select_jid(jid)
@@ -350,6 +359,24 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if value in self._dates:
             self._select_date(value)
         else:
+            # The day may have been added to SQLite by a MAM backfill after
+            # this contact's dates were last read; re-check before declaring
+            # it empty, then select it or show the empty notice.
+            self._start_task(self._recheck_date_async(value))
+
+    async def _recheck_date_async(self, value: str) -> None:
+        if self._released:
+            return
+        jid = self._jid
+        dates = await history.dates_async(jid)
+        if self._released or jid != self._jid or value != \
+                self._calendar.selectedDate().toString("yyyy-MM-dd"):
+            return
+        self._dates = dates
+        self._mark_calendar_dates()
+        if value in self._dates:
+            self._select_date(value)
+        else:
             self._show_empty_day(value)
 
     def _select_date(self, date: str) -> None:
@@ -421,7 +448,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._start_task(self._load_date_async(date))
 
     async def _load_date_async(self, date: str) -> None:
-        if self._released:
+        if self._released or not date or not self._jid:
             return
         entries = await history.load_day_async(self._jid, date)
         if self._released or date != self._date:

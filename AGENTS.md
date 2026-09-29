@@ -356,7 +356,17 @@ so removed contacts keep their names), shows per-day bold dates in a
 (`core/history.dates/load_day/search_dates`). `_select_jid_async` records the
 target JID **before** awaiting the JSONL migration so the stale-selection guard
 does not abort the first pick (a regression from moving the SQLite I/O off the
-event loop). The roster context menu's
+event loop). The dialog is a **reused singleton** (`MainWindow._history_manager`),
+so closing it marks it released (`done()`) while `showEvent`/`open_for` revive
+it — otherwise every async load would bail on `_released` and the reopened
+manager would stay empty until a client restart. Clicking a calendar day that is
+not yet among the cached `_dates` re-reads `history.dates_async` first
+(`_recheck_date_async`), so a day added to SQLite by a MAM backfill after the
+manager opened is highlighted and loads its messages instead of showing the
+empty-day notice. `core/history._connection` refuses an empty JID (raises a
+`sqlite3.OperationalError`, caught by every handler) and `_path` maps one to a
+non-colliding name, so no nameless `<HISTORY_DIR>/.sqlite3` store is ever
+created. The roster context menu's
 «Очистить историю» and the chat toolbar's clear button both run
 `MainWindow._on_clear_history`: after a confirmation it calls `history.clear`
 (wipes the SQLite messages **and** the legacy JSONL file) and resets the open

@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.core import history
 from stanza_im.i18n import load as i18n_load
@@ -79,6 +79,41 @@ muc = ChatWidget("room@conf.example", "Room", ChatThemeFactory(), is_muc=True)
 check("MUC tabs also carry the history button",
       getattr(muc, "_history_btn", None) is not None)
 muc.detach()
+
+# 3. The reused singleton must revive after close (``done`` marks it
+#    released; ``showEvent``/``open_for`` reset that flag).
+dlg.done(0)
+check("closing the dialog marks it released", dlg._released is True)
+dlg.show()
+dlg.open_for("bob@example.com")
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.2))
+check("reopening the reused dialog revives it", dlg._released is False)
+check("reopened dialog reloads the dated days",
+      dlg._dates == ["2026-01-02"])
+check("reopened dialog renders the day's messages",
+      "hi" in dlg._messages.toPlainText())
+
+# 4. A day added to SQLite after the dates were read (MAM backfill) is picked
+#    up when it is clicked: the dates are re-read instead of shown as empty.
+history.store_message("bob@example.com", "incoming", "older", sender="bob",
+                      timestamp="2026-01-01T09:00:00", origin_id="m0")
+check("the new day is not known yet", "2026-01-01" not in dlg._dates)
+dlg._calendar.setSelectedDate(QtCore.QDate(2026, 1, 1))
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.2))
+check("clicking a backfilled day re-reads the dates",
+      "2026-01-01" in dlg._dates)
+check("the backfilled day's messages are shown",
+      "older" in dlg._messages.toPlainText())
+dlg._released = True
+
+# 5. An empty JID must never create the nameless ``<dir>/.sqlite3`` store.
+check("store_message('') is refused", history.store_message("", "incoming", "x")
+      is False)
+check("dates('') is empty", history.dates("") == [])
+check("load_history('') is empty", history.load_history("") == [])
+check("has_history('') is false", history.has_history("") is False)
+check("no nameless history file is created",
+      not os.path.isfile(os.path.join(history.HISTORY_DIR, ".sqlite3")))
 
 print()
 if FAILURES:

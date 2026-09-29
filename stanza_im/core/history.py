@@ -62,7 +62,11 @@ _pool: OrderedDict[str, tuple[sqlite3.Connection, float]] = OrderedDict()
 
 
 def _path(jid: str) -> str:
-    safe = jid.lower().replace("/", "_")
+    safe = jid.lower().replace("/", "_") if isinstance(jid, str) else ""
+    if not safe.strip():
+        # An empty JID must never map to the nameless ``<HISTORY_DIR>/.sqlite3``
+        # file; return a path that cannot collide with a real store.
+        safe = "__invalid__"
     return os.path.join(HISTORY_DIR, f"{safe}.sqlite3")
 
 
@@ -116,6 +120,11 @@ def _migrate_dedup(conn: sqlite3.Connection) -> None:
 
 
 def _connection(jid: str) -> sqlite3.Connection:
+    if not isinstance(jid, str) or not jid.strip():
+        # Never create the nameless ``.sqlite3`` store for an empty JID; the
+        # caller has no conversation to attach the history to.  Raised as a
+        # sqlite3 error so every existing handler degrades gracefully.
+        raise sqlite3.OperationalError("history: empty JID")
     with _lock:
         now = time.monotonic()
         _evict_expired(now)
