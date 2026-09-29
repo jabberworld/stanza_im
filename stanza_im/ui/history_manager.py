@@ -314,13 +314,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._results.hide()
         if not jid:
             self._dates = []
-            self._select_date("")
+            self._show_empty_day("")
             return
         if history.has_history(jid):
             self._start_task(self._set_contact_dates(jid))
         else:
             self._dates = []
-            self._select_date("")
+            self._show_empty_day("")
 
     async def _set_contact_dates(self, jid: str) -> None:
         if self._released or jid != self._jid:
@@ -333,7 +333,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if self._dates:
             self._select_date(self._dates[-1])
         else:
-            self._select_date("")
+            self._show_empty_day("")
 
     # ── Calendar ─────────────────────────────────────────────────
 
@@ -437,18 +437,17 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     # ── Messages ──────────────────────────────────────────────────
 
-    def _load_date(self, date: str) -> None:
-        self._entries = []
-        self._message_blocks = []
+    async def _load_date_async(self, date: str) -> None:
+        if self._released:
+            return
         if not date or not self._jid:
+            # No day to show: never leave the previous contact's messages on
+            # screen while switching to a contact without history.
+            self._entries = []
+            self._message_blocks = []
             self._messages.clear()
             self._status.setText(
                 tr("history_no_history") if self._jid else "")
-            return
-        self._start_task(self._load_date_async(date))
-
-    async def _load_date_async(self, date: str) -> None:
-        if self._released or not date or not self._jid:
             return
         entries = await history.load_day_async(self._jid, date)
         if self._released or date != self._date:

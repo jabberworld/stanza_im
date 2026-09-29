@@ -44,8 +44,10 @@ history.store_message("bob@example.com", "incoming", "hi", sender="bob",
 history.store_message("bob@example.com", "outgoing", "yo", sender="Me",
                       timestamp="2026-01-02T10:05:00", message_id="m2",
                       origin_id="m2")
-catalog = [{"jid": "bob@example.com", "name": "Bob", "groups": ["G"],
-            "is_conference": False}]
+catalog: list[dict] = [{"jid": "bob@example.com", "name": "Bob",
+                        "groups": ["G"], "is_conference": False},
+                       {"jid": "empty@example.com", "name": "Empty",
+                        "groups": ["G"], "is_conference": False}]
 
 
 async def _run():
@@ -114,6 +116,23 @@ check("load_history('') is empty", history.load_history("") == [])
 check("has_history('') is false", history.has_history("") is False)
 check("no nameless history file is created",
       not os.path.isfile(os.path.join(history.HISTORY_DIR, ".sqlite3")))
+
+# 6. Switching from a contact with history to one without clears the view.
+dlg._released = False
+dlg._jid = ""
+dlg._select_jid("bob@example.com")
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.2))
+check("switched to Bob and loaded his messages",
+      "hi" in dlg._messages.toPlainText())
+dlg._select_jid("empty@example.com")
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.2))
+check("switching to a contact without history empties the dates",
+      dlg._dates == [])
+check("switching to a contact without history clears the messages",
+      dlg._messages.toPlainText().strip() == "")
+check("switching to a contact without history drops the entries",
+      dlg._entries == [])
+dlg._released = True
 
 print()
 if FAILURES:
