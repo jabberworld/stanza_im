@@ -387,6 +387,7 @@ class ChatWidget(QtWidgets.QWidget):
     link_clicked = QtCore.pyqtSignal(str)
     xmpp_link_clicked = QtCore.pyqtSignal(str)      # XEP-0147 xmpp: URI
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
+    history_requested = QtCore.pyqtSignal(str)             # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since_ts
     bookmark_toggled = QtCore.pyqtSignal(str)              # MUC room
     set_subject_requested = QtCore.pyqtSignal(str)         # MUC room
@@ -620,6 +621,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._clear_btn.clicked.connect(
             lambda: self.clear_history_requested.emit(self.jid))
         actions_row.addWidget(self._clear_btn)
+
+        self._history_btn = QtWidgets.QToolButton(self)
+        self._history_btn.setIcon(self._chat_icon("history.png"))
+        self._history_btn.setToolTip(tr("ctx_show_history"))
+        self._history_btn.setAutoRaise(True)
+        self._history_btn.clicked.connect(
+            lambda: self.history_requested.emit(self.jid))
+        actions_row.addWidget(self._history_btn)
 
         vcard_btn = QtWidgets.QToolButton(self)
         vcard_btn.setIcon(self._chat_icon("v-card.png"))

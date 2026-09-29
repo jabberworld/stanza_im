@@ -331,6 +331,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
         self._chat_window.set_muc_leave_confirm(self._confirm_muc_leave)
         self._chat_window.clear_history_requested.connect(self._on_clear_history)
+        self._chat_window.history_requested.connect(self._on_history_contact)
         self._chat_window.server_history_requested.connect(self._on_server_history)
         self._chat_window.bookmark_toggled.connect(self._toggle_bookmark)
         self._chat_window.set_subject_requested.connect(self._on_set_subject)

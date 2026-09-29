@@ -346,17 +346,22 @@ statistics via `client.get_server_stats`, XEP-0012 uptime via
 «Копировать» button copies the active tab. [`tests/test_service_browser.py`]
 Chat avatar `<img>` elements carry `class="avatar"`; `ChatView.update_sender_avatar`
 updates only `img.avatar`, never emoticon images in the same message.
-`HistoryManagerDialog` (opened from the roster contact context menu and the
-Actions menu) groups contacts with history by their roster groups or the
+`HistoryManagerDialog` (opened from the roster contact context menu, the
+Actions menu, and the chat toolbar's history button — `ChatWidget.
+history_requested` right after the clear button, icon `history.png`) groups
+contacts with history by their roster groups or the
 `core/known_contacts.py` registry (persisted JID → name/groups/conference flag
 so removed contacts keep their names), shows per-day bold dates in a
 `QCalendarWidget`, and supports day-scoped and all-time substring search
-(`core/history.dates/load_day/search_dates`). The roster context menu's
+(`core/history.dates/load_day/search_dates`). `_select_jid_async` records the
+target JID **before** awaiting the JSONL migration so the stale-selection guard
+does not abort the first pick (a regression from moving the SQLite I/O off the
+event loop). The roster context menu's
 «Очистить историю» and the chat toolbar's clear button both run
 `MainWindow._on_clear_history`: after a confirmation it calls `history.clear`
 (wipes the SQLite messages **and** the legacy JSONL file) and resets the open
 tab; the server archive (MAM) is untouched, so a reopened chat may refill from
-it.
+it. [`tests/test_history_manager.py`]
 
 UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)`, which resolves through

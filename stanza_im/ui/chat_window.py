@@ -186,6 +186,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
+        widget.history_requested.connect(self.history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
         widget.set_subject_requested.connect(self.set_subject_requested)
@@ -260,6 +261,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
+        widget.history_requested.connect(self.history_requested)
         widget.server_history_requested.connect(self.server_history_requested)
         widget.bookmark_toggled.connect(self.bookmark_toggled)
         widget.set_subject_requested.connect(self.set_subject_requested)
@@ -644,6 +646,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     link_clicked = QtCore.pyqtSignal(str)               # unhandled chat link
     xmpp_link_clicked = QtCore.pyqtSignal(str)          # XEP-0147 xmpp: URI
     clear_history_requested = QtCore.pyqtSignal(str)    # jid
+    history_requested = QtCore.pyqtSignal(str)          # jid
     server_history_requested = QtCore.pyqtSignal(str, str)  # jid, since
     bookmark_toggled = QtCore.pyqtSignal(str)               # MUC room
     nick_change_requested = QtCore.pyqtSignal(str, str)     # MUC room, nick

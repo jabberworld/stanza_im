@@ -451,7 +451,7 @@ non-modal `PepManagerDialog` with a `QStackedWidget`:
 **Delete** confirms first (`client.pep_delete_node`). All requests run through
 `MainWindow._start_task`.
 
-### 5.4 Help Menu — Connection / Certificate / Server Info
+### 5.5 Help Menu — Connection / Certificate / Server Info
 
 The «Справка» menu holds three non-modal entries, disabled until the session
 starts (`_set_info_actions_enabled`, toggled on `session_started`/
@@ -485,7 +485,7 @@ starts (`_set_info_actions_enabled`, toggled on `session_started`/
   сервера» group above the table, values as clickable links (`xmpp:` ones
   emitted via `ServerInfoDialog.contact_uri_clicked` → `MainWindow._on_xmpp_uri`).
 
-### 5.5 Privacy Lists & Blocking (XEP-0016 / XEP-0191 / XEP-0377)
+### 5.6 Privacy Lists & Blocking (XEP-0016 / XEP-0191 / XEP-0377)
 
 Preferences → Connection → «Подключение» has two buttons, gated on the account
 domain's `disco#info` (`client.supports_privacy`/`supports_blocking`/
@@ -521,7 +521,7 @@ XEP-0377 `<block><item><report reason=…><text/></report></item></block>` and
 therefore also blocks the JID). Server pushes (`blocked`/`unblocked`) and the
 local operations emit `blocklist_updated`, refreshing the roster.
 
-### 5.6 Service Browser Info Dialog (`ui/service_browser.py`, `ui/service_info_dialog.py`)
+### 5.7 Service Browser Info Dialog (`ui/service_browser.py`, `ui/service_info_dialog.py`)
 
 The service browser's server-load button is «Обзор»; an `info.svg` tool button
 next to it opens `ServiceInfoDialog` for the selected tree node (or the combo
@@ -1751,7 +1751,9 @@ Registers XEP plugins (conditionally where noted):
 
 ### 14.5 HTTP File Upload (XEP-0363)
 
-- A toolbar above the input offers flat icon buttons: Clear chat, vCard, and
+- A toolbar above the input offers flat icon buttons: Clear chat, History
+  (`history.png`, opens the history manager for this JID — 1:1, MUC and private
+  tabs alike — via `ChatWidget.history_requested`), vCard, and
   Send file (a menu with "P2P" and "HTTP Upload" for 1:1 chats; in a conference
   a plain button, HTTP Upload only). The Send control is a vertical icon-only
   button (an Enter-style arrow) whose height tracks the input field. The input

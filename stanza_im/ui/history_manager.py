@@ -268,7 +268,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     async def _select_jid_async(self, jid: str, name: str) -> None:
         if self._released:
             return
-        if jid != self._jid and not os.path.isfile(history._path(jid)):
+        # Record the target before awaiting: ``_set_contact`` (which sets
+        # ``_jid``) runs further down, so a guard against ``self._jid`` below
+        # would otherwise always abort the very first selection.
+        previous = self._jid
+        self._jid = jid
+        if jid != previous and not os.path.isfile(history._path(jid)):
             await history.migrate_from_jsonl_async(jid)
         if self._released or jid != self._jid:
             return
