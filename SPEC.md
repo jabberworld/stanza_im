@@ -93,8 +93,9 @@ stanza_im/
 ├── i18n/               — Translation dicts (en.py, ru.py)
 ├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue)
 └── plugins/            — Plugin registry (__init__.py) + bundled plugins
-                          (notes/ = XEP-0049 tagged notes; notes/strings/ =
-                           the plugin's own en/ru UI strings)
+                          (notes/ = XEP-0049 tagged notes;
+                           attention/ = XEP-0224 attention requests; each with
+                           <name>/strings/ = the plugin's own en/ru UI strings)
 ```
 
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
@@ -1975,6 +1976,25 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   asks for confirmation. `reload()` re-fetches on tab activation; a server
   without `jabber:iq:private` shows `notes_no_private_storage` and an empty
   list (the plugin stays enabled).
+
+### 14.8.3 Attention (XEP-0224, `stanza_im/plugins/attention/`)
+
+- The plugin installs `MainWindow._attention_feature = "urn:xmpp:attention:0"`
+  and a contact-menu hook; the menu entry «Привлечь внимание» (after «Отправить
+  контакт…») and the 1:1 chat bell (`ChatWidget.set_attention_support`, right of
+  the call button) are enabled only when the peer advertises the namespace
+  (`JabberClient.supports_feature`, refreshed by `contact_caps` and
+  `MainWindow.apply_attention_support` on tab open).
+- Sending: `JabberClient.send_attention(jid)` builds a bodyless `<message
+  type='chat'><attention xmlns='urn:xmpp:attention:0'/></message>`. Receiving:
+  `_on_message`/`_on_carbon_received` detect `<attention/>` (never rendered as a
+  chat message) and emit `attention_received(from)`.
+- The plugin answers the event with `resources/sounds/effects/door_bell.wav`
+  (`SoundPlayer.play_file`), an OSD («Пользователь {name} пытается привлечь ваше
+  внимание») and an Events entry, gated by `[plugin_settings.attention]`:
+  `cooldown` (1–99 s, incoming per-contact throttle), `allow_dnd` (notify while
+  our status is «Не беспокоить»), `play_sound`, `show_events`. The settings
+  dialog is `ui/attention_settings_dialog.py` (opened via `open_settings`).
 
 ### 14.9 Event System
 

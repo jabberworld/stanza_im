@@ -3075,6 +3075,7 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.debug("CALL caps %s: audio=%s video=%s", bare, audio, video)
         self._chat_window.set_call_support(bare, audio, video)
         self._roster.set_client_icon(bare, self._client.client_icon(bare))
+        self.apply_attention_support(bare)
 
     def _apply_call_support(self, jid: str) -> None:
         """Apply a 1:1 tab's call support from the already-resolved caps.
@@ -3093,6 +3094,21 @@ class MainWindow(QtWidgets.QMainWindow):
             jid, self._client.supports_calls(bare),
             self._client.supports_calls(bare, video=True))
         self.apply_attention_support(bare)
+
+    def apply_attention_support(self, jid: str) -> None:
+        """Enable the XEP-0224 attention bell when the peer advertises it.
+
+        The feature namespace is provided by the attention plugin
+        (``self._attention_feature``); without it the bell stays disabled.
+        """
+        if not self._client:
+            return
+        feature = getattr(self, "_attention_feature", "")
+        if not feature:
+            return
+        bare = jid.split("/", 1)[0]
+        enabled = self._client.supports_feature(bare, feature)
+        self._chat_window.set_attention_support(bare, enabled)
 
     def _on_call_incoming(self, sid: str, peer: str, kind: str) -> None:
         if not self._client:

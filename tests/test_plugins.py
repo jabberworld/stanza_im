@@ -76,7 +76,8 @@ dlg.plugins_changed.connect(seen.append)
 tree = dlg._widget._tree
 categories = [tree.topLevelItem(i).text(0)
               for i in range(tree.topLevelItemCount())]
-check("the manager groups plugins by category", categories == ["Tools"])
+check("the manager groups plugins by category",
+      "Tools" in categories and "Communication" in categories)
 check("the enabled plugin starts checked", dlg._widget.checked_ids() == ["notes"])
 check("Configure is disabled for a plugin without settings",
       not dlg._widget._configure_btn.isEnabled())

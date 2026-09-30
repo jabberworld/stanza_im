@@ -420,6 +420,24 @@ live on the server in XEP-0049 private storage using the Miranda payload
 build raw IQs (one packet for the whole set) and `_parse_notes` reads
 `<note tags><title><text>`. The tab re-fetches on activation; a server without
 XEP-0049 shows a warning and an empty list. [`tests/test_plugins.py`]
+The core exposes two generic extension points plugins may use: a contact-menu
+hook list (`MainWindow.add_contact_menu_hook`/`remove_contact_menu_hook`, called
+as `hook(menu, jid, is_conf)` inside `_on_contact_context`) and a 1:1 toolbar
+`ChatWidget.set_attention_support` (driven by `MainWindow.apply_attention_support`
+from the `_attention_feature` namespace a plugin installs).
+The bundled **Attention** plugin (`stanza_im/plugins/attention/`, category
+«Общение», icon `attention.svg` — a yellow bell) implements XEP-0224: its
+contact-menu entry «Привлечь внимание» (after «Отправить контакт…») and the 1:1
+chat bell (right of the call button) send a bodyless `<attention
+xmlns='urn:xmpp:attention:0'/>` (`JabberClient.send_attention`) and stay disabled
+until the peer advertises `urn:xmpp:attention:0` (`supports_feature`, driven by
+`contact_caps`). An incoming `<attention/>` is routed by `_on_message`/
+`_on_carbon_received` (never rendered as a chat message) to the
+`attention_received` event → the plugin plays `resources/sounds/effects/door_bell.wav`,
+shows an OSD («Пользователь … пытается привлечь ваше внимание») and pushes an
+Events entry. Its `[plugin_settings.attention]` holds `cooldown` (1–99 s,
+incoming per-contact throttle), `allow_dnd` (notify while we are in «Не
+беспокоить»), `play_sound` and `show_events`. [`tests/test_attention.py`]
 
 UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)`, which resolves through
