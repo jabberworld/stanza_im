@@ -171,6 +171,8 @@ class Config:
                    "auto_status_message": "",
                    "message": "", "mood": "", "activity": ""},
         "ui": {"close_to_tray": True, "language": ""},
+        # Plugin registry: plugin id -> enabled flag (see stanza_im/plugins).
+        "plugins": {},
     }
 
     def __init__(self):

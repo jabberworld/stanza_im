@@ -12,7 +12,7 @@ whenever a new XEP is implemented or its usage changes.
 | XEP-0045 | Multi-User Chat | Joining/leaving conferences, roles and affiliations, the participant sidebar, and MUC private messages. Mediated invitations (`<x xmlns='http://jabber.org/protocol/muc#user'><invite from='…'/></x>`) open the join prompt with the real inviter even without a `jabber:x:conference` element. |
 | XEP-0047 | In-Band Bytestreams | Data transport for the Jingle IBB method (XEP-0261): `<open/>`/`<data/>`/`<close/>` over IQ with Base64 chunks, used as the P2P fallback when SOCKS5 fails (`xmpp/jingle.py`). |
 | XEP-0048 | Bookmarks | Saves/removes conference bookmarks (menu "Conferences") and auto-joins rooms flagged for auto-join on startup. |
-| XEP-0049 | Private XML Storage | Legacy bookmark store backend (when the server lacks pubsub-based XEP-0223 storage). |
+| XEP-0049 | Private XML Storage | Legacy bookmark store backend (when the server lacks pubsub-based XEP-0223 storage) and the storage for the Notes plugin's tagged text notes (`http://miranda-im.org/storage#notes`; the whole set is fetched/stored in a single IQ). |
 | XEP-0050 | Ad-hoc Commands | `AdHocDialog` executes remote commands exposed by a service. |
 | XEP-0054 | vCard | Displays/edits the own and contacts' vCards; avatar PHOTO data is cached by `include/avatars.py`. |
 | XEP-0084 | User Avatar (PEP) | Our avatar is published to the PEP nodes `urn:xmpp:avatar:data`/`metadata` (id, type, bytes, dimensions) and contacts' `avatar:metadata` notifications are fetched and cached; `chat.text_scale`-independent avatars are shown by the existing roster/chat rendering. |

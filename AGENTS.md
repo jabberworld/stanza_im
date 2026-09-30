@@ -117,7 +117,9 @@ stanza_im/                      # Python package
 │   ├── __init__.py              # tr() function + auto language detection
 │   ├── en.py                    # English strings (~530 keys)
 │   └── ru.py                    # Russian strings
-├── plugins/                     # (Future) Plugin system
+├── plugins/
+│   ├── __init__.py              # Plugin registry (discover/manifest/hooks)
+│   └── notes/                   # Notes plugin (XEP-0049 private storage)
 resources/                       # Images, chat skins, sounds, etc.
 old/                             # Original Jabbim code (reference only, gitignored)
 README.md                        # Общее описание проекта (назначение, возможности, зависимости)
@@ -372,6 +374,35 @@ created. The roster context menu's
 (wipes the SQLite messages **and** the legacy JSONL file) and resets the open
 tab; the server archive (MAM) is untouched, so a reopened chat may refill from
 it. [`tests/test_history_manager.py`]
+
+**Plugin system** (`stanza_im/plugins/__init__.py`, `ui/plugin_manager_dialog.py`):
+plugins are self-contained sub-packages of `stanza_im.plugins`, each exposing a
+manifest (`PLUGIN_ID`, `PLUGIN_NAME`/`PLUGIN_CATEGORY`/`PLUGIN_DESCRIPTION` i18n
+keys, `PLUGIN_ICON`) and optional `activate(app)`/`deactivate(app)` hooks.
+`discover()` scans the directory (no external loading) and returns a sorted
+`Plugin` list; `enabled_ids`/`set_enabled`/`missing_enabled` read and write the
+`plugins` config section (plugin id → bool, `core/storage.py`). The Actions
+menu's «Плагины» (`exec.png`, replacing the old disabled stub) opens the
+singleton `PluginManagerDialog`: a `QTreeWidget` of categories → plugins with a
+check per plugin (tri-state per category), «Ок»/«Отмена»; «Ок» writes the flags
+and emits `plugins_changed`, and `MainWindow._apply_plugins` activates/
+deactivates the affected plugins **live** (no restart). If a saved-enabled
+plugin is missing on disk, `_on_plugins` shows a `QMessageBox.warning` and the
+client keeps running. Plugin tabs are appended to the roster tab bar after the
+built-ins through `MainWindow._add_roster_tab`/`_remove_roster_tab`, and
+`_tab_index`/`_tab_key` resolve positions from the live `_roster_tab_keys` list
+(the contiguous built-ins stay `roster`/`bookmarks`/`events`);
+`_on_roster_tab_changed` calls a plugin page's `reload()` on activation.
+`_deactivate_plugins` tears everything down on logout. [`tests/test_plugins.py`]
+The bundled **Notes** plugin (`stanza_im/plugins/notes/`, category «Инструменты»)
+adds a tab after the built-ins (icon `draw-brush.png`): a search box, a tag
+filter («Все теги» + the collected tags), the note titles and the bookmarks-style
+toolbar (Открыть/Создать/Изменить/Удалить, with a delete confirmation). Notes
+live on the server in XEP-0049 private storage using the Miranda payload
+(`http://miranda-im.org/storage#notes`): `JabberClient.get_notes`/`set_notes`
+build raw IQs (one packet for the whole set) and `_parse_notes` reads
+`<note tags><title><text>`. The tab re-fetches on activation; a server without
+XEP-0049 shows a warning and an empty list. [`tests/test_plugins.py`]
 
 UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)`, which resolves through

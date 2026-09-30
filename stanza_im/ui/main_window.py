@@ -373,6 +373,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._client = None
         self._xml_console = None
         self._pep_manager = None
+        self._plugin_manager = None
+        self._notes_page = None
+        self._applied_plugins: set[str] = set()
         # XEP-0191: JIDs blocked on the server (roster strikethrough).
         self._blocked_jids: set[str] = set()
 
@@ -447,6 +450,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # input font, colors, themes, interface mode) matches the config from
         # the first frame instead of only after the Preferences are used.
         self._on_settings_applied()
+        # Activate the plugins enabled in the config (their tabs are added to
+        # the roster tab bar built above).
+        self._apply_plugins()
 
         # ── Auto-connect (if configured) delayed until loop runs ──
         QtCore.QTimer.singleShot(100, self.try_auto_connect)
@@ -567,27 +573,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster_tabs = QtWidgets.QTabBar()
         self._roster_tabs.setExpanding(False)
         self._roster_tabs.setDrawBase(False)
-        icons = {
-            "roster": self._tab_icon("system-users.png"),
-            "bookmarks": self._tab_icon("bookmarks.svg"),
-            "events": self._tab_icon("event.svg"),
-        }
-        tips = {
-            "roster": tr("roster_tab_roster"),
-            "bookmarks": tr("roster_tab_bookmarks"),
-            "events": tr("roster_tab_events"),
-        }
-        for key in ("roster", "bookmarks", "events"):
-            index = self._roster_tabs.addTab(icons[key], "")
-            self._roster_tabs.setTabToolTip(index, tips[key])
+        # Ordered tab keys; plugin tabs are appended after the built-ins.  Kept
+        # as a list so ``_tab_index`` stays valid when tabs are added/removed
+        # live (plugin manager "Ok").
+        self._roster_tab_keys: list[str] = []
+        self._roster_tab_pages: dict[str, QtWidgets.QWidget] = {}
         self._roster_tabs.currentChanged.connect(self._on_roster_tab_changed)
         host_layout.addWidget(self._roster_tabs)
 
         self._roster_stack = QtWidgets.QStackedWidget()
-        self._roster_stack.addWidget(roster_content)          # 0 roster
-        self._roster_stack.addWidget(self._build_bookmarks_tab())  # 1
-        self._roster_stack.addWidget(self._build_events_tab())     # 2
         host_layout.addWidget(self._roster_stack, stretch=1)
+
+        builtins = {
+            "roster": (self._tab_icon("system-users.png"),
+                       tr("roster_tab_roster"), lambda: roster_content),
+            "bookmarks": (self._tab_icon("bookmarks.svg"),
+                          tr("roster_tab_bookmarks"),
+                          self._build_bookmarks_tab),
+            "events": (self._tab_icon("event.svg"),
+                       tr("roster_tab_events"), self._build_events_tab),
+        }
+        for key, (icon, tip, factory) in builtins.items():
+            self._add_roster_tab(key, icon, tip, factory())
 
         self._roster_tabs.setCurrentIndex(0)
         self._roster_stack.setCurrentIndex(0)
@@ -600,6 +607,32 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+PgDown"), self,
                         activated=lambda: self._cycle_roster_tab(1))
         return host
+
+    def _add_roster_tab(self, key: str, icon: QtGui.QIcon, tooltip: str,
+                        page: QtWidgets.QWidget) -> None:
+        """Append a roster tab (used for built-ins and live plugin tabs)."""
+        if key in self._roster_tab_keys:
+            return
+        index = self._roster_tabs.addTab(icon, "")
+        self._roster_tabs.setTabToolTip(index, tooltip)
+        self._roster_stack.addWidget(page)
+        self._roster_tab_keys.append(key)
+        self._roster_tab_pages[key] = page
+
+    def _remove_roster_tab(self, key: str) -> None:
+        """Remove a roster tab and its page (plugin deactivation)."""
+        if key not in self._roster_tab_keys:
+            return
+        index = self._roster_tab_keys.index(key)
+        if self._roster_tabs.currentIndex() == index:
+            self._roster_tabs.setCurrentIndex(0)
+        page = self._roster_tab_pages.pop(key, None)
+        self._roster_tab_keys.pop(index)
+        self._roster_tabs.removeTab(index)
+        if page is not None:
+            self._roster_stack.removeWidget(page)
+            page.setParent(None)
+            page.deleteLater()
 
     def _cycle_roster_tab(self, step: int) -> None:
         if getattr(self, "_unified", False) or not self.isActiveWindow():
@@ -856,16 +889,32 @@ class MainWindow(QtWidgets.QMainWindow):
             self._roster_tabs.setTabIcon(index, QtGui.QIcon(faded))
 
     def _tab_index(self, key: str) -> int:
-        return {"roster": 0, "bookmarks": 1, "events": 2}.get(key, -1)
+        keys = getattr(self, "_roster_tab_keys", [])
+        try:
+            return keys.index(key)
+        except ValueError:
+            return -1
+
+    def _tab_key(self, index: int) -> str:
+        keys = getattr(self, "_roster_tab_keys", [])
+        if 0 <= index < len(keys):
+            return keys[index]
+        return ""
 
     def _on_roster_tab_changed(self, index: int) -> None:
         if not hasattr(self, "_roster_stack"):
             return
         self._roster_stack.setCurrentIndex(index)
-        if index == self._tab_index("bookmarks") and self._client:
+        key = self._tab_key(index)
+        if key == "bookmarks" and self._client:
             self._start_task(self._load_bookmarks())
-        elif index == self._tab_index("events"):
+        elif key == "events":
             self._stop_event_blink()
+        elif key and key.startswith("plugin:") and self._client:
+            page = self._roster_tab_pages.get(key)
+            reload_fn = getattr(page, "reload", None)
+            if callable(reload_fn):
+                reload_fn()
 
     def _on_bookmark_activated(self, item: QtWidgets.QListWidgetItem) -> None:
         bookmark = item.data(QtCore.Qt.ItemDataRole.UserRole)
@@ -1040,10 +1089,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                              tr("menu_history"))
         history_act.triggered.connect(self._on_history_manager)
         actions_menu.addSeparator()
-        plugins_menu = actions_menu.addMenu(self._menu_icon("exec.png"),
-                                            tr("menu_plugins"))
-        plugins_menu.setEnabled(False)
-        plugins_menu.addAction(tr("menu_plugins_empty")).setEnabled(False)
+        plugins_act = actions_menu.addAction(self._menu_icon("exec.png"),
+                                             tr("menu_plugins"))
+        plugins_act.triggered.connect(self._on_plugins)
         actions_menu.addSeparator()
         prefs = actions_menu.addAction(self._menu_icon("gtk-preferences.png"),
                                        tr("menu_preferences"))
@@ -2063,6 +2111,52 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pep_manager.raise_()
         self._pep_manager.activateWindow()
         self._pep_manager.refresh()
+
+    def _on_plugins(self):
+        """Open the plugin manager; warn about missing saved plugins."""
+        from stanza_im.plugins import discover, missing_enabled
+        known = discover()
+        missing = missing_enabled(self._config, known)
+        if missing:
+            QtWidgets.QMessageBox.warning(
+                self, tr("plugin_manager_title"),
+                tr("plugins_missing_warning", plugins=", ".join(missing)))
+        if self._plugin_manager is None:
+            from stanza_im.ui.plugin_manager_dialog import PluginManagerDialog
+            self._plugin_manager = PluginManagerDialog(self._config, self)
+            self._plugin_manager.plugins_changed.connect(
+                self._on_plugins_changed)
+        self._plugin_manager.show()
+        self._plugin_manager.raise_()
+        self._plugin_manager.activateWindow()
+
+    def _on_plugins_changed(self, enabled_ids: list) -> None:
+        self._config.save()
+        self._apply_plugins(list(enabled_ids))
+
+    def _apply_plugins(self, enabled_ids: list | None = None) -> None:
+        """Activate/deactivate plugins to match *enabled_ids* (live)."""
+        from stanza_im.plugins import discover, enabled_ids as _enabled
+        known = discover()
+        wanted = set(enabled_ids if enabled_ids is not None
+                     else _enabled(self._config, known))
+        applied = getattr(self, "_applied_plugins", set())
+        for plugin in known:
+            if plugin.id in wanted and plugin.id not in applied:
+                try:
+                    plugin.activate(self)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Plugin %s activation failed", plugin.id,
+                                   exc_info=True)
+                applied.add(plugin.id)
+            elif plugin.id not in wanted and plugin.id in applied:
+                try:
+                    plugin.deactivate(self)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Plugin %s deactivation failed", plugin.id,
+                                   exc_info=True)
+                applied.discard(plugin.id)
+        self._applied_plugins = applied
 
     def _on_password_changed(self, new_password: str):
         """Keep the login form in sync after a successful password change."""
@@ -6046,6 +6140,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.sort_and_update()
         self._schedule_roster_repaint()
         self._chat_window.close_all()
+        self._deactivate_plugins()
+
+    def _deactivate_plugins(self) -> None:
+        """Tear down every active plugin (logout / account switch)."""
+        from stanza_im.plugins import discover
+        for plugin in discover():
+            if plugin.id in self._applied_plugins:
+                try:
+                    plugin.deactivate(self)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Plugin %s deactivation failed", plugin.id,
+                                   exc_info=True)
+        self._applied_plugins = set()
 
     def _quit(self):
         if self._shutting_down:

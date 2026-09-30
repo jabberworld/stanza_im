@@ -76,6 +76,9 @@ stanza_im/
 │   ├── report_dialog.py     — XEP-0377 spam/abuse report dialog
 │   ├── xml_console.py       — Raw XML console (filtered, coloured)
 │   ├── pep_manager_dialog.py — PEP node manager (list/open/config/delete)
+│   ├── plugin_manager_dialog.py — plugin enable/disable tree (Actions → Plugins)
+│   ├── notes_widget.py      — Notes plugin tab (XEP-0049 private storage)
+│   ├── notes_dialog.py      — Note create/edit dialog
 │   ├── tray.py         — System tray icon
 │   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
 │   └── icons.py        — LRU icon cache
@@ -88,7 +91,8 @@ stanza_im/
 │                          socks5.py = dependency-free SOCKS5 CONNECT)
 ├── i18n/               — Translation dicts (en.py, ru.py)
 ├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue)
-└── plugins/            — (future)
+└── plugins/            — Plugin registry (__init__.py) + bundled plugins
+                          (notes/ = XEP-0049 tagged notes)
 ```
 
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
@@ -341,6 +345,7 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 | `notifications.sound_ft_finish` | `false` | Play `ft_finish` when a transfer finishes |
 | `notifications.sound_contact_online` | `false` | Play `contact_online` on an offline→online transition |
 | `notifications.sound_contact_offline` | `false` | Play `contact_offline` on an online→offline transition |
+| `plugins` | `{}` | Plugin registry: plugin id → enabled flag (see §5.4). Written by `PluginManagerDialog` («Ок»); read by `MainWindow._apply_plugins` at startup and live. |
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -450,6 +455,20 @@ non-modal `PepManagerDialog` with a `QStackedWidget`:
 
 **Delete** confirms first (`client.pep_delete_node`). All requests run through
 `MainWindow._start_task`.
+
+### 5.4.1 Plugin Manager (`ui/plugin_manager_dialog.py`)
+
+Actions → «Плагины» (`exec.png`) opens the singleton `PluginManagerDialog`
+(after warning about saved-enabled plugins that are missing on disk, via
+`plugins_missing_warning`; the client keeps running). It shows the installed
+plugins in a `QTreeWidget` grouped by category (a tri-state checkbox per
+category, one checkbox per plugin) and «Ок»/«Отмена». «Ок» writes the flags to
+the `plugins` config section and emits `plugins_changed`; `MainWindow.
+_apply_plugins` then activates/deactivates the affected plugins live — a plugin
+adds/removes its roster tab through `MainWindow._add_roster_tab`/
+`_remove_roster_tab` (see `stanza_im/plugins/notes/`, §14.8.2). The bundled
+Notes plugin's tab is appended after the built-ins (`roster`/`bookmarks`/
+`events`); `_tab_index`/`_tab_key` resolve the live `_roster_tab_keys` list.
 
 ### 5.5 Help Menu — Connection / Certificate / Server Info
 
@@ -1929,6 +1948,25 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (`_recheck_date_async`), so days added by a MAM backfill after the dialog
   opened are highlighted and load their messages.
 
+### 14.8.2 Notes (Notes plugin, `stanza_im/plugins/notes/`)
+
+- Notes are stored on the server in XEP-0049 private XML storage under the
+  Miranda payload `http://miranda-im.org/storage#notes`. `JabberClient.
+  get_notes()` sends one `iq get` (`<query xmlns='jabber:iq:private'><storage
+  xmlns='…notes'/></query>`) and returns `[{title, tags, text}]` from
+  `_parse_notes`; `set_notes(notes)` sends the **whole** set in one `iq set`
+  (`<note tags='a, b'><title>…</title><text>…</text></note>` per note). The tags
+  string is stored/read verbatim (comma-separated; split with `strip`).
+- The plugin's tab (`ui/notes_widget.py`) is a search box, a tag filter
+  (`QComboBox`, first entry «Все теги» = no filter, then the tags collected from
+  all notes), the note titles (`QListWidget`) and the bookmarks-style bottom
+  toolbar (Открыть `ok.png` / Создать `about.png` / Изменить `edit.png` /
+  Удалить `process-stop.png`). Double-click or «Открыть» opens `NoteDialog`
+  (title / tags / text); a save re-sends the set and rebuilds the list; delete
+  asks for confirmation. `reload()` re-fetches on tab activation; a server
+  without `jabber:iq:private` shows `notes_no_private_storage` and an empty
+  list (the plugin stays enabled).
+
 ### 14.9 Event System
 
 ```
@@ -2304,7 +2342,6 @@ Copied from original Jabbim `resources/`:
 | Chat skins (minimal-mod, candy) | HTML/CSS | Yes, directly |
 | CSS variants | 54 CSS | Yes, directly |
 | QSS themes | 8 themes | Needs Qt6 syntax update |
-| Locale .ts/.qm | 9 languages | Replaced by i18n/*.py |
 
 ## 17. Phase 2 Features (planned)
 
