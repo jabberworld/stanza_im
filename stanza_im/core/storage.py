@@ -173,6 +173,8 @@ class Config:
         "ui": {"close_to_tray": True, "language": ""},
         # Plugin registry: plugin id -> enabled flag (see stanza_im/plugins).
         "plugins": {},
+        # Per-plugin settings: plugin id -> {key: value} (see plugins registry).
+        "plugin_settings": {},
     }
 
     def __init__(self):

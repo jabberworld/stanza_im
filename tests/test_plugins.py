@@ -39,6 +39,14 @@ def check(name, cond):
         FAILURES.append(name)
 
 
+def _roundtrip_setting(cfg) -> bool:
+    """Save *cfg* and reload it; True when the fake setting survived."""
+    from stanza_im.core.storage import Config
+    cfg.save()
+    reloaded = Config()
+    return (reloaded.plugin_settings.get("fake", {}).get("greeting") == "hi")
+
+
 # 1. Registry ----------------------------------------------------------------
 plugins = discover()
 ids = [p.id for p in plugins]
@@ -65,15 +73,68 @@ check("stored ids include the missing one",
 dlg = PluginManagerDialog(cfg)
 seen = []
 dlg.plugins_changed.connect(seen.append)
-categories = [dlg._tree.topLevelItem(i).text(0)
-              for i in range(dlg._tree.topLevelItemCount())]
+tree = dlg._widget._tree
+categories = [tree.topLevelItem(i).text(0)
+              for i in range(tree.topLevelItemCount())]
 check("the manager groups plugins by category", categories == ["Tools"])
-check("the enabled plugin starts checked", dlg._checked_ids() == ["notes"])
+check("the enabled plugin starts checked", dlg._widget.checked_ids() == ["notes"])
+check("Configure is disabled for a plugin without settings",
+      not dlg._widget._configure_btn.isEnabled())
 dlg._accept()
 check("Ok emits the enabled ids", seen == [["notes"]])
 check("Ok writes the flags to the config", cfg.plugins.get("notes") is True)
 check("Ok disables the previously unchecked plugin",
       cfg.plugins.get("ghost") is False)
+
+# 3b. Per-plugin settings ----------------------------------------------------
+from stanza_im.plugins import Plugin, settings_section  # noqa: E402
+from stanza_im.ui.plugin_manager_dialog import PluginManagerWidget  # noqa: E402
+
+
+class _FakeSettingsModule:
+    """A minimal plugin module with a settings dialog."""
+
+    def __init__(self):
+        self.opened = 0
+
+    def open_settings(self, config, parent=None):
+        self.opened += 1
+        settings_section(config, "fake").greeting = "hi"
+
+
+_fake_mod = _FakeSettingsModule()
+_fake = Plugin(id="fake", name="plugin_notes_name",
+               category="plugin_category_tools", icon="draw-brush.png",
+               module=_fake_mod, has_settings=True)
+_plain = Plugin(id="notes", name="plugin_notes_name",
+                category="plugin_category_tools", icon="draw-brush.png",
+                module=_FakeSettingsModule(), has_settings=False)
+
+w = PluginManagerWidget(cfg, plugins=[_fake, _plain])
+check("Configure is disabled with no plugin selected",
+      not w._configure_btn.isEnabled())
+plain_item = None
+for i in range(w._tree.topLevelItemCount()):
+    hdr = w._tree.topLevelItem(i)
+    for j in range(hdr.childCount()):
+        if hdr.child(j).data(0, QtCore.Qt.ItemDataRole.UserRole) == "notes":
+            plain_item = hdr.child(j)
+w._tree.setCurrentItem(plain_item)
+check("Configure stays disabled for a settings-less plugin",
+      not w._configure_btn.isEnabled())
+for i in range(w._tree.topLevelItemCount()):
+    hdr = w._tree.topLevelItem(i)
+    for j in range(hdr.childCount()):
+        if hdr.child(j).data(0, QtCore.Qt.ItemDataRole.UserRole) == "fake":
+            w._tree.setCurrentItem(hdr.child(j))
+check("Configure is enabled for a settings-capable plugin",
+      w._configure_btn.isEnabled())
+w._on_configure()
+check("Configure opens the plugin's settings dialog", _fake_mod.opened == 1)
+check("the plugin's settings are stored in config.plugin_settings",
+      cfg.plugin_settings.get("fake", {}).get("greeting") == "hi")
+check("settings survive a config save/load round-trip",
+      _roundtrip_setting(cfg))
 
 # 4. Protocol round-trip -----------------------------------------------------
 sample = ET.fromstring(

@@ -13,6 +13,13 @@ optional lifecycle hooks::
     def activate(app): ...           # called when enabled
     def deactivate(app): ...         # called when disabled
 
+    PLUGIN_HAS_SETTINGS = True       # optional: announce a settings dialog
+    def open_settings(config, parent=None): ...  # opens the plugin's own dialog
+
+A plugin with settings persists them in the shared config under
+``[plugin_settings.<id>]`` (see :func:`settings_section`); the enable flag stays
+``[plugins].<id> = true``.
+
 ``discover()`` scans the directory (no external loading), so enabling a plugin
 is a pure in-process call and a plugin that disappeared between sessions is a
 plain missing entry the caller can warn about.
@@ -41,6 +48,7 @@ class Plugin:
     description: str = ""
     icon: str = ""
     module: object = None
+    has_settings: bool = False
 
     def activate(self, app) -> None:
         hook = getattr(self.module, "activate", None)
@@ -51,6 +59,16 @@ class Plugin:
         hook = getattr(self.module, "deactivate", None)
         if callable(hook):
             hook(app)
+
+    def open_settings(self, config, parent=None) -> bool:
+        """Open the plugin's settings dialog; True when it was offered."""
+        if not self.has_settings:
+            return False
+        hook = getattr(self.module, "open_settings", None)
+        if not callable(hook):
+            return False
+        hook(config, parent)
+        return True
 
 
 def _package_dir() -> str:
@@ -75,6 +93,8 @@ def discover() -> list[Plugin]:
         plugin_id = str(getattr(module, "PLUGIN_ID", "") or entry)
         name = str(getattr(module, "PLUGIN_NAME", "") or plugin_id)
         category = str(getattr(module, "PLUGIN_CATEGORY", "") or "other")
+        has_settings = bool(getattr(module, "PLUGIN_HAS_SETTINGS", False)) \
+            and callable(getattr(module, "open_settings", None))
         found.append(Plugin(
             id=plugin_id,
             name=name,
@@ -82,6 +102,7 @@ def discover() -> list[Plugin]:
             description=str(getattr(module, "PLUGIN_DESCRIPTION", "") or ""),
             icon=str(getattr(module, "PLUGIN_ICON", "") or ""),
             module=module,
+            has_settings=has_settings,
         ))
     return sorted(found, key=_sort_key)
 
@@ -135,6 +156,24 @@ def stored_enabled_ids(config) -> list[str]:
 def set_enabled(config, plugin_id: str, enabled: bool) -> None:
     """Persist the enabled/disabled state of *plugin_id*."""
     _plugins_section(config)[plugin_id] = bool(enabled)
+
+
+def settings_section(config, plugin_id: str):
+    """Return (creating if needed) the plugin's settings AttrDict.
+
+    Settings live in the shared config under ``[plugin_settings.<id>]`` so they
+    never collide with the boolean enable flag in ``[plugins].<id>``.
+    """
+    from stanza_im.core.storage import AttrDict
+    root = getattr(config, "plugin_settings", None)
+    if root is None:
+        root = AttrDict()
+        setattr(config, "plugin_settings", root)
+    section = root.get(plugin_id)
+    if not isinstance(section, AttrDict):
+        section = AttrDict(section or {})
+        root[plugin_id] = section
+    return section
 
 
 def missing_enabled(config, known: Iterable[Plugin] | None = None) -> list[str]:

@@ -1244,6 +1244,7 @@ STRINGS = {
     'map_coords_copied': 'Координаты скопированы в буфер обмена.',
     # Plugins (manager + Notes plugin)
     'plugin_manager_title': 'Плагины',
+    'plugin_configure': 'Настроить',
     'plugin_category_communication': 'Общение',
     'plugin_category_appearance': 'Внешний вид',
     'plugin_category_other': 'Прочее',

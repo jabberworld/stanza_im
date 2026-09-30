@@ -1243,6 +1243,7 @@ STRINGS = {
     'map_coords_copied': 'Coordinates copied to the clipboard.',
     # Plugins (manager; plugin-owned strings live in plugins/*/strings/)
     'plugin_manager_title': 'Plugins',
+    'plugin_configure': 'Configure',
     'plugin_category_communication': 'Communication',
     'plugin_category_appearance': 'Appearance',
     'plugin_category_other': 'Other',
