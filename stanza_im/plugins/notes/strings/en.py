@@ -1,0 +1,23 @@
+"""English strings for the Notes plugin."""
+STRINGS = {
+    "plugin_category_tools": "Tools",
+    "plugin_notes_name": "Notes",
+    "plugin_notes_desc": "Store tagged text notes in the private storage.",
+    "notes_all_tags": "All tags",
+    "notes_search_placeholder": "Search notes…",
+    "notes_open": "Open",
+    "notes_new": "Create",
+    "notes_edit": "Edit",
+    "notes_remove": "Remove",
+    "notes_untitled": "(untitled)",
+    "notes_dialog_new_title": "New note",
+    "notes_dialog_edit_title": "Edit note",
+    "notes_field_title": "Title",
+    "notes_field_tags": "Tags (comma-separated)",
+    "notes_field_text": "Text",
+    "notes_remove_confirm": "Delete the note “{title}”?",
+    "notes_loading": "Loading notes…",
+    "notes_offline": "Not connected — notes are unavailable.",
+    "notes_no_private_storage": "The server does not support private storage (XEP-0049).",
+    "notes_save_failed": "Could not save the notes on the server.",
+}

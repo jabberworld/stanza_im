@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core.client import NS_NOTES, _parse_notes
 from stanza_im.core.storage import Config
@@ -152,10 +152,44 @@ visible = [widget._list.item(i).text() for i in range(widget._list.count())
            if not widget._list.item(i).isHidden()]
 check("the search box filters by title", visible == ["First"])
 
-# 7. i18n parity -------------------------------------------------------------
-check("en and ru have the same keys", set(en.STRINGS) == set(ru.STRINGS))
-check("the notes tab tooltip is translated",
-      en.STRINGS.get("roster_tab_notes") and ru.STRINGS.get("roster_tab_notes"))
+# 6b. Clicking empty space clears the note selection (shared ZoomListWidget).
+from stanza_im.ui.zoom_list import ZoomListWidget  # noqa: E402
+
+check("the notes list is a ZoomListWidget", isinstance(widget._list, ZoomListWidget))
+if widget._list.count():
+    widget._list.setCurrentRow(0)
+    widget._list.selectAll()
+    pressed = QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonPress,
+        QtCore.QPointF(5, widget._list.height() - 1),
+        QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.NoModifier)
+    widget._list.mousePressEvent(pressed)
+    check("a click on empty space clears the note selection",
+          widget._list.selectedItems() == [])
+
+# 7. i18n parity + plugin strings --------------------------------------------
+from stanza_im import i18n  # noqa: E402
+
+i18n_load("en")
+merged_en = dict(i18n._current)
+i18n_load("ru")
+merged_ru = dict(i18n._current)
+check("the merged en/ru dictionaries have the same keys",
+      set(merged_en) == set(merged_ru))
+check("the plugin's own strings are merged in",
+      i18n.tr("notes_open") == "Открыть"
+      and i18n.tr("plugin_category_tools") == "Инструменты")
+check("the manager's strings stay in the core dictionary",
+      "plugin_manager_title" in en.STRINGS and "plugin_manager_title" in ru.STRINGS)
+check("plugin-owned keys are no longer in the core dictionary",
+      "notes_open" not in en.STRINGS and "notes_open" not in ru.STRINGS)
+from stanza_im.plugins.notes import strings as _notes_strings  # noqa: E402
+
+check("the plugin has its own en/ru string modules",
+      _notes_strings.en.STRINGS and _notes_strings.ru.STRINGS)
+check("the plugin's en/ru strings have the same keys",
+      set(_notes_strings.en.STRINGS) == set(_notes_strings.ru.STRINGS))
 
 print()
 if FAILURES:

@@ -64,6 +64,7 @@ stanza_im/                      # Python package
 │   ├── chat_themes.py           # Adium-style theme HTML generator
 │   ├── nick_colors.py           # Session MUC nickname → color allocation
 │   ├── font_zoom.py             # Ctrl+wheel font-size helper (input/roster/MUC)
+│   ├── zoom_list.py             # List with Ctrl+wheel zoom + empty-click deselect
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
@@ -173,7 +174,8 @@ server / password / auto-join) and save via `client.save_bookmark`
 bookmark first, and removal always asks for confirmation
 (`_remove_bookmark_confirmed`). The list shows the name (JID only in the
 tooltip) and shares the roster font settings
-(`_apply_roster_font`); `_ZoomListWidget` gives Ctrl+wheel font zoom and clears
+(`_apply_roster_font`); `ui/zoom_list.ZoomListWidget` (used by the bookmarks,
+events and notes lists) gives Ctrl+wheel font zoom and clears
 the selection on a click over empty space. The Events tab
 (icon `event`) — a search field and a list of system/subscription events; each
 entry carries its time (`_push_system_event` prefixes `HH:MM`,
@@ -379,6 +381,12 @@ it. [`tests/test_history_manager.py`]
 plugins are self-contained sub-packages of `stanza_im.plugins`, each exposing a
 manifest (`PLUGIN_ID`, `PLUGIN_NAME`/`PLUGIN_CATEGORY`/`PLUGIN_DESCRIPTION` i18n
 keys, `PLUGIN_ICON`) and optional `activate(app)`/`deactivate(app)` hooks.
+A plugin keeps its own UI strings in `plugins/<id>/strings/<lang>.py`
+(`STRINGS = {...}`); `i18n.load()` merges every plugin's string module into the
+active dictionary (so the shared `tr()` finds them), the core dictionary wins on
+a collision. The category is declared by the plugin, so the manager groups
+plugins by the `PLUGIN_CATEGORY` key — several plugins with the same category
+share one branch.
 `discover()` scans the directory (no external loading) and returns a sorted
 `Plugin` list; `enabled_ids`/`set_enabled`/`missing_enabled` read and write the
 `plugins` config section (plugin id → bool, `core/storage.py`). The Actions

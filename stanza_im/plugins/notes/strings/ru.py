@@ -1,0 +1,23 @@
+"""Russian strings for the Notes plugin."""
+STRINGS = {
+    "plugin_category_tools": "Инструменты",
+    "plugin_notes_name": "Заметки",
+    "plugin_notes_desc": "Хранит текстовые заметки с тегами в приватном хранилище.",
+    "notes_all_tags": "Все теги",
+    "notes_search_placeholder": "Поиск заметок…",
+    "notes_open": "Открыть",
+    "notes_new": "Создать",
+    "notes_edit": "Изменить",
+    "notes_remove": "Удалить",
+    "notes_untitled": "(без заголовка)",
+    "notes_dialog_new_title": "Новая заметка",
+    "notes_dialog_edit_title": "Редактирование заметки",
+    "notes_field_title": "Заголовок",
+    "notes_field_tags": "Теги (через запятую)",
+    "notes_field_text": "Текст",
+    "notes_remove_confirm": "Удалить заметку «{title}»?",
+    "notes_loading": "Загрузка заметок…",
+    "notes_offline": "Нет соединения — заметки недоступны.",
+    "notes_no_private_storage": "Сервер не поддерживает приватное хранилище (XEP-0049).",
+    "notes_save_failed": "Не удалось сохранить заметки на сервере.",
+}

@@ -15,6 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
 from stanza_im.ui.notes_dialog import NoteDialog
+from stanza_im.ui.zoom_list import ZoomListWidget
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class NotesWidget(QtWidgets.QWidget):
         self._tag_filter.currentIndexChanged.connect(self._apply_filter)
         layout.addWidget(self._tag_filter)
 
-        self._list = QtWidgets.QListWidget()
+        self._list = ZoomListWidget()
         self._list.itemDoubleClicked.connect(self._on_activated)
         self._list.itemSelectionChanged.connect(self._update_actions)
         layout.addWidget(self._list, stretch=1)

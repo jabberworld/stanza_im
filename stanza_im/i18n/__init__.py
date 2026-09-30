@@ -26,22 +26,54 @@ def current_language() -> str:
     return _lang
 
 
+def _plugin_strings(lang: str) -> dict[str, str]:
+    """Merge every plugin's ``strings/<lang>.py`` STRINGS dict.
+
+    Plugins keep their own UI strings next to their code.  A broken or missing
+    file is skipped so one plugin can never break language loading.
+    """
+    merged: dict[str, str] = {}
+    folder = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                          "plugins")
+    try:
+        entries = sorted(os.listdir(folder))
+    except OSError:
+        return merged
+    for name in entries:
+        if name.startswith(("_", ".")):
+            continue
+        module = f"stanza_im.plugins.{name}.strings.{lang}"
+        try:
+            mod = importlib.import_module(module)
+        except (ModuleNotFoundError, AttributeError, ImportError):
+            continue
+        strings = getattr(mod, "STRINGS", None)
+        if isinstance(strings, dict):
+            merged.update(strings)
+    return merged
+
+
 def load(lang: str | None = None) -> None:
     """Load translation strings for *lang* (default: auto-detect)."""
     global _current, _lang
     lang = lang or _detect_language()
     try:
         mod = importlib.import_module(f"stanza_im.i18n.{lang}")
-        _current = mod.STRINGS
+        strings = dict(mod.STRINGS)
         _lang = lang
     except (ModuleNotFoundError, AttributeError):
         try:
             mod = importlib.import_module("stanza_im.i18n.en")
-            _current = mod.STRINGS
+            strings = dict(mod.STRINGS)
             _lang = "en"
         except (ModuleNotFoundError, AttributeError):
-            _current = {}
+            strings = {}
             _lang = "en"
+    # Plugin strings are merged on top of the core ones (a plugin may not
+    # override core keys, so core wins on a collision).
+    for key, value in _plugin_strings(_lang).items():
+        strings.setdefault(key, value)
+    _current = strings
 
 
 def available_languages() -> list[tuple[str, str]]:

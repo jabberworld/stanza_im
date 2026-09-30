@@ -79,6 +79,7 @@ stanza_im/
 │   ├── plugin_manager_dialog.py — plugin enable/disable tree (Actions → Plugins)
 │   ├── notes_widget.py      — Notes plugin tab (XEP-0049 private storage)
 │   ├── notes_dialog.py      — Note create/edit dialog
+│   ├── zoom_list.py         — List with Ctrl+wheel zoom + empty-click deselect
 │   ├── tray.py         — System tray icon
 │   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
 │   └── icons.py        — LRU icon cache
@@ -92,7 +93,8 @@ stanza_im/
 ├── i18n/               — Translation dicts (en.py, ru.py)
 ├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue)
 └── plugins/            — Plugin registry (__init__.py) + bundled plugins
-                          (notes/ = XEP-0049 tagged notes)
+                          (notes/ = XEP-0049 tagged notes; notes/strings/ =
+                           the plugin's own en/ru UI strings)
 ```
 
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
@@ -2324,6 +2326,11 @@ error.setText(tr("error_nickname_conflict"))
 ```
 
 Auto-detects language from `LANG` env var. Falls back to English.
+
+Plugins keep their own strings in `stanza_im/plugins/<id>/strings/<lang>.py`
+(`STRINGS = {...}`); `i18n.load()` merges all of them into the active dictionary
+(the core dictionary wins on a collision), so plugin UI and the plugin manager
+(category/name/description, declared by the plugin) use the shared `tr()`.
 
 ## 16. Resources
 
