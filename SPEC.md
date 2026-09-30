@@ -348,6 +348,7 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 | `notifications.sound_contact_online` | `false` | Play `contact_online` on an offline→online transition |
 | `notifications.sound_contact_offline` | `false` | Play `contact_offline` on an online→offline transition |
 | `plugins` | `{}` | Plugin registry: plugin id → enabled flag (see §5.4). Written by `PluginManagerDialog` («Ок»); read by `MainWindow._apply_plugins` at startup and live. |
+| `plugin_settings` | `{}` | Per-plugin settings: plugin id → `{key: value}` (`plugins.settings_section`). Kept apart from the boolean enable flag; a settings-capable plugin writes its own values when its «Настроить» dialog is accepted. |
 
 ## 5. Main Window (`ui/main_window.py`)
 
@@ -462,13 +463,19 @@ non-modal `PepManagerDialog` with a `QStackedWidget`:
 
 Actions → «Плагины» (`exec.png`) opens the singleton `PluginManagerDialog`
 (after warning about saved-enabled plugins that are missing on disk, via
-`plugins_missing_warning`; the client keeps running). It shows the installed
-plugins in a `QTreeWidget` grouped by category (a tri-state checkbox per
-category, one checkbox per plugin) and «Ок»/«Отмена». «Ок» writes the flags to
-the `plugins` config section and emits `plugins_changed`; `MainWindow.
-_apply_plugins` then activates/deactivates the affected plugins live — a plugin
-adds/removes its roster tab through `MainWindow._add_roster_tab`/
-`_remove_roster_tab` (see `stanza_im/plugins/notes/`, §14.8.2). The bundled
+`plugins_missing_warning`; the client keeps running). It wraps the reusable
+`PluginManagerWidget`: a `QTreeWidget` grouped by category (a tri-state checkbox
+per category, one checkbox per plugin), a «Настроить» button and «Ок»/«Отмена».
+«Ок» writes the flags to the `plugins` config section and emits
+`plugins_changed`; `MainWindow._apply_plugins` then activates/deactivates the
+affected plugins live — a plugin adds/removes its roster tab through
+`MainWindow._add_roster_tab`/`_remove_roster_tab` (see
+`stanza_im/plugins/notes/`, §14.8.2). «Настроить» is enabled only for a selected
+plugin that announces `PLUGIN_HAS_SETTINGS` and `open_settings`; the plugin
+opens its own dialog and persists its values in `[plugin_settings.<id>]`. The
+Preferences → «Плагины» page embeds the **same widget**; its `apply_checked()`
+runs on Preferences «Ок»/«Применить» and `plugins_applied` drives the live
+apply (both managers rebuild so they stay in sync). The bundled
 Notes plugin's tab is appended after the built-ins (`roster`/`bookmarks`/
 `events`); `_tab_index`/`_tab_key` resolve the live `_roster_tab_keys` list.
 

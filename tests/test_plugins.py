@@ -229,6 +229,29 @@ if widget._list.count():
     check("a click on empty space clears the note selection",
           widget._list.selectedItems() == [])
 
+# 6c. Preferences → Plugins mirrors the manager -------------------------------
+from stanza_im.ui.chat_themes import ChatThemeFactory  # noqa: E402
+from stanza_im.ui.preferences import PreferencesDialog  # noqa: E402
+
+prefs_cfg = Config()
+prefs = PreferencesDialog(prefs_cfg, ChatThemeFactory())
+pm = getattr(prefs, "_plugin_widget", None)
+check("the Preferences → Plugins page embeds the manager widget",
+      pm is not None)
+applied = []
+prefs.plugins_applied.connect(applied.append)
+for i in range(pm._tree.topLevelItemCount()):
+    hdr = pm._tree.topLevelItem(i)
+    for j in range(hdr.childCount()):
+        if hdr.child(j).data(0, QtCore.Qt.ItemDataRole.UserRole) == "notes":
+            hdr.child(j).setCheckState(0, QtCore.Qt.CheckState.Checked)
+prefs._apply_settings()
+check("applying Preferences writes the enabled plugins",
+      prefs_cfg.plugins.get("notes") is True)
+check("applying Preferences emits plugins_applied",
+      applied == [["notes"]])
+prefs.done(0)
+
 # 7. i18n parity + plugin strings --------------------------------------------
 from stanza_im import i18n  # noqa: E402
 

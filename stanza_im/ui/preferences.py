@@ -133,6 +133,7 @@ class PreferencesDialog(QtWidgets.QDialog):
     settings_applied = QtCore.pyqtSignal()
     password_changed = QtCore.pyqtSignal(str)
     register_requested = QtCore.pyqtSignal()
+    plugins_applied = QtCore.pyqtSignal(list)  # newly enabled plugin ids
 
     def __init__(self, config: Config, theme_factory: ChatThemeFactory,
                  osd_manager=None, parent=None,
@@ -1177,10 +1178,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         return combo
 
     def _page_plugins(self):
-        page, form = self._page()
-        label = QtWidgets.QLabel(tr("prefs_no_plugins"))
-        label.setWordWrap(True)
-        form.addRow(label)
+        """Mirror of Actions → Plugins: the same enable/configure widget."""
+        from stanza_im.ui.plugin_manager_dialog import PluginManagerWidget
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._plugin_widget = PluginManagerWidget(self._config, page)
+        layout.addWidget(self._plugin_widget, 1)
         return page
 
     def _page_notifications(self):
@@ -1572,8 +1576,16 @@ class PreferencesDialog(QtWidgets.QDialog):
                                 "video_input": ""})
         for key in ("audio_input", "audio_output", "video_input"):
             cfg.devices[key] = self._value("devices_" + key) or ""
+        # Apply the plugin manager page (mirror of Actions → Plugins) and let
+        # the main window (de)activate the affected plugins live.
+        plugin_ids = None
+        widget = getattr(self, "_plugin_widget", None)
+        if widget is not None:
+            plugin_ids = widget.apply_checked()
         cfg.save()
         self.settings_applied.emit()
+        if plugin_ids is not None:
+            self.plugins_applied.emit(list(plugin_ids))
 
     # ── Change account password ──────────────────────────────────────
 

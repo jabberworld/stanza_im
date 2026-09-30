@@ -2054,6 +2054,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                 client=self._client,
                                 sound_player=self._sounds)
         dlg.settings_applied.connect(self._on_settings_applied)
+        dlg.plugins_applied.connect(self._on_plugins_changed)
         dlg.password_changed.connect(self._on_password_changed)
         dlg.register_requested.connect(self._on_create_account)
         dlg.finished.connect(self._on_prefs_finished)
@@ -2110,6 +2111,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_plugins_changed(self, enabled_ids: list) -> None:
         self._config.save()
         self._apply_plugins(list(enabled_ids))
+        # Keep the two plugin managers (Actions dialog / Preferences page) in
+        # sync when either one changes the enabled set.
+        view = getattr(self, "_plugin_manager", None)
+        if view is not None and hasattr(view, "_widget"):
+            view._widget.rebuild()
+        prefs = getattr(self, "_prefs_dialog", None)
+        widget = getattr(prefs, "_plugin_widget", None)
+        if widget is not None:
+            widget.rebuild()
 
     def _apply_plugins(self, enabled_ids: list | None = None) -> None:
         """Activate/deactivate plugins to match *enabled_ids* (live)."""

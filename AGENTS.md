@@ -387,16 +387,25 @@ active dictionary (so the shared `tr()` finds them), the core dictionary wins on
 a collision. The category is declared by the plugin, so the manager groups
 plugins by the `PLUGIN_CATEGORY` key — several plugins with the same category
 share one branch.
+A plugin that offers settings sets `PLUGIN_HAS_SETTINGS = True` and defines
+`open_settings(config, parent)` (opening its own dialog); its settings are
+persisted in the shared config under `[plugin_settings.<id>]`
+(`plugins.settings_section`, kept apart from the boolean `[plugins].<id>` flag).
 `discover()` scans the directory (no external loading) and returns a sorted
 `Plugin` list; `enabled_ids`/`set_enabled`/`missing_enabled` read and write the
-`plugins` config section (plugin id → bool, `core/storage.py`). The Actions
-menu's «Плагины» (`exec.png`, replacing the old disabled stub) opens the
-singleton `PluginManagerDialog`: a `QTreeWidget` of categories → plugins with a
-check per plugin (tri-state per category), «Ок»/«Отмена»; «Ок» writes the flags
-and emits `plugins_changed`, and `MainWindow._apply_plugins` activates/
-deactivates the affected plugins **live** (no restart). If a saved-enabled
-plugin is missing on disk, `_on_plugins` shows a `QMessageBox.warning` and the
-client keeps running. Plugin tabs are appended to the roster tab bar after the
+`plugins` config section (plugin id → bool, `core/storage.py`). The reusable
+`PluginManagerWidget` (`ui/plugin_manager_dialog.py`) is a `QTreeWidget` of
+categories → plugins with a check per plugin (tri-state per category) plus a
+«Настроить» button enabled only for a selected settings-capable plugin. The
+Actions menu's «Плагины» (`exec.png`) wraps it in the singleton
+`PluginManagerDialog` with «Ок»/«Отмена»; «Ок» writes the flags and emits
+`plugins_changed`, and `MainWindow._apply_plugins` activates/deactivates the
+affected plugins **live** (no restart). The Preferences → «Плагины» page embeds
+the **same widget** (mirror); the page's `apply_checked()` runs in
+`PreferencesDialog._apply_settings`, and its `plugins_applied` signal is wired to
+`MainWindow._on_plugins_changed`, which also rebuilds both views so they stay in
+sync. If a saved-enabled plugin is missing on disk, `_on_plugins` shows a
+`QMessageBox.warning` and the client keeps running. Plugin tabs are appended to the roster tab bar after the
 built-ins through `MainWindow._add_roster_tab`/`_remove_roster_tab`, and
 `_tab_index`/`_tab_key` resolve positions from the live `_roster_tab_keys` list
 (the contiguous built-ins stay `roster`/`bookmarks`/`events`);
