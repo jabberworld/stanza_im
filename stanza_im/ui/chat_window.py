@@ -210,6 +210,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.geo_view_requested.connect(self.geo_view_requested)
         widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.call_requested.connect(self.call_requested)
+        widget.attention_ping_requested.connect(self.attention_ping_requested)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -463,6 +464,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         if widget is not None and widget.is_muc:
             widget.set_muji_support(enabled)
 
+    def set_attention_support(self, jid: str, enabled: bool) -> None:
+        """Enable/disable the XEP-0224 attention bell of a 1:1 tab."""
+        widget = self._tabs.get(jid)
+        if widget is not None and not widget.is_muc:
+            widget.set_attention_support(enabled)
+
     def set_muc_admin(self, room: str, can_manage: bool) -> None:
         """Enable/disable the room-management button of a MUC tab."""
         widget = self._tabs.get(room)
@@ -657,6 +664,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     vcard_requested = QtCore.pyqtSignal(str)                   # jid
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
+    attention_ping_requested = QtCore.pyqtSignal(str)           # jid (XEP-0224)
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height

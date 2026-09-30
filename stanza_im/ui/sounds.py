@@ -80,6 +80,22 @@ class SoundPlayer:
             self._effects[path] = effect
         effect.play()
 
+    def play_file(self, path: str) -> None:
+        """Play an arbitrary WAV *path* (one-shots outside the theme packs)."""
+        if not path or not _load_qtmm():
+            return
+        effect = self._effects.get(path)
+        if effect is None:
+            try:
+                effect = _QSoundEffect()
+                effect.setSource(_QUrl.fromLocalFile(path))
+                effect.setVolume(1.0)
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Could not prepare sound %s", path, exc_info=True)
+                return
+            self._effects[path] = effect
+        effect.play()
+
     def stop(self) -> None:
         for effect in self._effects.values():
             try:

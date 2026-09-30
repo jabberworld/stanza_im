@@ -275,6 +275,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 jid, paths, method, self._chat_window))
         self._chat_window.call_requested.connect(self._on_call_requested)
         self._chat_window.muji_call_requested.connect(self._on_muji_call_requested)
+        self._chat_window.attention_ping_requested.connect(
+            self._on_attention_ping_requested)
         self._chat_window.muc_config_requested.connect(
             self._on_muc_config_requested)
         self._chat_window.input_height_changed.connect(
@@ -353,6 +355,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plugin_manager = None
         self._notes_page = None
         self._applied_plugins: set[str] = set()
+        # Plugins may append entries to the roster contact context menu; each
+        # hook is called as ``hook(menu, jid, is_conf)``.
+        self._contact_menu_hooks: list = []
         # XEP-0191: JIDs blocked on the server (roster strikethrough).
         self._blocked_jids: set[str] = set()
 
@@ -2090,6 +2095,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pep_manager.activateWindow()
         self._pep_manager.refresh()
 
+    def add_contact_menu_hook(self, hook) -> None:
+        """Register a callable ``hook(menu, jid, is_conf)`` for the contact menu."""
+        if hook not in self._contact_menu_hooks:
+            self._contact_menu_hooks.append(hook)
+
+    def remove_contact_menu_hook(self, hook) -> None:
+        try:
+            self._contact_menu_hooks.remove(hook)
+        except ValueError:
+            pass
+
     def _on_plugins(self):
         """Open the plugin manager; warn about missing saved plugins."""
         from stanza_im.plugins import discover, missing_enabled
@@ -3045,6 +3061,11 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("CALL request to %s (video=%s)", jid, video)
         self._client.start_call(jid, video)
 
+    def _on_attention_ping_requested(self, jid: str) -> None:
+        """Send a XEP-0224 attention request (installed by the plugin)."""
+        if self._client and getattr(self, "_attention_feature", ""):
+            self._client.send_attention(jid.split("/", 1)[0])
+
     def _on_contact_caps(self, bare: str) -> None:
         """A contact's capabilities arrived — refresh the call menu."""
         if not self._client:
@@ -3071,6 +3092,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_call_support(
             jid, self._client.supports_calls(bare),
             self._client.supports_calls(bare, video=True))
+        self.apply_attention_support(bare)
 
     def _on_call_incoming(self, sid: str, peer: str, kind: str) -> None:
         if not self._client:
@@ -3781,6 +3803,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._menu_icon("add-user.png"), tr("ctx_send_contact"),
                 lambda checked=False: defer(
                     lambda: self._on_send_contact(jid.split("/", 1)[0])))
+            for hook in list(self._contact_menu_hooks):
+                try:
+                    hook(menu, jid, is_conf)
+                except Exception:  # noqa: BLE001
+                    logger.debug("Contact menu hook failed", exc_info=True)
             menu.addSeparator()
             menu.addAction(self._menu_icon("edit.png"), tr("ctx_rename"),
                            lambda checked=False: defer(lambda: self._rename_contact(jid)))

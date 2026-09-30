@@ -80,6 +80,7 @@ NS_BOOKMARKS2_COMPAT_PEP = "urn:xmpp:bookmarks:1#compat-pep"
 NS_CAPS = "http://jabber.org/protocol/caps"    # XEP-0115 Entity Capabilities
 NS_PRIVACY = "jabber:iq:privacy"                # XEP-0016 Privacy Lists
 NS_PRIVATE = "jabber:iq:private"                # XEP-0049 Private XML Storage
+NS_ATTENTION = "urn:xmpp:attention:0"           # XEP-0224 Attention
 NS_NOTES = "http://miranda-im.org/storage#notes"  # Miranda notes storage
 NS_BLOCKING = "urn:xmpp:blocking"               # XEP-0191 Blocking Command
 NS_REPORTING = "urn:xmpp:reporting:1"           # XEP-0377 Blocking Command Reports
@@ -1811,6 +1812,28 @@ class JabberClient:
                      mtype, jid, reply_id, body[:200])
         msg.send()
         return message_id
+
+    def send_attention(self, jid: str) -> bool:
+        """Send a XEP-0224 attention request (a bodyless ``<attention/>``)."""
+        if not isinstance(jid, str) or not jid.strip():
+            return False
+        msg = self.xmpp.Message()
+        msg["to"] = jid.strip()
+        msg["type"] = "chat"
+        ET.SubElement(msg.xml, "{%s}attention" % NS_ATTENTION)
+        logger.debug("ATTENTION request to %s", jid)
+        msg.send()
+        return True
+
+    @staticmethod
+    def _attention_request(msg) -> str:
+        """Return the sender of a XEP-0224 ``<attention/>`` (else "")."""
+        xml = getattr(msg, "xml", None)
+        if xml is None:
+            return ""
+        for _ in xml.iter("{%s}attention" % NS_ATTENTION):
+            return str(msg["from"] or "")
+        return ""
 
     def _build_reactions(self, target: str, target_id: str, emojis: list[str],
                          mtype: str = "", msg_id: str = ""):
@@ -4835,6 +4858,12 @@ class JabberClient:
         if _is_roster_exchange(msg):
             # A XEP-0144 roster exchange is surfaced by its own handler.
             return
+        attention_from = self._attention_request(msg)
+        if attention_from:
+            # XEP-0224: a bare attention request (possibly with a fallback
+            # body) is surfaced as an event, never as a chat message.
+            self.emit("attention_received", attention_from.split("/")[0])
+            return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])
             frm = str(msg["from"])
@@ -4906,6 +4935,9 @@ class JabberClient:
             return
         if _is_roster_exchange(inner):
             self._start_task(self._on_roster_exchange_stanza(inner))
+            return
+        if self._attention_request(inner):
+            self.emit("attention_received", str(inner["from"]).split("/")[0])
             return
         if inner["type"] not in ("chat", "normal"):
             return
