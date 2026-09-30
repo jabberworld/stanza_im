@@ -79,6 +79,8 @@ NS_BOOKMARKS2_COMPAT = "urn:xmpp:bookmarks:1#compat"
 NS_BOOKMARKS2_COMPAT_PEP = "urn:xmpp:bookmarks:1#compat-pep"
 NS_CAPS = "http://jabber.org/protocol/caps"    # XEP-0115 Entity Capabilities
 NS_PRIVACY = "jabber:iq:privacy"                # XEP-0016 Privacy Lists
+NS_PRIVATE = "jabber:iq:private"                # XEP-0049 Private XML Storage
+NS_NOTES = "http://miranda-im.org/storage#notes"  # Miranda notes storage
 NS_BLOCKING = "urn:xmpp:blocking"               # XEP-0191 Blocking Command
 NS_REPORTING = "urn:xmpp:reporting:1"           # XEP-0377 Blocking Command Reports
 _RETRACT_NAMESPACES = (NS_RETRACT, NS_RETRACT_LEGACY)
@@ -332,6 +334,20 @@ def _parse_bookmarks2(xml) -> list[dict]:
             "password": str(conf.findtext("{%s}password" % NS_BOOKMARKS2) or ""),
             "autojoin": conf.get("autojoin", "") in ("1", "true"),
             "name": str(conf.get("name") or ""),
+        })
+    return out
+
+
+def _parse_notes(xml) -> list[dict]:
+    """Parse a XEP-0049 notes ``storage`` payload into note dicts."""
+    out: list[dict] = []
+    if xml is None:
+        return out
+    for note in xml.iter("{%s}note" % NS_NOTES):
+        out.append({
+            "title": str(note.findtext("{%s}title" % NS_NOTES) or ""),
+            "text": str(note.findtext("{%s}text" % NS_NOTES) or ""),
+            "tags": str(note.get("tags") or ""),
         })
     return out
 
@@ -3251,6 +3267,36 @@ class JabberClient:
                          exc_info=True)
         if not removed or await self._bookmarks2_compat_mode() == "dual":
             await self._remove_bookmark_legacy(room)
+
+    # ── Private XML Storage notes (XEP-0049, Miranda format) ──────────
+
+    async def get_notes(self) -> list[dict]:
+        """Fetch the text notes stored in private storage.
+
+        A single IQ gets the whole set; each ``<note tags title text>`` becomes
+        ``{"title", "tags", "text"}``.  An empty/missing storage yields ``[]``.
+        """
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        query = ET.SubElement(iq.xml, "{%s}query" % NS_PRIVATE)
+        ET.SubElement(query, "{%s}storage" % NS_NOTES)
+        result = await iq.send(timeout=15)
+        return _parse_notes(result.xml)
+
+    async def set_notes(self, notes: list[dict]) -> None:
+        """Store the whole note set in private storage in one IQ."""
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        query = ET.SubElement(iq.xml, "{%s}query" % NS_PRIVATE)
+        storage = ET.SubElement(query, "{%s}storage" % NS_NOTES)
+        for note in notes:
+            element = ET.SubElement(storage, "{%s}note" % NS_NOTES)
+            element.set("tags", str(note.get("tags", "") or ""))
+            ET.SubElement(element, "{%s}title" % NS_NOTES).text = str(
+                note.get("title", "") or "")
+            ET.SubElement(element, "{%s}text" % NS_NOTES).text = str(
+                note.get("text", "") or "")
+        await iq.send(timeout=15)
 
     async def _save_bookmark_legacy(self, room: str, nick: str,
                                     password: str = "", autojoin: bool = True,
