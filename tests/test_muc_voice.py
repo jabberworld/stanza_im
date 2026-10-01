@@ -62,29 +62,57 @@ check("a non-member item is not a voice request",
 
 
 # 2. Sending a request -------------------------------------------------------
-class _SendClient:
+# A client-supplied ``from`` makes the server close the stream with
+# ``invalid-from`` ("Improper 'from' attribute"), so it must never be set.
+from stanza_im.core.client import JabberClient, NS_MUC_USER  # noqa: E402
+
+
+class _FakeMessage:
     def __init__(self):
-        self.sent = []
+        self.attrs = {}
+        self.xml = ET.Element("message")
+        self.sent = False
 
-    def __getattr__(self, _name):
-        return lambda *a, **k: None
+    def __setitem__(self, key, value):
+        self.attrs[key] = value
+
+    def send(self):
+        self.sent = True
 
 
-from stanza_im.core.client import JabberClient  # noqa: E402
+class _FakeXMPP:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def Message(self):
+        m = _FakeMessage()
+        self._owner.messages.append(m)
+        return m
 
 
 class _ReqClient(JabberClient):
     def __init__(self):
-        self.sent = []
-
-    def send(self, *a, **k):
-        pass
+        self.messages = []
+        self.xmpp = _FakeXMPP(self)
 
 
 req = _ReqClient()
-# JabberClient with no xmpp would fail; use the static-ish build via monkeypatch.
 check("request_voice refuses an empty room",
       req.request_voice("") is False)
+check("request_voice accepts a room",
+      req.request_voice("room@conf.example") is True)
+sent = req.messages[-1]
+check("the voice message is not sent with a 'from'",
+      "from" not in sent.attrs)
+check("the voice message targets the room",
+      sent.attrs.get("to") == "room@conf.example")
+check("the voice message is a groupchat message",
+      sent.attrs.get("type") == "groupchat")
+check("the voice message was actually sent", sent.sent is True)
+_x = sent.xml.find("{%s}x" % NS_MUC_USER)
+_item = _x.find("{%s}item" % NS_MUC_USER) if _x is not None else None
+check("the voice request carries affiliation=member",
+      _item is not None and _item.get("affiliation") == "member")
 
 
 # 3. MainWindow gating + events ---------------------------------------------

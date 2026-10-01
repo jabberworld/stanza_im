@@ -3591,16 +3591,18 @@ class JabberClient:
         """Send a XEP-0308 correction replacing *replace_id* with *body*."""
         return self.send_message(jid, body, mtype=mtype, replace_id=replace_id)
 
-    def request_voice(self, room: str, nick: str = "") -> bool:
-        """Ask the room for voice (XEP-0045 §7.13, affiliation ``member``)."""
+    def request_voice(self, room: str) -> bool:
+        """Ask the room for voice (XEP-0045 §7.13, affiliation ``member``).
+
+        The ``from`` attribute is deliberately left unset: the server stamps
+        our full JID, and a client-supplied ``from`` closes the stream with
+        ``invalid-from`` / "Improper 'from' attribute".
+        """
         if not isinstance(room, str) or not room.strip():
             return False
         room = room.strip()
-        # A visitor asks the room directly with ``to = <room>``.
-        target = f"{room}/{nick}" if nick else room
         msg = self.xmpp.Message()
         msg["to"] = room
-        msg["from"] = target  # ignored by the server; keeps the intent explicit
         msg["type"] = "groupchat"
         x = ET.SubElement(msg.xml, "{%s}x" % NS_MUC_USER)
         item = ET.SubElement(x, "{%s}item" % NS_MUC_USER)
