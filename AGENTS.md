@@ -396,6 +396,12 @@ _notify_plugins_client_ready` (called at the end of `_on_login`, after the
 client exists and its events are wired) runs it for every active plugin — a
 plugin enabled before login (when `app._client` is still `None`) can then
 subscribe to client events and re-apply its UI state.
+The login splash (`MainWindow._set_splash(text, percent)`, a determinate
+`QProgressBar`) reports the connection stages: «Подключение…» (10 %) →
+«Аутентификация…» (35 %) → «Соединение установлено» (60 %) → «Получение списка
+контактов…» (80 %, on `session_started`) → «Готово» (100 %, on
+`roster_received`, which then switches to the roster page instead of a fixed
+timer).
 A plugin that offers settings sets `PLUGIN_HAS_SETTINGS = True` and defines
 `open_settings(config, parent)` (opening its own dialog); its settings are
 persisted in the shared config under `[plugin_settings.<id>]`

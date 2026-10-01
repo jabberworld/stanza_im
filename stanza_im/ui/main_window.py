@@ -469,7 +469,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._splash_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         splash_layout.addWidget(self._splash_label)
         self._splash_progress = QtWidgets.QProgressBar()
-        self._splash_progress.setRange(0, 0)  # indeterminate
+        self._splash_progress.setRange(0, 100)  # determinate (login stages)
+        self._splash_progress.setValue(0)
         splash_layout.addWidget(self._splash_progress)
         self._splash_cancel = QtWidgets.QPushButton("Cancel")
         self._splash_cancel.clicked.connect(self._on_connect_cancel)
@@ -2503,10 +2504,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── Login / Connect ───────────────────────────────────────────
 
+    def _set_splash(self, text: str, percent: int) -> None:
+        """Update the login splash text and the determinate progress bar."""
+        self._splash_label.setText(text)
+        self._splash_progress.setValue(max(0, min(100, int(percent))))
+
     def _on_login(self, jid: str, password: str, show: str):
         """Handle login form submission."""
         self._stack.setCurrentIndex(_PAGE_SPLASH)
-        self._splash_label.setText(tr("login_connecting"))
+        self._set_splash(tr("login_connecting"), 10)
 
         from stanza_im.core.client import JabberClient
         connection = self._config.connection
@@ -2565,15 +2571,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     async def _connect_async(self, jid: str, show: str):
         try:
+            self._set_splash(tr("login_authenticating"), 35)
             await self._client.connect_async()
             self._client.send_presence(
                 show=show,
                 status=getattr(self._config.status, "message", "") or "")
-            self._splash_label.setText(tr("login_connected"))
-            self._splash_progress.setRange(0, 100)
-            self._splash_progress.setValue(100)
-            # Switch to roster page after a brief delay
-            QtCore.QTimer.singleShot(500, lambda: self._stack.setCurrentIndex(_PAGE_ROSTER))
+            # The roster is requested next; the splash switches to the roster
+            # page when the roster actually arrives (see _on_roster_received).
+            self._set_splash(tr("login_connected"), 60)
         except Exception as e:
             from stanza_im.core.client import TLSOnlyUnavailable
             if isinstance(e, TLSOnlyUnavailable):
@@ -2688,6 +2693,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_session_started(self):
         logger.info("Session started, roster arriving...")
+        if self._stack.currentIndex() == _PAGE_SPLASH:
+            self._set_splash(tr("login_roster"), 80)
         self._presence_sound_seen.clear()
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
@@ -2776,6 +2783,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_roster_received(self, items):
         """Full roster arrived (initial load or server refresh)."""
+        if self._stack.currentIndex() == _PAGE_SPLASH:
+            self._set_splash(tr("login_ready"), 100)
+            QtCore.QTimer.singleShot(
+                300, lambda: self._stack.setCurrentIndex(_PAGE_ROSTER))
         self._rebuild_roster(items)
         self._sync_all_conference_roster()
         self._recount_groups()

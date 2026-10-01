@@ -105,6 +105,9 @@ STRINGS = {
     "login_profiles": "Profiles",
     "login_connecting": "Connecting...",
     "login_connected": "Connected.",
+    "login_authenticating": "Authenticating...",
+    "login_roster": "Receiving the contact list...",
+    "login_ready": "Ready.",
     "login_auth_failed": "Authentication failed.",
     "login_connection_error": "Connection error: {error}",
     # Roster

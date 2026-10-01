@@ -379,6 +379,13 @@ Tray → (show) → Roster
 Roster → («Действия» → «Завершить сеанс») → Login (client dropped)
 ```
 
+The Splash is a **determinate progress report** (`MainWindow._set_splash(text,
+percent)`): «Подключение…» (10 %) → «Аутентификация…» (35 %, before
+`connect_async`) → «Соединение установлено» (60 %) → «Получение списка
+контактов…» (80 %, on `session_started`) → «Готово» (100 %, on
+`roster_received`, then the roster page is shown after a short delay). The
+roster page is switched on the actual `roster_received`, not a fixed timer.
+
 The Actions menu carries «Завершить сеанс» (above «Выход», same
 `gtk-quit.png` icon) → `MainWindow._logout`: flush unread/roster cache,
 disconnect the client and drop it, clear the per-account UI state

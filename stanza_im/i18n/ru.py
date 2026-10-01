@@ -105,6 +105,9 @@ STRINGS = {
     "login_profiles": "Профили",
     "login_connecting": "Подключение...",
     "login_connected": "Подключено.",
+    "login_authenticating": "Аутентификация...",
+    "login_roster": "Получение списка контактов...",
+    "login_ready": "Готово.",
     "login_auth_failed": "Ошибка авторизации.",
     "login_connection_error": "Ошибка подключения: {error}",
     # Roster

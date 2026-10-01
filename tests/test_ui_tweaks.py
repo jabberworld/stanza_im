@@ -75,6 +75,15 @@ check("subscription event shows a time label",
 w._push_system_event("disconnected")
 _last = w._events_list.item(w._events_list.count() - 1).text()
 check("system event is prefixed with the time", _last[:5].count(":") == 1)
+
+# 2b. Login splash stages ----------------------------------------------------
+w._set_splash("stage", 40)
+check("the splash bar is determinate (0..100)",
+      w._splash_progress.minimum() == 0 and w._splash_progress.maximum() == 100)
+check("_set_splash sets the label and value",
+      w._splash_label.text() == "stage" and w._splash_progress.value() == 40)
+w._set_splash("clamp", 250)
+check("_set_splash clamps the percentage", w._splash_progress.value() == 100)
 w.close()
 
 # 3/4. Chat CSS: no dashed underline on nicknames/mentions or action buttons --
