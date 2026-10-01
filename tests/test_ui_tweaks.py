@@ -155,6 +155,15 @@ check("the notes label placeholder is declared", "TONOTE_LABEL" in declared)
 check("the notes-enabled flag is initialised in JS",
       "window.__stanzaNotesEnabled = window.__stanzaNotesEnabled || false;"
       in js)
+# Copy/Forward/Notes show LOCAL time: fmtCopyTime must parse the (UTC) ISO
+# timestamp with Date and use the local getters, not slice the string.
+fmt = re.search(r"function fmtCopyTime\(raw\)\s*\{(.*?)\n            \}",
+                js, re.S)
+check("fmtCopyTime is found", fmt is not None)
+fmt_body = fmt.group(1) if fmt else ""
+check("fmtCopyTime parses the timestamp with Date", "new Date(full)" in fmt_body)
+check("fmtCopyTime uses local getters",
+      "getHours" in fmt_body and "getMinutes" in fmt_body)
 # _install_action_js must substitute every placeholder the template uses.
 install = re.search(r"def _install_action_js\(self\):(.*?)runJavaScript",
                     view_src, re.S)

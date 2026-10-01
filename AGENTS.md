@@ -441,7 +441,10 @@ via `ChatWindow.set_notes_enabled`/`ChatWidget.set_notes_enabled`) sends the
 message in the same "[date] sender: text" format as Forward to
 `MainWindow._on_note_requested`, which calls `NotesWidget.add_note(title, text,
 "Сообщения")` with the title `@<room name or nick> <date> <time>` and shows an
-OSD notice when notifications are on. [`tests/test_plugins.py`]
+OSD notice when notifications are on. That shared format (Copy / «Переслать» /
+«В заметки») uses the **local** time: `fmtCopyTime` in `_ACTION_JS` parses the
+stored UTC `data-stanza-time` with `new Date(...)` and formats it with the local
+getters. [`tests/test_plugins.py`]
 The core exposes two generic extension points plugins may use: a contact-menu
 hook list (`MainWindow.add_contact_menu_hook`/`remove_contact_menu_hook`, called
 as `hook(menu, jid, is_conf)` inside `_on_contact_context`) and a 1:1 toolbar

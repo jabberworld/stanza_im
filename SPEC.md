@@ -1988,7 +1988,7 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - While the plugin is active (`MainWindow._notes_feature`) the message menu
   gains **«В заметки»** (after «Переслать», gated by `window.
   __stanzaNotesEnabled` set from `ChatWindow.set_notes_enabled`). It delivers
-  the message in the Forward format (`[date] sender: body`) as
+  the message in the Forward format (`[date] sender: body`, **local** time) as
   `stanza:tonote:` → `ChatWidget.note_requested` → `MainWindow.
   _on_note_requested`, which appends a note via `NotesWidget.add_note(title,
   text, "Сообщения")` (title `@<room name or nick> <date> <time>`, fixed tag

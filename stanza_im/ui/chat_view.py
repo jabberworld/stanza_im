@@ -750,11 +750,20 @@ window.__stanzaMentionRef = '';
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
             function fmtCopyTime(raw) {
+                // ``raw`` is the stored ISO timestamp (UTC, often ``…Z``);
+                // Date parses it and the getX() accessors give local time.
                 var full = (raw || '').trim();
-                var m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})/
-                    .exec(full);
-                if (m) return m[1] + '-' + m[2] + '-' + m[3] + ' '
-                    + m[4] + ':' + m[5] + ':' + m[6];
+                var m = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.exec(full);
+                if (m) {
+                    var d = new Date(full);
+                    if (!isNaN(d.getTime())) {
+                        return d.getFullYear() + '-' + pad(d.getMonth() + 1)
+                            + '-' + pad(d.getDate()) + ' '
+                            + pad(d.getHours()) + ':' + pad(d.getMinutes())
+                            + ':' + pad(d.getSeconds());
+                    }
+                    return full.slice(0, 10) + ' ' + full.slice(11, 19);
+                }
                 if (full && full.indexOf('-') < 0) {
                     var now = new Date();
                     return now.getFullYear() + '-' + pad(now.getMonth() + 1)
