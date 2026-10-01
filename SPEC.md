@@ -1277,6 +1277,17 @@ the edit dialog warns immediately otherwise) and the configuration only when a
 form value changed, as a fresh `type='submit'` form built by
 `client.muc_set_config(room, values)` (the server's own form is never mutated).
 
+**Voice requests (XEP-0045 §7.13).** A `visitor` in a moderated room can ask for
+voice with the «Попросить голос» header button (`ChatWidget.set_voice_request`,
+icon `voice-request.svg`; visible/enabled only when we are a visitor and the room
+advertises `muc_membersonly`/`muc_moderated`, `MainWindow._apply_voice_request`).
+It sends a bodyless `<message type='groupchat'><x xmlns='…muc#user'><item
+affiliation='member'/></x></message>` (`JabberClient.request_voice`). Moderators
+(`_can_moderate_room`) see the request as an Events row (`_VoiceRequestRow`:
+«Пользователь … просит право голоса») with «Предоставить» (`client.grant_voice` →
+`muc#admin` affiliation `member`) / «Отклонить» (marks the row only), plus an OSD
+and a tray balloon.
+
 The MUC toolbar's vCard button opens the room's own vCard
 (`MainWindow._show_muc_room_info` → `_show_profile(room)`). `VCardInfoDialog`
 shows an Edit button for room cards, enabled for owners/admins

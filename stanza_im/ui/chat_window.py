@@ -293,6 +293,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.muji_call_requested.connect(self.muji_call_requested)
         widget.muc_config_requested.connect(self.muc_config_requested)
+        widget.voice_requested.connect(self.voice_requested)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -500,6 +501,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         if widget is not None and widget.is_muc:
             widget.set_muc_admin(can_manage)
 
+    def set_voice_request(self, room: str, visible: bool,
+                          enabled: bool) -> None:
+        """Show/enable the 'Ask for voice' button of a MUC tab."""
+        widget = self._tabs.get(room)
+        if widget is not None and widget.is_muc:
+            widget.set_voice_request(visible, enabled)
+
     def set_moderation_enabled(self, room: str, enabled: bool) -> None:
         """Enable/disable the XEP-0425 moderation action of a MUC tab."""
         widget = self._tabs.get(room)
@@ -691,6 +699,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     attention_ping_requested = QtCore.pyqtSignal(str)           # jid (XEP-0224)
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
+    voice_requested = QtCore.pyqtSignal(str)                   # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)         # jid, height
     input_font_zoom_requested = QtCore.pyqtSignal(int)         # new size (pt)
     participant_font_zoom_requested = QtCore.pyqtSignal(int)   # new size (pt)

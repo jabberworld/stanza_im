@@ -126,6 +126,55 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
                              else tr("event_rejected"))
 
 
+class _VoiceRequestRow(QtWidgets.QWidget):
+    """Events tab row: a MUC visitor asking for voice (XEP-0045 §7.13)."""
+
+    granted = QtCore.pyqtSignal(str, str)   # room, jid
+    refused = QtCore.pyqtSignal(str, str)   # room, jid
+
+    def __init__(self, room: str, nick: str, jid: str, parent=None):
+        super().__init__(parent)
+        self.room = room
+        self.jid = jid
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(3)
+
+        title = QtWidgets.QLabel(
+            tr("event_voice_request", who=nick or jid, room=room))
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        stamp = QtWidgets.QLabel(time.strftime("%H:%M"))
+        stamp.setStyleSheet("color: #888; font-size: 90%;")
+        layout.addWidget(stamp)
+        if jid and jid != nick:
+            sub = QtWidgets.QLabel(jid)
+            sub.setStyleSheet("color: #888; font-size: 90%;")
+            layout.addWidget(sub)
+
+        buttons = QtWidgets.QHBoxLayout()
+        self._grant = QtWidgets.QPushButton(tr("event_voice_grant"), self)
+        self._grant.setIcon(QtGui.QIcon(find_icon("ok.png")))
+        self._grant.clicked.connect(lambda: self.granted.emit(self.room, self.jid))
+        self._refuse = QtWidgets.QPushButton(tr("event_voice_deny"), self)
+        self._refuse.setIcon(QtGui.QIcon(find_icon("process-stop.png")))
+        self._refuse.clicked.connect(
+            lambda: self.refused.emit(self.room, self.jid))
+        buttons.addWidget(self._grant)
+        buttons.addWidget(self._refuse)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        self._result = QtWidgets.QLabel("", self)
+        layout.addWidget(self._result)
+
+    def mark(self, granted: bool) -> None:
+        """Show the decision in place of the buttons (the row stays)."""
+        self._grant.setVisible(False)
+        self._refuse.setVisible(False)
+        self._result.setText(tr("event_voice_granted") if granted
+                             else tr("event_voice_denied"))
+
+
 class MainWindow(QtWidgets.QMainWindow):
     """Top-level window that owns the roster, chat window, tray and XMPP client."""
 
@@ -301,6 +350,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_media_copy_requested)
         self._chat_window.share_requested.connect(self._on_share_requested)
         self._chat_window.note_requested.connect(self._on_note_requested)
+        self._chat_window.voice_requested.connect(self._on_voice_requested)
         self._chat_window.geo_view_requested.connect(
             self._on_geo_view_requested)
         self._chat_window.geo_message_corrected.connect(
@@ -379,6 +429,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # The tray only blinks once logged in (see _sync_tray_blink); restored
         # unread counters still show as roster badges before that.
         self._muc_users: dict[str, dict[str, dict]] = {}
+        self._muc_room_features: dict[str, set] = {}
         self._muc_moderation: dict[str, bool] = {}
         self._muc_moderation_pending: set[str] = set()
         self._muc_self_nicks: dict[str, str] = {}
@@ -809,6 +860,47 @@ class MainWindow(QtWidgets.QMainWindow):
         self._events_list.setItemWidget(item, widget)
         self._event_unread += 1
         self._start_event_blink()
+
+    def _on_muc_voice_request(self, room: str, jid: str, nick: str) -> None:
+        """A visitor asks for voice — surface it (moderators only)."""
+        if self._client is None or not self._can_moderate_room(room):
+            return
+        bare = (jid.split("/", 1)[0] if isinstance(jid, str) and "@" in jid
+                else "")
+        target = bare or f"{room}/{nick}"
+        self._clear_events_placeholder()
+        item = QtWidgets.QListWidgetItem(self._events_list)
+        widget = _VoiceRequestRow(room, nick, target, parent=self._events_list)
+        widget.granted.connect(self._on_voice_grant)
+        widget.refused.connect(self._on_voice_refuse)
+        item.setSizeHint(widget.sizeHint())
+        self._events_list.setItemWidget(item, widget)
+        self._event_unread += 1
+        self._start_event_blink()
+        text = tr("event_voice_request", who=nick or bare or room, room=room)
+        if getattr(self._config.notifications, "osd_enabled", False):
+            self._osd.show(self._menu_icon("voice-request.svg"),
+                           tr("event_voice_osd_title"), text,
+                           on_click=lambda: self._osd_click(room))
+        self._tray.show_message(APP_NAME, text)
+
+    def _on_voice_grant(self, room: str, jid: str) -> None:
+        if self._client and jid:
+            self._start_task(self._client.grant_voice(room, jid))
+        self._mark_voice_row(room, jid, granted=True)
+
+    def _on_voice_refuse(self, room: str, jid: str) -> None:
+        # "Refuse" only marks the row — no stanza is sent (per design).
+        self._mark_voice_row(room, jid, granted=False)
+
+    def _mark_voice_row(self, room: str, jid: str, granted: bool) -> None:
+        for i in range(self._events_list.count()):
+            item = self._events_list.item(i)
+            widget = self._events_list.itemWidget(item)
+            if (isinstance(widget, _VoiceRequestRow)
+                    and widget.room == room and widget.jid == jid):
+                widget.mark(granted)
+                break
 
     def _on_subscription_approved(self, jid: str) -> None:
         if self._client:
@@ -1539,6 +1631,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_muc_admin(
             room, self._muc_affiliation(room) in ("owner", "admin"))
         self._apply_muc_moderation(room)
+        self._apply_voice_request(room)
 
     def _can_moderate_room(self, room: str) -> bool:
         """True when we are a moderator/owner/admin of *room* (XEP-0425)."""
@@ -1546,6 +1639,30 @@ class MainWindow(QtWidgets.QMainWindow):
                                       self._muc_self_nicks.get(room, ""))
         return (info.get("role") == "moderator"
                 or info.get("affiliation") in ("owner", "admin"))
+
+    @staticmethod
+    def _room_is_moderated(features) -> bool:
+        """True when the room advertises a members-only/moderated policy."""
+        feats = features or set()
+        return bool(feats & {
+            "muc_membersonly", "muc_moderated",
+            "http://jabber.org/protocol/muc#membersonly",
+            "http://jabber.org/protocol/muc#moderated",
+        })
+
+    def _apply_voice_request(self, room: str) -> None:
+        """Show 'Ask for voice' when we are a visitor in a moderated room."""
+        own = self._participant_info(room, self._muc_self_nicks.get(room, ""))
+        is_visitor = own.get("role") == "visitor"
+        moderated = self._room_is_moderated(self._muc_room_features.get(room))
+        self._chat_window.set_voice_request(
+            room, visible=is_visitor and moderated,
+            enabled=is_visitor and moderated)
+
+    def _on_voice_requested(self, room: str) -> None:
+        """Send a XEP-0045 §7.13 voice request to *room*."""
+        if self._client:
+            self._client.request_voice(room)
 
     def _apply_muc_moderation(self, room: str) -> None:
         """Offer the XEP-0425 moderation action when the room supports it."""
@@ -1650,6 +1767,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.leave_muc(room)
         self._muc_users.pop(room, None)
+        self._muc_room_features.pop(room, None)
         self._muc_moderation.pop(room, None)
         self._muc_moderation_pending.discard(room)
         self._muc_self_nicks.pop(room, None)
@@ -1963,7 +2081,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._place_dialog_over(dialog, self._chat_dialog_parent())
         dialog.open()
 
-    def _on_muc_info_received(self, room: str, name: str):
+    def _on_muc_info_received(self, room: str, name: str, features=None):
+        if features is not None:
+            self._muc_room_features[room] = set(features)
+            self._apply_voice_request(room)
         if room in self._muc_self_nicks and name:
             self._muc_names[room] = name
             self._apply_muc_name(room)
@@ -2659,6 +2780,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muc_joined", self._on_muc_joined)
         c.on("muc_subject_changed", self._on_muc_subject_changed)
         c.on("muc_info_received", self._on_muc_info_received)
+        c.on("muc_voice_requested", self._on_muc_voice_request)
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("contact_pep_updated", self._on_contact_pep_updated)
         c.on("contact_caps", self._on_contact_caps)

@@ -402,6 +402,7 @@ class ChatWidget(QtWidgets.QWidget):
     attention_ping_requested = QtCore.pyqtSignal(str)           # jid (XEP-0224)
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
+    voice_requested = QtCore.pyqtSignal(str)                    # MUC room
     input_height_changed = QtCore.pyqtSignal(str, int)   # jid, height
     input_font_zoom_requested = QtCore.pyqtSignal(int)   # new size (pt)
     participant_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
@@ -548,6 +549,18 @@ class ChatWidget(QtWidgets.QWidget):
         self._config_btn.clicked.connect(
             lambda: self.muc_config_requested.emit(self.jid))
         header.addWidget(self._config_btn)
+
+        # "Ask for voice" (XEP-0045 §7.13) — MUC only, enabled for a visitor in
+        # a moderated room.
+        self._voice_btn = QtWidgets.QToolButton(self)
+        self._voice_btn.setIcon(self._chat_icon("voice-request.svg"))
+        self._voice_btn.setToolTip(tr("muc_ask_voice"))
+        self._voice_btn.setVisible(False)
+        self._voice_btn.setEnabled(False)
+        self._voice_btn.setAutoRaise(True)
+        self._voice_btn.clicked.connect(
+            lambda: self.voice_requested.emit(self.jid))
+        header.addWidget(self._voice_btn)
 
         if self.is_muc:
             layout.addLayout(header)
@@ -2380,6 +2393,13 @@ class ChatWidget(QtWidgets.QWidget):
         if not self.is_muc:
             return
         self._config_btn.setEnabled(bool(can_manage))
+
+    def set_voice_request(self, visible: bool, enabled: bool) -> None:
+        """Show/enable the 'Ask for voice' button (visitor in a moderated room)."""
+        if not self.is_muc:
+            return
+        self._voice_btn.setVisible(bool(visible))
+        self._voice_btn.setEnabled(bool(visible and enabled))
 
     def set_moderation_enabled(self, enabled: bool) -> None:
         """Offer the XEP-0425 moderation action for this MUC tab."""

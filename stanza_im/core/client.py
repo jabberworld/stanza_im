@@ -511,6 +511,28 @@ def muc_mediated_invite_from_message(msg) -> dict | None:
     }
 
 
+def _muc_voice_request(msg) -> dict | None:
+    """Detect a XEP-0045 §7.13 voice request in a ``muc#user`` message.
+
+    A visitor asks for voice with a bodyless ``<message type='groupchat'>``
+    carrying ``<x xmlns='…muc#user'><item affiliation='member'/></x>``.
+    Returns ``{"room", "nick", "from"}`` or ``None``.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    user = xml.find("{%s}x" % NS_MUC_USER)
+    if user is None or user.find("{%s}invite" % NS_MUC_USER) is not None:
+        return None
+    item = user.find("{%s}item" % NS_MUC_USER)
+    if item is None or (item.get("affiliation") or "") != "member":
+        return None
+    frm = str(msg["from"] or "")
+    room = frm.split("/", 1)[0]
+    nick = frm.split("/", 1)[1] if "/" in frm else ""
+    return {"room": room, "nick": nick, "from": frm}
+
+
 def _make_unique_id(xml) -> str:
     """Return a stable, per-stanza unique id used as the ``origin-id``.
 
@@ -1367,6 +1389,12 @@ class JabberClient:
         """A room-relayed invitation may carry only the XEP-0045 ``muc#user``
         invite; when a ``jabber:x:conference`` element is present the XEP-0249
         handler already covers the stanza."""
+        voice = _muc_voice_request(msg)
+        if voice is not None:
+            # XEP-0045 §7.13: a visitor asks for voice (affiliation ``member``).
+            self.emit("muc_voice_requested", voice["room"], voice["from"],
+                      voice["nick"])
+            return
         if msg.xml.find("{%s}x" % NS_MUC_INVITE) is not None:
             return
         invite = muc_mediated_invite_from_message(msg)
@@ -2976,9 +3004,12 @@ class JabberClient:
                 if value:
                     name = value
                     break
+            features = {str(el.get("var") or "")
+                        for el in iq.xml.iter()
+                        if str(el.tag).endswith("feature")}
             if name:
                 logger.info("MUC room name received for %s: %s", room, name)
-                self.emit("muc_info_received", room, name)
+            self.emit("muc_info_received", room, name, features)
         except Exception:
             logger.debug("Could not retrieve MUC info for %s",
                          room, exc_info=True)
@@ -3559,6 +3590,28 @@ class JabberClient:
                      mtype: str = "chat") -> str:
         """Send a XEP-0308 correction replacing *replace_id* with *body*."""
         return self.send_message(jid, body, mtype=mtype, replace_id=replace_id)
+
+    def request_voice(self, room: str, nick: str = "") -> bool:
+        """Ask the room for voice (XEP-0045 §7.13, affiliation ``member``)."""
+        if not isinstance(room, str) or not room.strip():
+            return False
+        room = room.strip()
+        # A visitor asks the room directly with ``to = <room>``.
+        target = f"{room}/{nick}" if nick else room
+        msg = self.xmpp.Message()
+        msg["to"] = room
+        msg["from"] = target  # ignored by the server; keeps the intent explicit
+        msg["type"] = "groupchat"
+        x = ET.SubElement(msg.xml, "{%s}x" % NS_MUC_USER)
+        item = ET.SubElement(x, "{%s}item" % NS_MUC_USER)
+        item.set("affiliation", "member")
+        logger.debug("VOICE request to %s", room)
+        msg.send()
+        return True
+
+    async def grant_voice(self, room: str, jid: str) -> None:
+        """Grant voice to *jid* (affiliation ``member``)."""
+        await self.muc_set_affiliation(room, jid, "member")
 
     def set_muc_role(self, room: str, nick: str, role: str) -> None:
         """Request a MUC role change for an occupant."""
