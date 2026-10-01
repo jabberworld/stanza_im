@@ -165,6 +165,31 @@ missing = placeholders - substituted
 check("every label placeholder is substituted when installing (%s)"
       % (", ".join(sorted(missing)) if missing else "none"), not missing)
 
+# Every control ref the menu sets must also be read back by the scroll poll,
+# and have a matching `_clear_*_request` — otherwise the click is silently lost.
+poll = re.search(r'var st = window\.scrollY(.*?)self\._on_scroll_position',
+                 view_src, re.S)
+check("the scroll-poll block is found", poll is not None)
+poll_js = poll.group(0) if poll else ""
+poll_refs = set(re.findall(r"window\.(__stanza[A-Za-z]+Ref)", poll_js))
+set_refs = set(re.findall(r"window\.(__stanza[A-Za-z]+Ref)\s*=", js))
+# Ignore refs that are only reset to '' (cleared), they are not menu actions.
+set_refs = {r for r in set_refs if not r.endswith("NotesEnabled")}
+missing_in_poll = set_refs - poll_refs
+check("every menu ref is read by the scroll poll (%s)"
+      % (", ".join(sorted(missing_in_poll)) if missing_in_poll else "none"),
+      not missing_in_poll)
+check("the notes ref is polled", "__stanzaToNoteRef" in poll_refs)
+# Each polled ref has a clear<Name>Request helper, mirroring the pattern.
+clear_funcs = set(re.findall(r"def _clear_([a-z_]+)_request", view_src))
+for ref in sorted(poll_refs):
+    name = ref[len("__stanza"):-len("Ref")]  # e.g. ToNote / MediaFs
+    split = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    flat = name.lower()
+    # The codebase uses both conventions (`media_fs`, but `xmpp`/`tonote`).
+    check(f"a _clear_*_request helper exists for {ref}",
+          split in clear_funcs or flat in clear_funcs)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

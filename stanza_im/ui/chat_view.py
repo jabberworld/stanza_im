@@ -1224,7 +1224,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaReactRect || '',"
                 " window.__stanzaReactionsRef || '',"
                 " window.__stanzaReactLikeRef || '',"
-                " window.__stanzaMediaFsRef || '']",
+                " window.__stanzaMediaFsRef || '',"
+                " window.__stanzaToNoteRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1267,6 +1268,12 @@ window.__stanzaMentionRef = '';
         def _clear_forward_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaForwardRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_tonote_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaToNoteRef = '';")
             except RuntimeError:
                 pass
 
@@ -1491,6 +1498,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_media_fs_ref = ""
+            if len(value) > 21 and isinstance(value[21], str) and value[21]:
+                self._clear_tonote_request()
+                requested = value[21]
+                if requested != getattr(self, "_last_tonote_ref", ""):
+                    self._last_tonote_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_tonote_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
