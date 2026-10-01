@@ -61,6 +61,9 @@ _PAGE_LOGIN = 0
 _PAGE_SPLASH = 1
 _PAGE_ROSTER = 2
 
+# Fixed tag used for notes created from chat messages ("Add to notes").
+_NOTES_TAG = "Сообщения"
+
 # Presence status lines are suppressed for this long after a successful join:
 # the server's initial occupant dump must not be rendered as "X joined".
 _MUC_JOIN_GRACE_S = 2.0
@@ -297,6 +300,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.media_copy_requested.connect(
             self._on_media_copy_requested)
         self._chat_window.share_requested.connect(self._on_share_requested)
+        self._chat_window.note_requested.connect(self._on_note_requested)
         self._chat_window.geo_view_requested.connect(
             self._on_geo_view_requested)
         self._chat_window.geo_message_corrected.connect(
@@ -354,6 +358,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pep_manager = None
         self._plugin_manager = None
         self._notes_page = None
+        self._notes_feature = False
         self._applied_plugins: set[str] = set()
         # Bare JIDs that ever sent us an XEP-0224 attention request (set by the
         # attention plugin); used to enable the bell even without caps.
@@ -2169,6 +2174,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                    exc_info=True)
                 applied.discard(plugin.id)
         self._applied_plugins = applied
+        # Tell the chat views whether the Notes plugin is active (its
+        # "Add to notes" message-menu entry).
+        self._chat_window.set_notes_enabled(
+            bool(getattr(self, "_notes_feature", False)))
 
     def _on_password_changed(self, new_password: str):
         """Keep the login form in sync after a successful password change."""
@@ -4788,6 +4797,44 @@ class MainWindow(QtWidgets.QMainWindow):
                                         tr("rosterx_sent", count=sent))
         dlg.finished.connect(finished)
         dlg.open()
+
+    def _on_note_requested(self, chat_key: str, content: str) -> None:
+        """Add a forwarded-format message to the Notes plugin as a new note."""
+        content = (content or "").strip()
+        page = getattr(self, "_notes_page", None)
+        if not content or page is None or not getattr(self, "_notes_feature", False):
+            return
+        import datetime
+        display = chat_key.split("/", 1)[0]
+        if chat_key in self._muc_self_nicks or chat_key in self._conference_roster:
+            display = self._muc_display_name(chat_key) or display
+        else:
+            display = (self._roster_name(display)
+                       or display.split("@")[0] or display)
+        # The content already carries "[YYYY-MM-DD HH:MM:SS] …"; reuse that
+        # timestamp for the title, falling back to "now".
+        stamp = ""
+        if content.startswith("[") and "]" in content:
+            stamp = content[1:content.index("]")].strip()
+        if not stamp:
+            stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        title = f"@{display} {stamp}"
+        if page.add_note(title, content, _NOTES_TAG):
+            self._notify_note_added()
+
+    def _notify_note_added(self) -> None:
+        """Show an OSD notice that a note was added (when OSD is on)."""
+        if not getattr(self._config.notifications, "osd_enabled", False):
+            return
+
+        def _open_notes():
+            index = self._tab_index("plugin:notes")
+            if index >= 0:
+                self._roster_tabs.setCurrentIndex(index)
+
+        self._osd.show(self._menu_icon("draw-brush.png"),
+                       tr("notes_added_osd_title"), tr("notes_added_osd"),
+                       on_click=_open_notes)
 
     def _on_share_requested(self, content: str) -> None:
         """Open the share window for a chat URL/media/selection or xmpp: body."""

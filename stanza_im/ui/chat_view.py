@@ -353,6 +353,7 @@ if HAS_WEBENGINE:
             self._bridge = _ChatBridge()
             self._bridge.link_clicked.connect(self.link_clicked)
             self._bridge.near_top.connect(self._on_bridge_near_top)
+            self._notes_enabled = False
             self._fraction = 1.0
             self._overflow = False
             self._near_top_hit = False
@@ -585,6 +586,10 @@ if HAS_WEBENGINE:
                 self._install_scroll_js()
                 self._install_jump_js()
                 self._install_action_js()
+                self.page().runJavaScript(
+                    "window.__stanzaNotesEnabled = %s;"
+                    % ("true" if getattr(self, "_notes_enabled", False)
+                       else "false"))
                 self._scroll_poll.start()
             else:
                 self._load_failures += 1
@@ -731,6 +736,7 @@ if HAS_WEBENGINE:
 window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
             window.__stanzaForwardRef = '';
+            window.__stanzaToNoteRef = '';
             window.__stanzaJumpRef = '';
             window.__stanzaDeleteRef = '';
             window.__stanzaModerateRef = '';
@@ -872,6 +878,30 @@ window.__stanzaMentionRef = '';
                     window.setTimeout(closeMenu, 0);
                 });
                 menu.appendChild(fwd);
+                if (window.__stanzaNotesEnabled) {
+                    var tonote = document.createElement('button');
+                    tonote.type = 'button';
+                    tonote.textContent = TONOTE_LABEL || 'Add to notes';
+                    tonote.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        var content = body;
+                        if (!content) {
+                            var media = wrap.querySelector(
+                                'a.stanza-media, a.stanza-media-open');
+                            if (media) {
+                                content = media.getAttribute('data-media-url')
+                                    || media.getAttribute('href') || '';
+                            }
+                        }
+                        if (content) {
+                            window.__stanzaToNoteRef = 'stanza:tonote:'
+                                + encodeURIComponent(
+                                    composeCopyText(sender, timeRaw, content));
+                        }
+                        window.setTimeout(closeMenu, 0);
+                    });
+                    menu.appendChild(tonote);
+                }
                 document.body.appendChild(menu);
                 var rect = menu.getBoundingClientRect();
                 var M = 4;
@@ -1115,8 +1145,19 @@ window.__stanzaMentionRef = '';
                     .replace("%EDIT_LABEL%", json.dumps(tr("chat_edit")))
                     .replace("%DELETE_LABEL%", json.dumps(tr("chat_delete")))
                     .replace("%MODERATE_LABEL%", json.dumps(tr("chat_moderate")))
-                    .replace("%FORWARD_LABEL%", json.dumps(tr("chat_forward"))))
+                    .replace("%FORWARD_LABEL%", json.dumps(tr("chat_forward")))
+                    .replace("%TONOTE_LABEL%", json.dumps(tr("chat_to_note"))))
             self.page().runJavaScript(code)
+
+        def set_notes_enabled(self, enabled: bool):
+            """Enable the 'Add to notes' message-menu entry (Notes plugin)."""
+            self._notes_enabled = bool(enabled)
+            try:
+                self.page().runJavaScript(
+                    "window.__stanzaNotesEnabled = %s;"
+                    % ("true" if enabled else "false"))
+            except RuntimeError:
+                pass
 
         def _close_stanza_menu(self):
             """Close the in-page message menu (e.g. focus leaves the view)."""

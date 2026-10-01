@@ -411,6 +411,7 @@ class ChatWidget(QtWidgets.QWidget):
     media_save_requested = QtCore.pyqtSignal(str)             # url
     media_copy_requested = QtCore.pyqtSignal(str)             # url
     share_requested = QtCore.pyqtSignal(str)                  # shared content
+    note_requested = QtCore.pyqtSignal(str, str)              # chat_key, content
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, new_body
 
@@ -842,6 +843,9 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:forward:"):
             self._handle_forward_uri(url)
             return
+        if url.startswith("stanza:tonote:"):
+            self._handle_note_uri(url)
+            return
         if url.startswith("stanza:geo:"):
             self._handle_geo_uri(url)
             return
@@ -907,6 +911,18 @@ class ChatWidget(QtWidgets.QWidget):
         content = unquote(url[len("stanza:forward:"):])
         if content:
             self.share_requested.emit(content)
+
+    def _handle_note_uri(self, url: str) -> None:
+        """Decode ``stanza:tonote:<text>`` and request a new note."""
+        content = unquote(url[len("stanza:tonote:"):])
+        if content:
+            self.note_requested.emit(self.jid, content)
+
+    def set_notes_enabled(self, enabled: bool) -> None:
+        """Toggle the 'Add to notes' menu entry (Notes plugin active)."""
+        setter = getattr(self._view, "set_notes_enabled", None)
+        if callable(setter):
+            setter(bool(enabled))
 
     def _handle_geo_uri(self, url: str) -> None:
         """Open the map window for a ``stanza:geo:<ref>/<uri>`` or plain geo:."""

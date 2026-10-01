@@ -22,6 +22,8 @@ _TAB_KEY = "plugin:notes"
 
 def activate(app) -> None:
     """Add the Notes tab to the roster tab bar."""
+    app._notes_feature = True
+    app._notes_page = getattr(app, "_notes_page", None)
     if getattr(app, "_notes_page", None) is not None:
         return
     from stanza_im.i18n import tr
@@ -36,3 +38,4 @@ def deactivate(app) -> None:
     """Remove the Notes tab from the roster tab bar."""
     app._remove_roster_tab(_TAB_KEY)
     app._notes_page = None
+    app._notes_feature = False

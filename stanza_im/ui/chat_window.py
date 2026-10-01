@@ -69,6 +69,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._subject_font = ("", 0)
         self._colored_muc_nicks = True
         self._avatar_radius = 20
+        self._notes_enabled = False
         self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_hats_visible = True                 # XEP-0317 chips in chat
         self._muc_participant_width = 0               # 0 = default width
@@ -208,6 +209,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
         widget.share_requested.connect(self.share_requested)
+        widget.note_requested.connect(self.note_requested)
         widget.geo_view_requested.connect(self.geo_view_requested)
         widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.call_requested.connect(self.call_requested)
@@ -215,6 +217,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
+        widget.set_notes_enabled(self._notes_enabled)
         self._tab_order.append(jid)
         self._apply_tab_icon(jid)
         if focus:
@@ -285,6 +288,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
         widget.share_requested.connect(self.share_requested)
+        widget.note_requested.connect(self.note_requested)
         widget.geo_view_requested.connect(self.geo_view_requested)
         widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.muji_call_requested.connect(self.muji_call_requested)
@@ -292,6 +296,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
+        widget.set_notes_enabled(self._notes_enabled)
         self._tab_order.append(room)
         self._apply_tab_icon(room)
         self._tab_widget.setCurrentIndex(idx)
@@ -480,6 +485,14 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_avatar_radius(self._avatar_radius)
+
+    def set_notes_enabled(self, enabled: bool) -> None:
+        """Toggle the 'Add to notes' menu entry in every open tab."""
+        self._notes_enabled = bool(enabled)
+        for widget in self._tabs.values():
+            setter = getattr(widget, "set_notes_enabled", None)
+            if callable(setter):
+                setter(self._notes_enabled)
 
     def set_muc_admin(self, room: str, can_manage: bool) -> None:
         """Enable/disable the room-management button of a MUC tab."""
@@ -687,6 +700,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     media_save_requested = QtCore.pyqtSignal(str)              # url
     media_copy_requested = QtCore.pyqtSignal(str)              # url
     share_requested = QtCore.pyqtSignal(str)                   # shared content
+    note_requested = QtCore.pyqtSignal(str, str)             # chat_key, content
     geo_view_requested = QtCore.pyqtSignal(str, str, str)      # chat, ref, geo_uri
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)    # chat, ref, new_body
     window_closed = QtCore.pyqtSignal()                        # window closed

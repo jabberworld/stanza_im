@@ -434,7 +434,14 @@ live on the server in XEP-0049 private storage using the Miranda payload
 (`http://miranda-im.org/storage#notes`): `JabberClient.get_notes`/`set_notes`
 build raw IQs (one packet for the whole set) and `_parse_notes` reads
 `<note tags><title><text>`. The tab re-fetches on activation; a server without
-XEP-0049 shows a warning and an empty list. [`tests/test_plugins.py`]
+XEP-0049 shows a warning and an empty list. The plugin sets
+`MainWindow._notes_feature` while active; the message menu's **«В заметки»**
+entry (after «Переслать», `chat_view.py`, gated by `window.__stanzaNotesEnabled`
+via `ChatWindow.set_notes_enabled`/`ChatWidget.set_notes_enabled`) sends the
+message in the same "[date] sender: text" format as Forward to
+`MainWindow._on_note_requested`, which calls `NotesWidget.add_note(title, text,
+"Сообщения")` with the title `@<room name or nick> <date> <time>` and shows an
+OSD notice when notifications are on. [`tests/test_plugins.py`]
 The core exposes two generic extension points plugins may use: a contact-menu
 hook list (`MainWindow.add_contact_menu_hook`/`remove_contact_menu_hook`, called
 as `hook(menu, jid, is_conf)` inside `_on_contact_context`) and a 1:1 toolbar

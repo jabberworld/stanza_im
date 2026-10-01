@@ -207,6 +207,18 @@ visible = [widget._list.item(i).text() for i in range(widget._list.count())
            if not widget._list.item(i).isHidden()]
 check("filtering by a tag hides non-matching notes", visible == ["Second"])
 
+# 6·. add_note (used by "Add to notes")
+before = len(stored["notes"])
+ok = widget.add_note("@Bob 2026-01-01 10:00:00", "msg body", "Сообщения")
+loop.run_until_complete(__import__("asyncio").sleep(0.1))
+check("add_note reports success", ok is True)
+check("add_note stores the note on the server",
+      stored["notes"][-1] == {"title": "@Bob 2026-01-01 10:00:00",
+                              "tags": "Сообщения", "text": "msg body"})
+widget2 = NotesWidget(lambda: None, _run_task)
+check("add_note without a client returns False",
+      widget2.add_note("t", "x", "Сообщения") is False)
+
 widget._tag_filter.setCurrentIndex(0)
 widget._search.setText("first")
 loop.run_until_complete(__import__("asyncio").sleep(0.05))
@@ -275,6 +287,50 @@ check("the plugin has its own en/ru string modules",
       _notes_strings.en.STRINGS and _notes_strings.ru.STRINGS)
 check("the plugin's en/ru strings have the same keys",
       set(_notes_strings.en.STRINGS) == set(_notes_strings.ru.STRINGS))
+
+# 8. "Add to notes" wiring in MainWindow -------------------------------------
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
+
+mw_cfg = Config()
+mw_cfg.plugins["notes"] = True
+mw_cfg.save()
+mw = MainWindow(app)
+
+
+class _StubClient:
+    def __getattr__(self, _name):
+        return lambda *a, **k: None
+
+
+mw._client = _StubClient()
+check("the notes plugin exposes the feature flag",
+      getattr(mw, "_notes_feature", False) is True)
+check("the chat window was told notes are enabled",
+      mw._chat_window._notes_enabled is True)
+
+mw._on_note_requested("bob@example.com",
+                      "[2026-10-01 12:34:56] bob: hello")
+note = mw._notes_page._notes[-1]
+check("the note title is '@<name> <date> <time>'",
+      note["title"] == "@bob 2026-10-01 12:34:56")
+check("the note text keeps the forwarded format",
+      note["text"] == "[2026-10-01 12:34:56] bob: hello")
+check("the note is tagged 'Сообщения'", note["tags"] == "Сообщения")
+
+mw._conference_roster.add("room@conf.example")
+mw._muc_names["room@conf.example"] = "My Room"
+mw._on_note_requested("room@conf.example",
+                      "[2026-10-01 09:00:00] Alice: hi")
+check("a MUC note uses the room display name",
+      mw._notes_page._notes[-1]["title"].startswith("@My Room "))
+
+# Gating: a request is ignored while the plugin is inactive.
+mw._notes_feature = False
+count = len(mw._notes_page._notes)
+mw._on_note_requested("bob@example.com", "[2026-10-01 00:00:00] x: y")
+check("note requests are ignored when the plugin is inactive",
+      len(mw._notes_page._notes) == count)
+mw._notes_feature = True
 
 print()
 if FAILURES:

@@ -124,6 +124,17 @@ class NotesWidget(QtWidgets.QWidget):
         self._rebuild()
         self._show_status("")
 
+    def add_note(self, title: str, text: str, tags: str = "") -> bool:
+        """Append a note and store the whole set (used by 'Add to notes').
+
+        Returns False when there is no client to save with.
+        """
+        if self._get_client() is None:
+            return False
+        self._notes.append({"title": title, "tags": tags, "text": text})
+        self._save()
+        return True
+
     def _save(self) -> None:
         """Persist the whole note set on the server."""
         client = self._get_client()

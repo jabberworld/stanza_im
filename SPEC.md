@@ -1985,6 +1985,14 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   asks for confirmation. `reload()` re-fetches on tab activation; a server
   without `jabber:iq:private` shows `notes_no_private_storage` and an empty
   list (the plugin stays enabled).
+- While the plugin is active (`MainWindow._notes_feature`) the message menu
+  gains **«В заметки»** (after «Переслать», gated by `window.
+  __stanzaNotesEnabled` set from `ChatWindow.set_notes_enabled`). It delivers
+  the message in the Forward format (`[date] sender: body`) as
+  `stanza:tonote:` → `ChatWidget.note_requested` → `MainWindow.
+  _on_note_requested`, which appends a note via `NotesWidget.add_note(title,
+  text, "Сообщения")` (title `@<room name or nick> <date> <time>`, fixed tag
+  «Сообщения») and shows an OSD notice when `notifications.osd_enabled`.
 
 ### 14.8.3 Attention (XEP-0224, `stanza_im/plugins/attention/`)
 
