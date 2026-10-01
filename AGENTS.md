@@ -433,7 +433,12 @@ toolbar (Открыть/Создать/Изменить/Удалить, with a d
 live on the server in XEP-0049 private storage using the Miranda payload
 (`http://miranda-im.org/storage#notes`): `JabberClient.get_notes`/`set_notes`
 build raw IQs (one packet for the whole set) and `_parse_notes` reads
-`<note tags><title><text>`. The tab re-fetches on activation; a server without
+`<note tags><title><text>`. Because `set_notes` **replaces** the whole stored
+set, `NotesWidget.add_note` first fetches the server set and merges the new note
+into it (a note can be added from the message menu without the Notes tab ever
+having been opened), and every notes operation is serialised by an
+`asyncio.Lock`; success is reported via the `note_added(bool)` signal. The tab
+re-fetches on activation (`on_client_ready` preloads it too); a server without
 XEP-0049 shows a warning and an empty list. The plugin sets
 `MainWindow._notes_feature` while active; the message menu's **«В заметки»**
 entry (after «Переслать», `chat_view.py`, gated by `window.__stanzaNotesEnabled`

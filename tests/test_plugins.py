@@ -207,14 +207,49 @@ visible = [widget._list.item(i).text() for i in range(widget._list.count())
            if not widget._list.item(i).isHidden()]
 check("filtering by a tag hides non-matching notes", visible == ["Second"])
 
-# 6·. add_note (used by "Add to notes")
-before = len(stored["notes"])
+# 6·. add_note (used by "Add to notes") -------------------------------------
+# add_note merges with the SERVER set: even when the local list is empty (the
+# Notes tab was never opened) the existing notes must survive.
+added = []
+widget.note_added.connect(added.append)
 ok = widget.add_note("@Bob 2026-01-01 10:00:00", "msg body", "Сообщения")
-loop.run_until_complete(__import__("asyncio").sleep(0.1))
+loop.run_until_complete(__import__("asyncio").sleep(0.2))
 check("add_note reports success", ok is True)
-check("add_note stores the note on the server",
+check("add_note keeps the existing notes (no data loss)",
+      {n["title"] for n in stored["notes"]}
+      >= {"First", "Second", "@Bob 2026-01-01 10:00:00"})
+check("add_note stores the new note on the server",
       stored["notes"][-1] == {"title": "@Bob 2026-01-01 10:00:00",
                               "tags": "Сообщения", "text": "msg body"})
+check("add_note emits note_added(True) on success", added == [True])
+
+# An empty local cache (tab never shown) must still merge, not overwrite.
+fresh = NotesWidget(lambda: _FakeClient(), _run_task)
+stored["notes"] = [{"title": "OnlyOld", "tags": "", "text": "keep"}]
+got2 = []
+fresh.note_added.connect(got2.append)
+fresh.add_note("Fresh", "b", "Сообщения")
+loop.run_until_complete(__import__("asyncio").sleep(0.2))
+check("add_note from an empty cache keeps the server notes",
+      [n["title"] for n in stored["notes"]] == ["OnlyOld", "Fresh"])
+check("the fresh add reported success", got2 == [True])
+
+
+class _NoStorageClient:
+    async def get_notes(self):
+        return None
+
+    async def set_notes(self, notes):
+        raise AssertionError("must not save when there is no storage")
+
+
+ns = NotesWidget(lambda: _NoStorageClient(), _run_task)
+got3 = []
+ns.note_added.connect(got3.append)
+ns.add_note("t", "x", "Сообщения")
+loop.run_until_complete(__import__("asyncio").sleep(0.1))
+check("no private storage -> note_added(False)", got3 == [False])
+
 widget2 = NotesWidget(lambda: None, _run_task)
 check("add_note without a client returns False",
       widget2.add_note("t", "x", "Сообщения") is False)
@@ -297,12 +332,22 @@ mw_cfg.save()
 mw = MainWindow(app)
 
 
+mw_notes = {"notes": []}
+
+
 class _StubClient:
     def __getattr__(self, _name):
         return lambda *a, **k: None
 
+    async def get_notes(self):
+        return [dict(n) for n in mw_notes["notes"]]
+
+    async def set_notes(self, notes):
+        mw_notes["notes"] = [dict(n) for n in notes]
+
 
 mw._client = _StubClient()
+mw_loop = __import__("asyncio").get_event_loop()
 check("the notes plugin exposes the feature flag",
       getattr(mw, "_notes_feature", False) is True)
 check("the chat window was told notes are enabled",
@@ -310,7 +355,8 @@ check("the chat window was told notes are enabled",
 
 mw._on_note_requested("bob@example.com",
                       "[2026-10-01 12:34:56] bob: hello")
-note = mw._notes_page._notes[-1]
+mw_loop.run_until_complete(__import__("asyncio").sleep(0.2))
+note = mw_notes["notes"][-1]
 check("the note title is '@<name> <date> <time>'",
       note["title"] == "@bob 2026-10-01 12:34:56")
 check("the note text keeps the forwarded format",
@@ -321,8 +367,11 @@ mw._conference_roster.add("room@conf.example")
 mw._muc_names["room@conf.example"] = "My Room"
 mw._on_note_requested("room@conf.example",
                       "[2026-10-01 09:00:00] Alice: hi")
+mw_loop.run_until_complete(__import__("asyncio").sleep(0.2))
 check("a MUC note uses the room display name",
-      mw._notes_page._notes[-1]["title"].startswith("@My Room "))
+      mw_notes["notes"][-1]["title"].startswith("@My Room "))
+check("the earlier note survived the second add",
+      any(n["title"] == "@bob 2026-10-01 12:34:56" for n in mw_notes["notes"]))
 
 # Gating: a request is ignored while the plugin is inactive.
 mw._notes_feature = False

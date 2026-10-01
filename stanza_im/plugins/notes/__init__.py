@@ -34,6 +34,13 @@ def activate(app) -> None:
         _TAB_KEY, app._tab_icon(PLUGIN_ICON), tr(PLUGIN_NAME), page)
 
 
+def on_client_ready(app) -> None:
+    """Preload the notes once the client exists."""
+    page = getattr(app, "_notes_page", None)
+    if page is not None and getattr(app, "_client", None) is not None:
+        page.reload()
+
+
 def deactivate(app) -> None:
     """Remove the Notes tab from the roster tab bar."""
     app._remove_roster_tab(_TAB_KEY)

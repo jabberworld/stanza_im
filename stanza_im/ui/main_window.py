@@ -4819,7 +4819,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if not stamp:
             stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         title = f"@{display} {stamp}"
-        if page.add_note(title, content, _NOTES_TAG):
+        # The save is async; show the OSD only once it actually succeeded
+        # (a one-shot connection so unrelated adds do not re-notify).
+        try:
+            page.note_added.disconnect(self._on_note_added_result)
+        except TypeError:
+            pass
+        page.note_added.connect(self._on_note_added_result)
+        page.add_note(title, content, _NOTES_TAG)
+
+    def _on_note_added_result(self, ok: bool) -> None:
+        page = getattr(self, "_notes_page", None)
+        if page is not None:
+            try:
+                page.note_added.disconnect(self._on_note_added_result)
+            except TypeError:
+                pass
+        if ok:
             self._notify_note_added()
 
     def _notify_note_added(self) -> None:

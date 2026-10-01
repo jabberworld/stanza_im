@@ -8,6 +8,7 @@ in one IQ and rebuilds the list.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -29,12 +30,15 @@ def _split_tags(value: str) -> list[str]:
 class NotesWidget(QtWidgets.QWidget):
     """Server-backed note list with a tag filter."""
 
+    note_added = QtCore.pyqtSignal(bool)  # True when the note was stored
+
     def __init__(self, get_client, run_task, parent=None):
         super().__init__(parent)
         self._get_client = get_client
         self._run_task = run_task
         self._notes: list[dict] = []
         self._loading = False
+        self._lock = asyncio.Lock()
         self._build_ui()
 
     # ── UI ────────────────────────────────────────────────────────
@@ -108,32 +112,68 @@ class NotesWidget(QtWidgets.QWidget):
         self._run_task(self._load_async())
 
     async def _load_async(self) -> None:
-        client = self._get_client()
-        try:
-            notes = await client.get_notes()
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not fetch notes", exc_info=True)
-            notes = None
+        async with self._lock:
+            client = self._get_client()
+            if client is None:
+                self._loading = False
+                return
+            try:
+                notes = await client.get_notes()
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not fetch notes", exc_info=True)
+                notes = None
+            if notes is None:
+                self._notes = []
+                self._loading = False
+                self._rebuild()
+                self._show_status(tr("notes_no_private_storage"))
+                return
+            self._notes = notes
         self._loading = False
-        if notes is None:
-            self._notes = []
-            self._rebuild()
-            self._show_status(tr("notes_no_private_storage"))
-            return
-        self._notes = notes
         self._rebuild()
         self._show_status("")
 
     def add_note(self, title: str, text: str, tags: str = "") -> bool:
-        """Append a note and store the whole set (used by 'Add to notes').
+        """Append a note, merging with the server set so nothing is lost.
 
-        Returns False when there is no client to save with.
+        ``set_notes`` replaces the whole stored set, so the current notes are
+        fetched first (a note may be added from the message menu without the
+        Notes tab ever having been opened).  Emits ``note_added(ok)`` when the
+        save finishes.  Returns False when there is no client.
         """
         if self._get_client() is None:
             return False
-        self._notes.append({"title": title, "tags": tags, "text": text})
-        self._save()
+        self._run_task(self._add_note_async(title, text, tags))
         return True
+
+    async def _add_note_async(self, title: str, text: str,
+                              tags: str) -> None:
+        async with self._lock:
+            client = self._get_client()
+            if client is None:
+                self.note_added.emit(False)
+                return
+            try:
+                notes = await client.get_notes()
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not fetch notes before add", exc_info=True)
+                notes = None
+            if notes is None:
+                self._show_status(tr("notes_no_private_storage"))
+                self.note_added.emit(False)
+                return
+            notes.append({"title": title, "tags": tags, "text": text})
+            try:
+                await client.set_notes(notes)
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not store notes", exc_info=True)
+                self._show_status(tr("notes_save_failed"))
+                self.note_added.emit(False)
+                return
+            self._notes = notes
+        self._rebuild()
+        self._show_status("")
+        self.note_added.emit(True)
 
     def _save(self) -> None:
         """Persist the whole note set on the server."""
@@ -143,13 +183,16 @@ class NotesWidget(QtWidgets.QWidget):
         self._run_task(self._save_async())
 
     async def _save_async(self) -> None:
-        client = self._get_client()
-        try:
-            await client.set_notes(self._notes)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not store notes", exc_info=True)
-            self._show_status(tr("notes_save_failed"))
-            return
+        async with self._lock:
+            client = self._get_client()
+            if client is None:
+                return
+            try:
+                await client.set_notes(self._notes)
+            except Exception:  # noqa: BLE001
+                logger.debug("Could not store notes", exc_info=True)
+                self._show_status(tr("notes_save_failed"))
+                return
         self._rebuild()
         self._show_status("")
 

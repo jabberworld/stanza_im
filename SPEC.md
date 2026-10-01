@@ -1982,7 +1982,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   toolbar (Открыть `ok.png` / Создать `about.png` / Изменить `edit.png` /
   Удалить `process-stop.png`). Double-click or «Открыть» opens `NoteDialog`
   (title / tags / text); a save re-sends the set and rebuilds the list; delete
-  asks for confirmation. `reload()` re-fetches on tab activation; a server
+  asks for confirmation. `set_notes` replaces the whole set, so `add_note`
+  fetches the server set first and merges (never losing existing notes, even
+  when the tab was never opened); all notes I/O is serialised by an
+  `asyncio.Lock` and a successful add emits `note_added(True)`. `reload()`
+  re-fetches on tab activation (and `on_client_ready` preloads it); a server
   without `jabber:iq:private` shows `notes_no_private_storage` and an empty
   list (the plugin stays enabled).
 - While the plugin is active (`MainWindow._notes_feature`) the message menu
