@@ -1988,12 +1988,15 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   внимание», after «Отправить контакт…») is likewise enabled only on support.
   `on_client_ready` (called by `MainWindow` after login) binds the plugin to the
   live client, since a plugin enabled before login has no client to subscribe to.
-- Sending: `JabberClient.send_attention(jid)` builds a bodyless `<message
+- Sending: `JabberClient.send_attention(jid)` delegates to slixmpp's
+  `xep_0224.request_attention`, which builds a bodyless `<message
   type='headline'><attention xmlns='urn:xmpp:attention:0'/></message>` (headline
-  per XEP-0224 §3, so it is not stored offline). Receiving: `_on_message`
-  detects `<attention/>` **before** the `type` dispatch (so a `headline`
-  attention is not mistaken for PEP/MDS) and `_on_carbon_received` does too;
-  both emit `attention_received(from)` and never render a chat message.
+  per XEP-0224 §3, so it is not stored offline). Receiving: slixmpp's `xep_0224`
+  plugin raises its own `attention` event for an incoming `<attention/>`;
+  `JabberClient._on_attention_event` (subscribed in `_register_handlers`) turns
+  it into `attention_received(from)`. The core `message` event only fires for a
+  stanza with a `<body>`, so a bodyless attention never reaches `_on_message`
+  (its earlier detection was removed); no chat message is ever rendered.
 - The plugin answers the event with `resources/sounds/effects/door_bell.wav`
   (`SoundPlayer.play_file`), an OSD («Пользователь {name} пытается привлечь ваше
   внимание») and an Events entry, gated by `[plugin_settings.attention]`:

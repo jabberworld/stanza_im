@@ -434,13 +434,17 @@ The bundled **Attention** plugin (`stanza_im/plugins/attention/`, category
 «Общение», icon `attention.svg` — a yellow bell) implements XEP-0224: its
 contact-menu entry «Привлечь внимание» (after «Отправить контакт…») and the 1:1
 chat bell (right of the call button) send a bodyless `<attention
-xmlns='urn:xmpp:attention:0'/>` (`JabberClient.send_attention`, `headline` type
-so the request is not stored offline, per XEP-0224 §3). The bell is **hidden**
+xmlns='urn:xmpp:attention:0'/>` (`JabberClient.send_attention`, which delegates
+to slixmpp's `xep_0224.request_attention` → `headline` type, so the request is
+not stored offline, per XEP-0224 §3). The bell is **hidden**
 while the plugin is inactive and shown (but disabled) until the peer advertises
 `urn:xmpp:attention:0` (`supports_feature`, driven by `contact_caps` and
 `MainWindow.apply_attention_support`, which computes both the plugin-active and
-peer-support flags). An incoming `<attention/>` — including a `headline` one, so
-it is detected in `_on_message` **before** the type dispatch — is routed (never
+peer-support flags). An incoming `<attention/>` arrives through slixmpp's
+`xep_0224` plugin as its own **`attention` event** (`JabberClient.
+_on_attention_event`, subscribed in `_register_handlers`): the core `message`
+event only fires for a stanza with a `<body>`, so a bodyless attention (which
+SHOULD use `headline`) never reaches `_on_message`. It is routed (never
 rendered as a chat message) to the
 `attention_received` event → the plugin plays `resources/sounds/effects/door_bell.wav`,
 shows an OSD («Пользователь … пытается привлечь ваше внимание») and pushes an

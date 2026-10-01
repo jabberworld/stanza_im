@@ -1078,6 +1078,12 @@ class JabberClient:
         self.xmpp.add_event_handler("session_start", self._on_session_start)
         self.xmpp.add_event_handler("disco_info", self._on_disco_info)
         self.xmpp.add_event_handler("message", self._on_message)
+        # XEP-0224: slixmpp's ``xep_0224`` plugin raises an ``attention`` event
+        # for an incoming ``<attention/>``.  The core ``message`` event only
+        # fires for stanzas that carry a ``<body>``, so a bodyless attention
+        # (which SHOULD use ``headline`` to avoid offline storage) never
+        # reaches ``_on_message`` — the plugin's event is the only path.
+        self.xmpp.add_event_handler("attention", self._on_attention_event)
         # slixmpp folds a bare <show> value into the presence ``type`` (so a
         # transport presence with ``<show>away</show>`` but no ``type`` emits
         # ``presence_away``, not ``presence_available``).  Subscribe to the
@@ -1816,28 +1822,18 @@ class JabberClient:
     def send_attention(self, jid: str) -> bool:
         """Send a XEP-0224 attention request (a bodyless ``<attention/>``).
 
-        Uses the ``headline`` type as the XEP recommends, so the request is not
-        stored as an offline message (Psi+ does the same).
+        Uses slixmpp's ``xep_0224`` plugin, which sends the request with the
+        ``headline`` type so it is not stored as an offline message.
         """
         if not isinstance(jid, str) or not jid.strip():
             return False
-        msg = self.xmpp.Message()
-        msg["to"] = jid.strip()
-        msg["type"] = "headline"
-        ET.SubElement(msg.xml, "{%s}attention" % NS_ATTENTION)
+        try:
+            self.xmpp.plugin["xep_0224"].request_attention(jid.strip())
+        except Exception:  # noqa: BLE001
+            logger.debug("ATTENTION request failed", exc_info=True)
+            return False
         logger.debug("ATTENTION request to %s", jid)
-        msg.send()
         return True
-
-    @staticmethod
-    def _attention_request(msg) -> str:
-        """Return the sender of a XEP-0224 ``<attention/>`` (else "")."""
-        xml = getattr(msg, "xml", None)
-        if xml is None:
-            return ""
-        for _ in xml.iter("{%s}attention" % NS_ATTENTION):
-            return str(msg["from"] or "")
-        return ""
 
     def _build_reactions(self, target: str, target_id: str, emojis: list[str],
                          mtype: str = "", msg_id: str = ""):
@@ -4847,14 +4843,14 @@ class JabberClient:
                     return pep.parse_payload(node, child)
         return None
 
+    def _on_attention_event(self, msg) -> None:
+        """slixmpp ``xep_0224`` saw an incoming ``<attention/>`` (XEP-0224)."""
+        frm = str(msg.get("from", "") or "")
+        if frm:
+            logger.debug("ATTENTION received from %s", frm)
+            self.emit("attention_received", frm.split("/")[0])
+
     def _on_message(self, msg) -> None:
-        attention_from = self._attention_request(msg)
-        if attention_from:
-            # XEP-0224 §3: attention requests SHOULD use the ``headline`` type
-            # to avoid offline storage, so this must run before the type
-            # dispatch (a headline would otherwise be treated as PEP/MDS).
-            self.emit("attention_received", attention_from.split("/")[0])
-            return
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
@@ -4940,9 +4936,6 @@ class JabberClient:
             return
         if _is_roster_exchange(inner):
             self._start_task(self._on_roster_exchange_stanza(inner))
-            return
-        if self._attention_request(inner):
-            self.emit("attention_received", str(inner["from"]).split("/")[0])
             return
         if inner["type"] not in ("chat", "normal"):
             return

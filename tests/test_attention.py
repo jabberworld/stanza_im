@@ -38,11 +38,9 @@ def check(name, cond):
         FAILURES.append(name)
 
 
-def _msg(frm: str, extra_attention: bool, body: str = "") -> slixmpp.Message:
-    att = (f"<attention xmlns='{NS_ATTENTION}'/>" if extra_attention else "")
-    body_el = f"<body>{body}</body>" if body else ""
-    raw = (f"<message xmlns='jabber:client' type='chat' from='{frm}' "
-           f"to='me@x'>{att}{body_el}</message>")
+def _attention_msg(frm: str, mtype: str = "headline") -> slixmpp.Message:
+    raw = (f"<message xmlns='jabber:client' type='{mtype}' from='{frm}' "
+           f"to='me@x'><attention xmlns='{NS_ATTENTION}'/></message>")
     return slixmpp.Message(xml=ET.fromstring(raw))
 
 
@@ -57,15 +55,10 @@ check("the attention plugin carries the bell icon",
 check("the attention plugin lives in the Communication category",
       att.category == "plugin_category_communication")
 
-# 2. Protocol parsing --------------------------------------------------------
-check("a bare attention is parsed",
-      JabberClient._attention_request(_msg("bob@example.com/res", True))
-      == "bob@example.com/res")
-check("a message without attention yields nothing",
-      JabberClient._attention_request(_msg("bob@example.com", False, "hi")) == "")
-check("attention with a fallback body is still parsed",
-      JabberClient._attention_request(
-          _msg("bob@example.com", True, "attention!")) == "bob@example.com")
+# 2. The plugin registers the attention event handler ------------------------
+check("the client subscribes to slixmpp's attention event",
+      JabberClient._on_attention_event is not None)
+check("NS_ATTENTION matches XEP-0224", NS_ATTENTION == "urn:xmpp:attention:0")
 
 # 3. Defaults ----------------------------------------------------------------
 cfg = Config()
@@ -200,7 +193,10 @@ w.apply_attention_support("bob@example.com")
 check("reactivating the plugin shows the bell again",
       not cw._attention_btn.isHidden())
 
-# 6b. A headline attention (Psi+) reaches the client event -------------------
+# 6b. The plugin's ``attention`` event drives the receive path (XEP-0224) ----
+# slixmpp's core ``message`` event only fires for a stanza with a ``<body>``,
+# so a bodyless attention (Psi+) is delivered through slixmpp's ``attention``
+# event instead (raised by its ``xep_0224`` plugin).
 from stanza_im.core.client import JabberClient as _JC  # noqa: E402
 
 
@@ -211,23 +207,34 @@ class _EventClient(_JC):
     def emit(self, name, *a, **k):
         self.events.append((name, a))
 
-    def _maybe_mds_event(self, *a):
-        self.events.append(("mds", ()))
-
-    def _maybe_pep_event(self, *a):
-        self.events.append(("pep", ()))
-
 
 ec = _EventClient()
-_headline = slixmpp.Message(xml=ET.fromstring(
-    "<message xmlns='jabber:client' type='headline' "
-    "from='rain@jabberworld.info/walkbook' to='me'>"
-    f"<attention xmlns='{NS_ATTENTION}'/></message>"))
-ec._on_message(_headline)
-check("a headline attention emits attention_received",
+ec._on_attention_event(
+    _attention_msg("rain@jabberworld.info/walkbook"))
+check("the attention event emits attention_received with the bare JID",
       ("attention_received", ("rain@jabberworld.info",)) in ec.events)
-check("a headline attention is not treated as PEP/MDS",
-      all(name != "pep" and name != "mds" for name, _ in ec.events))
+
+# 6c. Sending goes through slixmpp's xep_0224 plugin -------------------------
+class _Xep:
+    def __init__(self):
+        self.sent = []
+
+    def request_attention(self, to):
+        self.sent.append(to)
+
+
+class _SendClient(_JC):
+    def __init__(self):
+        self.xmpp = type("X", (), {"plugin": {"xep_0224": _Xep()}})()
+
+
+sc = _SendClient()
+check("send_attention returns True for a valid JID",
+      sc.send_attention("rain@jabberworld.info") is True)
+check("send_attention delegates to xep_0224.request_attention",
+      sc.xmpp.plugin["xep_0224"].sent == ["rain@jabberworld.info"])
+check("send_attention refuses an empty JID",
+      sc.send_attention("") is False)
 
 
 class _FakeMenu:

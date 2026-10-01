@@ -3122,6 +3122,8 @@ class MainWindow(QtWidgets.QMainWindow):
         peer_supports = bool(
             plugin_active and self._client
             and self._client.supports_feature(bare, feature))
+        logger.debug("ATTENTION support %s: plugin=%s peer=%s",
+                     bare, plugin_active, peer_supports)
         self._chat_window.set_attention_support(
             bare, plugin_active, peer_supports)
 
