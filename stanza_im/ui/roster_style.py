@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include import pep
+from stanza_im.include.avatars import rounded_avatar
 from stanza_im.ui import icons as icons_mod
 
 
@@ -82,6 +83,7 @@ class RosterStyle:
         self._show_activity = bool(show_activity)
         self._show_mood = bool(show_mood)
         self._show_clients = bool(show_clients)
+        self._avatar_radius_pct = 20
         self.set_colors(bg_color, group_bg_color)
 
     def set_options(self, show_avatars: bool = True,
@@ -93,6 +95,10 @@ class RosterStyle:
         self._show_activity = bool(show_activity)
         self._show_mood = bool(show_mood)
         self._show_clients = bool(show_clients)
+
+    def set_avatar_radius(self, radius_pct: int) -> None:
+        """Set the roster avatar corner rounding (0 = square, 100 = circle)."""
+        self._avatar_radius_pct = max(0, min(100, int(radius_pct or 0)))
 
     @staticmethod
     def _parse(value) -> QtGui.QColor | None:
@@ -217,9 +223,8 @@ class RosterStyle:
         if self._show_avatars and item.avatar_path and icons:
             ipix = icons.get(item.avatar_path)
             if not ipix.isNull():
-                scaled = ipix.scaled(self.AVATAR_SIZE, self.AVATAR_SIZE,
-                                     QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                                     QtCore.Qt.TransformationMode.SmoothTransformation)
+                scaled = rounded_avatar(
+                    ipix, self.AVATAR_SIZE, self._avatar_radius_pct)
                 ax = avail_right - self.AVATAR_SIZE
                 ay = y + (rect.height() - self.AVATAR_SIZE) // 2
                 painter.drawPixmap(ax, ay, scaled)

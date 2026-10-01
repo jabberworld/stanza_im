@@ -148,6 +148,7 @@ class Config:
                         "participant_font": "", "participant_font_size": 0,
                         "muc_subject_font": "", "muc_subject_font_size": 0,
                         "input_font": "", "input_font_size": 0,
+                        "avatar_radius": 20,
                         "tooltip_avatar_size": 64},
         "notifications": {"tray_blink": True, "popups": "system",
                            "sound_theme": "default",

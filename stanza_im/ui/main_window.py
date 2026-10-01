@@ -2223,10 +2223,24 @@ class MainWindow(QtWidgets.QMainWindow):
             bool(getattr(self._config.appearance, "roster_show_clients", True)))
         self._roster_style.set_options(*opts)
         self._applied_roster_options = opts
+        self._apply_avatar_radius()
         roster = getattr(self, "_roster", None)
         if roster is not None:
             roster.update()
         self._apply_conference_options()
+
+    def _apply_avatar_radius(self) -> None:
+        """Apply the avatar corner rounding to roster, MUC and Muji windows."""
+        radius = int(getattr(self._config.appearance, "avatar_radius", 20) or 0)
+        style = getattr(self, "_roster_style", None)
+        if style is not None and hasattr(style, "set_avatar_radius"):
+            style.set_avatar_radius(radius)
+        chat_window = getattr(self, "_chat_window", None)
+        if chat_window is not None:
+            chat_window.set_avatar_radius(radius)
+        for window in getattr(self, "_muji_windows", {}).values():
+            if hasattr(window, "set_avatar_radius"):
+                window.set_avatar_radius(radius)
 
     def _on_muc_participant_width(self, width: int) -> None:
         """Remember the MUC sidebar width (persisted with the config on quit)."""
@@ -2281,6 +2295,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_interface_mode()
         self._refresh_muc_names()
         self._apply_roster_font()
+        self._apply_avatar_radius()
         roster_opts = (
             bool(getattr(self._config.appearance, "roster_show_avatars", True)),
             bool(getattr(self._config.appearance, "roster_show_activity", True)),
@@ -3310,6 +3325,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if window is None:
             nick = self._muc_self_nicks.get(room, "")
             window = MujiCallWindow(room, self_nick=nick)
+            window.set_avatar_radius(
+                getattr(self._config.appearance, "avatar_radius", 20))
             window.leave.connect(self._client.leave_muji)
             window.participant_audio.connect(
                 self._on_muji_participant_audio)

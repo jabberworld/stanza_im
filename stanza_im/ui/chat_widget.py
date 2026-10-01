@@ -424,6 +424,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_muc_avatars = True
         self._show_muc_clients = True
         self._show_muc_hats = True
+        self._avatar_radius = 20
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
         self._subject_font: tuple[str, int] = ("", 0)
@@ -2183,9 +2184,9 @@ class ChatWidget(QtWidgets.QWidget):
             path = user.get("avatar_path", "") or default_avatar()
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
-                avatar.setPixmap(pix.scaled(
-                    28, 28, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                    QtCore.Qt.TransformationMode.SmoothTransformation))
+                from stanza_im.include.avatars import rounded_avatar
+                avatar.setPixmap(
+                    rounded_avatar(pix, 28, self._avatar_radius))
             layout.addWidget(avatar)
         # The child labels swallow wheel events; forward them to the row so a
         # Ctrl+wheel over any part of the row changes the participant font.
@@ -2539,6 +2540,12 @@ class ChatWidget(QtWidgets.QWidget):
         """Toggle participant avatars / client icons in the MUC sidebar."""
         self._show_muc_avatars = bool(show_avatars)
         self._show_muc_clients = bool(show_clients)
+        if self.is_muc:
+            self._render_muc_users()
+
+    def set_avatar_radius(self, radius_pct: int) -> None:
+        """Set the MUC participant avatar rounding (0 = square, 100 = circle)."""
+        self._avatar_radius = max(0, min(100, int(radius_pct or 0)))
         if self.is_muc:
             self._render_muc_users()
 

@@ -38,26 +38,14 @@ def _icon(name: str) -> QtGui.QIcon:
     return icon
 
 
-def _rounded_avatar(path: str, size: int = 24) -> QtGui.QPixmap:
-    """Return a circular, scaled avatar pixmap from *path*."""
-    pix = QtGui.QPixmap(path)
-    if pix.isNull():
-        return pix
-    scaled = pix.scaled(
-        size, size, QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-        QtCore.Qt.TransformationMode.SmoothTransformation)
-    rounded = QtGui.QPixmap(size, size)
-    rounded.fill(QtCore.Qt.GlobalColor.transparent)
-    painter = QtGui.QPainter(rounded)
-    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-    clip = QtGui.QPainterPath()
-    clip.addEllipse(0, 0, size, size)
-    painter.setClipPath(clip)
-    x = (scaled.width() - size) // 2
-    y = (scaled.height() - size) // 2
-    painter.drawPixmap(-x, -y, scaled)
-    painter.end()
-    return rounded
+def _rounded_avatar(path: str, size: int = 24,
+                    radius_pct: int = 100) -> QtGui.QPixmap:
+    """Return a scaled avatar pixmap clipped to a rounded square.
+
+    *radius_pct* mirrors ``appearance.avatar_radius`` (100 = full circle).
+    """
+    from stanza_im.include.avatars import rounded_avatar
+    return rounded_avatar(QtGui.QPixmap(path), size, radius_pct)
 
 
 class VideoView(QtWidgets.QLabel):
@@ -293,6 +281,7 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._applied: dict[str, tuple[bool, bool, bool]] = {}
         self._avatar_paths: dict[str, str] = {}
         self._avatar_labels: dict[str, QtWidgets.QLabel] = {}
+        self._avatar_radius = 20  # mirrors appearance.avatar_radius
         self._rows: dict[str, QtWidgets.QListWidgetItem] = {}
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -393,9 +382,19 @@ class MujiCallWindow(QtWidgets.QWidget):
             self._avatar_paths[nick] = path
             label = self._avatar_labels.get(nick)
             if label is not None:
-                pix = _rounded_avatar(path)
+                pix = _rounded_avatar(path, radius_pct=self._avatar_radius)
                 if not pix.isNull():
                     label.setPixmap(pix)
+
+    def set_avatar_radius(self, radius_pct: int) -> None:
+        """Re-render participant avatars with a new corner rounding."""
+        self._avatar_radius = max(0, min(100, int(radius_pct or 0)))
+        for nick, label in self._avatar_labels.items():
+            pix = _rounded_avatar(
+                self._avatar_paths.get(nick) or default_avatar(),
+                radius_pct=self._avatar_radius)
+            if not pix.isNull():
+                label.setPixmap(pix)
 
     def apply_states(self, nick: str) -> None:
         """Force the effective device states onto one participant.
@@ -420,7 +419,8 @@ class MujiCallWindow(QtWidgets.QWidget):
         avatar = QtWidgets.QLabel(row)
         avatar.setFixedSize(24, 24)
         avatar.setPixmap(_rounded_avatar(
-            self._avatar_paths.get(nick) or default_avatar()))
+            self._avatar_paths.get(nick) or default_avatar(),
+            radius_pct=self._avatar_radius))
         self._avatar_labels[nick] = avatar
         layout.addWidget(avatar)
         name = QtWidgets.QLabel(nick, row)

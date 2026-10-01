@@ -68,6 +68,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._input_font = ("", 0)
         self._subject_font = ("", 0)
         self._colored_muc_nicks = True
+        self._avatar_radius = 20
         self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_hats_visible = True                 # XEP-0317 chips in chat
         self._muc_participant_width = 0               # 0 = default width
@@ -243,6 +244,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_participant_font(*self._participant_font)
         widget.set_subject_font(*self._subject_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
+        widget.set_avatar_radius(self._avatar_radius)
         widget.set_muc_hats_visible(self._muc_hats_visible)
         widget.set_participant_width(self._muc_participant_width)
         widget.participant_width_changed.connect(
@@ -367,6 +369,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_participant_font(*self._participant_font)
         widget.set_subject_font(*self._subject_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
+        widget.set_avatar_radius(self._avatar_radius)
         widget.set_muc_hats_visible(self._muc_hats_visible)
         widget.set_participant_width(self._muc_participant_width)
         widget.participant_width_changed.connect(
@@ -470,6 +473,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = self._tabs.get(jid)
         if widget is not None and not widget.is_muc:
             widget.set_attention_enabled(plugin_active, peer_supports)
+
+    def set_avatar_radius(self, radius_pct: int) -> None:
+        """Apply the avatar rounding to every open MUC participant list."""
+        self._avatar_radius = int(radius_pct or 0)
+        for widget in self._tabs.values():
+            if widget.is_muc:
+                widget.set_avatar_radius(self._avatar_radius)
 
     def set_muc_admin(self, room: str, can_manage: bool) -> None:
         """Enable/disable the room-management button of a MUC tab."""

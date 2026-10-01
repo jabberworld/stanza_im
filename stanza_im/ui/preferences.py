@@ -1129,6 +1129,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         color_form.addRow(tr("prefs_color_osd_opacity"), osd_opacity)
 
         misc, misc_form = self._page()
+        avatar_radius = self._spin("avatar_radius", 0, 100)
+        avatar_radius.setSuffix(" %")
+        misc_form.addRow(tr("prefs_avatar_radius"), avatar_radius)
         misc_form.addRow(tr("prefs_tooltip_avatar_size"),
                          self._spin("tooltip_avatar_size", 32, 256))
         misc_form.addRow(tr("prefs_media_preview_size"),
@@ -1434,6 +1437,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 appearance, "muc_subject_font_size", 0),
             "input_font": getattr(appearance, "input_font", ""),
             "input_font_size": getattr(appearance, "input_font_size", 0),
+            "avatar_radius": getattr(appearance, "avatar_radius", 20),
             "tooltip_avatar_size": getattr(
                 appearance, "tooltip_avatar_size", 64) or 64,
             "roster_bg_color": getattr(appearance, "roster_bg_color", "#ffffff"),
@@ -1551,6 +1555,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.status[key] = self._value(key)
         cfg.status.auto_status_message = self._value("auto_status_message")
         cfg.chat.text_scale = self._value("text_scale")
+        cfg.appearance.avatar_radius = self._value("avatar_radius")
         for key in ("roster_font", "roster_font_size", "chat_font", "chat_font_size",
                     "osd_font", "osd_font_size", "nick_font", "nick_font_size",
                     "participant_font", "participant_font_size",

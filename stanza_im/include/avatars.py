@@ -55,6 +55,41 @@ def save_avatar(jid: str, raw: bytes) -> str:
     return path
 
 
+def rounded_avatar(pix: QtGui.QPixmap, size: int,
+                   radius_pct: int) -> QtGui.QPixmap:
+    """Return *pix* scaled to *size* and clipped to a rounded square.
+
+    *radius_pct* is 0–100 % of the half-size: 0 keeps sharp corners, 100 gives
+    a full circle.  Falls back to the plain scaled pixmap for an invalid one.
+    """
+    if pix.isNull():
+        return pix
+    scaled = pix.scaled(
+        size, size, QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        QtCore.Qt.TransformationMode.SmoothTransformation)
+    radius = max(0.0, min(1.0, float(radius_pct) / 100.0)) * (size / 2.0)
+    if radius <= 0.0:
+        # Sharp corners: centre-crop to the square so nothing shifts.
+        out = QtGui.QPixmap(size, size)
+        out.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(out)
+        painter.drawPixmap((size - scaled.width()) // 2,
+                           (size - scaled.height()) // 2, scaled)
+        painter.end()
+        return out
+    out = QtGui.QPixmap(size, size)
+    out.fill(QtCore.Qt.GlobalColor.transparent)
+    painter = QtGui.QPainter(out)
+    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+    clip = QtGui.QPainterPath()
+    clip.addRoundedRect(QtCore.QRectF(0, 0, size, size), radius, radius)
+    painter.setClipPath(clip)
+    painter.drawPixmap((size - scaled.width()) // 2,
+                       (size - scaled.height()) // 2, scaled)
+    painter.end()
+    return out
+
+
 def default_avatar() -> str:
     """Return the neutral placeholder avatar, generating it on first use."""
     path = os.path.join(AVATARS_DIR, PLACEHOLDER_FILENAME)

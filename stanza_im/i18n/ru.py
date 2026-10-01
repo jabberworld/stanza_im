@@ -941,6 +941,7 @@ STRINGS = {
     "prefs_interface_separate": "Отдельное окно чата",
     "prefs_interface_unified": "Чат рядом со списком контактов",
     "prefs_idle_unload_minutes": "Выгружать неактивные чаты через (мин, 0 — выкл.):",
+    "prefs_avatar_radius": "Скругление аватарок:",
     "prefs_tooltip_avatar_size": "Размер аватарки в подсказке, px:",
     "prefs_media_preview_size": "Размер превью изображений, px:",
     "prefs_media_cache_days": "Хранить превью, дней:",

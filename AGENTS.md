@@ -554,7 +554,10 @@ resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and prefixes th
 `pep.activity_icon_path` / `pep.tune_icon_path`.
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
-before the nick; the conference toggles are
+before the nick; roster and participant avatars are clipped by
+`include.avatars.rounded_avatar` with `appearance.avatar_radius` (0 = square,
+100 = circle; `RosterStyle.set_avatar_radius`/`ChatWidget.set_avatar_radius`,
+applied live via `MainWindow._apply_avatar_radius`). The conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →
 Appearance → «Конференции», all `true`; a participant's caps node is captured in
 `_on_groupchat_presence`). `muc_show_hats` gates the XEP-0317 hat chips under
@@ -1508,8 +1511,10 @@ enlarged participant leaves. The single `MujiCallWindow`
 splits horizontally: the video mosaic / status on the left and the participant
 list on the right (the same style as the MUC chat participant sidebar). Each
 participant row carries a rounded avatar (`_rounded_avatar`, the cached vCard
-PNG masked to a circle, filled by `MainWindow._muji_avatar` →
-`set_avatars`) before the nick and **three**
+PNG clipped by `include.avatars.rounded_avatar` using `appearance.avatar_radius`
+— the same knob as the roster and MUC participant lists, 0 = square … 100 =
+circle — filled by `MainWindow._muji_avatar` → `set_avatars`) before the nick
+and **three**
 icon-only toggles that swap their glyph on state — "send my mic to this
 participant" (`set_call_audio`, per-session silence), "hear this participant"
 (`set_call_audio_receive` → `AiortcCall.set_remote_audio_enabled` →
