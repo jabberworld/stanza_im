@@ -56,14 +56,17 @@ def open_settings(config, parent=None) -> None:
 def _ensure_state(app) -> dict:
     state = getattr(app, _STATE, None)
     if state is None:
-        state = {"last": {}, "hooks": []}
+        state = {"last": {}, "hooks": [], "seen": set()}
         setattr(app, _STATE, state)
+    state.setdefault("seen", set())
+    app._attention_seen = state["seen"]
     return state
 
 
 def activate(app) -> None:
     state = _ensure_state(app)
     app._attention_feature = NS_ATTENTION
+    app._attention_seen = state["seen"]
 
     menuhook = _make_menu_hook(app)
     app.add_contact_menu_hook(menuhook)
@@ -91,6 +94,7 @@ def deactivate(app) -> None:
         app.remove_contact_menu_hook(hook)
     setattr(app, _STATE, None)
     app._attention_feature = ""
+    app._attention_seen = set()
     # Hide the bell on open 1:1 tabs (plugin is no longer active).
     for jid in list(getattr(app, "_chat_window", None).tabs()
                     if getattr(app, "_chat_window", None) else []):
@@ -110,7 +114,11 @@ def _make_menu_hook(app):
             return
         bare = jid.split("/", 1)[0]
         client = getattr(app, "_client", None)
-        supported = bool(client and client.supports_feature(bare, NS_ATTENTION))
+        # Enabled when the peer advertises the feature or has ever sent us an
+        # attention request (Psi+ often sends it without announcing it).
+        supported = (bare in getattr(app, "_attention_seen", set())
+                     or bool(client
+                             and client.supports_feature(bare, NS_ATTENTION)))
         action = menu.addAction(
             _menu_icon(), tr("attention_menu"),
             lambda checked=False: _send(app, bare))
@@ -140,6 +148,12 @@ def _on_attention(app, frm: str) -> None:
     config = app._config
     settings = _settings(config)
     state = _ensure_state(app)
+
+    # The peer proved it supports attention by sending one — unlock the bell /
+    # menu for it even if it does not advertise the feature in its caps.
+    if bare not in state["seen"]:
+        state["seen"].add(bare)
+        app.apply_attention_support(bare)
 
     # Our "do not disturb" status suppresses the notification unless allowed.
     our_show = str(getattr(config, "last_status", "") or "")

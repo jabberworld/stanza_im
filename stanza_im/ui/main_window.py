@@ -355,6 +355,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plugin_manager = None
         self._notes_page = None
         self._applied_plugins: set[str] = set()
+        # Bare JIDs that ever sent us an XEP-0224 attention request (set by the
+        # attention plugin); used to enable the bell even without caps.
+        self._attention_seen: set[str] = set()
         # Plugins may append entries to the roster contact context menu; each
         # hook is called as ``hook(menu, jid, is_conf)``.
         self._contact_menu_hooks: list = []
@@ -759,14 +762,19 @@ class MainWindow(QtWidgets.QMainWindow):
         return page
 
     def _clear_events_placeholder(self) -> None:
-        if (self._events_list.count() == 1
-                and self._events_list.itemWidget(self._events_list.item(0))
-                is None):
-            self._events_list.clear()
+        # Only the *placeholder* row may be cleared: a real event is also a
+        # single plain (widget-less) item, so it must be told apart by its
+        # marker, not by "no item widget".
+        if self._events_list.count() == 1:
+            item = self._events_list.item(0)
+            if item.data(QtCore.Qt.ItemDataRole.UserRole) == "__placeholder__":
+                self._events_list.clear()
 
     def _ensure_events_placeholder(self) -> None:
         if self._events_list.count() == 0:
-            self._events_list.addItem(tr("events_empty"))
+            item = QtWidgets.QListWidgetItem(tr("events_empty"))
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, "__placeholder__")
+            self._events_list.addItem(item)
 
     def _push_system_event(self, title: str, detail: str = "") -> None:
         """Append an informational system event and blink the tab icon."""
@@ -3119,9 +3127,14 @@ class MainWindow(QtWidgets.QMainWindow):
         feature = getattr(self, "_attention_feature", "")
         plugin_active = bool(feature)
         bare = jid.split("/", 1)[0]
+        # The peer counts as supporting attention if its caps advertise it or
+        # it has ever sent us an attention request (Psi+ sends without
+        # announcing it in caps).
         peer_supports = bool(
-            plugin_active and self._client
-            and self._client.supports_feature(bare, feature))
+            plugin_active
+            and (bare in getattr(self, "_attention_seen", set())
+                 or (self._client
+                     and self._client.supports_feature(bare, feature))))
         logger.debug("ATTENTION support %s: plugin=%s peer=%s",
                      bare, plugin_active, peer_supports)
         self._chat_window.set_attention_support(

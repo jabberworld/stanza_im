@@ -123,13 +123,15 @@ check("activating the plugin installs a contact-menu hook",
 pushed = []
 w._push_system_event = lambda *a: pushed.append(a)
 w._config.notifications.osd_enabled = False
-A._on_attention(w, "bob@example.com/res")
+A._on_attention(w, "rcpt@example.com/res")
 check("an incoming attention pushes an Events entry", len(pushed) == 1)
 state = getattr(w, A._STATE)
 check("the sender is recorded for throttling",
-      "bob@example.com" in state["last"])
+      "rcpt@example.com" in state["last"])
+check("the sender is unlocked for attention support",
+      "rcpt@example.com" in getattr(w, "_attention_seen", set()))
 pushed.clear()
-A._on_attention(w, "bob@example.com/res")
+A._on_attention(w, "rcpt@example.com/res")
 check("a repeat within the cooldown is throttled", pushed == [])
 
 s = A._settings(w._config)

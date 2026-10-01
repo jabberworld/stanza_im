@@ -179,7 +179,11 @@ events and notes lists) gives Ctrl+wheel font zoom and clears
 the selection on a click over empty space. The Events tab
 (icon `event`) — a search field and a list of system/subscription events; each
 entry carries its time (`_push_system_event` prefixes `HH:MM`,
-`_SubscriptionRequestRow` shows a timestamp label). A smooth tab-icon blink
+`_SubscriptionRequestRow` shows a timestamp label); new events **accumulate**
+(the "events_empty" placeholder is marked with a `UserRole` flag so it — and
+only it — is removed on the first real entry; an earlier check keyed on "a
+single widget-less item" wrongly wiped the first event on the second push).
+A smooth tab-icon blink
 (`_start_event_blink`/`_event_blink_step`, the same cosine fade as the tray)
 stops and clears when the tab is shown. Ctrl+PgUp/PgDn cycles
 the roster tabs only in the `separate` layout with the main window active
@@ -437,10 +441,14 @@ chat bell (right of the call button) send a bodyless `<attention
 xmlns='urn:xmpp:attention:0'/>` (`JabberClient.send_attention`, which delegates
 to slixmpp's `xep_0224.request_attention` → `headline` type, so the request is
 not stored offline, per XEP-0224 §3). The bell is **hidden**
-while the plugin is inactive and shown (but disabled) until the peer advertises
-`urn:xmpp:attention:0` (`supports_feature`, driven by `contact_caps` and
-`MainWindow.apply_attention_support`, which computes both the plugin-active and
-peer-support flags). An incoming `<attention/>` arrives through slixmpp's
+while the plugin is inactive and shown (but disabled) until the peer counts as
+supporting attention — that is, it advertises `urn:xmpp:attention:0` in its
+caps (`supports_feature`, driven by `contact_caps` and
+`MainWindow.apply_attention_support`) **or** it has ever sent us an attention
+request (tracked in `MainWindow._attention_seen`, set by the plugin): Psi+ often
+sends `<attention/>` **without announcing the feature in its caps**, so the
+"proven by receipt" unlock keeps the bell/menu usable for it. `apply_attention_support`
+computes both the plugin-active and peer-support flags. An incoming `<attention/>` arrives through slixmpp's
 `xep_0224` plugin as its own **`attention` event** (`JabberClient.
 _on_attention_event`, subscribed in `_register_handlers`): the core `message`
 event only fires for a stanza with a `<body>`, so a bodyless attention (which

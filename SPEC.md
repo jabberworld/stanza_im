@@ -121,9 +121,10 @@ selected bookmark; Create and Edit open
 `ui/bookmark_dialog.py::BookmarkDialog` (room + free-text server);
 removal always confirms; replaces the
 old menu; Ctrl+wheel font zoom and click-on-empty clears the selection) and
-**Events** (icon `event`; scaffold with
-a search field and an empty list, plus `MainWindow._push_system_event` and a
-smooth tab-icon blink for future system events). In the `separate` layout
+**Events** (icon `event`; a search field and a list of system/subscription
+events fed by `MainWindow._push_system_event`, plus a smooth tab-icon blink;
+new entries accumulate — the `events_empty` placeholder carries a `UserRole`
+marker so only it is removed on the first real event). In the `separate` layout
 Ctrl+PgUp/PgDn cycles the roster tabs while the main window is active; in
 `unified` the chat owns the shortcut.
 Bookmarks are stored with **XEP-0402 PEP Native Bookmarks**
@@ -1982,10 +1983,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - The plugin installs `MainWindow._attention_feature = "urn:xmpp:attention:0"`
   and a contact-menu hook. The 1:1 chat bell (`ChatWidget.set_attention_enabled`,
   right of the call button) is **visible only while the plugin is active** and
-  **enabled only** when the peer advertises the namespace
-  (`JabberClient.supports_feature`, refreshed by `contact_caps` and
-  `MainWindow.apply_attention_support` on tab open); the menu entry («Привлечь
-  внимание», after «Отправить контакт…») is likewise enabled only on support.
+  **enabled** when the peer counts as supporting attention — it advertises the
+  namespace (`JabberClient.supports_feature`, refreshed by `contact_caps` and
+  `MainWindow.apply_attention_support` on tab open) **or** it has ever sent us an
+  attention request (`MainWindow._attention_seen`, filled by the plugin). Psi+
+  often sends `<attention/>` without announcing it in caps, so the "proven by
+  receipt" unlock keeps the bell/menu usable for it. The menu entry («Привлечь
+  внимание», after «Отправить контакт…») is enabled on the same condition.
   `on_client_ready` (called by `MainWindow` after login) binds the plugin to the
   live client, since a plugin enabled before login has no client to subscribe to.
 - Sending: `JabberClient.send_attention(jid)` delegates to slixmpp's
