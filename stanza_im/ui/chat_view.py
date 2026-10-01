@@ -723,6 +723,7 @@ if HAS_WEBENGINE:
             var FORWARD_LABEL = %FORWARD_LABEL%;
             var DELETE_LABEL = %DELETE_LABEL%;
             var MODERATE_LABEL = %MODERATE_LABEL%;
+            var TONOTE_LABEL = %TONOTE_LABEL%;
             var menu = null;
 
             function closeMenu() {
@@ -737,6 +738,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
             window.__stanzaForwardRef = '';
             window.__stanzaToNoteRef = '';
+            window.__stanzaNotesEnabled = window.__stanzaNotesEnabled || false;
             window.__stanzaJumpRef = '';
             window.__stanzaDeleteRef = '';
             window.__stanzaModerateRef = '';

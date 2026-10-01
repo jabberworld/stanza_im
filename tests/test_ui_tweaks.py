@@ -42,6 +42,10 @@ def _css(*parts):
         return fh.read()
 
 
+def _src(*parts):
+    return _css(*parts)
+
+
 # 1. OSD width ---------------------------------------------------------------
 cfg = Config()
 check("osd_width default is 280", cfg.notifications.osd_width == 280)
@@ -133,6 +137,33 @@ zoomed.clear()
 cw._subject_edit.wheelEvent(_wheel(ctrl=False))
 check("a plain wheel over the subject does not zoom", zoomed == [])
 cw.detach()
+
+# 6. Chat message-menu JS: every %LABEL% placeholder is declared and filled --
+# (A missing `var X_LABEL = %X_LABEL%;` aborts openMenu, so the menu vanishes.)
+import re  # noqa: E402
+
+view_src = _src("stanza_im", "ui", "chat_view.py")
+# The JS template body (between the _ACTION_JS """ and its closing """).
+m = re.search(r'_ACTION_JS = """(.*?)"""', view_src, re.S)
+check("the message-menu JS template is found", m is not None)
+js = m.group(1) if m else ""
+placeholders = set(re.findall(r"%([A-Z_]+)%", js))
+declared = set(re.findall(r"var ([A-Z_]+) = %[A-Z_]+%;", js))
+check("every label placeholder is declared as a JS var",
+      placeholders <= declared)
+check("the notes label placeholder is declared", "TONOTE_LABEL" in declared)
+check("the notes-enabled flag is initialised in JS",
+      "window.__stanzaNotesEnabled = window.__stanzaNotesEnabled || false;"
+      in js)
+# _install_action_js must substitute every placeholder the template uses.
+install = re.search(r"def _install_action_js\(self\):(.*?)runJavaScript",
+                    view_src, re.S)
+check("the action-JS installer is found", install is not None)
+substituted = set(re.findall(r'\.replace\("%([A-Z_]+)%"',
+                             install.group(1) if install else ""))
+missing = placeholders - substituted
+check("every label placeholder is substituted when installing (%s)"
+      % (", ".join(sorted(missing)) if missing else "none"), not missing)
 
 print()
 if FAILURES:
