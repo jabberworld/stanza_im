@@ -69,11 +69,17 @@ def activate(app) -> None:
     app.add_contact_menu_hook(menuhook)
     state["hooks"].append(menuhook)
 
-    client = getattr(app, "_client", None)
-    if client is not None:
-        client.on("attention_received", lambda frm: _on_attention(app, frm))
+    on_client_ready(app)
 
-    # Enable the bell on already-open 1:1 tabs.
+
+def on_client_ready(app) -> None:
+    """Bind to the now-existing client (called after login / activation)."""
+    state = _ensure_state(app)
+    client = getattr(app, "_client", None)
+    if client is not None and not state.get("subscribed"):
+        client.on("attention_received", lambda frm: _on_attention(app, frm))
+        state["subscribed"] = True
+    # Show/enable the bell on already-open 1:1 tabs.
     for jid in list(getattr(app, "_chat_window", None).tabs()
                     if getattr(app, "_chat_window", None) else []):
         app.apply_attention_support(jid)
@@ -85,10 +91,10 @@ def deactivate(app) -> None:
         app.remove_contact_menu_hook(hook)
     setattr(app, _STATE, None)
     app._attention_feature = ""
-    chat_window = getattr(app, "_chat_window", None)
-    if chat_window is not None:
-        for jid in list(chat_window.tabs()):
-            chat_window.set_attention_support(jid, False)
+    # Hide the bell on open 1:1 tabs (plugin is no longer active).
+    for jid in list(getattr(app, "_chat_window", None).tabs()
+                    if getattr(app, "_chat_window", None) else []):
+        app.apply_attention_support(jid)
 
 
 # ── Menu entry ────────────────────────────────────────────────────

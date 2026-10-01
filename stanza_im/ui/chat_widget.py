@@ -690,16 +690,16 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_btn.setEnabled(False)
         actions_row.addWidget(self._call_btn)
 
-        # XEP-0224 attention bell — 1:1 only, enabled once the peer advertises
-        # support (set_attention_support).
+        # XEP-0224 attention bell — 1:1 only, shown while the attention plugin
+        # is active and enabled once the peer advertises support.
         self._attention_btn = QtWidgets.QToolButton(self)
         self._attention_btn.setIcon(self._chat_icon("attention.svg"))
-        self._attention_btn.setToolTip(tr("ctx_attention"))
+        self._attention_btn.setToolTip(tr("attention_menu"))
         self._attention_btn.setAutoRaise(True)
         self._attention_btn.clicked.connect(
             lambda: self.attention_ping_requested.emit(self.jid))
         self._attention_btn.setEnabled(False)
-        self._attention_btn.setVisible(not self.is_muc)
+        self._attention_btn.setVisible(False)
         actions_row.addWidget(self._attention_btn)
         actions_row.addStretch(1)
         chat_col.addLayout(actions_row)
@@ -2350,11 +2350,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_audio_action.setEnabled(bool(enabled))
         self._call_video_action.setEnabled(bool(enabled))
 
-    def set_attention_support(self, enabled: bool) -> None:
-        """Enable the XEP-0224 attention bell when the peer supports it."""
-        if self.is_muc:
-            return
-        self._attention_btn.setEnabled(bool(enabled))
+    def set_attention_enabled(self, plugin_active: bool,
+                              peer_supports: bool) -> None:
+        """Show the XEP-0224 bell while the plugin is active and gate it on
+        the peer advertising ``urn:xmpp:attention:0``."""
+        visible = bool(plugin_active) and not self.is_muc
+        self._attention_btn.setVisible(visible)
+        self._attention_btn.setEnabled(visible and bool(peer_supports))
 
     def set_muc_admin(self, can_manage: bool) -> None:
         """Enable the room-management button (owner/admin only)."""

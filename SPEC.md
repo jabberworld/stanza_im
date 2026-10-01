@@ -1980,15 +1980,20 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 ### 14.8.3 Attention (XEP-0224, `stanza_im/plugins/attention/`)
 
 - The plugin installs `MainWindow._attention_feature = "urn:xmpp:attention:0"`
-  and a contact-menu hook; the menu entry «Привлечь внимание» (after «Отправить
-  контакт…») and the 1:1 chat bell (`ChatWidget.set_attention_support`, right of
-  the call button) are enabled only when the peer advertises the namespace
+  and a contact-menu hook. The 1:1 chat bell (`ChatWidget.set_attention_enabled`,
+  right of the call button) is **visible only while the plugin is active** and
+  **enabled only** when the peer advertises the namespace
   (`JabberClient.supports_feature`, refreshed by `contact_caps` and
-  `MainWindow.apply_attention_support` on tab open).
+  `MainWindow.apply_attention_support` on tab open); the menu entry («Привлечь
+  внимание», after «Отправить контакт…») is likewise enabled only on support.
+  `on_client_ready` (called by `MainWindow` after login) binds the plugin to the
+  live client, since a plugin enabled before login has no client to subscribe to.
 - Sending: `JabberClient.send_attention(jid)` builds a bodyless `<message
-  type='chat'><attention xmlns='urn:xmpp:attention:0'/></message>`. Receiving:
-  `_on_message`/`_on_carbon_received` detect `<attention/>` (never rendered as a
-  chat message) and emit `attention_received(from)`.
+  type='headline'><attention xmlns='urn:xmpp:attention:0'/></message>` (headline
+  per XEP-0224 §3, so it is not stored offline). Receiving: `_on_message`
+  detects `<attention/>` **before** the `type` dispatch (so a `headline`
+  attention is not mistaken for PEP/MDS) and `_on_carbon_received` does too;
+  both emit `attention_received(from)` and never render a chat message.
 - The plugin answers the event with `resources/sounds/effects/door_bell.wav`
   (`SoundPlayer.play_file`), an OSD («Пользователь {name} пытается привлечь ваше
   внимание») and an Events entry, gated by `[plugin_settings.attention]`:

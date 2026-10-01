@@ -156,14 +156,19 @@ check("dnd still notifies when allowed", len(pushed) == 1)
 cw = w._chat_window.open_chat("bob@example.com", "Bob")
 check("the 1:1 tab has a bell button",
       getattr(cw, "_attention_btn", None) is not None)
-check("the bell starts disabled without caps",
-      not cw._attention_btn.isEnabled())
+check("the bell tooltip is the plugin's translated label",
+      cw._attention_btn.toolTip() == "Get attention")
+check("the bell is hidden without peer caps",
+      cw._attention_btn.isHidden())
 muc = w._chat_window.open_groupchat("room@conf.example", "me", "Room")
 check("a MUC tab hides the bell",
-      not muc._attention_btn.isVisible())
+      muc._attention_btn.isHidden())
 
 
 class _CapsClient:
+    def __getattr__(self, _name):
+        return lambda *a, **k: None
+
     def supports_feature(self, bare, feature):
         return True
 
@@ -181,10 +186,48 @@ class _CapsClient:
 caps = _CapsClient()
 w._client = caps
 w.apply_attention_support("bob@example.com")
-check("the bell enables once the peer advertises support",
-      cw._attention_btn.isEnabled())
+check("the bell becomes visible and enabled on peer support",
+      not cw._attention_btn.isHidden() and cw._attention_btn.isEnabled())
 cw._attention_btn.click()
 check("clicking the bell sends an attention", caps.sent == "bob@example.com")
+
+# Deactivating the plugin hides the bell again.
+A.deactivate(w)
+check("deactivating the plugin hides the bell",
+      cw._attention_btn.isHidden())
+A.activate(w)
+w.apply_attention_support("bob@example.com")
+check("reactivating the plugin shows the bell again",
+      not cw._attention_btn.isHidden())
+
+# 6b. A headline attention (Psi+) reaches the client event -------------------
+from stanza_im.core.client import JabberClient as _JC  # noqa: E402
+
+
+class _EventClient(_JC):
+    def __init__(self):
+        self.events = []
+
+    def emit(self, name, *a, **k):
+        self.events.append((name, a))
+
+    def _maybe_mds_event(self, *a):
+        self.events.append(("mds", ()))
+
+    def _maybe_pep_event(self, *a):
+        self.events.append(("pep", ()))
+
+
+ec = _EventClient()
+_headline = slixmpp.Message(xml=ET.fromstring(
+    "<message xmlns='jabber:client' type='headline' "
+    "from='rain@jabberworld.info/walkbook' to='me'>"
+    f"<attention xmlns='{NS_ATTENTION}'/></message>"))
+ec._on_message(_headline)
+check("a headline attention emits attention_received",
+      ("attention_received", ("rain@jabberworld.info",)) in ec.events)
+check("a headline attention is not treated as PEP/MDS",
+      all(name != "pep" and name != "mds" for name, _ in ec.events))
 
 
 class _FakeMenu:

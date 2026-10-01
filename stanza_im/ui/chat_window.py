@@ -464,11 +464,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         if widget is not None and widget.is_muc:
             widget.set_muji_support(enabled)
 
-    def set_attention_support(self, jid: str, enabled: bool) -> None:
-        """Enable/disable the XEP-0224 attention bell of a 1:1 tab."""
+    def set_attention_support(self, jid: str, plugin_active: bool,
+                              peer_supports: bool) -> None:
+        """Show/enable the XEP-0224 bell of a 1:1 tab (plugin + peer caps)."""
         widget = self._tabs.get(jid)
         if widget is not None and not widget.is_muc:
-            widget.set_attention_support(enabled)
+            widget.set_attention_enabled(plugin_active, peer_supports)
 
     def set_muc_admin(self, room: str, can_manage: bool) -> None:
         """Enable/disable the room-management button of a MUC tab."""

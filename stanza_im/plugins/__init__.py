@@ -12,6 +12,7 @@ optional lifecycle hooks::
 
     def activate(app): ...           # called when enabled
     def deactivate(app): ...         # called when disabled
+    def on_client_ready(app): ...    # called once the XMPP client exists
 
     PLUGIN_HAS_SETTINGS = True       # optional: announce a settings dialog
     def open_settings(config, parent=None): ...  # opens the plugin's own dialog
@@ -57,6 +58,12 @@ class Plugin:
 
     def deactivate(self, app) -> None:
         hook = getattr(self.module, "deactivate", None)
+        if callable(hook):
+            hook(app)
+
+    def client_ready(self, app) -> None:
+        """Called once the XMPP client exists (event subscriptions etc.)."""
+        hook = getattr(self.module, "on_client_ready", None)
         if callable(hook):
             hook(app)
 

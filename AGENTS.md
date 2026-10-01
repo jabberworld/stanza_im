@@ -387,6 +387,11 @@ active dictionary (so the shared `tr()` finds them), the core dictionary wins on
 a collision. The category is declared by the plugin, so the manager groups
 plugins by the `PLUGIN_CATEGORY` key — several plugins with the same category
 share one branch.
+A plugin may also define `on_client_ready(app)`: `MainWindow.
+_notify_plugins_client_ready` (called at the end of `_on_login`, after the
+client exists and its events are wired) runs it for every active plugin — a
+plugin enabled before login (when `app._client` is still `None`) can then
+subscribe to client events and re-apply its UI state.
 A plugin that offers settings sets `PLUGIN_HAS_SETTINGS = True` and defines
 `open_settings(config, parent)` (opening its own dialog); its settings are
 persisted in the shared config under `[plugin_settings.<id>]`
@@ -429,10 +434,14 @@ The bundled **Attention** plugin (`stanza_im/plugins/attention/`, category
 «Общение», icon `attention.svg` — a yellow bell) implements XEP-0224: its
 contact-menu entry «Привлечь внимание» (after «Отправить контакт…») and the 1:1
 chat bell (right of the call button) send a bodyless `<attention
-xmlns='urn:xmpp:attention:0'/>` (`JabberClient.send_attention`) and stay disabled
-until the peer advertises `urn:xmpp:attention:0` (`supports_feature`, driven by
-`contact_caps`). An incoming `<attention/>` is routed by `_on_message`/
-`_on_carbon_received` (never rendered as a chat message) to the
+xmlns='urn:xmpp:attention:0'/>` (`JabberClient.send_attention`, `headline` type
+so the request is not stored offline, per XEP-0224 §3). The bell is **hidden**
+while the plugin is inactive and shown (but disabled) until the peer advertises
+`urn:xmpp:attention:0` (`supports_feature`, driven by `contact_caps` and
+`MainWindow.apply_attention_support`, which computes both the plugin-active and
+peer-support flags). An incoming `<attention/>` — including a `headline` one, so
+it is detected in `_on_message` **before** the type dispatch — is routed (never
+rendered as a chat message) to the
 `attention_received` event → the plugin plays `resources/sounds/effects/door_bell.wav`,
 shows an OSD («Пользователь … пытается привлечь ваше внимание») and pushes an
 Events entry. Its `[plugin_settings.attention]` holds `cooldown` (1–99 s,

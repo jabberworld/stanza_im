@@ -1814,12 +1814,16 @@ class JabberClient:
         return message_id
 
     def send_attention(self, jid: str) -> bool:
-        """Send a XEP-0224 attention request (a bodyless ``<attention/>``)."""
+        """Send a XEP-0224 attention request (a bodyless ``<attention/>``).
+
+        Uses the ``headline`` type as the XEP recommends, so the request is not
+        stored as an offline message (Psi+ does the same).
+        """
         if not isinstance(jid, str) or not jid.strip():
             return False
         msg = self.xmpp.Message()
         msg["to"] = jid.strip()
-        msg["type"] = "chat"
+        msg["type"] = "headline"
         ET.SubElement(msg.xml, "{%s}attention" % NS_ATTENTION)
         logger.debug("ATTENTION request to %s", jid)
         msg.send()
@@ -4844,6 +4848,13 @@ class JabberClient:
         return None
 
     def _on_message(self, msg) -> None:
+        attention_from = self._attention_request(msg)
+        if attention_from:
+            # XEP-0224 §3: attention requests SHOULD use the ``headline`` type
+            # to avoid offline storage, so this must run before the type
+            # dispatch (a headline would otherwise be treated as PEP/MDS).
+            self.emit("attention_received", attention_from.split("/")[0])
+            return
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
@@ -4857,12 +4868,6 @@ class JabberClient:
             return
         if _is_roster_exchange(msg):
             # A XEP-0144 roster exchange is surfaced by its own handler.
-            return
-        attention_from = self._attention_request(msg)
-        if attention_from:
-            # XEP-0224: a bare attention request (possibly with a fallback
-            # body) is surfaced as an event, never as a chat message.
-            self.emit("attention_received", attention_from.split("/")[0])
             return
         if msg["type"] in ("chat", "normal"):
             body = str(msg["body"])

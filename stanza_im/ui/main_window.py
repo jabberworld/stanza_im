@@ -2648,6 +2648,20 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("mam_unavailable", self._on_mam_unavailable)
         c.on("mam_parse_error", self._on_mam_parse_error)
         # roster removals are delivered via roster_item_removed (from client)
+        # Plugins enabled before login could not subscribe yet (no client at
+        # activation time) — let them wire up now.
+        self._notify_plugins_client_ready()
+
+    def _notify_plugins_client_ready(self) -> None:
+        """Give active plugins a chance to bind to the live client."""
+        from stanza_im.plugins import discover
+        for plugin in discover():
+            if plugin.id in self._applied_plugins:
+                try:
+                    plugin.client_ready(self)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Plugin %s client_ready failed", plugin.id,
+                                   exc_info=True)
 
     def _on_session_started(self):
         logger.info("Session started, roster arriving...")
@@ -3096,19 +3110,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_attention_support(bare)
 
     def apply_attention_support(self, jid: str) -> None:
-        """Enable the XEP-0224 attention bell when the peer advertises it.
+        """Sync the XEP-0224 bell of a 1:1 tab.
 
-        The feature namespace is provided by the attention plugin
-        (``self._attention_feature``); without it the bell stays disabled.
+        The bell is *visible* only while the attention plugin is active
+        (``self._attention_feature`` set) and *enabled* only when the peer
+        advertises that namespace.
         """
-        if not self._client:
-            return
         feature = getattr(self, "_attention_feature", "")
-        if not feature:
-            return
+        plugin_active = bool(feature)
         bare = jid.split("/", 1)[0]
-        enabled = self._client.supports_feature(bare, feature)
-        self._chat_window.set_attention_support(bare, enabled)
+        peer_supports = bool(
+            plugin_active and self._client
+            and self._client.supports_feature(bare, feature))
+        self._chat_window.set_attention_support(
+            bare, plugin_active, peer_supports)
 
     def _on_call_incoming(self, sid: str, peer: str, kind: str) -> None:
         if not self._client:
