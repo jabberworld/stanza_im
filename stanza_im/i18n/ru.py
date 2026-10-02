@@ -810,6 +810,8 @@ STRINGS = {
     "prefs_privacy_lists": "Списки приватности",
     "prefs_blocked_contacts": "Заблокированные контакты",
     "login_reconnecting": "Переподключение…",
+    "login_reconnect_attempt": "Переподключение (попытка {attempt})…",
+    "reconnect_now": "Переподключиться",
     "login_reconnected": "Соединение восстановлено.",
     "login_disconnected": "Соединение с сервером потеряно",
     "prefs_auto_join_conferences": "Автоматически подключаться к конференциям при запуске",

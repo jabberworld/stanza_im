@@ -1848,7 +1848,8 @@ text is kept. Returning activity (`eventFilter`) resumes
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
 
-- **Graceful shutdown**: `JabberClient.disconnect()` disables `auto_reconnect`,
+- **Graceful shutdown**: `JabberClient.disconnect()` disables reconnect
+  (`_reconnect_enabled = False`, `_shutting_down = True`, `_cancel_reconnect()`),
   sends `<presence type='unavailable'/>` and **awaits**
   `xmpp.disconnect(wait=1.0)` (slixmpp's `XMLStream.disconnect` returns a future
   that drains the send queue and closes the stream). `MainWindow._shutdown_async`
@@ -1859,9 +1860,20 @@ text is kept. Returning activity (`eventFilter`) resumes
 - `connection.stream_management` (default on) registers `xep_0198`: slixmpp
   enables SM after bind and resumes a dropped stream (`session_resumed`)
   without re-auth/roster/presence, replaying unacked stanzas.
-  `JabberClient.resume_expected()` drives the UI: while resume is possible
-  MainWindow shows "Переподключение…" and then "Соединение восстановлено";
-  "Disconnected" appears only on `sm_failed`/`sm_disabled`.
+  `JabberClient.resume_expected()` (true only while `xep_0198.sm_id` is set —
+  slixmpp has **no** `auto_reconnect` option) drives the UI: while resume is
+  possible MainWindow shows "Переподключение…". If the stream is not resumed
+  within a short window (`_RESUME_WINDOW_S` = 10 s) or the server refuses
+  (`sm_failed`), the client runs its **own reconnect loop**
+  (`_reconnect_loop`): `connect_async` retried with a 1/2/5/15/30 s backoff
+  (capped, **no attempt limit**) until connected, emitting
+  `reconnecting(attempt, delay)` / `reconnect_failed(attempt)` / `reconnected`;
+  a successful session re-runs the normal `_on_session_start`
+  (roster/presence/PEP/autojoin). A `session_resumed` cancels any scheduled
+  attempt. `disconnect()`/logout stops the loop; `manual_reconnect()` resets the
+  backoff for the status-bar "Reconnect" button. Messages sent while offline are
+  not hard-blocked (a future offline outbox will flush them on reconnect,
+  `_offline_outbox` is the placeholder).
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow derives activity from

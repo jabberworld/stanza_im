@@ -1928,8 +1928,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 
 ### 14.7 Stream Management & Client State (XEP-0198/0352)
 
-- **Graceful shutdown**: `JabberClient.disconnect()` disables
-  `auto_reconnect`, sends `<presence type='unavailable'/>` and awaits
+- **Graceful shutdown**: `JabberClient.disconnect()` disables reconnect
+  (`_reconnect_enabled = False`, `_shutting_down = True`, `_cancel_reconnect()`),
+  sends `<presence type='unavailable'/>` and awaits
   `xmpp.disconnect(wait=1.0)` (slixmpp's future drains the send queue and closes
   the stream); `MainWindow._shutdown_async` waits for it before cancelling tasks
   and quitting, so the server ends the session immediately instead of holding it
@@ -1937,8 +1938,14 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - `connection.stream_management` (default on) registers `xep_0198`: SM is
   enabled after bind and a dropped stream is resumed (`session_resumed`)
   without re-auth/roster/presence; unacked stanzas are replayed by `h` counter.
-  `resume_expected()` drives MainWindow's "Переподключение…" /
-  "Соединение восстановлено"; "Disconnected" only on `sm_failed`/`sm_disabled`.
+  `resume_expected()` (true only while `xep_0198.sm_id` is set) drives
+  MainWindow's "Переподключение…". If the stream is not resumed within 10 s
+  (`_RESUME_WINDOW_S`) or the server refuses (`sm_failed`), the client runs its
+  own reconnect loop: `connect_async` retried with a 1/2/5/15/30 s backoff
+  (capped, no attempt limit) until connected, emitting
+  `reconnecting`/`reconnect_failed`/`reconnected`; a resume cancels it and
+  `disconnect()`/logout stops it. `manual_reconnect()` backs the status-bar
+  "Reconnect" button.
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow recomputes activity from `QApplication.applicationState()` via an

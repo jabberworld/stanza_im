@@ -943,8 +943,16 @@ class JabberClient:
 
         self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
         self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")
-        self.xmpp.auto_reconnect = True
-        self.xmpp.reconnect_max_retries = 5
+        # Our own reconnect state (slixmpp has no ``auto_reconnect`` option).
+        self._reconnect_enabled = True
+        self._shutting_down = False
+        self._reconnect_task: asyncio.Task | None = None
+        self._reconnect_handle = None          # resumable QTimer-like handle
+        self._reconnect_attempt = 0
+        self._resume_deadline = 0.0            # monotonic; SM resume window
+        # Messages queued while offline (sent on reconnect) — future feature;
+        # currently a stub list so callers can rely on the hook being present.
+        self._offline_outbox: list = []
 
         flags = tls_flags(tls_mode, starttls_mode)
         self.xmpp.enable_direct_tls = flags["enable_direct_tls"]
@@ -1526,16 +1534,16 @@ class JabberClient:
                 tzo = tzo_el.text.strip()
         return {"utc": utc, "tzo": tzo}
 
-    def _start_task(self, coro) -> None:
-        """Schedule *coro* on the current event loop (best-effort)."""
+    def _start_task(self, coro):
+        """Schedule *coro* on the current event loop; returns the task."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             try:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
-                return
-        loop.create_task(coro)
+                return None
+        return loop.create_task(coro)
 
     def on(self, event: str, callback: Callable) -> None:
         """Register a callback for an internal event name."""
@@ -1830,14 +1838,16 @@ class JabberClient:
 
     async def disconnect(self) -> None:
         """Gracefully disconnect: go offline and close the stream."""
+        # Stop any reconnect attempts (an explicit logout must not reconnect).
+        self._reconnect_enabled = False
+        self._shutting_down = True
+        self._cancel_reconnect()
         try:
             self.file_transfer.close()
         except Exception:
             logger.debug("Closing file transfers failed", exc_info=True)
         if not self.xmpp.is_connected():
             return
-        # Do not let the reconnect logic turn the shutdown into a resume.
-        self.xmpp.auto_reconnect = False
         try:
             self.send_presence("offline")
         except Exception:
@@ -5698,14 +5708,105 @@ class JabberClient:
         self._stop_muc_self_ping()
         self._pep_subscribed.clear()
         self.emit("disconnected")
+        self._maybe_schedule_reconnect()
+
+    # ── Reconnect (XEP-0198 window, then our own backoff loop) ────────
+
+    _RESUME_WINDOW_S = 10.0
+    _RECONNECT_BACKOFF = (1.0, 2.0, 5.0, 15.0, 30.0)
 
     def resume_expected(self) -> bool:
         """Whether a dropped connection is likely to be resumed (XEP-0198)."""
         if not self.stream_management or "xep_0198" not in self.xmpp.plugin:
             return False
         plugin = self.xmpp.plugin["xep_0198"]
-        return bool(getattr(plugin, "sm_id", None)) \
-            and bool(getattr(self.xmpp, "auto_reconnect", False))
+        return bool(getattr(plugin, "sm_id", None))
+
+    def _maybe_schedule_reconnect(self) -> None:
+        """Wait briefly for an SM resume, then start our reconnect loop."""
+        if not self._reconnect_enabled or self._shutting_down:
+            return
+        if self._reconnect_handle is not None:
+            return
+        if self.resume_expected():
+            # Give the server a short window to resume the stream; if the
+            # ``session_resumed`` event arrives it cancels the reconnect.
+            try:
+                loop = asyncio.get_event_loop()
+                self._reconnect_handle = loop.call_later(
+                    self._RESUME_WINDOW_S, self._start_reconnect_loop)
+            except RuntimeError:
+                self._start_reconnect_loop()
+        else:
+            self._start_reconnect_loop()
+
+    async def manual_reconnect(self) -> None:
+        """User-requested reconnect: reset the backoff and try once."""
+        self._reconnect_enabled = True
+        self._shutting_down = False
+        self._cancel_reconnect()
+        self.emit("reconnecting", 1, 0.0)
+        try:
+            await self.connect_async()
+        except Exception as exc:
+            logger.info("Manual reconnect failed: %r", exc)
+            self.emit("reconnect_failed", 1)
+            self._maybe_schedule_reconnect()
+            return
+        if self.xmpp.is_connected():
+            self.emit("reconnected")
+
+    def _cancel_reconnect(self) -> None:
+        if self._reconnect_handle is not None:
+            try:
+                self._reconnect_handle.cancel()
+            except Exception:
+                pass
+            self._reconnect_handle = None
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+        self._reconnect_task = None
+        self._reconnect_attempt = 0
+
+    def _start_reconnect_loop(self) -> None:
+        self._reconnect_handle = None
+        if not self._reconnect_enabled or self._shutting_down:
+            return
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return
+        self._reconnect_task = self._start_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Retry ``connect_async`` with exponential backoff (no attempt cap)."""
+        while self._reconnect_enabled and not self._shutting_down:
+            if self.xmpp.is_connected():
+                return
+            delay = self._RECONNECT_BACKOFF[
+                min(self._reconnect_attempt, len(self._RECONNECT_BACKOFF) - 1)]
+            self._reconnect_attempt += 1
+            logger.info("Reconnect attempt %d in %.0fs", self._reconnect_attempt,
+                        delay)
+            self.emit("reconnecting", self._reconnect_attempt, delay)
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            if not self._reconnect_enabled or self._shutting_down:
+                return
+            try:
+                await self.connect_async()
+            except Exception as exc:
+                logger.info("Reconnect attempt %d failed: %r",
+                            self._reconnect_attempt, exc)
+                self.emit("reconnect_failed", self._reconnect_attempt)
+                continue
+            # ``connect_async`` resolves once the transport is up; the full
+            # session (roster/presence/PEP/autojoin) re-runs in
+            # ``_on_session_start``.
+            if self.xmpp.is_connected():
+                self._reconnect_attempt = 0
+                self.emit("reconnected")
+                return
 
     def _on_sm_enabled(self, _event=None) -> None:
         logger.info("Stream management enabled")
@@ -5715,6 +5816,7 @@ class JabberClient:
     def _on_session_resumed(self, _event=None) -> None:
         logger.info("Stream resumed (XEP-0198)")
         self._sm_resumed = True
+        self._cancel_reconnect()
         self._sync_csi()
         for bare in self.contacts:
             self._ensure_pep_subscription(bare)
@@ -5726,6 +5828,8 @@ class JabberClient:
         logger.warning("Stream management resumption failed")
         self._sm_resumed = False
         self.emit("sm_failed")
+        # The server refused to resume — start the reconnect loop now.
+        self._start_reconnect_loop()
 
     def _on_sm_disabled(self, _event=None) -> None:
         self._sm_resumed = False

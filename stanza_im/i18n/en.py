@@ -810,6 +810,8 @@ STRINGS = {
     "prefs_privacy_lists": "Privacy lists",
     "prefs_blocked_contacts": "Blocked contacts",
     "login_reconnecting": "Reconnecting…",
+    "login_reconnect_attempt": "Reconnecting (attempt {attempt})…",
+    "reconnect_now": "Reconnect",
     "login_reconnected": "Connection restored.",
     "login_disconnected": "Disconnected from server",
     "prefs_auto_join_conferences": "Automatically join conferences on startup",

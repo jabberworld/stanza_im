@@ -510,6 +510,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._build_menu()
 
+        # Status bar (problem states only) + a "Reconnect" button shown offline.
+        self._status_bar = QtWidgets.QStatusBar()
+        self._status_label = QtWidgets.QLabel("")
+        self._status_bar.addWidget(self._status_label, 1)
+        self._reconnect_btn = QtWidgets.QPushButton(tr("reconnect_now"))
+        self._reconnect_btn.setVisible(False)
+        self._reconnect_btn.clicked.connect(self._on_reconnect_clicked)
+        self._status_bar.addPermanentWidget(self._reconnect_btn)
+        self._status_bar.setVisible(False)
+        self.setStatusBar(self._status_bar)
+
         self._stack = QtWidgets.QStackedWidget()
         main_layout.addWidget(self._stack)
 
@@ -2781,6 +2792,9 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("disconnected", self._on_disconnected)
         c.on("tls_required", self._on_tls_required)
         c.on("stream_resumed", self._on_stream_resumed)
+        c.on("reconnecting", self._on_reconnecting)
+        c.on("reconnected", self._on_reconnected)
+        c.on("reconnect_failed", self._on_reconnect_failed)
         c.on("sm_failed", self._on_sm_failed)
         c.on("sm_disabled", self._on_sm_disabled)
         c.on("csi_enabled", self._on_csi_enabled)
@@ -2874,15 +2888,52 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tray.stop_blinking()
         if self._client is not None and self._client.resume_expected():
             self._resume_pending = True
-            self._tray.show_message(APP_NAME, tr("login_reconnecting"))
+            self._set_busy_status(tr("login_reconnecting"))
         else:
             self._resume_pending = False
-            self._tray.show_message(APP_NAME, tr("login_disconnected"))
+            self._set_offline_status(tr("login_disconnected"))
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
+
+    def _on_reconnecting(self, attempt: int, delay: float):
+        self._set_busy_status(
+            tr("login_reconnect_attempt", attempt=attempt))
+        self._reconnect_btn.setVisible(True)
+        if self._visible:
+            self._tray.show_message(APP_NAME, tr("login_reconnecting"))
+
+    def _on_reconnect_failed(self, attempt: int):
+        self._set_offline_status(tr("login_disconnected"))
+        self._reconnect_btn.setVisible(True)
+
+    def _on_reconnected(self):
+        self._clear_status()
+        self._tray.set_icon(
+            QtGui.QIcon(self._icons.get_status_icon(self._config.last_status)))
+        if self._visible:
+            self._tray.show_message(APP_NAME, tr("login_reconnected"))
+
+    def _on_reconnect_clicked(self):
+        if self._client is not None and self._reconnect_btn.isVisible():
+            self._start_task(self._client.manual_reconnect())
+
+    def _set_busy_status(self, text: str) -> None:
+        self._status_label.setText(text)
+        self._status_bar.setVisible(True)
+
+    def _set_offline_status(self, text: str) -> None:
+        self._status_label.setText(text)
+        self._reconnect_btn.setVisible(True)
+        self._status_bar.setVisible(True)
+
+    def _clear_status(self) -> None:
+        self._status_label.setText("")
+        self._reconnect_btn.setVisible(False)
+        self._status_bar.setVisible(False)
 
     def _on_stream_resumed(self):
         logger.info("Connection restored (stream resumed)")
         self._resume_pending = False
+        self._clear_status()
         self._set_tray_status_icon(self._config.last_status)
         if self._visible:
             self._tray.show_message(APP_NAME, tr("login_reconnected"))
@@ -2893,7 +2944,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_sm_failed(self):
         self._resume_pending = False
         self._tray.stop_blinking()
-        self._tray.show_message(APP_NAME, tr("login_disconnected"))
+        self._set_offline_status(tr("login_disconnected"))
         self._set_info_actions_enabled(False)
 
     def _on_sm_disabled(self):
@@ -6417,6 +6468,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Unread counters remain on disk; clear only the live totals/blink.
         self._unread_total = 0
         self._unread_jids = set()
+        self._clear_status()
         self._tray.stop_blinking()
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
         self._tray.set_current_status("offline")
