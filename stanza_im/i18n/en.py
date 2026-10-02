@@ -124,6 +124,8 @@ STRINGS = {
     "chat_activity_inactive": "inactive",
     "chat_activity_gone": "user closed the chat",
     "chat_send": "Send",
+    "chat_jump_mention": "Jump to mention",
+    "chat_jump_mention_count": "Jump to mention ({count})",
     "chat_clear": "Clear chat",
     "chat_history": "History",
     "chat_vcard": "vCard",

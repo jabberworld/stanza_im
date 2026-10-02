@@ -756,6 +756,16 @@ QWebChannel `bridge.on_jump_clicked` only as an optional fast path (the poll is
 the fallback when the transport is unavailable).
 [`tests/test_jump_button.py`]
 
+**Unread mentions & the `@` button**: an unread conference message naming our
+nick is also handed to the tab (`MainWindow._note_unread_mention` →
+`ChatWidget.note_unread_mention`, keyed by the reply target id), which shows an
+`@` button in the input toolbar (tooltip `chat_jump_mention` /
+`chat_jump_mention_count`). Each click jumps to the oldest mention not yet
+looked at (`_jump_to_next_mention`: `scroll_to_message` when it is rendered,
+else `_jump_to_message` paging the local archive) and drops it from the list;
+`_reset_unread` (focus or reaching the bottom) calls `mark_mentions_read`, which
+clears the rest and hides the button.
+
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
 enabled via `ChatView.mention_senders`); clicking it inserts `nick: ` into the

@@ -467,6 +467,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._jump_pending = ""
         self._jump_pages = 0
         self._restore_anchor: dict = {}
+        self._mention_refs: list[str] = []
         self._build_ui(theme)
 
     # ── UI construction ───────────────────────────────────────────
@@ -642,6 +643,15 @@ class ChatWidget(QtWidgets.QWidget):
         self._history_btn.clicked.connect(
             lambda: self.history_requested.emit(self.jid))
         actions_row.addWidget(self._history_btn)
+
+        # Conference only: jumps to the next message that named our nickname.
+        self._mention_btn = QtWidgets.QToolButton(self)
+        self._mention_btn.setText("@")
+        self._mention_btn.setAutoRaise(True)
+        self._mention_btn.setToolTip(tr("chat_jump_mention"))
+        self._mention_btn.clicked.connect(self._jump_to_next_mention)
+        self._mention_btn.setVisible(False)
+        actions_row.addWidget(self._mention_btn)
 
         vcard_btn = QtWidgets.QToolButton(self)
         vcard_btn.setIcon(self._chat_icon("v-card.png"))
@@ -1880,6 +1890,49 @@ class ChatWidget(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
+
+    def note_unread_mention(self, ref_id: str) -> None:
+        """Remember a message that named us, so ``@`` can jump to it.
+
+        Called by the owner for every unread mention; the button walks the
+        list, and :meth:`mark_mentions_read` clears it once the conversation
+        has actually been read.
+        """
+        if not ref_id:
+            return
+        if ref_id not in self._mention_refs:
+            self._mention_refs.append(ref_id)
+        self._update_mention_button()
+
+    def mark_mentions_read(self) -> None:
+        """The conversation was marked read — forget the pending mentions."""
+        if self._mention_refs:
+            self._mention_refs = []
+            self._update_mention_button()
+
+    def unread_mention_count(self) -> int:
+        return len(self._mention_refs)
+
+    def _update_mention_button(self) -> None:
+        count = len(self._mention_refs)
+        self._mention_btn.setVisible(count > 0)
+        if count:
+            self._mention_btn.setToolTip(tr("chat_jump_mention_count",
+                                            count=count))
+
+    def _jump_to_next_mention(self) -> None:
+        """Scroll to the earliest mention we have not looked at yet."""
+        if not self._mention_refs:
+            self._update_mention_button()
+            return
+        ref = self._mention_refs.pop(0)
+        self._update_mention_button()
+        entry = self._find_message(ref)
+        if entry is not None:
+            self._view.scroll_to_message(self._reply_target_id(entry))
+        else:
+            # Outside the rendered window: walk the local archive towards it.
+            self._jump_to_message(ref)
 
     def set_restore_anchor(self, anchor: dict) -> None:
         """Show the conversation from *anchor* instead of its very beginning.

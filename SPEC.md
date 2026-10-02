@@ -1453,6 +1453,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
   `origin-id` → own message id — plus its raw timestamp), so an unread
   conversation can be restored from the point the user stopped reading.
+- In a conference an unread message naming our nickname also arms an `@`
+  button in the input toolbar: each click jumps to the next unread mention
+  (paging the local archive when it is outside the rendered window) and
+  marking the conversation read disarms it.
 - A conversation is marked read when the user reaches the newest message in
   the view they are looking at (`ChatView.bottom_reached` →
   `MainWindow._on_chat_reached_bottom`); a background tab scrolling to its end

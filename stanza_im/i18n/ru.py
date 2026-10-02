@@ -124,6 +124,8 @@ STRINGS = {
     "chat_activity_inactive": "неактивен",
     "chat_activity_gone": "пользователь закрыл чат",
     "chat_send": "Отправить",
+    "chat_jump_mention": "К упоминанию",
+    "chat_jump_mention_count": "К упоминанию ({count})",
     "chat_clear": "Очистить чат",
     "chat_history": "История",
     "chat_vcard": "vCard",

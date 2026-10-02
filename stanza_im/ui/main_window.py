@@ -4637,6 +4637,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_unread_badge(jid)
         self._schedule_unread_save()
         self._sync_tray_blink()
+        chat = (self._chat_window.get_chat(jid)
+                if self._chat_window is not None else None)
+        if chat is not None:
+            chat.mark_mentions_read()
+
+    def _note_unread_mention(self, jid: str, ref_id: str) -> None:
+        """Hand an unread mention to the tab so its ``@`` button can jump."""
+        chat = (self._chat_window.get_chat(jid)
+                if self._chat_window is not None else None)
+        if chat is not None:
+            chat.note_unread_mention(ref_id)
 
     def _schedule_unread_save(self) -> None:
         """Coalesce unread-counter writes to disk."""
@@ -4936,6 +4947,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not active and nick != self_nick:
             self._bump_unread(room, mention=is_mention)
             self._refresh_unread_badge(room)
+            if is_mention:
+                self._note_unread_mention(room, reply_ref_id or archive_id)
         if (self._client and active):
             self._client.mds_mark_displayed(room)
         self._remember_contact(room, name=self._muc_display_name(room),

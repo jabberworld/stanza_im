@@ -43,6 +43,7 @@ class _Chat:
         self.jid = jid
         self.is_muc = False
         self.rendered = []
+        self.mentions = []
 
     def add_message(self, **kwargs):
         self.rendered.append(kwargs)
@@ -64,6 +65,12 @@ class _Chat:
 
     def read_anchor(self):
         return {}
+
+    def note_unread_mention(self, ref_id):
+        self.mentions.append(ref_id)
+
+    def mark_mentions_read(self):
+        self.mentions = []
 
     @property
     def _history(self):
@@ -239,6 +246,24 @@ check("the stored anchor is kept for an unread chat",
       win._restore_anchor_for("bob@example.com")
       == {"ref": "arc-9", "ts": "2026-10-02T09:00:00Z",
           "sid": ""})
+class _Button:
+    """ToolButton stand-in recording its visibility."""
+
+    def __init__(self):
+        self.visible_flag = False
+        self.text_value = ""
+        self.tip = ""
+
+    def setVisible(self, flag):
+        self.visible_flag = bool(flag)
+
+    def setText(self, text):
+        self.text_value = text
+
+    def setToolTip(self, tip):
+        self.tip = tip
+
+
 def method_source(src, name):
     """The body of ``MainWindow.<name>`` from the bundled source."""
     start = src.index(f"def {name}(")
@@ -366,12 +391,51 @@ check("the bottom report is edge-triggered",
       and _cv_src.count("self._at_bottom_hit = True\n            self.bottom_reached.emit()") == 2
       and "_at_bottom_hit = False" in _cv_src)
 
-# 8. static wiring ------------------------------------------------------------
+# 8. the @ button walks the unread mentions ------------------------------------
+widget = bare_chat()
+widget._mention_refs = []
+widget._mention_btn = _Button()
+widget._history = [
+    {"timestamp": "2026-10-02T10:00:00Z", "origin_id": "m-1",
+     "direction": "incoming"},
+    {"timestamp": "2026-10-02T10:05:00Z", "origin_id": "m-2",
+     "direction": "incoming"},
+]
+widget.note_unread_mention("m-1")
+widget.note_unread_mention("m-2")
+widget.note_unread_mention("m-1")
+check("the @ button shows while a mention is unread",
+      widget._mention_btn.visible_flag is True
+      and widget.unread_mention_count() == 2)
+widget._jump_to_next_mention()
+check("the mentions are walked in arrival order",
+      widget._view.scrolled == ["m-1"] and widget.unread_mention_count() == 1)
+widget.mark_mentions_read()
+check("marking read drops the pending mentions",
+      widget.unread_mention_count() == 0
+      and widget._mention_btn.visible_flag is False)
+
+widget = bare_chat()
+widget._mention_refs = []
+widget._mention_btn = _Button()
+widget.jumped = []
+widget.note_unread_mention("arc-old")
+widget._jump_to_next_mention()
+check("a mention outside the window pages the local archive",
+      widget.jumped == ["arc-old"] and widget.unread_mention_count() == 0)
+
+# 9. static wiring ------------------------------------------------------------
 check("the room counts mentions from the highlight rule",
       "self._bump_unread(room, mention=is_mention)" in _mw_src
       and "is_mention = bool(self_nick and nick != self_nick" in _mw_src)
 check("a private message counts for its chat key",
       "self._bump_unread(target)" in _mw_src)
+check("an unread mention is handed to the tab",
+      "chat.note_unread_mention(ref_id)" in _mw_src
+      and "if is_mention:\n                self._note_unread_mention("
+      in _mw_src
+      and "chat.mark_mentions_read()" in _mw_src
+      and "def _jump_to_next_mention(self)" in _cw_src)
 check("marking read stores an anchor",
       "entry[\"read_ref\"] = str(anchor.get(\"ref\") or \"\")" in _mw_src
       and "def read_anchor(self)" in _cw_src)
