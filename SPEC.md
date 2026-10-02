@@ -1289,7 +1289,10 @@ affiliation='member'/></x>` is also accepted). Moderators (`_can_moderate_room`)
 see the request as an Events row (`_VoiceRequestRow`: «Пользователь … просит
 право голоса») with «Предоставить» (`client.grant_voice(room, nick, jid)` →
 `muc#admin` `<item role='participant'/>`, XEP-0045 §8.3) / «Отклонить» (marks the
-row only), plus an OSD and a tray balloon.
+row only), plus an OSD and a tray balloon. A rejected request (the server
+throttles repeats with `<error type='wait'><resource-constraint/>`) is tracked
+by the sent `id` (`JabberClient._voice_requests`) and surfaced via
+`voice_request_failed` as a tray balloon + OSD (if enabled) + chat status line.
 
 The MUC toolbar's vCard button opens the room's own vCard
 (`MainWindow._show_muc_room_info` → `_show_profile(room)`). `VCardInfoDialog`

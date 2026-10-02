@@ -229,9 +229,13 @@ broadcast and is rejected with `forbidden`) carrying a `muc#request` data form
 (`FORM_TYPE=http://jabber.org/protocol/muc#request`, `muc#role=participant`);
 `JabberClient.request_voice` builds it and never sets `from`. The stanza is
 matched by its own `MatchPath` on `message/{jabber:x:data}x`
-(`_on_muc_voice_request_stanza`) — a legacy `<x xmlns='…muc#user'><item
+(`_on_bodyless_voice_stanza`) — a legacy `<x xmlns='…muc#user'><item
 affiliation='member'/></x>` shape is still recognised by `_muc_voice_request` —
-and emitted as `muc_voice_requested(room, jid, nick)`.
+and emitted as `muc_voice_requested(room, jid, nick)`. A rejected request (the
+server throttles repeats with `<error type='wait'><resource-constraint/>`) is
+matched on the same bodyless path; the sent message's `id` is tracked in
+`JabberClient._voice_requests` and `_voice_request_error` turns the reply into
+`voice_request_failed(room, condition, text)`.
 The MUC header gains a «Попросить голос» bell/megaphone button
 (`ChatWidget.set_voice_request`, icon `voice-request.svg`), visible/enabled only
 when we are a `visitor` **and** the room is moderated (`MainWindow.
@@ -241,7 +245,10 @@ only to moderators/owners/admins (`_can_moderate_room`): an Events row
 (`_VoiceRequestRow`) «Пользователь … просит право голоса» with «Предоставить»
 (`client.grant_voice(room, nick, jid)` → `muc#admin` `<item role='participant'/>`,
 XEP-0045 §8.3) / «Отклонить» (marks the row only), plus an OSD and a tray
-balloon. [`tests/test_muc_voice.py`]
+balloon. A **failed** request (`voice_request_failed`, e.g. the server rate-limit
+`resource-constraint`) is shown to the user via a tray balloon, an OSD (when
+enabled) and a chat status line; the «Попросить голос» button stays enabled.
+[`tests/test_muc_voice.py`]
 
 **Hats (XEP-0317, `include/hats.py` + `ui/hats_dialog.py`)**: occupants'
 `<hats xmlns='urn:xmpp:hats:0'/>` presence lists are parsed by

@@ -515,6 +515,8 @@ STRINGS = {
     "muc_affiliation_none": "Нет",
     "muc_config_tooltip": "Настройки конференции",
     "muc_ask_voice": "Попросить голос",
+    "muc_voice_request_failed": "Не удалось запросить голос",
+    "muc_voice_request_failed_title": "Запрос голоса",
     "event_voice_request": "Пользователь {who} в конференции {room} просит право голоса",
     "event_voice_osd_title": "Запрос голоса",
     "event_voice_grant": "Предоставить",

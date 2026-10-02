@@ -1112,6 +1112,8 @@ class JabberClient:
         self._muc_last_activity: dict[str, float] = {}
         self._muc_self_ping_task: asyncio.Task | None = None
         self._muc_self_ping_busy: set[str] = set()
+        # ids of sent XEP-0045 §7.13 voice requests awaiting a server reply
+        self._voice_requests: set[str] = set()
         self._version_probed: set[str] = set()        # full JIDs (XEP-0092)
         self._muc_version_probed: set[tuple[str, str]] = set()
         # bare JID -> SHA-1 of the currently applied avatar (XEP-0084/0153/0398)
@@ -1242,6 +1244,30 @@ class JabberClient:
             "Message Reactions",
             MatchXPath("%s/{%s}reactions" % (msg_ns, NS_REACTIONS)),
             self._on_bodyless_reactions_stanza))
+        # XEP-0045 §7.13 voice request — a bodyless ``jabber:x:data`` message
+        # (no <body>, so slixmpp's IM handler never fires).
+        self.xmpp.register_handler(CoroutineCallback(
+            "MUC Voice Request",
+            MatchXPath("%s/{jabber:x:data}x" % msg_ns),
+            self._on_bodyless_voice_stanza))
+
+    async def _on_bodyless_voice_stanza(self, msg) -> None:
+        """Route a bodyless ``jabber:x:data`` message (voice request/error)."""
+        voice_err = self._voice_request_error(msg)
+        if voice_err is not None:
+            room, condition, text = voice_err
+            logger.info("VOICE request error in %s: %s", room,
+                        condition or "error")
+            self.emit("voice_request_failed", room, condition, text)
+            return
+        if str(msg["type"] or "") == "error":
+            return
+        voice = _muc_voice_request(msg)
+        if voice is not None:
+            logger.info("VOICE request in %s from %s", voice["room"],
+                        voice["from"])
+            self.emit("muc_voice_requested", voice["room"], voice["from"],
+                      voice["nick"])
 
     async def _on_bodyless_reactions_stanza(self, msg) -> None:
         """Route a bodyless XEP-0444 ``<reactions/>`` to the right handler."""
@@ -1408,15 +1434,6 @@ class JabberClient:
                     invite["room"], invite["inviter"], invite["mediated"])
         self.emit("muc_invite_received", invite["inviter"], invite["room"],
                   invite["password"], invite["reason"])
-
-    async def _on_muc_voice_request_stanza(self, msg) -> None:
-        """Route a bodyless ``jabber:x:data`` message when it is a voice ask."""
-        voice = _muc_voice_request(msg)
-        if voice is None:
-            return
-        logger.info("VOICE request in %s from %s", voice["room"], voice["from"])
-        self.emit("muc_voice_requested", voice["room"], voice["from"],
-                  voice["nick"])
 
     async def _on_muc_mediated_invite_stanza(self, msg) -> None:
         """A room-relayed invitation may carry only the XEP-0045 ``muc#user``
@@ -3653,9 +3670,55 @@ class JabberClient:
         form.append(fmt)
         form.append(role)
         msg.append(form)
-        logger.debug("VOICE request to %s", room)
+        msg_id = str(msg["id"] or "")
+        if not msg_id:
+            msg_id = uuid.uuid4().hex
+            msg["id"] = msg_id
+        # Remember the id so a server error reply (e.g. a throttled request)
+        # can be attributed to this voice request.
+        if len(self._voice_requests) > 64:
+            self._voice_requests.clear()
+        self._voice_requests.add(msg_id)
+        logger.debug("VOICE request to %s (id=%s)", room, msg_id)
         msg.send()
         return True
+
+    def _voice_request_error(self, msg) -> tuple[str, str, str] | None:
+        """Return ``(room, condition, text)`` for a voice-request error reply."""
+        if str(msg.get("type", "") or "") != "error":
+            return None
+        msg_id = str(msg["id"] or "")
+        xml = getattr(msg, "xml", None)
+        has_form = False
+        if xml is not None:
+            form = xml.find("{jabber:x:data}x")
+            if form is not None:
+                for field in form.iter("{jabber:x:data}field"):
+                    if field.get("var") != "FORM_TYPE":
+                        continue
+                    value = next((c.text or "" for c in field
+                                  if c.tag == "{jabber:x:data}value"), "")
+                    has_form = value.strip() == NS_MUC_REQUEST
+                    break
+        if msg_id not in self._voice_requests and not has_form:
+            return None
+        self._voice_requests.discard(msg_id)
+        frm = str(msg["from"] or "")
+        room = frm.split("/", 1)[0]
+        condition = ""
+        err_text = ""
+        if xml is not None:
+            err = xml.find("{jabber:client}error")
+            if err is not None:
+                for child in err:
+                    tag = str(child.tag).rsplit("}", 1)[-1]
+                    if tag == "text":
+                        text = (child.text or "").strip()
+                        if text and not err_text:
+                            err_text = text
+                    elif tag not in ("text",) and not condition:
+                        condition = tag
+        return room, condition, err_text
 
     async def grant_voice(self, room: str, nick: str, jid: str = "") -> None:
         """Grant voice to an occupant (XEP-0045 §8.3).
@@ -4966,6 +5029,13 @@ class JabberClient:
             self.emit("attention_received", frm.split("/")[0])
 
     def _on_message(self, msg) -> None:
+        voice_err = self._voice_request_error(msg)
+        if voice_err is not None:
+            room, condition, text = voice_err
+            logger.info("VOICE request error in %s: %s", room,
+                        condition or "error")
+            self.emit("voice_request_failed", room, condition, text)
+            return
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)

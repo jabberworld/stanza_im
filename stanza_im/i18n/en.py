@@ -515,6 +515,8 @@ STRINGS = {
     "muc_affiliation_none": "None",
     "muc_config_tooltip": "Room settings",
     "muc_ask_voice": "Ask for voice",
+    "muc_voice_request_failed": "Could not request voice",
+    "muc_voice_request_failed_title": "Voice request",
     "event_voice_request": "User {who} in conference {room} is asking for voice",
     "event_voice_osd_title": "Voice request",
     "event_voice_grant": "Grant",

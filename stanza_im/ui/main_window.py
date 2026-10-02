@@ -895,6 +895,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # "Refuse" only marks the row — no stanza is sent (per design).
         self._mark_voice_row(room, nick, jid, granted=False)
 
+    def _on_voice_request_failed(self, room: str, condition: str,
+                                 text: str) -> None:
+        """A voice request was rejected by the server (e.g. throttled)."""
+        message = (text or "").strip() or tr("muc_voice_request_failed")
+        self._tray.show_message(APP_NAME, message)
+        if getattr(self._config.notifications, "osd_enabled", False):
+            self._osd.show(self._menu_icon("voice-request.svg"),
+                           tr("muc_voice_request_failed_title"), message,
+                           on_click=lambda: self._osd_click(room))
+        chat = self._chat_window.get_chat(room)
+        if chat is not None:
+            from stanza_im.include.utils import format_time
+            chat.add_status(message, format_time())
+
     def _mark_voice_row(self, room: str, nick: str, jid: str,
                         granted: bool) -> None:
         for i in range(self._events_list.count()):
@@ -2785,6 +2799,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muc_subject_changed", self._on_muc_subject_changed)
         c.on("muc_info_received", self._on_muc_info_received)
         c.on("muc_voice_requested", self._on_muc_voice_request)
+        c.on("voice_request_failed", self._on_voice_request_failed)
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("contact_pep_updated", self._on_contact_pep_updated)
         c.on("contact_caps", self._on_contact_caps)

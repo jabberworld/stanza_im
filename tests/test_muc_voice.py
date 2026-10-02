@@ -91,6 +91,7 @@ class _FakeXMPP:
 class _ReqClient(JabberClient):
     def __init__(self):
         self.messages = []
+        self._voice_requests = set()
         self.xmpp = _FakeXMPP(self)
 
 
@@ -113,6 +114,44 @@ asyncio.get_event_loop().run_until_complete(
     gc.grant_voice("room@conf.example", "guest", "guest@x"))
 check("grant_voice asks for the participant role (XEP-0045 §8.3)",
       gc._muc.roles == [("room@conf.example", "guest", "participant")])
+
+
+class _ErrClient(JabberClient):
+    def __init__(self):
+        self.events = []
+        self._voice_requests = set()
+
+    def emit(self, name, *a, **k):
+        self.events.append((name, a))
+
+
+_REQ_NS = "http://jabber.org/protocol/muc#request"
+_ERR_RAW = (
+    "<message xmlns='jabber:client' type='error' id='{mid}' "
+    "from='room@conf.example' to='me'>"
+    "<x xmlns='jabber:x:data' type='submit'><field var='FORM_TYPE' "
+    f"type='hidden'><value>{_REQ_NS}</value></field></x>"
+    "<error type='wait'>"
+    "<resource-constraint xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>"
+    "<text xmlns='urn:ietf:params:xml:ns:xmpp-stanzas' xml:lang='en'>"
+    "Please, wait before sending new voice request</text></error></message>")
+
+ec = _ErrClient()
+ec._voice_requests.add("abc123")
+ec._on_message(slixmpp.Message(xml=ET.fromstring(_ERR_RAW.format(mid="abc123"))))
+check("a voice-request error emits voice_request_failed",
+      ec.events and ec.events[-1][0] == "voice_request_failed")
+check("the error carries condition and server text",
+      ec.events[-1][1] == ("room@conf.example", "resource-constraint",
+                           "Please, wait before sending new voice request"))
+check("the pending voice id is cleared", "abc123" not in ec._voice_requests)
+# A foreign error (not our voice request) is ignored.
+ec.events.clear()
+ec._on_message(slixmpp.Message(xml=ET.fromstring(
+    "<message xmlns='jabber:client' type='error' id='zzz' from='x@y' to='me'>"
+    "<error type='cancel'><item-not-found "
+    "xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></message>")))
+check("an unrelated message error is ignored", ec.events == [])
 
 
 req = _ReqClient()
@@ -210,6 +249,24 @@ row2.refused.emit(room, "other", "other@x")
 check("refuse does not send anything to the server",
       stub.granted == [(room, "guest", "guest@x")]
       and row2._result.text() != "")
+
+# 3b. Surfacing a rejected voice request ------------------------------------
+w._chat_window.open_groupchat(room, "me", "Room")
+cw3 = w._chat_window.get_chat(room)
+chan = {"tray": [], "osd": [], "status": []}
+w._tray.show_message = lambda *a, **k: chan["tray"].append(a)
+w._osd.show = lambda *a, **k: chan["osd"].append(a)
+cw3.add_status = lambda *a, **k: chan["status"].append(a)
+w._config.notifications.osd_enabled = False
+w._on_voice_request_failed(room, "resource-constraint", "Please, wait")
+check("a failed voice request shows a tray notice", len(chan["tray"]) == 1)
+check("a failed voice request adds a chat status line",
+      len(chan["status"]) == 1)
+check("no OSD when notifications are off", chan["osd"] == [])
+w._config.notifications.osd_enabled = True
+w._on_voice_request_failed(room, "resource-constraint", "")
+check("the OSD is shown when enabled and the text falls back",
+      len(chan["osd"]) == 1 and chan["osd"][0][2] != "")
 
 # 4. Button gating -----------------------------------------------------------
 w._chat_window.open_groupchat(room, "me", "Room")
