@@ -662,6 +662,23 @@ the reply button; Ctrl+Up stays the XEP-0308 edit shortcut). Pressing `Down`
 while the reply is still untouched (the input holds exactly the inserted quote)
 cancels it again.
 [`tests/test_reply_up.py`]
+
+**Control links — mandatory rule**: *every* `stanza:` control link the chat
+renders (message-menu buttons **and** links placed elsewhere: status lines,
+`show_voice_prompt`, error hints) MUST be relayed in-page, never navigated:
+an `a[href^="stanza:…"]` branch in the `_ACTION_JS` document-level handler calls
+`e.preventDefault()` and stores the href in a `window.__stanza<Name>Ref`
+variable; the always-running scroll poll appends that variable to its result
+array **at the end** (indices are positional — never renumber the earlier
+entries); `_on_scroll_position` reads it, guards the repeat with
+`self._last_<name>_ref`, and emits `link_clicked`; and a matching
+`_clear_<name>_request()` helper resets the variable. `ChatWidget._open_link`
+then routes the scheme. A missing branch means Chromium navigates, the request
+is denied by `_StanzaPage.acceptNavigationRequest`, and the resulting
+`loadFinished(false)` makes `_probe_chat_alive` reload the document — the user
+sees the whole conversation disappear. `tests/test_ui_tweaks.py` enforces this
+statically: any `window.__stanza*Ref` assigned in `_ACTION_JS` must appear in
+the poll and have a `_clear_*_request` helper.
 Real links still request a navigation that is intercepted on the
 C++ side by `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`,
 which emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto`
@@ -1985,6 +2002,11 @@ of work (one bug fix or feature = one commit). Match the commit message style of
 the existing history (short imperative summary line). Do not commit secrets or
 unintended files; check `git status` before committing. Specification updates
 (see below) belong to the same commit as the change that made them stale.
+
+A modified `README.md` in `git status` that was **not** authored by the current
+task (the user edits it by hand) must never be ignored and never folded
+silently into an unrelated commit: point it out to the user, propose committing
+it, and keep it in a commit of its own once they agree.
 
 ## Documentation Maintenance
 

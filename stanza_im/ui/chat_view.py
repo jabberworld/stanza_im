@@ -774,6 +774,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
             window.__stanzaForwardRef = '';
             window.__stanzaToNoteRef = '';
+            window.__stanzaVoiceRef = '';
             window.__stanzaNotesEnabled = window.__stanzaNotesEnabled || false;
             window.__stanzaJumpRef = '';
             window.__stanzaDeleteRef = '';
@@ -1154,6 +1155,17 @@ window.__stanzaMentionRef = '';
                         x.getAttribute('href') || '';
                     return;
                 }
+                // A control link in a status line (e.g. "ask for voice"):
+                // never navigate — a stanza: navigation is denied and can blank
+                // the whole conversation.  Relay it through the scroll poll.
+                var vs = t && t.closest
+                    ? t.closest('a[href^="stanza:voice"]') : null;
+                if (vs) {
+                    e.preventDefault();
+                    window.__stanzaVoiceRef =
+                        vs.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -1270,7 +1282,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaReactionsRef || '',"
                 " window.__stanzaReactLikeRef || '',"
                 " window.__stanzaMediaFsRef || '',"
-                " window.__stanzaToNoteRef || '']",
+                " window.__stanzaToNoteRef || '',"
+                " window.__stanzaVoiceRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1319,6 +1332,12 @@ window.__stanzaMentionRef = '';
         def _clear_tonote_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaToNoteRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_voice_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaVoiceRef = '';")
             except RuntimeError:
                 pass
 
@@ -1551,6 +1570,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_tonote_ref = ""
+            if len(value) > 22 and isinstance(value[22], str) and value[22]:
+                self._clear_voice_request()
+                requested = value[22]
+                if requested != getattr(self, "_last_voice_ref", ""):
+                    self._last_voice_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_voice_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])

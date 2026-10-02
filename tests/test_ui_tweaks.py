@@ -210,6 +210,12 @@ check("every menu ref is read by the scroll poll (%s)"
       % (", ".join(sorted(missing_in_poll)) if missing_in_poll else "none"),
       not missing_in_poll)
 check("the notes ref is polled", "__stanzaToNoteRef" in poll_refs)
+check("the voice-request ref is polled", "__stanzaVoiceRef" in poll_refs)
+# A control link rendered in a *status line* (the "ask for voice" prompt) must
+# be relayed in-page too: a real stanza: navigation is denied and the document
+# probe then reloads the page, wiping the conversation.
+check("the voice-request link is relayed in-page instead of navigated",
+      'a[href^="stanza:voice"]' in js and "e.preventDefault();" in js)
 # Each polled ref has a clear<Name>Request helper, mirroring the pattern.
 clear_funcs = set(re.findall(r"def _clear_([a-z_]+)_request", view_src))
 for ref in sorted(poll_refs):

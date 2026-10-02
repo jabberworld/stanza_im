@@ -1167,6 +1167,22 @@ the newest incoming message (`ChatWidget._reply_to_last` skips our own entries
 and those without a replyable id; Ctrl+Up remains the XEP-0308 edit shortcut).
 Pressing `Down` while the reply is untouched (the input holds exactly the
 inserted quote) cancels it.
+**Control-link rule (mandatory):** every `stanza:` control link the chat
+renders — message-menu buttons *and* links placed elsewhere, e.g. the
+`ChatWidget.show_voice_prompt` status line — must be relayed in-page instead of
+navigated: an `a[href^="stanza:…"]` branch in the `_ACTION_JS` document handler
+calls `e.preventDefault()` and stores the href in a `window.__stanza<Name>Ref`
+variable; the always-running scroll poll appends that variable at the **end** of
+its result array (indices are positional — earlier entries are never
+renumbered); `_on_scroll_position` reads it, guards the repeat with
+`self._last_<name>_ref` and emits `link_clicked`; a matching
+`_clear_<name>_request()` helper resets the variable, and `ChatWidget._open_link`
+routes the scheme. Without the branch Chromium navigates, `_StanzaPage.
+acceptNavigationRequest` denies the request and the resulting
+`loadFinished(false)` makes `_probe_chat_alive` reload the page, so the whole
+conversation disappears. `tests/test_ui_tweaks.py` checks this statically (every
+`window.__stanza*Ref` set in `_ACTION_JS` must be polled and have a
+`_clear_*_request` helper).
 Real links request a navigation intercepted on the C++ side by
 `_StanzaPage.acceptNavigationRequest` → `ChatView._accept_navigation`, which
 emits `link_clicked` for the `stanza`/`mam`/`http`/`https`/`mailto` schemes
