@@ -465,6 +465,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._text_scale = 1.0
         self._jump_pending = ""
         self._jump_pages = 0
+        self._restore_anchor: dict = {}
         self._build_ui(theme)
 
     # ── UI construction ───────────────────────────────────────────
@@ -1873,8 +1874,55 @@ class ChatWidget(QtWidgets.QWidget):
         self._anchor_bottom = True
         self._preserve_fraction = None
         self._render_all()
+        if self._restore_anchor:
+            QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
+
+    def set_restore_anchor(self, anchor: dict) -> None:
+        """Show the conversation from *anchor* instead of its very beginning.
+
+        Called before the initial history window is rendered when the persisted
+        read state reports unread messages for this conversation: the view then
+        opens on the message the user stopped reading at (the unread block
+        starts right below it) instead of replaying everything from the start.
+        There is no age limit — as long as the state says "unread", the
+        conversation is resumed from the anchor.
+        """
+        anchor = dict(anchor or {})
+        self._restore_anchor = (anchor if (anchor.get("ref")
+                                           or anchor.get("ts")) else {})
+
+    def _restore_from_anchor(self) -> None:
+        """Jump to the stored read anchor (applied once, then dropped)."""
+        anchor = self._restore_anchor
+        self._restore_anchor = {}
+        if not anchor or self._released:
+            return
+        ref = str(anchor.get("ref") or "")
+        entry = self._find_message(ref) if ref else None
+        if entry is not None:
+            self._view.scroll_to_message(self._reply_target_id(entry))
+            return
+        # The anchor message is outside the loaded window: fall back to its
+        # timestamp, and only then walk the local archive page by page.
+        entry = self._entry_before_or_at(str(anchor.get("ts") or ""))
+        if entry is not None:
+            self._view.scroll_to_message(self._reply_target_id(entry))
+            return
+        if ref:
+            self._jump_to_message(ref)
+
+    def _entry_before_or_at(self, ts: str):
+        """The newest loaded message whose raw timestamp is not newer than *ts*."""
+        if not ts:
+            return None
+        best = None
+        for entry in list(self._history) + list(self._messages):
+            stamp = entry.get("timestamp") or ""
+            if stamp and stamp <= ts:
+                best = entry
+        return best
 
     def prepend_history(self, entries: list[dict], exhausted: bool,
                         keep_position: bool = True):

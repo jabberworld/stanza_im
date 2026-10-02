@@ -1452,7 +1452,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   archived MAM replay never is. `_reset_unread` also stores the read anchor
   (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
   `origin-id` → own message id — plus its raw timestamp), so an unread
-  conversation can be restored from the point the user stopped reading. The file is a **v2 payload**
+  conversation can be restored from the point the user stopped reading.
+- Opening an unread conversation resumes it there: the anchor is captured
+  before the tab is opened (`MainWindow._restore_anchor_for` →
+  `ChatWidget.set_restore_anchor`) and `set_history` scrolls to that message
+  after the history window is rendered (falling back to the anchor timestamp
+  and then to paging the local archive). A conversation with no unread
+  messages opens at its newest message as before. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
   "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
   where *chat-key* is the conversation key the chat tabs use (bare JID for 1:1

@@ -27,6 +27,12 @@ def check(label, ok):
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
+               encoding="utf-8").read()
+_cw_src = open(os.path.join(_root, "stanza_im", "ui", "chat_widget.py"),
+               encoding="utf-8").read()
+
 ROOM = "room@conf.example"
 
 
@@ -223,12 +229,108 @@ check("the anchor prefers the server stanza-id",
 check("an empty conversation has no anchor",
       ChatWidget("x@y", "X", ChatThemeFactory()).read_anchor() == {})
 
-# 6. static wiring ------------------------------------------------------------
-_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
-               encoding="utf-8").read()
-_cw_src = open(os.path.join(_root, "stanza_im", "ui", "chat_widget.py"),
-               encoding="utf-8").read()
+# 6. resuming an unread conversation from its read anchor ----------------------
+win = make_window(chats=("bob@example.com",))
+win._store_read_state("bob@example.com",
+                      {"read_ref": "arc-9",
+                       "read_ts": "2026-10-02T09:00:00Z"})
+win._bump_unread("bob@example.com")
+check("the stored anchor is kept for an unread chat",
+      win._restore_anchor_for("bob@example.com")
+      == {"ref": "arc-9", "ts": "2026-10-02T09:00:00Z",
+          "sid": ""})
+def method_source(src, name):
+    """The body of ``MainWindow.<name>`` from the bundled source."""
+    start = src.index(f"def {name}(")
+    end = src.find("\n    def ", start + 1)
+    return src[start:end if end > 0 else len(src)]
+
+
+win = make_window(chats=("bob@example.com",))
+win._reset_unread = MainWindow._reset_unread.__get__(win)
+win._bump_unread("bob@example.com")
+check("an unread conversation is tracked in the unread set",
+      "bob@example.com" in win._unread_jids)
+win._reset_unread("bob@example.com")
+check("marking read leaves the unread set",
+      "bob@example.com" not in win._unread_jids and win._unread_total == 0)
+
+contact_open = method_source(_mw_src, "_on_contact_open")
+check("the restore anchor is taken before the tab is opened",
+      contact_open.index("restore_anchor = self._restore_anchor_for(jid)")
+      < contact_open.index("open_chat(jid, display_name)")
+      < contact_open.rindex("self._reset_unread(jid)"))
+pm_click = method_source(_mw_src, "_on_muc_participant_clicked")
+check("a private chat is resumed the same way",
+      pm_click.index("restore_anchor = self._restore_anchor_for(target)")
+      < pm_click.index("open_chat(target, nick)"))
+
+
+class _View:
+    """ChatView stand-in recording the requested scroll target."""
+
+    def __init__(self):
+        self.scrolled = []
+
+    def scroll_to_message(self, message_id, highlight=True):
+        self.scrolled.append(message_id)
+
+
+def bare_chat(jid="bob@example.com"):
+    """A ChatWidget with only the buffers ``_restore_from_anchor`` touches."""
+    widget = ChatWidget.__new__(ChatWidget)
+    widget.jid = jid
+    widget.is_muc = False
+    widget._history = []
+    widget._messages = []
+    widget._released = False
+    widget._jump_pending = ""
+    widget._jump_pages = 0
+    widget._restore_anchor = {}
+    widget._view = _View()
+    widget.jumped = []
+    widget._jump_to_message = lambda ref: widget.jumped.append(ref)
+    return widget
+
+
+anchor = {"ref": "arc-2", "ts": "2026-10-02T10:01:00Z", "sid": "arc-2"}
+widget = bare_chat()
+widget._history = [
+    {"timestamp": "2026-10-02T10:00:00Z", "origin_id": "m-1",
+     "direction": "incoming"},
+    {"timestamp": "2026-10-02T10:01:00Z", "archive_id": "arc-2",
+     "origin_id": "m-2", "direction": "incoming"},
+]
+widget.set_restore_anchor(anchor)
+widget._restore_from_anchor()
+check("the view opens on the anchor message",
+      widget._view.scrolled == ["m-2"] and widget.jumped == [])
+check("the anchor is applied only once", widget._restore_anchor == {})
+
+widget = bare_chat()
+widget._history = [
+    {"timestamp": "2026-10-02T09:30:00Z", "origin_id": "m-0",
+     "direction": "incoming"},
+    {"timestamp": "2026-10-02T11:00:00Z", "origin_id": "m-9",
+     "direction": "incoming"},
+]
+widget.set_restore_anchor({"ts": "2026-10-02T10:01:00Z"})
+widget._restore_from_anchor()
+check("a timestamp-only anchor falls back to the newest older message",
+      widget._view.scrolled == ["m-0"] and widget.jumped == [])
+
+widget = bare_chat()
+widget.set_restore_anchor({"ref": "arc-77", "ts": "2026-10-02T10:01:00Z"})
+widget._restore_from_anchor()
+check("an unresolvable anchor pages the local archive",
+      widget._view.scrolled == [] and widget.jumped == ["arc-77"])
+
+widget = bare_chat()
+widget.set_restore_anchor({})
+widget._restore_from_anchor()
+check("a read conversation is not moved", widget._view.scrolled == [])
+
+# 7. static wiring ------------------------------------------------------------
 check("the room counts mentions from the highlight rule",
       "self._bump_unread(room, mention=is_mention)" in _mw_src
       and "is_mention = bool(self_nick and nick != self_nick" in _mw_src)

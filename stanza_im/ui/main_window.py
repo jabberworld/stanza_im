@@ -4089,17 +4089,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_contact_open(self, jid: str):
         display_name = self._roster_name(jid) or jid.split("@")[0]
         self._touch_tab_activity(jid)
+        # Captured before the tab is opened: focusing it clears the counters,
+        # so an unread conversation is resumed from its stored read anchor.
+        restore_anchor = self._restore_anchor_for(jid)
         if jid in self._muc_self_nicks:
             is_new = not self._chat_window.has_chat(jid)
             chat = self._chat_window.open_groupchat(
                 jid, self._muc_self_nicks[jid], display_name)
+            if is_new and chat is not None:
+                chat.set_restore_anchor(restore_anchor)
             self._seed_muc_chat(jid, chat, title=display_name, is_new=is_new)
             self._apply_muji_support(jid)
             self._apply_muc_admin(jid)
             self._reset_unread(jid)
             return
         is_new = not self._chat_window.has_chat(jid)
-        self._chat_window.open_chat(jid, display_name)
+        chat = self._chat_window.open_chat(jid, display_name)
+        if is_new and chat is not None:
+            chat.set_restore_anchor(restore_anchor)
         self._apply_call_support(jid)
         chat_show = next((user.status for user in self._roster._users
                           if user.jid == jid), None)
@@ -4550,9 +4557,31 @@ class MainWindow(QtWidgets.QMainWindow):
             self._unread_chats[jid] = record
         else:
             self._unread_chats.pop(jid, None)
+        # An anchor-only record (read state kept, nothing unread) must not
+        # keep the conversation in the "has unread" set used for tray
+        # cycling and tab suspension.
+        if record["unread"] > 0:
+            self._unread_jids.add(jid)
+        else:
             self._unread_jids.discard(jid)
         self._unread_total = sum(item["unread"] for item in
                                  self._unread_chats.values())
+
+    def _restore_anchor_for(self, jid: str) -> dict:
+        """The stored read anchor of *jid* when it has unread messages.
+
+        Opening a conversation focuses it, which clears its counters, so the
+        anchor is captured beforehand and handed to the fresh view
+        (`ChatWidget.set_restore_anchor`): an unread chat is shown from the
+        message the user stopped reading at instead of from its very
+        beginning.  A read conversation returns ``{}`` and keeps its normal
+        opening behaviour; there is no age limit on the resume.
+        """
+        entry = self._read_state(jid)
+        if entry["unread"] <= 0:
+            return {}
+        return {"ref": entry["read_ref"], "ts": entry["read_ts"],
+                "sid": entry["read_sid"]}
 
     def _recount_unread(self) -> None:
         """Recompute the aggregate counters from the stored records."""
@@ -5969,7 +5998,12 @@ class MainWindow(QtWidgets.QMainWindow):
         target = real_jid.strip() if isinstance(real_jid, str) else ""
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
+        # Before the open: focusing the tab clears the counters, so the stored
+        # read anchor of an unread private chat is captured first.
+        restore_anchor = self._restore_anchor_for(target)
         chat = self._chat_window.open_chat(target, nick)
+        if chat is not None and not chat._history:
+            chat.set_restore_anchor(restore_anchor)
         self._apply_call_support(target)
         self._sync_pm_roster(target, room, nick)
         self._reset_unread(target)

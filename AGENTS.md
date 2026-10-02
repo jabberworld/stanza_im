@@ -872,6 +872,14 @@ a message that arrives while its own conversation is the active one is skipped,
 and an archived MAM replay never counts. `_reset_unread` also records the
 **read anchor** via `ChatWidget.read_anchor()` (newest displayed message:
 server `stanza-id` → `origin-id` → own message id, plus its raw timestamp).
+Opening a conversation focuses it, which clears its counters, so
+`MainWindow._restore_anchor_for` captures the anchor **before** the tab is
+opened (`_on_contact_open`, `_on_muc_participant_clicked`) and hands it to
+`ChatWidget.set_restore_anchor`; `set_history` then calls
+`_restore_from_anchor`, which scrolls to the anchor message (by ref, else by
+timestamp via `_entry_before_or_at`, else paging the local archive with
+`_jump_to_message`), so an unread chat opens with the unread block right below
+the last message the user read. The anchor is applied once and dropped.
 The **tray only blinks while logged in**: `_sync_tray_blink`
 (called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
 `_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it
