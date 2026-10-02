@@ -51,6 +51,49 @@ counts, displayed = unread_state.load_state()
 check("legacy int format still loads",
       counts == {"x@y": 5} and displayed == {})
 
+# 1b. v2 payload: unread + mentions + read anchor -----------------------------
+import json
+
+unread_state.save_chats({
+    "bob@example.com": {"unread": 4, "read_sid": "sid-1",
+                        "read_ts": "2026-10-02T10:00:00", "read_ref": "m-1"},
+    "room@conf.example": {"unread": 234, "mentions": 2},
+    "old@x": {"unread": 0, "read_sid": "sid-old"},
+    "empty@x": {},
+    "": {"unread": 9},
+    "junk@x": {"unread": "bad", "mentions": None, "read_sid": 5},
+}, account="me@example.com")
+chats = unread_state.load_chats("me@example.com")
+check("v2 keeps unread and mention counters",
+      chats["room@conf.example"]["unread"] == 234
+      and chats["room@conf.example"]["mentions"] == 2)
+check("v2 keeps the read anchor",
+      chats["bob@example.com"]["read_ts"] == "2026-10-02T10:00:00"
+      and chats["bob@example.com"]["read_ref"] == "m-1"
+      and chats["bob@example.com"]["read_sid"] == "sid-1")
+check("v2 keeps a read conversation's displayed sid",
+      "old@x" in chats and chats["old@x"]["unread"] == 0)
+check("empty, nameless and junk records are dropped",
+      "empty@x" not in chats and "" not in chats and "junk@x" not in chats)
+with open(unread_state.path(), encoding="utf-8") as fh:
+    raw = json.load(fh)
+check("file uses the v2 chats section",
+      isinstance(raw.get("chats"), dict) and raw.get("account") == "me@example.com")
+check("legacy views are derived from v2",
+      unread_state.load() == {"bob@example.com": 4, "room@conf.example": 234}
+      and unread_state.load_state()[1] == {"bob@example.com": "sid-1",
+                                           "old@x": "sid-old"})
+check("records expose every field",
+      set(unread_state.blank()) == {"unread", "mentions", "read_sid",
+                                    "read_ts", "read_ref"})
+
+with open(unread_state.path(), "w", encoding="utf-8") as fh:
+    fh.write('{"x@y": {"count": 7, "displayed": "sid-v1"}}')
+converted = unread_state.load_chats()
+check("v1 payload converts to a v2 record",
+      converted["x@y"] == {"unread": 7, "mentions": 0, "read_sid": "sid-v1",
+                           "read_ts": "", "read_ref": ""})
+
 # Account-bound state: another account's counters must be ignored.
 unread_state.save({"me@here": 4}, account="me@here")
 check("account is persisted", unread_state.load_account() == "me@here")

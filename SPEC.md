@@ -29,7 +29,7 @@ stanza_im/
 │   ├── storage.py      — Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py      — SQLite chat-history access (day/summary + async wrappers)
 │   ├── known_contacts.py — persisted JID → name/groups/conference registry
-│   ├── unread_state.py — persisted per-contact unread counters (JSON)
+│   ├── unread_state.py — persisted per-chat read state (unread/mentions/anchor)
 │   ├── vcard_cache.py  — vCard avatar download/cache coordination
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
 │   ├── privacy.py      — XEP-0016 privacy-list parse/build helpers
@@ -1425,10 +1425,19 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `core/unread_state.py`) and restored on startup: the roster badges come back
   exactly as before the restart (`MainWindow._unread_counts`,
   applied in `_add_roster_item`/`_sync_conference_roster`, saved with a 1 s
-  debounce and on quit). The file entry is `{"count": N, "displayed": "<sid>"}`
-  (legacy `{"jid": N}` is still read): the displayed sid is the last XEP-0490
+  debounce and on quit). The file is a **v2 payload**
+  `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
+  "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
+  where *chat-key* is the conversation key the chat tabs use (bare JID for 1:1
+  and MUC PM, bare room JID for a conference); the v1
+  `{"count": N, "displayed": "<sid>"}` and v0 `{"jid": N}` layouts are still
+  read (`unread_state.load_chats()`/`save_chats()` are the v2 API,
+  `load_state()`/`save()` the derived legacy views). `read_sid` is the last
+  XEP-0490
   point we published, seeded into the client on login, so the startup MDS
-  catch-up does not clear unread that arrived after it. OSD popups are not
+  catch-up does not clear unread that arrived after it; `read_ref`/`read_ts` are
+  the last read message (the anchor an unread conversation is restored from).
+  OSD popups are not
   replayed. Messages received while
   the client was offline are delivered by the server on reconnect and counted
   as unread in the new session (no MAM catch-up). The file also stores the

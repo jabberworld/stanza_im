@@ -47,7 +47,7 @@ stanza_im/                      # Python package
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py               # SQLite history; RLock + store_many + async wrappers
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
-│   ├── unread_state.py          # Persisted per-contact unread counters (JSON)
+│   ├── unread_state.py          # Persisted per-chat read state (unread/mentions/anchor)
 │   ├── vcard_cache.py           # vCard avatar download coordination
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
 │   ├── privacy.py               # XEP-0016 privacy-list parse/build helpers
@@ -850,14 +850,24 @@ plus on quit. The **tray only blinks while logged in**: `_sync_tray_blink`
 so the offline icon is visible — restored counters do not blink on the login
 screen. The blink is **smooth** (`TrayIcon._blink_step`): a ~25 fps timer fades
 the icon out and back in over a 1 s period following a cosine curve (the icon is
-painted at the current opacity, so it pulses instead of toggling on/off). Alongside each count the file stores the last displayed MDS
-stanza-id (`{"count": N, "displayed": "sid"}`; the legacy `{"jid": N}` format is
-still read); `_flush_unread` collects it from the client's `_mds_local` and
+painted at the current opacity, so it pulses instead of toggling on/off). The
+file is a **v2 payload**:
+`{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
+"read_sid": "<stanza-id>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
+where *chat-key* is the conversation key the chat tabs use — a bare JID for 1:1
+and MUC private messages (the real JID when the room reveals one, otherwise
+`room/nick`), the bare room JID for a conference. `read_sid` is the last
+displayed MDS
+stanza-id (the v1 `{"count": N, "displayed": "sid"}` layout and the v0
+`{"jid": N}` one are still read); `_flush_unread` collects it from the client's
+`_mds_local` and
 `_on_login` seeds it back via `client.set_displayed_state`, so the startup
 XEP-0490 catch-up cannot clear unread messages that arrived after our own last
-displayed point (a genuinely newer remote state still clears them). OSD popups
+displayed point (a genuinely newer remote state still clears them).
+`unread_state.load_chats()/save_chats()` are the v2 API; `load_state()`/`save()`
+are the derived legacy views. OSD popups
 are not replayed. The file also stores the owning account JID
-(`unread_state.save(..., account=cfg.jid)`); `load_state(cfg.jid)` ignores
+(`unread_state.save_chats(..., account=cfg.jid)`); `load_chats(cfg.jid)` ignores
 counters written for a different account, so switching accounts never keeps the
 previous account's tray blinking (legacy account-less files still load). OSD
 popups are not replayed. [`tests/test_unread_state.py`]
