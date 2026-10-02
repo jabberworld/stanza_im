@@ -2008,6 +2008,26 @@ task (the user edits it by hand) must never be ignored and never folded
 silently into an unrelated commit: point it out to the user, propose committing
 it, and keep it in a commit of its own once they agree.
 
+**Author attribution.** A commit created by the agent MUST be stamped with the
+model that produced it:
+
+```bash
+git commit --author="opencode (<model>) <opencode@localhost>" -m "<message>"
+```
+
+`<model>` is the short model id of the current session (`opencode/big-pickle` →
+`big-pickle`), taken from the session prompt; if it cannot be determined, ask
+the user instead of guessing. The repo-local `git oca` alias wraps exactly this
+call and reads `$STANZA_MODEL` when set, so `STANZA_MODEL=big-pickle git oca -m
+"…"` is equivalent. The committer stays the configured one (`opencode
+<opencode@localhost>`), which keeps the user's own commits under their
+identity and leaves `user.name`/`user.email` untouched. Verify the result with
+`git log -1 --format='%an <%ae>'`.
+
+**Existing history is never rewritten** — no `--reset-author`, `rebase`,
+`filter-repo`: `master` tracks `origin/master`, so altering old authors would
+change every hash and require a force-push.
+
 ## Documentation Maintenance
 
 `AGENTS.md`, `SPEC.md`, `XEPs.md` and `CHECKLIST.md` are living documents and
