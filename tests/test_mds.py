@@ -73,7 +73,9 @@ check("assist mds sid", st2.get("id") == "sid-3")
 
 # 3. remote apply dedup + emit -------------------------------------------------
 c._mds_apply_remote("bob@example.com", "sid-10")
-check("apply emits", len(mds_events) == 1 and mds_events[0] == ("bob@example.com",))
+check("apply emits with the remote sid",
+      len(mds_events) == 1
+      and mds_events[0] == ("bob@example.com", "sid-10"))
 c._mds_apply_remote("bob@example.com", "sid-10")
 check("apply dedups", len(mds_events) == 1)
 c._mds_apply_remote("", "")
@@ -110,7 +112,7 @@ est.set("id", "sid-carol")
 _before = list(mds_events)
 c._on_message(headline)
 check("notification applies", len(mds_events) == len(_before) + 1
-      and mds_events[-1] == ("carol@example.com",))
+      and mds_events[-1] == ("carol@example.com", "sid-carol"))
 
 # notification from a third party is ignored ------------------------------------
 h2 = slixmpp.Message()
@@ -146,11 +148,11 @@ c_seed._mds_apply_remote("frank@example.com", "sid-old")
 check("seeded state suppresses stale apply", not seed_events)
 c_seed._mds_apply_remote("frank@example.com", "sid-new")
 check("newer state still applies after seeding",
-      seed_events == [("frank@example.com",)])
+      seed_events == [("frank@example.com", "sid-new")])
 check("seed ignores blank jids/sids",
       "" not in c_seed._mds_local and "g@example.com" not in c_seed._mds_local)
 
-# 8. toggle off ----------------------------------------------------------------
+# 7. toggle off ----------------------------------------------------------------
 c_off = JabberClient("me@example.com/r", "pw", message_displayed_sync=False)
 c_off.mds_mark_displayed("any@example.com")
 check("disabled does nothing", not c_off._mds_local)

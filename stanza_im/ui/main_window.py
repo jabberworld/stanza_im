@@ -4823,14 +4823,58 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=stable_id, message_id=stable_id,
             reply_to=reply_to, reply_id=reply_id))
 
-    def _on_mds_displayed(self, chat_jid: str):
-        """Another of our devices flagged *chat_jid* as displayed (XEP-0490)."""
-        bare = chat_jid.split("/")[0]
-        self._reset_unread(bare)
-        chat = self._chat_window.get_chat(bare)
+    def _resolve_mds_key(self, chat_jid: str) -> str:
+        """Map an incoming MDS chat JID onto one of our conversation keys.
+
+        A 1:1 conversation and a conference are keyed by their bare JID, so a
+        full address collapses onto it; a private message is keyed by its
+        **sender** (the real JID when the room revealed one, otherwise
+        ``room/nick``) and is matched verbatim first — dropping its
+        resourcepart would clear the conference instead.
+        """
+        key = (chat_jid or "").strip()
+        if not key:
+            return ""
+        if key in self._unread_chats or key in self._pm_targets:
+            return key
+        return key.split("/", 1)[0]
+
+    def _on_mds_displayed(self, chat_jid: str, sid: str = ""):
+        """Another of our devices flagged *chat_jid* as displayed (XEP-0490).
+
+        The remote state is clamped against our own position: what the other
+        device read becomes read here too and the read anchor moves to it,
+        while a device that is behind us leaves our counters alone.
+        """
+        key = self._resolve_mds_key(chat_jid)
+        if not key:
+            return
+        entry = self._unread_chats.get(key)
+        if sid and entry and (entry["unread"] or entry["mentions"]):
+            self._start_task(self._clamp_read_state(key, sid))
+        else:
+            self._reset_unread(key)
+        chat = self._chat_window.get_chat(key)
         if chat:
             chat.add_status(tr("mds_displayed_elsewhere"),
                             time.strftime("%H:%M:%S"))
+
+    async def _clamp_read_state(self, key: str, sid: str) -> None:
+        """Apply a remote displayed state to our own unread block (XEP-0490).
+
+        The remote ``<displayed/>`` id is resolved against the local archive:
+        when it points at a message newer than the newest one we know, the
+        other device has seen everything and the counters are dropped with the
+        read anchor moved to it; a device behind us (or an id we have never
+        stored) leaves the unread block untouched.
+        """
+        from stanza_im.core import history
+        remote_ts = await history.timestamp_for_ref_async(key, sid)
+        newest_ts = await history.newest_timestamp_async(key)
+        if remote_ts and newest_ts and remote_ts < newest_ts:
+            return
+        self._reset_unread(key, anchor={"ref": sid, "ts": remote_ts,
+                                        "sid": sid})
 
     def _on_muc_private_message(self, room: str, nick: str,
                                  body: str, ts, unstyled: bool = False,

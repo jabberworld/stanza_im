@@ -1199,8 +1199,18 @@ published to the private PEP node `urn:xmpp:mds:displayed:0` when the chat is
 focused/active (server-assist via a companion XEP-0333 marker when the server
 announces `urn:xmpp:mds:server-assist:0`); incoming PEP events (routed like the
 extended-presence notifications, see below) and a catch-up
-fetch apply remote displayed states — unread is cleared and an open chat gets
-an "Displayed on another device" status line. `_mds_apply_remote` skips a state
+fetch apply remote displayed states (`mds_displayed(chat_jid, sid)`) and an open
+chat gets an "Displayed on another device" status line. The remote state is
+**clamped** against our own position instead of clearing blindly:
+`MainWindow._on_mds_displayed` resolves the incoming chat JID to one of our
+conversation keys (`_resolve_mds_key` — a 1:1 chat and a conference collapse to
+their bare JID, while a private message matches its own `room/nick`/real-JID key
+verbatim, so it never clears the conference) and, when something is unread,
+`_clamp_read_state` resolves the remote `sid` in the local archive
+(`history.timestamp_for_ref`, `newest_timestamp`): a device that has seen at
+least as much as we have drops our counters and moves the read anchor to it,
+while a device that is behind us leaves the unread block untouched (an id we
+never stored is treated as "seen everything"). `_mds_apply_remote` skips a state
 equal to the one already recorded in `_mds_local`; that map is seeded at connect
 from the persisted unread state, so the startup catch-up does not wipe restored
 unread (see the unread-counters paragraph above).

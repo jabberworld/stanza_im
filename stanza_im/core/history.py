@@ -699,6 +699,38 @@ def message_exists(jid: str, stable_id: str) -> bool:
         return False
 
 
+def newest_timestamp(jid: str) -> str:
+    """Timestamp of the newest stored message ("" when there is none)."""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT timestamp FROM messages "
+                "ORDER BY timestamp DESC, id DESC LIMIT 1").fetchone()
+            return str(row[0] or "") if row else ""
+    except sqlite3.Error:
+        return ""
+
+
+def timestamp_for_ref(jid: str, stable_id: str) -> str:
+    """Timestamp of the stored message carrying *stable_id* ("" when unknown).
+
+    *stable_id* matches the same references as :func:`message_exists`.
+    """
+    if not stable_id:
+        return ""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT timestamp FROM messages WHERE archive_id = ? "
+                "OR origin_id = ? OR message_id = ? LIMIT 1",
+                (stable_id, stable_id, stable_id)).fetchone()
+            return str(row[0] or "") if row else ""
+    except sqlite3.Error:
+        return ""
+
+
 def first_id(jid: str) -> int | None:
     """Return the smallest stored message id for *jid*, or ``None``."""
     try:
@@ -874,6 +906,14 @@ async def load_older_timestamp_async(jid: str, before: str,
                                      limit: int = 200) -> list[dict]:
     return await asyncio.to_thread(load_older_timestamp, jid, before,
                                    limit=limit)
+
+
+async def newest_timestamp_async(jid: str) -> str:
+    return await asyncio.to_thread(newest_timestamp, jid)
+
+
+async def timestamp_for_ref_async(jid: str, stable_id: str) -> str:
+    return await asyncio.to_thread(timestamp_for_ref, jid, stable_id)
 
 
 async def message_exists_async(jid: str, stable_id: str) -> bool:

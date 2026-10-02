@@ -1686,8 +1686,13 @@ Registers XEP plugins (conditionally where noted):
   delivered through the shared "PEP Event" `MatchXPath` stanza handler (same
   routing as the extended-presence notifications, §14.10.1 — slixmpp's
   `message` event requires a `<body>`); a catch-up fetch after bind also
-  applies remote displayed states (`mds_displayed` event):
-  unread is cleared and an "Displayed on another device" status line is added
+  applies remote displayed states (`mds_displayed(chat_jid, sid)` event):
+  the chat JID is resolved to our conversation key (a private message keeps its
+  own key, a full address collapses to the bare JID) and the remote `sid` is
+  resolved in the local archive — a device at or beyond our newest message
+  clears the unread/mention counters and moves the read anchor to it, while a
+  device behind us (or an id we never stored) clears them; an
+  "Displayed on another device" status line is added
   to an open chat. `_mds_apply_remote` skips a state equal to `_mds_local`;
   on login `MainWindow` seeds `_mds_local` from the persisted unread state
   (`client.set_displayed_state`), so the startup catch-up does not wipe restored

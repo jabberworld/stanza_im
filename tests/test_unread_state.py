@@ -4,6 +4,7 @@ Run with:
     LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu \
     QT_QPA_PLATFORM=offscreen python3 tests/test_unread_state.py
 """
+import asyncio
 import os
 import stat
 import sys
@@ -162,13 +163,76 @@ c.on("mds_displayed", win._on_mds_displayed)
 c._mds_apply_remote("carol@example.com", "carol-sid-old")
 check("stale catch-up keeps restored unread",
       win._unread_counts.get("carol@example.com") == 4)
+
+
+# the clamp reads the archive off-loop, so run the scheduled task here
+_pending = []
+_start_task = win._start_task
+win._start_task = _pending.append
 c._mds_apply_remote("carol@example.com", "carol-sid-new")
+win._start_task = _start_task
+asyncio.get_event_loop().run_until_complete(
+    asyncio.gather(*_pending, return_exceptions=True))
 check("newer remote state clears unread",
       "carol@example.com" not in win._unread_counts)
 check("seed keeps blank sids out",
       c._mds_local.get("carol@example.com") == "carol-sid-new")
 
-# 5. static wiring ------------------------------------------------------------
+# 5. a remote displayed state is clamped against our own unread block -------
+from stanza_im.core import history
+
+for _sid, _ts in (("arc-1", "2026-10-02T10:00:00Z"),
+                  ("arc-2", "2026-10-02T11:00:00Z")):
+    history.store_message("dave@example.com", "incoming", f"m {_sid}", _ts,
+                          sender="dave", archive_id=_sid, origin_id=_sid,
+                          message_id=_sid)
+check("the archive resolves a displayed id to its timestamp",
+      history.timestamp_for_ref("dave@example.com", "arc-1")
+      == "2026-10-02T10:00:00Z"
+      and history.newest_timestamp("dave@example.com")
+      == "2026-10-02T11:00:00Z")
+
+
+def _remote(key, sid):
+    """Feed a remote XEP-0490 state through the real handler and settle it."""
+    pending = []
+    start_task = win._start_task
+    win._start_task = pending.append
+    try:
+        win._on_mds_displayed(key, sid)
+    finally:
+        win._start_task = start_task
+    asyncio.get_event_loop().run_until_complete(
+        asyncio.gather(*pending, return_exceptions=True))
+
+
+win._unread_chats["dave@example.com"] = unread_state.blank()
+win._unread_chats["dave@example.com"]["unread"] = 2
+win._recount_unread()
+_remote("dave@example.com", "arc-2")
+check("a device that read everything clears our unread",
+      win._unread_counts.get("dave@example.com", 0) == 0
+      and win._unread_chats["dave@example.com"]["read_sid"] == "arc-2"
+      and win._unread_chats["dave@example.com"]["read_ts"]
+      == "2026-10-02T11:00:00Z")
+
+win._unread_chats["dave@example.com"]["unread"] = 2
+win._recount_unread()
+_remote("dave@example.com", "arc-1")
+check("a device behind us keeps the unread block",
+      win._unread_counts.get("dave@example.com") == 2
+      and win._unread_chats["dave@example.com"]["read_sid"] == "arc-2")
+
+win._pm_targets["room@conf.example/dave"] = ("room@conf.example", "dave")
+check("a private message resolves to its own conversation",
+      win._resolve_mds_key("room@conf.example/dave")
+      == "room@conf.example/dave")
+check("a bare room address stays the conference",
+      win._resolve_mds_key("room@conf.example") == "room@conf.example")
+check("a one-to-one chat resolves to its bare jid",
+      win._resolve_mds_key("bob@example.com/stanza") == "bob@example.com")
+
+# 6. static wiring ------------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
                encoding="utf-8").read()
