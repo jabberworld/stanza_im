@@ -236,7 +236,7 @@ server throttles repeats with `<error type='wait'><resource-constraint/>`) is
 matched on the same bodyless path; the sent message's `id` is tracked in
 `JabberClient._voice_requests` and `_voice_request_error` turns the reply into
 `voice_request_failed(room, condition, text)`.
-The MUC header gains a «Попросить голос» bell/megaphone button
+The MUC action panel above the input gains a «Попросить голос» bell/megaphone button
 (`ChatWidget.set_voice_request`, icon `voice-request.svg`), visible/enabled only
 when we are a `visitor` **and** the room is moderated (`MainWindow.
 _apply_voice_request`, from `disco#info` features `muc_membersonly`/

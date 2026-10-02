@@ -550,18 +550,6 @@ class ChatWidget(QtWidgets.QWidget):
             lambda: self.muc_config_requested.emit(self.jid))
         header.addWidget(self._config_btn)
 
-        # "Ask for voice" (XEP-0045 §7.13) — MUC only, enabled for a visitor in
-        # a moderated room.
-        self._voice_btn = QtWidgets.QToolButton(self)
-        self._voice_btn.setIcon(self._chat_icon("voice-request.svg"))
-        self._voice_btn.setToolTip(tr("muc_ask_voice"))
-        self._voice_btn.setVisible(False)
-        self._voice_btn.setEnabled(False)
-        self._voice_btn.setAutoRaise(True)
-        self._voice_btn.clicked.connect(
-            lambda: self.voice_requested.emit(self.jid))
-        header.addWidget(self._voice_btn)
-
         if self.is_muc:
             layout.addLayout(header)
 
@@ -717,6 +705,18 @@ class ChatWidget(QtWidgets.QWidget):
         self._attention_btn.setVisible(False)
         actions_row.addWidget(self._attention_btn)
         actions_row.addStretch(1)
+
+        # "Ask for voice" (XEP-0045 §7.13) — MUC only, enabled for a visitor in
+        # a moderated room; sits at the right edge of the action row.
+        self._voice_btn = QtWidgets.QToolButton(self)
+        self._voice_btn.setIcon(self._chat_icon("voice-request.svg"))
+        self._voice_btn.setToolTip(tr("muc_ask_voice"))
+        self._voice_btn.setVisible(False)
+        self._voice_btn.setEnabled(False)
+        self._voice_btn.setAutoRaise(True)
+        self._voice_btn.clicked.connect(
+            lambda: self.voice_requested.emit(self.jid))
+        actions_row.addWidget(self._voice_btn)
         chat_col.addLayout(actions_row)
 
         self._call_icon_idle = QtGui.QIcon(self._call_btn.icon())

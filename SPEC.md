@@ -1278,7 +1278,8 @@ form value changed, as a fresh `type='submit'` form built by
 `client.muc_set_config(room, values)` (the server's own form is never mutated).
 
 **Voice requests (XEP-0045 §7.13).** A `visitor` in a moderated room can ask for
-voice with the «Попросить голос» header button (`ChatWidget.set_voice_request`,
+voice with the «Попросить голос» button on the action panel above the input
+(`ChatWidget.set_voice_request`,
 icon `voice-request.svg`; visible/enabled only when we are a visitor and the room
 advertises `muc_membersonly`/`muc_moderated`, `MainWindow._apply_voice_request`).
 It sends a bodyless `<message>` (**no `type`**) with a `muc#request` data form
