@@ -224,10 +224,14 @@ builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
 only JIDs). [`tests/test_muc_config.py`]
 
 **Voice requests (XEP-0045 §7.13)**: a visitor in a moderated room asks for
-voice with a bodyless `<message type='groupchat'><x xmlns='…muc#user'><item
-affiliation='member'/></x></message>` (`JabberClient.request_voice`); the stanza
-is intercepted by the mediated-invite matcher (`_muc_voice_request` distinguishes
-it from an `<invite/>`) and emitted as `muc_voice_requested(room, jid, nick)`.
+voice with a bodyless `<message>` (**no `type`** — a `groupchat` type would be a
+broadcast and is rejected with `forbidden`) carrying a `muc#request` data form
+(`FORM_TYPE=http://jabber.org/protocol/muc#request`, `muc#role=participant`);
+`JabberClient.request_voice` builds it and never sets `from`. The stanza is
+matched by its own `MatchPath` on `message/{jabber:x:data}x`
+(`_on_muc_voice_request_stanza`) — a legacy `<x xmlns='…muc#user'><item
+affiliation='member'/></x>` shape is still recognised by `_muc_voice_request` —
+and emitted as `muc_voice_requested(room, jid, nick)`.
 The MUC header gains a «Попросить голос» bell/megaphone button
 (`ChatWidget.set_voice_request`, icon `voice-request.svg`), visible/enabled only
 when we are a `visitor` **and** the room is moderated (`MainWindow.
@@ -235,8 +239,9 @@ _apply_voice_request`, from `disco#info` features `muc_membersonly`/
 `muc_moderated` emitted by `_fetch_muc_info`). Incoming requests are surfaced
 only to moderators/owners/admins (`_can_moderate_room`): an Events row
 (`_VoiceRequestRow`) «Пользователь … просит право голоса» with «Предоставить»
-(`client.grant_voice` → `muc#admin` affiliation `member`) / «Отклонить»
-(marks the row only), plus an OSD and a tray balloon. [`tests/test_muc_voice.py`]
+(`client.grant_voice(room, nick, jid)` → `muc#admin` `<item role='participant'/>`,
+XEP-0045 §8.3) / «Отклонить» (marks the row only), plus an OSD and a tray
+balloon. [`tests/test_muc_voice.py`]
 
 **Hats (XEP-0317, `include/hats.py` + `ui/hats_dialog.py`)**: occupants'
 `<hats xmlns='urn:xmpp:hats:0'/>` presence lists are parsed by

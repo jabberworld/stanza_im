@@ -129,12 +129,13 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
 class _VoiceRequestRow(QtWidgets.QWidget):
     """Events tab row: a MUC visitor asking for voice (XEP-0045 §7.13)."""
 
-    granted = QtCore.pyqtSignal(str, str)   # room, jid
-    refused = QtCore.pyqtSignal(str, str)   # room, jid
+    granted = QtCore.pyqtSignal(str, str, str)   # room, nick, jid
+    refused = QtCore.pyqtSignal(str, str, str)   # room, nick, jid
 
     def __init__(self, room: str, nick: str, jid: str, parent=None):
         super().__init__(parent)
         self.room = room
+        self.nick = nick
         self.jid = jid
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
@@ -155,11 +156,12 @@ class _VoiceRequestRow(QtWidgets.QWidget):
         buttons = QtWidgets.QHBoxLayout()
         self._grant = QtWidgets.QPushButton(tr("event_voice_grant"), self)
         self._grant.setIcon(QtGui.QIcon(find_icon("ok.png")))
-        self._grant.clicked.connect(lambda: self.granted.emit(self.room, self.jid))
+        self._grant.clicked.connect(
+            lambda: self.granted.emit(self.room, self.nick, self.jid))
         self._refuse = QtWidgets.QPushButton(tr("event_voice_deny"), self)
         self._refuse.setIcon(QtGui.QIcon(find_icon("process-stop.png")))
         self._refuse.clicked.connect(
-            lambda: self.refused.emit(self.room, self.jid))
+            lambda: self.refused.emit(self.room, self.nick, self.jid))
         buttons.addWidget(self._grant)
         buttons.addWidget(self._refuse)
         buttons.addStretch(1)
@@ -884,21 +886,23 @@ class MainWindow(QtWidgets.QMainWindow):
                            on_click=lambda: self._osd_click(room))
         self._tray.show_message(APP_NAME, text)
 
-    def _on_voice_grant(self, room: str, jid: str) -> None:
-        if self._client and jid:
-            self._start_task(self._client.grant_voice(room, jid))
-        self._mark_voice_row(room, jid, granted=True)
+    def _on_voice_grant(self, room: str, nick: str, jid: str) -> None:
+        if self._client and (nick or jid):
+            self._start_task(self._client.grant_voice(room, nick, jid))
+        self._mark_voice_row(room, nick, jid, granted=True)
 
-    def _on_voice_refuse(self, room: str, jid: str) -> None:
+    def _on_voice_refuse(self, room: str, nick: str, jid: str) -> None:
         # "Refuse" only marks the row — no stanza is sent (per design).
-        self._mark_voice_row(room, jid, granted=False)
+        self._mark_voice_row(room, nick, jid, granted=False)
 
-    def _mark_voice_row(self, room: str, jid: str, granted: bool) -> None:
+    def _mark_voice_row(self, room: str, nick: str, jid: str,
+                        granted: bool) -> None:
         for i in range(self._events_list.count()):
             item = self._events_list.item(i)
             widget = self._events_list.itemWidget(item)
             if (isinstance(widget, _VoiceRequestRow)
-                    and widget.room == room and widget.jid == jid):
+                    and widget.room == room and widget.nick == nick
+                    and widget.jid == jid):
                 widget.mark(granted)
                 break
 

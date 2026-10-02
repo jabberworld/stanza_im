@@ -1281,12 +1281,15 @@ form value changed, as a fresh `type='submit'` form built by
 voice with the «Попросить голос» header button (`ChatWidget.set_voice_request`,
 icon `voice-request.svg`; visible/enabled only when we are a visitor and the room
 advertises `muc_membersonly`/`muc_moderated`, `MainWindow._apply_voice_request`).
-It sends a bodyless `<message type='groupchat'><x xmlns='…muc#user'><item
-affiliation='member'/></x></message>` (`JabberClient.request_voice`). Moderators
-(`_can_moderate_room`) see the request as an Events row (`_VoiceRequestRow`:
-«Пользователь … просит право голоса») with «Предоставить» (`client.grant_voice` →
-`muc#admin` affiliation `member`) / «Отклонить» (marks the row only), plus an OSD
-and a tray balloon.
+It sends a bodyless `<message>` (**no `type`**) with a `muc#request` data form
+(`FORM_TYPE` + `muc#role=participant`); `from` is never set
+(`JabberClient.request_voice`). Incoming requests are matched by a dedicated
+`MatchXPath` on `message/{jabber:x:data}x` (a legacy `<x muc#user><item
+affiliation='member'/></x>` is also accepted). Moderators (`_can_moderate_room`)
+see the request as an Events row (`_VoiceRequestRow`: «Пользователь … просит
+право голоса») with «Предоставить» (`client.grant_voice(room, nick, jid)` →
+`muc#admin` `<item role='participant'/>`, XEP-0045 §8.3) / «Отклонить» (marks the
+row only), plus an OSD and a tray balloon.
 
 The MUC toolbar's vCard button opens the room's own vCard
 (`MainWindow._show_muc_room_info` → `_show_profile(room)`). `VCardInfoDialog`

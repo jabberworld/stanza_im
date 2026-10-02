@@ -45,10 +45,21 @@ def _msg(frm: str, inner: str, mtype: str = "groupchat") -> slixmpp.Message:
 
 # 1. Protocol parsing --------------------------------------------------------
 MUC_USER = "http://jabber.org/protocol/muc#user"
+MUC_REQUEST = "http://jabber.org/protocol/muc#request"
 voice = _msg("room@conf.example/guest",
              f"<x xmlns='{MUC_USER}'><item affiliation='member'/></x>")
-check("a voice request is parsed",
+check("a legacy voice request is parsed",
       _muc_voice_request(voice) == {
+          "room": "room@conf.example", "nick": "guest",
+          "from": "room@conf.example/guest"})
+# The standard data-form shape (XEP-0045 §7.13).
+form = _msg("room@conf.example/guest",
+            "<x xmlns='jabber:x:data' type='submit'>"
+            f"<field var='FORM_TYPE'><value>{MUC_REQUEST}</value></field>"
+            "<field var='muc#role' type='list-single'>"
+            "<value>participant</value></field></x>")
+check("a data-form voice request is parsed",
+      _muc_voice_request(form) == {
           "room": "room@conf.example", "nick": "guest",
           "from": "room@conf.example/guest"})
 invite = _msg("room@conf.example",
@@ -67,25 +78,12 @@ check("a non-member item is not a voice request",
 from stanza_im.core.client import JabberClient, NS_MUC_USER  # noqa: E402
 
 
-class _FakeMessage:
-    def __init__(self):
-        self.attrs = {}
-        self.xml = ET.Element("message")
-        self.sent = False
-
-    def __setitem__(self, key, value):
-        self.attrs[key] = value
-
-    def send(self):
-        self.sent = True
-
-
 class _FakeXMPP:
     def __init__(self, owner):
         self._owner = owner
 
     def Message(self):
-        m = _FakeMessage()
+        m = slixmpp.Message()
         self._owner.messages.append(m)
         return m
 
@@ -96,23 +94,52 @@ class _ReqClient(JabberClient):
         self.xmpp = _FakeXMPP(self)
 
 
+class _FakeMuc:
+    def __init__(self):
+        self.roles = []
+
+    async def set_role(self, room, nick, role, reason=""):
+        self.roles.append((room, nick, role))
+
+
+class _GrantClient(JabberClient):
+    def __init__(self):
+        self._muc = _FakeMuc()
+        self.xmpp = type("X", (), {"plugin": {"xep_0045": self._muc}})()
+
+
+gc = _GrantClient()
+asyncio.get_event_loop().run_until_complete(
+    gc.grant_voice("room@conf.example", "guest", "guest@x"))
+check("grant_voice asks for the participant role (XEP-0045 §8.3)",
+      gc._muc.roles == [("room@conf.example", "guest", "participant")])
+
+
 req = _ReqClient()
 check("request_voice refuses an empty room",
       req.request_voice("") is False)
 check("request_voice accepts a room",
       req.request_voice("room@conf.example") is True)
 sent = req.messages[-1]
+xml = sent.xml
 check("the voice message is not sent with a 'from'",
-      "from" not in sent.attrs)
+      xml.get("from") is None)
 check("the voice message targets the room",
-      sent.attrs.get("to") == "room@conf.example")
-check("the voice message is a groupchat message",
-      sent.attrs.get("type") == "groupchat")
-check("the voice message was actually sent", sent.sent is True)
-_x = sent.xml.find("{%s}x" % NS_MUC_USER)
-_item = _x.find("{%s}item" % NS_MUC_USER) if _x is not None else None
-check("the voice request carries affiliation=member",
-      _item is not None and _item.get("affiliation") == "member")
+      xml.get("to") == "room@conf.example")
+check("the voice message has no groupchat type",
+      (xml.get("type") or "") != "groupchat")
+_x = xml.find("{jabber:x:data}x")
+_fields = {f.get("var"): f for f in (_x if _x is not None else [])}
+_fmt = _fields.get("FORM_TYPE")
+check("the voice request carries the muc#request FORM_TYPE",
+      _fmt is not None and next(
+          (c.text for c in _fmt if c.tag == "{jabber:x:data}value"), "")
+      == MUC_REQUEST)
+_role = _fields.get("muc#role")
+check("the voice request asks for the participant role",
+      _role is not None and next(
+          (c.text for c in _role if c.tag == "{jabber:x:data}value"), "")
+      == "participant")
 
 
 # 3. MainWindow gating + events ---------------------------------------------
@@ -129,8 +156,8 @@ class _StubClient:
     def __getattr__(self, _name):
         return lambda *a, **k: None
 
-    async def grant_voice(self, room, jid):
-        self.granted.append((room, jid))
+    async def grant_voice(self, room, nick, jid=""):
+        self.granted.append((room, nick, jid))
 
     def request_voice(self, room):
         self.requested.append(room)
@@ -163,10 +190,12 @@ w._muc_users[room]["me"] = {"nick": "me", "role": "moderator",
 w._on_muc_voice_request(room, "guest@x", "guest")
 row = w._events_list.itemWidget(w._events_list.item(w._events_list.count() - 1))
 check("a moderator gets a voice-request row",
-      isinstance(row, _VoiceRequestRow) and row.jid == "guest@x")
-row.granted.emit(room, "guest@x")
+      isinstance(row, _VoiceRequestRow) and row.jid == "guest@x"
+      and row.nick == "guest")
+row.granted.emit(room, "guest", "guest@x")
 asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.05))
-check("grant calls client.grant_voice", stub.granted == [(room, "guest@x")])
+check("grant calls client.grant_voice with the nick",
+      stub.granted == [(room, "guest", "guest@x")])
 check("the row is marked granted after grant",
       "granted" in row._result.text().lower()
       or row._result.text() != "")
@@ -175,9 +204,10 @@ check("the row is marked granted after grant",
 row2 = None
 w._on_muc_voice_request(room, "other@x", "other")
 row2 = w._events_list.itemWidget(w._events_list.item(w._events_list.count() - 1))
-row2.refused.emit(room, "other@x")
+row2.refused.emit(room, "other", "other@x")
 check("refuse does not send anything to the server",
-      stub.granted == [(room, "guest@x")] and row2._result.text() != "")
+      stub.granted == [(room, "guest", "guest@x")]
+      and row2._result.text() != "")
 
 # 4. Button gating -----------------------------------------------------------
 w._chat_window.open_groupchat(room, "me", "Room")

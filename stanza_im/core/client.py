@@ -511,25 +511,49 @@ def muc_mediated_invite_from_message(msg) -> dict | None:
     }
 
 
-def _muc_voice_request(msg) -> dict | None:
-    """Detect a XEP-0045 §7.13 voice request in a ``muc#user`` message.
+NS_MUC_REQUEST = "http://jabber.org/protocol/muc#request"
 
-    A visitor asks for voice with a bodyless ``<message type='groupchat'>``
-    carrying ``<x xmlns='…muc#user'><item affiliation='member'/></x>``.
+
+def _muc_voice_request(msg) -> dict | None:
+    """Detect a XEP-0045 §7.13 voice request.
+
+    Two shapes are recognised:
+
+    * the standard one — a ``<message>`` (no ``type``) with a
+      ``muc#request`` data form (``FORM_TYPE`` + ``muc#role``);
+    * a legacy ``<x xmlns='…muc#user'><item affiliation='member'/></x>`` in a
+      ``<message>`` without an ``<invite/>``.
+
     Returns ``{"room", "nick", "from"}`` or ``None``.
     """
     xml = getattr(msg, "xml", None)
     if xml is None:
         return None
+    frm = str(msg["from"] or "")
+    room = frm.split("/", 1)[0]
+    nick = frm.split("/", 1)[1] if "/" in frm else ""
+
+    # Data-form request (XEP-0045 §7.13).
+    data = xml.find("{jabber:x:data}x")
+    if data is not None:
+        fields = {el.get("var"): el for el in data
+                  if str(el.tag) == "{jabber:x:data}field"}
+        fmt = fields.get("FORM_TYPE")
+        if fmt is not None:
+            value = next((c.text or "" for c in fmt
+                          if str(c.tag) == "{jabber:x:data}value"), "")
+            if value.strip() == NS_MUC_REQUEST:
+                # The room is the sender's bare JID (``from = room/nick``);
+                # ``to`` is our own address, not the room.
+                return {"room": room, "nick": nick, "from": frm}
+
+    # Legacy muc#user shape.
     user = xml.find("{%s}x" % NS_MUC_USER)
     if user is None or user.find("{%s}invite" % NS_MUC_USER) is not None:
         return None
     item = user.find("{%s}item" % NS_MUC_USER)
     if item is None or (item.get("affiliation") or "") != "member":
         return None
-    frm = str(msg["from"] or "")
-    room = frm.split("/", 1)[0]
-    nick = frm.split("/", 1)[1] if "/" in frm else ""
     return {"room": room, "nick": nick, "from": frm}
 
 
@@ -1384,6 +1408,15 @@ class JabberClient:
                     invite["room"], invite["inviter"], invite["mediated"])
         self.emit("muc_invite_received", invite["inviter"], invite["room"],
                   invite["password"], invite["reason"])
+
+    async def _on_muc_voice_request_stanza(self, msg) -> None:
+        """Route a bodyless ``jabber:x:data`` message when it is a voice ask."""
+        voice = _muc_voice_request(msg)
+        if voice is None:
+            return
+        logger.info("VOICE request in %s from %s", voice["room"], voice["from"])
+        self.emit("muc_voice_requested", voice["room"], voice["from"],
+                  voice["nick"])
 
     async def _on_muc_mediated_invite_stanza(self, msg) -> None:
         """A room-relayed invitation may carry only the XEP-0045 ``muc#user``
@@ -3592,28 +3625,54 @@ class JabberClient:
         return self.send_message(jid, body, mtype=mtype, replace_id=replace_id)
 
     def request_voice(self, room: str) -> bool:
-        """Ask the room for voice (XEP-0045 §7.13, affiliation ``member``).
+        """Ask the room for voice (XEP-0045 §7.13).
 
-        The ``from`` attribute is deliberately left unset: the server stamps
-        our full JID, and a client-supplied ``from`` closes the stream with
-        ``invalid-from`` / "Improper 'from' attribute".
+        A visitor submits a ``muc#request`` data form (``muc#role`` =
+        ``participant``) in a ``<message>`` addressed to the room; per the XEP
+        the message carries **no** ``type`` (a ``groupchat`` type is treated as
+        a broadcast and rejected with ``forbidden``) and no ``from`` (the
+        server stamps it — a client-supplied ``from`` closes the stream with
+        ``invalid-from``).
         """
         if not isinstance(room, str) or not room.strip():
             return False
         room = room.strip()
+        from slixmpp.plugins.xep_0004.stanza import Form, FormField
         msg = self.xmpp.Message()
         msg["to"] = room
-        msg["type"] = "groupchat"
-        x = ET.SubElement(msg.xml, "{%s}x" % NS_MUC_USER)
-        item = ET.SubElement(x, "{%s}item" % NS_MUC_USER)
-        item.set("affiliation", "member")
+        form = Form()
+        form["type"] = "submit"
+        fmt = FormField()
+        fmt["var"] = "FORM_TYPE"
+        fmt["value"] = "http://jabber.org/protocol/muc#request"
+        role = FormField()
+        role["var"] = "muc#role"
+        role["type"] = "list-single"
+        role["value"] = "participant"
+        form.append(fmt)
+        form.append(role)
+        msg.append(form)
         logger.debug("VOICE request to %s", room)
         msg.send()
         return True
 
-    async def grant_voice(self, room: str, jid: str) -> None:
-        """Grant voice to *jid* (affiliation ``member``)."""
-        await self.muc_set_affiliation(room, jid, "member")
+    async def grant_voice(self, room: str, nick: str, jid: str = "") -> None:
+        """Grant voice to an occupant (XEP-0045 §8.3).
+
+        The moderator sends ``<iq type='set'><query xmlns='muc#admin'>
+        <item nick='…' role='participant'/></query></iq>``.  *nick* is the
+        occupant's room nickname; when it is unknown the bare/full *jid* is
+        used instead (``<item jid=…>``).
+        """
+        muc = self.xmpp.plugin["xep_0045"]
+        if nick:
+            await muc.set_role(room, nick, "participant", reason="")
+            return
+        iq = self.xmpp.make_iq_set(ito=room)
+        item = iq["mucadmin_query"]["item"]
+        item["jid"] = jid
+        item["role"] = "participant"
+        await iq.send()
 
     def set_muc_role(self, room: str, nick: str, role: str) -> None:
         """Request a MUC role change for an occupant."""
