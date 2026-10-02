@@ -2372,7 +2372,10 @@ class GroupChatInfo:     # room, nick, subject, users
   `QWebEngineView.lastContextMenuRequest()` and always shows the app's own menu
   (never Chromium's): over media the copy/save/view entries, otherwise
   «Поделиться» for a media URL, a link or the selected text (only `http(s)`),
-  copy link / open in browser, copy the selection, and "Select all". The media
+  the `xmpp:` bookmark/contact entries (see §14.12: `?join` → bookmark,
+  `?roster` → contact, bare JID → both), «В заметки» for a selection while the
+  Notes plugin is active, copy link / open in browser, copy the selection, and
+  "Select all". The media
   kind comes from the `MediaType*` enum members, and an embedded image's
   shareable original URL is decoded from its `stanza:view:` link (the request's
   media URL is only the data-URI thumbnail).

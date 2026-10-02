@@ -886,8 +886,11 @@ from the `MediaType*` enum members, and for an embedded image the shareable
 original URL is decoded from its `stanza:view:` link (the reported media URL is
 only the data-URI thumbnail). Over media it keeps the
 copy/Save as…/open viewer/fullscreen entries; otherwise it offers «Поделиться»
-(«Share», only for `http(s)`), copy link / open in browser for a web link, copy
-for a selection, and "Select all". Sharing (and an address-less
+(«Share», only for `http(s)`), the `xmpp:` bookmark/contact entries (see above),
+copy link / open in browser for a web link, copy for a selection, «В заметки»
+(«Add to notes», only while the Notes plugin is active — it adds the selected
+text as a note, title `@<name> <date> <time>`, tag «Сообщения») and "Select
+all". Sharing (and an address-less
 ``xmpp:?message;body=…`` URI) opens `ShareDialog` — a checkable list of the
 roster contacts and the conferences we are in — and sends each chosen target a
 `«Переслано:»` line followed by the content as a XEP-0393 quote
@@ -1268,7 +1271,11 @@ bare JID / `?message` opens the chat (prefilling `body`), `?join` opens the
 conference join dialog (prepopulating room+server and persisting the server),
 `?roster`/`?subscribe` open `AddContactDialog` prefilled with the JID. An
 address-less `xmpp:?message;body=…` (no JID) opens `ShareDialog` with that body
-instead.
+instead. The chat **context menu** on an `xmpp:` link offers bookmark/contact
+entries by action (`_xmpp_menu_target`): `?join` → only «Добавить в закладки»
+(opens `BookmarkDialog`, or the edit dialog when it already exists,
+`MainWindow._on_bookmark_jid_requested`), `?roster`/`?subscribe` → only «Добавить
+контакт», a bare `xmpp:user@server` (ambiguous) → both.
 Unrecognized actions warn the user. The vCard dialog shows its JID with an
 icon-only copy button right beside the address (toolbar-style
 `QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",

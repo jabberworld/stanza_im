@@ -352,6 +352,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_media_copy_requested)
         self._chat_window.share_requested.connect(self._on_share_requested)
         self._chat_window.note_requested.connect(self._on_note_requested)
+        self._chat_window.bookmark_jid_requested.connect(
+            self._on_bookmark_jid_requested)
+        self._chat_window.add_contact_jid_requested.connect(
+            lambda jid: self._on_add_contact(jid=jid))
         self._chat_window.voice_requested.connect(self._on_voice_requested)
         self._chat_window.geo_view_requested.connect(
             self._on_geo_view_requested)
@@ -1485,6 +1489,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_bookmark_new(self) -> None:
         from stanza_im.ui.bookmark_dialog import BookmarkDialog
         dlg = BookmarkDialog(self._conference_servers(),
+                             default_nick=self._default_nick(), parent=self)
+        if not dlg.exec():
+            return
+        self._save_bookmark_values(dlg.collect())
+
+    def _on_bookmark_jid_requested(self, jid: str) -> None:
+        """Add/edit a bookmark for an ``xmpp:`` link's room JID."""
+        jid = (jid or "").strip()
+        if not jid or not self._client:
+            return
+        from stanza_im.ui.bookmark_dialog import BookmarkDialog
+        existing = self._bookmarks.get(jid)
+        bookmark = existing if existing else {"jid": jid}
+        servers = self._conference_servers()
+        _, _, server = jid.partition("@")
+        if server and server not in servers:
+            servers.insert(0, server)
+        dlg = BookmarkDialog(servers, bookmark=bookmark,
                              default_nick=self._default_nick(), parent=self)
         if not dlg.exec():
             return

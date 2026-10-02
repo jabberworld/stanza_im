@@ -164,6 +164,27 @@ fmt_body = fmt.group(1) if fmt else ""
 check("fmtCopyTime parses the timestamp with Date", "new Date(full)" in fmt_body)
 check("fmtCopyTime uses local getters",
       "getHours" in fmt_body and "getMinutes" in fmt_body)
+
+# 6b. The xmpp: context-menu routing (conference -> bookmark, contact -> add).
+from stanza_im.ui.chat_view import ChatView  # noqa: E402
+
+t = ChatView._xmpp_menu_target
+check("an xmpp ?join link is a conference",
+      t("xmpp:room@conf.example?join") == ("room@conf.example", "join"))
+check("an xmpp ?roster link is a contact",
+      t("xmpp:user@server.example?roster") == ("user@server.example", "roster"))
+check("a bare xmpp jid parses with an empty action",
+      t("xmpp:user@server.example") == ("user@server.example", ""))
+check("a non-xmpp link is not a target", t("https://example.com") is None)
+check("an xmpp link without @ is not a target",
+      t("xmpp:server.example?join") is None)
+# The context-menu text mentions the two new entries.
+check("the bookmark entry has a label",
+      "ctx_bookmark_add" in view_src)
+check("the add-contact entry has a label",
+      "ctx_add_contact_short" in view_src)
+check("the selection menu offers Add to notes",
+      'tr("chat_to_note")' in view_src and "_notes_enabled" in view_src)
 # _install_action_js must substitute every placeholder the template uses.
 install = re.search(r"def _install_action_js\(self\):(.*?)runJavaScript",
                     view_src, re.S)

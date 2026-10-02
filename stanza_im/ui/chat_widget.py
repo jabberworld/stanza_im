@@ -413,6 +413,8 @@ class ChatWidget(QtWidgets.QWidget):
     media_copy_requested = QtCore.pyqtSignal(str)             # url
     share_requested = QtCore.pyqtSignal(str)                  # shared content
     note_requested = QtCore.pyqtSignal(str, str)              # chat_key, content
+    bookmark_jid_requested = QtCore.pyqtSignal(str)           # xmpp: room jid
+    add_contact_jid_requested = QtCore.pyqtSignal(str)        # xmpp: contact jid
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, new_body
 
@@ -482,6 +484,10 @@ class ChatWidget(QtWidgets.QWidget):
         view.media_copy_requested.connect(self.media_copy_requested)
         view.media_open_requested.connect(self._on_media_open_requested)
         view.share_requested.connect(self.share_requested)
+        view.bookmark_requested.connect(self.bookmark_jid_requested)
+        view.add_contact_requested.connect(self.add_contact_jid_requested)
+        view.note_requested.connect(
+            lambda content: self.note_requested.emit(self.jid, content))
         view.near_top.connect(self._on_near_top)
         return view
 

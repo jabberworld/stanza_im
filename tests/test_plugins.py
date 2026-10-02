@@ -373,12 +373,22 @@ check("a MUC note uses the room display name",
 check("the earlier note survived the second add",
       any(n["title"] == "@bob 2026-10-01 12:34:56" for n in mw_notes["notes"]))
 
+# A note from a text selection: the body is the raw selected text (no
+# forwarded prefix), the title still gets "@<name> <date> <time>".
+mw._on_note_requested("bob@example.com", "some selected words")
+mw_loop.run_until_complete(__import__("asyncio").sleep(0.2))
+sel = mw_notes["notes"][-1]
+check("a note from a selection keeps the raw text",
+      sel["text"] == "some selected words")
+check("a note from a selection uses the '@name date time' title",
+      sel["title"].startswith("@bob ") and sel["tags"] == "Сообщения")
+
 # Gating: a request is ignored while the plugin is inactive.
 mw._notes_feature = False
-count = len(mw._notes_page._notes)
+count = len(mw_notes["notes"])
 mw._on_note_requested("bob@example.com", "[2026-10-01 00:00:00] x: y")
 check("note requests are ignored when the plugin is inactive",
-      len(mw._notes_page._notes) == count)
+      len(mw_notes["notes"]) == count)
 mw._notes_feature = True
 
 print()

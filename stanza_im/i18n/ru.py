@@ -417,6 +417,8 @@ STRINGS = {
     "ctx_show_history": "История переписки",
     "ctx_invite_to": "Пригласить в",
     "ctx_share": "Поделиться",
+    "ctx_bookmark_add": "Добавить в закладки",
+    "ctx_add_contact_short": "Добавить контакт",
     "ctx_copy": "Копировать",
     "ctx_open_link": "Открыть в браузере",
     "ctx_select_all": "Выделить всё",

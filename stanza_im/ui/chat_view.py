@@ -334,6 +334,9 @@ if HAS_WEBENGINE:
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
         share_requested = QtCore.pyqtSignal(str)            # shared content
+        bookmark_requested = QtCore.pyqtSignal(str)         # xmpp: room jid
+        add_contact_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
+        note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
 
         _LOAD_RETRY_LIMIT = 5
@@ -490,11 +493,22 @@ if HAS_WEBENGINE:
             """The standard chat menu: share / copy link / open / select all."""
             menu = QtWidgets.QMenu(self)
             web_link = link_url.lower().startswith(("http://", "https://"))
+            xmpp = self._xmpp_menu_target(link_url)
             if share_content:
                 menu.addAction(
                     tr("ctx_share"),
                     lambda c=share_content: self.share_requested.emit(c))
-            if web_link:
+            if xmpp is not None:
+                jid, action = xmpp
+                if action != "roster" and action != "subscribe":
+                    menu.addAction(
+                        tr("ctx_bookmark_add"),
+                        lambda j=jid: self.bookmark_requested.emit(j))
+                if action not in ("join",):
+                    menu.addAction(
+                        tr("ctx_add_contact_short"),
+                        lambda j=jid: self.add_contact_requested.emit(j))
+            elif web_link:
                 menu.addAction(
                     tr("media_copy_link"),
                     lambda u=link_url: QtWidgets.QApplication.clipboard().setText(u))
@@ -506,9 +520,31 @@ if HAS_WEBENGINE:
                 menu.addAction(
                     tr("ctx_copy"),
                     lambda t=selected: QtWidgets.QApplication.clipboard().setText(t))
+            if selected and getattr(self, "_notes_enabled", False):
+                menu.addAction(
+                    tr("chat_to_note"),
+                    lambda t=selected: self.note_requested.emit(t))
             menu.addSeparator()
             menu.addAction(tr("ctx_select_all"), self._select_all)
             menu.exec(event.globalPos())
+
+        @staticmethod
+        def _xmpp_menu_target(link_url: str):
+            """Return ``(jid, action)`` for an ``xmpp:`` link, else ``None``.
+
+            ``join`` is a conference, ``roster``/``subscribe`` a plain contact;
+            a bare ``xmpp:user@server`` is ambiguous (both entries are offered).
+            """
+            from stanza_im.include.xmpp_uri import parse_xmpp_uri
+            if not (link_url or "").lower().startswith("xmpp:"):
+                return None
+            parsed = parse_xmpp_uri(link_url)
+            if not parsed:
+                return None
+            jid = parsed.get("jid") or ""
+            if "@" not in jid:
+                return None
+            return jid, (parsed.get("action") or "").lower()
 
         def _select_all(self) -> None:
             try:
@@ -1938,6 +1974,9 @@ else:
         media_copy_requested = QtCore.pyqtSignal(str)       # url
         media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
         share_requested = QtCore.pyqtSignal(str)            # shared content
+        bookmark_requested = QtCore.pyqtSignal(str)         # xmpp: room jid
+        add_contact_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
+        note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
 
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
@@ -1945,6 +1984,7 @@ else:
             self._theme = theme
             self.highlight_nick = ""
             self._zoom = 1.0
+            self._notes_enabled = False
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -1971,18 +2011,51 @@ else:
             anchor = self.anchorAt(pos)
             selected = self.textCursor().selectedText().replace("\u2029", "\n")
             content = share_payload(anchor, "", "", selected)
+            to_add = []
             if content:
-                action = QtGui.QAction(tr("ctx_share"), menu)
-                action.triggered.connect(
-                    lambda _checked=False, payload=content:
-                    self.share_requested.emit(payload))
+                to_add.append((tr("ctx_share"), self.share_requested, content))
+            xmpp = self._xmpp_menu_target(anchor)
+            if xmpp is not None:
+                jid, action = xmpp
+                if action not in ("roster", "subscribe"):
+                    to_add.append((tr("ctx_bookmark_add"),
+                                   self.bookmark_requested, jid))
+                if action != "join":
+                    to_add.append((tr("ctx_add_contact_short"),
+                                   self.add_contact_requested, jid))
+            if selected and self._notes_enabled:
+                to_add.append((tr("chat_to_note"), self.note_requested, selected))
+            if to_add:
                 actions = menu.actions()
-                if actions:
-                    menu.insertAction(actions[0], action)
-                    menu.insertSeparator(actions[0])
-                else:
-                    menu.addAction(action)
+                anchor_action = actions[0] if actions else None
+                for label, signal, payload in to_add:
+                    action = QtGui.QAction(label, menu)
+                    action.triggered.connect(
+                        lambda _checked=False, sig=signal, p=payload:
+                        sig.emit(p))
+                    if anchor_action is not None:
+                        menu.insertAction(anchor_action, action)
+                    else:
+                        menu.addAction(action)
+                if anchor_action is not None:
+                    menu.insertSeparator(anchor_action)
             menu.exec(event.globalPos())
+
+        @staticmethod
+        def _xmpp_menu_target(link_url: str):
+            from stanza_im.include.xmpp_uri import parse_xmpp_uri
+            if not (link_url or "").lower().startswith("xmpp:"):
+                return None
+            parsed = parse_xmpp_uri(link_url)
+            if not parsed:
+                return None
+            jid = parsed.get("jid") or ""
+            if "@" not in jid:
+                return None
+            return jid, (parsed.get("action") or "").lower()
+
+        def set_notes_enabled(self, enabled: bool) -> None:
+            self._notes_enabled = bool(enabled)
 
         def set_chat_zoom(self, factor: float):
             """Set a persisted text-scale factor as the document font size."""

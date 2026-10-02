@@ -417,6 +417,8 @@ STRINGS = {
     "ctx_show_history": "Conversation History",
     "ctx_invite_to": "Invite to",
     "ctx_share": "Share",
+    "ctx_bookmark_add": "Add to bookmarks",
+    "ctx_add_contact_short": "Add contact",
     "ctx_copy": "Copy",
     "ctx_open_link": "Open in browser",
     "ctx_select_all": "Select all",
