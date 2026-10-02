@@ -1453,6 +1453,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
   `origin-id` → own message id — plus its raw timestamp), so an unread
   conversation can be restored from the point the user stopped reading.
+- A conversation is marked read when the user reaches the newest message in
+  the view they are looking at (`ChatView.bottom_reached` →
+  `MainWindow._on_chat_reached_bottom`); a background tab scrolling to its end
+  never clears its counters.
 - Opening an unread conversation resumes it there: the anchor is captured
   before the tab is opened (`MainWindow._restore_anchor_for` →
   `ChatWidget.set_restore_anchor`) and `set_history` scrolls to that message

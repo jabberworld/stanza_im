@@ -377,6 +377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._unified:
             self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
+        self._chat_window.bottom_reached.connect(self._on_chat_reached_bottom)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
         self._chat_window.set_muc_leave_confirm(self._confirm_muc_leave)
@@ -4661,6 +4662,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
+        self._reset_unread(jid)
+        if self._client:
+            self._client.mds_mark_displayed(jid)
+
+    def _on_chat_reached_bottom(self, jid: str):
+        """The active chat is scrolled to its newest message: it is read.
+
+        Only the conversation the user is actually looking at counts, so a
+        background tab reaching the bottom (a render, a paging, a restore)
+        never clears its counters.
+        """
+        if not jid or not self._chat_area_active():
+            return
+        if self._chat_window.current_jid() != jid:
+            return
         self._reset_unread(jid)
         if self._client:
             self._client.mds_mark_displayed(jid)

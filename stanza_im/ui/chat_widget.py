@@ -384,6 +384,7 @@ class ChatWidget(QtWidgets.QWidget):
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_sent = QtCore.pyqtSignal(str, str, str)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
+    bottom_reached = QtCore.pyqtSignal()     # the view sits at the newest msg
     link_clicked = QtCore.pyqtSignal(str)
     xmpp_link_clicked = QtCore.pyqtSignal(str)      # XEP-0147 xmpp: URI
     clear_history_requested = QtCore.pyqtSignal(str)       # jid
@@ -490,6 +491,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.note_requested.connect(
             lambda content: self.note_requested.emit(self.jid, content))
         view.near_top.connect(self._on_near_top)
+        view.bottom_reached.connect(self.bottom_reached)
         return view
 
     def _build_ui(self, theme: ChatThemeFactory):

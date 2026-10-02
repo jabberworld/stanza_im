@@ -327,6 +327,7 @@ if HAS_WEBENGINE:
 
         link_clicked = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
+        bottom_reached = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
@@ -360,6 +361,7 @@ if HAS_WEBENGINE:
             self._fraction = 1.0
             self._overflow = False
             self._near_top_hit = False
+            self._at_bottom_hit = True
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self._on_jump_clicked)
             self._bridge.reply_requested.connect(self.reply_requested)
@@ -1600,12 +1602,29 @@ window.__stanzaMentionRef = '';
             if self._fraction >= 0.999:
                 self._reset_unread_indicator()
             self._update_jump_button()
+            self._note_bottom()
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
             if self._fraction >= 0.999:
                 self._reset_unread_indicator()
             self._update_jump_button()
+            self._note_bottom()
+
+        def _note_bottom(self) -> None:
+            """Edge-triggered "the view sits at the newest message" report.
+
+            One signal per stay at the bottom (re-armed by scrolling up), so
+            the owner can mark the conversation read without being woken by
+            every scroll poll.
+            """
+            if self._fraction < 0.999:
+                self._at_bottom_hit = False
+                return
+            if self._at_bottom_hit:
+                return
+            self._at_bottom_hit = True
+            self.bottom_reached.emit()
 
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
@@ -1994,6 +2013,7 @@ else:
 
         link_clicked = QtCore.pyqtSignal(str)
         near_top = QtCore.pyqtSignal()
+        bottom_reached = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
@@ -2016,9 +2036,25 @@ else:
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
             self._near_top_hit = False
+            self._at_bottom_hit = True
+            self.verticalScrollBar().valueChanged.connect(self._note_bottom)
             self._fraction = 1.0
             self._overflow = False
             self._create_jump_button()
+
+        def _note_bottom(self, *_args) -> None:
+            """Edge-triggered "at the newest message" (scrollbar driven)."""
+            bar = self.verticalScrollBar()
+            if bar.value() < bar.maximum() - 2:
+                self._at_bottom_hit = False
+                self._fraction = max(0.0, bar.value() / max(1, bar.maximum()))
+                return
+            self._fraction = 1.0
+            self._reset_unread_indicator()
+            if self._at_bottom_hit:
+                return
+            self._at_bottom_hit = True
+            self.bottom_reached.emit()
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""

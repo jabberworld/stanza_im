@@ -880,6 +880,15 @@ opened (`_on_contact_open`, `_on_muc_participant_clicked`) and hands it to
 timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`), so an unread chat opens with the unread block right below
 the last message the user read. The anchor is applied once and dropped.
+A conversation is also marked read when its view **reaches the newest
+message**: `ChatView._note_bottom` (both the WebEngine poll — fed by the
+existing `st`/`innerHeight`/`scrollHeight` values, so no new JS control ref is
+needed — and the `QTextBrowser` fallback's scrollbar) emits `bottom_reached`
+edge-triggered, re-armed by scrolling up; `ChatWidget` →
+`ChatWindow.bottom_reached(jid)` → `MainWindow._on_chat_reached_bottom`,
+which resets only the conversation the chat area actually shows
+(`_chat_area_active()` and `current_jid()`), so a background tab reaching the
+bottom never clears its counters.
 The **tray only blinks while logged in**: `_sync_tray_blink`
 (called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
 `_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it

@@ -185,6 +185,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.reaction_like_requested.connect(self.reaction_like_requested)
         widget.typing_changed.connect(self.typing_changed)
+        widget.bottom_reached.connect(
+            lambda j=widget.jid: self.bottom_reached.emit(j))
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -266,6 +268,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.reaction_like_requested.connect(self.reaction_like_requested)
         widget.typing_changed.connect(self.typing_changed)
+        widget.bottom_reached.connect(
+            lambda j=widget.jid: self.bottom_reached.emit(j))
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -681,6 +685,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_requested = QtCore.pyqtSignal(str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
+    bottom_reached = QtCore.pyqtSignal(str)             # jid view at the end
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave

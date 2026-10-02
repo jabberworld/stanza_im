@@ -330,7 +330,43 @@ widget.set_restore_anchor({})
 widget._restore_from_anchor()
 check("a read conversation is not moved", widget._view.scrolled == [])
 
-# 7. static wiring ------------------------------------------------------------
+# 7. reaching the bottom of the active chat marks it read -----------------------
+win = make_window(chats=("bob@example.com",))
+win._reset_unread = MainWindow._reset_unread.__get__(win)
+win._on_chat_reached_bottom = MainWindow._on_chat_reached_bottom.__get__(win)
+win._bump_unread("bob@example.com")
+win._chat_window.current = "bob@example.com"
+win._chat_area_active = lambda: False
+win._on_chat_reached_bottom("bob@example.com")
+check("a background tab reaching the bottom stays unread",
+      win._read_state("bob@example.com")["unread"] == 1)
+win._chat_window.current = "carol@example.com"
+win._chat_area_active = lambda: True
+win._on_chat_reached_bottom("bob@example.com")
+check("another tab's bottom does not clear this conversation",
+      win._read_state("bob@example.com")["unread"] == 1)
+win._chat_window.current = "bob@example.com"
+win._on_chat_reached_bottom("bob@example.com")
+check("the active chat at the bottom is marked read",
+      win._read_state("bob@example.com")["unread"] == 0
+      and "bob@example.com" not in win._unread_jids)
+
+_cw_window_src = open(os.path.join(
+    _root, "stanza_im", "ui", "chat_window.py"), encoding="utf-8").read()
+_cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
+               encoding="utf-8").read()
+check("the bottom report is relayed to the main window",
+      "view.bottom_reached.connect(self.bottom_reached)" in _cw_src
+      and "widget.bottom_reached.connect(" in _cw_window_src
+      and "self.bottom_reached.emit(j)" in _cw_window_src
+      and "self._chat_window.bottom_reached.connect(self._on_chat_reached_bottom)"
+      in _mw_src)
+check("the bottom report is edge-triggered",
+      _cv_src.count("def _note_bottom(self") == 2
+      and _cv_src.count("self._at_bottom_hit = True\n            self.bottom_reached.emit()") == 2
+      and "_at_bottom_hit = False" in _cv_src)
+
+# 8. static wiring ------------------------------------------------------------
 check("the room counts mentions from the highlight rule",
       "self._bump_unread(room, mention=is_mention)" in _mw_src
       and "is_mention = bool(self_nick and nick != self_nick" in _mw_src)
