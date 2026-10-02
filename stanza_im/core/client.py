@@ -1258,6 +1258,38 @@ class JabberClient:
             "MUC Voice Request",
             MatchXPath("%s/{jabber:x:data}x" % msg_ns),
             self._on_bodyless_voice_stanza))
+        # A MUC message rejected by the server (e.g. a visitor without voice
+        # -> ``forbidden``) is a bodyless ``<message type='error'>``.
+        self.xmpp.register_handler(CoroutineCallback(
+            "MUC Message Error",
+            MatchXPath("%s/{%s}error" % (msg_ns, "jabber:client")),
+            self._on_muc_message_error_stanza))
+
+    async def _on_muc_message_error_stanza(self, msg) -> None:
+        """Surface a MUC message rejected with ``forbidden`` (no voice)."""
+        from_room = str(msg["from"] or "").split("/", 1)[0]
+        if from_room not in self.groupchats:
+            return
+        xml = getattr(msg, "xml", None)
+        if xml is None:
+            return
+        err = xml.find("{jabber:client}error")
+        if err is None:
+            return
+        condition = ""
+        text = ""
+        for child in err:
+            tag = str(child.tag).rsplit("}", 1)[-1]
+            if tag == "text":
+                if not text:
+                    text = (child.text or "").strip()
+            elif not condition:
+                condition = tag
+        if condition != "forbidden":
+            return
+        logger.info("MUC %s rejected a message (forbidden): %s",
+                    from_room, text)
+        self.emit("muc_send_forbidden", from_room, text)
 
     async def _on_bodyless_voice_stanza(self, msg) -> None:
         """Route a bodyless ``jabber:x:data`` message (voice request/error)."""

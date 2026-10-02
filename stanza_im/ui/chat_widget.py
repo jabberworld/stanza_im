@@ -865,6 +865,11 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:tonote:"):
             self._handle_note_uri(url)
             return
+        if url.startswith("stanza:voice"):
+            # The "ask for voice" link in the chat status line — same action as
+            # the toolbar button.
+            self.voice_requested.emit(self.jid)
+            return
         if url.startswith("stanza:geo:"):
             self._handle_geo_uri(url)
             return
@@ -1555,6 +1560,21 @@ class ChatWidget(QtWidgets.QWidget):
         if len(self._status_lines) > _STATUS_MAX:
             del self._status_lines[:len(self._status_lines) - _STATUS_MAX]
         self._view.add_status(text, timestamp)
+
+    def show_voice_prompt(self) -> None:
+        """Prompt (once per 10 s) to ask for voice when a send was rejected."""
+        from stanza_im.include.utils import escape_html
+        now = time.monotonic()
+        if now - getattr(self, "_voice_prompt_at", 0.0) < 10.0:
+            return
+        self._voice_prompt_at = now
+        link = (f'<a href="stanza:voice">{escape_html(tr("muc_voice_ask_link"))}'
+                f'</a>')
+        html = tr("muc_voice_required", link=link)
+        self._status_lines.append((html, time.strftime("%H:%M:%S")))
+        if len(self._status_lines) > _STATUS_MAX:
+            del self._status_lines[:len(self._status_lines) - _STATUS_MAX]
+        self._view.add_status(html, time.strftime("%H:%M:%S"))
 
     def set_history_status(self, text: str):
         """Replace the transient server-history status without moving scroll."""

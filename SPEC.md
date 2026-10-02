@@ -1294,6 +1294,12 @@ row only), plus an OSD and a tray balloon. A rejected request (the server
 throttles repeats with `<error type='wait'><resource-constraint/>`) is tracked
 by the sent `id` (`JabberClient._voice_requests`) and surfaced via
 `voice_request_failed` as a tray balloon + OSD (if enabled) + chat status line.
+A **message rejected for lack of voice** (`<message type='error'><error
+type='auth'><forbidden/>`, matched bodylessly in `_on_muc_message_error_stanza`)
+emits `muc_send_forbidden`; the chat then shows a one-line prompt
+(`ChatWidget.show_voice_prompt`, ≤1 per 10 s) with an
+`<a href="stanza:voice">` link that fires the same `voice_requested` as the
+button.
 
 The MUC toolbar's vCard button opens the room's own vCard
 (`MainWindow._show_muc_room_info` → `_show_profile(room)`). `VCardInfoDialog`

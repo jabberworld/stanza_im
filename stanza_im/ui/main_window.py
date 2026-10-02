@@ -910,6 +910,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # "Refuse" only marks the row — no stanza is sent (per design).
         self._mark_voice_row(room, nick, jid, granted=False)
 
+    def _on_muc_send_forbidden(self, room: str, text: str) -> None:
+        """A message was rejected (no voice) — prompt to ask for voice."""
+        chat = self._chat_window.get_chat(room)
+        if chat is not None:
+            chat.show_voice_prompt()
+
     def _on_voice_request_failed(self, room: str, condition: str,
                                  text: str) -> None:
         """A voice request was rejected by the server (e.g. throttled)."""
@@ -2836,6 +2842,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muc_info_received", self._on_muc_info_received)
         c.on("muc_voice_requested", self._on_muc_voice_request)
         c.on("voice_request_failed", self._on_voice_request_failed)
+        c.on("muc_send_forbidden", self._on_muc_send_forbidden)
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("contact_pep_updated", self._on_contact_pep_updated)
         c.on("contact_caps", self._on_contact_caps)

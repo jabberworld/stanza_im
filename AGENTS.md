@@ -248,6 +248,13 @@ XEP-0045 §8.3) / «Отклонить» (marks the row only), plus an OSD and a
 balloon. A **failed** request (`voice_request_failed`, e.g. the server rate-limit
 `resource-constraint`) is shown to the user via a tray balloon, an OSD (when
 enabled) and a chat status line; the «Попросить голос» button stays enabled.
+When a message is **rejected** because we have no voice (the server returns
+`<message type='error'><error type='auth'><forbidden/>`), the client emits
+`muc_send_forbidden` (`_on_muc_message_error_stanza`, matched on the bodyless
+`message/{error}` path) and the chat shows a one-line prompt
+(`ChatWidget.show_voice_prompt`, at most once per 10 s) with an
+`<a href="stanza:voice">` link that fires the same `voice_requested` action as
+the toolbar button.
 [`tests/test_muc_voice.py`]
 
 **Hats (XEP-0317, `include/hats.py` + `ui/hats_dialog.py`)**: occupants'

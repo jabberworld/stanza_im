@@ -518,6 +518,8 @@ STRINGS = {
     "muc_config_tooltip": "Room settings",
     "muc_ask_voice": "Ask for voice",
     "muc_voice_request_failed": "Could not request voice",
+    "muc_voice_required": "You cannot send messages in this conference, {link}",
+    "muc_voice_ask_link": "ask for voice?",
     "muc_voice_request_failed_title": "Voice request",
     "event_voice_request": "User {who} in conference {room} is asking for voice",
     "event_voice_osd_title": "Voice request",

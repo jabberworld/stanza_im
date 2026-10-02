@@ -120,6 +120,7 @@ class _ErrClient(JabberClient):
     def __init__(self):
         self.events = []
         self._voice_requests = set()
+        self.groupchats = {"room@conf.example": object()}
 
     def emit(self, name, *a, **k):
         self.events.append((name, a))
@@ -152,6 +153,39 @@ ec._on_message(slixmpp.Message(xml=ET.fromstring(
     "<error type='cancel'><item-not-found "
     "xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></message>")))
 check("an unrelated message error is ignored", ec.events == [])
+
+# A MUC message rejected with ``forbidden`` (visitor without voice).
+_FORBIDDEN = (
+    "<message xmlns='jabber:client' type='error' from='room@conf.example' "
+    "to='me'><error type='auth'>"
+    "<forbidden xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>"
+    "<text xmlns='urn:ietf:params:xml:ns:xmpp-stanzas' xml:lang='en'>"
+    "Visitors are not allowed to send messages</text></error>"
+    "<body>hi</body></message>")
+
+
+async def _run_forbidden():
+    ec.events.clear()
+    await ec._on_muc_message_error_stanza(
+        slixmpp.Message(xml=ET.fromstring(_FORBIDDEN)))
+
+
+asyncio.get_event_loop().run_until_complete(_run_forbidden())
+check("a forbidden MUC error emits muc_send_forbidden",
+      ec.events == [("muc_send_forbidden",
+                     ("room@conf.example",
+                      "Visitors are not allowed to send messages"))])
+
+# A non-forbidden error is ignored.
+async def _run_notacceptable():
+    ec.events.clear()
+    bad = _FORBIDDEN.replace("forbidden", "not-acceptable")
+    await ec._on_muc_message_error_stanza(
+        slixmpp.Message(xml=ET.fromstring(bad)))
+
+
+asyncio.get_event_loop().run_until_complete(_run_notacceptable())
+check("a non-forbidden MUC error is ignored", ec.events == [])
 
 
 req = _ReqClient()
@@ -285,6 +319,23 @@ w._muc_users[room]["me"] = {"nick": "me", "role": "participant",
                             "affiliation": "member"}
 w._apply_voice_request(room)
 check("a non-visitor does not see the button", cw._voice_btn.isHidden())
+
+# 4b. Voice prompt when a send is rejected + its link -----------------------
+got = []
+cw.voice_requested.connect(got.append)
+for line, _ts in list(cw._status_lines):
+    if isinstance(line, str):
+        cw._status_lines.remove((line, _ts))
+cw._voice_prompt_at = 0.0
+cw.show_voice_prompt()
+check("the voice prompt is a status line with a stanza:voice link",
+      len(cw._status_lines) == 1
+      and "stanza:voice" in cw._status_lines[-1][0])
+cw.show_voice_prompt()
+check("a second prompt within 10 s is suppressed",
+      len(cw._status_lines) == 1)
+cw._open_link("stanza:voice")
+check("clicking the link asks for voice", got == [room])
 
 # 5. i18n --------------------------------------------------------------------
 check("the voice strings are translated",
