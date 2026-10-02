@@ -135,9 +135,11 @@ check("the voice request carries the muc#request FORM_TYPE",
       _fmt is not None and next(
           (c.text for c in _fmt if c.tag == "{jabber:x:data}value"), "")
       == MUC_REQUEST)
+check("the FORM_TYPE field is hidden (XEP-0004)",
+      _fmt is not None and _fmt.get("type") == "hidden")
 _role = _fields.get("muc#role")
 check("the voice request asks for the participant role",
-      _role is not None and next(
+      _role is not None and _role.get("type") == "list-single" and next(
           (c.text for c in _role if c.tag == "{jabber:x:data}value"), "")
       == "participant")
 

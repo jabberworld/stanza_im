@@ -3644,6 +3644,7 @@ class JabberClient:
         form["type"] = "submit"
         fmt = FormField()
         fmt["var"] = "FORM_TYPE"
+        fmt["type"] = "hidden"  # XEP-0004: FORM_TYPE is always hidden
         fmt["value"] = "http://jabber.org/protocol/muc#request"
         role = FormField()
         role["var"] = "muc#role"
