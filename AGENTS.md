@@ -855,11 +855,24 @@ old leading «Звук») and a note-icon preview button before each
 (`prefs_sound_preview_tip`). [`tests/test_sounds.py`]
 
 Unread counters are persisted per contact (`core/unread_state.py` →
-`$XDG_DATA_HOME/stanza-im/unread.json`) so the badges survive a restart:
-`MainWindow` loads them at startup, applies them when building
+`$XDG_DATA_HOME/stanza-im/unread.json`) so the badges survive a restart.
+`MainWindow` keeps one record per chat key in `_unread_chats` and derives the
+`unread`/`mentions`/`read_sid` views from it (`_unread_counts`,
+`_unread_mentions`, `_unread_displayed` are properties), so the badge, the tray
+and the XEP-0490 seed can never drift apart; `_recount_unread` recomputes the
+aggregates (restored counters blink the tray again after a re-login,
+`_on_session_started`). It loads them at startup, applies them when building
 roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
 in `_bump_unread`/`_reset_unread` and flushes them to disk with a 1 s debounce
-plus on quit. The **tray only blinks while logged in**: `_sync_tray_blink`
+plus on quit. All three conversation kinds count unread: `_on_message_received`
+(1:1), `_on_groupchat_message` (conference, `mention=is_mention` from
+`mentions_nick` — the same rule as the highlight and the mention sound) and
+`_on_muc_private_message` (attributed to the **sender**, under the PM chat key);
+a message that arrives while its own conversation is the active one is skipped,
+and an archived MAM replay never counts. `_reset_unread` also records the
+**read anchor** via `ChatWidget.read_anchor()` (newest displayed message:
+server `stanza-id` → `origin-id` → own message id, plus its raw timestamp).
+The **tray only blinks while logged in**: `_sync_tray_blink`
 (called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
 `_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it
 so the offline icon is visible — restored counters do not blink on the login

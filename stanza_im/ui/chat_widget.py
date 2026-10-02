@@ -1177,6 +1177,23 @@ class ChatWidget(QtWidgets.QWidget):
         for entry in reversed(self._history):
             yield entry
 
+    def read_anchor(self) -> dict:
+        """The conversation's read point: the newest message we display.
+
+        Returned as ``{"ref", "ts", "sid"}`` where *ref* is the most stable
+        identifier available (server ``stanza-id`` → ``origin-id`` → our own
+        message id), *ts* the raw message timestamp (the fallback when the ref
+        is gone, e.g. after a restart of an older archive) and *sid* the
+        XEP-0359 id used by XEP-0490.  Stored as the conversation's read
+        anchor so an unread chat can be restored from this point.
+        """
+        for entry in self._newest_first():
+            archive_id = entry.get("archive_id") or ""
+            return {"ref": (archive_id or self._reply_target_id(entry)),
+                    "ts": entry.get("timestamp") or "",
+                    "sid": archive_id}
+        return {}
+
     @staticmethod
     def _reply_target_id(entry: dict) -> str:
         """Stable id a XEP-0461 ``<reply/>`` can reference for *entry*.

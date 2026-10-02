@@ -1660,20 +1660,27 @@ class MainWindow(QtWidgets.QMainWindow):
         status = info.get("show") or getattr(contact, "status", "") or "online"
         name = (info.get("nick") or nick
                 or getattr(contact, "name", "") or target)
-        self._roster.remove_user(target)
-        self._roster.add_user(UserItem(
-            jid=target,
-            name=name,
-            group=tr("roster_group_personal_messages"),
-            status=status,
-            status_message=(info.get("status")
-                            or getattr(contact, "status_message", "") or ""),
-            icon_key=show_to_icon_key(status),
-            avatar_path=(info.get("avatar_path")
-                         or getattr(contact, "avatar_path", None)),
-            unread_count=self._unread_counts.get(target, 0),
-            unread_mentions=self._unread_mentions.get(target, 0),
-        ))
+        fields = {
+            "name": name,
+            "status": status,
+            "status_message": (info.get("status")
+                               or getattr(contact, "status_message", "") or ""),
+            "icon_key": show_to_icon_key(status),
+            "avatar_path": (info.get("avatar_path")
+                            or getattr(contact, "avatar_path", None)),
+            "unread_count": self._unread_counts.get(target, 0),
+            "unread_mentions": self._unread_mentions.get(target, 0),
+        }
+        existing = next((user for user in self._roster._users
+                         if user.jid == target), None)
+        if existing is not None:
+            # Update in place: re-adding the row would drop the selection.
+            self._roster.update_user(target, **fields)
+        else:
+            self._roster.add_user(UserItem(
+                jid=target,
+                group=tr("roster_group_personal_messages"),
+                **fields))
         self._pm_roster.add(target)
         self._schedule_roster_repaint()
 
@@ -4089,6 +4096,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._seed_muc_chat(jid, chat, title=display_name, is_new=is_new)
             self._apply_muji_support(jid)
             self._apply_muc_admin(jid)
+            self._reset_unread(jid)
             return
         is_new = not self._chat_window.has_chat(jid)
         self._chat_window.open_chat(jid, display_name)
@@ -4797,8 +4805,14 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_message(nick, body, target)
-        if (self._client and self._chat_area_visible()
-                and self._chat_window.current_jid() == target):
+        # A private message is attributed to its sender: it counts as unread in
+        # its own roster row (skipping a conversation that is on screen).
+        active = (self._chat_area_visible()
+                  and self._chat_window.current_jid() == target)
+        if not active:
+            self._bump_unread(target)
+            self._refresh_unread_badge(target)
+        if active and self._client:
             self._client.mds_mark_displayed(target)
 
     def _on_message_send(self, jid: str, body: str):
@@ -4866,11 +4880,18 @@ class MainWindow(QtWidgets.QMainWindow):
             reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_groupchat(room, nick, body)
         self_nick = self._muc_self_nicks.get(room, "")
-        if (self_nick and nick != self_nick
-                and mentions_nick(body, self_nick)):
+        is_mention = bool(self_nick and nick != self_nick
+                          and mentions_nick(body, self_nick))
+        if is_mention:
             self._play_sound("message", "sound_muc_mention")
-        if (self._client and self._chat_area_visible()
-                and self._chat_window.current_jid() == room):
+        # A conference counts unread too (skipped while the room is on screen);
+        # mentions are counted separately for the composite roster badge.
+        active = (self._chat_area_visible()
+                  and self._chat_window.current_jid() == room)
+        if not active and nick != self_nick:
+            self._bump_unread(room, mention=is_mention)
+            self._refresh_unread_badge(room)
+        if (self._client and active):
             self._client.mds_mark_displayed(room)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],

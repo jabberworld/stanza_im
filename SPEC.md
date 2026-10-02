@@ -1440,9 +1440,19 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   screen.
 - Unread counters are persisted (`$XDG_DATA_HOME/stanza-im/unread.json`,
   `core/unread_state.py`) and restored on startup: the roster badges come back
-  exactly as before the restart (`MainWindow._unread_counts`,
-  applied in `_add_roster_item`/`_sync_conference_roster`, saved with a 1 s
-  debounce and on quit). The file is a **v2 payload**
+  exactly as before the restart (`MainWindow._unread_chats` is the single
+  record store; `_unread_counts`/`_unread_mentions`/`_unread_displayed` are
+  derived views, applied in `_add_roster_item`/`_sync_conference_roster`,
+  saved with a 1 s debounce and on quit).
+- Every conversation kind counts unread: 1:1 (`_on_message_received`), a
+  conference (`_on_groupchat_message`, with `mention=True` when the body names
+  our nickname per `mentions_nick`) and a MUC private message
+  (`_on_muc_private_message`, stored under the sender's chat key). A message
+  arriving while its own conversation is the active one is not counted, and an
+  archived MAM replay never is. `_reset_unread` also stores the read anchor
+  (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
+  `origin-id` → own message id — plus its raw timestamp), so an unread
+  conversation can be restored from the point the user stopped reading. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
   "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
   where *chat-key* is the conversation key the chat tabs use (bare JID for 1:1
