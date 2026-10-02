@@ -1945,7 +1945,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (capped, no attempt limit) until connected, emitting
   `reconnecting`/`reconnect_failed`/`reconnected`; a resume cancels it and
   `disconnect()`/logout stops it. `manual_reconnect()` backs the status-bar
-  "Reconnect" button.
+  "Reconnect" button. MainWindow surfaces the state in the window status bar
+  for problem states only (`_set_busy_status`/`_set_offline_status`/
+  `_clear_status`): «Переподключение (попытка N)…» / «Отключено» plus a
+  «Переподключиться» button shown only while offline; the bar is hidden
+  otherwise.
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow recomputes activity from `QApplication.applicationState()` via an

@@ -1873,7 +1873,11 @@ text is kept. Returning activity (`eventFilter`) resumes
   attempt. `disconnect()`/logout stops the loop; `manual_reconnect()` resets the
   backoff for the status-bar "Reconnect" button. Messages sent while offline are
   not hard-blocked (a future offline outbox will flush them on reconnect,
-  `_offline_outbox` is the placeholder).
+  `_offline_outbox` is the placeholder). MainWindow shows the connection state
+  only in problem states via the window status bar (`_set_busy_status`/
+  `_set_offline_status`/`_clear_status`): reconnecting/attempt/offline plus a
+  «Переподключиться» button visible only while offline (`_on_reconnect_clicked`
+  → `manual_reconnect`). The bar is hidden otherwise.
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow derives activity from

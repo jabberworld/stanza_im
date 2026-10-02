@@ -117,6 +117,48 @@ rr._cancel_reconnect()
 check("a resumed session cancels the reconnect handle",
       rr._reconnect_handle is None)
 
+# 6. UI status bar + reconnect button ---------------------------------------
+from PyQt6 import QtWidgets  # noqa: E402
+from stanza_im.i18n import load as i18n_load  # noqa: E402
+from stanza_im.core.storage import Config  # noqa: E402
+
+i18n_load("en")
+_qt = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
+
+w = MainWindow(_qt)
+
+
+class _UIClient:
+    def on(self, *a, **k):
+        pass
+
+    def resume_expected(self):
+        return True
+
+    def manual_reconnect(self):
+        pass
+
+    def disconnect(self):
+        pass
+
+
+w._client = _UIClient()
+check("the status bar starts hidden", w._status_bar.isHidden())
+check("the reconnect button starts hidden", w._reconnect_btn.isHidden())
+w._on_disconnected()  # resume expected -> busy, no button yet
+check("a resumable drop shows the busy bar but no button",
+      not w._status_bar.isHidden() and w._reconnect_btn.isHidden())
+w._on_reconnecting(2, 5.0)
+check("reconnecting shows the attempt and the button",
+      "2" in w._status_label.text() and not w._reconnect_btn.isHidden())
+w._on_reconnect_failed(3)
+check("a failed attempt keeps the offline state + button",
+      w._status_label.text() != "" and not w._reconnect_btn.isHidden())
+w._on_reconnected()
+check("a reconnect clears the bar and button",
+      w._status_bar.isHidden() and w._reconnect_btn.isHidden())
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
