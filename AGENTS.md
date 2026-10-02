@@ -569,7 +569,22 @@ and allows full visual control (avatars, status icons, unread badges, mood icons
 **Data model**: `GroupItem` and `UserItem` dataclasses. The widget maintains
 flat lists and sorted dicts. Hit-testing iterates items by accumulated Y offset.
 Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
-used by `MainWindow` for the conferences group) which always come last.
+used by `MainWindow` for the conferences group **and** the private-messages
+group) which always come last. Two groups hold an app-computed row rather than
+a real contact group — conferences (`MainWindow._sync_conference_roster`, one
+row per joined room) and MUC private messages — so they are excluded from the
+group pickers and roster sharing via `_virtual_roster_groups()` and are never
+persisted into `core/known_contacts.py`. A **private message is attributed to
+its sender**: `MainWindow._sync_pm_roster(target, room, nick)` gives the
+conversation its own row in the «Личные сообщения» group
+(`roster_group_personal_messages`) keyed by the chat key (the real JID when the
+room revealed one, otherwise `room/nick`), which is exactly where its unread
+counter lives; `_on_muc_private_message` and `_on_muc_participant_clicked`
+create/refresh it, `_on_groupchat_presence` keeps it in step with presence, and
+`_maybe_drop_pm_roster` (from `_on_chat_closed`) drops the row — and the group
+itself through `RosterWidget.remove_group` — once the tab is closed and nothing
+is left unread. The badge label is `RosterStyle.badge_text`: `N`, or
+`N / M` when the conversation has `M` unread messages naming our own nickname.
 Contacts sort alphabetically inside a group by default; `set_sort_by_status`
 (the View menu's «Сортировать по статусу», default on) instead ranks them by
 presence — chat («free for chat») → online → away → xa → dnd → offline — with

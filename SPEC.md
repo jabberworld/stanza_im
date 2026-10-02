@@ -709,6 +709,7 @@ class UserItem:
     icon_key: str = "offline"
     avatar_path: str | None = None
     unread_count: int = 0
+    unread_mentions: int = 0
     mood: str = ""
     meta_parent_jid: str | None = None
 ```
@@ -721,7 +722,9 @@ Custom `paintEvent()` draws all items. No child widgets.
 bold group name, online/total count "(3/7)" on the right.
 
 **User item**: Status icon (16×16) + avatar placeholder (24×24) + name (bold) +
-status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect)
+status message (italic, gray, truncated to 40 chars) + unread badge (red rounded rect,
+labelled `N` — or `N / M` when the conversation has M unread messages naming our
+own nickname, `RosterStyle.badge_text`)
 + PEP mood/activity icons (16×16 each). The name/status are drawn with the
 +roster font (the badge sets a small bold font temporarily and restores it, so
 +its size never leaks into the contact row). The icons appear between the name and the
@@ -760,8 +763,22 @@ The roster background and the group-header stripe colorized per
 widget's viewport palette so the area below the last contact matches.
 
 Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
-`MainWindow` to the conferences group, `roster_group_conferences`) forces those
+`MainWindow` to the conferences group, `roster_group_conferences`, and to the
+private-messages group, `roster_group_personal_messages`) forces those
 groups after all contact groups.
+
+Both of those groups hold a row **computed by the app** rather than a real
+contact group, so they are excluded from the group pickers and from
+roster sharing (`_virtual_roster_groups()`) and are never persisted into the
+known-contacts registry. A conference renders as one row per joined room
+(`MainWindow._sync_conference_roster`). A **MUC private message** is
+attributed to its sender, so it gets its own row in the private-messages group
+keyed by the chat key (the real JID when the room revealed one, otherwise
+`room/nick`) — `MainWindow._sync_pm_roster` creates/updates it when the
+message arrives or the participant's chat is opened, and
+`_maybe_drop_pm_roster` drops it (with the group itself,
+`RosterWidget.remove_group`) once the tab is closed and nothing is left
+unread. Presence changes of that occupant keep the row in step.
 
 ### 7.3 Interactions
 

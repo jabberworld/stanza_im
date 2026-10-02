@@ -152,8 +152,10 @@ check("flush persists the current state",
 # 4. startup MDS catch-up must not wipe restored unread ----------------------
 from stanza_im.core.client import JabberClient
 
-win._unread_counts = {"carol@example.com": 4}
-win._unread_displayed = {"carol@example.com": "carol-sid-old"}
+win._unread_chats["carol@example.com"] = unread_state.blank()
+win._unread_chats["carol@example.com"]["unread"] = 4
+win._unread_chats["carol@example.com"]["read_sid"] = "carol-sid-old"
+win._recount_unread()
 c = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)
 c.set_displayed_state(win._unread_displayed)
 c.on("mds_displayed", win._on_mds_displayed)
@@ -176,8 +178,11 @@ check("quit flushes unread state", "self._flush_unread()" in _mw_src)
 check("startup seeds the displayed state",
       "set_displayed_state(self._unread_displayed)" in _mw_src)
 check("flush persists the displayed sids and the account",
-      "unread_state.save(self._unread_counts, displayed," in _mw_src
+      "unread_state.save_chats(self._unread_chats" in _mw_src
       and "account=self._config.jid" in _mw_src)
+check("mention counters reach the roster rows",
+      "unread_mentions=self._unread_mentions.get(jid, 0)" in _mw_src
+      and "unread_mentions=self._unread_mentions.get(room, 0)" in _mw_src)
 
 print()
 if FAILURES:

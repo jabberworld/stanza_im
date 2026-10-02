@@ -126,6 +126,17 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._recalc_heights()
         self.update()
 
+    def remove_group(self, name: str) -> None:
+        """Drop an empty group (e.g. the virtual private-messages group)."""
+        if name not in self._groups:
+            return
+        del self._groups[name]
+        if name in self._sorted_groups:
+            self._sorted_groups.remove(name)
+        self._sorted_users.pop(name, None)
+        self._recalc_heights()
+        self.update()
+
     def clear(self) -> None:
         self._groups.clear()
         self._users.clear()

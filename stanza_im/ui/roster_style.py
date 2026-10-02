@@ -37,6 +37,7 @@ class UserItem:
     avatar_path: str | None = None
     is_hidden: bool = False
     unread_count: int = 0
+    unread_mentions: int = 0
     mood: str = ""
     activity: str = ""
     tune: str = ""
@@ -126,6 +127,18 @@ class RosterStyle:
         if item.status_message:
             return self.USER_HEIGHT_TALL
         return self.USER_HEIGHT_SHORT
+
+    @staticmethod
+    def badge_text(item: UserItem) -> str:
+        """Unread badge label: ``N``, or ``N / M`` with mention counters.
+
+        In a conference the second number counts the unread messages that
+        mention our own nickname, so a busy room stays readable at a glance.
+        """
+        mentions = getattr(item, "unread_mentions", 0) or 0
+        if mentions > 0:
+            return "%d / %d" % (item.unread_count, mentions)
+        return str(item.unread_count)
 
     def group_height(self) -> int:
         return self.GROUP_HEIGHT
@@ -244,7 +257,7 @@ class RosterStyle:
                 avail_right -= self.CLIENT_ICON_SIZE + 4
 
         if item.unread_count > 0:
-            badge_text = str(item.unread_count)
+            badge_text = self.badge_text(item)
             badge_font = painter.font()
             badge_font.setBold(True)
             badge_font.setPointSize(8)

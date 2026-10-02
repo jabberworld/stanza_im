@@ -116,6 +116,7 @@ STRINGS = {
     "roster_all_offline": "All contacts are offline.\nTry Show Offline to see them.",
     "roster_group_ungrouped": "Ungrouped",
     "roster_group_conferences": "Conferences",
+    "roster_group_personal_messages": "Private messages",
     "category_personal": "Personal messages",
     # Chat
     "chat_is_typing": "{name} is typing...",

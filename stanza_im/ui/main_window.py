@@ -57,6 +57,17 @@ def _current_timestamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(
         timespec="microseconds").replace("+00:00", "Z")
 
+
+def _virtual_roster_groups() -> set[str]:
+    """Roster groups that hold a computed row, not a real contact group.
+
+    Conferences and the MUC private-message rows are rendered by the app
+    itself, so they must not be offered as groups of a contact (and are never
+    persisted as such in the known-contacts registry).
+    """
+    return {tr("roster_group_conferences"), tr("roster_group_transports"),
+            tr("roster_group_personal_messages")}
+
 _PAGE_LOGIN = 0
 _PAGE_SPLASH = 1
 _PAGE_ROSTER = 2
@@ -428,10 +439,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── State ────────────────────────────────────────────────
         self._visible = True
         self._shutting_down = False
-        (self._unread_counts,
-         self._unread_displayed) = unread_state.load_state(self._config.jid)
-        self._unread_total = sum(self._unread_counts.values())
-        self._unread_jids: set[str] = set(self._unread_counts)
+        # Per-conversation read state: {"unread", "mentions", "read_sid",
+        # "read_ts", "read_ref"} keyed by the chat-tab key.  The unread /
+        # mention / displayed views below are derived from it, so the badge,
+        # the tray and the XEP-0490 seed can never drift apart.
+        self._unread_chats: dict[str, dict] = unread_state.load_chats(
+            self._config.jid)
+        self._unread_jids: set[str] = {key for key, entry in
+                                       self._unread_chats.items()
+                                       if entry["unread"]}
+        self._unread_total = sum(entry["unread"] for entry in
+                                 self._unread_chats.values())
         # The tray only blinks once logged in (see _sync_tray_blink); restored
         # unread counters still show as roster badges before that.
         self._muc_users: dict[str, dict[str, dict]] = {}
@@ -454,6 +472,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_create_opts: dict[str, dict] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
+        # MUC private-message rows: chat key -> (room, nick).
+        self._pm_roster: set[str] = set()
+        self._pm_targets: dict[str, tuple[str, str]] = {}
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
         self._pending_profile: set[str] = set()
@@ -565,7 +586,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Roster widget
         self._roster = RosterWidget()
-        self._roster.set_trailing_groups({tr("roster_group_conferences")})
+        self._roster.set_trailing_groups({
+            tr("roster_group_conferences"),
+            tr("roster_group_personal_messages")})
         self._apply_roster_font()
         self._roster.set_tooltip_provider(self._roster_tooltip)
         self._roster.roster_font_zoom_requested.connect(
@@ -1288,9 +1311,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from stanza_im.ui.add_contact_dialog import AddContactDialog
         groups = sorted({user.group for user in self._roster._users
-                         if user.group not in (tr("roster_group_conferences"),
-                                               tr("roster_group_transports"),
-                                               tr("roster_group_ungrouped"))},
+                         if user.group not in _virtual_roster_groups()
+                         | {tr("roster_group_ungrouped")}},
                         key=str.casefold)
         dlg = AddContactDialog(groups, self._client, self, jid=jid)
         dlg.vcard_requested.connect(self._show_profile)
@@ -1603,6 +1625,7 @@ class MainWindow(QtWidgets.QMainWindow):
             avatar_path=(self._muc_avatar_paths.get(room)
                          or getattr(contact, "avatar_path", None)),
             unread_count=self._unread_counts.get(room, 0),
+            unread_mentions=self._unread_mentions.get(room, 0),
         ))
         self._conference_roster.add(room)
         self._roster._groups[tr("roster_group_conferences")].single_count = True
@@ -1611,6 +1634,69 @@ class MainWindow(QtWidgets.QMainWindow):
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
         self._schedule_roster_repaint()
+
+    def _sync_pm_roster(self, target: str, room: str = "",
+                        nick: str = "") -> None:
+        """Represent a MUC private-message conversation as a roster row.
+
+        A private message is attributed to its **sender**, so the conversation
+        gets its own row in the virtual «Личные сообщения» group instead of
+        inflating the conference.  *target* is the chat key (the real JID when
+        the room revealed one, otherwise ``room/nick``), which is also the
+        key its unread counter is stored under.  The row is dropped again by
+        :meth:`_maybe_drop_pm_roster` once its tab is closed and nothing is
+        left unread.
+        """
+        if not target:
+            return
+        if not nick and "/" in target:
+            room, _, nick = target.rpartition("/")
+        if not nick:
+            nick = target.split("@")[0]
+        self._pm_targets[target] = (room, nick)
+        info = self._participant_info(room, nick) if room else {}
+        contact = (self._client.get_contact(info.get("real_jid") or target)
+                   if self._client else None)
+        status = info.get("show") or getattr(contact, "status", "") or "online"
+        name = (info.get("nick") or nick
+                or getattr(contact, "name", "") or target)
+        self._roster.remove_user(target)
+        self._roster.add_user(UserItem(
+            jid=target,
+            name=name,
+            group=tr("roster_group_personal_messages"),
+            status=status,
+            status_message=(info.get("status")
+                            or getattr(contact, "status_message", "") or ""),
+            icon_key=show_to_icon_key(status),
+            avatar_path=(info.get("avatar_path")
+                         or getattr(contact, "avatar_path", None)),
+            unread_count=self._unread_counts.get(target, 0),
+            unread_mentions=self._unread_mentions.get(target, 0),
+        ))
+        self._pm_roster.add(target)
+        self._schedule_roster_repaint()
+
+    def _maybe_drop_pm_roster(self, target: str) -> None:
+        """Remove a private-message row that is neither open nor unread."""
+        if target not in self._pm_roster:
+            return
+        if self._read_state(target)["unread"]:
+            return
+        if self._chat_window is not None and self._chat_window.has_chat(target):
+            return
+        self._pm_roster.discard(target)
+        self._pm_targets.pop(target, None)
+        self._roster.remove_user(target)
+        self._maybe_remove_empty_pm_group()
+        self._schedule_roster_repaint()
+
+    def _maybe_remove_empty_pm_group(self) -> None:
+        """Hide the private-messages group while it holds no row."""
+        group = tr("roster_group_personal_messages")
+        if self._pm_roster:
+            return
+        self._roster.remove_group(group)
 
     def _sync_all_conference_roster(self):
         for room in self._muc_self_nicks:
@@ -2892,6 +2978,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
         self._republish_pep()
+        # Restored counters are counted again so a re-login blinks the tray.
+        self._recount_unread()
         self._sync_tray_blink()
         self._set_info_actions_enabled(True)
 
@@ -3068,6 +3156,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 activity=((activity_data.get("sub")
                            or activity_data.get("group")) or ""),
                 unread_count=self._unread_counts.get(jid, 0),
+                unread_mentions=self._unread_mentions.get(jid, 0),
                 blocked=jid in self._blocked_jids,
                 client_icon=(self._client.client_icon(jid)
                              if self._client else ""),
@@ -4126,9 +4215,8 @@ class MainWindow(QtWidgets.QMainWindow):
             no_group.triggered.connect(lambda: self._set_contact_groups(jid, []))
             group_menu.addSeparator()
             groups = sorted({user.group for user in self._roster._users
-                             if user.group not in (tr("roster_group_conferences"),
-                                                   tr("roster_group_transports"),
-                                                   tr("roster_group_ungrouped"))},
+                             if user.group not in _virtual_roster_groups()
+                             | {tr("roster_group_ungrouped")}},
                             key=str.casefold)
             for group in groups:
                 action = group_menu.addAction(group)
@@ -4419,35 +4507,96 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.remove_contact(jid)
             self._roster.remove_user(jid)
 
-    def _sync_tray_blink(self):
-        """Blink the tray only while logged in and unread messages exist."""
-        if self._unread_total > 0 and self._config.notifications.tray_blink:
-            self._tray.start_blinking()
-        else:
-            self._tray.stop_blinking()
+    # ── Read state (unread + mention counters, read anchor) ──────────────
 
-    def _bump_unread(self, jid: str):
-        """Increment the unread counter for a roster contact."""
+    @property
+    def _unread_counts(self) -> dict[str, int]:
+        """``{chat-key: unread}`` for conversations with unread messages."""
+        return {key: entry["unread"] for key, entry in self._unread_chats.items()
+                if entry["unread"]}
+
+    @property
+    def _unread_mentions(self) -> dict[str, int]:
+        """``{chat-key: mentions}`` — unread messages naming our nickname."""
+        return {key: entry["mentions"] for key, entry in self._unread_chats.items()
+                if entry["mentions"]}
+
+    @property
+    def _unread_displayed(self) -> dict[str, str]:
+        """``{chat-key: read-sid}`` — the last XEP-0490 point we published."""
+        return {key: entry["read_sid"] for key, entry in self._unread_chats.items()
+                if entry["read_sid"]}
+
+    def _read_state(self, jid: str) -> dict:
+        """Return a copy of the stored read state for *jid* (may be empty)."""
+        entry = self._unread_chats.get(jid)
+        return dict(entry) if entry is not None else unread_state.blank()
+
+    def _store_read_state(self, jid: str, entry: dict) -> None:
+        """Keep (or drop) the read-state record of *jid* and refresh totals."""
+        record = unread_state.blank()
+        for field, value in entry.items():
+            if field in record:
+                record[field] = value
+        if any(record.values()):
+            self._unread_chats[jid] = record
+        else:
+            self._unread_chats.pop(jid, None)
+            self._unread_jids.discard(jid)
+        self._unread_total = sum(item["unread"] for item in
+                                 self._unread_chats.values())
+
+    def _recount_unread(self) -> None:
+        """Recompute the aggregate counters from the stored records."""
+        self._unread_jids = {key for key, entry in self._unread_chats.items()
+                             if entry["unread"]}
+        self._unread_total = sum(entry["unread"] for entry in
+                                 self._unread_chats.values())
+
+    def _refresh_unread_badge(self, jid: str) -> None:
+        """Repaint the roster badge of *jid* from its stored counters."""
+        entry = self._unread_chats.get(jid)
+        self._roster.update_user(jid,
+                                 unread_count=entry["unread"] if entry else 0,
+                                 unread_mentions=entry["mentions"] if entry
+                                 else 0)
+
+    def _bump_unread(self, jid: str, mention: bool = False):
+        """Count an incoming message for *jid* (roster badge + tray blink)."""
+        entry = self._unread_chats.get(jid)
+        if entry is None:
+            entry = unread_state.blank()
+            self._unread_chats[jid] = entry
+        entry["unread"] += 1
+        if mention:
+            entry["mentions"] += 1
         self._unread_jids.add(jid)
-        count = self._unread_counts.get(jid, 0) + 1
-        self._unread_counts[jid] = count
         self._unread_total += 1
         self._schedule_unread_save()
-        for user in self._roster._users:
-            if user.jid == jid:
-                self._roster.update_user(jid, unread_count=count)
-                return
+        self._refresh_unread_badge(jid)
 
-    def _reset_unread(self, jid: str):
-        """Clear the unread counter for *jid* and refresh totals."""
-        self._unread_jids.discard(jid)
-        self._unread_counts.pop(jid, None)
-        self._unread_displayed.pop(jid, None)
-        for user in self._roster._users:
-            if user.jid == jid and user.unread_count:
-                self._roster.update_user(jid, unread_count=0)
-                break
-        self._unread_total = sum(self._unread_counts.values())
+    def _reset_unread(self, jid: str, anchor: dict | None = None):
+        """Mark *jid* read: drop its counters and remember the read anchor.
+
+        *anchor* is the ``{"ref", "ts", "sid"}`` triple of the newest message
+        the user has seen; without it the open tab is asked for its own.
+        """
+        if not jid:
+            return
+        if anchor is None:
+            chat = (self._chat_window.get_chat(jid)
+                    if self._chat_window is not None else None)
+            anchor = chat.read_anchor() if chat is not None else None
+        entry = self._unread_chats.get(jid) or unread_state.blank()
+        entry["unread"] = 0
+        entry["mentions"] = 0
+        if anchor:
+            entry["read_ref"] = str(anchor.get("ref") or "")
+            entry["read_ts"] = str(anchor.get("ts") or "")
+            if anchor.get("sid"):
+                entry["read_sid"] = str(anchor["sid"])
+        self._store_read_state(jid, entry)
+        self._refresh_unread_badge(jid)
         self._schedule_unread_save()
         self._sync_tray_blink()
 
@@ -4458,17 +4607,20 @@ class MainWindow(QtWidgets.QMainWindow):
             timer.start()
 
     def _flush_unread(self) -> None:
-        displayed = {jid: sid for jid, sid in self._unread_displayed.items()
-                     if jid in self._unread_counts}
         if self._client is not None:
             local = getattr(self._client, "_mds_local", {}) or {}
-            for jid in self._unread_counts:
+            for jid, entry in self._unread_chats.items():
                 sid = local.get(jid, "")
                 if sid:
-                    displayed[jid] = sid
-        self._unread_displayed = displayed
-        unread_state.save(self._unread_counts, displayed,
-                          account=self._config.jid or "")
+                    entry["read_sid"] = sid
+        unread_state.save_chats(self._unread_chats, account=self._config.jid or "")
+
+    def _sync_tray_blink(self):
+        """Blink the tray only while logged in and unread messages exist."""
+        if self._unread_total > 0 and self._config.notifications.tray_blink:
+            self._tray.start_blinking()
+        else:
+            self._tray.stop_blinking()
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -4626,6 +4778,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
         self._remember_contact(target, name=nick, is_conference=True)
+        self._sync_pm_roster(target, room, nick)
         self._notify_incoming_message(target, body)
         chat = self._chat_window.open_chat(target, nick)
         self._apply_call_support(target)
@@ -4795,6 +4948,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat.add_status(msg, time.strftime("%H:%M:%S"))
         if nick == self._muc_self_nicks.get(room):
             self._sync_conference_roster(room)
+        # Keep the private-message row of this occupant in step with presence.
+        for target, (target_room, target_nick) in list(self._pm_targets.items()):
+            if target_room == room and target_nick == nick:
+                if show == "unavailable":
+                    self._pm_targets.pop(target, None)
+                    if self._chat_window is not None \
+                            and self._chat_window.has_chat(target):
+                        self._roster.update_user(target, status="offline",
+                                                 icon_key=show_to_icon_key("offline"))
+                    else:
+                        self._pm_roster.discard(target)
+                        self._roster.remove_user(target)
+                        self._maybe_remove_empty_pm_group()
+                        self._schedule_roster_repaint()
+                else:
+                    self._sync_pm_roster(target, room, nick)
 
     def _on_groupchat_presence_details(self, room: str, nick: str):
         """A participant's client (XEP-0092) arrived later — refresh tooltips."""
@@ -5094,8 +5263,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _share_contacts(self) -> list:
         """``(jid, name)`` pairs for the non-conference roster contacts."""
-        skip_groups = {tr("roster_group_conferences"),
-                       tr("roster_group_transports")}
+        skip_groups = _virtual_roster_groups()
         seen: set = set()
         out = []
         for user in self._roster._users:
@@ -5782,6 +5950,8 @@ class MainWindow(QtWidgets.QMainWindow):
             target = f"{room}/{nick}"
         chat = self._chat_window.open_chat(target, nick)
         self._apply_call_support(target)
+        self._sync_pm_roster(target, room, nick)
+        self._reset_unread(target)
         if not chat._history:
             self._load_history(target)
 
@@ -6445,6 +6615,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """A chat tab was closed — release its history DB connection."""
         from stanza_im.core import history
         history.close(jid)
+        self._maybe_drop_pm_roster(jid)
         self._trim_main_process_memory()
 
     def _toggle_visibility(self):
@@ -6504,6 +6675,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._presence_sound_seen.clear()
         self._blocked_jids = set()
         self._conference_roster = set()
+        self._pm_roster = set()
+        self._pm_targets = {}
         self._muc_self_nicks.clear()
         self._muc_users.clear()
         self._muc_vcard_names.clear()

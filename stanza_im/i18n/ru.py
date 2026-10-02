@@ -116,6 +116,7 @@ STRINGS = {
     "roster_all_offline": "Все контакты отсутствуют.",
     "roster_group_ungrouped": "Без группы",
     "roster_group_conferences": "Конференции",
+    "roster_group_personal_messages": "Личные сообщения",
     "category_personal": "Личные сообщения",
     # Chat
     "chat_is_typing": "{name} пишет...",
