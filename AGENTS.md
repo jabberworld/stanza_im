@@ -2072,7 +2072,9 @@ non-trivial task's objective, reasoning, decisions and progress on disk:
   compaction), read `.opencode/work-state.md`, verify its `Ground truth` against
   `git status --short`, `git log --oneline -2` and the test exit codes, re-read
   `Objective` / `Analysis` / `Decisions` / `Plan`, then continue from
-  `In progress`.
+  `In progress`. On a **recreated container** the same routine applies, but the
+  test environment must be activated first: `source .testenv/env.sh` (see
+  [Headless Test Environment](#headless-test-environment)).
 - Never trust recalled state or a printed "success": confirm with `git diff`,
   `git status`, exit codes and a `Read` of the edited region. A remembered
   commit may not exist — check `git rev-parse --verify <hash>`.
@@ -2097,36 +2099,34 @@ updated: <ISO-8601>   HEAD: <hash> <subject>
 
 ## Headless Test Environment
 
-This sandbox has no root, so the Python packages are installed into the user
-site (`~/.local`) and PyQt6's system deps (libGL, libglib, libx11, etc.) are
-extracted from Debian `.deb` packages into `~/.local/qtlibs`, loaded via
-`LD_LIBRARY_PATH`.
+**The test environment is vendored inside the repository, in the gitignored
+`.testenv/` directory** (~693 MB): the Python packages (`site-packages/`), the
+rootless Qt/system libraries extracted from Debian `.deb` packages
+(`qtlibs/`), the console scripts (`bin/`), plus `env.sh`, `README.md` and
+`manifest.txt`. This sandbox has no root, so everything is unpacked into the
+user tree and loaded via `LD_LIBRARY_PATH`.
 
 ```bash
-# 1. Python packages (slixmpp pinned to the target machine's 1.10.0)
-python3 -m pip install --user --break-system-packages \
-  "PyQt6>=6.5" "PyQt6-WebEngine>=6.5" "slixmpp==1.10.0" \
-  defusedxml qasync aiodns aiortc
-
-# 2. System Qt libraries (rootless).  Download the bookworm .deb files from
-#    http://deb.debian.org/debian/pool/main/ and unpack them:
-mkdir -p ~/.local/qtlibs
-for f in *.deb; do dpkg-deb -x "$f" ~/.local/qtlibs; done
-#    Needed: libgl1 libglvnd0 libglx0 libegl1 libgles2 libglib2.0-0 libx11-6
-#    libxcb1 libxcb-dri3-0 libxext6 libxrender1 libxkbcommon0 libfontconfig1
-#    libfreetype6 libpng16-16 libharfbuzz0b libgraphite2-3 libbrotli1
-#    libpcre2-8-0 libexpat1 libdbus-1-3 libgbm1 libdrm2 libxcomposite1
-#    libxdamage1 libxfixes3 libxrandr2 libxtst6 libxkbfile1 libxau6 libxdmcp6
-#    libxshmfence1 libx11-xcb1 libasound2 libpulse0 libnss3 libnspr4
-#    libsndfile1 libasyncns0 libwayland-server0 libwayland-client0 libpcsclite1
-
-# 3. Environment
-export LD_LIBRARY_PATH="$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu:\
-$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu/pulseaudio:\
-$HOME/.local/qtlibs/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
-export QT_QPA_PLATFORM=offscreen   # run GUI without a display
+source .testenv/env.sh          # must be sourced from bash; one command, any cwd
+python3 tests/test_ui_tweaks.py
 python main.py
 ```
+
+`env.sh` exports the three `qtlibs` loader directories, `QT_QPA_PLATFORM`
+(`offscreen` unless already set) and `STANZA_ENV`, and it recreates three
+compatibility symlinks — `~/.local/qtlibs`, `~/.local/lib/python3.11/site-packages`
+and `~/.local/bin` — so the invocation still quoted in the ~57 test docstrings
+(`LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu QT_QPA_PLATFORM=offscreen python3 tests/…`)
+and a plain `python3 tests/…` keep working untouched.
+
+**Mandatory after a container rebuild or a context compaction:** read
+`.testenv/README.md` and run `source .testenv/env.sh` **first**. While the
+`.testenv/` directory exists, never reinstall packages, re-download `.deb`
+files or re-extract the libraries — that is what the directory is for. Only if
+it is missing (fresh clone, or the repository volume was not mounted into the
+new container) rebuild it from `.testenv/README.md` → *Rebuild*; `manifest.txt`
+lists the exact pinned versions (slixmpp 1.10.0, PyQt6 6.11.0, aiortc 1.15.0,
+…) and the `.deb` package names.
 
 `QtWebEngine` now loads (all deps present). Note the **test suite was written
 for the `QTextBrowser` fallback** in some places (`test_history_window`,

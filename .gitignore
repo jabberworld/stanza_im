@@ -10,6 +10,8 @@ venv/
 
 # Original Jabbim sources (reference only)
 old/
+# Vendored headless test environment (see .testenv/README.md)
+/.testenv/
 # Runtime junk
 /core
 jabbim.log
