@@ -66,6 +66,9 @@ class _Chat:
     def read_anchor(self):
         return {}
 
+    def set_restore_anchor(self, anchor):
+        pass
+
     def note_unread_mention(self, ref_id):
         self.mentions.append(ref_id)
 
@@ -284,11 +287,30 @@ contact_open = method_source(_mw_src, "_on_contact_open")
 check("the restore anchor is taken before the tab is opened",
       contact_open.index("restore_anchor = self._restore_anchor_for(jid)")
       < contact_open.index("open_chat(jid, display_name)")
-      < contact_open.rindex("self._reset_unread(jid)"))
+      < contact_open.index("self._focus_chat(jid, chat"))
+check("opening a chat suppresses the tab_focused handler",
+      "self._opening_chat = True" in contact_open
+      and "self._opening_chat = False" in contact_open)
+focus_chat = method_source(_mw_src, "_focus_chat")
+check("the anchor survives the read reset",
+      "self._reset_unread(jid, anchor or None)" in focus_chat
+      and focus_chat.index("self._load_history(jid, anchor)")
+      < focus_chat.index("self._reset_unread(jid, anchor or None)"))
+check("a hidden tab without history loads its archive on focus",
+      "elif is_new or not chat._history:" in focus_chat)
+tab_focused = method_source(_mw_src, "_on_tab_focused")
+check("focusing an existing tab resumes it from the anchor",
+      "if self._opening_chat:" in tab_focused
+      and "self._focus_chat(jid, self._chat_window.get_chat(jid))"
+      in tab_focused)
 pm_click = method_source(_mw_src, "_on_muc_participant_clicked")
 check("a private chat is resumed the same way",
-      pm_click.index("restore_anchor = self._restore_anchor_for(target)")
-      < pm_click.index("open_chat(target, nick)"))
+      pm_click.index("self._opening_chat = True")
+      < pm_click.index("open_chat(target, nick)")
+      and "self._focus_chat(target, chat)" in pm_click)
+tray_cycle = method_source(_mw_src, "_on_tray_cycle_unread")
+check("tray cycling does not overwrite the anchor with the newest message",
+      "self._reset_unread" not in tray_cycle)
 
 
 class _View:
@@ -381,7 +403,10 @@ _cw_window_src = open(os.path.join(
 _cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
                encoding="utf-8").read()
 check("the bottom report is relayed to the main window",
-      "view.bottom_reached.connect(self.bottom_reached)" in _cw_src
+      "view.bottom_reached.connect(self._forward_bottom_reached)"
+      in _cw_src
+      and "if self._truncate_newer:" in method_source(_cw_src,
+                                                     "_forward_bottom_reached")
       and "widget.bottom_reached.connect(" in _cw_window_src
       and "self.bottom_reached.emit(j)" in _cw_window_src
       and "self._chat_window.bottom_reached.connect(self._on_chat_reached_bottom)"

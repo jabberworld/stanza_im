@@ -384,6 +384,9 @@ if HAS_WEBENGINE:
             # no #chat node; buffer them until the load has finished.
             self._pending: list[str] = []
             self._ready = False
+            self._deferred_scroll: tuple | None = None
+            self._newer_html = ""
+            self._last_newer_ref = ""
             self._load_failures = 0
             self._loading = False
             self.loadFinished.connect(self._on_load_finished)
@@ -412,6 +415,8 @@ if HAS_WEBENGINE:
                 pass
             self._ready = False
             self._pending.clear()
+            self._deferred_scroll = None
+            self._newer_html = ""
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""
@@ -651,6 +656,11 @@ if HAS_WEBENGINE:
                 pending, self._pending = self._pending, []
                 for chunk in pending:
                     self._append_chunk(chunk)
+            # A scroll requested while the document was still empty (the
+            # read-anchor resume) only becomes meaningful once the buffered
+            # chunks above are in the DOM, so replay it last.
+            self._apply_newer_marker()
+            self._flush_deferred_scroll()
 
         def _probe_chat_alive(self):
             """Check whether the ``#chat`` node survived a rejected load."""
@@ -661,6 +671,8 @@ if HAS_WEBENGINE:
                         pending, self._pending = self._pending, []
                         for chunk in pending:
                             self._append_chunk(chunk)
+                    self._apply_newer_marker()
+                    self._flush_deferred_scroll()
                 elif self._load_failures >= self._LOAD_RETRY_LIMIT:
                     logger.error("chat document repeatedly lost (%d); "
                                  "stopping reload attempts",
@@ -1011,6 +1023,17 @@ window.__stanzaMentionRef = '';
                         loadref.getAttribute('href') || '';
                     return;
                 }
+                // "Load newer messages" closing a window resumed from a read
+                // anchor: relayed in-page exactly like the other control links,
+                // so the click can never reset the chat document.
+                var newer = t && t.closest
+                    ? t.closest('a.stanza-newer') : null;
+                if (newer) {
+                    e.preventDefault();
+                    window.__stanzaNewerRef =
+                        newer.getAttribute('href') || '';
+                    return;
+                }
                 // Media preview/player links must never navigate: a custom
                 // stanza: navigation can otherwise replace the chat document
                 // (and the image click would not reach Python).  Leave the
@@ -1285,7 +1308,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaReactLikeRef || '',"
                 " window.__stanzaMediaFsRef || '',"
                 " window.__stanzaToNoteRef || '',"
-                " window.__stanzaVoiceRef || '']",
+                " window.__stanzaVoiceRef || '',"
+                " window.__stanzaNewerRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1352,6 +1376,12 @@ window.__stanzaMentionRef = '';
         def _clear_load_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaLoadRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_newer_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaNewerRef = '';")
             except RuntimeError:
                 pass
 
@@ -1580,6 +1610,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_voice_ref = ""
+            if len(value) > 23 and isinstance(value[23], str) and value[23]:
+                self._clear_newer_request()
+                requested = value[23]
+                if requested != getattr(self, "_last_newer_ref", ""):
+                    self._last_newer_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_newer_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1635,7 +1673,9 @@ window.__stanzaMentionRef = '';
                 var div = document.createElement('div');
                 div.innerHTML = {safe};
                 var slot = document.getElementById('stanza-typing-slot');
-                if (slot) {{ chat.insertBefore(div, slot); }}
+                var marker = document.getElementById('stanza-newer');
+                if (marker) {{ chat.insertBefore(div, marker); }}
+                else if (slot) {{ chat.insertBefore(div, slot); }}
                 else {{ chat.appendChild(div); }}
                 var nodes = chat.querySelectorAll('.stanza-message');
                 for (var i = 0; i < nodes.length - {self._MAX_DOM_MESSAGES}; i++) {{
@@ -1653,6 +1693,8 @@ window.__stanzaMentionRef = '';
         def _load_empty(self):
             self._pending.clear()
             self._ready = False
+            self._deferred_scroll = None
+            self._newer_html = ""
             self._fraction = 1.0
             self._overflow = False
             self._reset_unread_indicator()
@@ -1927,7 +1969,37 @@ window.__stanzaMentionRef = '';
 
         def scroll_to_message(self, message_id: str,
                               highlight: bool = True) -> None:
-            """Scroll the ``data-stanza-id`` node into view (and flash it)."""
+            """Scroll the ``data-stanza-id`` node into view (and flash it).
+
+            While the document is empty (a ``clear()`` whose page load has not
+            finished yet) the node does not exist, so the request is parked in
+            ``_deferred_scroll`` and replayed by ``_flush_deferred_scroll()``
+            after the buffered markup has been appended.  Without it the
+            read-anchor resume ran its JavaScript against a blank document and
+            the conversation ended up scrolled to the newest message.
+            """
+            if not message_id:
+                return
+            if not self._ready or self._pending:
+                self._deferred_scroll = ("message", message_id, bool(highlight))
+                return
+            self._run_scroll_to_message(message_id, highlight)
+
+        def _flush_deferred_scroll(self) -> None:
+            """Re-run a parked scroll request once the document is filled."""
+            pending, self._deferred_scroll = self._deferred_scroll, None
+            if pending is None or not self._ready or self._pending:
+                if pending is not None:
+                    self._deferred_scroll = pending
+                return
+            kind = pending[0]
+            if kind == "message":
+                self._run_scroll_to_message(pending[1], pending[2])
+            elif kind == "bottom":
+                self.scroll_to_bottom()
+
+        def _run_scroll_to_message(self, message_id: str,
+                                   highlight: bool = True) -> None:
             safe = json.dumps(message_id or "")
             flash = 1 if highlight else 0
             self.page().runJavaScript(f"""
@@ -1973,11 +2045,49 @@ window.__stanzaMentionRef = '';
         def clear(self):
             """Clear all messages."""
             self._pending.clear()
+            self._deferred_scroll = None
+            self._newer_html = ""
             self._fraction = 1.0
             self._overflow = False
             self._reset_unread_indicator()
             self._update_jump_button()
             self._load_empty()
+
+        def set_newer_marker(self, html: str = "") -> None:
+            """Pin (or drop) the "load newer messages" marker at the bottom.
+
+            The marker closes a window that was resumed from a read anchor: the
+            messages after the anchor are fetched from the local archive by a
+            click, so they must stay reachable *below* the anchor window.
+            ``html`` is empty when the window has caught up with the present.
+
+            The marker is remembered rather than injected straight away: it is
+            usually set right after ``clear()``, when the document is still
+            empty, and it is applied once the buffered markup has landed.
+            """
+            self._newer_html = html or ""
+            if self._ready and not self._pending:
+                self._apply_newer_marker()
+
+        def _apply_newer_marker(self) -> None:
+            safe = json.dumps(self._newer_html or "")
+            self.page().runJavaScript(f"""
+            (function() {{
+                var old = document.getElementById('stanza-newer');
+                if (old) {{ old.parentNode.removeChild(old); }}
+                var html = {safe};
+                if (!html) return;
+                var chat = document.getElementById('chat');
+                if (!chat) return;
+                var div = document.createElement('div');
+                div.id = 'stanza-newer';
+                div.className = 'stanza-newer';
+                div.innerHTML = html;
+                var slot = document.getElementById('stanza-typing-slot');
+                if (slot) {{ chat.insertBefore(div, slot); }}
+                else {{ chat.appendChild(div); }}
+            }})();
+            """)
 
         def evaluate_js(self, code: str):
             self.page().runJavaScript(code)
@@ -2040,6 +2150,7 @@ else:
             self.verticalScrollBar().valueChanged.connect(self._note_bottom)
             self._fraction = 1.0
             self._overflow = False
+            self._newer_html = ""
             self._create_jump_button()
 
         def _note_bottom(self, *_args) -> None:
@@ -2332,8 +2443,29 @@ else:
             self._near_top_hit = False
             self._fraction = 1.0
             self._overflow = False
+            self._newer_html = ""
             self._reset_unread_indicator()
             self._update_jump_button()
+
+        def set_newer_marker(self, html: str = "") -> None:
+            """Pin (or drop) the "load newer messages" marker (fallback view).
+
+            Same contract as the WebEngine view: the marker closes a window
+            resumed from a read anchor and lives as its own block at the very
+            end of the document, so later pages appended above it can be
+            re-pinned by simply calling this again.
+            """
+            self._newer_html = html or ""
+            block = self.document().begin()
+            while block.isValid():
+                nxt = block.next()
+                if "stanza-newer" in block.text():
+                    cursor = QtGui.QTextCursor(block)
+                    cursor.select(QtGui.QTextCursor.SelectionType.BlockUnderCursor)
+                    cursor.removeSelectedText()
+                block = nxt
+            if self._newer_html:
+                self.append(self._newer_html)
 
         def evaluate_js(self, code: str):
             pass

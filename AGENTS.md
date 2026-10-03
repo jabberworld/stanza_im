@@ -890,6 +890,49 @@ opened (`_on_contact_open`, `_on_muc_participant_clicked`) and hands it to
 timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`), so an unread chat opens with the unread block right below
 the last message the user read. The anchor is applied once and dropped.
+
+**Resuming an unread conversation (anchor window + forward paging)**: an unread
+chat must open *on* the read anchor, not at the end of the archive, so
+`MainWindow._focus_chat(jid, chat, is_new=…)` (called from `_on_tab_focused`,
+`_on_contact_open`, `_on_muc_participant_clicked`) captures the anchor
+**before** the counters are cleared and loads the window with
+`history.load_history(..., until=read_ts)` — the boundary row is included, so
+the anchor message itself is the last one on screen
+(`MainWindow._load_history[_async]`, deduplicated per conversation through
+`_history_loading`). The window is only trimmed when the archive really holds
+something newer (`history.newer_available_timestamp_async`), otherwise it is the
+tail and the chat is shown in full. Opening a tab sets `_opening_chat`, which
+suppresses `tab_focused` until the open finished, so the focus handler cannot
+reset the counters (and thus overwrite the anchor) mid-open; `_on_contact_open`,
+`_seed_muc_chat`, the MUC participant path and `_on_tray_cycle_unread` all pass
+the captured anchor to `_reset_unread(jid, anchor)` and never re-reset
+afterwards. A background auto-join MUC keeps loading the ordinary tail and never
+applies an anchor.
+
+While trimmed, `ChatWidget._truncate_newer` is set and `_messages` (everything
+newer than the anchor) keeps accumulating in Python **without** being rendered;
+`_render_all` shows `_history` only and closes the window with the
+`stanza:newer:` marker (`_newer_marker_html`, count = hidden messages). Clicking
+it runs `ChatWidget.load_newer` → `_load_newer_batch_async`, which pages the
+local archive forward with `history.load_newer_timestamp` (strict
+`timestamp > since`, oldest first), appends the unique rows and moves
+`_newer_anchor` forward; the last page calls `_catch_up_newer`, which releases
+the window and re-renders `_history + _messages`. Sending a message ourselves
+catches the window up immediately (`add_message`). The marker is a normal
+in-page control link: `chat_view`'s `_ACTION_JS` `preventDefaults` it into
+`window.__stanzaNewerRef`, the always-running scroll poll relays it as
+`link_clicked` (poll index 23) and `_clear_newer_request` resets it — the
+WebEngine chunk appender keeps it at the very bottom, so a paging page is never
+inserted above it. Because a trimmed window is *not* "caught up",
+`ChatWidget._forward_bottom_reached` ignores `bottom_reached` while
+`_truncate_newer` is set, and `refresh_history`/`detach` drop the state.
+`ChatView.scroll_to_message` parks the request in `_deferred_scroll` while the
+document is empty or has buffered chunks (`clear()` loads a fresh page
+asynchronously), replaying it in `_on_load_finished`/`_probe_chat_alive` after
+the pending markup is appended — otherwise the anchor resume ran against a blank
+document and the chat stayed scrolled to the newest message.
+[`tests/test_read_anchor_restore.py`]
+
 A conversation is also marked read when its view **reaches the newest
 message**: `ChatView._note_bottom` (both the WebEngine poll — fed by the
 existing `st`/`innerHeight`/`scrollHeight` values, so no new JS control ref is

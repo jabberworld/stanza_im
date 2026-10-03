@@ -206,6 +206,8 @@ STRINGS = {
     "muc_mention_sender": "Упомянуть",
     "chat_file_transfer": "Передача файлов",
     "history_load_earlier": "Загрузить более ранние",
+    "history_load_newer": "Загрузить более новые сообщения",
+    "history_load_newer_count": "Загрузить ещё сообщений: {n}",
     "history_clear": "Очистить локальную историю",
     "history_load_from_server": "Локальная история очищена — загрузить с сервера",
     "history_menu_tooltip": "История переписки",

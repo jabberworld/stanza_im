@@ -467,6 +467,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._jump_pending = ""
         self._jump_pages = 0
         self._restore_anchor: dict = {}
+        self._newer_anchor = ""
+        self._newer_loading = False
+        self._truncate_newer = False
         self._mention_refs: list[str] = []
         self._build_ui(theme)
 
@@ -492,8 +495,16 @@ class ChatWidget(QtWidgets.QWidget):
         view.note_requested.connect(
             lambda content: self.note_requested.emit(self.jid, content))
         view.near_top.connect(self._on_near_top)
-        view.bottom_reached.connect(self.bottom_reached)
+        # While the window is trimmed at the read anchor its bottom is *not*
+        # the newest message, so reaching it must not mark the conversation
+        # read (that would move the anchor past the unseen block).
+        view.bottom_reached.connect(self._forward_bottom_reached)
         return view
+
+    def _forward_bottom_reached(self) -> None:
+        if self._truncate_newer:
+            return
+        self.bottom_reached.emit()
 
     def _build_ui(self, theme: ChatThemeFactory):
         layout = QtWidgets.QVBoxLayout(self)
@@ -891,6 +902,9 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:load:"):
             self.load_more_from_server()
+            return
+        if url.startswith("stanza:newer:"):
+            self.load_newer()
             return
         if url == "mam://load":
             self.load_more_from_server()
@@ -1572,6 +1586,18 @@ class ChatWidget(QtWidgets.QWidget):
         self._messages.append(entry)
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
+        if self._truncate_newer:
+            # The window is trimmed at the read anchor: a new incoming message
+            # belongs *after* it, so it is only counted (and shown by the
+            # marker's counter).  Our own reply is the exception — the user
+            # expects to see what they just sent, so the window catches up.
+            if self._is_mine(entry):
+                self._catch_up_newer()
+            else:
+                self._refresh_newer_marker()
+            self._last_sender = sender if direction == "incoming" \
+                or sender == "Me" else self._last_sender
+            return
         self._render_entry(entry)
         mine = self._is_mine(entry)
         if direction == "incoming" and not mine and self._view.is_scrolled_up():
@@ -1768,7 +1794,9 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.add_status(text, timestamp)
         entries = []
         seen = set()
-        for entry in self._history + self._messages:
+        source = (self._history if self._truncate_newer
+                  else self._history + self._messages)
+        for entry in source:
             key = self._entry_key(entry)
             if key in seen:
                 continue
@@ -1778,6 +1806,7 @@ class ChatWidget(QtWidgets.QWidget):
             entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
         for entry in entries:
             self._render_entry(entry)
+        self._refresh_newer_marker()
         self._preserve_fraction = None
         if self._anchor_bottom:
             self._view.scroll_to_bottom()
@@ -1824,6 +1853,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._users.clear()
         self._subjects.clear()
         self._jump_pending = ""
+        self._newer_anchor = ""
+        self._newer_loading = False
+        self._truncate_newer = False
 
     def suspend(self) -> bool:
         """Free the WebEngine page of an inactive tab, keeping its state.
@@ -1874,8 +1906,17 @@ class ChatWidget(QtWidgets.QWidget):
         return self._suspended
 
     def set_history(self, entries: list[dict], window_size: int,
-                    exhausted: bool):
-        """Initial window: replace history rows and re-render from bottom."""
+                    exhausted: bool, anchor: dict | None = None):
+        """Initial window: replace history rows and re-render from bottom.
+
+        *anchor* is the persisted read state of a conversation with unread
+        messages.  The window then ends **at** the anchor instead of at the
+        newest message, so the user is shown the block they have not read yet;
+        everything after it is fetched from the local archive with the
+        "load newer messages" marker at the bottom of the view.  Without an
+        anchor (or when the archive holds nothing newer) the window is the
+        ordinary tail of the conversation.
+        """
         self._history = list(entries or [])
         self._window_size = max(50, int(window_size))
         self._db_exhausted = bool(exhausted)
@@ -1883,13 +1924,106 @@ class ChatWidget(QtWidgets.QWidget):
         self._hist_loading = False
         self._server_fetching = False
         self._cleared = False
-        self._anchor_bottom = True
+        self._newer_loading = False
+        self._newer_anchor = str((anchor or {}).get("ts") or "")
+        self._set_truncated(bool(anchor))
+        self._anchor_bottom = not self._truncate_newer
         self._preserve_fraction = None
         self._render_all()
         if self._restore_anchor:
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
+
+    # ── Read-anchor window (forward paging) ──────────────────────
+
+    def _set_truncated(self, on: bool) -> None:
+        """Trim the window at the read anchor, or restore the full tail.
+
+        While trimmed, ``_messages`` (everything newer than the anchor) keeps
+        accumulating in Python but is not rendered, so nothing is lost when
+        the user pages forward through the archive.
+        """
+        self._truncate_newer = bool(on and self._newer_anchor
+                                    and self._history)
+        if not self._truncate_newer:
+            self._newer_anchor = ""
+
+    @property
+    def truncated_at_anchor(self) -> bool:
+        """True while the window ends at the read anchor instead of "now"."""
+        return self._truncate_newer
+
+    def _newer_marker_html(self) -> str:
+        """The "load newer messages" control link closing a trimmed window."""
+        if not self._truncate_newer:
+            return ""
+        from stanza_im.include.utils import escape_html
+        pending = len(self._messages)
+        text = (tr("history_load_newer_count", n=pending) if pending
+                else tr("history_load_newer"))
+        return (f'<p class="stanza-newer-msg" style="text-align:center;">'
+                f'<a class="stanza-newer" href="stanza:newer:">'
+                f'<i>{escape_html(text)}</i></a></p>')
+
+    def _refresh_newer_marker(self) -> None:
+        try:
+            self._view.set_newer_marker(self._newer_marker_html())
+        except (AttributeError, RuntimeError):
+            pass
+
+    def load_newer(self) -> None:
+        """Fetch the next page of messages after the read anchor."""
+        if not self._truncate_newer or self._newer_loading or self._released:
+            return
+        self._newer_loading = True
+        self._start_task(self._load_newer_batch_async())
+
+    async def _load_newer_batch_async(self) -> None:
+        from stanza_im.core import history
+        self._newer_loading = False
+        if not self._truncate_newer or self._released:
+            return
+        since = self._newer_anchor
+        try:
+            rows = await history.load_newer_timestamp_async(
+                self.jid, since, self._batch_size())
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not page forward for %s", self.jid,
+                         exc_info=True)
+            return
+        if self._released or not self._truncate_newer:
+            return
+        if not rows:
+            self._catch_up_newer()
+            return
+        known = {self._entry_key(entry) for entry in self._history}
+        unique = [entry for entry in rows
+                  if self._entry_key(entry) not in known]
+        if unique:
+            self._history.extend(unique)
+            self._trim_history()
+            self._newer_anchor = (unique[-1].get("timestamp") or since)
+            for entry in unique:
+                self._render_entry(entry)
+        more = await history.newer_available_timestamp_async(
+            self.jid, self._newer_anchor)
+        if self._released or not self._truncate_newer:
+            return
+        if more:
+            self._refresh_newer_marker()
+        else:
+            self._catch_up_newer()
+
+    def _catch_up_newer(self) -> None:
+        """The window reached the newest message — stop trimming it."""
+        if not self._truncate_newer:
+            return
+        self._truncate_newer = False
+        self._newer_anchor = ""
+        self._refresh_newer_marker()
+        self._anchor_bottom = True
+        self._render_all()
 
     def note_unread_mention(self, ref_id: str) -> None:
         """Remember a message that named us, so ``@`` can jump to it.
@@ -2117,6 +2251,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._cleared = False
         self._server_fetching = False
         self._history = entries
+        # A full re-read of the tail is never trimmed at a read anchor.
+        self._truncate_newer = False
+        self._newer_anchor = ""
         self._db_exhausted = bool(entries) and not await \
             history.older_available_timestamp_async(
                 self.jid, self.oldest_ts())

@@ -499,6 +499,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_save_timer.setInterval(1000)
         self._unread_save_timer.timeout.connect(self._flush_unread)
 
+        # ``_opening_chat`` suppresses the tab_focused handler while a chat is
+        # being opened on purpose (the opener applies the read anchor itself);
+        # ``_history_loading`` remembers the in-flight history load per chat
+        # (keyed by its anchor timestamp) so a repeated request is not issued.
+        self._opening_chat = False
+        self._history_loading: dict[str, str] = {}
+
         # Unload the WebEngine page of tabs that stay cold (see P7).
         self._tab_activity: dict[str, float] = {}
         self._suspend_timer = QtCore.QTimer(self)
@@ -4072,7 +4079,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return ""
 
     def _seed_muc_chat(self, room: str, chat, *, title: str = "",
-                       is_new: bool = False) -> None:
+                       is_new: bool = False, anchor: dict | None = None) -> None:
         """Push the current MUC occupant state into an open tab."""
         self_nick = self._muc_self_nicks.get(room, "")
         users = self._muc_users.get(room, {})
@@ -4083,8 +4090,12 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.set_subject(self._client.get_muc_subjects(room))
         self._chat_window.set_chat_title(room, chat_title)
         chat.set_bookmarked(room in self._bookmarks)
-        if is_new:
+        if anchor:
+            chat.set_restore_anchor(anchor)
+            self._load_history(room, anchor)
+        elif is_new or not chat._history:
             self._load_history(room)
+        if is_new:
             self._request_vcard(room, force=True)
 
     def _on_contact_open(self, jid: str):
@@ -4093,54 +4104,83 @@ class MainWindow(QtWidgets.QMainWindow):
         # Captured before the tab is opened: focusing it clears the counters,
         # so an unread conversation is resumed from its stored read anchor.
         restore_anchor = self._restore_anchor_for(jid)
-        if jid in self._muc_self_nicks:
-            is_new = not self._chat_window.has_chat(jid)
-            chat = self._chat_window.open_groupchat(
-                jid, self._muc_self_nicks[jid], display_name)
-            if is_new and chat is not None:
-                chat.set_restore_anchor(restore_anchor)
-            self._seed_muc_chat(jid, chat, title=display_name, is_new=is_new)
-            self._apply_muji_support(jid)
-            self._apply_muc_admin(jid)
-            self._reset_unread(jid)
-            return
-        is_new = not self._chat_window.has_chat(jid)
-        chat = self._chat_window.open_chat(jid, display_name)
-        if is_new and chat is not None:
-            chat.set_restore_anchor(restore_anchor)
-        self._apply_call_support(jid)
-        chat_show = next((user.status for user in self._roster._users
-                          if user.jid == jid), None)
-        self._chat_window.set_contact_status(jid, chat_show)
-        if is_new:
-            self._load_history(jid)
-        self._reset_unread(jid)
-        self._request_vcard(jid)
+        self._opening_chat = True
+        try:
+            if jid in self._muc_self_nicks:
+                is_new = not self._chat_window.has_chat(jid)
+                chat = self._chat_window.open_groupchat(
+                    jid, self._muc_self_nicks[jid], display_name)
+                self._seed_muc_chat(jid, chat, title=display_name,
+                                    is_new=is_new, anchor=restore_anchor)
+                self._apply_muji_support(jid)
+                self._apply_muc_admin(jid)
+                # The anchor is passed explicitly: the tab's own newest
+                # message would otherwise become the read point.
+                self._reset_unread(jid, restore_anchor or None)
+                if self._client:
+                    self._client.mds_mark_displayed(jid)
+            else:
+                is_new = not self._chat_window.has_chat(jid)
+                chat = self._chat_window.open_chat(jid, display_name)
+                self._apply_call_support(jid)
+                chat_show = next((user.status for user in self._roster._users
+                                  if user.jid == jid), None)
+                self._chat_window.set_contact_status(jid, chat_show)
+                self._focus_chat(jid, chat, is_new=is_new)
+                self._request_vcard(jid)
+        finally:
+            self._opening_chat = False
 
-    def _load_history(self, jid: str):
-        """Feed previously saved messages from the SQLite history into chat."""
-        self._start_task(self._load_history_async(jid))
+    def _load_history(self, jid: str, anchor: dict | None = None):
+        """Feed previously saved messages from the SQLite history into chat.
 
-    async def _load_history_async(self, jid: str):
+        *anchor* is the persisted read state of an unread conversation: the
+        window then ends at the anchor (the unread block is loaded forward on
+        demand) instead of at the newest message.
+        """
+        self._start_task(self._load_history_async(jid, anchor))
+
+    async def _load_history_async(self, jid: str, anchor: dict | None = None):
         from stanza_im.core import history
         chat = self._chat_window.get_chat(jid)
         if not chat:
             return
-        if not os.path.isfile(history._path(jid)):
-            await history.migrate_from_jsonl_async(jid)
-        try:
-            window = int(self._config.chat.history_limit)
-        except (TypeError, ValueError):
-            window = _HISTORY_PAGE
-        window = max(10, min(window, _HISTORY_WINDOW_MAX))
-        chat = self._chat_window.get_chat(jid)
-        if chat is None:
+        anchor_ts = str((anchor or {}).get("ts") or "")
+        if jid in self._history_loading:
+            # A load is already on its way for this conversation; the read
+            # state cannot have changed in between, so skip the duplicate.
             return
-        entries = await history.load_history_async(jid, limit=window)
-        exhausted = bool(entries) and not await \
-            history.older_available_timestamp_async(
-                jid, entries[0].get("timestamp", ""))
-        chat.set_history(entries, window, exhausted)
+        self._history_loading[jid] = anchor_ts
+        try:
+            if not os.path.isfile(history._path(jid)):
+                await history.migrate_from_jsonl_async(jid)
+            try:
+                window = int(self._config.chat.history_limit)
+            except (TypeError, ValueError):
+                window = _HISTORY_PAGE
+            window = max(10, min(window, _HISTORY_WINDOW_MAX))
+            chat = self._chat_window.get_chat(jid)
+            if chat is None:
+                return
+            entries = await history.load_history_async(
+                jid, limit=window, until=anchor_ts or None)
+            # Only trim the window at the anchor when the archive really holds
+            # something newer; otherwise it *is* the newest message and the
+            # conversation is shown in full.
+            if anchor_ts and entries and await \
+                    history.newer_available_timestamp_async(
+                        jid, entries[-1].get("timestamp", "")):
+                window_anchor = anchor
+            else:
+                window_anchor = None
+            exhausted = bool(entries) and not await \
+                history.older_available_timestamp_async(
+                    jid, entries[0].get("timestamp", ""))
+        finally:
+            self._history_loading.pop(jid, None)
+        if chat is None or self._chat_window.get_chat(jid) is not chat:
+            return
+        chat.set_history(entries, window, exhausted, anchor=window_anchor)
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -4671,11 +4711,39 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._tray.stop_blinking()
 
-    def _on_tab_focused(self, jid: str):
-        self._touch_tab_activity(jid)
-        self._reset_unread(jid)
+    def _focus_chat(self, jid: str, chat, *, is_new: bool = False) -> None:
+        """Show *jid* the way the user left it, then mark it read.
+
+        An unread conversation is resumed from its stored read anchor, so the
+        view opens on the last message that was read instead of at the very
+        end of the history (where a large unread block would be scrolled out
+        of sight above).  The anchor is captured *before* the counters are
+        cleared and passed to :meth:`_reset_unread`, otherwise the fresh view
+        would report the newest message as the read point and the anchor
+        could never be restored again.
+        """
+        anchor = self._restore_anchor_for(jid)
+        if chat is None:
+            self._reset_unread(jid)
+            return
+        if anchor:
+            chat.set_restore_anchor(anchor)
+            self._load_history(jid, anchor)
+        elif is_new or not chat._history:
+            # A tab created by an incoming message (opened with focus=False)
+            # never loaded its archive; do it when it is first shown.
+            self._load_history(jid)
+        self._reset_unread(jid, anchor or None)
         if self._client:
             self._client.mds_mark_displayed(jid)
+
+    def _on_tab_focused(self, jid: str):
+        self._touch_tab_activity(jid)
+        if self._opening_chat:
+            # ``_on_contact_open`` (or a MUC/PM path) applies the anchor and
+            # clears the counters itself for the tab it is opening.
+            return
+        self._focus_chat(jid, self._chat_window.get_chat(jid))
 
     def _on_chat_reached_bottom(self, jid: str):
         """The active chat is scrolled to its newest message: it is read.
@@ -6072,16 +6140,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
         # Before the open: focusing the tab clears the counters, so the stored
-        # read anchor of an unread private chat is captured first.
-        restore_anchor = self._restore_anchor_for(target)
-        chat = self._chat_window.open_chat(target, nick)
-        if chat is not None and not chat._history:
-            chat.set_restore_anchor(restore_anchor)
+        # read anchor of an unread private chat is captured by ``_focus_chat``
+        # itself (the tab_focused handler is suppressed while opening).
+        self._opening_chat = True
+        try:
+            chat = self._chat_window.open_chat(target, nick)
+        finally:
+            self._opening_chat = False
         self._apply_call_support(target)
         self._sync_pm_roster(target, room, nick)
-        self._reset_unread(target)
-        if not chat._history:
-            self._load_history(target)
+        self._focus_chat(target, chat)
 
     def _on_muc_participant_context(self, room: str, nick: str, pos):
         info = self._participant_info(room, nick)
@@ -6661,10 +6729,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not unread:
             return
         target = unread[0]
+        # ``_on_contact_open`` resumes the conversation from its read anchor
+        # and marks it read; a second reset here would overwrite the anchor
+        # with the newest message.
         self._osd_click(target)
-        self._reset_unread(target)
-        if self._client:
-            self._client.mds_mark_displayed(target)
 
     def _on_status_change(self, index: int):
         self._apply_status(self._status_combo.currentData() or "")

@@ -206,6 +206,8 @@ STRINGS = {
     "muc_mention_sender": "Mention",
     "chat_file_transfer": "File Transfer",
     "history_load_earlier": "Load earlier",
+    "history_load_newer": "Load newer messages",
+    "history_load_newer_count": "Load {n} more new messages",
     "history_clear": "Clear local history",
     "history_load_from_server": "Local history was cleared — load it from server",
     "history_menu_tooltip": "Conversation history",

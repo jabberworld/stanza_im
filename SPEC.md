@@ -1466,7 +1466,21 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `ChatWidget.set_restore_anchor`) and `set_history` scrolls to that message
   after the history window is rendered (falling back to the anchor timestamp
   and then to paging the local archive). A conversation with no unread
-  messages opens at its newest message as before. The file is a **v2 payload**
+  messages opens at its newest message as before.
+- An unread conversation opens as a window that **ends at the read anchor**:
+  `MainWindow._focus_chat` loads it with `history.load_history(..., until=
+  read_ts)` (inclusive, so the anchor message is the last row on screen) and
+  keeps the anchor when clearing the counters (`_reset_unread(jid, anchor)`).
+  Messages newer than the anchor are not rendered; they keep accumulating in
+  `ChatWidget._messages` and a `stanza:newer:` marker at the bottom of the view
+  offers them ("Загрузить более новые сообщения", with a count).
+  Clicking it pages the local archive forward
+  (`history.load_newer_timestamp`, strict `timestamp > since`, oldest first);
+  the last page releases the window and re-renders everything. Sending a message
+  releases it immediately. While the window is trimmed, `bottom_reached` does
+  **not** mark the conversation read (only "caught up" counts), and a background
+  auto-joined MUC is never anchored. A hidden tab (opened with `focus=False`
+  by an incoming message) loads its archive when it is first shown. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
   "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
   where *chat-key* is the conversation key the chat tabs use (bare JID for 1:1
