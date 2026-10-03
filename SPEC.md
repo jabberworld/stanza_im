@@ -1467,20 +1467,30 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   after the history window is rendered (falling back to the anchor timestamp
   and then to paging the local archive). A conversation with no unread
   messages opens at its newest message as before.
-- An unread conversation opens as a window that **ends at the read anchor**:
-  `MainWindow._focus_chat` loads it with `history.load_history(..., until=
-  read_ts)` (inclusive, so the anchor message is the last row on screen) and
-  keeps the anchor when clearing the counters (`_reset_unread(jid, anchor)`).
-  Messages newer than the anchor are not rendered; they keep accumulating in
-  `ChatWidget._messages` and a `stanza:newer:` marker at the bottom of the view
-  offers them ("Загрузить более новые сообщения", with a count).
-  Clicking it pages the local archive forward
-  (`history.load_newer_timestamp`, strict `timestamp > since`, oldest first);
-  the last page releases the window and re-renders everything. Sending a message
-  releases it immediately. While the window is trimmed, `bottom_reached` does
-  **not** mark the conversation read (only "caught up" counts), and a background
-  auto-joined MUC is never anchored. A hidden tab (opened with `focus=False`
-  by an incoming message) loads its archive when it is first shown. The file is a **v2 payload**
+- An unread conversation opens with **every** new message already on screen: the
+  window is the ordinary tail of the conversation (`history.load_history`), there
+  is no forward pager, and older messages are reached by scrolling up or the
+  archive/jump menus (the jump button returns to the newest one). The read
+  anchor (`MainWindow._focus_chat` captures it before the counters are cleared
+  and keeps it when clearing them, `_reset_unread(jid, anchor)`) then only does
+  two things: it places a visual separator and it is the position the window
+  opens at.
+- The separator is part of the message stream: `ChatThemeFactory.render_message(
+  unread_marker=True)` prepends `<div class="stanza-unread">` and `_UNREAD_CSS`
+  styles it `font-size: 0.85em`, so it stays one step below the chat text and
+  follows the chat font and the Ctrl+wheel zoom (no skin change needed, works in
+  the `QTextBrowser` fallback too). `ChatWidget._take_unread_marker` emits it once
+  per rendering above the first message past `_unread_boundary` (matched by
+  reference, else by order of arrival); a read point older than the loaded
+  window (an unread block larger than `chat.history_limit`) is paged back first
+  and the separator is placed afterwards, `_finish_unread_resolve` re-rendering
+  the completed window. an unread message in an open but unfocused tab is armed by
+  `MainWindow._arm_unread_separator` before `add_message` renders it
+  (`ChatWidget.note_unread_arrival`). It stays in the window until the chat is
+  reopened. `bottom_reached` is not suppressed, so the newest message always
+  marks the conversation read, and a background auto-joined MUC is never
+  anchored. A hidden tab (opened with `focus=False` by an incoming message) loads
+  its archive when it is first shown. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
   "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
   where *chat-key* is the conversation key the chat tabs use (bare JID for 1:1

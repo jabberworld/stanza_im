@@ -891,41 +891,51 @@ timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`), so an unread chat opens with the unread block right below
 the last message the user read. The anchor is applied once and dropped.
 
-**Resuming an unread conversation (anchor window + forward paging)**: an unread
-chat must open *on* the read anchor, not at the end of the archive, so
+**Resuming an unread conversation (full window + unread separator)**: an
+unread chat opens with **every** new message already on screen — the window is
+the ordinary tail of the conversation and there is no forward pager (older
+messages are reached by scrolling up or the archive/jump menus, the jump button
+returns to the newest one). The persisted anchor therefore only does two
+things: it places the separator and it is the position the window opens at.
 `MainWindow._focus_chat(jid, chat, is_new=…)` (called from `_on_tab_focused`,
 `_on_contact_open`, `_on_muc_participant_clicked`) captures the anchor
-**before** the counters are cleared and loads the window with
-`history.load_history(..., until=read_ts)` — the boundary row is included, so
-the anchor message itself is the last one on screen
-(`MainWindow._load_history[_async]`, deduplicated per conversation through
-`_history_loading`). The window is only trimmed when the archive really holds
-something newer (`history.newer_available_timestamp_async`), otherwise it is the
-tail and the chat is shown in full. Opening a tab sets `_opening_chat`, which
-suppresses `tab_focused` until the open finished, so the focus handler cannot
-reset the counters (and thus overwrite the anchor) mid-open; `_on_contact_open`,
-`_seed_muc_chat`, the MUC participant path and `_on_tray_cycle_unread` all pass
-the captured anchor to `_reset_unread(jid, anchor)` and never re-reset
-afterwards. A background auto-join MUC keeps loading the ordinary tail and never
-applies an anchor.
+**before** the counters are cleared and hands it to `ChatWidget.set_history(…,
+anchor=…)` alongside the tail loaded by
+`MainWindow._load_history[_async]` (`history.load_history`, deduplicated per
+conversation through `_history_loading`). Opening a tab sets `_opening_chat`,
+which suppresses `tab_focused` until the open finished, so the focus handler
+cannot reset the counters (and thus overwrite the anchor) mid-open;
+`_on_contact_open`, `_seed_muc_chat`, the MUC participant path and
+`_on_tray_cycle_unread` all pass the captured anchor to
+`_reset_unread(jid, anchor)` and never re-reset afterwards. A background
+auto-join MUC keeps loading the ordinary tail and never applies an anchor.
 
-While trimmed, `ChatWidget._truncate_newer` is set and `_messages` (everything
-newer than the anchor) keeps accumulating in Python **without** being rendered;
-`_render_all` shows `_history` only and closes the window with the
-`stanza:newer:` marker (`_newer_marker_html`, count = hidden messages). Clicking
-it runs `ChatWidget.load_newer` → `_load_newer_batch_async`, which pages the
-local archive forward with `history.load_newer_timestamp` (strict
-`timestamp > since`, oldest first), appends the unique rows and moves
-`_newer_anchor` forward; the last page calls `_catch_up_newer`, which releases
-the window and re-renders `_history + _messages`. Sending a message ourselves
-catches the window up immediately (`add_message`). The marker is a normal
-in-page control link: `chat_view`'s `_ACTION_JS` `preventDefaults` it into
-`window.__stanzaNewerRef`, the always-running scroll poll relays it as
-`link_clicked` (poll index 23) and `_clear_newer_request` resets it — the
-WebEngine chunk appender keeps it at the very bottom, so a paging page is never
-inserted above it. Because a trimmed window is *not* "caught up",
-`ChatWidget._forward_bottom_reached` ignores `bottom_reached` while
-`_truncate_newer` is set, and `refresh_history`/`detach` drop the state.
+The separator is part of the message stream rather than a control link:
+`ChatThemeFactory.render_message(unread_marker=True)` prepends
+`<div class="stanza-unread">` and `_UNREAD_CSS` styles it `font-size: 0.85em`,
+so the label stays one step below the chat text and follows both the chat font
+setting and the Ctrl+wheel zoom; it needs no change in the chat skins and works
+in the `QTextBrowser` fallback alike. `ChatWidget` keeps the boundary in
+`_unread_boundary` (`{"ref", "ts", "sid"}`) and hands the flag out once per
+rendering in `_take_unread_marker`: entries arrive oldest-first, the entry
+carrying the anchor's own reference is the last read one and the next message
+opens the block (matched by reference, otherwise by the order of arrival). A
+read point **older** than the whole loaded window — an unread block bigger than
+`chat.history_limit` — is only reachable by paging the local archive back, so
+`_boundary_reachable` defers the separator (`_unread_resolving`) until
+`_load_jump_pages_async` located it and `_finish_unread_resolve` re-renders the
+completed window; when the archive cannot reach the read point the separator
+falls back to the first message of the window. A message arriving in an
+open but unfocused tab is armed by `MainWindow._arm_unread_separator` **before**
+`ChatWidget.add_message` renders it (`ChatWidget.note_unread_arrival`), so the
+incoming entry carries the separator and the conversation the user already read
+stays separated; a fully read tab has no boundary yet, so one is taken from the
+newest message on screen. Arming *after* the render would be lost by the next
+`_render_all` pass. The separator stays in the window until the
+chat is reopened (re-reading never removes it), `_render_all` re-emits it once
+per pass (theme/font change, restore) and `detach`/`refresh_history` drop the
+state. Reaching the bottom is `bottom_reached` again, with no trimming to
+suppress, so the newest message always marks the conversation read.
 `ChatView.scroll_to_message` parks the request in `_deferred_scroll` while the
 document is empty or has buffered chunks (`clear()` loads a fresh page
 asynchronously), replaying it in `_on_load_finished`/`_probe_chat_alive` after

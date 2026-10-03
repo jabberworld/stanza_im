@@ -44,9 +44,15 @@ class _Chat:
         self.is_muc = False
         self.rendered = []
         self.mentions = []
+        self.unread_armed = 0
 
     def add_message(self, **kwargs):
-        self.rendered.append(kwargs)
+        # The separator has to be armed before the entry is rendered, so the
+        # order of the two calls is recorded with every message.
+        self.rendered.append((self.unread_armed, kwargs))
+
+    def note_unread_arrival(self):
+        self.unread_armed += 1
 
     def add_status(self, *args, **kwargs):
         pass
@@ -182,6 +188,18 @@ win._on_groupchat_message(ROOM, "alice", "old", "2026-10-02T09:00:00Z",
 check("an archived replay is not counted",
       win._read_state(ROOM)["unread"] == 2)
 
+# 1b. an open background room arms its separator before the entry is drawn ----
+win = make_window()
+win._roster.add_user(UserItem(jid=ROOM, name=ROOM,
+                              group=tr("roster_group_conferences"),
+                              status="online"))
+room_chat = win._chat_window.open_groupchat(ROOM, "me", ROOM)
+win._on_groupchat_message(ROOM, "alice", "first", "2026-10-02T10:00:00Z")
+win._on_groupchat_message(ROOM, "me", "mine", "2026-10-02T10:01:00Z")
+win._on_groupchat_message(ROOM, "alice", "second", "2026-10-02T10:02:00Z")
+check("a backgrounded room arms the separator before rendering",
+      [armed for armed, _ in room_chat.rendered] == [1, 1, 2])
+
 # 2. a room on screen is not counted ------------------------------------------
 win = make_window()
 win._chat_window.open_chat(ROOM)
@@ -189,6 +207,8 @@ win._chat_area_visible = lambda: True
 win._on_groupchat_message(ROOM, "alice", "me: ping", "2026-10-02T10:00:00Z")
 check("a message in the focused room is not unread",
       win._read_state(ROOM)["unread"] == 0)
+check("a focused room arms no separator",
+      not win._chat_window.get_chat(ROOM).unread_armed)
 
 # 3. a private message counts for its sender ---------------------------------
 win = make_window()
@@ -403,10 +423,7 @@ _cw_window_src = open(os.path.join(
 _cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
                encoding="utf-8").read()
 check("the bottom report is relayed to the main window",
-      "view.bottom_reached.connect(self._forward_bottom_reached)"
-      in _cw_src
-      and "if self._truncate_newer:" in method_source(_cw_src,
-                                                     "_forward_bottom_reached")
+      "view.bottom_reached.connect(self.bottom_reached)" in _cw_src
       and "widget.bottom_reached.connect(" in _cw_window_src
       and "self.bottom_reached.emit(j)" in _cw_window_src
       and "self._chat_window.bottom_reached.connect(self._on_chat_reached_bottom)"

@@ -1,9 +1,10 @@
-"""Offscreen tests for resuming an unread chat from its read anchor.
+"""Offscreen tests for resuming an unread chat on its read anchor.
 
-A conversation with unread messages must open on the message block the user
-left off at instead of the very end of the archive: the window loaded from
-SQLite ends at the stored anchor, and the newer messages are fetched forward
-only when the user asks for them.
+A conversation with unread messages must open with **all** of the new messages
+already on screen — there is no forward pager any more.  The persisted read
+anchor then only does two things: it places the "unread messages" separator
+above the first unseen message and it is the position the window opens at.  The
+separator stays in the window until the chat is reopened.
 
 Run with:
     LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu \
@@ -21,13 +22,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtWidgets  # noqa: E402
 
-from stanza_im.core import history
-from stanza_im.i18n import load as i18n_load
-from stanza_im.ui.chat_themes import ChatThemeFactory
-from stanza_im.ui.chat_widget import ChatWidget
-from stanza_im.ui.main_window import MainWindow
+from stanza_im.core import history  # noqa: E402
+from stanza_im.i18n import load as i18n_load  # noqa: E402
+from stanza_im.ui import chat_themes  # noqa: E402
+from stanza_im.ui.chat_themes import ChatThemeFactory  # noqa: E402
+from stanza_im.ui.chat_widget import ChatWidget  # noqa: E402
 
 i18n_load("en")
 
@@ -37,6 +38,8 @@ _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
 _cw_src = open(os.path.join(_root, "stanza_im", "ui", "chat_widget.py"),
                encoding="utf-8").read()
 _cv_src = open(os.path.join(_root, "stanza_im", "ui", "chat_view.py"),
+               encoding="utf-8").read()
+_ct_src = open(os.path.join(_root, "stanza_im", "ui", "chat_themes.py"),
                encoding="utf-8").read()
 
 FAILURES = []
@@ -65,7 +68,6 @@ class _View:
     def __init__(self):
         self.messages = []
         self.statuses = []
-        self.marker = ""
         self.scrolled = []
         self.cleared = 0
 
@@ -79,9 +81,6 @@ class _View:
 
     def add_status(self, text, ts=""):
         self.statuses.append(text)
-
-    def set_newer_marker(self, html):
-        self.marker = html or ""
 
     def scroll_to_message(self, message_id, highlight=True):
         self.scrolled.append(message_id)
@@ -134,175 +133,211 @@ def widget(jid="bob@example.com"):
     w._preserve_fraction = None
     w._restore_anchor = {}
     w._released = False
-    w._truncate_newer = False
-    w._newer_anchor = ""
-    w._newer_loading = False
+    w._unread_boundary = {}
+    w._unread_marker_shown = False
+    w._unread_armed = False
+    w._unread_passed = False
+    w._unread_resolving = False
     w._anchor_bottom = False
     w._last_sender = None
     w._show_avatars = False
     w._users = []
+    w._jump_pending = ""
+    w._jump_pages = 0
+    w._db_exhausted = False
+    w._server_exhausted = False
+    w._hist_loading = False
+    w._server_fetching = False
+    w._window_size = 50
+    w._start_task = lambda coro: None
     return w
 
 
-ANCHOR = {"ref": "m-3", "ts": "2026-10-02T10:02:00Z", "sid": "sid-3"}
+ANCHOR = {"ref": "m-3", "ts": "2026-10-02T10:03:00Z", "sid": "sid-3"}
 
-# 1. forward paging in the local archive --------------------------------------
-JID = "paging@example.com"
-for i in range(1, 6):
-    history.store_message(JID, "incoming", f"m{i}",
-                          timestamp=f"2026-10-02T10:0{i}:00Z",
-                          origin_id=f"m{i}")
-
-newer = history.load_newer_timestamp(JID, "2026-10-02T10:03:00Z")
-check("forward paging is strict and oldest-first",
-      [r["body"] for r in newer] == ["m4", "m5"])
-check("more to come is reported as a flag",
-      history.newer_available_timestamp(JID, "2026-10-02T10:03:00Z") is True)
-check("the newest row has nothing after it",
-      history.newer_available_timestamp(JID, "2026-10-02T10:05:00Z") is False)
-check("a first page is bounded by the requested limit",
-      len(history.load_newer_timestamp(JID, "2026-10-01T00:00:00Z",
-                                       limit=2)) == 2)
-check("the async wrappers mirror the sync results",
-      [r["body"] for r in
-       run(history.load_newer_timestamp_async(JID, "2026-10-02T10:03:00Z"))]
-      == ["m4", "m5"]
-      and run(history.newer_available_timestamp_async(
-          JID, "2026-10-02T10:03:00Z")) is True)
-
-# 2. the anchor window renders history only ------------------------------------
+# 1. the window holds every message, the anchor only separates the block -------
 w = widget()
 w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),
-               row("2026-10-02T10:02:00Z", "two", "m-2")],
+               row("2026-10-02T10:02:00Z", "two", "m-2"),
+               row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4")],
               50, False, anchor=ANCHOR)
-w._messages = [row("2026-10-02T10:03:00Z", "three", "m-3")]
-w._render_all()
-check("the tab is anchored at the read point", w.truncated_at_anchor)
-check("messages newer than the anchor stay hidden",
-      [m["body"] for m in w._view.messages] == ["one", "two"])
-check("live messages are kept in memory",
-      len(w._messages) == 1 and w._messages[0]["body"] == "three")
-check("a forward marker is offered", "stanza:newer:" in w._view.marker)
-check("the marker counts the hidden messages", "1" in w._view.marker)
+check("the whole window is rendered up front",
+      [m["body"] for m in w._view.messages]
+      == ["one", "two", "three", "four"])
+check("the separator lands above the first message past the anchor",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+check("the boundary is kept for the reopening",
+      w.unread_boundary.get("ref") == "m-3")
 
+# 2. no anchor → no separator ---------------------------------------------------
 w = widget()
-w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1")],
-              50, False, anchor=ANCHOR)
-check("a hidden conversation resumes on its anchor", w.truncated_at_anchor)
-check("the main window keeps the anchor out of a re-read conversation",
-      "window_anchor = anchor" in method_source(_mw_src, "_load_history_async")
-      and "window_anchor = None" in method_source(_mw_src, "_load_history_async"))
-check("the anchor window is skipped when the archive holds nothing newer",
-      "newer_available_timestamp_async" in
-      method_source(_mw_src, "_load_history_async"))
+w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1")], 50, False)
+check("a re-read conversation carries no separator",
+      not any(m["unread_marker"] for m in w._view.messages))
+check("the window opens at the newest message", w._anchor_bottom)
 
-# 3. the timestamp fallback still finds the anchor -----------------------------
+# 3. a read point older than the window waits for the archive -------------------
+w = widget()
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4"),
+               row("2026-10-02T10:05:00Z", "five", "m-5")],
+              50, False, anchor=ANCHOR)
+check("an unread block larger than the window defers the separator",
+      w._unread_resolving
+      and not any(m["unread_marker"] for m in w._view.messages))
+w._history = [row("2026-10-02T10:02:00Z", "read", "m-2"),
+              row("2026-10-02T10:03:00Z", "last read", "m-3"),
+              row("2026-10-02T10:04:00Z", "four", "m-4"),
+              row("2026-10-02T10:05:00Z", "five", "m-5")]
+w._view.messages = []
+w._finish_unread_resolve(w._history[1])
+check("the separator is placed once the window is complete",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+check("the resume scrolls to the read point",
+      w._view.scrolled == ["m-3"] and not w._unread_resolving)
+
+# 3b. an unresolvable read point falls back to the first message ---------------
+w = widget()
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor=ANCHOR)
+w._view.messages = []
+w._finish_unread_resolve(None)
+check("a read point the archive cannot reach marks the first message",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+
+# 3b2. a timestamp-only read point never waits ---------------------------------
+w = widget()
+w.set_restore_anchor({"ref": "", "ts": ANCHOR["ts"], "sid": ""})
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor={"ref": "", "ts": ANCHOR["ts"]})
+check("a timestamp-only read point also waits for its page",
+      w._unread_resolving)
+w._view.messages = []
+w._restore_from_anchor()
+check("a timestamp-only read point places the separator anyway",
+      not w._unread_resolving
+      and [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+
+# 3c. the separator is emitted once per render ---------------------------------
+w = widget()
+w.set_history([row("2026-10-02T10:02:00Z", "two", "m-2"),
+               row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor=ANCHOR)
+check("a reachable read point separates immediately",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+w._view.messages = []
+w._render_all()
+check("a re-render re-emits the separator exactly once",
+      len([m for m in w._view.messages if m["unread_marker"]]) == 1)
+
+# 4. a timestamp-only anchor falls back to time ---------------------------------
 w = widget()
 w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),
                row("2026-10-02T10:02:00Z", "two", "m-2")],
               50, False, anchor={"ts": "2026-10-02T10:01:30Z"})
+check("without a reference the timestamp decides the separator",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["two"])
 w.set_restore_anchor({"ts": "2026-10-02T10:01:30Z"})
 w._restore_from_anchor()
 check("a timestamp-only anchor lands on the newest older message",
       w._view.scrolled == ["m-1"])
 
-# 4. reaching the bottom of an anchored window is not "caught up" -------------
+# 5. unread arriving in a background tab gets its own separator ------------------
 w = widget()
-w.set_history([row("2026-10-02T10:02:00Z", "two", "m-2")],
+w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1")], 50, False)
+check("a read tab starts without a boundary", not w.unread_boundary)
+w.add_message("Bob", "live", "2026-10-02T10:02:00Z", message_id="m-9")
+check("a read tab renders without a separator",
+      not any(m["unread_marker"] for m in w._view.messages))
+w.note_unread_arrival()
+check("a read tab takes the newest message on screen as its boundary",
+      w.unread_boundary.get("ts") == "2026-10-02T10:02:00Z")
+w.add_message("Bob", "live", "2026-10-02T10:06:00Z", message_id="m-9")
+check("an armed tab separates the message that just arrived",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["live"])
+w.add_message("Bob", "again", "2026-10-02T10:07:00Z", message_id="m-10")
+check("later messages are not separated again",
+      len([m for m in w._view.messages if m["unread_marker"]]) == 1)
+w._view.messages = []
+w._render_all()
+check("the separator survives a re-render of a background tab",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["again"])
+w.set_unread_boundary(ANCHOR)
+check("the boundary can be dropped again", w.unread_boundary == ANCHOR)
+
+# 6. our own message keeps the separator where it is ----------------------------
+w = widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3")],
+              50, False, anchor=ANCHOR)
+w.add_message("me", "mine", "2026-10-02T10:06:00Z", direction="outgoing",
+              message_id="m-10")
+check("our reply stays inside the unread block",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["mine"])
+
+# 7. reading the block does not remove the separator ----------------------------
+w = widget()
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor=ANCHOR)
+w.set_unread_boundary({})
+check("clearing the boundary drops it", not w.unread_boundary)
+
+# 8. reaching the bottom marks the conversation read ---------------------------
+w = widget()
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4")],
               50, False, anchor=ANCHOR)
 emitted = []
 w.bottom_reached.connect(lambda: emitted.append(True))
-w._forward_bottom_reached()
-check("the bottom of an anchored window marks nothing read", not emitted)
-w._set_truncated(False)
-w._forward_bottom_reached()
-check("after catching up the bottom marks the chat read", emitted == [True])
+w.bottom_reached.emit()
+check("the bottom of the full window marks the chat read", emitted == [True])
+check("the view reports the bottom straight through",
+      "view.bottom_reached.connect(self.bottom_reached)" in _cw_src)
+check("there is no forward pager left in the widget",
+      "load_newer" not in _cw_src and "stanza:newer" not in _cw_src
+      and "_forward_bottom_reached" not in _cw_src)
+check("there is no forward pager left in the view",
+      "stanza-newer" not in _cv_src and "__stanzaNewerRef" not in _cv_src)
+check("the archive forward pager is gone",
+      not hasattr(history, "load_newer_timestamp")
+      and not hasattr(history, "newer_available_timestamp"))
 
-# 5. forwarding pages until the hidden block is complete ----------------------
-PAGE = [row("2026-10-02T10:03:00Z", "three", "m-3"),
-        row("2026-10-02T10:04:00Z", "four", "m-4")]
-LATER = [row("2026-10-02T10:05:00Z", "five", "m-5")]
+# 9. the theme renders the separator -------------------------------------------
+factory = ChatThemeFactory()
+html = factory.render_message(sender="Bob", body="hi", timestamp="12:00",
+                              direction="incoming", unread_marker=True)
+check("the separator is prepended to the message",
+      html.startswith('<div class="stanza-unread">'))
+check("the separator is not emitted without the flag",
+      "stanza-unread" not in factory.render_message(
+          sender="Bob", body="hi", timestamp="12:00", direction="incoming"))
+check("an action line carries no separator",
+      "stanza-unread" not in factory.render_action("Bob", "waves", "12:00"))
+check("the separator size is relative, so it follows the chat font",
+      "font-size: 0.85em" in chat_themes._UNREAD_CSS)
+check("both chat pages carry the separator rule",
+      _ct_src.count("{_UNREAD_CSS}") == 2)
 
+# 10. the main window loads the tail and arms background tabs ------------------
+load_async = method_source(_mw_src, "_load_history_async")
+check("the window is the ordinary tail of the conversation",
+      "history.load_history_async(jid, limit=window)" in load_async
+      and "until=" not in load_async
+      and "newer_available" not in load_async)
+check("the anchor only reaches the separator", "anchor=anchor" in load_async)
+arm = method_source(_mw_src, "_arm_unread_separator")
+check("an unread message arms the separator of an open tab",
+      "note_unread_arrival()" in arm
+      and "note_unread_arrival()" not in method_source(_mw_src,
+                                                       "_bump_unread"))
+for handler in ("_on_message_received", "_on_muc_private_message",
+                "_on_groupchat_message"):
+    body = method_source(_mw_src, handler)
+    check(f"{handler} arms the separator before the entry is rendered",
+          body.index("_arm_unread_separator") < body.index("add_message"))
 
-def paged(rows, more):
-    """Run one forward page with a stubbed archive."""
-    async def load(jid, since, limit=200):
-        return list(rows)
-    history.load_newer_timestamp_async = load
-    history.newer_available_timestamp_async = lambda jid, since: _true(more)
-
-    async def has_more(jid, since):
-        return more
-    history.newer_available_timestamp_async = has_more
-
-
-def _true(value):
-    return bool(value)
-
-
-w = widget()
-w.set_history([row("2026-10-02T10:02:00Z", "two", "m-2")],
-              50, False, anchor=ANCHOR)
-paged(PAGE, True)
-run(w._load_newer_batch_async())
-check("a page keeps the window anchored",
-      w.truncated_at_anchor and w._newer_anchor == "2026-10-02T10:04:00Z")
-check("the page is appended to the rendered history",
-      [m["body"] for m in w._view.messages] == ["two", "three", "four"])
-check("the marker stays while more rows remain", w._view.marker != "")
-
-w = widget()
-w.set_history([row("2026-10-02T10:02:00Z", "two", "m-2")],
-              50, False, anchor=ANCHOR)
-paged(LATER, False)
-run(w._load_newer_batch_async())
-check("the last page releases the anchor",
-      not w.truncated_at_anchor and w._newer_anchor == "")
-check("the whole conversation is rendered afterwards",
-      [m["body"] for m in w._view.messages] == ["two", "five"])
-check("the marker is gone once caught up", w._view.marker == "")
-
-# 6. incoming messages only move the marker, outgoing ones catch up -----------
-w = widget()
-w.set_history([row("2026-10-02T10:02:00Z", "two", "m-2")],
-              50, False, anchor=ANCHOR)
-w._view.messages = []
-w.add_message("Bob", "live", "2026-10-02T10:06:00Z", message_id="m-9")
-check("an incoming message is not rendered inside the anchor window",
-      w._view.messages == [] and w.truncated_at_anchor)
-check("it still counts towards the marker", "1" in w._view.marker)
-w.add_message("me", "mine", "2026-10-02T10:07:00Z", direction="outgoing",
-              message_id="m-10")
-check("our own message catches the window up", not w.truncated_at_anchor)
-check("the whole window is visible after catching up",
-      [m["body"] for m in w._view.messages] == ["two", "live", "mine"])
-
-# 7. a re-read conversation is never pulled back ------------------------------
-w = widget()
-w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1")], 50, False)
-check("without an anchor the tab shows the newest messages",
-      not w.truncated_at_anchor)
-w._render_all()
-check("live messages are rendered too",
-      [m["body"] for m in w._view.messages] == ["one"])
-w._truncate_newer = True
-w._newer_anchor = "2026-10-02T10:01:00Z"
-
-async def _refresh():
-    entries = await history.load_history_async(JID, limit=50)
-    w._preserve_fraction = w._view.scroll_fraction()
-    w._set_truncated(False)
-    w._history = entries
-    w._render_all()
-
-run(_refresh())
-check("refreshing the history drops the anchor window",
-      not w.truncated_at_anchor and w._newer_anchor == "")
-
-
-# 8. the main window resumes the conversation on focus ------------------------
+# 11. the opening order still protects the read state --------------------------
 focus_chat = method_source(_mw_src, "_focus_chat")
-check("the anchor window is loaded before the counters are cleared",
+check("the window is loaded before the counters are cleared",
       "if anchor:" in focus_chat
       and focus_chat.index("self._load_history(jid, anchor)")
       < focus_chat.index("self._reset_unread(jid, anchor or None)"))
@@ -314,7 +349,7 @@ check("repeated loads of one conversation are collapsed",
 check("an anchored window is not restored by a background auto-join",
       "anchor" not in method_source(_mw_src, "_on_muc_joined"))
 
-# 9. the anchor survives a WebEngine document reset ---------------------------
+# 12. the anchor survives a WebEngine document reset ---------------------------
 scroll_to_message = method_source(_cv_src, "scroll_to_message")
 on_load = method_source(_cv_src, "_on_load_finished")
 check("a scroll to the anchor waits for a loaded page",

@@ -578,47 +578,6 @@ def older_available_timestamp(jid: str, before: str) -> bool:
         return False
 
 
-def load_newer_timestamp(jid: str, since: str, limit: int = 200) -> list[dict]:
-    """Load messages strictly newer than timestamp *since*, oldest first.
-
-    The forward counterpart of :func:`load_older_timestamp`: it extends an
-    on-screen window towards the present, which is how a conversation resumed
-    from its read anchor reaches the messages that arrived afterwards.  The
-    bound is exclusive (``timestamp > since``) because
-    :func:`load_history` already includes the anchor row itself.
-    """
-    try:
-        with _lock:
-            conn = _connection(jid)
-            cur = conn.execute(
-                "SELECT * FROM (SELECT id, direction, sender, body, timestamp,"
-                " archive_id, origin_id, reply_to, reply_id, message_id,"
-                " edited, retracted, retract_marker, retract_reason,"
-                " retract_by, reactions "
-                "FROM messages WHERE timestamp > ? "
-                "ORDER BY timestamp ASC, id ASC LIMIT ?) "
-                "ORDER BY timestamp ASC, id ASC", (since, int(limit)))
-            rows = cur.fetchall()
-        return _dedup([_row_to_entry(r) for r in rows])
-    except sqlite3.Error as exc:
-        logger.warning("Could not load newer timestamp history for %s: %s",
-                       jid, exc)
-        return []
-
-
-def newer_available_timestamp(jid: str, since: str) -> bool:
-    """True when at least one message is stored strictly newer than *since*."""
-    try:
-        with _lock:
-            conn = _connection(jid)
-            row = conn.execute(
-                "SELECT 1 FROM messages WHERE timestamp > ? LIMIT 1",
-                (since,)).fetchone()
-            return row is not None
-    except sqlite3.Error:
-        return False
-
-
 def has_history(jid: str) -> bool:
     """True when *jid* has a history store (SQLite db or legacy JSONL)."""
     return os.path.isfile(_path(jid)) or _jsonl_exists(jid)
@@ -947,16 +906,6 @@ async def load_older_timestamp_async(jid: str, before: str,
                                      limit: int = 200) -> list[dict]:
     return await asyncio.to_thread(load_older_timestamp, jid, before,
                                    limit=limit)
-
-
-async def load_newer_timestamp_async(jid: str, since: str,
-                                     limit: int = 200) -> list[dict]:
-    return await asyncio.to_thread(load_newer_timestamp, jid, since,
-                                   limit=limit)
-
-
-async def newer_available_timestamp_async(jid: str, since: str) -> bool:
-    return await asyncio.to_thread(newer_available_timestamp, jid, since)
 
 
 async def newest_timestamp_async(jid: str) -> str:

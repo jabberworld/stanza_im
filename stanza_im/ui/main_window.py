@@ -4134,9 +4134,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_history(self, jid: str, anchor: dict | None = None):
         """Feed previously saved messages from the SQLite history into chat.
 
-        *anchor* is the persisted read state of an unread conversation: the
-        window then ends at the anchor (the unread block is loaded forward on
-        demand) instead of at the newest message.
+        *anchor* is the persisted read state of an unread conversation.  The
+        window is the ordinary tail of the conversation — the unseen messages
+        are right there — and the anchor only places the "unread messages"
+        separator above the first of them.
         """
         self._start_task(self._load_history_async(jid, anchor))
 
@@ -4162,17 +4163,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat = self._chat_window.get_chat(jid)
             if chat is None:
                 return
-            entries = await history.load_history_async(
-                jid, limit=window, until=anchor_ts or None)
-            # Only trim the window at the anchor when the archive really holds
-            # something newer; otherwise it *is* the newest message and the
-            # conversation is shown in full.
-            if anchor_ts and entries and await \
-                    history.newer_available_timestamp_async(
-                        jid, entries[-1].get("timestamp", "")):
-                window_anchor = anchor
-            else:
-                window_anchor = None
+            entries = await history.load_history_async(jid, limit=window)
             exhausted = bool(entries) and not await \
                 history.older_available_timestamp_async(
                     jid, entries[0].get("timestamp", ""))
@@ -4180,7 +4171,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._history_loading.pop(jid, None)
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
-        chat.set_history(entries, window, exhausted, anchor=window_anchor)
+        chat.set_history(entries, window, exhausted, anchor=anchor)
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -4653,6 +4644,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._schedule_unread_save()
         self._refresh_unread_badge(jid)
 
+    def _arm_unread_separator(self, jid: str, chat) -> None:
+        """Tell an open but unfocused chat that its next message is unread.
+
+        The separator is armed *before* ``add_message``, so the incoming entry
+        renders with it; arming afterwards would be lost by the render pass.
+        """
+        if chat is not None:
+            chat.note_unread_arrival()
+
     def _reset_unread(self, jid: str, anchor: dict | None = None):
         """Mark *jid* read: drop its counters and remember the read anchor.
 
@@ -4832,6 +4832,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         chat = self._chat_window.get_chat(bare_jid)
         if chat:
+            self._arm_unread_separator(bare_jid, chat)
             chat.add_message(sender=sender_name, body=body,
                              timestamp=ts or _current_timestamp(),
                              direction="incoming", unstyled=unstyled,
@@ -4958,6 +4959,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._notify_incoming_message(target, body)
         chat = self._chat_window.open_chat(target, nick)
         self._apply_call_support(target)
+        self._arm_unread_separator(target, chat)
         chat.add_message(sender=nick, body=body,
                          timestamp=ts or _current_timestamp(), direction="incoming",
                          unstyled=unstyled,
@@ -5026,6 +5028,15 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(room)
         logger.debug("Groupchat live: room=%s nick=%s chat_present=%s",
                      room, nick, chat is not None)
+        # A conference counts unread too (skipped while the room is on screen).
+        # The test is repeated below for the counters, but it is needed here as
+        # well: an unread message of a backgrounded room carries the separator,
+        # and it is armed before the entry is rendered.
+        self_nick = self._muc_self_nicks.get(room, "")
+        room_active = (self._chat_area_visible()
+                       and self._chat_window.current_jid() == room)
+        if chat and not room_active and nick != self_nick:
+            self._arm_unread_separator(room, chat)
         if chat:
             user = self._muc_users.get(room, {}).get(nick, {})
             chat.add_message(sender=nick, body=body,
@@ -5047,7 +5058,6 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id))
         self._maybe_osd_groupchat(room, nick, body)
-        self_nick = self._muc_self_nicks.get(room, "")
         is_mention = bool(self_nick and nick != self_nick
                           and mentions_nick(body, self_nick))
         if is_mention:

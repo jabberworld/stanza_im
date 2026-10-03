@@ -86,6 +86,15 @@ _REACTION_CSS = """
 
 _MAX_REACTION_CHIPS = 6
 
+# The "unread messages" separator.  The size is relative so the label always
+# stays one step below the chat text and follows the chat font setting as well
+# as the Ctrl+wheel zoom (both rescale the page, not this rule).
+_UNREAD_CSS = """
+.stanza-unread { margin: 8px 2px 6px; padding-top: 3px; text-align: center;
+                 font-size: 0.85em; color: #888;
+                 border-top: 1px solid rgba(127,127,127,.45); }
+"""
+
 _emoji_font_family_cache: str | None = None
 
 
@@ -467,7 +476,8 @@ class ChatThemeFactory:
                        retract_marker: bool = False,
                        retract_reason: str = "",
                        retract_by: str = "",
-                       reactions=None) -> str:
+                       reactions=None,
+                       unread_marker: bool = False) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -478,6 +488,8 @@ class ChatThemeFactory:
         *geo_ref* geo: URIs in the body become ``stanza:geo:`` links carrying
         the message id (used to live-update the map window on corrections).
         *hats* (XEP-0317) are rendered as coloured chips right of the nick.
+        With *unread_marker* the "unread messages" separator is placed right
+        above the message, so it opens the block that arrived unread.
         """
         key = direction
         if is_next:
@@ -543,7 +555,21 @@ class ChatThemeFactory:
             html = html.replace(
                 '<div class="stanza-reactions"></div>',
                 '<div class="stanza-reactions">%s</div>' % _render_reactions_chips(reactions))
+        if unread_marker:
+            html = self.render_unread_marker() + html
         return html
+
+    @staticmethod
+    def render_unread_marker() -> str:
+        """Render the "unread messages" separator.
+
+        It is part of the message stream (not a control link), so it works in
+        the WebEngine view and in the ``QTextBrowser`` fallback alike and needs
+        no change in the chat skins.  The size is relative (``em``), so the
+        label always stays one step below the chat text and follows both the
+        chat font setting and the Ctrl+wheel zoom.
+        """
+        return (f'<div class="stanza-unread">{escape_html(tr("chat_unread_marker"))}</div>')
 
     @staticmethod
     def _render_hats(hats: list | None) -> str:
@@ -671,6 +697,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {_HATS_CSS}
 {_DELETE_CSS}
 {_REACTION_CSS}
+{_UNREAD_CSS}
 {self._font_override_css()}
 </style>
 </head>
@@ -715,6 +742,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {_HATS_CSS}
 {_DELETE_CSS}
 {_REACTION_CSS}
+{_UNREAD_CSS}
 {self._font_override_css()}
 </style>
 </head>

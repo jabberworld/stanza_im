@@ -467,9 +467,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._jump_pending = ""
         self._jump_pages = 0
         self._restore_anchor: dict = {}
-        self._newer_anchor = ""
-        self._newer_loading = False
-        self._truncate_newer = False
+        self._unread_boundary: dict = {}
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
+        self._unread_resolving = False
         self._mention_refs: list[str] = []
         self._build_ui(theme)
 
@@ -495,16 +497,8 @@ class ChatWidget(QtWidgets.QWidget):
         view.note_requested.connect(
             lambda content: self.note_requested.emit(self.jid, content))
         view.near_top.connect(self._on_near_top)
-        # While the window is trimmed at the read anchor its bottom is *not*
-        # the newest message, so reaching it must not mark the conversation
-        # read (that would move the anchor past the unseen block).
-        view.bottom_reached.connect(self._forward_bottom_reached)
+        view.bottom_reached.connect(self.bottom_reached)
         return view
-
-    def _forward_bottom_reached(self) -> None:
-        if self._truncate_newer:
-            return
-        self.bottom_reached.emit()
 
     def _build_ui(self, theme: ChatThemeFactory):
         layout = QtWidgets.QVBoxLayout(self)
@@ -902,9 +896,6 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:load:"):
             self.load_more_from_server()
-            return
-        if url.startswith("stanza:newer:"):
-            self.load_newer()
             return
         if url == "mam://load":
             self.load_more_from_server()
@@ -1586,18 +1577,6 @@ class ChatWidget(QtWidgets.QWidget):
         self._messages.append(entry)
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
-        if self._truncate_newer:
-            # The window is trimmed at the read anchor: a new incoming message
-            # belongs *after* it, so it is only counted (and shown by the
-            # marker's counter).  Our own reply is the exception — the user
-            # expects to see what they just sent, so the window catches up.
-            if self._is_mine(entry):
-                self._catch_up_newer()
-            else:
-                self._refresh_newer_marker()
-            self._last_sender = sender if direction == "incoming" \
-                or sender == "Me" else self._last_sender
-            return
         self._render_entry(entry)
         mine = self._is_mine(entry)
         if direction == "incoming" and not mine and self._view.is_scrolled_up():
@@ -1640,7 +1619,8 @@ class ChatWidget(QtWidgets.QWidget):
         if text:
             self._status_lines.append((text, time.strftime("%H:%M:%S")))
 
-    def _entry_view_kwargs(self, entry: dict) -> dict:
+    def _entry_view_kwargs(self, entry: dict,
+                            unread_marker: bool = False) -> dict:
         body = entry.get("body", "")
         reply_quote = None
         if entry.get("reply_id"):
@@ -1675,6 +1655,7 @@ class ChatWidget(QtWidgets.QWidget):
             "sender_color": self._sender_color(entry),
             "hats": self._user_hats(entry),
             "reactions": self.compute_reactions(entry),
+            "unread_marker": unread_marker,
         }
 
     def compute_reactions(self, entry: dict) -> list[dict]:
@@ -1737,7 +1718,8 @@ class ChatWidget(QtWidgets.QWidget):
         return ""
 
     def _render_entry(self, entry: dict):
-        self._view.add_message(**self._entry_view_kwargs(entry))
+        self._view.add_message(
+            **self._entry_view_kwargs(entry, self._take_unread_marker(entry)))
 
     def _user_icon(self, direction: str, sender_jid: str = "",
                    sender: str = "") -> str:
@@ -1794,9 +1776,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.add_status(text, timestamp)
         entries = []
         seen = set()
-        source = (self._history if self._truncate_newer
-                  else self._history + self._messages)
-        for entry in source:
+        for entry in self._history + self._messages:
             key = self._entry_key(entry)
             if key in seen:
                 continue
@@ -1804,9 +1784,13 @@ class ChatWidget(QtWidgets.QWidget):
             entries.append(entry)
         entries.sort(key=lambda entry: (
             entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
+        # The separator is placed by _render_entry, so let the pass above emit
+        # it again from scratch (theme change, font change, restore).
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
         for entry in entries:
             self._render_entry(entry)
-        self._refresh_newer_marker()
         self._preserve_fraction = None
         if self._anchor_bottom:
             self._view.scroll_to_bottom()
@@ -1853,9 +1837,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._users.clear()
         self._subjects.clear()
         self._jump_pending = ""
-        self._newer_anchor = ""
-        self._newer_loading = False
-        self._truncate_newer = False
+        self._unread_boundary = {}
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
+        self._unread_resolving = False
 
     def suspend(self) -> bool:
         """Free the WebEngine page of an inactive tab, keeping its state.
@@ -1910,12 +1896,12 @@ class ChatWidget(QtWidgets.QWidget):
         """Initial window: replace history rows and re-render from bottom.
 
         *anchor* is the persisted read state of a conversation with unread
-        messages.  The window then ends **at** the anchor instead of at the
-        newest message, so the user is shown the block they have not read yet;
-        everything after it is fetched from the local archive with the
-        "load newer messages" marker at the bottom of the view.  Without an
-        anchor (or when the archive holds nothing newer) the window is the
-        ordinary tail of the conversation.
+        messages.  The window is the ordinary tail of the conversation — the
+        unseen messages are right there — and the anchor only places the
+        "unread messages" separator above the first of them, which
+        :meth:`set_restore_anchor` scrolls into view.  Older messages are
+        reached by scrolling up (or the archive/jump menus); there is no
+        forward pager.  Without an anchor the window carries no separator.
         """
         self._history = list(entries or [])
         self._window_size = max(50, int(window_size))
@@ -1924,10 +1910,17 @@ class ChatWidget(QtWidgets.QWidget):
         self._hist_loading = False
         self._server_fetching = False
         self._cleared = False
-        self._newer_loading = False
-        self._newer_anchor = str((anchor or {}).get("ts") or "")
-        self._set_truncated(bool(anchor))
-        self._anchor_bottom = not self._truncate_newer
+        self._unread_boundary = dict(anchor or {})
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
+        # A read point older than the whole window is only reachable by paging
+        # back through the archive (see ``_restore_from_anchor``), so the
+        # separator waits: it would otherwise open the window instead of the
+        # unread block.
+        self._unread_resolving = bool(self._unread_boundary) and not \
+            self._boundary_reachable(entries)
+        self._anchor_bottom = not self._unread_boundary
         self._preserve_fraction = None
         self._render_all()
         if self._restore_anchor:
@@ -1935,95 +1928,115 @@ class ChatWidget(QtWidgets.QWidget):
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
 
-    # ── Read-anchor window (forward paging) ──────────────────────
+    # ── Unread separator ───────────────────────────────────────────
 
-    def _set_truncated(self, on: bool) -> None:
-        """Trim the window at the read anchor, or restore the full tail.
+    def set_unread_boundary(self, anchor: dict | None) -> None:
+        """Place (or clear) the boundary the "unread messages" separator marks.
 
-        While trimmed, ``_messages`` (everything newer than the anchor) keeps
-        accumulating in Python but is not rendered, so nothing is lost when
-        the user pages forward through the archive.
+        *anchor* is the persisted read state of the conversation: the last
+        displayed message.  The separator is drawn right above the first
+        message that came after it.  It stays in the window until the chat is
+        reopened, so the block stays recognisable while the user reads it.
         """
-        self._truncate_newer = bool(on and self._newer_anchor
-                                    and self._history)
-        if not self._truncate_newer:
-            self._newer_anchor = ""
+        self._unread_boundary = dict(anchor or {})
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
+        self._unread_resolving = False
 
     @property
-    def truncated_at_anchor(self) -> bool:
-        """True while the window ends at the read anchor instead of "now"."""
-        return self._truncate_newer
+    def unread_boundary(self) -> dict:
+        """The read-anchor boundary the separator is derived from."""
+        return self._unread_boundary
 
-    def _newer_marker_html(self) -> str:
-        """The "load newer messages" control link closing a trimmed window."""
-        if not self._truncate_newer:
-            return ""
-        from stanza_im.include.utils import escape_html
-        pending = len(self._messages)
-        text = (tr("history_load_newer_count", n=pending) if pending
-                else tr("history_load_newer"))
-        return (f'<p class="stanza-newer-msg" style="text-align:center;">'
-                f'<a class="stanza-newer" href="stanza:newer:">'
-                f'<i>{escape_html(text)}</i></a></p>')
+    def note_unread_arrival(self) -> None:
+        """Arm the separator for a message arriving in a backgrounded tab.
 
-    def _refresh_newer_marker(self) -> None:
-        try:
-            self._view.set_newer_marker(self._newer_marker_html())
-        except (AttributeError, RuntimeError):
-            pass
+        ``MainWindow`` calls this **before** it hands the incoming entry to
+        :meth:`add_message`, so the message it renders next is the first
+        unread one and carries the separator.  A fully read tab has no stored
+        boundary; one is taken from the message currently on screen, so the
+        arriving message is still detached from the read part.
+        """
+        if (self._released or self._unread_marker_shown
+                or self._unread_resolving):
+            return
+        if not self._unread_boundary:
+            self._unread_boundary = self.read_anchor() or {"ref": "", "ts": "",
+                                                           "sid": ""}
+        self._unread_armed = True
 
-    def load_newer(self) -> None:
-        """Fetch the next page of messages after the read anchor."""
-        if not self._truncate_newer or self._newer_loading or self._released:
-            return
-        self._newer_loading = True
-        self._start_task(self._load_newer_batch_async())
+    def _take_unread_marker(self, entry: dict) -> bool:
+        """True when *entry* is the first one past the unread boundary.
 
-    async def _load_newer_batch_async(self) -> None:
-        from stanza_im.core import history
-        self._newer_loading = False
-        if not self._truncate_newer or self._released:
-            return
-        since = self._newer_anchor
-        try:
-            rows = await history.load_newer_timestamp_async(
-                self.jid, since, self._batch_size())
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not page forward for %s", self.jid,
-                         exc_info=True)
-            return
-        if self._released or not self._truncate_newer:
-            return
-        if not rows:
-            self._catch_up_newer()
-            return
-        known = {self._entry_key(entry) for entry in self._history}
-        unique = [entry for entry in rows
-                  if self._entry_key(entry) not in known]
-        if unique:
-            self._history.extend(unique)
-            self._trim_history()
-            self._newer_anchor = (unique[-1].get("timestamp") or since)
-            for entry in unique:
-                self._render_entry(entry)
-        more = await history.newer_available_timestamp_async(
-            self.jid, self._newer_anchor)
-        if self._released or not self._truncate_newer:
-            return
-        if more:
-            self._refresh_newer_marker()
-        else:
-            self._catch_up_newer()
+        Entries reach this in the order they are rendered (oldest first), so the
+        boundary is a cursor: the entry carrying the anchor's own reference is
+        the last read one, and everything after it is unread.  When the
+        boundary message itself is not on screen (it predates the window, or
+        only a timestamp was stored) the order of arrival decides instead: the
+        first message newer than the anchor opens the block.  A boundary we
+        cannot place at all marks the first message of the window.
+        """
+        if self._unread_marker_shown or not self._unread_boundary:
+            return False
+        if self._unread_resolving:
+            return False
+        if self._unread_armed:
+            # An unread message arrived while the tab was in the background:
+            # it is newer than everything already on screen.
+            return self._emit_unread_marker()
+        if self._is_boundary_entry(entry):
+            self._unread_passed = True
+            return False
+        if self._unread_passed:
+            return self._emit_unread_marker()
+        ts = str(self._unread_boundary.get("ts") or "")
+        entry_ts = str(entry.get("timestamp") or "")
+        if not ts or not entry_ts or entry_ts > ts:
+            return self._emit_unread_marker()
+        return False
 
-    def _catch_up_newer(self) -> None:
-        """The window reached the newest message — stop trimming it."""
-        if not self._truncate_newer:
-            return
-        self._truncate_newer = False
-        self._newer_anchor = ""
-        self._refresh_newer_marker()
-        self._anchor_bottom = True
-        self._render_all()
+    def _emit_unread_marker(self) -> bool:
+        """Consume the separator: it belongs to one message per rendering."""
+        self._unread_marker_shown = True
+        self._unread_armed = False
+        return True
+
+    def _boundary_reachable(self, entries) -> bool:
+        """True when *entries* reaches back to the stored read point.
+
+        The read point of an unread conversation is never *newer* than the
+        loaded tail, so it is either inside the window or older than it.  Only
+        the first case can be placed straight away; in the second one the
+        archive has to be paged back first, otherwise the separator would open
+        the window instead of the unread block.
+        """
+        if not self._unread_boundary:
+            return True
+        ref = str(self._unread_boundary.get("ref") or "")
+        ts = str(self._unread_boundary.get("ts") or "")
+        for entry in entries or []:
+            if ref and ref in self._entry_refs(entry):
+                return True
+            entry_ts = str(entry.get("timestamp") or "")
+            if ts and entry_ts and entry_ts <= ts:
+                return True
+        return False
+
+    def _is_boundary_entry(self, entry: dict) -> bool:
+        """True when *entry* is the last message the user had read."""
+        boundary = self._unread_boundary
+        ref = str(boundary.get("ref") or "")
+        if ref and ref in self._entry_refs(entry):
+            return True
+        ts = str(boundary.get("ts") or "")
+        return bool(ts) and ts == str(entry.get("timestamp") or "")
+
+    def _entry_refs(self, entry: dict) -> set:
+        """Every identifier *entry* can be addressed by (jump/marker anchors)."""
+        return {str(entry.get(key) or "") for key in
+                ("archive_id", "origin_id", "reply_to", "reply_id",
+                 "message_id")} - {""}
 
     def note_unread_mention(self, ref_id: str) -> None:
         """Remember a message that named us, so ``@`` can jump to it.
@@ -2101,6 +2114,9 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if ref:
             self._jump_to_message(ref)
+        else:
+            # Nothing to page back to: place the separator on what we have.
+            self._finish_unread_resolve(None)
 
     def _entry_before_or_at(self, ts: str):
         """The newest loaded message whose raw timestamp is not newer than *ts*."""
@@ -2252,8 +2268,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._server_fetching = False
         self._history = entries
         # A full re-read of the tail is never trimmed at a read anchor.
-        self._truncate_newer = False
-        self._newer_anchor = ""
+        self._unread_boundary = {}
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
+        self._unread_resolving = False
         self._db_exhausted = bool(entries) and not await \
             history.older_available_timestamp_async(
                 self.jid, self.oldest_ts())
@@ -2342,17 +2361,19 @@ class ChatWidget(QtWidgets.QWidget):
         from stanza_im.core import history
         ref_id = self._jump_pending
         if not ref_id or self._released:
+            self._finish_unread_resolve(None)
             return
         if not await history.message_exists_async(self.jid, ref_id):
             # Not in the local archive: do not bother the server.
             self._jump_pending = ""
+            self._finish_unread_resolve(None)
             return
         while (self._jump_pending and not self._released
                and self._jump_pages < _JUMP_MAX_PAGES):
             entry = self._find_message(self._jump_pending)
             if entry is not None:
                 self._jump_pending = ""
-                self._view.scroll_to_message(self._reply_target_id(entry))
+                self._finish_unread_resolve(entry)
                 return
             before = self.oldest_ts()
             if not before or not await \
@@ -2367,6 +2388,21 @@ class ChatWidget(QtWidgets.QWidget):
                 break
             self.prepend_history(rows, False, keep_position=False)
         self._jump_pending = ""
+        self._finish_unread_resolve(None)
+
+    def _finish_unread_resolve(self, entry) -> None:
+        """End the deferred separator placement and scroll to the read point.
+
+        When the read point was outside the loaded window the archive was
+        paged back to reach it; the separator could only be placed once the
+        window was complete, so the whole document is re-rendered (the entries
+        are already in Python) and the scroll lands on the read point.
+        """
+        if self._unread_resolving:
+            self._unread_resolving = False
+            self._render_all()
+        if entry is not None:
+            self._view.scroll_to_message(self._reply_target_id(entry))
 
     def load_more_from_server(self):
         if self._server_fetching or self._server_exhausted:
