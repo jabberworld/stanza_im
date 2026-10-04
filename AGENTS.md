@@ -974,7 +974,9 @@ the icon out and back in over a 1 s period following a cosine curve (the icon is
 painted at the current opacity, so it pulses instead of toggling on/off). The
 file is a **v2 payload**:
 `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
-"read_sid": "<stanza-id>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
+"read_sid": "<stanza-id>", "read_ts": "<ts>", "read_ref": "<message-id>",
+"seen_sid": "<stanza-id>", "seen_ts": "<ts>", "seen_ref": "<message-id>",
+"seen_at": <unix>}}}`,
 where *chat-key* is the conversation key the chat tabs use — a bare JID for 1:1
 and MUC private messages (the real JID when the room reveals one, otherwise
 `room/nick`), the bare room JID for a conference. `read_sid` is the last
@@ -984,7 +986,11 @@ stanza-id (the v1 `{"count": N, "displayed": "sid"}` layout and the v0
 `_mds_local` and
 `_on_login` seeds it back via `client.set_displayed_state`, so the startup
 XEP-0490 catch-up cannot clear unread messages that arrived after our own last
-displayed point (a genuinely newer remote state still clears them).
+displayed point (a genuinely newer remote state still clears them). The
+`seen_*` fields are the **partial progress** point: the newest message that has
+scrolled into the viewport (see the partial-read paragraph below), kept next to
+the read anchor so a partially read conversation resumes where the user stopped
+looking.
 `unread_state.load_chats()/save_chats()` are the v2 API; `load_state()`/`save()`
 are the derived legacy views. OSD popups
 are not replayed. The file also stores the owning account JID
@@ -1280,6 +1286,25 @@ never stored is treated as "seen everything"). `_mds_apply_remote` skips a state
 equal to the one already recorded in `_mds_local`; that map is seeded at connect
 from the persisted unread state, so the startup catch-up does not wipe restored
 unread (see the unread-counters paragraph above).
+
+**Partial read progress (`seen`)**: scrolling a conversation into view records
+the bottom-most visible message (`ChatView._find_last_visible_ref`, a WebEngine
+JS query of `#chat .stanza-message`; `_last_seen_result` reads its
+`data-stanza-id`/`data-reply-id`/`data-stanza-time`) and emits
+`last_seen_changed(ref, ts, sid)`. `ChatWindow.last_seen` relays it to
+`MainWindow._on_chat_last_seen`, which advances the persisted `seen_*` point,
+shrinks the unread badge by the messages that just became visible
+(`ChatWidget.count_seen_since`), and arms the `@`/jump state accordingly.
+`ChatWidget.set_seen()` moves the unread separator boundary with it, and
+`_restore_anchor_for` prefers the seen point over the read anchor, so reopening
+a partially read conversation resumes where the user stopped looking instead of
+dropping back to the old read point. The XEP-0490 `displayed` update for
+partial progress is published through a single-shot timer
+(`MainWindow._mds_throttle_timer`, `_flush_mds_pending`) at most once per
+`chat.mds_displayed_throttle` seconds (1–30, default 3; Preferences → Chat →
+«Общие»), carrying the newest seen stanza-id; reaching the bottom
+(`_on_chat_reached_bottom`) still publishes at once and folds `seen_*` onto the
+read anchor. [`tests/test_unread_state.py`, `tests/test_read_anchor_restore.py`]
 
 Last Message Correction (XEP-0308): any own message is editable (Ctrl+Up =
 last sent; the message menu's "Edit" button for `data-stanza-outgoing` wrappers

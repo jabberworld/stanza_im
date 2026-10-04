@@ -245,6 +245,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
+| `chat.mds_displayed_throttle` | `3` | Seconds (1–30) between XEP-0490 `displayed` publishes for **partial** read progress while scrolling (Preferences → Chat → «Общие»/«General»). `MainWindow._on_chat_last_seen` arms a single-shot `_mds_throttle_timer` carrying the newest seen stanza-id; reaching the bottom still publishes immediately. Applied live from `_on_settings_applied`. |
 | `chat.allow_incoming_deletions` | `true` | Apply a peer's XEP-0424 retraction (Preferences → Chat → «Общие»/«General»). On: the message becomes a tombstone; off: it keeps its body and gains a "✕" marker. Applied live to the client from `_on_settings_applied`. |
 | `chat.allow_moderation` | `true` | Apply a moderator's XEP-0425 retraction (Preferences → Chat → «Конференции»/«Conferences»). On: the message becomes a "Retracted by a moderator" tombstone with the reason; off: it keeps its body and gains a "✕" marker. It only governs the receive side — the moderator action in the message menu is unaffected. |
 | `chat.confirm_retraction` | `false` | Ask for confirmation before retracting one of our own messages (message menu "Delete" / inline "✕"). |
@@ -1733,6 +1734,13 @@ Registers XEP plugins (conditionally where noted):
   (`client.set_displayed_state`), so the startup catch-up does not wipe restored
   unread while a newer remote state still clears it.
   Config `chat.message_displayed_sync` (default on).
+- **Partial progress**: scrolling a conversation into view records the newest
+  visible message (`ChatView._find_last_visible_ref`) and publishes it as
+  `displayed` through a single-shot throttle (`MainWindow._mds_throttle_timer`,
+  `chat.mds_displayed_throttle` seconds, 1–30, default 3), so a peer sees
+  "read up to here" without a stanza per scrolled message. The persisted
+  `seen_*` unread-state fields hold that point and are preferred when reopening;
+  reaching the bottom publishes at once.
 
 ### 14.4 Last Message Correction (XEP-0308)
 
