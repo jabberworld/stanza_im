@@ -956,10 +956,15 @@ Single conversation tab. Layout:
 - Jump-to-bottom button (`_JumpButtonMixin`): shown while the view overflows and
   is not at the bottom. It shows the count of incoming, non-own messages that
   arrived while scrolled up (`ChatWidget.add_message` →
-  `ChatView.is_scrolled_up` → `note_new_message`), as `▼ N` (capped `99+`). The
-  first click jumps to the first such message (`scroll_to_message(..., highlight=False)`),
-  the second click — or reaching the bottom — scrolls to the end and clears the
-  counter, which lives until the actual bottom. WebEngine renders the button as
+  `ChatView.is_scrolled_up` → `note_new_message`), as `▼ N` (capped `99+`); the
+  number otherwise mirrors the conversation's roster unread counter
+  (`MainWindow._push_unread_to_chat` → `ChatWidget.set_unread_count` →
+  `ChatView.set_unseen_count`, called on open/bump/seen/reset), so it ticks down
+  as messages are seen. The first click jumps to the first still-unseen message
+  (`scroll_to_message(..., highlight=False)`, target refreshed from the local
+  block by `ChatWidget._sync_jump_target_from_block`), the second click — or
+  reaching the bottom — scrolls to the end and clears the counter, which lives
+  until the actual bottom. WebEngine renders the button as
   the in-page `#stanza-jump` div (its click sets `window.__stanzaJumpPress` and
   is relayed by the scroll poll to `_on_jump_clicked`; `bridge.on_jump_clicked`
   is only an optional fast path); the QTextBrowser fallback uses a `QToolButton`

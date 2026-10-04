@@ -1316,7 +1316,13 @@ up (`ChatWidget._on_last_seen` skips a view at the bottom), so the transient
 the newest message. `ChatWindow.last_seen` relays it to
 `MainWindow._on_chat_last_seen`, which advances the persisted `seen_*` point,
 shrinks the unread badge by the messages that just became visible
-(`ChatWidget.count_seen_since`), and arms the `@`/jump state accordingly.
+(`ChatWidget.count_seen_since`), and arms the `@`/jump state accordingly. The
+`▼ N` number is the conversation's **roster unread counter**: `MainWindow.
+_push_unread_to_chat` mirrors `_unread_chats[jid]["unread"]` onto the button
+(`ChatWidget.set_unread_count` → `ChatView.set_unseen_count`) on open, bump,
+seen and reset, so it ticks down while the user scrolls just like the badge;
+the first-click target is refreshed separately from the local block
+(`ChatWidget._sync_jump_target_from_block` → `ChatView.set_unseen_target`).
 `ChatWidget.set_seen()` moves the unread separator boundary with it, and
 `_restore_anchor_for` prefers the seen point over the read anchor, so reopening
 a partially read conversation resumes where the user stopped looking instead of

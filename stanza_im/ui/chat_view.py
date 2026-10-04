@@ -309,6 +309,24 @@ class _JumpButtonMixin:
         self._update_jump_label()
         self._update_jump_button()
 
+    def set_unseen_count(self, count: int, target_id: str | None = None) -> None:
+        """Set the jump-to-bottom counter to *count*.
+
+        The number is owned by ``MainWindow`` and mirrors the conversation's
+        unread counter in the roster (so it ticks down as messages are seen).
+        *target_id*, when given, updates the first-unseen click target; ``None``
+        leaves it untouched.  A non-positive *count* clears the target.
+        """
+        self._new_count = max(0, int(count or 0))
+        if target_id is not None:
+            self._first_unread_id = str(target_id) if self._new_count > 0 else ""
+        self._update_jump_label()
+        self._update_jump_button()
+
+    def set_unseen_target(self, target_id: str) -> None:
+        """Refresh the first-unseen click target without touching the count."""
+        self._first_unread_id = str(target_id or "")
+
     def clear_unread_separator(self) -> bool:
         """Drop the inline "unread messages" divider; ``False`` if unsupported.
 

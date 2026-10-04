@@ -331,12 +331,20 @@ class _View:
     def __init__(self):
         self.scrolled = []
         self.mention_count = 0
+        self.unseen_count = 0
+        self.unseen_target = ""
 
     def scroll_to_message(self, message_id, highlight=True):
         self.scrolled.append(message_id)
 
     def set_mention_count(self, count):
         self.mention_count = int(count or 0)
+
+    def set_unseen_count(self, count, target_id=None):
+        self.unseen_count = int(count or 0)
+
+    def set_unseen_target(self, target_id):
+        self.unseen_target = target_id
 
 
 def bare_chat(jid="bob@example.com"):

@@ -4207,6 +4207,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
         chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)
+        # ``set_history`` seeds the button from the loaded block; the roster
+        # counter is authoritative, so mirror it (a block bigger than the
+        # window shows the full unread count, not just the loaded part).
+        self._push_unread_to_chat(jid)
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -4673,6 +4677,23 @@ class MainWindow(QtWidgets.QMainWindow):
                                  unread_mentions=entry["mentions"] if entry
                                  else 0)
 
+    def _push_unread_to_chat(self, jid: str) -> None:
+        """Mirror the conversation's unread counter on its jump-to-bottom button.
+
+        The number is the same one the roster badge shows, so it ticks down as
+        messages are seen; the first-click target is kept separately by the tab.
+        """
+        chat_window = getattr(self, "_chat_window", None)
+        chat = chat_window.get_chat(jid) if chat_window is not None else None
+        if chat is None:
+            return
+        entry = self._unread_chats.get(jid)
+        count = int(entry["unread"]) if entry else 0
+        try:
+            chat.set_unread_count(count)
+        except (AttributeError, RuntimeError):
+            pass
+
     def _bump_unread(self, jid: str, mention: bool = False):
         """Count an incoming message for *jid* (roster badge + tray blink)."""
         entry = self._unread_chats.get(jid)
@@ -4686,6 +4707,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_total += 1
         self._schedule_unread_save()
         self._refresh_unread_badge(jid)
+        self._push_unread_to_chat(jid)
 
     def _arm_unread_separator(self, jid: str, chat) -> None:
         """Tell an open but unfocused chat that its next message is unread.
@@ -4726,6 +4748,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_unread_badge(jid)
         self._schedule_unread_save()
         self._sync_tray_blink()
+        self._push_unread_to_chat(jid)
         chat = (self._chat_window.get_chat(jid)
                 if self._chat_window is not None else None)
         if chat is not None:
@@ -4781,6 +4804,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # A tab created by an incoming message (opened with focus=False)
             # never loaded its archive; do it when it is first shown.
             self._load_history(jid)
+        # Mirror the unread counter now (relevant for an already-loaded tab; a
+        # scheduled reload re-pushes it once the window is applied).
+        self._push_unread_to_chat(jid)
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -4862,6 +4888,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     entry["unread"] = max(0, prev_unread - seen_now)
                     self._recount_unread()
                     self._refresh_unread_badge(jid)
+        # Keep the jump-to-bottom number equal to the roster badge as it ticks
+        # down while the user reads.
+        self._push_unread_to_chat(jid)
         if sid:
             self._mds_pending_sid = str(sid)
             self._mds_pending_jid = jid

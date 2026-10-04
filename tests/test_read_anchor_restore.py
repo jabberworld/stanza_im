@@ -74,6 +74,8 @@ class _View:
         self.separators_cleared = 0
         self.bottom = False
         self.mention_count = 0
+        self.unseen_count = None
+        self.unseen_target = None
 
     def clear(self):
         self.cleared += 1
@@ -105,6 +107,14 @@ class _View:
 
     def set_mention_count(self, count):
         self.mention_count = int(count or 0)
+
+    def set_unseen_count(self, count, target_id=None):
+        self.unseen_count = int(count or 0)
+        if target_id is not None:
+            self.unseen_target = target_id
+
+    def set_unseen_target(self, target_id):
+        self.unseen_target = target_id
 
     def __getattr__(self, name):
         return lambda *a, **k: None
@@ -310,6 +320,28 @@ w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
 check("a scrolled-up view records the seen point",
       w._seen_ts == "2026-10-02T10:04:00Z")
 
+# 3g. the jump number mirrors the unread counter, the target the block ---------
+w = widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4"),
+               row("2026-10-02T10:05:00Z", "five", "m-5")],
+              50, False, anchor=ANCHOR)
+w.set_unread_count(9)
+check("the jump button takes the pushed unread count",
+      w._view.unseen_count == 9)
+w._view.bottom = True
+w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
+check("scrolling moves the first-unseen target to the next message",
+      w._view.unseen_target == "m-5")
+check("scrolling does not overwrite the pushed unread count",
+      w._view.unseen_count == 9)
+w.set_unread_count(0)
+check("a zero pushed count is applied",
+      w._view.unseen_count == 0)
+w._view.set_unseen_count(0, "")
+check("a zero pushed count with a target clears it",
+      w._view.unseen_target == "")
+
 # 4. a timestamp-only anchor falls back to time ---------------------------------
 w = widget()
 w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),
@@ -513,6 +545,25 @@ for handler in ("_on_message_received", "_on_muc_private_message",
 check("sending a message scrolls to the bottom, so it marks the chat read",
       "self._view.scroll_to_bottom()" in
       method_source(_cw_src, "add_message"))
+
+# 11b. the jump number mirrors the roster unread counter -----------------------
+_push = method_source(_mw_src, "_push_unread_to_chat")
+check("the jump number comes from the conversation's unread counter",
+      'entry["unread"]' in _push and "chat.set_unread_count(count)" in _push)
+check("the unread counter is pushed whenever it changes",
+      "self._push_unread_to_chat(jid)" in method_source(_mw_src, "_bump_unread")
+      and "self._push_unread_to_chat(jid)" in method_source(_mw_src, "_reset_unread")
+      and "self._push_unread_to_chat(jid)" in
+      method_source(_mw_src, "_on_chat_last_seen")
+      and "self._push_unread_to_chat(jid)" in
+      method_source(_mw_src, "_load_history"))
+check("the widget forwards the count and refreshes the click target",
+      "self._view.set_unseen_count(self._unread_count)" in
+      method_source(_cw_src, "set_unread_count")
+      and "self._view.set_unseen_target(first)" in
+      method_source(_cw_src, "_sync_jump_target_from_block")
+      and "self._sync_jump_target_from_block()" in
+      method_source(_cw_src, "_on_last_seen"))
 
 # 12. a message arriving above the fold is not published as displayed ----------
 at_bottom = method_source(_mw_src, "_chat_at_bottom")

@@ -479,6 +479,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_passed = False
         self._unread_resolving = False
         self._mention_refs: list[str] = []
+        self._unread_count = 0
         self._build_ui(theme)
 
     # ── UI construction ───────────────────────────────────────────
@@ -508,6 +509,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.mention_jump_requested.connect(self._jump_to_next_mention)
         try:
             view.set_mention_count(len(self._mention_refs))
+            view.set_unseen_count(self._unread_count)
         except (AttributeError, RuntimeError):
             pass
         return view
@@ -3282,6 +3284,34 @@ class ChatWidget(QtWidgets.QWidget):
                 self._view.set_mds_throttle(seconds)
         except Exception:
             pass
+
+    def set_unread_count(self, count: int) -> None:
+        """Show/refresh the jump button with the conversation's unread count.
+
+        The number is pushed by ``MainWindow`` so it mirrors the roster badge
+        and ticks down as messages are seen; the first-unseen click target is
+        kept in sync separately by :meth:`_sync_jump_target_from_block`.
+        """
+        try:
+            self._unread_count = max(0, int(count or 0))
+        except (TypeError, ValueError):
+            self._unread_count = 0
+        try:
+            self._view.set_unseen_count(self._unread_count)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _sync_jump_target_from_block(self) -> None:
+        """Point the jump button's first click at the first still-unseen message."""
+        if (self._released or self._unread_resolving
+                or not self._unread_marker_shown):
+            return
+        try:
+            _count, first = self._measure_unread_block(self._ordered_entries())
+            self._view.set_unseen_target(first)
+        except (AttributeError, RuntimeError):
+            pass
+
     def _on_last_seen(self, ref: str = "", ts: str = "", sid: str = ""):
         try:
             # A view sitting at the newest message is *read*, not partially
@@ -3291,6 +3321,7 @@ class ChatWidget(QtWidgets.QWidget):
             if not self._view.is_scrolled_up():
                 return
             self.set_seen(ref, ts, sid)
+            self._sync_jump_target_from_block()
             try:
                 self.last_seen_changed.emit(str(ref or ""), str(ts or ""), str(sid or ""))
             except Exception:
