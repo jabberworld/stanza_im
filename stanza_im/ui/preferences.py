@@ -958,7 +958,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         general_form.addRow(self._check("send_ctrl_enter", tr("prefs_send_ctrl_enter")))
         general_form.addRow(self._check("message_displayed_sync",
                                         tr("prefs_message_displayed_sync")))
-        mds_throttle_spin = self._spin("mds_displayed_throttle", 1, 30, 1, suffix="с")
+        mds_throttle_spin = self._spin("mds_displayed_throttle", 1, 30)
+        mds_throttle_spin.setSuffix(" с")
         general_form.addRow(tr("chat_mds_displayed_throttle"), mds_throttle_spin)
         general_form.addRow(self._check("allow_incoming_edits",
                                         tr("prefs_allow_incoming_edits")))

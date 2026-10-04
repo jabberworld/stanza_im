@@ -158,10 +158,22 @@ check("the config default tooltip avatar size is 64",
 
 # The spin range reaches 256 (Preferences → Appearance → «Разное»).
 from stanza_im.ui.preferences import PreferencesDialog  # noqa: E402
-_pdlg = PreferencesDialog(Config(), ChatThemeFactory())
-check("the tooltip avatar spin allows up to 256",
-      _pdlg._controls["tooltip_avatar_size"].maximum() == 256)
-_pdlg.deleteLater()
+try:
+    _pdlg = PreferencesDialog(Config(), ChatThemeFactory())
+    _pdlg_built = True
+except Exception as _exc:  # pragma: no cover - the check below reports it
+    print("preferences dialog raised:", repr(_exc))
+    _pdlg = None
+    _pdlg_built = False
+check("the preferences dialog builds without error", _pdlg_built)
+if _pdlg is not None:
+    check("the tooltip avatar spin allows up to 256",
+          _pdlg._controls["tooltip_avatar_size"].maximum() == 256)
+    _mds_spin = _pdlg._controls["mds_displayed_throttle"]
+    check("the MDS throttle spin is 1..30 with a unit suffix",
+          _mds_spin.minimum() == 1 and _mds_spin.maximum() == 30
+          and _mds_spin.suffix().strip() == "с")
+    _pdlg.deleteLater()
 
 
 # 3b. saved fonts are applied at startup --------------------------------------
@@ -200,9 +212,11 @@ win._idle_timer.stop()
 win._suspend_timer.stop()
 win._memory_timer.stop()
 win._client = None
-win._unread_counts = {"bob@example.com": 3}
-win._unread_total = 3
-win._unread_jids = {"bob@example.com"}
+_unread_state = __import__("stanza_im.core.unread_state",
+                           fromlist=["blank"])
+win._unread_chats["bob@example.com"] = _unread_state.blank()
+win._unread_chats["bob@example.com"]["unread"] = 3
+win._recount_unread()
 win._tray.start_blinking()
 win._stack.setCurrentIndex(2)  # roster page
 
