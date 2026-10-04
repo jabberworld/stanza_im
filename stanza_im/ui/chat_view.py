@@ -1743,8 +1743,6 @@ window.__stanzaMentionRef = '';
             else:
                 self._near_top_hit = False
             self._release_scroll_suspend()
-            if self._fraction >= 0.999:
-                self._reset_unread_indicator()
             self._update_jump_button()
             self._note_bottom()
             try:
@@ -1754,8 +1752,6 @@ window.__stanzaMentionRef = '';
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
-            if self._fraction >= 0.999:
-                self._reset_unread_indicator()
             self._update_jump_button()
             self._note_bottom()
             try:
@@ -1779,6 +1775,10 @@ window.__stanzaMentionRef = '';
                 return
             if self._at_bottom_hit:
                 return
+            # Reaching the newest message is what clears the seeded unread
+            # count; doing it here (edge-triggered, suspension-aware) keeps a
+            # seeded block intact while the anchor restore is still in flight.
+            self._reset_unread_indicator()
             self._at_bottom_hit = True
             self.bottom_reached.emit()
 

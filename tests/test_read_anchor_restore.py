@@ -166,6 +166,10 @@ def widget(jid="bob@example.com"):
     w._mention_refs = []
     w._mention_btn = _Button()
     w._self_nick = ""
+    w._seen_ref = ""
+    w._seen_ts = ""
+    w._seen_sid = ""
+    w._seen_at = 0.0
     w._anchor_bottom = False
     w._moderation_enabled = False
     w._show_muc_hats = False
@@ -182,6 +186,14 @@ def widget(jid="bob@example.com"):
     w._server_fetching = False
     w._window_size = 50
     w._start_task = lambda coro: None
+    return w
+
+
+def muc_widget(jid="room@conf.example", nick="me"):
+    """A ``widget()`` marked as a conference with our own nickname known."""
+    w = widget(jid)
+    w.is_muc = True
+    w._self_nick = nick
     return w
 
 
@@ -262,6 +274,52 @@ w._view.messages = []
 w._render_all()
 check("a re-render re-emits the separator exactly once",
       len([m for m in w._view.messages if m["unread_marker"]]) == 1)
+
+# 3d. a never-read conversation treats the whole window as unread --------------
+w = muc_widget()
+w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),
+               row("2026-10-02T10:02:00Z", "hey me", "m-2"),
+               row("2026-10-02T10:03:00Z", "three", "m-3")],
+              50, False, anchor={"ref": "", "ts": "", "sid": ""})
+check("a never-read conversation does not wedge the separator",
+      not w._unread_resolving
+      and [m["body"] for m in w._view.messages if m["unread_marker"]] == ["one"])
+check("the whole window is counted as unread",
+      w._view.seeded and w._view.seeded[0][0] == 3)
+check("its mentions are rebuilt for the @ button",
+      bool(w._mention_refs) and w._mention_btn.visible_flag is True)
+check("it opens at the start of the unread block",
+      w._restore_anchor.get("ref") == "m-1")
+
+# 3e. mentions are rebuilt once the archive reaches the read point -------------
+w = muc_widget()
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4"),
+               row("2026-10-02T10:05:00Z", "hey me", "m-5")],
+              50, False, anchor=ANCHOR)
+check("a block past the window defers its mentions",
+      w._unread_resolving and not w._mention_refs)
+w._history = [row("2026-10-02T10:02:00Z", "read", "m-2"),
+              row("2026-10-02T10:03:00Z", "last read", "m-3"),
+              row("2026-10-02T10:04:00Z", "four", "m-4"),
+              row("2026-10-02T10:05:00Z", "hey me", "m-5")]
+w._view.messages = []
+w._finish_unread_resolve(w._history[1])
+check("the mentions are rebuilt after the deferred resolve",
+      bool(w._mention_refs) and w._mention_btn.visible_flag is True)
+
+# 3f. last-seen never advances while the view sits at the bottom ---------------
+w = muc_widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor=ANCHOR)
+w._view.bottom = False
+w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
+check("a bottom view does not advance the seen point",
+      w._seen_ref == "" and w._seen_ts == "")
+w._view.bottom = True
+w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
+check("a scrolled-up view records the seen point",
+      w._seen_ts == "2026-10-02T10:04:00Z")
 
 # 4. a timestamp-only anchor falls back to time ---------------------------------
 w = widget()

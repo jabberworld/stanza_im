@@ -1493,18 +1493,26 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   reference, else by order of arrival); a read point older than the loaded
   window (an unread block larger than `chat.history_limit`) is paged back first
   and the separator is placed afterwards, `_finish_unread_resolve` re-rendering
-  the completed window. an unread message in an open but unfocused tab is armed by
+  the completed window and re-running `refresh_unread_mentions` so the `@` button
+  survives the paging. A conversation with **no stored read point** (never read
+  to its end) is wholly unread: the block spans the whole loaded window and the
+  tab opens at its first message. an unread message in an open but unfocused tab is armed by
   `MainWindow._arm_unread_separator` before `add_message` renders it
   (`ChatWidget.note_unread_arrival`). It stays in the window until the
   conversation is actually read — reaching the newest message removes it in
   place (`ChatView.clear_unread_separator`) and a re-render cannot resurrect it
   (`ChatWidget.mark_read` also clears the `@` mentions). The same pass seeds the
-  jump button with the block already on screen (`ChatView.seed_unseen`).
+  jump button with the block already on screen (`ChatView.seed_unseen`); the
+  count is cleared only when `ChatView._note_bottom` actually reaches the newest
+  message (edge-triggered and suspension-aware), so the transient bottom during
+  an anchor restore cannot wipe it.
   `bottom_reached` is not suppressed, so the newest message always marks the
   conversation read, and a background auto-joined MUC is never anchored. A hidden tab (opened with `focus=False` by an incoming message) loads
   its archive when it is first shown. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
-  "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,
+  "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>",
+  "seen_sid": "<sid>", "seen_ts": "<ts>", "seen_ref": "<message-id>",
+  "seen_at": <unix>}}}`,
   where *chat-key* is the conversation key the chat tabs use (bare JID for 1:1
   and MUC PM, bare room JID for a conference); the v1
   `{"count": N, "displayed": "<sid>"}` and v0 `{"jid": N}` layouts are still
@@ -1738,9 +1746,11 @@ Registers XEP plugins (conditionally where noted):
   visible message (`ChatView._find_last_visible_ref`) and publishes it as
   `displayed` through a single-shot throttle (`MainWindow._mds_throttle_timer`,
   `chat.mds_displayed_throttle` seconds, 1–30, default 3), so a peer sees
-  "read up to here" without a stanza per scrolled message. The persisted
-  `seen_*` unread-state fields hold that point and are preferred when reopening;
-  reaching the bottom publishes at once.
+  "read up to here" without a stanza per scrolled message. It advances only while
+  the view is scrolled up (`ChatWidget._on_last_seen`), so the transient bottom of
+  an anchor restore never marks the newest message seen. The persisted `seen_*`
+  unread-state fields hold that point and are preferred when reopening; reaching
+  the bottom publishes at once.
 
 ### 14.4 Last Message Correction (XEP-0308)
 

@@ -54,6 +54,30 @@ view.note_new_message("m1")
 view.note_new_message("m2")
 check("new messages counted", view._new_count == 2)
 check("first unread remembered", view._first_unread_id == "m1")
+
+# 2b. the seeded unread count survives a suspended at-bottom position ----------
+# (Keep this before the label check: the label one needs the QTextBrowser
+# fallback's QToolButton, which the WebEngine backend does not create.)
+view._at_bottom_hit = False
+view._scroll_suspended = True
+view._deferred_scroll = None
+view._overflow = True
+view._fraction = 0.5
+view.seed_unseen(3, "m1")
+check("seed_unseen sets the count", view._new_count == 3)
+view._set_fraction(1.0)
+check("a suspended at-bottom position keeps the seeded count",
+      view._new_count == 3)
+view._scroll_suspended = False
+view._at_bottom_hit = False
+view._note_bottom()
+check("reaching the bottom clears the seeded count", view._new_count == 0)
+# restore the state the following checks expect
+view._new_count = 2
+view._first_unread_id = "m1"
+view._jumped_once = False
+view._update_jump_label()
+
 check("label shows the number", view._jump_button.text() == "\u25bc 2")
 check("label caps at 99+", view._jump_label(120) == "\u25bc 99+")
 

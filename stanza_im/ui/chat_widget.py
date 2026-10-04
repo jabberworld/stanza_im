@@ -1969,6 +1969,16 @@ class ChatWidget(QtWidgets.QWidget):
         entries = self._render_all()
         self._seed_unseen(entries)
         self.refresh_unread_mentions(entries)
+        # A never-read conversation has no anchor to scroll to; open at the
+        # start of the unread block so the separator and the jump button are in
+        # view instead of the oldest unread scrolling off the top.
+        if (not self._restore_anchor and self._unread_boundary
+                and not (self._unread_boundary.get("ref")
+                         or self._unread_boundary.get("ts")) and entries):
+            first = entries[0]
+            self._restore_anchor = {
+                "ref": self._reply_target_id(first),
+                "ts": first.get("timestamp") or ""}
         if self._restore_anchor:
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
@@ -2143,6 +2153,11 @@ class ChatWidget(QtWidgets.QWidget):
             return True
         ref = str(self._unread_boundary.get("ref") or "")
         ts = str(self._unread_boundary.get("ts") or "")
+        # No stored read point at all (a conversation never read to the end):
+        # everything in the window is unread, so the block starts at its first
+        # message instead of waiting for an anchor the archive cannot provide.
+        if not ref and not ts:
+            return True
         for entry in entries or []:
             if ref and ref in self._entry_refs(entry):
                 return True
@@ -2581,6 +2596,7 @@ class ChatWidget(QtWidgets.QWidget):
         if self._unread_resolving:
             self._unread_resolving = False
             self._seed_unseen(self._render_all())
+            self.refresh_unread_mentions(self._ordered_entries())
         if entry is not None:
             self._view.scroll_to_message(self._reply_target_id(entry))
 
@@ -3271,6 +3287,12 @@ class ChatWidget(QtWidgets.QWidget):
             pass
     def _on_last_seen(self, ref: str = "", ts: str = "", sid: str = ""):
         try:
+            # A view sitting at the newest message is *read*, not partially
+            # read: the bottom report owns that transition.  Skipping here also
+            # stops the transient "at the bottom" position during an anchor
+            # restore from advancing the seen point to the newest message.
+            if not self._view.is_scrolled_up():
+                return
             self.set_seen(ref, ts, sid)
             try:
                 self.last_seen_changed.emit(str(ref or ""), str(ts or ""), str(sid or ""))

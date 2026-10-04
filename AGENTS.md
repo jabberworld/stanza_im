@@ -929,7 +929,14 @@ read point **older** than the whole loaded window — an unread block bigger tha
 `_boundary_reachable` defers the separator (`_unread_resolving`) until
 `_load_jump_pages_async` located it and `_finish_unread_resolve` re-renders the
 completed window; when the archive cannot reach the read point the separator
-falls back to the first message of the window. A message arriving in an
+falls back to the first message of the window. A conversation with **no stored
+read point** (never read to its end, so `ref`/`ts` are both empty) is treated as
+wholly unread: `_boundary_reachable` returns true, the block spans the whole
+loaded window and `set_history` opens the tab at its first message (it sets the
+restore anchor to it), so the `▼ N` count and the `@` button are present right
+away. `_finish_unread_resolve` re-runs `refresh_unread_mentions` as well, so a
+mention that only surfaced after the archive paged back still reaches the `@`
+button. A message arriving in an
 open but unfocused tab is armed by `MainWindow._arm_unread_separator` **before**
 `ChatWidget.add_message` renders it (`ChatWidget.note_unread_arrival`), so the
 incoming entry carries the separator and the conversation the user already read
@@ -944,7 +951,9 @@ the newest message always marks the conversation read. The same pass **seeds
 the jump button** from the block that is already on screen
 (`ChatView.seed_unseen(count, target_id)`, the first unseen message), so an
 unread chat shows `▼ N` instead of an empty tail; a re-render does not recount
-it.
+it. The count is cleared only when the view actually reaches the newest message
+(`ChatView._note_bottom`, edge-triggered and suspension-aware), never by the
+transient "at the bottom" position during the anchor restore.
 `ChatView.scroll_to_message` parks the request in `_deferred_scroll` while the
 document is empty or has buffered chunks (`clear()` loads a fresh page
 asynchronously), replaying it in `_on_load_finished`/`_probe_chat_alive` after
@@ -1291,7 +1300,10 @@ unread (see the unread-counters paragraph above).
 the bottom-most visible message (`ChatView._find_last_visible_ref`, a WebEngine
 JS query of `#chat .stanza-message`; `_last_seen_result` reads its
 `data-stanza-id`/`data-reply-id`/`data-stanza-time`) and emits
-`last_seen_changed(ref, ts, sid)`. `ChatWindow.last_seen` relays it to
+`last_seen_changed(ref, ts, sid)` — but only while the view is actually scrolled
+up (`ChatWidget._on_last_seen` skips a view at the bottom), so the transient
+"at the bottom" position during an anchor restore cannot jump the seen point to
+the newest message. `ChatWindow.last_seen` relays it to
 `MainWindow._on_chat_last_seen`, which advances the persisted `seen_*` point,
 shrinks the unread badge by the messages that just became visible
 (`ChatWidget.count_seen_since`), and arms the `@`/jump state accordingly.
