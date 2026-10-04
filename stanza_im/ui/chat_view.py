@@ -181,13 +181,26 @@ class _JumpButtonMixin:
         self._jump_button = button
         self._init_jump_state()
 
-    def _position_jump_button(self):
-        button = getattr(self, "_jump_button", None)
-        if button is None:
+    def _position_fab_buttons(self):
+        """Lay the floating buttons (``@`` left, ``▼`` right) centred in a row."""
+        jump = getattr(self, "_jump_button", None)
+        mention = getattr(self, "_mention_button", None)
+        shown = [b for b in (mention, jump)
+                 if b is not None and b.isVisible()]
+        if not shown:
             return
-        button.move(
-            (self.width() - button.width()) // 2,
-            self.height() - button.height() - 16)
+        gap = 8
+        total = sum(b.width() for b in shown) + gap * (len(shown) - 1)
+        x = (self.width() - total) // 2
+        y = self.height() - 34 - 16
+        for button in (mention, jump):
+            if button is None or not button.isVisible():
+                continue
+            button.move(x, y)
+            x += button.width() + gap
+
+    def _position_jump_button(self):
+        self._position_fab_buttons()
 
     def _update_jump_button(self):
         at_bottom = self.scroll_fraction() >= 0.999
@@ -344,9 +357,77 @@ class _JumpButtonMixin:
             button.setFixedSize(max(34, button.sizeHint().width() + 8), 34)
         self._position_jump_button()
 
+    # ── Mention jump button (floating "@ N", left of "▼ N") ───────
+
+    @staticmethod
+    def _mention_label(count: int) -> str:
+        if count <= 0:
+            return "@"
+        return "@ " + ("99+" if count > 99 else str(count))
+
+    def _init_mention_state(self):
+        self._mention_count = 0
+        self._update_mention_label()
+        self._update_mention_button()
+
+    def set_mention_count(self, count: int) -> None:
+        """Show/refresh the floating ``@`` button with the mention count."""
+        try:
+            self._mention_count = max(0, int(count or 0))
+        except (TypeError, ValueError):
+            self._mention_count = 0
+        self._update_mention_label()
+        self._update_mention_button()
+
+    def _update_mention_button(self):
+        self._set_mention_visible(getattr(self, "_mention_count", 0) > 0)
+
+    def _on_mention_clicked(self) -> None:
+        try:
+            self.mention_jump_requested.emit()
+        except Exception:
+            pass
+
+    def _create_mention_button(self):
+        button = QtWidgets.QToolButton(self)
+        button.setText("@")
+        button.setAutoRaise(True)
+        button.setToolTip(tr("chat_jump_mention"))
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setFixedSize(34, 34)
+        button.setStyleSheet(
+            "QToolButton {"
+            "  background: #ececec;"
+            "  color: #555; border: none; border-radius: 17px;"
+            "  font-size: 18px;"
+            "}"
+            "QToolButton:hover { background: #d9d9d9; }")
+        button.clicked.connect(self._on_mention_clicked)
+        button.hide()
+        self._mention_button = button
+        self._init_mention_state()
+
+    def _update_mention_label(self):
+        button = getattr(self, "_mention_button", None)
+        if button is None:
+            return
+        text = self._mention_label(getattr(self, "_mention_count", 0))
+        if button.text() != text:
+            button.setText(text)
+            button.setFixedSize(max(34, button.sizeHint().width() + 8), 34)
+        self._position_fab_buttons()
+
+    def _set_mention_visible(self, show: bool):
+        button = getattr(self, "_mention_button", None)
+        if button is None:
+            return
+        if button.isVisible() != show:
+            button.setVisible(show)
+        self._position_fab_buttons()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._position_jump_button()
+        self._position_fab_buttons()
 
 
 if HAS_WEBENGINE:
@@ -360,6 +441,7 @@ if HAS_WEBENGINE:
         near_top = QtCore.pyqtSignal()
         scroll_fraction = QtCore.pyqtSignal(float)
         jump_clicked = QtCore.pyqtSignal()
+        mention_clicked = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)  # reply_id, author, sender, snippet
 
         @QtCore.pyqtSlot(str)
@@ -385,6 +467,10 @@ if HAS_WEBENGINE:
         @QtCore.pyqtSlot()
         def on_jump_clicked(self):
             self.jump_clicked.emit()
+
+        @QtCore.pyqtSlot()
+        def on_mention_clicked(self):
+            self.mention_clicked.emit()
 
         @QtCore.pyqtSlot(str, str, str, str)
         def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
@@ -414,6 +500,7 @@ if HAS_WEBENGINE:
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
         last_seen_changed = QtCore.pyqtSignal(str, str, str)
+        mention_jump_requested = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
@@ -448,11 +535,13 @@ if HAS_WEBENGINE:
             self._at_bottom_hit = True
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self._on_jump_clicked)
+            self._bridge.mention_clicked.connect(self._on_mention_clicked)
             self._bridge.reply_requested.connect(self.reply_requested)
 
             self._page = _StanzaPage(self, parent=self)
             self.setPage(self._page)
             self._init_jump_state()
+            self._init_mention_state()
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -761,7 +850,14 @@ if HAS_WEBENGINE:
                 self.setZoomFactor(self._zoom)
                 self._install_scroll_js()
                 self._install_jump_js()
+                self._install_mention_js()
                 self._install_action_js()
+                # The floating buttons were created just now; replay the
+                # counters that were seeded before the page was ready.
+                self._update_jump_label()
+                self._update_mention_label()
+                self._update_jump_button()
+                self._update_mention_button()
                 self.page().runJavaScript(
                     "window.__stanzaNotesEnabled = %s;"
                     % ("true" if getattr(self, "_notes_enabled", False)
@@ -861,17 +957,32 @@ if HAS_WEBENGINE:
         def _install_scroll_js(self):
             self.page().runJavaScript(self._SCROLL_JS)
 
+        _FABS_JS = """
+        (function ensureStanzaFabs() {
+            var c = document.getElementById('stanza-fabs');
+            if (c) return;
+            c = document.createElement('div');
+            c.id = 'stanza-fabs';
+            c.style.cssText =
+                'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);' +
+                'display:flex;gap:8px;align-items:center;z-index:9999;';
+            document.body.appendChild(c);
+        })();
+        """
+
         _JUMP_JS = """
         (function installStanzaJump() {
             if (document.getElementById('stanza-jump')) return;
+            var c = document.getElementById('stanza-fabs');
+            if (!c) return;
             var d = document.createElement('div');
             d.id = 'stanza-jump';
             d.style.cssText =
-                'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);' +
                 'width:34px;height:34px;line-height:34px;text-align:center;' +
                 'border-radius:17px;background:#ececec;' +
-                'color:#555;font-size:18px;cursor:pointer;z-index:9999;' +
+                'color:#555;font-size:18px;cursor:pointer;' +
                 'display:none;user-select:none;';
+            d.style.order = '1';
             d.addEventListener('mouseenter', function () {
                 d.style.background = '#d9d9d9';
             });
@@ -887,12 +998,52 @@ if HAS_WEBENGINE:
                 });
             d.textContent = '\\u25bc';
             window.__stanzaJumpPress = 0;
-            document.body.appendChild(d);
+            c.appendChild(d);
+        })();
+        """
+
+        _MENTION_JS = """
+        (function installStanzaMention() {
+            if (document.getElementById('stanza-mention')) return;
+            var c = document.getElementById('stanza-fabs');
+            if (!c) return;
+            var d = document.createElement('div');
+            d.id = 'stanza-mention';
+            d.style.cssText =
+                'width:34px;height:34px;line-height:34px;text-align:center;' +
+                'border-radius:17px;background:#ececec;' +
+                'color:#555;font-size:16px;cursor:pointer;' +
+                'display:none;user-select:none;';
+            d.style.order = '0';
+            d.title = %MENTION_TITLE%;
+            d.addEventListener('mouseenter', function () {
+                d.style.background = '#d9d9d9';
+            });
+            d.addEventListener('mouseleave', function () {
+                d.style.background = '#ececec';
+            });
+            d.addEventListener('click', function () {
+                window.__stanzaMentionPress = 1;
+                if (window.bridge && window.bridge.on_mention_clicked) {
+                    window.bridge.on_mention_clicked();
+                    window.__stanzaMentionPress = 0;
+                }
+            });
+            d.textContent = '@';
+            window.__stanzaMentionPress = 0;
+            c.appendChild(d);
         })();
         """
 
         def _install_jump_js(self):
+            self.page().runJavaScript(self._FABS_JS)
             self.page().runJavaScript(self._JUMP_JS)
+
+        def _install_mention_js(self):
+            self.page().runJavaScript(self._FABS_JS)
+            self.page().runJavaScript(
+                self._MENTION_JS.replace(
+                    "%MENTION_TITLE%", json.dumps(tr("chat_jump_mention"))))
 
         _ACTION_JS = """
         (function installStanzaActions() {
@@ -1398,6 +1549,22 @@ window.__stanzaMentionRef = '';
                 % (text, "'auto'" if count else "'34px'",
                    "'0 10px'" if count else "'0'"))
 
+        def _set_mention_visible(self, show: bool):
+            self.evaluate_js(
+                "var d = document.getElementById('stanza-mention');"
+                "if (d) d.style.display = %s;"
+                % ("'block'" if show else "'none'"))
+
+        def _update_mention_label(self):
+            count = getattr(self, "_mention_count", 0)
+            text = json.dumps(self._mention_label(count))
+            self.evaluate_js(
+                "var d = document.getElementById('stanza-mention');"
+                "if (d) { d.textContent = %s; d.style.width = %s;"
+                " d.style.padding = %s; }"
+                % (text, "'auto'" if count else "'34px'",
+                   "'0 10px'" if count else "'0'"))
+
         def _poll_scroll_position(self):
             if not self._ready:
                 return
@@ -1428,7 +1595,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaReactLikeRef || '',"
                 " window.__stanzaMediaFsRef || '',"
                 " window.__stanzaToNoteRef || '',"
-                " window.__stanzaVoiceRef || '']",
+                " window.__stanzaVoiceRef || '',"
+                " window.__stanzaMentionPress ? 1 : 0]",
                 self._on_scroll_position,
             )
 
@@ -1723,6 +1891,9 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_voice_ref = ""
+            if len(value) > 23 and value[23]:
+                self.evaluate_js("window.__stanzaMentionPress = 0;")
+                self._on_mention_clicked()
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -1742,13 +1913,17 @@ window.__stanzaMentionRef = '';
                     self.near_top.emit()
             else:
                 self._near_top_hit = False
-            self._release_scroll_suspend()
             self._update_jump_button()
             self._note_bottom()
             try:
                 self._maybe_emit_last_seen()
             except Exception:
                 pass
+            # Release the parked-scroll guard only after this poll: it lets the
+            # first poll still see the stale "at the bottom" position and, more
+            # importantly, keeps it from resetting the seeded unread count
+            # before the restore scroll has actually painted.
+            self._release_scroll_suspend()
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
@@ -2248,6 +2423,7 @@ else:
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
         last_seen_changed = QtCore.pyqtSignal(str, str, str)
+        mention_jump_requested = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
@@ -2273,6 +2449,7 @@ else:
             self._fraction = 1.0
             self._overflow = False
             self._create_jump_button()
+            self._create_mention_button()
 
         def _note_bottom(self, *_args) -> None:
             """Edge-triggered "at the newest message" (scrollbar driven)."""

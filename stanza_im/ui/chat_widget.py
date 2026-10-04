@@ -505,6 +505,11 @@ class ChatWidget(QtWidgets.QWidget):
         view.near_top.connect(self._on_near_top)
         view.bottom_reached.connect(self.bottom_reached)
         view.last_seen_changed.connect(self._on_last_seen)
+        view.mention_jump_requested.connect(self._jump_to_next_mention)
+        try:
+            view.set_mention_count(len(self._mention_refs))
+        except (AttributeError, RuntimeError):
+            pass
         return view
 
     def _build_ui(self, theme: ChatThemeFactory):
@@ -655,15 +660,6 @@ class ChatWidget(QtWidgets.QWidget):
         self._history_btn.clicked.connect(
             lambda: self.history_requested.emit(self.jid))
         actions_row.addWidget(self._history_btn)
-
-        # Conference only: jumps to the next message that named our nickname.
-        self._mention_btn = QtWidgets.QToolButton(self)
-        self._mention_btn.setText("@")
-        self._mention_btn.setAutoRaise(True)
-        self._mention_btn.setToolTip(tr("chat_jump_mention"))
-        self._mention_btn.clicked.connect(self._jump_to_next_mention)
-        self._mention_btn.setVisible(False)
-        actions_row.addWidget(self._mention_btn)
 
         vcard_btn = QtWidgets.QToolButton(self)
         vcard_btn.setIcon(self._chat_icon("v-card.png"))
@@ -2256,11 +2252,12 @@ class ChatWidget(QtWidgets.QWidget):
         return len(self._mention_refs)
 
     def _update_mention_button(self) -> None:
+        """Reflect the pending-mention count on the floating ``@`` button."""
         count = len(self._mention_refs)
-        self._mention_btn.setVisible(count > 0)
-        if count:
-            self._mention_btn.setToolTip(tr("chat_jump_mention_count",
-                                            count=count))
+        try:
+            self._view.set_mention_count(count)
+        except (AttributeError, RuntimeError):
+            pass
 
     def _jump_to_next_mention(self) -> None:
         """Scroll to the earliest mention we have not looked at yet."""

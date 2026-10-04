@@ -963,9 +963,12 @@ Single conversation tab. Layout:
   the in-page `#stanza-jump` div (its click sets `window.__stanzaJumpPress` and
   is relayed by the scroll poll to `_on_jump_clicked`; `bridge.on_jump_clicked`
   is only an optional fast path); the QTextBrowser fallback uses a `QToolButton`
-  and cannot target a message, so it always scrolls to the bottom. Incoming
-  messages never force a scroll to the bottom — only the user's own outgoing
-  messages do.
+  and cannot target a message, so it always scrolls to the bottom. The `@`
+  mention button is a sibling in the same centred `#stanza-fabs` row (see the
+  mention bullet above); both labels are replayed after every page load
+  (`_on_load_finished`) so a count seeded before the document existed still
+  shows. Incoming messages never force a scroll to the bottom — only the user's
+  own outgoing messages do.
 - MUC participant sidebar (`_users_list`, a `_ParticipantList` subclass): a
   single click selects a row (highlight only), a double-click opens the private
   chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,
@@ -1454,12 +1457,17 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
   `origin-id` → own message id — plus its raw timestamp), so an unread
   conversation can be restored from the point the user stopped reading.
-- In a conference an unread message naming our nickname also arms an `@`
-  button in the input toolbar: each click jumps to the next unread mention
-  (paging the local archive when it is outside the rendered window) and
-  reaching the newest message disarms it. The list is rebuilt from the window
-  on open (`ChatWidget.refresh_unread_mentions`), so the button survives a
-  restart.
+- In a conference an unread message naming our nickname also arms a floating
+  `@ N` button left of the `▼ N` one (shared `#stanza-fabs` row; the WebEngine
+  backend uses the in-page `#stanza-mention` div, the fallback a `QToolButton`,
+  both via `ChatView.set_mention_count`, click relayed as
+  `window.__stanzaMentionPress` → `mention_jump_requested`): each click jumps to
+  the next unread mention (paging the local archive when it is outside the
+  rendered window) and reaching the newest message disarms it. The list is
+  rebuilt from the window on open (`ChatWidget.refresh_unread_mentions`) and
+  after a deferred archive resolve, and a joined room loads its history with the
+  read anchor (`MainWindow._on_muc_joined`), so the button appears on open and
+  survives a restart.
 - A conversation is marked read **only** when the user reaches the newest
   message in the view they are looking at (`ChatView.bottom_reached` →
   `MainWindow._on_chat_reached_bottom`); a background tab scrolling to its end

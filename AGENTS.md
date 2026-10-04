@@ -753,22 +753,32 @@ bottom. Incoming messages no longer force a scroll to the bottom (only the
 user's own outgoing messages do); the HTML button's click sets
 `window.__stanzaJumpPress` and is relayed through the scroll poll, with the
 QWebChannel `bridge.on_jump_clicked` only as an optional fast path (the poll is
-the fallback when the transport is unavailable).
+the fallback when the transport is unavailable). The `▼` shares a centred
+bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
+button below; both labels are replayed after every page load
+(`_on_load_finished` calls `_update_jump_label`/`_update_mention_label`) so a
+count seeded before the document existed still shows.
 [`tests/test_jump_button.py`]
 
 **Unread mentions & the `@` button**: an unread conference message naming our
 nick is also handed to the tab (`MainWindow._note_unread_mention` →
-`ChatWidget.note_unread_mention`, keyed by the reply target id), which shows an
-`@` button in the input toolbar (tooltip `chat_jump_mention` /
-`chat_jump_mention_count`). Each click jumps to the oldest mention not yet
+`ChatWidget.note_unread_mention`, keyed by the reply target id). The pending
+count drives a **floating `@ N` button left of `▼ N`** (same row/style; the
+WebEngine backend uses the in-page `#stanza-mention` div, the QTextBrowser
+fallback a `QToolButton`, both via `ChatView.set_mention_count`; the click is
+relayed by the scroll poll as `window.__stanzaMentionPress` →
+`mention_jump_requested`). Each click jumps to the oldest mention not yet
 looked at (`_jump_to_next_mention`: `scroll_to_message` when it is rendered,
 else `_jump_to_message` paging the local archive) and drops it from the list;
 `_on_chat_reached_bottom` (reaching the newest message, see the unread
 paragraph below) calls `mark_mentions_read`, which clears the rest and hides the
 button. The list is also **rebuilt from the window** on open
 (`refresh_unread_mentions`: every mention of the loaded history after the read
-anchor is re-armed, so the button survives a restart), and
-`ChatWidget.mark_read` clears it together with the divider.
+anchor is re-armed, so the button survives a restart) and again after a deferred
+archive resolve (`_finish_unread_resolve`); `ChatWidget.mark_read` clears it
+together with the divider. A room joined with unread messages loads its history
+with the read anchor (`MainWindow._on_muc_joined`), so the `@` list and the
+separator are present on open.
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,

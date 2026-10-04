@@ -513,6 +513,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # (keyed by its anchor timestamp) so a repeated request is not issued.
         self._opening_chat = False
         self._history_loading: dict[str, str] = {}
+        # Monotonic token per history load so a superseded (anchor-less) load
+        # cannot apply its stale window over a newer anchored one.
+        self._history_load_seq: dict[str, int] = {}
 
         # Unload the WebEngine page of tabs that stay cold (see P7).
         self._tab_activity: dict[str, float] = {}
@@ -2012,7 +2015,13 @@ class MainWindow(QtWidgets.QMainWindow):
             chat = self._chat_window.open_groupchat(
                 room, self._muc_self_nicks[room],
                 self._muc_display_name(room))
-            self._load_history(room)
+            # Restore an unread room from its read anchor (and place the
+            # separator / rebuild the @ list) instead of loading an anchor-less
+            # tail that would look read.
+            anchor = self._restore_anchor_for(room)
+            if anchor:
+                chat.set_restore_anchor(anchor)
+            self._load_history(room, anchor)
             self._request_vcard(room, force=True)
         self._apply_muji_support(room)
         self._apply_muc_admin(room)
@@ -4164,10 +4173,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         anchor_ts = str((anchor or {}).get("ts") or "")
         if jid in self._history_loading:
-            # A load is already on its way for this conversation; the read
-            # state cannot have changed in between, so skip the duplicate.
-            return
+            # A load is already on its way for this conversation.  Skip the
+            # duplicate unless the newer call carries a read anchor that the
+            # in-flight one lacks (otherwise an anchor-less join-time load
+            # would swallow the boundary and the unread separator / @ list).
+            if not anchor_ts or anchor_ts == self._history_loading.get(jid, ""):
+                return
         self._history_loading[jid] = anchor_ts
+        seq = self._history_load_seq.get(jid, 0) + 1
+        self._history_load_seq[jid] = seq
         try:
             if not os.path.isfile(history._path(jid)):
                 await history.migrate_from_jsonl_async(jid)
@@ -4184,7 +4198,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 history.older_available_timestamp_async(
                     jid, entries[0].get("timestamp", ""))
         finally:
-            self._history_loading.pop(jid, None)
+            if self._history_loading.get(jid, "") == anchor_ts:
+                self._history_loading.pop(jid, None)
+        # A newer load superseded this one: never apply a stale, anchor-less
+        # window over it.
+        if self._history_load_seq.get(jid) != seq:
+            return
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
         chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)

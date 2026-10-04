@@ -62,20 +62,6 @@ def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-class _Button:
-    """Stand-in for the mention toolbar button."""
-
-    def __init__(self):
-        self.visible_flag = False
-        self.tooltip = ""
-
-    def setVisible(self, show):
-        self.visible_flag = bool(show)
-
-    def setToolTip(self, text):
-        self.tooltip = text
-
-
 class _View:
     """Recording ChatView stand-in (no WebEngine, no layout)."""
 
@@ -87,6 +73,7 @@ class _View:
         self.seeded = []
         self.separators_cleared = 0
         self.bottom = False
+        self.mention_count = 0
 
     def clear(self):
         self.cleared += 1
@@ -115,6 +102,9 @@ class _View:
     def clear_unread_separator(self):
         self.separators_cleared += 1
         return True
+
+    def set_mention_count(self, count):
+        self.mention_count = int(count or 0)
 
     def __getattr__(self, name):
         return lambda *a, **k: None
@@ -164,7 +154,6 @@ def widget(jid="bob@example.com"):
     w._unread_passed = False
     w._unread_resolving = False
     w._mention_refs = []
-    w._mention_btn = _Button()
     w._self_nick = ""
     w._seen_ref = ""
     w._seen_ts = ""
@@ -287,7 +276,7 @@ check("a never-read conversation does not wedge the separator",
 check("the whole window is counted as unread",
       w._view.seeded and w._view.seeded[0][0] == 3)
 check("its mentions are rebuilt for the @ button",
-      bool(w._mention_refs) and w._mention_btn.visible_flag is True)
+      bool(w._mention_refs) and w._view.mention_count > 0)
 check("it opens at the start of the unread block",
       w._restore_anchor.get("ref") == "m-1")
 
@@ -305,7 +294,7 @@ w._history = [row("2026-10-02T10:02:00Z", "read", "m-2"),
 w._view.messages = []
 w._finish_unread_resolve(w._history[1])
 check("the mentions are rebuilt after the deferred resolve",
-      bool(w._mention_refs) and w._mention_btn.visible_flag is True)
+      bool(w._mention_refs) and w._view.mention_count > 0)
 
 # 3f. last-seen never advances while the view sits at the bottom ---------------
 w = muc_widget()
@@ -415,10 +404,10 @@ w.set_history([row("2026-10-02T10:03:00Z", "read that", "m-3"),
               50, False, anchor=ANCHOR)
 check("mentions inside the unread block reach the @ button",
       w._mention_refs == ["m-4", "m-6"]
-      and w._mention_btn.visible_flag is True)
+      and w._view.mention_count == 2)
 w.mark_mentions_read()
 check("reading the chat clears the @ button",
-      w._mention_refs == [] and w._mention_btn.visible_flag is False)
+      w._mention_refs == [] and w._view.mention_count == 0)
 w.mark_read()
 w2 = widget()
 w2.set_history([row("2026-10-02T10:04:00Z", "hey me", "m-4")], 50, False)
@@ -495,8 +484,16 @@ check("a hidden tab loads its archive when it is first shown",
 check("repeated loads of one conversation are collapsed",
       "if jid in self._history_loading:" in
       method_source(_mw_src, "_load_history"))
-check("an anchored window is not restored by a background auto-join",
-      "anchor" not in method_source(_mw_src, "_on_muc_joined"))
+check("a newer anchored load supersedes an anchor-less one",
+      'anchor_ts == self._history_loading.get(jid, "")'
+      in method_source(_mw_src, "_load_history")
+      and "self._history_load_seq.get(jid) != seq"
+      in method_source(_mw_src, "_load_history"))
+_joined = method_source(_mw_src, "_on_muc_joined")
+check("a joined room is restored only when it has a read anchor",
+      "anchor = self._restore_anchor_for(room)" in _joined
+      and "if anchor:" in _joined
+      and "self._load_history(room, anchor)" in _joined)
 
 reached = method_source(_mw_src, "_on_chat_reached_bottom")
 check("reaching the newest message is the one point that marks it read",
@@ -534,6 +531,38 @@ check("the deferred scroll is replayed once the page finished loading",
 check("buffered messages are in the DOM before the scroll is replayed",
       on_load.index("self._append_chunk(chunk)")
       < on_load.index("self._flush_deferred_scroll()"))
+
+# 14. the floating mention button mirrors the jump button ----------------------
+from stanza_im.ui.chat_view import ChatView as _CV  # noqa: E402
+
+check("the mention label mirrors the jump label",
+      _CV._mention_label(0) == "@"
+      and _CV._mention_label(3) == "@ 3"
+      and _CV._mention_label(120) == "@ 99+")
+check("the floating buttons share a centred row container",
+      "id = 'stanza-fabs'" in _cv_src
+      and "id = 'stanza-jump'" in _cv_src
+      and "id = 'stanza-mention'" in _cv_src)
+check("the mention button is ordered left of the jump button",
+      "d.style.order = '0'" in _cv_src and "d.style.order = '1'" in _cv_src)
+check("the mention press is relayed by the scroll poll",
+      "window.__stanzaMentionPress ? 1 : 0" in _cv_src
+      and "self._on_mention_clicked()" in _cv_src)
+check("every floating label is replayed once the page is loaded",
+      "_update_jump_label()" in on_load
+      and "_update_mention_label()" in on_load
+      and "_install_mention_js()" in on_load)
+check("the floating click asks the widget to jump",
+      "def _on_mention_clicked" in _cv_src
+      and "mention_jump_requested.emit()" in _cv_src)
+_create_view = method_source(_cw_src, "_create_view")
+check("the widget wires the mention signal and count",
+      "view.mention_jump_requested.connect(self._jump_to_next_mention)"
+      in _create_view
+      and "view.set_mention_count(len(self._mention_refs))" in _create_view)
+check("the widget drives the floating @ button",
+      "self._view.set_mention_count(count)"
+      in method_source(_cw_src, "_update_mention_button"))
 
 print()
 if FAILURES:
