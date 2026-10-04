@@ -1275,4 +1275,6 @@ STRINGS = {
     'plugin_category_appearance': 'Внешний вид',
     'plugin_category_other': 'Прочее',
     'plugins_missing_warning': 'Включённые плагины отсутствуют и были пропущены:\n{plugins}',
+
+    "chat_mds_displayed_throttle": "Период синхронизации просмотренного",    "chat_mds_displayed_throttle": "Период синхронизации просмотренного",
 }

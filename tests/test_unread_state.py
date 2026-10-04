@@ -86,14 +86,16 @@ check("legacy views are derived from v2",
                                            "old@x": "sid-old"})
 check("records expose every field",
       set(unread_state.blank()) == {"unread", "mentions", "read_sid",
-                                    "read_ts", "read_ref"})
+                                    "read_ts", "read_ref", "seen_sid",
+                                    "seen_ts", "seen_ref", "seen_at"})
 
 with open(unread_state.path(), "w", encoding="utf-8") as fh:
     fh.write('{"x@y": {"count": 7, "displayed": "sid-v1"}}')
 converted = unread_state.load_chats()
 check("v1 payload converts to a v2 record",
       converted["x@y"] == {"unread": 7, "mentions": 0, "read_sid": "sid-v1",
-                           "read_ts": "", "read_ref": ""})
+                           "read_ts": "", "read_ref": "", "seen_sid": "",
+                           "seen_ts": "", "seen_ref": "", "seen_at": 0.0})
 
 # Account-bound state: another account's counters must be ignored.
 unread_state.save({"me@here": 4}, account="me@here")

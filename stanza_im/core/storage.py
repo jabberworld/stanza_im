@@ -75,6 +75,7 @@ class Config:
                  "muc_auto_nick": True, "muc_confirm_leave": True,
                  "muc_minimize_startup": True, "message_styling": True,
                  "message_displayed_sync": True,
+                 "mds_displayed_throttle": 3,
                  "allow_incoming_edits": True,
                  "allow_incoming_deletions": True,
                  "allow_moderation": True,

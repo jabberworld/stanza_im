@@ -1456,25 +1456,33 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
 - In a conference an unread message naming our nickname also arms an `@`
   button in the input toolbar: each click jumps to the next unread mention
   (paging the local archive when it is outside the rendered window) and
-  marking the conversation read disarms it.
-- A conversation is marked read when the user reaches the newest message in
-  the view they are looking at (`ChatView.bottom_reached` →
+  reaching the newest message disarms it. The list is rebuilt from the window
+  on open (`ChatWidget.refresh_unread_mentions`), so the button survives a
+  restart.
+- A conversation is marked read **only** when the user reaches the newest
+  message in the view they are looking at (`ChatView.bottom_reached` →
   `MainWindow._on_chat_reached_bottom`); a background tab scrolling to its end
-  never clears its counters.
-- Opening an unread conversation resumes it there: the anchor is captured
+  never clears its counters. Opening it, switching to it, sending a message
+  into it and a remote XEP-0490 state do not clear them either.
+- An incoming message is published as XEP-0490 displayed only when the view is
+  at the bottom (`MainWindow._chat_at_bottom` → `ChatWidget.at_bottom`), so a
+  message that lands while the user reads further up is not advertised as seen.
+- Opening an unread conversation resumes it there: the anchor is resolved
   before the tab is opened (`MainWindow._restore_anchor_for` →
   `ChatWidget.set_restore_anchor`) and `set_history` scrolls to that message
   after the history window is rendered (falling back to the anchor timestamp
-  and then to paging the local archive). A conversation with no unread
-  messages opens at its newest message as before.
+  and then to paging the local archive). The parked scroll is suspended
+  meanwhile (`ChatView._scroll_suspended`), so the still-loading document cannot
+  report the bottom and mark the fresh window read on its own. A conversation
+  with no unread messages opens at its newest message as before.
 - An unread conversation opens with **every** new message already on screen: the
   window is the ordinary tail of the conversation (`history.load_history`), there
   is no forward pager, and older messages are reached by scrolling up or the
-  archive/jump menus (the jump button returns to the newest one). The read
-  anchor (`MainWindow._focus_chat` captures it before the counters are cleared
-  and keeps it when clearing them, `_reset_unread(jid, anchor)`) then only does
-  two things: it places a visual separator and it is the position the window
-  opens at.
+  archive/jump menus (the jump button returns to the newest one). The persisted
+  anchor therefore only does two things: it places the separator and it is the
+  position the window opens at (`MainWindow._focus_chat` hands it to
+  `ChatWidget.set_history(…, anchor=…)` and `set_restore_anchor` without
+  touching the counters).
 - The separator is part of the message stream: `ChatThemeFactory.render_message(
   unread_marker=True)` prepends `<div class="stanza-unread">` and `_UNREAD_CSS`
   styles it `font-size: 0.85em`, so it stays one step below the chat text and
@@ -1486,10 +1494,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   and the separator is placed afterwards, `_finish_unread_resolve` re-rendering
   the completed window. an unread message in an open but unfocused tab is armed by
   `MainWindow._arm_unread_separator` before `add_message` renders it
-  (`ChatWidget.note_unread_arrival`). It stays in the window until the chat is
-  reopened. `bottom_reached` is not suppressed, so the newest message always
-  marks the conversation read, and a background auto-joined MUC is never
-  anchored. A hidden tab (opened with `focus=False` by an incoming message) loads
+  (`ChatWidget.note_unread_arrival`). It stays in the window until the
+  conversation is actually read — reaching the newest message removes it in
+  place (`ChatView.clear_unread_separator`) and a re-render cannot resurrect it
+  (`ChatWidget.mark_read` also clears the `@` mentions). The same pass seeds the
+  jump button with the block already on screen (`ChatView.seed_unseen`).
+  `bottom_reached` is not suppressed, so the newest message always marks the
+  conversation read, and a background auto-joined MUC is never anchored. A hidden tab (opened with `focus=False` by an incoming message) loads
   its archive when it is first shown. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
   "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>"}}}`,

@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 
 _FILE = "unread.json"
 
-_FIELDS = ("unread", "mentions", "read_sid", "read_ts", "read_ref")
+_FIELDS = ("unread", "mentions", "read_sid", "read_ts", "read_ref",
+           "seen_sid", "seen_ts", "seen_ref", "seen_at")
 
 
 def path() -> str:
@@ -49,7 +50,8 @@ def path() -> str:
 def blank() -> dict:
     """Return an empty read-state record."""
     return {"unread": 0, "mentions": 0, "read_sid": "", "read_ts": "",
-            "read_ref": ""}
+            "read_ref": "", "seen_sid": "", "seen_ts": "", "seen_ref": "",
+            "seen_at": 0.0}
 
 
 def _positive_int(value) -> int:
@@ -73,10 +75,18 @@ def _entry(value) -> dict:
         entry["read_sid"] = _text(value.get("read_sid") or value.get("displayed"))
         entry["read_ts"] = _text(value.get("read_ts"))
         entry["read_ref"] = _text(value.get("read_ref"))
+        entry["seen_sid"] = _text(value.get("seen_sid"))
+        entry["seen_ts"] = _text(value.get("seen_ts"))
+        entry["seen_ref"] = _text(value.get("seen_ref"))
+        try:
+            entry["seen_at"] = float(value.get("seen_at") or 0.0)
+        except (TypeError, ValueError):
+            entry["seen_at"] = 0.0
+    elif value is None:
+        return entry
     else:
         entry["unread"] = _positive_int(value)
     return entry
-
 
 def _is_empty(entry: dict) -> bool:
     return not any(entry.get(field) for field in _FIELDS)

@@ -8,6 +8,12 @@ venv/
 *.deb
 .opencode/
 
+# AI-assistant tooling (never committed)
+.brain/
+.cursor/
+.windsurfrules
+CLAUDE.md
+
 # Original Jabbim sources (reference only)
 old/
 # Vendored headless test environment (see .testenv/README.md)

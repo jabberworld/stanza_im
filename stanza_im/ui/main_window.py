@@ -285,8 +285,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── Map windows (geo: links) ──────────────────────────────
         self._geo_windows: dict = {}
-        # The tile disk cache and its prune timer are created lazily on the
-        # first map window, so a session that never opens a map pays nothing.
+        # ── MDS throttle ─────────────────────────────────────────
+        self._mds_pending_sid = ""
+        self._mds_pending_jid = ""
+        self._mds_throttle_sec = 3
+        self._mds_throttle_ms = 3000
+        self._mds_throttle_timer = QtCore.QTimer(self)
+        self._mds_throttle_timer.setSingleShot(True)
+        self._mds_throttle_timer.timeout.connect(self._flush_mds_pending)
+
         self._tile_cache = None
         self._tile_prune_timer = None
 
@@ -378,6 +385,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._chat_window.restore_geometry(self._config.chat_window)
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.bottom_reached.connect(self._on_chat_reached_bottom)
+        self._chat_window.last_seen.connect(self._on_chat_last_seen)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
         self._chat_window.set_muc_leave_confirm(self._confirm_muc_leave)
@@ -2579,6 +2587,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.set_csi_config(csi)
             self._update_csi()
         self._tray.set_popups_mode(self._config.notifications.popups)
+        try:
+            sec = int(getattr(self._config.chat, "mds_displayed_throttle", 3) or 3)
+        except (TypeError, ValueError):
+            sec = 3
+        sec = max(1, min(30, sec))
+        self._mds_throttle_sec = sec
+        self._mds_throttle_ms = sec * 1000
+        self._chat_window.set_mds_throttle(sec)
         self._sounds.set_theme(
             getattr(self._config.notifications, "sound_theme", "default"))
         self._apply_interface_mode()
@@ -4092,7 +4108,11 @@ class MainWindow(QtWidgets.QMainWindow):
         chat.set_bookmarked(room in self._bookmarks)
         if anchor:
             chat.set_restore_anchor(anchor)
-            self._load_history(room, anchor)
+            seen = {}
+            entry = self._read_state(room)
+            if entry.get("seen_ref") or entry.get("seen_ts") or entry.get("seen_sid"):
+                seen = {"ref": entry.get("seen_ref",""), "ts": entry.get("seen_ts",""), "sid": entry.get("seen_sid","")}
+            self._load_history(room, anchor, seen_anchor=seen or None)
         elif is_new or not chat._history:
             self._load_history(room)
         if is_new:
@@ -4101,8 +4121,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_contact_open(self, jid: str):
         display_name = self._roster_name(jid) or jid.split("@")[0]
         self._touch_tab_activity(jid)
-        # Captured before the tab is opened: focusing it clears the counters,
-        # so an unread conversation is resumed from its stored read anchor.
+        # Captured before the tab is opened, while the counters still stand:
+        # an unread conversation is resumed from its stored read anchor and
+        # stays unread until the view actually reaches the newest message.
         restore_anchor = self._restore_anchor_for(jid)
         self._opening_chat = True
         try:
@@ -4114,11 +4135,6 @@ class MainWindow(QtWidgets.QMainWindow):
                                     is_new=is_new, anchor=restore_anchor)
                 self._apply_muji_support(jid)
                 self._apply_muc_admin(jid)
-                # The anchor is passed explicitly: the tab's own newest
-                # message would otherwise become the read point.
-                self._reset_unread(jid, restore_anchor or None)
-                if self._client:
-                    self._client.mds_mark_displayed(jid)
             else:
                 is_new = not self._chat_window.has_chat(jid)
                 chat = self._chat_window.open_chat(jid, display_name)
@@ -4131,7 +4147,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._opening_chat = False
 
-    def _load_history(self, jid: str, anchor: dict | None = None):
+    def _load_history(self, jid: str, anchor: dict | None = None, seen_anchor: dict | None = None, **kwargs):
         """Feed previously saved messages from the SQLite history into chat.
 
         *anchor* is the persisted read state of an unread conversation.  The
@@ -4139,9 +4155,9 @@ class MainWindow(QtWidgets.QMainWindow):
         are right there — and the anchor only places the "unread messages"
         separator above the first of them.
         """
-        self._start_task(self._load_history_async(jid, anchor))
+        self._start_task(self._load_history_async(jid, anchor, seen_anchor=seen_anchor))
 
-    async def _load_history_async(self, jid: str, anchor: dict | None = None):
+    async def _load_history_async(self, jid: str, anchor: dict | None = None, seen_anchor: dict | None = None):
         from stanza_im.core import history
         chat = self._chat_window.get_chat(jid)
         if not chat:
@@ -4171,7 +4187,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._history_loading.pop(jid, None)
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
-        chat.set_history(entries, window, exhausted, anchor=anchor)
+        chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -4602,16 +4618,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _restore_anchor_for(self, jid: str) -> dict:
         """The stored read anchor of *jid* when it has unread messages.
 
-        Opening a conversation focuses it, which clears its counters, so the
-        anchor is captured beforehand and handed to the fresh view
-        (`ChatWidget.set_restore_anchor`): an unread chat is shown from the
-        message the user stopped reading at instead of from its very
-        beginning.  A read conversation returns ``{}`` and keeps its normal
-        opening behaviour; there is no age limit on the resume.
+        The anchor is the message the user stopped reading at, and it is handed
+        to the fresh view (`ChatWidget.set_restore_anchor`) so the unread
+        conversation is shown from there instead of from its very end — with
+        the unread divider right below and the "N unseen" button ready to jump.
+        It stays valid while the counters stand: opening the chat no longer
+        clears them (only reaching the newest message does,
+        `_on_chat_reached_bottom`), so a chat that was opened and left
+        unfinished resumes at the very same place.  A read conversation returns
+        ``{}`` and keeps its normal opening behaviour; there is no age limit on
+        the resume.
         """
         entry = self._read_state(jid)
         if entry["unread"] <= 0:
             return {}
+        # Prefer seen anchor if available (partial progress)
+        if entry.get("seen_ref") or entry.get("seen_ts") or entry.get("seen_sid"):
+            return {"ref": entry.get("seen_ref", ""), "ts": entry.get("seen_ts", ""),
+                    "sid": entry.get("seen_sid", "")}
         return {"ref": entry["read_ref"], "ts": entry["read_ts"],
                 "sid": entry["read_sid"]}
 
@@ -4673,6 +4697,12 @@ class MainWindow(QtWidgets.QMainWindow):
             entry["read_ts"] = str(anchor.get("ts") or "")
             if anchor.get("sid"):
                 entry["read_sid"] = str(anchor["sid"])
+            # Reaching the bottom means everything seen is read, so the
+            # partial-progress point collapses onto the read anchor.
+            entry["seen_ref"] = str(anchor.get("ref") or "")
+            entry["seen_ts"] = str(anchor.get("ts") or "")
+            if anchor.get("sid"):
+                entry["seen_sid"] = str(anchor["sid"])
         self._store_read_state(jid, entry)
         self._refresh_unread_badge(jid)
         self._schedule_unread_save()
@@ -4712,19 +4742,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._tray.stop_blinking()
 
     def _focus_chat(self, jid: str, chat, *, is_new: bool = False) -> None:
-        """Show *jid* the way the user left it, then mark it read.
+        """Show *jid* the way the user left it.
 
         An unread conversation is resumed from its stored read anchor, so the
         view opens on the last message that was read instead of at the very
         end of the history (where a large unread block would be scrolled out
-        of sight above).  The anchor is captured *before* the counters are
-        cleared and passed to :meth:`_reset_unread`, otherwise the fresh view
-        would report the newest message as the read point and the anchor
-        could never be restored again.
+        of sight above).  Nothing is marked read here: merely opening or
+        focusing a conversation says nothing about how much of it was seen, so
+        the counters, the persisted read point (:meth:`_reset_unread`) and the
+        XEP-0490 displayed state wait for :meth:`_on_chat_reached_bottom`.
         """
         anchor = self._restore_anchor_for(jid)
         if chat is None:
-            self._reset_unread(jid)
             return
         if anchor:
             chat.set_restore_anchor(anchor)
@@ -4733,32 +4762,105 @@ class MainWindow(QtWidgets.QMainWindow):
             # A tab created by an incoming message (opened with focus=False)
             # never loaded its archive; do it when it is first shown.
             self._load_history(jid)
-        self._reset_unread(jid, anchor or None)
-        if self._client:
-            self._client.mds_mark_displayed(jid)
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
         if self._opening_chat:
-            # ``_on_contact_open`` (or a MUC/PM path) applies the anchor and
-            # clears the counters itself for the tab it is opening.
+            # ``_on_contact_open`` (or a MUC/PM path) applies the anchor itself
+            # for the tab it is opening.
             return
         self._focus_chat(jid, self._chat_window.get_chat(jid))
 
     def _on_chat_reached_bottom(self, jid: str):
         """The active chat is scrolled to its newest message: it is read.
 
-        Only the conversation the user is actually looking at counts, so a
-        background tab reaching the bottom (a render, a paging, a restore)
-        never clears its counters.
+        This is the single point where a conversation stops being unread —
+        opening it, switching to it or sending a message into it do not.  Only
+        the conversation the user is actually looking at counts, so a background
+        tab reaching the bottom (a render, a paging, a restore) never clears its
+        counters.
         """
         if not jid or not self._chat_area_active():
             return
         if self._chat_window.current_jid() != jid:
             return
+        chat = self._chat_window.get_chat(jid)
         self._reset_unread(jid)
+        if chat is not None:
+            # The unread divider has served its purpose: it must not survive
+            # into the next re-render now that the counters are gone.
+            chat.mark_read()
         if self._client:
             self._client.mds_mark_displayed(jid)
+
+
+    def _flush_mds_pending(self):
+        if not self._mds_pending_sid or self._client is None:
+            return
+        sid = self._mds_pending_sid
+        jid = self._mds_pending_jid
+        self._mds_pending_sid = ""
+        self._mds_pending_jid = ""
+        try:
+            if jid:
+                self._client.mds_mark_displayed(jid, sid)
+        except Exception:
+            pass
+
+    def _on_chat_last_seen(self, jid: str, ref: str, ts: str, sid: str):
+        """Record the newest message the view has scrolled into sight.
+
+        The seen point advances the unread boundary (so a reopened chat opens
+        at what was already looked at) and shrinks the unread badge by the
+        messages that just became visible.  The XEP-0490 ``displayed`` update
+        is throttled to one publish per ``chat.mds_displayed_throttle``
+        seconds, carrying the newest seen stanza-id; reaching the bottom still
+        publishes immediately through :meth:`_on_chat_reached_bottom`.
+        """
+        if not jid:
+            return
+        entry = self._unread_chats.get(jid)
+        if not entry:
+            return
+        boundary_ts = str(entry.get("seen_ts") or entry.get("read_ts") or "")
+        prev_unread = int(entry.get("unread") or 0)
+        if sid:
+            entry["seen_sid"] = str(sid)
+        if ref:
+            entry["seen_ref"] = str(ref)
+        if ts:
+            entry["seen_ts"] = str(ts)
+        import time
+        entry["seen_at"] = time.time()
+        # Shrink the badge by the messages that just became visible.  Without
+        # a known starting point the count would be guesswork, so leave the
+        # counters alone until the conversation is reopened with an anchor.
+        if ts and prev_unread > 0 and boundary_ts:
+            chat = self._chat_window.get_chat(jid)
+            if chat is not None:
+                seen_now = chat.count_seen_since(boundary_ts, str(ts))
+                if seen_now > 0:
+                    entry["unread"] = max(0, prev_unread - seen_now)
+                    self._recount_unread()
+                    self._refresh_unread_badge(jid)
+        if sid:
+            self._mds_pending_sid = str(sid)
+            self._mds_pending_jid = jid
+            try:
+                self._mds_throttle_timer.start(self._mds_throttle_ms)
+            except Exception:
+                pass
+        self._schedule_unread_save()
+
+    def _chat_at_bottom(self, jid: str) -> bool:
+        """Whether the conversation on screen is showing its newest message.
+
+        A message arriving while the user reads further up has not been seen,
+        so it must not be published as displayed (XEP-0490): the chat reports
+        the bottom on its own, which marks the conversation read then.
+        """
+        chat = self._chat_window.get_chat(jid)
+        return chat is None or chat.at_bottom()
 
     def _touch_tab_activity(self, jid: str) -> None:
         """Remember when a conversation last had real activity."""
@@ -4855,7 +4957,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not active:
             self._bump_unread(bare_jid)
             self._sync_tray_blink()
-        if active and self._client:
+        if active and self._client and self._chat_at_bottom(bare_jid):
             self._client.mds_mark_displayed(bare_jid)
         if not active:
             popup_body = (f"* {sender_name} {body[4:]}"
@@ -4921,8 +5023,11 @@ class MainWindow(QtWidgets.QMainWindow):
         entry = self._unread_chats.get(key)
         if sid and entry and (entry["unread"] or entry["mentions"]):
             self._start_task(self._clamp_read_state(key, sid))
-        else:
-            self._reset_unread(key)
+        # A conversation without unread messages has nothing to apply.  Touching
+        # it here used to re-anchor the tab to its newest rendered message, so a
+        # remote state published for a message *we* had not seen yet (our own
+        # XEP-0490 echo after a re-login, or a device ahead of us) moved the
+        # stored read point forward and the next open started at the end.
         chat = self._chat_window.get_chat(key)
         if chat:
             chat.add_status(tr("mds_displayed_elsewhere"),
@@ -4982,7 +5087,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not active:
             self._bump_unread(target)
             self._refresh_unread_badge(target)
-        if active and self._client:
+        if active and self._client and self._chat_at_bottom(target):
             self._client.mds_mark_displayed(target)
 
     def _on_message_send(self, jid: str, body: str):
@@ -5071,7 +5176,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_unread_badge(room)
             if is_mention:
                 self._note_unread_mention(room, reply_ref_id or archive_id)
-        if (self._client and active):
+        if self._client and active and self._chat_at_bottom(room):
             self._client.mds_mark_displayed(room)
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],

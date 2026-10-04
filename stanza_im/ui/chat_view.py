@@ -201,13 +201,68 @@ class _JumpButtonMixin:
         if button.isVisible() != show:
             button.setVisible(show)
         self._position_jump_button()
+    def _find_last_visible_ref(self):
+        """Return (ref, ts, sid) of the last visible message or ("", "", "")."""
+        return ("", "", "")
 
     # ── New-message counter + two-step jump ───────────────────────
+
+    def set_mds_throttle(self, seconds: int) -> None:
+        """Remember the XEP-0490 partial-display throttle interval."""
+        try:
+            self._seen_throttle_ms = max(1, min(30, int(seconds))) * 1000
+        except (TypeError, ValueError):
+            self._seen_throttle_ms = 3000
+
+    def _emit_last_seen(self, ref: str = "", ts: str = "",
+                        sid: str = "") -> None:
+        """Publish the newest message that scrolled into view.
+
+        The value is forwarded only when it differs from the last one, so a
+        held scroll position does not re-announce the same message.  The
+        owner (``MainWindow``) applies the throttling to the server update.
+        """
+        ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
+        if (ref, ts, sid) == (self._last_seen_ref, self._last_seen_ts,
+                              self._last_seen_sid):
+            return
+        self._last_seen_ref, self._last_seen_ts, self._last_seen_sid = (
+            ref, ts, sid)
+        if not (ref or ts or sid):
+            return
+        try:
+            self.last_seen_changed.emit(ref, ts, sid)
+        except Exception:
+            pass
+
+    def _maybe_emit_last_seen(self):
+        try:
+            self._find_last_visible_ref()
+        except Exception:
+            pass
+
+    def _flush_pending_seen(self):
+        pending = getattr(self, "_pending_seen", None)
+        if not pending:
+            return
+        try:
+            self.last_seen_changed.emit(pending[0], pending[1], pending[2])
+        except Exception:
+            pass
+        self._pending_seen = None
 
     def _init_jump_state(self):
         self._new_count = 0
         self._first_unread_id = ""
         self._jumped_once = False
+        self._last_seen_ref = ""
+        self._last_seen_ts = ""
+        self._last_seen_sid = ""
+        self._pending_seen = None
+        self._seen_throttle_ms = 3000
+        self._seen_throttle_timer = QtCore.QTimer(self)
+        self._seen_throttle_timer.setSingleShot(True)
+        self._seen_throttle_timer.timeout.connect(self._flush_pending_seen)
         self._update_jump_label()
 
     def is_scrolled_up(self) -> bool:
@@ -221,6 +276,34 @@ class _JumpButtonMixin:
         if not self._first_unread_id and target_id:
             self._first_unread_id = target_id
         self._update_jump_label()
+
+    def seed_unseen(self, count: int, target_id: str = "") -> None:
+        """Count the messages already on screen below the stored read point.
+
+        Called once the whole tail has been rendered: an unread conversation
+        opens scrolled to its read anchor, so the unseen block is already in
+        the DOM and must reach the jump button before any new message arrives
+        (:meth:`note_new_message` only fires for live arrivals).  A non-positive
+        *count* leaves the indicator untouched — reaching the bottom resets it
+        through :meth:`_reset_unread_indicator` instead.
+        """
+        if count <= 0:
+            return
+        self._new_count = int(count)
+        if target_id and not self._first_unread_id:
+            self._first_unread_id = target_id
+        self._jumped_once = False
+        self._update_jump_label()
+        self._update_jump_button()
+
+    def clear_unread_separator(self) -> bool:
+        """Drop the inline "unread messages" divider; ``False`` if unsupported.
+
+        Both backends can remove the divider in place, so marking a
+        conversation read does not need a full re-render (which would restart
+        the deferred anchor scroll and move the reading position).
+        """
+        return False
 
     def _reset_unread_indicator(self) -> None:
         if not (getattr(self, "_new_count", 0)
@@ -330,6 +413,7 @@ if HAS_WEBENGINE:
         bottom_reached = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
+        last_seen_changed = QtCore.pyqtSignal(str, str, str)
         zoom_changed = QtCore.pyqtSignal(float)
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
@@ -385,7 +469,13 @@ if HAS_WEBENGINE:
             self._pending: list[str] = []
             self._ready = False
             self._deferred_scroll: tuple | None = None
+            # True while a parked scroll (the read-anchor resume) has not been
+            # applied yet: until the first poll that observes the new position,
+            # a "sitting at the bottom" report would be the empty document and
+            # would mark the freshly opened conversation as read.
+            self._scroll_suspended = False
             self._load_failures = 0
+            self._last_seen_cache = ("", "", "")
             self._loading = False
             self.loadFinished.connect(self._on_load_finished)
             self.loadStarted.connect(self._on_load_started)
@@ -414,6 +504,7 @@ if HAS_WEBENGINE:
             self._ready = False
             self._pending.clear()
             self._deferred_scroll = None
+            self._scroll_suspended = False
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""
@@ -531,6 +622,51 @@ if HAS_WEBENGINE:
             menu.addSeparator()
             menu.addAction(tr("ctx_select_all"), self._select_all)
             menu.exec(event.globalPos())
+
+        def _find_last_visible_ref(self):
+            """Ask the page for the bottom-most message visible in the viewport.
+
+            The result arrives asynchronously through :meth:`_last_seen_result`;
+            the cached tuple is returned so the caller can keep its synchronous
+            contract.
+            """
+            try:
+                if not getattr(self, "_ready", False):
+                    return getattr(self, "_last_seen_cache", ("", "", ""))
+                js = """
+(function(){
+  var msgs = document.querySelectorAll('#chat .stanza-message');
+  if (!msgs.length) return {ref:'', ts:'', sid:''};
+  var vh = window.innerHeight || document.documentElement.clientHeight;
+  var best = null;
+  for (var i = msgs.length - 1; i >= 0; i--) {
+    var el = msgs[i];
+    var r = el.getBoundingClientRect();
+    if (r.bottom > 0 && r.top < vh) { best = el; break; }
+  }
+  if (!best) return {ref:'', ts:'', sid:''};
+  var sid = best.getAttribute('data-stanza-id') || '';
+  var ref = sid || best.getAttribute('data-reply-id') || '';
+  var ts = best.getAttribute('data-stanza-time') || '';
+  return {ref: ref, ts: ts, sid: sid};
+})();
+"""
+                self._page.runJavaScript(js, self._last_seen_result)
+            except Exception:
+                pass
+            return getattr(self, "_last_seen_cache", ("", "", ""))
+
+        def _last_seen_result(self, result):
+            try:
+                if not isinstance(result, dict):
+                    return
+                ref = str(result.get("ref") or "")
+                ts = str(result.get("ts") or "")
+                sid = str(result.get("sid") or "")
+                self._last_seen_cache = (ref, ts, sid)
+                self._emit_last_seen(ref, ts, sid)
+            except Exception:
+                pass
 
         @staticmethod
         def _xmpp_menu_target(link_url: str):
@@ -1606,10 +1742,15 @@ window.__stanzaMentionRef = '';
                     self.near_top.emit()
             else:
                 self._near_top_hit = False
+            self._release_scroll_suspend()
             if self._fraction >= 0.999:
                 self._reset_unread_indicator()
             self._update_jump_button()
             self._note_bottom()
+            try:
+                self._maybe_emit_last_seen()
+            except Exception:
+                pass
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
@@ -1617,14 +1758,22 @@ window.__stanzaMentionRef = '';
                 self._reset_unread_indicator()
             self._update_jump_button()
             self._note_bottom()
+            try:
+                self._maybe_emit_last_seen()
+            except Exception:
+                pass
 
         def _note_bottom(self) -> None:
             """Edge-triggered "the view sits at the newest message" report.
 
             One signal per stay at the bottom (re-armed by scrolling up), so
             the owner can mark the conversation read without being woken by
-            every scroll poll.
+            every scroll poll.  A parked (deferred) scroll suspends the report:
+            the document is still filling up and would look like its bottom.
             """
+            if self._scroll_suspended or self._deferred_scroll is not None:
+                self._at_bottom_hit = False
+                return
             if self._fraction < 0.999:
                 self._at_bottom_hit = False
                 return
@@ -1632,6 +1781,16 @@ window.__stanzaMentionRef = '';
                 return
             self._at_bottom_hit = True
             self.bottom_reached.emit()
+
+        def _release_scroll_suspend(self) -> None:
+            """Trust the scroll position again once the parked scroll ran.
+
+            Called at the top of every scroll poll: the first poll after
+            ``_flush_deferred_scroll`` is the earliest moment at which the
+            observed position can be the one the user is really looking at.
+            """
+            if self._scroll_suspended and self._deferred_scroll is None:
+                self._scroll_suspended = False
 
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
@@ -1661,6 +1820,7 @@ window.__stanzaMentionRef = '';
             self._pending.clear()
             self._ready = False
             self._deferred_scroll = None
+            self._scroll_suspended = False
             self._fraction = 1.0
             self._overflow = False
             self._reset_unread_indicator()
@@ -1785,6 +1945,32 @@ window.__stanzaMentionRef = '';
                     " document.body.scrollHeight);")
             except RuntimeError:
                 pass
+
+        def clear_unread_separator(self) -> bool:
+            """Remove the ``.stanza-unread`` divider without a re-render.
+
+            The scroll offset is compensated for the height the divider took,
+            so the visible window does not jump while the conversation is
+            marked read.  Returns ``False`` while the document is still empty,
+            which tells the caller to fall back to a full re-render.
+            """
+            if not self._ready:
+                return False
+            try:
+                self.page().runJavaScript(
+                    "var chat = document.getElementById('chat');"
+                    "if (!chat) return 0;"
+                    "var nodes = chat.querySelectorAll('.stanza-unread');"
+                    "if (!nodes.length) return 0;"
+                    "var before = document.body.scrollHeight;"
+                    "for (var i = 0; i < nodes.length; i++)"
+                    " nodes[i].remove();"
+                    "var delta = before - document.body.scrollHeight;"
+                    "if (delta > 0) window.scrollBy(0, delta);"
+                    "return nodes.length;")
+            except RuntimeError:
+                return False
+            return True
 
         @staticmethod
         def _action_phrase(body: str):
@@ -1952,6 +2138,7 @@ window.__stanzaMentionRef = '';
                 return
             if not self._ready or self._pending:
                 self._deferred_scroll = ("message", message_id, bool(highlight))
+                self._scroll_suspended = True
                 return
             self._run_scroll_to_message(message_id, highlight)
 
@@ -2016,6 +2203,7 @@ window.__stanzaMentionRef = '';
             """Clear all messages."""
             self._pending.clear()
             self._deferred_scroll = None
+            self._scroll_suspended = False
             self._fraction = 1.0
             self._overflow = False
             self._reset_unread_indicator()
@@ -2059,6 +2247,7 @@ else:
         bottom_reached = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)
         document_lost = QtCore.pyqtSignal()
+        last_seen_changed = QtCore.pyqtSignal(str, str, str)
         zoom_changed = QtCore.pyqtSignal(float)
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
@@ -2147,6 +2336,22 @@ else:
                     menu.insertSeparator(anchor_action)
             menu.exec(event.globalPos())
 
+        def _find_last_visible_ref(self):
+            try:
+                vbar = self.verticalScrollBar()
+                pos = vbar.value()
+                maxv = vbar.maximum()
+                # if near bottom, treat as bottom
+                if maxv > 0 and pos >= maxv - 5:
+                    pass
+                # simple fallback: scan document
+                cursor = self.textCursor()
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+                # not easy to map positions; return empty - will fallback to last seen by other means
+                return ("", "", "")
+            except Exception:
+                return ("", "", "")
+
         @staticmethod
         def _xmpp_menu_target(link_url: str):
             from stanza_im.include.xmpp_uri import parse_xmpp_uri
@@ -2181,6 +2386,31 @@ else:
                               highlight: bool = True) -> None:
             """No-op: the QTextBrowser fallback has no per-message nodes."""
             return
+
+        def clear_unread_separator(self) -> bool:
+            """Remove the divider paragraph from the fallback document.
+
+            ``QTextBrowser`` has no class selectors, so the marker block is
+            found by its (translated) text and the scroll position is restored
+            afterwards, keeping the reading window where it was.
+            """
+            marker = tr("chat_unread_marker")
+            if not marker:
+                return False
+            bar = self.verticalScrollBar()
+            top = bar.value()
+            removed = False
+            for _ in range(8):
+                cursor = self.document().find(marker)
+                if cursor.isNull():
+                    break
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfBlock)
+                cursor.select(QtGui.QTextCursor.SelectionType.BlockUnderCursor)
+                cursor.removeSelectedText()
+                removed = True
+            if removed:
+                bar.setValue(top)
+            return removed
 
         def scrollContentsBy(self, dx: int, dy: int) -> None:
             super().scrollContentsBy(dx, dy)

@@ -62,6 +62,20 @@ def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+class _Button:
+    """Stand-in for the mention toolbar button."""
+
+    def __init__(self):
+        self.visible_flag = False
+        self.tooltip = ""
+
+    def setVisible(self, show):
+        self.visible_flag = bool(show)
+
+    def setToolTip(self, text):
+        self.tooltip = text
+
+
 class _View:
     """Recording ChatView stand-in (no WebEngine, no layout)."""
 
@@ -70,6 +84,9 @@ class _View:
         self.statuses = []
         self.scrolled = []
         self.cleared = 0
+        self.seeded = []
+        self.separators_cleared = 0
+        self.bottom = False
 
     def clear(self):
         self.cleared += 1
@@ -89,7 +106,15 @@ class _View:
         return 1.0
 
     def is_scrolled_up(self):
-        return False
+        return self.bottom
+
+    def seed_unseen(self, count, target_id=""):
+        if count:
+            self.seeded.append((count, target_id))
+
+    def clear_unread_separator(self):
+        self.separators_cleared += 1
+        return True
 
     def __getattr__(self, name):
         return lambda *a, **k: None
@@ -138,10 +163,17 @@ def widget(jid="bob@example.com"):
     w._unread_armed = False
     w._unread_passed = False
     w._unread_resolving = False
+    w._mention_refs = []
+    w._mention_btn = _Button()
+    w._self_nick = ""
     w._anchor_bottom = False
+    w._moderation_enabled = False
+    w._show_muc_hats = False
+    w._colored_muc_nicks = False
+    w._users = {}
+    w._subjects = {}
     w._last_sender = None
     w._show_avatars = False
-    w._users = []
     w._jump_pending = ""
     w._jump_pages = 0
     w._db_exhausted = False
@@ -275,12 +307,64 @@ w.add_message("me", "mine", "2026-10-02T10:06:00Z", direction="outgoing",
 check("our reply stays inside the unread block",
       [m["body"] for m in w._view.messages if m["unread_marker"]] == ["mine"])
 
-# 7. reading the block does not remove the separator ----------------------------
+# 7. reaching the bottom takes the separator away ------------------------------
+w = widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor=ANCHOR)
+check("the divider is rendered while the block is unread",
+      [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+w.mark_read()
+check("reaching the bottom clears the boundary", not w.unread_boundary)
+check("the divider is removed from the view in place",
+      w._view.separators_cleared == 1 and w._view.cleared == 1)
+w._render_all()
+check("a re-render cannot resurrect the divider",
+      not any(m["unread_marker"] for m in w._view.messages))
+
 w = widget()
 w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4")],
               50, False, anchor=ANCHOR)
 w.set_unread_boundary({})
 check("clearing the boundary drops it", not w.unread_boundary)
+
+# 7b. the jump button counts the block that is already on screen ----------------
+w = widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4"),
+               row("2026-10-02T10:05:00Z", "five", "m-5"),
+               row("2026-10-02T10:06:00Z", "six", "m-6")],
+              50, False, anchor=ANCHOR)
+check("the unseen block reaches the jump button with its first message",
+      w._view.seeded == [(3, "m-4")])
+w2 = widget()
+w2.set_history([row("2026-10-02T10:01:00Z", "one", "m-1")], 50, False)
+check("a read conversation seeds nothing", w2._view.seeded == [])
+w3 = widget()
+w3.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),
+                row("2026-10-02T10:02:00Z", "two", "m-2")], 50, False)
+w3._render_all()
+check("a re-render does not recount the block", w3._view.seeded == [])
+
+# 7c. the @ button is rebuilt from the window -----------------------------------
+w = widget()
+w.is_muc = True
+w._self_nick = "me"
+w.set_history([row("2026-10-02T10:03:00Z", "read that", "m-3"),
+               row("2026-10-02T10:04:00Z", "hey me, look", "m-4"),
+               row("2026-10-02T10:05:00Z", "nothing here", "m-5"),
+               row("2026-10-02T10:06:00Z", "me: ping?", "m-6")],
+              50, False, anchor=ANCHOR)
+check("mentions inside the unread block reach the @ button",
+      w._mention_refs == ["m-4", "m-6"]
+      and w._mention_btn.visible_flag is True)
+w.mark_mentions_read()
+check("reading the chat clears the @ button",
+      w._mention_refs == [] and w._mention_btn.visible_flag is False)
+w.mark_read()
+w2 = widget()
+w2.set_history([row("2026-10-02T10:04:00Z", "hey me", "m-4")], 50, False)
+check("a read conversation has nothing to jump to", w2._mention_refs == [])
 
 # 8. reaching the bottom marks the conversation read ---------------------------
 w = widget()
@@ -335,12 +419,19 @@ for handler in ("_on_message_received", "_on_muc_private_message",
     check(f"{handler} arms the separator before the entry is rendered",
           body.index("_arm_unread_separator") < body.index("add_message"))
 
-# 11. the opening order still protects the read state --------------------------
+# 11. opening a conversation says nothing about what was read ------------------
 focus_chat = method_source(_mw_src, "_focus_chat")
-check("the window is loaded before the counters are cleared",
+contact_open = method_source(_mw_src, "_on_contact_open")
+check("opening a tab does not mark it read",
+      "self._reset_unread(" not in focus_chat
+      and "mds_mark_displayed(" not in focus_chat)
+check("opening a contact does not mark it read either",
+      "self._reset_unread(" not in contact_open
+      and "mds_mark_displayed(" not in contact_open)
+check("an unread tab is still resumed from its anchor",
       "if anchor:" in focus_chat
-      and focus_chat.index("self._load_history(jid, anchor)")
-      < focus_chat.index("self._reset_unread(jid, anchor or None)"))
+      and "chat.set_restore_anchor(anchor)" in focus_chat
+      and "self._load_history(jid, anchor)" in focus_chat)
 check("a hidden tab loads its archive when it is first shown",
       "elif is_new or not chat._history:" in focus_chat)
 check("repeated loads of one conversation are collapsed",
@@ -349,7 +440,32 @@ check("repeated loads of one conversation are collapsed",
 check("an anchored window is not restored by a background auto-join",
       "anchor" not in method_source(_mw_src, "_on_muc_joined"))
 
-# 12. the anchor survives a WebEngine document reset ---------------------------
+reached = method_source(_mw_src, "_on_chat_reached_bottom")
+check("reaching the newest message is the one point that marks it read",
+      "self._reset_unread(jid)" in reached
+      and "chat.mark_read()" in reached
+      and "mds_mark_displayed(jid)" in reached)
+check("a background tab reaching the bottom stays unread",
+      "if not jid or not self._chat_area_active():" in reached
+      and "self._chat_window.current_jid() != jid" in reached)
+check("a remote displayed state does not re-anchor a read conversation",
+      "_reset_unread(key)" not in method_source(_mw_src, "_on_mds_displayed"))
+for handler in ("_on_message_received", "_on_muc_private_message",
+                "_on_groupchat_message"):
+    body = method_source(_mw_src, handler)
+    check(f"{handler} publishes displayed only at the bottom",
+          "self._chat_at_bottom(" in body)
+check("sending a message scrolls to the bottom, so it marks the chat read",
+      "self._view.scroll_to_bottom()" in
+      method_source(_cw_src, "add_message"))
+
+# 12. a message arriving above the fold is not published as displayed ----------
+at_bottom = method_source(_mw_src, "_chat_at_bottom")
+check("the bottom test asks the tab, not the counters",
+      "chat.at_bottom()" in at_bottom and "_view.is_scrolled_up()" in
+      method_source(_cw_src, "at_bottom"))
+
+# 13. the anchor survives a WebEngine document reset ---------------------------
 scroll_to_message = method_source(_cv_src, "scroll_to_message")
 on_load = method_source(_cv_src, "_on_load_finished")
 check("a scroll to the anchor waits for a loaded page",

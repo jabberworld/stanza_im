@@ -1274,4 +1274,6 @@ STRINGS = {
     'plugin_category_appearance': 'Appearance',
     'plugin_category_other': 'Other',
     'plugins_missing_warning': 'Enabled plugins are missing and were skipped:\n{plugins}',
+
+    "chat_mds_displayed_throttle": "Displayed sync interval",
 }

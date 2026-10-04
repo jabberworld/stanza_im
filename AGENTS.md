@@ -763,8 +763,12 @@ nick is also handed to the tab (`MainWindow._note_unread_mention` →
 `chat_jump_mention_count`). Each click jumps to the oldest mention not yet
 looked at (`_jump_to_next_mention`: `scroll_to_message` when it is rendered,
 else `_jump_to_message` paging the local archive) and drops it from the list;
-`_reset_unread` (focus or reaching the bottom) calls `mark_mentions_read`, which
-clears the rest and hides the button.
+`_on_chat_reached_bottom` (reaching the newest message, see the unread
+paragraph below) calls `mark_mentions_read`, which clears the rest and hides the
+button. The list is also **rebuilt from the window** on open
+(`refresh_unread_mentions`: every mention of the loaded history after the read
+anchor is re-armed, so the button survives a restart), and
+`ChatWidget.mark_read` clears it together with the divider.
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,
@@ -882,14 +886,18 @@ a message that arrives while its own conversation is the active one is skipped,
 and an archived MAM replay never counts. `_reset_unread` also records the
 **read anchor** via `ChatWidget.read_anchor()` (newest displayed message:
 server `stanza-id` → `origin-id` → own message id, plus its raw timestamp).
-Opening a conversation focuses it, which clears its counters, so
-`MainWindow._restore_anchor_for` captures the anchor **before** the tab is
-opened (`_on_contact_open`, `_on_muc_participant_clicked`) and hands it to
-`ChatWidget.set_restore_anchor`; `set_history` then calls
-`_restore_from_anchor`, which scrolls to the anchor message (by ref, else by
-timestamp via `_entry_before_or_at`, else paging the local archive with
+**Reaching the newest message is the only thing that marks a conversation
+read** — opening it, switching to it, sending into it and a remote XEP-0490
+state never do. `MainWindow._restore_anchor_for` therefore hands the anchor to
+the tab (`ChatWidget.set_restore_anchor`) on open (`_on_contact_open`,
+`_on_muc_participant_clicked`) without clearing anything; `set_history` then
+calls `_restore_from_anchor`, which scrolls to the anchor message (by ref, else
+by timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`), so an unread chat opens with the unread block right below
-the last message the user read. The anchor is applied once and dropped.
+the last message the user read. The anchor is applied once and dropped. The
+parked scroll is **suspended** meanwhile (`ChatView._scroll_suspended`), so the
+view does not report an "at the bottom" position for a document that is still
+loading and the fresh window cannot mark itself read on its own.
 
 **Resuming an unread conversation (full window + unread separator)**: an
 unread chat opens with **every** new message already on screen — the window is
@@ -898,17 +906,13 @@ messages are reached by scrolling up or the archive/jump menus, the jump button
 returns to the newest one). The persisted anchor therefore only does two
 things: it places the separator and it is the position the window opens at.
 `MainWindow._focus_chat(jid, chat, is_new=…)` (called from `_on_tab_focused`,
-`_on_contact_open`, `_on_muc_participant_clicked`) captures the anchor
-**before** the counters are cleared and hands it to `ChatWidget.set_history(…,
-anchor=…)` alongside the tail loaded by
-`MainWindow._load_history[_async]` (`history.load_history`, deduplicated per
-conversation through `_history_loading`). Opening a tab sets `_opening_chat`,
-which suppresses `tab_focused` until the open finished, so the focus handler
-cannot reset the counters (and thus overwrite the anchor) mid-open;
-`_on_contact_open`, `_seed_muc_chat`, the MUC participant path and
-`_on_tray_cycle_unread` all pass the captured anchor to
-`_reset_unread(jid, anchor)` and never re-reset afterwards. A background
-auto-join MUC keeps loading the ordinary tail and never applies an anchor.
+`_on_contact_open`, `_on_muc_participant_clicked`) resolves the anchor and
+hands it to `ChatWidget.set_history(…, anchor=…)` (and `set_restore_anchor`)
+alongside the tail loaded by `MainWindow._load_history[_async]`
+(`history.load_history`, deduplicated per conversation through
+`_history_loading`). The counters stay untouched, so the anchor cannot be
+overwritten mid-open; a background auto-join MUC keeps loading the ordinary
+tail and never applies an anchor.
 
 The separator is part of the message stream rather than a control link:
 `ChatThemeFactory.render_message(unread_marker=True)` prepends
@@ -931,11 +935,16 @@ open but unfocused tab is armed by `MainWindow._arm_unread_separator` **before**
 incoming entry carries the separator and the conversation the user already read
 stays separated; a fully read tab has no boundary yet, so one is taken from the
 newest message on screen. Arming *after* the render would be lost by the next
-`_render_all` pass. The separator stays in the window until the
-chat is reopened (re-reading never removes it), `_render_all` re-emits it once
-per pass (theme/font change, restore) and `detach`/`refresh_history` drop the
-state. Reaching the bottom is `bottom_reached` again, with no trimming to
-suppress, so the newest message always marks the conversation read.
+`_render_all` pass. The separator stays in the window **until the conversation
+is actually read** (reaching the newest message removes it in place — a
+re-render cannot resurrect it), `_render_all` re-emits it once per pass
+(theme/font change, restore) and `detach`/`refresh_history` drop the state.
+Reaching the bottom is `bottom_reached` again, with no trimming to suppress, so
+the newest message always marks the conversation read. The same pass **seeds
+the jump button** from the block that is already on screen
+(`ChatView.seed_unseen(count, target_id)`, the first unseen message), so an
+unread chat shows `▼ N` instead of an empty tail; a re-render does not recount
+it.
 `ChatView.scroll_to_message` parks the request in `_deferred_scroll` while the
 document is empty or has buffered chunks (`clear()` loads a fresh page
 asynchronously), replaying it in `_on_load_finished`/`_probe_chat_alive` after
@@ -943,15 +952,19 @@ the pending markup is appended — otherwise the anchor resume ran against a bla
 document and the chat stayed scrolled to the newest message.
 [`tests/test_read_anchor_restore.py`]
 
-A conversation is also marked read when its view **reaches the newest
-message**: `ChatView._note_bottom` (both the WebEngine poll — fed by the
+A conversation is marked read when its view **reaches the newest
+message** — the single point described above: `ChatView._note_bottom` (both the WebEngine poll — fed by the
 existing `st`/`innerHeight`/`scrollHeight` values, so no new JS control ref is
 needed — and the `QTextBrowser` fallback's scrollbar) emits `bottom_reached`
 edge-triggered, re-armed by scrolling up; `ChatWidget` →
 `ChatWindow.bottom_reached(jid)` → `MainWindow._on_chat_reached_bottom`,
 which resets only the conversation the chat area actually shows
 (`_chat_area_active()` and `current_jid()`), so a background tab reaching the
-bottom never clears its counters.
+bottom never clears its counters. An incoming message is published as
+XEP-0490 displayed only when `MainWindow._chat_at_bottom(jid)`
+(`ChatWidget.at_bottom()` → the view) holds, so a message that lands while the
+user reads further up is not advertised as seen; the chat's own `bottom_reached`
+marks it read when they get there.
 The **tray only blinks while logged in**: `_sync_tray_blink`
 (called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
 `_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it

@@ -45,6 +45,8 @@ class _Chat:
         self.rendered = []
         self.mentions = []
         self.unread_armed = 0
+        self.at_bottom_flag = False
+        self.read_marks = 0
 
     def add_message(self, **kwargs):
         # The separator has to be armed before the entry is rendered, so the
@@ -80,6 +82,12 @@ class _Chat:
 
     def mark_mentions_read(self):
         self.mentions = []
+
+    def at_bottom(self):
+        return self.at_bottom_flag
+
+    def mark_read(self):
+        self.read_marks += 1
 
     @property
     def _history(self):
@@ -231,7 +239,7 @@ win._on_muc_private_message(ROOM, "alice", "psst", "2026-10-02T10:01:00Z")
 check("a private message in the focused chat is not unread",
       win._read_state(target)["unread"] == 0)
 
-# 4. opening a conference from the roster clears its counters ------------------
+# 4. opening a conference from the roster does not mark it read ----------------
 win = make_window(chats=(ROOM,))
 win._bump_unread(ROOM, mention=True)
 win._bookmarks = {}
@@ -240,9 +248,11 @@ win._apply_muc_admin = lambda *a, **k: None
 win._load_history = lambda *a, **k: None
 win._reset_unread = MainWindow._reset_unread.__get__(win)
 win._on_contact_open(ROOM)
-check("opening a conference marks it read",
-      win._read_state(ROOM)["unread"] == 0
-      and win._read_state(ROOM)["mentions"] == 0)
+check("opening a conference leaves it unread",
+      win._read_state(ROOM)["unread"] == 1
+      and win._read_state(ROOM)["mentions"] == 1)
+check("an unopened chat is never marked read by the divider",
+      win._chat_window.get_chat(ROOM).read_marks == 0)
 
 # 5. the read anchor comes from the newest displayed message -------------------
 chat = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
@@ -312,10 +322,10 @@ check("opening a chat suppresses the tab_focused handler",
       "self._opening_chat = True" in contact_open
       and "self._opening_chat = False" in contact_open)
 focus_chat = method_source(_mw_src, "_focus_chat")
-check("the anchor survives the read reset",
-      "self._reset_unread(jid, anchor or None)" in focus_chat
-      and focus_chat.index("self._load_history(jid, anchor)")
-      < focus_chat.index("self._reset_unread(jid, anchor or None)"))
+check("the anchor is applied to the tab that is being opened",
+      "chat.set_restore_anchor(anchor)" in focus_chat
+      and "self._load_history(jid, anchor)" in focus_chat
+      and "self._reset_unread(" not in focus_chat)
 check("a hidden tab without history loads its archive on focus",
       "elif is_new or not chat._history:" in focus_chat)
 tab_focused = method_source(_mw_src, "_on_tab_focused")
@@ -398,25 +408,44 @@ widget._restore_from_anchor()
 check("a read conversation is not moved", widget._view.scrolled == [])
 
 # 7. reaching the bottom of the active chat marks it read -----------------------
+class _Client:
+    """Records the XEP-0490 displayed states the client publishes."""
+
+    def __init__(self):
+        self.displayed = []
+
+    def mds_mark_displayed(self, jid):
+        self.displayed.append(jid)
+
+
 win = make_window(chats=("bob@example.com",))
 win._reset_unread = MainWindow._reset_unread.__get__(win)
 win._on_chat_reached_bottom = MainWindow._on_chat_reached_bottom.__get__(win)
+win._chat_at_bottom = MainWindow._chat_at_bottom.__get__(win)
 win._bump_unread("bob@example.com")
+chat = win._chat_window.get_chat("bob@example.com")
 win._chat_window.current = "bob@example.com"
 win._chat_area_active = lambda: False
 win._on_chat_reached_bottom("bob@example.com")
 check("a background tab reaching the bottom stays unread",
-      win._read_state("bob@example.com")["unread"] == 1)
+      win._read_state("bob@example.com")["unread"] == 1
+      and chat.read_marks == 0)
 win._chat_window.current = "carol@example.com"
 win._chat_area_active = lambda: True
 win._on_chat_reached_bottom("bob@example.com")
 check("another tab's bottom does not clear this conversation",
-      win._read_state("bob@example.com")["unread"] == 1)
+      win._read_state("bob@example.com")["unread"] == 1
+      and chat.read_marks == 0)
 win._chat_window.current = "bob@example.com"
+win._client = _Client()
 win._on_chat_reached_bottom("bob@example.com")
 check("the active chat at the bottom is marked read",
       win._read_state("bob@example.com")["unread"] == 0
       and "bob@example.com" not in win._unread_jids)
+check("reaching the bottom takes the divider away in place",
+      chat.read_marks == 1)
+check("reaching the bottom publishes the displayed state",
+      win._client.displayed == ["bob@example.com"])
 
 _cw_window_src = open(os.path.join(
     _root, "stanza_im", "ui", "chat_window.py"), encoding="utf-8").read()
@@ -432,6 +461,14 @@ check("the bottom report is edge-triggered",
       _cv_src.count("def _note_bottom(self") == 2
       and _cv_src.count("self._at_bottom_hit = True\n            self.bottom_reached.emit()") == 2
       and "_at_bottom_hit = False" in _cv_src)
+check("a deferred anchor scroll never reports the bottom",
+      "if self._scroll_suspended or self._deferred_scroll is not None:"
+      in method_source(_cv_src, "_note_bottom"))
+check("the parked scroll keeps the report suspended until it is applied",
+      "self._scroll_suspended = True" in
+      method_source(_cv_src, "scroll_to_message")
+      and "self._scroll_suspended = False" in
+      method_source(_cv_src, "_flush_deferred_scroll"))
 
 # 8. the @ button walks the unread mentions ------------------------------------
 widget = bare_chat()

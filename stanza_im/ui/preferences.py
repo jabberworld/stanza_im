@@ -958,6 +958,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         general_form.addRow(self._check("send_ctrl_enter", tr("prefs_send_ctrl_enter")))
         general_form.addRow(self._check("message_displayed_sync",
                                         tr("prefs_message_displayed_sync")))
+        mds_throttle_spin = self._spin("mds_displayed_throttle", 1, 30, 1, suffix="с")
+        general_form.addRow(tr("chat_mds_displayed_throttle"), mds_throttle_spin)
         general_form.addRow(self._check("allow_incoming_edits",
                                         tr("prefs_allow_incoming_edits")))
         general_form.addRow(self._check("allow_incoming_deletions",
@@ -1373,6 +1375,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "proxy_host": connection.proxy_host, "proxy_port": connection.proxy_port,
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
             "message_displayed_sync": chat.message_displayed_sync,
+            "mds_displayed_throttle": chat.mds_displayed_throttle,
             "allow_incoming_edits": chat.allow_incoming_edits,
             "allow_incoming_deletions": getattr(
                 chat, "allow_incoming_deletions", True),

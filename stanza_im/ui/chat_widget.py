@@ -28,7 +28,7 @@ from stanza_im.include.avatars import (
     avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
 )
 from stanza_im.ui.chat_view import ChatView
-from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
 from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
 from stanza_im.ui import tooltip as tooltip_mod
@@ -327,6 +327,11 @@ class _NullView:
     def scroll_fraction(self) -> float:
         return 1.0
 
+    def clear_unread_separator(self) -> bool:
+        # Nothing is rendered while suspended, so there is nothing to remove
+        # and no need for the caller to force a re-render.
+        return True
+
     def isVisible(self) -> bool:
         return False
 
@@ -417,6 +422,7 @@ class ChatWidget(QtWidgets.QWidget):
     bookmark_jid_requested = QtCore.pyqtSignal(str)           # xmpp: room jid
     add_contact_jid_requested = QtCore.pyqtSignal(str)        # xmpp: contact jid
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
+    last_seen_changed = QtCore.pyqtSignal(str, str, str)
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, new_body
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
@@ -498,6 +504,7 @@ class ChatWidget(QtWidgets.QWidget):
             lambda content: self.note_requested.emit(self.jid, content))
         view.near_top.connect(self._on_near_top)
         view.bottom_reached.connect(self.bottom_reached)
+        view.last_seen_changed.connect(self._on_last_seen)
         return view
 
     def _build_ui(self, theme: ChatThemeFactory):
@@ -1195,6 +1202,30 @@ class ChatWidget(QtWidgets.QWidget):
         for entry in reversed(self._history):
             yield entry
 
+    def count_seen_since(self, boundary_ts: str, seen_ts: str) -> int:
+        """Count loaded messages in ``(boundary_ts, seen_ts]``.
+
+        Used to shrink the unread badge as the user scrolls a conversation
+        into view: *boundary_ts* is the previous not-yet-seen point (the read
+        anchor or the last seen timestamp) and *seen_ts* the newest message
+        that has just become visible.  Only messages already loaded in the tab
+        can be counted; timestamps are ISO strings, so a lexicographic compare
+        orders them correctly.
+        """
+        if not seen_ts:
+            return 0
+        boundary = boundary_ts or ""
+        count = 0
+        for entry in list(self._history) + list(self._messages):
+            ts = str(entry.get("timestamp") or "")
+            if not ts:
+                continue
+            if ts <= boundary:
+                continue
+            if ts <= seen_ts:
+                count += 1
+        return count
+
     def read_anchor(self) -> dict:
         """The conversation's read point: the newest message we display.
 
@@ -1762,8 +1793,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._anchor_bottom = True
         self._render_all()
 
-    def _render_all(self):
-        """Clear the view and re-render everything, restoring scroll."""
+    def _render_all(self) -> list[dict]:
+        """Clear the view and re-render everything, restoring scroll.
+
+        Returns the ordered, de-duplicated window that was drawn, so callers
+        that seed the jump button (:meth:`_seed_unseen`) measure the very same
+        set the separator was placed in.
+        """
         keep = self._preserve_fraction if self._preserve_fraction is not None \
             else self._view.scroll_fraction()
         self._view.clear()
@@ -1774,16 +1810,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.add_status(marker, "")
         for text, timestamp in self._status_lines:
             self._view.add_status(text, timestamp)
-        entries = []
-        seen = set()
-        for entry in self._history + self._messages:
-            key = self._entry_key(entry)
-            if key in seen:
-                continue
-            seen.add(key)
-            entries.append(entry)
-        entries.sort(key=lambda entry: (
-            entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
+        entries = self._ordered_entries()
         # The separator is placed by _render_entry, so let the pass above emit
         # it again from scratch (theme change, font change, restore).
         self._unread_marker_shown = False
@@ -1796,6 +1823,21 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.scroll_to_bottom()
         else:
             self._view.set_scroll_fraction(keep)
+        return entries
+
+    def _ordered_entries(self) -> list[dict]:
+        """The whole window (history + live rows) de-duplicated, oldest first."""
+        entries = []
+        seen = set()
+        for entry in self._history + self._messages:
+            key = self._entry_key(entry)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(entry)
+        entries.sort(key=lambda entry: (
+            entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
+        return entries
 
     @staticmethod
     def _entry_key(entry: dict) -> tuple:
@@ -1892,7 +1934,8 @@ class ChatWidget(QtWidgets.QWidget):
         return self._suspended
 
     def set_history(self, entries: list[dict], window_size: int,
-                    exhausted: bool, anchor: dict | None = None):
+                    exhausted: bool, anchor: dict | None = None,
+                    seen_anchor: dict | None = None):
         """Initial window: replace history rows and re-render from bottom.
 
         *anchor* is the persisted read state of a conversation with unread
@@ -1910,7 +1953,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._hist_loading = False
         self._server_fetching = False
         self._cleared = False
-        self._unread_boundary = dict(anchor or {})
+        boundary = dict(seen_anchor or anchor or {})
+        self._unread_boundary = boundary
         self._unread_marker_shown = False
         self._unread_armed = False
         self._unread_passed = False
@@ -1922,7 +1966,9 @@ class ChatWidget(QtWidgets.QWidget):
             self._boundary_reachable(entries)
         self._anchor_bottom = not self._unread_boundary
         self._preserve_fraction = None
-        self._render_all()
+        entries = self._render_all()
+        self._seed_unseen(entries)
+        self.refresh_unread_mentions(entries)
         if self._restore_anchor:
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
@@ -1988,13 +2034,95 @@ class ChatWidget(QtWidgets.QWidget):
         if self._is_boundary_entry(entry):
             self._unread_passed = True
             return False
-        if self._unread_passed:
-            return self._emit_unread_marker()
-        ts = str(self._unread_boundary.get("ts") or "")
-        entry_ts = str(entry.get("timestamp") or "")
-        if not ts or not entry_ts or entry_ts > ts:
+        if self._opens_unread_block(entry, self._unread_passed):
             return self._emit_unread_marker()
         return False
+
+    def _opens_unread_block(self, entry: dict, passed: bool) -> bool:
+        """True when *entry* is the first message past the read point.
+
+        Side-effect free, so :meth:`_measure_unread_block` can walk the window
+        with the very same rule the separator is drawn from.  *passed* tells
+        that the last read message was already met while walking; without it
+        the stored timestamp decides (a read point that predates the window
+        makes its first message the start of the unread block).
+        """
+        if not self._unread_boundary:
+            return False
+        if self._unread_armed or passed:
+            return True
+        ts = str(self._unread_boundary.get("ts") or "")
+        entry_ts = str(entry.get("timestamp") or "")
+        return not ts or not entry_ts or entry_ts > ts
+
+    def _unread_block_entries(self, entries) -> list[dict]:
+        """The rendered messages that follow the stored read point.
+
+        Oldest first, taken with the very rule the separator is drawn from
+        (:meth:`_opens_unread_block`), so callers measuring "what is still
+        unread here" cannot disagree with what the user sees below the divider.
+        """
+        if not self._unread_boundary:
+            return []
+        block: list[dict] = []
+        passed = False
+        for entry in entries or []:
+            if self._is_boundary_entry(entry):
+                passed = True
+                continue
+            if self._opens_unread_block(entry, passed):
+                block.append(entry)
+        return block
+
+    def _measure_unread_block(self, entries) -> tuple[int, str]:
+        """Size of the unread block in *entries*: ``(count, first message ref)``."""
+        block = self._unread_block_entries(entries)
+        if not block:
+            return 0, ""
+        return len(block), self._reply_target_id(block[0])
+
+    def _seed_unseen(self, entries) -> None:
+        """Put the already-rendered unread block on the jump-to-bottom button.
+
+        :meth:`note_new_message` counts live arrivals only, so a conversation
+        opened at its read anchor would carry a bare "▼" without a number.
+        Seeding happens once per initial window (and once more after the archive
+        was paged back to reach the read point), never on a theme/font
+        re-render — there the user may already have scrolled into the block, and
+        counting it whole again would overstate what is below the viewport.
+        """
+        if (self._released or self._unread_resolving
+                or not self._unread_marker_shown):
+            return
+        count, first = self._measure_unread_block(entries)
+        self._view.seed_unseen(count, first)
+
+    def mark_read(self) -> None:
+        """The conversation reached its newest message — drop the separator.
+
+        The boundary is forgotten (so a theme change cannot resurrect the
+        divider) and the rendered node is removed in place; the view keeps the
+        reading position, which a full re-render would not.
+        """
+        if not self._unread_boundary and not self._unread_marker_shown:
+            return
+        self._unread_boundary = {}
+        self._unread_marker_shown = False
+        self._unread_armed = False
+        self._unread_passed = False
+        self._unread_resolving = False
+        try:
+            if not self._view.clear_unread_separator():
+                self._render_all()
+        except (AttributeError, RuntimeError):
+            self._render_all()
+
+    def at_bottom(self) -> bool:
+        """True while the view shows the newest message of the conversation."""
+        try:
+            return not self._view.is_scrolled_up()
+        except (AttributeError, RuntimeError):
+            return True
 
     def _emit_unread_marker(self) -> bool:
         """Consume the separator: it belongs to one message per rendering."""
@@ -2038,6 +2166,31 @@ class ChatWidget(QtWidgets.QWidget):
                 ("archive_id", "origin_id", "reply_to", "reply_id",
                  "message_id")} - {""}
 
+    def set_seen(self, ref: str = "", ts: str = "", sid: str = "") -> None:
+        ref = str(ref or "")
+        ts = str(ts or "")
+        sid = str(sid or "")
+        if not (ref or ts or sid):
+            return
+        self._seen_ref = ref
+        self._seen_ts = ts
+        self._seen_sid = sid
+        try:
+            import time
+            self._seen_at = time.time()
+        except Exception:
+            self._seen_at = 0.0
+        # If seen is ahead of current unread boundary, move boundary to seen
+        try:
+            if self._unread_boundary:
+                bts = str(self._unread_boundary.get("ts") or "")
+                if ts and bts and ts > bts:
+                    self._unread_boundary = {"ref": ref, "ts": ts, "sid": sid}
+                elif ts and not bts:
+                    self._unread_boundary = {"ref": ref, "ts": ts, "sid": sid}
+        except Exception:
+            pass
+
     def note_unread_mention(self, ref_id: str) -> None:
         """Remember a message that named us, so ``@`` can jump to it.
 
@@ -2050,6 +2203,33 @@ class ChatWidget(QtWidgets.QWidget):
         if ref_id not in self._mention_refs:
             self._mention_refs.append(ref_id)
         self._update_mention_button()
+
+    def refresh_unread_mentions(self, entries=None, limit: int = 50) -> None:
+        """Rebuild the ``@`` list of a conversation opened with unread mentions.
+
+        The owner can only hand out a live ref-id while the tab exists, so a
+        mention that arrived while the tab was closed has no entry in
+        :attr:`_mention_refs` even though the roster counts it — and the button
+        stays invisible.  The loaded window is the source of truth here: every
+        message past the stored read point that names us is unread by
+        definition.  Oldest first (the button jumps to the earliest mention not
+        looked at yet), capped at *limit* so a huge unread block cannot fill
+        the list.
+        """
+        if (self._released or not self.is_muc
+                or not self._self_nick or self._unread_resolving
+                or not self._unread_boundary):
+            return
+        refs = []
+        for entry in self._unread_block_entries(
+                self._ordered_entries() if entries is None else entries):
+            if not mentions_nick(str(entry.get("body") or ""), self._self_nick):
+                continue
+            ref = self._reply_target_id(entry)
+            if ref:
+                refs.append(ref)
+        for ref in refs[-limit:]:
+            self.note_unread_mention(ref)
 
     def mark_mentions_read(self) -> None:
         """The conversation was marked read — forget the pending mentions."""
@@ -2400,7 +2580,7 @@ class ChatWidget(QtWidgets.QWidget):
         """
         if self._unread_resolving:
             self._unread_resolving = False
-            self._render_all()
+            self._seed_unseen(self._render_all())
         if entry is not None:
             self._view.scroll_to_message(self._reply_target_id(entry))
 
@@ -3083,3 +3263,18 @@ class ChatWidget(QtWidgets.QWidget):
         """Preload the input with *text* (e.g. an XEP-0147 ?message;body=)."""
         self._input.setPlainText(text or "")
         self.focus_input()
+    def set_mds_throttle(self, seconds: int):
+        try:
+            if hasattr(self._view, 'set_mds_throttle'):
+                self._view.set_mds_throttle(seconds)
+        except Exception:
+            pass
+    def _on_last_seen(self, ref: str = "", ts: str = "", sid: str = ""):
+        try:
+            self.set_seen(ref, ts, sid)
+            try:
+                self.last_seen_changed.emit(str(ref or ""), str(ts or ""), str(sid or ""))
+            except Exception:
+                pass
+        except Exception:
+            pass

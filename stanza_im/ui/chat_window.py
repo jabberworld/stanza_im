@@ -70,6 +70,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._colored_muc_nicks = True
         self._avatar_radius = 20
         self._notes_enabled = False
+        self._mds_throttle = 3
         self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_hats_visible = True                 # XEP-0317 chips in chat
         self._muc_participant_width = 0               # 0 = default width
@@ -175,6 +176,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
         widget.set_input_font(*self._input_font)
+        widget.set_mds_throttle(self._mds_throttle)
         widget.message_sent.connect(self._on_message_sent)
         widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.message_edit_sent.connect(self._on_message_edit_sent)
@@ -187,6 +189,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.typing_changed.connect(self.typing_changed)
         widget.bottom_reached.connect(
             lambda j=widget.jid: self.bottom_reached.emit(j))
+        widget.last_seen_changed.connect(
+            lambda r, t, s, j=widget.jid: self.last_seen.emit(j, r, t, s))
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -248,6 +252,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
         widget.set_input_font(*self._input_font)
+        widget.set_mds_throttle(self._mds_throttle)
         widget.set_participant_font(*self._participant_font)
         widget.set_subject_font(*self._subject_font)
         widget.set_muc_participant_options(*self._muc_participant_options)
@@ -270,6 +275,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.typing_changed.connect(self.typing_changed)
         widget.bottom_reached.connect(
             lambda j=widget.jid: self.bottom_reached.emit(j))
+        widget.last_seen_changed.connect(
+            lambda r, t, s, j=widget.jid: self.last_seen.emit(j, r, t, s))
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -467,6 +474,17 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_colored_muc_nicks(bool(enabled))
+
+    def set_mds_throttle(self, seconds: int) -> None:
+        """Apply and remember the XEP-0490 partial-display throttle."""
+        try:
+            self._mds_throttle = max(1, min(30, int(seconds)))
+        except (TypeError, ValueError):
+            self._mds_throttle = 3
+        for widget in self._tabs.values():
+            setter = getattr(widget, "set_mds_throttle", None)
+            if callable(setter):
+                setter(self._mds_throttle)
 
     def set_call_support(self, jid: str, audio: bool = True,
                          video: bool = True) -> None:
@@ -686,6 +704,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     message_moderate_requested = QtCore.pyqtSignal(str, str, str)
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
     bottom_reached = QtCore.pyqtSignal(str)             # jid view at the end
+    last_seen = QtCore.pyqtSignal(str, str, str, str)   # jid, ref, ts, sid
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave
