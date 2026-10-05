@@ -236,8 +236,11 @@ class _JumpButtonMixin:
         owner (``MainWindow``) applies the throttling to the server update.
         """
         ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
-        if (ref, ts, sid) == (self._last_seen_ref, self._last_seen_ts,
-                              self._last_seen_sid):
+        same = (ref, ts, sid) == (self._last_seen_ref, self._last_seen_ts,
+                                  self._last_seen_sid)
+        logger.debug("SEEN[emit] ref=%r ts=%r sid=%r dup=%s empty=%s",
+                     ref, ts, sid, same, not (ref or ts or sid))
+        if same:
             return
         self._last_seen_ref, self._last_seen_ts, self._last_seen_sid = (
             ref, ts, sid)
@@ -770,6 +773,8 @@ if HAS_WEBENGINE:
                 ref = str(result.get("ref") or "")
                 ts = str(result.get("ts") or "")
                 sid = str(result.get("sid") or "")
+                logger.debug("SEEN[view] ref=%r ts=%r sid=%r raw=%r",
+                             ref, ts, sid, result)
                 self._last_seen_cache = (ref, ts, sid)
                 self._emit_last_seen(ref, ts, sid)
             except Exception:

@@ -37,6 +37,17 @@ app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 cw = ChatWidget("jb@example.com", "JB", ChatThemeFactory())
 view = cw._view
 
+# 0. the real widget exposes the state `_on_last_seen` touches ----------------
+# (A missing `_last_seen_*`/`_seen_*` attribute used to raise inside the bare
+# `except`, so the seen point silently never advanced.)
+view._overflow = True
+view._fraction = 0.5
+cw._history = [{"timestamp": "2026-10-01T00:00:01Z"}]
+cw._on_last_seen("m1", "2026-10-01T00:00:01Z", "sid1")
+check("_on_last_seen records the seen point on the real widget",
+      cw._seen_ts == "2026-10-01T00:00:01Z"
+      and cw._last_seen_ts == "2026-10-01T00:00:01Z")
+
 # 1. scrolled-up detection ----------------------------------------------------
 view._overflow = True
 view._fraction = 0.5

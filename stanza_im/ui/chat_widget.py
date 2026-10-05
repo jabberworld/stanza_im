@@ -480,6 +480,15 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_resolving = False
         self._mention_refs: list[str] = []
         self._unread_count = 0
+        # Highest "seen" report already accepted (monotonic, never moved back).
+        self._last_seen_ref = ""
+        self._last_seen_ts = ""
+        self._last_seen_sid = ""
+        # Persisted partial-progress point (set by ``set_seen``).
+        self._seen_ref = ""
+        self._seen_ts = ""
+        self._seen_sid = ""
+        self._seen_at = 0.0
         self._build_ui(theme)
 
     # ── UI construction ───────────────────────────────────────────
@@ -1211,17 +1220,26 @@ class ChatWidget(QtWidgets.QWidget):
         orders them correctly.
         """
         if not seen_ts:
+            logger.debug("SEEN[count] boundary=%r seen=%r counted=0 (no seen_ts)",
+                         boundary_ts, seen_ts)
             return 0
         boundary = boundary_ts or ""
+        entries = list(self._history) + list(self._messages)
+        stamps = [str(e.get("timestamp") or "") for e in entries]
         count = 0
-        for entry in list(self._history) + list(self._messages):
-            ts = str(entry.get("timestamp") or "")
+        for ts in stamps:
             if not ts:
                 continue
             if ts <= boundary:
                 continue
             if ts <= seen_ts:
                 count += 1
+        logger.debug(
+            "SEEN[count] boundary=%r seen=%r counted=%d n=%d "
+            "ts_first=%r ts_last=%r missing_ts=%d",
+            boundary_ts, seen_ts, count, len(stamps),
+            stamps[0] if stamps else "", stamps[-1] if stamps else "",
+            sum(1 for ts in stamps if not ts))
         return count
 
     def read_anchor(self) -> dict:
@@ -3314,22 +3332,28 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_last_seen(self, ref: str = "", ts: str = "", sid: str = ""):
         try:
+            ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
+            scrolled_up = self._view.is_scrolled_up()
+            same = (ref, ts, sid) == (
+                self._last_seen_ref, self._last_seen_ts, self._last_seen_sid)
+            not_newer = bool(ts) and bool(self._last_seen_ts) \
+                and ts <= self._last_seen_ts
+            logger.debug(
+                "SEEN[widget] ref=%r ts=%r sid=%r scrolled_up=%s same=%s "
+                "not_newer=%s last_seen=%r seen=%r",
+                ref, ts, sid, scrolled_up, same, not_newer,
+                self._last_seen_ts, self._seen_ts)
             # A view sitting at the newest message is *read*, not partially
             # read: the bottom report owns that transition.  Skipping here also
             # stops the transient "at the bottom" position during an anchor
             # restore from advancing the seen point to the newest message.
-            if not self._view.is_scrolled_up():
+            if not scrolled_up:
                 return
-            ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
             # Only a forward move is a new "seen" point; scrolling back up or
             # re-showing an already seen message changes nothing, so it must not
             # be re-reported (which would shrink the unread counter again).
             # ``_last_seen_ts`` tracks the highest point ever reported, and it is
             # never moved back, so a return to an earlier message stays ignored.
-            same = (ref, ts, sid) == (
-                self._last_seen_ref, self._last_seen_ts, self._last_seen_sid)
-            not_newer = bool(ts) and bool(self._last_seen_ts) \
-                and ts <= self._last_seen_ts
             if same or not_newer:
                 return
             self._last_seen_ref, self._last_seen_ts, self._last_seen_sid = (
@@ -3341,4 +3365,4 @@ class ChatWidget(QtWidgets.QWidget):
             except Exception:
                 pass
         except Exception:
-            pass
+            logger.debug("SEEN[widget] failed", exc_info=True)

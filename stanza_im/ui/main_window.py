@@ -4686,9 +4686,11 @@ class MainWindow(QtWidgets.QMainWindow):
         chat_window = getattr(self, "_chat_window", None)
         chat = chat_window.get_chat(jid) if chat_window is not None else None
         if chat is None:
+            logger.debug("UNREAD[push] jid=%s no-chat", jid)
             return
         entry = self._unread_chats.get(jid)
         count = int(entry["unread"]) if entry else 0
+        logger.debug("UNREAD[push] jid=%s count=%d", jid, count)
         try:
             chat.set_unread_count(count)
         except (AttributeError, RuntimeError):
@@ -4866,6 +4868,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         entry = self._unread_chats.get(jid)
         if not entry:
+            logger.debug("UNREAD[seen] jid=%s ref=%r ts=%r no-entry", jid, ref, ts)
             return
         prev_seen = str(entry.get("seen_ts") or "")
         prev_unread = int(entry.get("unread") or 0)
@@ -4873,6 +4876,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # already seen message must neither move it backwards nor subtract the
         # same messages again.
         advanced = bool(ts) and (not prev_seen or str(ts) > prev_seen)
+        logger.debug(
+            "UNREAD[seen] jid=%s ref=%r ts=%r prev_seen=%r prev_unread=%d "
+            "advanced=%s read_ts=%r",
+            jid, ref, ts, prev_seen, prev_unread, advanced,
+            entry.get("read_ts") or "")
         if advanced:
             if sid:
                 entry["seen_sid"] = str(sid)
@@ -4886,6 +4894,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat = self._chat_window.get_chat(jid)
                 if chat is not None:
                     seen_now = chat.count_seen_since(boundary_ts, str(ts))
+                    logger.debug(
+                        "UNREAD[seen] jid=%s boundary=%r seen=%r seen_now=%d "
+                        "unread %d->%d",
+                        jid, boundary_ts, ts, seen_now, prev_unread,
+                        max(0, prev_unread - seen_now))
                     if seen_now > 0:
                         entry["unread"] = max(0, prev_unread - seen_now)
                         self._recount_unread()
