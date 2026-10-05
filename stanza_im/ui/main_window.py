@@ -4987,7 +4987,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              unstyled: bool = False,
                              reply_able_id: str = "", reply_author: str = "",
                              reply_to: str = "", reply_id: str = "",
-                             carbon: bool = False):
+                             carbon: bool = False, media: dict | None = None):
         bare_jid = frm.split("/")[0]
         self._touch_tab_activity(bare_jid)
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
@@ -5041,7 +5041,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_message_carbon_sent(self, jid: str, body: str, ts,
                                 stable_id: str = "", reply_to: str = "",
-                                reply_id: str = ""):
+                                reply_id: str = "", media: dict | None = None):
         """A message sent from another of our resources (XEP-0280 carbon).
 
         Shown as our own outgoing message in the target chat and stored in
@@ -5124,7 +5124,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_muc_private_message(self, room: str, nick: str,
                                  body: str, ts, unstyled: bool = False,
                                  reply_able_id: str = "", reply_author: str = "",
-                                 reply_to: str = "", reply_id: str = ""):
+                                 reply_to: str = "", reply_id: str = "",
+                                 media: dict | None = None):
         info = self._participant_info(room, nick)
         real_jid = info.get("real_jid")
         target = real_jid.strip() if isinstance(real_jid, str) else ""
@@ -5187,7 +5188,8 @@ class MainWindow(QtWidgets.QMainWindow):
                               ts, archived: bool = False,
                               archive_id: str = "", unstyled: bool = False,
                               reply_able_id: str = "", reply_author: str = "",
-                              reply_to: str = "", reply_id: str = ""):
+                              reply_to: str = "", reply_id: str = "",
+                              media: dict | None = None):
         self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
@@ -6044,7 +6046,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_message_corrected(self, frm: str, ref_id: str, body: str, ts,
                               unstyled: bool = False,
                               stable_id: str = "", reply_to: str = "",
-                              reply_id: str = ""):
+                              reply_id: str = "", media: dict | None = None):
         """A contact corrected a message they sent (XEP-0308)."""
         bare = frm.split("/")[0]
         chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(frm)
@@ -6057,7 +6059,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                         body: str, ts, unstyled: bool = False,
                                         stable_id: str = "", frm: str = "",
                                         reply_to: str = "",
-                                        reply_id: str = ""):
+                                        reply_id: str = "",
+                                        media: dict | None = None):
         """A participant corrected their MUC message (XEP-0308)."""
         chat = self._chat_window.get_chat(room)
         if chat:

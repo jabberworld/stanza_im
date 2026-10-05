@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS messages (
     retracted INTEGER NOT NULL DEFAULT 0,
     retract_marker INTEGER NOT NULL DEFAULT 0,
     retract_reason TEXT,
-    retract_by TEXT
+    retract_by TEXT,
+    media TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
@@ -162,6 +163,8 @@ def _connection(jid: str) -> sqlite3.Connection:
                     conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
             if "reactions" not in columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN reactions TEXT")
+            if "media" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN media TEXT")
             _migrate_dedup(conn)
             conn.commit()
         except sqlite3.Error:
@@ -177,10 +180,21 @@ def _connection(jid: str) -> sqlite3.Connection:
         return conn
 
 
+def _parse_media(raw) -> dict | None:
+    """Decode the stored ``media`` JSON (a XEP-0385 media dict), or ``None``."""
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) and value else None
+
+
 def _row_to_entry(row) -> dict:
     _id, direction, sender, body, timestamp, archive_id, origin_id, \
         reply_to, reply_id, message_id, edited, retracted, retract_marker, \
-        retract_reason, retract_by, reactions = row
+        retract_reason, retract_by, reactions, media = row
     return {
         "id": _id,
         "direction": direction,
@@ -198,6 +212,7 @@ def _row_to_entry(row) -> dict:
         "retract_reason": retract_reason or "",
         "retract_by": retract_by or "",
         "reactions": _parse_reactions(reactions),
+        "media": _parse_media(media),
     }
 
 
@@ -231,7 +246,8 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             reply_id: str, message_id: str, edited: bool,
             retracted: bool, retract_marker: bool,
             skip_existing: bool,
-            retract_reason: str = "", retract_by: str = "") -> bool:
+            retract_reason: str = "", retract_by: str = "",
+            media: str = "") -> bool:
     """Insert one row; returns True when a row was actually written."""
     if skip_existing:
         clauses: list[str] = []
@@ -261,13 +277,13 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
         "INSERT INTO messages "
         "(direction, sender, body, timestamp, archive_id, "
         "origin_id, reply_to, reply_id, message_id, edited, "
-        "retracted, retract_marker, retract_reason, retract_by) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "retracted, retract_marker, retract_reason, retract_by, media) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (direction, sender, body, ts, archive_id or None,
          origin_id or None, reply_to or None, reply_id or None,
          message_id or None, 1 if edited else 0,
          1 if retracted else 0, 1 if retract_marker else 0,
-         retract_reason or None, retract_by or None),
+         retract_reason or None, retract_by or None, media or None),
     )
     return True
 
@@ -279,7 +295,8 @@ def store_message(jid: str, direction: str, body: str,
                   reply_id: str = "", message_id: str = "",
                   edited: bool = False, retracted: bool = False,
                   retract_marker: bool = False,
-                  retract_reason: str = "", retract_by: str = "") -> bool:
+                  retract_reason: str = "", retract_by: str = "",
+                  media: dict | None = None) -> bool:
     """Append a message to *jid*'s history.
 
     By default (``skip_existing``) an already stored message is not duplicated.
@@ -297,7 +314,9 @@ def store_message(jid: str, direction: str, body: str,
             inserted = _insert(conn, direction, body, ts, sender, archive_id,
                                origin_id, reply_to, reply_id, message_id,
                                edited, retracted, retract_marker,
-                               skip_existing, retract_reason, retract_by)
+                               skip_existing, retract_reason, retract_by,
+                               json.dumps(media, ensure_ascii=False)
+                               if media else "")
             conn.commit()
             return inserted
     except sqlite3.Error as exc:
@@ -338,7 +357,9 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
                            bool(entry.get("retract_marker", False)),
                            skip_existing,
                            entry.get("retract_reason", ""),
-                           entry.get("retract_by", "")):
+                           entry.get("retract_by", ""),
+                           json.dumps(entry.get("media"), ensure_ascii=False)
+                           if entry.get("media") else ""):
                     inserted += 1
             conn.commit()
         return inserted
@@ -512,7 +533,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
                 f"SELECT id, direction, sender, body, timestamp, archive_id,"
                 f" origin_id, reply_to, reply_id, message_id, edited,"
                 f" retracted, retract_marker, retract_reason, retract_by,"
-                f" reactions FROM messages"
+                f" reactions, media FROM messages"
                 f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 f"ORDER BY timestamp ASC, id ASC",
                 params)
@@ -536,7 +557,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions FROM messages "
+                " reactions, media FROM messages "
                 "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (str(int(before_id)), str(int(limit))))
             rows = cur.fetchall()
@@ -554,8 +575,8 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
             cur = conn.execute(
                 "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
-                " retracted, retract_marker, retract_reason, retract_by, reactions "
-                "FROM messages WHERE timestamp < ? "
+                " retracted, retract_marker, retract_reason, retract_by, reactions, "
+                "media FROM messages WHERE timestamp < ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
             rows = cur.fetchall()
@@ -636,7 +657,7 @@ def load_day(jid: str, date: str) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions "
+                " reactions, media "
                 "FROM messages "
                 "WHERE substr(timestamp, 1, 10) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
@@ -856,12 +877,13 @@ async def store_message_async(jid: str, direction: str, body: str,
                               archive_id: str = "", origin_id: str = "",
                               reply_to: str = "", reply_id: str = "",
                               message_id: str = "",
-                              edited: bool = False) -> bool:
+                              edited: bool = False,
+                              media: dict | None = None) -> bool:
     return await asyncio.to_thread(
         store_message, jid, direction, body, timestamp=timestamp,
         sender=sender, skip_existing=skip_existing, archive_id=archive_id,
         origin_id=origin_id, reply_to=reply_to, reply_id=reply_id,
-        message_id=message_id, edited=edited)
+        message_id=message_id, edited=edited, media=media)
 
 
 async def store_many_async(jid: str, rows: list[dict]) -> int:

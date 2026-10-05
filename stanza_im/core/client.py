@@ -71,6 +71,12 @@ NS_HINTS = "urn:xmpp:hints"                # XEP-0334 Message Processing Hints
 NS_CAPTCHA = "urn:xmpp:captcha"            # XEP-0158 CAPTCHA Forms
 NS_MEDIA = "urn:xmpp:media-element"        # XEP-0221 Data Forms Media Element
 NS_OOB = "jabber:x:oob"                    # XEP-0066 Out-of-Band Data
+NS_SIMS = "urn:xmpp:sims:1"                # XEP-0385 Stateless Inline Media Sharing
+NS_REFERENCE = "urn:xmpp:reference:0"      # XEP-0372 References
+NS_HASHES = "urn:xmpp:hashes:2"            # XEP-0300 Hash Functions
+NS_FT = "urn:xmpp:jingle:apps:file-transfer:5"  # XEP-0234 file description
+NS_CHAT_MARKERS = "urn:xmpp:chat-markers:0"     # XEP-0333 Chat Markers
+NS_SCHEMA = "https://schema.org/"          # SIMS width/height extension
 NS_AVATAR_DATA = "urn:xmpp:avatar:data"        # XEP-0084 User Avatar
 NS_AVATAR_METADATA = "urn:xmpp:avatar:metadata"
 NS_VCARD_UPDATE = "vcard-temp:x:update"        # XEP-0153 vCard-Based Avatars
@@ -484,6 +490,103 @@ def _oob_url(msg) -> str:
         if el.tag == "{%s}url" % NS_OOB:
             return str(el.text or "")
     return ""
+
+
+def _int_or_zero(text: str) -> int:
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_file_element(file_el) -> dict:
+    """Parse a XEP-0234/SIMS ``<file/>`` into a media dict."""
+    media = {"name": "", "size": 0, "media_type": "", "width": 0, "height": 0,
+             "hashes": {}}
+    for child in file_el:
+        tag = child.tag.rsplit("}", 1)[-1]
+        text = (child.text or "").strip()
+        if tag == "name":
+            media["name"] = text
+        elif tag == "size":
+            media["size"] = _int_or_zero(text)
+        elif tag == "media-type":
+            media["media_type"] = text
+        elif tag == "width":
+            media["width"] = _int_or_zero(text)
+        elif tag == "height":
+            media["height"] = _int_or_zero(text)
+        elif tag == "hash":
+            algo = child.get("algo", "")
+            if algo and text:
+                media["hashes"][algo] = text
+    return media
+
+
+def _reference_url(msg) -> str:
+    """The first XEP-0372 ``type='data'`` reference URI of *msg*, else ""."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return ""
+    for el in xml.iter("{%s}reference" % NS_REFERENCE):
+        if el.get("type") == "data" and el.get("uri"):
+            return el.get("uri", "")
+    return ""
+
+
+def _fallback_body_range(msg, for_ns: str) -> tuple[int, int] | None:
+    """The XEP-0428 fallback ``(start, end)`` body range for *for_ns*."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    for fb in xml.iter("{%s}fallback" % NS_FALLBACK):
+        if fb.get("for") != for_ns:
+            continue
+        body = fb.find("{%s}body" % NS_FALLBACK)
+        if body is None:
+            body = fb.find("body")
+        if body is None:
+            continue
+        return (_int_or_zero(body.get("start", "0")),
+                _int_or_zero(body.get("end", "0")))
+    return None
+
+
+def message_media(msg) -> dict | None:
+    """Auxiliary media metadata carried by *msg*, or ``None``.
+
+    Understands XEP-0385 SIMS (optionally wrapped in a XEP-0372 reference),
+    a bare XEP-0372 ``type='data'`` reference and XEP-0066 OOB, plus the
+    XEP-0428 fallback body range that a supporting client must not render.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    sharing = next(xml.iter("{%s}media-sharing" % NS_SIMS), None)
+    if sharing is not None:
+        file_el = sharing.find("{%s}file" % NS_FT)
+        media = _parse_file_element(file_el) if file_el is not None else {
+            "name": "", "size": 0, "media_type": "", "width": 0, "height": 0,
+            "hashes": {}}
+        url = ""
+        for ref in sharing.iter("{%s}reference" % NS_REFERENCE):
+            if ref.get("uri"):
+                url = ref.get("uri", "")
+                break
+        media["url"] = url or _oob_url(msg)
+        media["hide_body"] = _fallback_body_range(msg, NS_SIMS)
+        return media
+    url = _reference_url(msg)
+    if url:
+        return {"name": "", "size": 0, "media_type": "", "width": 0,
+                "height": 0, "hashes": {}, "url": url,
+                "hide_body": _fallback_body_range(msg, NS_REFERENCE)}
+    url = _oob_url(msg)
+    if url:
+        return {"name": "", "size": 0, "media_type": "", "width": 0,
+                "height": 0, "hashes": {}, "url": url,
+                "hide_body": _fallback_body_range(msg, NS_OOB)}
+    return None
 
 
 def muc_mediated_invite_from_message(msg) -> dict | None:
@@ -5108,6 +5211,7 @@ class JabberClient:
                 return
             unstyled, ts, reply_to, reply_id, stable_id = \
                 self._message_fields(msg)
+            media = message_media(msg)
             server_sid = _stanza_id(msg, self.jid_str)
             replace_ref = _replace_reference(msg)
             room, separator, nick = frm.partition("/")
@@ -5118,11 +5222,11 @@ class JabberClient:
                     if self.allow_incoming_edits:
                         self.emit("message_corrected", frm, replace_ref,
                                   body, ts, unstyled, stable_id,
-                                  reply_to, reply_id)
+                                  reply_to, reply_id, media=media)
                         return
                     logger.debug("Incoming correction ignored (edits disabled)")
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
-                          stable_id, frm, reply_to, reply_id)
+                          stable_id, frm, reply_to, reply_id, media=media)
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -5130,11 +5234,11 @@ class JabberClient:
                 if self.allow_incoming_edits:
                     self.emit("message_corrected", frm, replace_ref,
                               body, ts, unstyled, stable_id,
-                              reply_to, reply_id)
+                              reply_to, reply_id, media=media)
                     return
                 logger.debug("Incoming correction ignored (edits disabled)")
             self.emit("message_received", frm, body, ts, unstyled,
-                      stable_id, frm, reply_to, reply_id)
+                      stable_id, frm, reply_to, reply_id, media=media)
 
     @staticmethod
     def _message_fields(msg):
@@ -5179,11 +5283,12 @@ class JabberClient:
             return
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
+        media = message_media(inner)
         server_sid = _stanza_id(inner, self.jid_str)
         if server_sid:
             self._mds_track(frm.split("/")[0], inner, server_sid)
         self.emit("message_received", frm, body, ts, unstyled,
-                  stable_id, frm, reply_to, reply_id, True)
+                  stable_id, frm, reply_to, reply_id, True, media=media)
 
     def _on_carbon_sent(self, msg) -> None:
         """A 1:1 message sent from another of our resources (XEP-0280)."""
@@ -5207,8 +5312,9 @@ class JabberClient:
             return
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
+        media = message_media(inner)
         self.emit("message_carbon_sent", bare, body, ts,
-                  stable_id, reply_to, reply_id)
+                  stable_id, reply_to, reply_id, media=media)
 
     def _on_groupchat_message(self, msg) -> None:
         frm = str(msg["from"])
@@ -5257,16 +5363,18 @@ class JabberClient:
             stable_id = archive_id
         if stable_id:
             self._mds_track(room, msg, stable_id)
+        media = message_media(msg)
         replace_ref = _replace_reference(msg)
         if replace_ref:
             if self.allow_incoming_edits:
                 self.emit("groupchat_message_corrected",
                           room, replace_ref, body, ts, unstyled,
-                          stable_id, frm, reply_to, reply_id)
+                          stable_id, frm, reply_to, reply_id, media=media)
                 return
             logger.debug("Incoming MUC correction ignored (edits disabled)")
         self.emit("groupchat_message", room, nick, body, ts, archived,
-                  archive_id, unstyled, stable_id, frm, reply_to, reply_id)
+                  archive_id, unstyled, stable_id, frm, reply_to, reply_id,
+                  media=media)
 
     def _on_groupchat_subject(self, msg) -> None:
         """A MUC subject was set/announced (subject-only message).
