@@ -56,8 +56,7 @@
 ## Запуск
 
 ```bash
-python main.py            # или
-python -m stanza_im
+python main.py
 ```
 
 ## Зависимости
@@ -68,6 +67,12 @@ python -m stanza_im
 - Опционально, для звонков: **aiortc** (`pip install stanza-im[calls]`)
 - Системные библиотеки Qt/веб-движка: `libglib-2.0`, `libGL`, `libgl1`,
   `libx11`, `libfontconfig`
+
+В Debian 13 нужные пакеты можно установить следующей командой:
+
+```
+sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine python3-defusedxml python3-qasync python3-aiodns python3-aiortc
+```
 
 ## Документация проекта
 
