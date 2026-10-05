@@ -652,6 +652,11 @@ check("last-seen is not searched while the view sits at the bottom",
       "if not self.is_scrolled_up():" in
       method_source(_cv_src, "_maybe_emit_last_seen"))
 
+# 16. the divider-removal JS is a function (no top-level `return`) -------------
+check("the divider-removal JS is wrapped in an IIFE",
+      '"(function () {"' in _cv_src
+      and '" if (!chat) return 0;"' in _cv_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -71,6 +71,26 @@ class _ConsoleFilter(logging.Filter):
         return self._debug
 
 
+class _SlixmppNoiseFilter(logging.Filter):
+    """Downgrade slixmpp's "Unknown stanza interface" notices to DEBUG.
+
+    slixmpp logs them through the root logger when an IQ matcher is tested
+    against a stanza with no ``from``/``id`` interface (e.g. the
+    stream-management ``<r/>``/``<a/>``), which floods the log at login.  The
+    information stays available with ``-d``/``-l`` without the warning noise.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        if message.startswith("Unknown stanza interface"):
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+        return True
+
+
 def configure_logging(debug: bool, xml_dump: bool, file_log: bool = False) -> None:
     """Set up logging levels and destinations.
 
@@ -109,6 +129,11 @@ def configure_logging(debug: bool, xml_dump: bool, file_log: bool = False) -> No
         handlers=handlers,
         force=True,
     )
+    root = logging.getLogger()
+    for existing in list(root.filters):
+        if isinstance(existing, _SlixmppNoiseFilter):
+            root.removeFilter(existing)
+    root.addFilter(_SlixmppNoiseFilter())
 
 
 def get_event_loop() -> asyncio.AbstractEventLoop:

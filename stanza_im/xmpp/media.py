@@ -684,6 +684,13 @@ def _install_audio_resampler_compat() -> None:
             ("aiortc.codecs.g722", ("G722Encoder",))):
         try:
             module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            # Not every aiortc build ships every codec module (e.g. g722);
+            # that is expected, so warn without dumping a traceback.
+            logger.warning(
+                "CALL audio codec %s is not available in this aiortc build; "
+                "its encoder is left unpatched", module_name)
+            continue
         except Exception:
             logger.debug("CALL could not patch %s", module_name, exc_info=True)
             continue

@@ -2176,17 +2176,22 @@ window.__stanzaMentionRef = '';
             if not self._ready:
                 return False
             try:
+                # Wrapped in an IIFE: `return` is illegal at the top level of a
+                # script passed to runJavaScript (it raised
+                # "Uncaught SyntaxError: Illegal return statement").
                 self.page().runJavaScript(
-                    "var chat = document.getElementById('chat');"
-                    "if (!chat) return 0;"
-                    "var nodes = chat.querySelectorAll('.stanza-unread');"
-                    "if (!nodes.length) return 0;"
-                    "var before = document.body.scrollHeight;"
-                    "for (var i = 0; i < nodes.length; i++)"
+                    "(function () {"
+                    " var chat = document.getElementById('chat');"
+                    " if (!chat) return 0;"
+                    " var nodes = chat.querySelectorAll('.stanza-unread');"
+                    " if (!nodes.length) return 0;"
+                    " var before = document.body.scrollHeight;"
+                    " for (var i = 0; i < nodes.length; i++)"
                     " nodes[i].remove();"
-                    "var delta = before - document.body.scrollHeight;"
-                    "if (delta > 0) window.scrollBy(0, delta);"
-                    "return nodes.length;")
+                    " var delta = before - document.body.scrollHeight;"
+                    " if (delta > 0) window.scrollBy(0, delta);"
+                    " return nodes.length;"
+                    "})();")
             except RuntimeError:
                 return False
             return True
