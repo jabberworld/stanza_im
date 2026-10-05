@@ -153,6 +153,12 @@ class RosterStyle:
         # Background stripe
         bg = self._group_bg_color or pal.color(QtGui.QPalette.ColorRole.Window)
         painter.fillRect(rect, bg)
+        # Drop-target highlight (drag a contact onto this group).
+        if is_selected:
+            painter.fillRect(rect, QtGui.QColor(60, 120, 216, 70))
+            painter.setPen(QtGui.QPen(QtGui.QColor(60, 120, 216), 1))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
         # Expand/collapse arrow
         arrow_x = rect.left() + 4

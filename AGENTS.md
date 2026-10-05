@@ -515,6 +515,13 @@ Events entry. Its `[plugin_settings.attention]` holds `cooldown` (1–99 s,
 incoming per-contact throttle), `allow_dnd` (notify while we are in «Не
 беспокоить»), `play_sound` and `show_events`. [`tests/test_attention.py`]
 
+A contact can be **dragged onto a group** (header or row): `RosterWidget`
+starts a `QDrag` (`application/x-stanza-roster-jid`) and emits
+`contact_dropped_on_group(jid, group)`, which `MainWindow.
+_on_contact_dropped_on_group` applies through `_set_contact_groups` (moving the
+contact to that one group; dropping on «Без группы» clears the groups; virtual
+groups are ignored). The target header is highlighted during the drag.
+
 UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)`, which resolves through
 `include.constants.find_icon` (scalable dirs first, then the sized dirs);

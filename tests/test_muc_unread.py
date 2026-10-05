@@ -393,6 +393,28 @@ check("renaming a group updates its members only",
       and ("carol@example.com", ["Amigos", "Work"]) in _fc.xmpp.updated
       and all(j != "dave@example.com" for j, _ in _fc.xmpp.updated))
 
+# 5e. dragging a contact onto a group moves it --------------------------------
+win = make_window()
+_calls = []
+
+
+class _GroupClient:
+    def update_contact(self, jid, name="", groups=None):
+        _calls.append((jid, list(groups or [])))
+
+
+win._client = _GroupClient()
+win._set_contact_groups = MainWindow._set_contact_groups.__get__(win)
+win._on_contact_dropped_on_group = \
+    MainWindow._on_contact_dropped_on_group.__get__(win)
+win._on_contact_dropped_on_group("bob@example.com", "Friends")
+win._on_contact_dropped_on_group("bob@example.com", tr("roster_group_ungrouped"))
+win._on_contact_dropped_on_group("bob@example.com",
+                                 tr("roster_group_conferences"))
+check("dropping a contact moves it to the target group",
+      _calls == [("bob@example.com", ["Friends"]),
+                 ("bob@example.com", [])])
+
 # 6b. the seen point never moves backwards (no repeated subtraction) ------------
 win = make_window(chats=("bob@example.com",))
 win._unread_chats["bob@example.com"] = unread_state.blank()

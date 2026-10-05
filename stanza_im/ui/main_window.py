@@ -619,6 +619,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.contact_double_clicked.connect(self._on_contact_open)
         self._roster.contact_context_menu.connect(self._on_contact_context)
         self._roster.group_context_menu.connect(self._on_group_context)
+        self._roster.contact_dropped_on_group.connect(
+            self._on_contact_dropped_on_group)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._roster)
@@ -4471,6 +4473,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.update_contact(jid, groups=groups)
         self._remember_contact(jid, groups=groups)
+
+    def _on_contact_dropped_on_group(self, jid: str, group: str) -> None:
+        """A contact was dragged onto *group*: move it there."""
+        if not jid or not group:
+            return
+        if group in _virtual_roster_groups():
+            # Conferences and private-message rows are computed by the app,
+            # never a real server group.
+            return
+        if group == tr("roster_group_ungrouped"):
+            self._set_contact_groups(jid, [])
+        else:
+            self._set_contact_groups(jid, [group])
 
     def _create_contact_group(self, jid: str):
         name, ok = QtWidgets.QInputDialog.getText(

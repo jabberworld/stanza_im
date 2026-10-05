@@ -14,9 +14,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
 
     Renders groups and contacts using QPainter.  Supports:
     - Expand/collapse groups
-    - Click, double-click, context menu
+    - Click, double-click, context menu (contact and group)
     - Keyboard navigation
-    - Drag-and-drop (planned)
+    - Drag-and-drop a contact onto a group
     - Dynamic item heights
     """
 
@@ -24,6 +24,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
     contact_double_clicked = QtCore.pyqtSignal(str)   # jid
     contact_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)  # jid, global_pos
     group_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)    # group, global_pos
+    contact_dropped_on_group = QtCore.pyqtSignal(str, str)  # jid, target group
     roster_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
 
     def __init__(self, parent=None):
@@ -40,10 +41,17 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._filter: str = ""
         self._show_offline = True
         self._sort_by_status = True
+        self._press_pos: QtCore.QPoint | None = None
+        self._press_jid: str | None = None
+        self._drop_group: str | None = None
 
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setAcceptDrops(True)
         self._tooltip_provider = None
+
+    # Drag-and-drop: move a contact onto a target group (header or row).
+    _DRAG_MIME = "application/x-stanza-roster-jid"
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -307,7 +315,8 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
                 h = self._style.group_height()
                 rect = QtCore.QRect(0, cy, self.width(), h)
                 if rect.intersects(dirty):
-                    self._style.paint_group(painter, item, rect, False)
+                    self._style.paint_group(
+                        painter, item, rect, item.name == self._drop_group)
                 cy += h
             else:
                 h = self._style.user_height(item)
@@ -321,6 +330,8 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         tooltip_mod.hide()
+        self._press_pos = event.position().toPoint()
+        self._press_jid = None
         hit = self._item_at(int(event.position().y()))
         if hit is None:
             self._selected_jid = None
@@ -333,6 +344,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             self.update()
         elif kind == "user":
             self._selected_jid = item.jid
+            self._press_jid = item.jid
             self.update()
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 self.contact_clicked.emit(item.jid)
@@ -343,7 +355,61 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         if hit and hit[0] == "user":
             self.contact_double_clicked.emit(hit[1].jid)
 
+    def _start_drag(self, jid: str) -> None:
+        """Begin dragging *jid* so it can be dropped onto another group."""
+        self._press_jid = None
+        drag = QtGui.QDrag(self)
+        mime = QtCore.QMimeData()
+        mime.setData(self._DRAG_MIME, jid.encode("utf-8"))
+        drag.setMimeData(mime)
+        drag.exec(QtCore.Qt.DropAction.MoveAction)
+
+    def _drop_target_group(self, y: int) -> str | None:
+        hit = self._item_at(int(y))
+        if not hit:
+            return None
+        kind, item = hit
+        return item.name if kind == "group" else item.group
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
+        if event.mimeData().hasFormat(self._DRAG_MIME):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent) -> None:
+        if not event.mimeData().hasFormat(self._DRAG_MIME):
+            event.ignore()
+            return
+        group = self._drop_target_group(event.position().y())
+        if group != self._drop_group:
+            self._drop_group = group
+            self.update()
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event: QtGui.QDragLeaveEvent) -> None:
+        self._drop_group = None
+        self.update()
+
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:
+        jid = bytes(event.mimeData().data(self._DRAG_MIME)).decode(
+            "utf-8", "replace")
+        group = self._drop_target_group(event.position().y())
+        self._drop_group = None
+        self.update()
+        if jid and group:
+            self.contact_dropped_on_group.emit(jid, group)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if (self._press_jid is not None and self._press_pos is not None
+                and event.buttons() & QtCore.Qt.MouseButton.LeftButton
+                and (event.position().toPoint() - self._press_pos)
+                .manhattanLength() >= QtWidgets.QApplication.startDragDistance()):
+            self._start_drag(self._press_jid)
+            return
         hit = self._item_at(int(event.position().y()))
         if hit is not None and hit[0] == "user":
             jid = hit[1].jid
