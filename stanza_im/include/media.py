@@ -41,8 +41,20 @@ def url_extension(url: str) -> str:
     return os.path.splitext(unquote(url_path(url)))[1].lower()
 
 
-def media_kind(url: str) -> str | None:
-    """Classify *url* as ``"image"``, ``"audio"``, ``"video"`` or ``None``."""
+def media_kind(url: str, media_type: str | None = None) -> str | None:
+    """Classify *url* as ``"image"``, ``"audio"``, ``"video"`` or ``None``.
+
+    An announced MIME *media_type* (XEP-0385 SIMS) wins over the URL extension,
+    so uploads with opaque paths are still previewed.
+    """
+    if media_type:
+        mime = media_type.lower()
+        if mime.startswith("image/"):
+            return "image"
+        if mime.startswith("audio/"):
+            return "audio"
+        if mime.startswith("video/"):
+            return "video"
     ext = url_extension(url)
     if ext in IMAGE_EXTS:
         return "image"
@@ -51,6 +63,25 @@ def media_kind(url: str) -> str | None:
     if ext in VIDEO_EXTS:
         return "video"
     return None
+
+
+def human_size(size) -> str:
+    """Human-readable byte size (e.g. ``132.5 KB``), '' for a non-positive value."""
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        return ""
+    if size <= 0:
+        return ""
+    units = ("B", "KB", "MB", "GB", "TB")
+    value = float(size)
+    index = 0
+    while value >= 1024 and index < len(units) - 1:
+        value /= 1024.0
+        index += 1
+    if index == 0:
+        return f"{int(value)} {units[index]}"
+    return f"{value:.1f} {units[index]}"
 
 
 def url_key(url: str) -> str:

@@ -2066,7 +2066,8 @@ window.__stanzaMentionRef = '';
                                 retract_by: str = "",
                                 moderatable: bool = False,
                                 reactions=None,
-                                unread_marker: bool = False) -> str:
+                                unread_marker: bool = False,
+                                media: dict | None = None) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2081,7 +2082,8 @@ window.__stanzaMentionRef = '';
                     geo_ref=reply_able_id or "", hats=hats,
                     retracted=retracted, retract_marker=retract_marker,
                     retract_reason=retract_reason, retract_by=retract_by,
-                    reactions=reactions, unread_marker=unread_marker)
+                    reactions=reactions, unread_marker=unread_marker,
+                    media=media)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -2106,7 +2108,8 @@ window.__stanzaMentionRef = '';
                         retract_by: str = "",
                         moderatable: bool = False,
                         reactions=None,
-                        unread_marker: bool = False):
+                        unread_marker: bool = False,
+                        media: dict | None = None):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2119,7 +2122,7 @@ window.__stanzaMentionRef = '';
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
                 outgoing, edited, hats, retracted, retract_marker,
                 retract_reason, retract_by, moderatable, reactions,
-                unread_marker)
+                unread_marker, media)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -2702,7 +2705,8 @@ else:
                         retract_reason: str = "",
                         retract_by: str = "",
                         moderatable: bool = False,
-                        unread_marker: bool = False):
+                        unread_marker: bool = False,
+                        media: dict | None = None):
             marker_html = (ChatThemeFactory.render_unread_marker()
                            if unread_marker else "")
             if retracted:

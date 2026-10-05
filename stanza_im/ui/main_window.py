@@ -5011,7 +5011,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              direction="incoming", unstyled=unstyled,
                              reply_able_id=reply_able_id,
                              reply_author=reply_author or frm,
-                             reply_to=reply_to, reply_id=reply_id)
+                             reply_to=reply_to, reply_id=reply_id,
+                             media=media)
 
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -5020,7 +5021,7 @@ class MainWindow(QtWidgets.QMainWindow):
             sender=sender_name,
             origin_id=reply_able_id,
             message_id=reply_able_id,
-            reply_to=reply_to, reply_id=reply_id))
+            reply_to=reply_to, reply_id=reply_id, media=media))
 
         # Unread badge + tray blink (skip when conversation is on screen)
         active = (self._chat_area_visible()
@@ -5056,14 +5057,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 timestamp=ts or _current_timestamp(), direction="outgoing",
                 message_id=stable_id,
                 reply_able_id=stable_id, reply_author=jid,
-                reply_to=reply_to, reply_id=reply_id)
+                reply_to=reply_to, reply_id=reply_id, media=media)
         self._remember_contact(jid)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=ts or _current_timestamp(), sender="Me",
             origin_id=stable_id, message_id=stable_id,
-            reply_to=reply_to, reply_id=reply_id))
+            reply_to=reply_to, reply_id=reply_id, media=media))
 
     def _resolve_mds_key(self, chat_jid: str) -> str:
         """Map an incoming MDS chat JID onto one of our conversation keys.
@@ -5143,14 +5144,14 @@ class MainWindow(QtWidgets.QMainWindow):
                          sender_jid=info.get("avatar_jid", "") or target,
                          reply_able_id=reply_able_id,
                          reply_author=reply_author or f"{room}/{nick}",
-                         reply_to=reply_to, reply_id=reply_id)
+                         reply_to=reply_to, reply_id=reply_id, media=media)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
             timestamp=ts or _current_timestamp(), sender=nick,
             origin_id=reply_able_id,
             message_id=reply_able_id,
-            reply_to=reply_to, reply_id=reply_id))
+            reply_to=reply_to, reply_id=reply_id, media=media))
         self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
         # its own roster row (skipping a conversation that is on screen).
@@ -5226,7 +5227,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              archive_id=archive_id,
                              reply_able_id=reply_ref_id,
                              reply_author=reply_author or f"{room}/{nick}",
-                             reply_to=reply_to, reply_id=reply_id)
+                             reply_to=reply_to, reply_id=reply_id,
+                             media=media)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             room, "incoming", body,
@@ -5234,7 +5236,7 @@ class MainWindow(QtWidgets.QMainWindow):
             archive_id=archive_id,
             origin_id=reply_ref_id,
             message_id=reply_ref_id,
-            reply_to=reply_to, reply_id=reply_id))
+            reply_to=reply_to, reply_id=reply_id, media=media))
         self._maybe_osd_groupchat(room, nick, body)
         is_mention = bool(self_nick and nick != self_nick
                           and mentions_nick(body, self_nick))

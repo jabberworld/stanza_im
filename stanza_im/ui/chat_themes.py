@@ -13,6 +13,7 @@ from stanza_im.include.constants import CHATSKINS_DIR
 from stanza_im.include.emoticons import smile_to_html
 from stanza_im.include.utils import escape_html, restore_url_tokens
 from stanza_im.include import hats as hats_mod
+from stanza_im.include import media as media_mod
 from stanza_im.i18n import tr
 
 _logger = logging.getLogger(__name__)
@@ -38,6 +39,9 @@ def mentions_nick(text: str, nick: str) -> bool:
     return mention_pattern(nick).search(text) is not None
 
 _MEDIA_CSS = """
+.stanza-media-card { display: block; margin: 3px 0; }
+.stanza-file-meta { display: block; margin-top: 2px; font-size: 11px;
+                    color: #777; word-break: break-all; }
 .stanza-media { display: inline-block; margin: 3px 0; vertical-align: top; }
 .stanza-media-thumb { border-radius: 6px; max-width: 100%; height: auto;
                       cursor: pointer; background: rgba(0,0,0,.06); display: block; }
@@ -465,6 +469,49 @@ class ChatThemeFactory:
 
         return tokenize_urls(text, render, geo_render)
 
+    def _media_card(self, media: dict) -> str:
+        """HTML for a media message's auxiliary info (XEP-0385 SIMS).
+
+        Renders the announced name/size line and, when the raw URL is not part
+        of the visible body, the preview itself.
+        """
+        url = str(media.get("url") or "")
+        name = str(media.get("name") or "")
+        size = media_mod.human_size(media.get("size"))
+        label = " \u00b7 ".join(part for part in (name, size) if part)
+        html = ""
+        if url and self._media is not None and self._media_mode != "none":
+            html += self._media.markup(url, media) or ""
+        if url and not html:
+            safe = escape_html(url)
+            html += f'<a href="{safe}">{safe}</a>'
+        if label:
+            html += ('<span class="stanza-file-meta">%s</span>'
+                     % escape_html(label))
+        if not html:
+            return ""
+        return '<span class="stanza-media-card">%s</span>' % html
+
+    @staticmethod
+    def _media_body(body: str, media: dict) -> tuple[str, bool]:
+        """Strip the XEP-0428 fallback range and report whether the URL stays.
+
+        Returns ``(visible_body, url_visible)``; the URL is hidden from the
+        text when it was only the fallback for the media block.
+        """
+        url = str(media.get("url") or "")
+        text = body
+        hide = media.get("hide_body")
+        if hide:
+            try:
+                start, end = int(hide[0]), int(hide[1])
+                end = min(end, len(text))
+                if 0 <= start < end:
+                    text = text[:start] + text[end:]
+            except (TypeError, ValueError, IndexError):
+                pass
+        return text, bool(url) and url in text
+
     def render_message(self, sender: str, body: str, timestamp: str,
                        direction: str, is_next: bool = False,
                        sender_color: str = "#000000",
@@ -477,7 +524,8 @@ class ChatThemeFactory:
                        retract_reason: str = "",
                        retract_by: str = "",
                        reactions=None,
-                       unread_marker: bool = False) -> str:
+                       unread_marker: bool = False,
+                       media: dict | None = None) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -495,7 +543,22 @@ class ChatThemeFactory:
         if is_next:
             key += "_next"
         template = self._templates.get(key, self._templates.get(direction, "{body}"))
-        body_html = self._transform_body(body, styled=not unstyled,
+        media_html = ""
+        body_text = body
+        if media and not retracted:
+            body_text, url_visible = self._media_body(body, media)
+            if url_visible:
+                # The URL stays in the text and the normal linkifier previews
+                # it; only the name/size line is added.
+                name = str(media.get("name") or "")
+                size = media_mod.human_size(media.get("size"))
+                label = " \u00b7 ".join(p for p in (name, size) if p)
+                if label:
+                    media_html = ('<span class="stanza-file-meta">%s</span>'
+                                  % escape_html(label))
+            else:
+                media_html = self._media_card(media)
+        body_html = self._transform_body(body_text, styled=not unstyled,
                                          highlight_nick=highlight_nick,
                                          geo_ref=geo_ref)
         if retracted:
@@ -528,6 +591,8 @@ class ChatThemeFactory:
                               'font-size:16px;font-weight:bold;margin-left:4px;'
                               'cursor:help;" title="%s">\u2715</span>'
                               % escape_html(marker_tip))
+        if media_html:
+            body_html += media_html
 
         sender_html = escape_html(sender)
         if mention and direction == "incoming" and sender:

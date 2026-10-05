@@ -83,8 +83,8 @@ class MediaPreviewService(QtCore.QObject):
     def cache(self) -> media_mod.MediaCache:
         return self._cache
 
-    def previewable(self, url: str) -> str | None:
-        kind = media_mod.media_kind(url)
+    def previewable(self, url: str, media: dict | None = None) -> str | None:
+        kind = media_mod.media_kind(url, (media or {}).get("media_type"))
         if kind and mode_allows(self._mode, kind):
             return kind
         return None
@@ -118,9 +118,13 @@ class MediaPreviewService(QtCore.QObject):
             self._thumb_uris.pop(key, None)
             self._thumb_bytes -= len(value)
 
-    def markup(self, url: str) -> str | None:
-        """Return embed HTML for *url*, or ``None`` to keep the plain link."""
-        kind = self.previewable(url)
+    def markup(self, url: str, media: dict | None = None) -> str | None:
+        """Return embed HTML for *url*, or ``None`` to keep the plain link.
+
+        *media* is the XEP-0385 SIMS dict (announced media-type/dimensions),
+        used to classify URLs with no useful extension.
+        """
+        kind = self.previewable(url, media)
         if not kind:
             return None
         # Callers pass the already HTML-escaped body text, so undo that first
