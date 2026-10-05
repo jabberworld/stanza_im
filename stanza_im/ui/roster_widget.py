@@ -339,9 +339,12 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             return
         kind, item = hit
         if kind == "group":
-            item.expanded = not item.expanded
-            self._recalc_heights()
-            self.update()
+            # Only the left button toggles the group; a right click must open
+            # the group menu without also collapsing/expanding it.
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
+                item.expanded = not item.expanded
+                self._recalc_heights()
+                self.update()
         elif kind == "user":
             self._selected_jid = item.jid
             self._press_jid = item.jid
