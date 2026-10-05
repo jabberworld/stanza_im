@@ -570,6 +570,15 @@ class ChatWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
+    def add_status_for_url(self, url: str, text: str, timestamp: str) -> None:
+        """Add a service line to every open chat that references *url*."""
+        for widget in self._tabs.values():
+            try:
+                if widget.contains_media_url(url):
+                    widget.add_status(text, timestamp)
+            except Exception:
+                pass
+
     def rerender_messages(self) -> None:
         """Re-render all open conversations (media preview settings)."""
         for widget in self._tabs.values():

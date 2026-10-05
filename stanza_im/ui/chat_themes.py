@@ -546,6 +546,9 @@ class ChatThemeFactory:
         media_html = ""
         body_text = body
         if media and not retracted:
+            if self._media is not None and media.get("hashes"):
+                self._media.register_hashes(str(media.get("url") or ""),
+                                            media.get("hashes"))
             body_text, url_visible = self._media_body(body, media)
             if url_visible:
                 # The URL stays in the text and the normal linkifier previews

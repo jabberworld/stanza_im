@@ -251,6 +251,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._media_service, media_mode, media_size)
         self._media_service.thumbnail_ready.connect(
             self._on_media_thumbnail_ready)
+        self._media_service.hash_mismatch.connect(self._on_hash_mismatch)
         self._applied_media = (media_mode, media_size)
         self._theme_factory.set_chat_font(
             self._config.appearance.chat_font,
@@ -2936,6 +2937,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("file_upload_progress", self._on_file_upload_progress)
         c.on("http_upload_oversize", self._on_http_upload_oversize)
         c.on("file_transfer_progress", self._on_file_transfer_progress)
+        c.on("hash_mismatch", self._on_file_hash_mismatch)
         c.on("file_transfer_status", self._on_file_transfer_status)
         c.on("file_offer", self._on_file_offer)
         c.on("muc_private_message", self._on_muc_private_message)
@@ -5518,6 +5520,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_media_thumbnail_ready(self, url: str, data_uri: str):
         self._chat_window.set_media_thumbnail(url, data_uri)
 
+    def _on_hash_mismatch(self, url: str, algo: str) -> None:
+        """Warn (as a chat service line) when a downloaded file's hash differs.
+
+        Only shown when ``files.verify_hashes`` is on; the verification itself
+        only runs when the sender announced a hash, so there is never a warning
+        for files that carry none.
+        """
+        if not bool(getattr(self._config.files, "verify_hashes", True)):
+            return
+        text = tr("media_hash_mismatch", algo=algo)
+        timestamp = _current_timestamp()
+        self._chat_window.add_status_for_url(url, text, timestamp)
+
     def _on_media_copy_requested(self, url: str):
         QtWidgets.QApplication.clipboard().setText(url or "")
 
@@ -5983,6 +5998,18 @@ class MainWindow(QtWidgets.QMainWindow):
                                 time.strftime("%H:%M:%S"))
         if direction == "out":
             self._check_uploads_finished(jid)
+
+    def _on_file_hash_mismatch(self, jid: str, path: str, algo: str) -> None:
+        """A received Jingle file's hash differs from the offered one."""
+        if not bool(getattr(self._config.files, "verify_hashes", True)):
+            return
+        bare = jid.split("/")[0]
+        chat = (self._chat_window.get_chat(bare)
+                or self._chat_window.get_chat(jid))
+        if chat is None:
+            return
+        chat.add_status(tr("media_hash_mismatch", algo=algo),
+                        time.strftime("%H:%M:%S"))
 
     def _on_file_transfer_status(self, jid: str, key: str):
         chat = (self._chat_window.get_chat(jid.split("/")[0])

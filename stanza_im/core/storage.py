@@ -115,7 +115,7 @@ class Config:
         "privacy": {"send_software": True, "send_typing_notifications": True,
                      "send_activity_notifications": True, "send_chatstates": True},
         "files": {"auto_accept": False, "download_notifications": True,
-                  "download_dir": ""},
+                  "download_dir": "", "verify_hashes": True},
         "devices": {"audio_input": "", "audio_output": "", "video_input": ""},
         "calls": {"auto_accept": False},
         "appearance": {"chat_theme": "", "muc_theme": "",

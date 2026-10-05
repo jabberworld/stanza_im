@@ -1668,6 +1668,18 @@ class ChatWidget(QtWidgets.QWidget):
             del self._status_lines[:len(self._status_lines) - _STATUS_MAX]
         self._view.add_status(text, timestamp)
 
+    def contains_media_url(self, url: str) -> bool:
+        """Whether a loaded message references the media *url*."""
+        if not url:
+            return False
+        for entry in list(self._history) + list(self._messages):
+            media = entry.get("media")
+            if media and str(media.get("url") or "") == url:
+                return True
+            if url in str(entry.get("body") or ""):
+                return True
+        return False
+
     def show_voice_prompt(self) -> None:
         """Prompt (once per 10 s) to ask for voice when a send was rejected."""
         from stanza_im.include.utils import escape_html

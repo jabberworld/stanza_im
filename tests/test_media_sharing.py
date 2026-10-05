@@ -143,6 +143,8 @@ check("an OOB url is attached as a fallback",
 
 # 6. XEP-0300 hashes ----------------------------------------------------------
 import tempfile as _tf  # noqa: E402
+from stanza_im.include import media as _media_mod  # noqa: E402
+
 _fd, _path = _tf.mkstemp()
 os.write(_fd, b"hello")
 os.close(_fd)
@@ -152,6 +154,19 @@ check("sha-256 and sha-1 are computed",
       _hashes.get("sha-256")
       == "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
       and _hashes.get("sha-1") == "qvTGHdzF6KLavt4PO0gs2a6pQ00=")
+check("a matching hash verifies",
+      _media_mod.verify_hashes(b"hello", _hashes) == [])
+check("a wrong hash is reported",
+      _media_mod.verify_hashes(b"other", _hashes)
+      == ["sha-256", "sha-1"])
+check("no announced hash means nothing to verify",
+      _media_mod.verify_hashes(b"hello", {}) == []
+      and _media_mod.verify_hashes(b"hello", None) == [])
+check("an unknown algorithm is skipped",
+      _media_mod.verify_hashes(b"hello", {"not-a-real-algo": "x"}) == [])
+check("the hash verification setting defaults to on",
+      __import__("stanza_im.core.storage",
+                 fromlist=["Config"]).Config().files.verify_hashes is True)
 
 print()
 if FAILURES:

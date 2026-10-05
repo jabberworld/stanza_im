@@ -65,6 +65,28 @@ def media_kind(url: str, media_type: str | None = None) -> str | None:
     return None
 
 
+def verify_hashes(raw: bytes, expected: dict | None) -> list[str]:
+    """Return the XEP-0300 algorithms of *expected* whose base64 hash differs.
+
+    Algorithms that Python's ``hashlib`` does not know are skipped, and an
+    empty *expected* yields an empty list (nothing to verify).
+    """
+    import base64
+    bad: list[str] = []
+    for algo, value in (expected or {}).items():
+        if not algo or not value:
+            continue
+        try:
+            hasher = hashlib.new(str(algo).replace("-", ""))
+        except ValueError:
+            continue
+        hasher.update(raw)
+        actual = base64.b64encode(hasher.digest()).decode("ascii")
+        if actual != value:
+            bad.append(str(algo))
+    return bad
+
+
 def human_size(size) -> str:
     """Human-readable byte size (e.g. ``132.5 KB``), '' for a non-positive value."""
     try:

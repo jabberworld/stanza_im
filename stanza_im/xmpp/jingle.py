@@ -814,6 +814,7 @@ class JingleFileTransferManager:
                 pass
             session.ibb_reader = None
         session.state = "done"
+        self._verify_received(session)
         self._emit("file_transfer_progress", session.peer_bare, "done",
                    "", session.path, "in")
         await self._send_received(session)
@@ -926,8 +927,32 @@ class JingleFileTransferManager:
             return
         await self._close_writer(writer)
         session.state = "done"
+        self._verify_received(session)
         self._emit("file_transfer_progress", session.peer_bare, "done",
                    "", session.path, "in")
+
+    def _verify_received(self, session: JingleSession) -> None:
+        """Emit ``hash_mismatch`` when a received file's XEP-0300 hash differs.
+
+        Only runs when the offer announced a hash, so a peer that sends none is
+        never reported.
+        """
+        meta = getattr(session, "meta", None)
+        if meta is None or not session.path:
+            return
+        expected = dict(getattr(meta, "hashes", None) or {})
+        if not expected and getattr(meta, "hash_algo", ""):
+            expected[meta.hash_algo] = getattr(meta, "hash_value", "")
+        if not expected:
+            return
+        try:
+            with open(session.path, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            return
+        from stanza_im.include import media as media_mod
+        for algo in media_mod.verify_hashes(raw, expected):
+            self._emit("hash_mismatch", session.peer_bare, session.path, algo)
 
     @staticmethod
     async def _close_writer(writer) -> None:

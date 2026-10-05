@@ -44,6 +44,7 @@ class MediaPreviewService(QtCore.QObject):
 
     thumbnail_ready = QtCore.pyqtSignal(str, str)  # url, png data-URI
     failed = QtCore.pyqtSignal(str)                # url
+    hash_mismatch = QtCore.pyqtSignal(str, str)    # url, algo
 
     MAX_DOWNLOAD = 64 * 1024 * 1024
     _UA = "StanzaIM/1.0 (media preview)"
@@ -56,6 +57,8 @@ class MediaPreviewService(QtCore.QObject):
         self._pending: set[str] = set()
         self._thumb_uris: dict[str, str] = {}
         self._thumb_bytes = 0
+        self._hashes: dict[str, dict[str, str]] = {}
+        self._reported_mismatch: set[tuple[str, str]] = set()
 
     # ── Policy ────────────────────────────────────────────────────
 
@@ -209,6 +212,23 @@ class MediaPreviewService(QtCore.QObject):
         finally:
             self._pending.discard(url)
 
+    def register_hashes(self, url: str, hashes: dict | None) -> None:
+        """Remember the announced XEP-0300 hashes of *url* for verification."""
+        if url and hashes:
+            self._hashes[url] = dict(hashes)
+
+    def _verify(self, url: str, raw: bytes) -> None:
+        expected = self._hashes.get(url)
+        if not expected:
+            return
+        for algo in media_mod.verify_hashes(raw, expected):
+            key = (url, algo)
+            if key in self._reported_mismatch:
+                continue
+            self._reported_mismatch.add(key)
+            logger.warning("media hash mismatch for %s (%s)", url, algo)
+            self.hash_mismatch.emit(url, algo)
+
     def _download(self, url: str) -> bytes:
         import urllib.request
         request = urllib.request.Request(url, headers={"User-Agent": self._UA})
@@ -230,7 +250,9 @@ class MediaPreviewService(QtCore.QObject):
                 if total > self.MAX_DOWNLOAD:
                     raise RuntimeError("file too large")
                 chunks.append(chunk)
-            return b"".join(chunks)
+            raw = b"".join(chunks)
+        self._verify(url, raw)
+        return raw
 
     def _make_thumb(self, raw: bytes) -> bytes:
         image = QtGui.QImage()
