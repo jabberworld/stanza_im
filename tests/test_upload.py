@@ -186,6 +186,19 @@ check("dialog ok emits caption",
       started == ["Check this out"] and not dlg._ok_btn.isEnabled())
 check("dialog preview helper", _preview_pixmap(doc_path, dlg).isNull() is False)
 
+# The dialog opens right after a Ctrl+V paste: the caption must have focus and
+# Enter must start the upload without touching the mouse.
+dlg_focus = FileTransferDialog([img_path])
+dlg_focus.show()
+check("the caption has focus when the dialog opens",
+      dlg_focus.focusWidget() is dlg_focus._caption)
+entered = []
+dlg_focus.upload_started.connect(entered.append)
+dlg_focus._caption.setText("hi")
+dlg_focus._caption.returnPressed.emit()
+check("Enter in the caption starts the upload",
+      entered == ["hi"] and not dlg_focus._ok_btn.isEnabled())
+
 # 8a. transfer speed + ETA -----------------------------------------------------
 check("speed format", format_speed(1536) == "1.5 KB/s"
       and format_speed(0) == "" and format_speed(-5) == "")

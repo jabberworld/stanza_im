@@ -193,6 +193,7 @@ class FileTransferDialog(QtWidgets.QDialog):
         layout.addWidget(QtWidgets.QLabel(tr("ft_upload_caption"), self))
         self._caption = QtWidgets.QLineEdit(self)
         self._caption.setPlaceholderText(tr("ft_upload_caption_placeholder"))
+        self._caption.returnPressed.connect(self._on_ok)
         layout.addWidget(self._caption)
 
         buttons = QtWidgets.QHBoxLayout()
@@ -206,6 +207,14 @@ class FileTransferDialog(QtWidgets.QDialog):
 
         self._ok_btn.clicked.connect(self._on_ok)
         self._cancel_btn.clicked.connect(self.reject)
+        # The caption is the natural target: the dialog usually opens right
+        # after a Ctrl+V image paste, so the user can type and press Enter
+        # without touching the mouse.
+        self._caption.setFocus()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._caption.setFocus()
 
     @property
     def paths(self) -> list[str]:
