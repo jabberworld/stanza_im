@@ -1677,7 +1677,12 @@ class MainWindow(QtWidgets.QMainWindow):
         info = self._participant_info(room, nick) if room else {}
         contact = (self._client.get_contact(info.get("real_jid") or target)
                    if self._client else None)
-        status = info.get("show") or getattr(contact, "status", "") or "online"
+        if room and not info:
+            # The occupant is no longer in the room: show the row offline (it
+            # stays in the group for the rest of the session).
+            status = "offline"
+        else:
+            status = info.get("show") or getattr(contact, "status", "") or "online"
         name = (info.get("nick") or nick
                 or getattr(contact, "name", "") or target)
         fields = {
@@ -1704,26 +1709,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pm_roster.add(target)
         self._schedule_roster_repaint()
 
-    def _maybe_drop_pm_roster(self, target: str) -> None:
-        """Remove a private-message row that is neither open nor unread."""
-        if target not in self._pm_roster:
-            return
-        if self._read_state(target)["unread"]:
-            return
-        if self._chat_window is not None and self._chat_window.has_chat(target):
-            return
-        self._pm_roster.discard(target)
-        self._pm_targets.pop(target, None)
-        self._roster.remove_user(target)
-        self._maybe_remove_empty_pm_group()
-        self._schedule_roster_repaint()
+    def _sync_all_pm_roster(self) -> None:
+        """Re-add the private-message rows after the roster was rebuilt.
 
-    def _maybe_remove_empty_pm_group(self) -> None:
-        """Hide the private-messages group while it holds no row."""
-        group = tr("roster_group_personal_messages")
-        if self._pm_roster:
-            return
-        self._roster.remove_group(group)
+        A private-message row lives for the whole session, so a full roster
+        refresh (``_rebuild_roster`` clears the widget) must restore it from
+        ``_pm_targets`` — otherwise the group disappears until the next private
+        message.
+        """
+        for target, (room, nick) in list(self._pm_targets.items()):
+            self._sync_pm_roster(target, room, nick)
 
     def _sync_all_conference_roster(self):
         for room in self._muc_self_nicks:
@@ -3150,6 +3145,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 300, lambda: self._stack.setCurrentIndex(_PAGE_ROSTER))
         self._rebuild_roster(items)
         self._sync_all_conference_roster()
+        self._sync_all_pm_roster()
         self._recount_groups()
         self._roster.sort_and_update()
         # Prefetch bookmarks so MUC bookmark buttons are correct before the
@@ -5333,19 +5329,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if nick == self._muc_self_nicks.get(room):
             self._sync_conference_roster(room)
         # Keep the private-message row of this occupant in step with presence.
+        # The row stays for the whole session: an occupant who left the room is
+        # shown offline instead of being removed.
         for target, (target_room, target_nick) in list(self._pm_targets.items()):
             if target_room == room and target_nick == nick:
                 if show == "unavailable":
-                    self._pm_targets.pop(target, None)
-                    if self._chat_window is not None \
-                            and self._chat_window.has_chat(target):
-                        self._roster.update_user(target, status="offline",
-                                                 icon_key=show_to_icon_key("offline"))
-                    else:
-                        self._pm_roster.discard(target)
-                        self._roster.remove_user(target)
-                        self._maybe_remove_empty_pm_group()
-                        self._schedule_roster_repaint()
+                    self._roster.update_user(
+                        target, status="offline",
+                        icon_key=show_to_icon_key("offline"))
+                    self._schedule_roster_repaint()
                 else:
                     self._sync_pm_roster(target, room, nick)
 
@@ -7030,7 +7022,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """A chat tab was closed — release its history DB connection."""
         from stanza_im.core import history
         history.close(jid)
-        self._maybe_drop_pm_roster(jid)
+        # A private-message row stays in the «Личные сообщения» group for the
+        # whole session (see _sync_pm_roster); closing the tab does not drop it.
         self._trim_main_process_memory()
 
     def _toggle_visibility(self):

@@ -254,6 +254,25 @@ win._on_muc_private_message(ROOM, "alice", "psst", "2026-10-02T10:01:00Z")
 check("a private message in the focused chat is not unread",
       win._read_state(target)["unread"] == 0)
 
+# 3b. a private-message row stays in the group for the whole session ----------
+win = make_window()
+win._on_muc_private_message(ROOM, "alice", "psst", "2026-10-02T10:00:00Z")
+target = f"{ROOM}/alice"
+check("the private row is in the personal-messages group",
+      any(u.jid == target
+          and u.group == tr("roster_group_personal_messages")
+          for u in win._roster._users))
+win._on_groupchat_presence(ROOM, "alice", "unavailable", "")
+row = next((u for u in win._roster._users if u.jid == target), None)
+check("a participant who left stays in the group offline",
+      row is not None and row.status == "offline")
+win._roster.clear()
+win._sync_all_pm_roster()
+check("the private row survives a full roster rebuild",
+      any(u.jid == target
+          and u.group == tr("roster_group_personal_messages")
+          for u in win._roster._users))
+
 # 4. opening a conference from the roster does not mark it read ----------------
 win = make_window(chats=(ROOM,))
 win._bump_unread(ROOM, mention=True)

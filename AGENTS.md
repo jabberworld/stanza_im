@@ -580,10 +580,14 @@ conversation its own row in the «Личные сообщения» group
 (`roster_group_personal_messages`) keyed by the chat key (the real JID when the
 room revealed one, otherwise `room/nick`), which is exactly where its unread
 counter lives; `_on_muc_private_message` and `_on_muc_participant_clicked`
-create/refresh it, `_on_groupchat_presence` keeps it in step with presence, and
-`_maybe_drop_pm_roster` (from `_on_chat_closed`) drops the row — and the group
-itself through `RosterWidget.remove_group` — once the tab is closed and nothing
-is left unread. The badge label is `RosterStyle.badge_text`: `N`, or
+create/refresh it, and `_on_groupchat_presence` keeps it in step with presence —
+an occupant who **leaves the room stays in the group shown offline** (the row
+lives for the whole session and is only cleared on logout by
+`_reset_account_ui`); a full roster refresh restores it through
+`_sync_all_pm_roster` (called from `_on_roster_received` after
+`_rebuild_roster`, which clears the widget). The group shows the usual
+online/total count through `_recount_groups`. The badge label is
+`RosterStyle.badge_text`: `N`, or
 `N / M` when the conversation has `M` unread messages naming our own nickname.
 Contacts sort alphabetically inside a group by default; `set_sort_by_status`
 (the View menu's «Сортировать по статусу», default on) instead ranks them by

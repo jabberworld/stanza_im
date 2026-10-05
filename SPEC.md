@@ -777,10 +777,11 @@ known-contacts registry. A conference renders as one row per joined room
 attributed to its sender, so it gets its own row in the private-messages group
 keyed by the chat key (the real JID when the room revealed one, otherwise
 `room/nick`) — `MainWindow._sync_pm_roster` creates/updates it when the
-message arrives or the participant's chat is opened, and
-`_maybe_drop_pm_roster` drops it (with the group itself,
-`RosterWidget.remove_group`) once the tab is closed and nothing is left
-unread. Presence changes of that occupant keep the row in step.
+message arrives or the participant's chat is opened. The row lives for the
+whole session (cleared only on logout by `_reset_account_ui`); an occupant who
+leaves the room is shown **offline**, and a full roster refresh restores the
+rows through `_sync_all_pm_roster` (called after `_rebuild_roster`). The group
+shows the usual online/total count.
 
 ### 7.3 Interactions
 
