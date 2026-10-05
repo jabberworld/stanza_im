@@ -918,7 +918,11 @@ by timestamp via `_entry_before_or_at`, else paging the local archive with
 the last message the user read. The anchor is applied once and dropped. The
 parked scroll is **suspended** meanwhile (`ChatView._scroll_suspended`), so the
 view does not report an "at the bottom" position for a document that is still
-loading and the fresh window cannot mark itself read on its own.
+loading and the fresh window cannot mark itself read on its own. The explicit
+**«Отметить прочитанным»** actions (a contact's context menu, before «Очистить
+историю», and «Отметить все прочитанным» in the Actions menu) share the same
+`MainWindow._mark_chat_read` helper: it clears the counters, removes the
+divider of an open tab and publishes the XEP-0490 displayed state.
 
 **Resuming an unread conversation (full window + unread separator)**: an
 unread chat opens with **every** new message already on screen — the window is

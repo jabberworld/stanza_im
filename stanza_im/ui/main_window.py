@@ -1258,6 +1258,9 @@ class MainWindow(QtWidgets.QMainWindow):
         history_act = actions_menu.addAction(self._menu_icon("history.png"),
                                              tr("menu_history"))
         history_act.triggered.connect(self._on_history_manager)
+        mark_all_act = actions_menu.addAction(
+            self._menu_icon("ok.png"), tr("menu_mark_all_read"))
+        mark_all_act.triggered.connect(self._mark_all_chats_read)
         actions_menu.addSeparator()
         plugins_act = actions_menu.addAction(self._menu_icon("exec.png"),
                                              tr("menu_plugins"))
@@ -4332,6 +4335,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         lambda checked=False: defer(
                             lambda: self._on_report_contact(bare)))
         menu.addSeparator()
+        menu.addAction(self._menu_icon("ok.png"), tr("ctx_mark_read"),
+                       lambda: self._mark_chat_read(jid))
         menu.addAction(self._menu_icon("clear.png"),
                        tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
         if is_conf:
@@ -4833,14 +4838,32 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._chat_window.current_jid() != jid:
             return
-        chat = self._chat_window.get_chat(jid)
+        self._mark_chat_read(jid)
+
+    def _mark_chat_read(self, jid: str) -> None:
+        """Mark *jid* read: clear its counters, divider and XEP-0490 state.
+
+        Used both when the active chat reaches its newest message and by the
+        explicit «Отметить прочитанным» actions, so the two never diverge.
+        """
+        if not jid:
+            return
         self._reset_unread(jid)
+        chat = (self._chat_window.get_chat(jid)
+                if self._chat_window is not None else None)
         if chat is not None:
             # The unread divider has served its purpose: it must not survive
             # into the next re-render now that the counters are gone.
             chat.mark_read()
         if self._client:
             self._client.mds_mark_displayed(jid)
+
+    def _mark_all_chats_read(self) -> None:
+        """Mark every conversation with unread messages read."""
+        for jid in list(self._unread_chats):
+            entry = self._unread_chats.get(jid)
+            if entry and entry.get("unread"):
+                self._mark_chat_read(jid)
 
 
     def _flush_mds_pending(self):

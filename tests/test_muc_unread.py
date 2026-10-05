@@ -329,6 +329,21 @@ win._reset_unread("bob@example.com")
 check("marking read leaves the unread set",
       "bob@example.com" not in win._unread_jids and win._unread_total == 0)
 
+# 5b. the explicit mark-read actions -----------------------------------------
+win = make_window(chats=("bob@example.com", "carol@example.com"))
+win._mark_chat_read = MainWindow._mark_chat_read.__get__(win)
+win._mark_all_chats_read = MainWindow._mark_all_chats_read.__get__(win)
+win._bump_unread("bob@example.com")
+win._bump_unread("carol@example.com", mention=True)
+win._mark_chat_read("bob@example.com")
+check("marking one chat read clears only it",
+      win._read_state("bob@example.com")["unread"] == 0
+      and win._read_state("carol@example.com")["unread"] == 1)
+win._mark_all_chats_read()
+check("marking all read clears every unread chat",
+      win._read_state("carol@example.com")["unread"] == 0
+      and not win._unread_jids)
+
 # 6b. the seen point never moves backwards (no repeated subtraction) ------------
 win = make_window(chats=("bob@example.com",))
 win._unread_chats["bob@example.com"] = unread_state.blank()

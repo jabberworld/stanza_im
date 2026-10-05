@@ -550,9 +550,12 @@ check("a joined room is restored only when it has a read anchor",
 
 reached = method_source(_mw_src, "_on_chat_reached_bottom")
 check("reaching the newest message is the one point that marks it read",
-      "self._reset_unread(jid)" in reached
-      and "chat.mark_read()" in reached
-      and "mds_mark_displayed(jid)" in reached)
+      "self._mark_chat_read(jid)" in reached)
+_mark_read = method_source(_mw_src, "_mark_chat_read")
+check("marking read clears the counters, divider and MDS state",
+      "self._reset_unread(jid)" in _mark_read
+      and "chat.mark_read()" in _mark_read
+      and "mds_mark_displayed(jid)" in _mark_read)
 check("a background tab reaching the bottom stays unread",
       "if not jid or not self._chat_area_active():" in reached
       and "self._chat_window.current_jid() != jid" in reached)

@@ -1485,7 +1485,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   message in the view they are looking at (`ChatView.bottom_reached` →
   `MainWindow._on_chat_reached_bottom`); a background tab scrolling to its end
   never clears its counters. Opening it, switching to it, sending a message
-  into it and a remote XEP-0490 state do not clear them either.
+  into it and a remote XEP-0490 state do not clear them either. The explicit
+  «Отметить прочитанным» (contact context menu) and «Отметить все прочитанным»
+  (Actions menu) share `MainWindow._mark_chat_read`, which clears the counters,
+  the divider and publishes the XEP-0490 state.
 - An incoming message is published as XEP-0490 displayed only when the view is
   at the bottom (`MainWindow._chat_at_bottom` → `ChatWidget.at_bottom`), so a
   message that lands while the user reads further up is not advertised as seen.
