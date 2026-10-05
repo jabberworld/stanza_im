@@ -238,10 +238,10 @@ class _JumpButtonMixin:
         ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
         same = (ref, ts, sid) == (self._last_seen_ref, self._last_seen_ts,
                                   self._last_seen_sid)
-        logger.debug("SEEN[emit] ref=%r ts=%r sid=%r dup=%s empty=%s",
-                     ref, ts, sid, same, not (ref or ts or sid))
         if same:
             return
+        logger.debug("SEEN[emit] ref=%r ts=%r sid=%r empty=%s",
+                     ref, ts, sid, not (ref or ts or sid))
         self._last_seen_ref, self._last_seen_ts, self._last_seen_sid = (
             ref, ts, sid)
         if not (ref or ts or sid):
@@ -252,6 +252,11 @@ class _JumpButtonMixin:
             pass
 
     def _maybe_emit_last_seen(self):
+        # The seen point only matters while the view is scrolled up; a view at
+        # the bottom is "read" and its owner (the bottom report) handles that.
+        # Skipping here avoids a needless JS round-trip and log line per poll.
+        if not self.is_scrolled_up():
+            return
         try:
             self._find_last_visible_ref()
         except Exception:
@@ -773,8 +778,9 @@ if HAS_WEBENGINE:
                 ref = str(result.get("ref") or "")
                 ts = str(result.get("ts") or "")
                 sid = str(result.get("sid") or "")
-                logger.debug("SEEN[view] ref=%r ts=%r sid=%r raw=%r",
-                             ref, ts, sid, result)
+                if (ref, ts, sid) != getattr(self, "_last_seen_cache", None):
+                    logger.debug("SEEN[view] ref=%r ts=%r sid=%r raw=%r",
+                                 ref, ts, sid, result)
                 self._last_seen_cache = (ref, ts, sid)
                 self._emit_last_seen(ref, ts, sid)
             except Exception:
@@ -885,7 +891,10 @@ if HAS_WEBENGINE:
                     "window.__stanzaNotesEnabled = %s;"
                     % ("true" if getattr(self, "_notes_enabled", False)
                        else "false"))
-                self._scroll_poll.start()
+                # Only poll while the view is on screen; a background tab is
+                # started by ``showEvent`` when it is first shown.
+                if self.isVisible():
+                    self._scroll_poll.start()
             else:
                 self._load_failures += 1
                 logger.warning("chat page load finished with error: %s",
@@ -1551,7 +1560,19 @@ window.__stanzaMentionRef = '';
 
         def hideEvent(self, event):
             self._close_stanza_menu()
+            # A hidden tab cannot be scrolled or zoomed and no control can be
+            # clicked in it, so stop polling until it is shown again.
+            poll = getattr(self, "_scroll_poll", None)
+            if poll is not None:
+                poll.stop()
             super().hideEvent(event)
+
+        def showEvent(self, event):
+            super().showEvent(event)
+            poll = getattr(self, "_scroll_poll", None)
+            if poll is not None and getattr(self, "_ready", False):
+                poll.start()
+                self._poll_scroll_position()
 
         def _set_jump_visible(self, show: bool):
             self.evaluate_js(

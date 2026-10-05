@@ -623,6 +623,17 @@ check("the widget drives the floating @ button",
       "self._view.set_mention_count(count)"
       in method_source(_cw_src, "_update_mention_button"))
 
+# 15. the scroll poll only runs while the view is on screen --------------------
+check("the scroll poll stops while the tab is hidden",
+      "poll.stop()" in method_source(_cv_src, "hideEvent"))
+check("the scroll poll starts when the tab is shown",
+      "poll.start()" in method_source(_cv_src, "showEvent"))
+check("the scroll poll starts on load only when visible",
+      "if self.isVisible():" in on_load)
+check("last-seen is not searched while the view sits at the bottom",
+      "if not self.is_scrolled_up():" in
+      method_source(_cv_src, "_maybe_emit_last_seen"))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
