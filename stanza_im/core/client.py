@@ -1386,6 +1386,11 @@ class JabberClient:
             "Message Reactions",
             MatchXPath("%s/{%s}reactions" % (msg_ns, NS_REACTIONS)),
             self._on_bodyless_reactions_stanza))
+        # XEP-0333 chat markers: a bodyless ``<displayed id='…'/>``.
+        self.xmpp.register_handler(CoroutineCallback(
+            "Chat Marker",
+            MatchXPath("%s/{%s}displayed" % (msg_ns, NS_CHAT_MARKERS)),
+            self._on_bodyless_chat_marker_stanza))
         # XEP-0045 §7.13 voice request — a bodyless ``jabber:x:data`` message
         # (no <body>, so slixmpp's IM handler never fires).
         self.xmpp.register_handler(CoroutineCallback(
@@ -1449,6 +1454,17 @@ class JabberClient:
             self._on_groupchat_message(msg)
         else:
             self._on_message(msg)
+
+    async def _on_bodyless_chat_marker_stanza(self, msg) -> None:
+        """A bodyless XEP-0333 ``<displayed id='…'/>`` (peer read our message)."""
+        xml = getattr(msg, "xml", None)
+        displayed = (xml.find("{%s}displayed" % NS_CHAT_MARKERS)
+                     if xml is not None else None)
+        if displayed is None:
+            return
+        ref = str(displayed.get("id", "") or "")
+        if ref:
+            self.emit("chat_marker_displayed", str(msg["from"]), ref)
 
     async def _on_bodyless_retract_stanza(self, msg) -> None:
         """Route a bodyless XEP-0424/0425 retraction to the right handler.
@@ -2067,6 +2083,9 @@ class JabberClient:
             self._attach_replace(msg, replace_id)
         if mtype == "chat":
             msg["request_receipt"] = True  # XEP-0184
+        if mtype in ("chat", "groupchat") and not replace_id:
+            # XEP-0333: mark the message so the peer may return a <displayed/>.
+            ET.SubElement(msg.xml, "{%s}markable" % NS_CHAT_MARKERS)
         if mhtml:
             msg["html"]["body"] = mhtml
         if media:

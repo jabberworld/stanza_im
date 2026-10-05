@@ -2965,6 +2965,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("typing", self._on_typing)
         c.on("chatstate_received", self._on_chatstate_received)
         c.on("receipt_delivered", self._on_receipt_delivered)
+        c.on("chat_marker_displayed", self._on_receipt_delivered)
         c.on("muc_joined", self._on_muc_joined)
         c.on("muc_subject_changed", self._on_muc_subject_changed)
         c.on("muc_info_received", self._on_muc_info_received)

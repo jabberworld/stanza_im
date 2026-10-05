@@ -61,11 +61,13 @@ class FileMeta:
     desc: str = ""
     hash_algo: str = ""
     hash_value: str = ""
+    hashes: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {"name": self.name, "size": self.size,
                 "media_type": self.media_type, "date": self.date,
-                "desc": self.desc, "hash_algo": self.hash_algo}
+                "desc": self.desc, "hash_algo": self.hash_algo,
+                "hashes": dict(self.hashes)}
 
 
 def build_file_element(meta: FileMeta) -> ET.Element:
@@ -81,10 +83,15 @@ def build_file_element(meta: FileMeta) -> ET.Element:
         ET.SubElement(file_el, _q(NS_FT, "desc")).text = meta.desc
     if meta.size:
         ET.SubElement(file_el, _q(NS_FT, "size")).text = str(int(meta.size))
-    if meta.hash_algo:
+    hashes = dict(meta.hashes)
+    if meta.hash_algo and meta.hash_value:
+        hashes.setdefault(meta.hash_algo, meta.hash_value)
+    for algo, value in hashes.items():
+        if not algo or not value:
+            continue
         hash_el = ET.SubElement(file_el, _q(NS_HASHES, "hash"))
-        hash_el.set("algo", meta.hash_algo)
-        hash_el.text = meta.hash_value or ""
+        hash_el.set("algo", algo)
+        hash_el.text = value
     return file_el
 
 
@@ -107,9 +114,13 @@ def parse_file_element(file_el: ET.Element) -> FileMeta:
             meta.date = text
         elif tag == "desc":
             meta.desc = text
-        elif tag == "hash" and not meta.hash_algo:
-            meta.hash_algo = child.get("algo", "")
-            meta.hash_value = text
+        elif tag == "hash":
+            algo = child.get("algo", "")
+            if algo and text:
+                meta.hashes[algo] = text
+                if not meta.hash_algo:
+                    meta.hash_algo = algo
+                    meta.hash_value = text
     return meta
 
 
@@ -245,17 +256,20 @@ def _safe_filename(name: str) -> str:
     return cleaned or "file"
 
 
-def _sha1_b64(path: str) -> tuple[str, int]:
-    digest = hashlib.sha1()
+def _file_hashes(path: str) -> tuple[dict, int]:
+    """Return (XEP-0300 base64 hashes, size) of *path* (sha-256 + sha-1)."""
+    digests = {"sha-256": hashlib.sha256(), "sha-1": hashlib.sha1()}
     size = 0
     with open(path, "rb") as fh:
         while True:
             chunk = fh.read(1024 * 1024)
             if not chunk:
                 break
-            digest.update(chunk)
+            for digest in digests.values():
+                digest.update(chunk)
             size += len(chunk)
-    return base64.b64encode(digest.digest()).decode("ascii"), size
+    return ({algo: base64.b64encode(d.digest()).decode("ascii")
+             for algo, d in digests.items()}, size)
 
 
 class JingleFileTransferManager:
@@ -298,7 +312,7 @@ class JingleFileTransferManager:
                        "not a file", path, "out")
             return
         try:
-            hash_b64, size = await asyncio.to_thread(_sha1_b64, path)
+            hashes, size = await asyncio.to_thread(_file_hashes, path)
         except OSError as exc:
             self._emit("file_transfer_progress", jid, "error",
                        str(exc), path, "out")
@@ -306,7 +320,9 @@ class JingleFileTransferManager:
         meta = FileMeta(name=os.path.basename(path), size=size,
                         media_type=mimetypes.guess_type(path)[0]
                         or "application/octet-stream",
-                        hash_algo="sha-1", hash_value=hash_b64)
+                        hashes=hashes,
+                        hash_algo="sha-1",
+                        hash_value=hashes.get("sha-1", ""))
         peer_bare = str(jid).split("/")[0]
         session = JingleSession(
             sid=uuid.uuid4().hex, peer_bare=peer_bare,

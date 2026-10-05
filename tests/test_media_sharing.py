@@ -168,6 +168,18 @@ check("the hash verification setting defaults to on",
       __import__("stanza_im.core.storage",
                  fromlist=["Config"]).Config().files.verify_hashes is True)
 
+# 7. Jingle file description multi-hash (XEP-0300) ----------------------------
+from stanza_im.xmpp import jingle as _jingle  # noqa: E402
+
+_meta = _jingle.FileMeta(name="f.bin", size=3,
+                         hashes={"sha-256": "AA", "sha-1": "BB"})
+_el = _jingle.build_file_element(_meta)
+_parsed = _jingle.parse_file_element(_el)
+check("Jingle file hashes round-trip",
+      _parsed.hashes == {"sha-256": "AA", "sha-1": "BB"})
+check("the legacy single hash mirrors the first",
+      _parsed.hash_algo in ("sha-256", "sha-1") and _parsed.hash_value)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
