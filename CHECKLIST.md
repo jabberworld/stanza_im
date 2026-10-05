@@ -83,13 +83,13 @@ notes of the applicable suites).
 | XEP | Status | Notes |
 |-----|--------|-------|
 | XEP-0077 (In-Band Registration) | ✅ | service registration + account creation |
-| XEP-0066 (Out-of-Band Data) | ✅ | plugin registered; sharing uses Jingle/HTTP Upload |
+| XEP-0066 (Out-of-Band Data) | ✅ | plugin registered; sharing uses Jingle/HTTP Upload; incoming `<x><url/>` parsed as a media fallback |
 | XEP-0392 (Consistent Color Generation) | ✅ | HSLuv hue→RGB for XEP-0317 hat colours |
 | XEP-0393 (Message Styling) | ✅ | `*bold*`/`_em_`/`` `code` ``/quote/pre |
 | XEP-0424 (Message Retraction) | ✅ | own-message retraction + tombstones |
 | XEP-0425 (Moderated Message Retraction) | ✅ | MUC moderator retraction |
 | XEP-0157 (Contact Addresses for XMPP Services) | ✅ | server contacts shown in «О сервере» |
-| XEP-0385 (Stateless Inline Media Sharing) | ❌ | not implemented |
+| XEP-0385 (Stateless Inline Media Sharing) | ✅ | SIMS metadata parsed/rendered (file card + preview) and attached to uploaded files, with XEP-0372/0300/0428/0066 companions |
 | XEP-0433 (Extended Channel Search) | ❌ | not implemented |
 
 ## Future development
@@ -105,7 +105,7 @@ Stanza IM does not implement any of them (except where noted).
 | XEP-0401 (Easy User Onboarding) | ❌ | |
 | XEP-0379 (Pre-Authenticated Roster Subscription) | ❌ | |
 | XEP-0445 (Pre-Authenticated In-Band Registration) | ❌ | |
-| XEP-0333 (Displayed Markers) | ⚠️ | only as an optional XEP-0490 MDS server-assist marker |
+| XEP-0333 (Displayed Markers) | ✅ | `<markable/>` on outgoing messages, incoming `<displayed/>` marks delivered, plus the XEP-0490 MDS server-assist marker |
 | XEP-0369 (MIX) | ❌ | |
 | XEP-0380 / XEP-0420 (E2EE tagging / Stanza Content Encryption) | ❌ | |
 | XEP-0384 / XEP-0396 (OMEMO) | ❌ | |

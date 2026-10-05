@@ -295,6 +295,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `files.auto_accept` | `false` | Automatically accept incoming P2P file offers and save them into `files.download_dir` (unique name) without a dialog. |
 | `files.download_notifications` | `true` | Show an OSD notification when an incoming file offer is accepted. |
 | `files.download_dir` | `""` | Directory for received files; empty falls back to `$XDG_DOWNLOAD_DIR` / `~/Downloads` (`include/utils.default_download_dir`). |
+| `files.verify_hashes` | `true` | Verify a downloaded file against the XEP-0300 hashes it was announced with (XEP-0385 SIMS or Jingle FT); a mismatch adds a service line to the chat. Only runs when a hash was announced (Preferences → file transfer). |
 
 ### 4.4 Call Settings (`devices.*`, `calls.*`, Preferences → Devices)
 
@@ -2045,6 +2046,31 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - Features `urn:xmpp:jingle:1`, `urn:xmpp:jingle:apps:file-transfer:5`,
   `urn:xmpp:jingle:transports:s5b:1` and `urn:xmpp:jingle:transports:ibb:1` are
   advertised in disco (`core/client.py`).
+
+### 14.5.2 Media Sharing & Hashes (XEP-0385/0372/0300/0428/0066/0333)
+
+- Incoming media messages are parsed by `core/client.message_media()` into a
+  dict (`name`/`size`/`media_type`/`width`/`height`/`hashes`/`url`/`hide_body`):
+  a XEP-0385 `<media-sharing>` block (optionally wrapped in a XEP-0372
+  `<reference type='data'>`), a bare data reference or a XEP-0066
+  `<x xmlns='jabber:x:oob'><url/></x>`, plus the XEP-0428 fallback body range.
+  It is passed as `media=` through the message events and stored in the
+  history `media` JSON column.
+- Rendering (`ChatThemeFactory.render_message(media=…)`): the fallback body
+  range is stripped and a file card (name, size) plus the preview (classified
+  by the announced media-type when the URL has no useful extension) is shown.
+- Sending (`JabberClient._attach_media_sharing`, from `_http_upload_flow`)
+  builds the same block with XEP-0300 sha-256 + sha-1 hashes, the OOB URL and
+  the two fallback ranges; the features `urn:xmpp:sims:1`,
+  `urn:xmpp:reference:0`, `urn:xmpp:hashes:2`, `jabber:x:oob`,
+  `urn:xmpp:fallback:0` and `urn:xmpp:chat-markers:0` are advertised in disco.
+- Verification (`files.verify_hashes`): the downloaded original is checked
+  against the announced hashes (`include/media.verify_hashes`); a mismatch
+  adds a service line to the chat (`media_hash_mismatch`). It never fires when
+  no hash was announced.
+- XEP-0333: outgoing chat/groupchat messages carry `<markable/>`; an incoming
+  bodyless `<displayed id='…'/>` (own `MatchXPath` handler) marks the message
+  delivered.
 
 ### 14.6 Connection Security & Transport
 
