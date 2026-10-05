@@ -480,6 +480,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_resolving = False
         self._mention_refs: list[str] = []
         self._unread_count = 0
+        self._mention_count = 0
         # Highest "seen" report already accepted (monotonic, never moved back).
         self._last_seen_ref = ""
         self._last_seen_ts = ""
@@ -517,7 +518,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.last_seen_changed.connect(self._on_last_seen)
         view.mention_jump_requested.connect(self._jump_to_next_mention)
         try:
-            view.set_mention_count(len(self._mention_refs))
+            view.set_mention_count(self._mention_count)
             view.set_unseen_count(self._unread_count)
         except (AttributeError, RuntimeError):
             pass
@@ -1240,6 +1241,30 @@ class ChatWidget(QtWidgets.QWidget):
             boundary_ts, seen_ts, count, len(stamps),
             stamps[0] if stamps else "", stamps[-1] if stamps else "",
             sum(1 for ts in stamps if not ts))
+        return count
+
+    def count_mentions_since(self, boundary_ts: str, seen_ts: str) -> int:
+        """Count loaded messages in ``(boundary_ts, seen_ts]`` that name us.
+
+        The mention counterpart of :meth:`count_seen_since`: a mention shown by
+        scrolling is no longer unread, so the roster's mention counter (and the
+        floating ``@``) can tick down with it.
+        """
+        if not seen_ts or not self._self_nick:
+            return 0
+        boundary = boundary_ts or ""
+        count = 0
+        for entry in list(self._history) + list(self._messages):
+            ts = str(entry.get("timestamp") or "")
+            if not ts or ts <= boundary or ts > seen_ts:
+                continue
+            sender = str(entry.get("sender") or "")
+            if sender and sender == self._self_nick:
+                continue
+            if mentions_nick(str(entry.get("body") or ""), self._self_nick):
+                count += 1
+        logger.debug("SEEN[mentions] boundary=%r seen=%r counted=%d",
+                     boundary_ts, seen_ts, count)
         return count
 
     def read_anchor(self) -> dict:
@@ -2233,7 +2258,6 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if ref_id not in self._mention_refs:
             self._mention_refs.append(ref_id)
-        self._update_mention_button()
 
     def refresh_unread_mentions(self, entries=None, limit: int = 50) -> None:
         """Rebuild the ``@`` list of a conversation opened with unread mentions.
@@ -2264,28 +2288,16 @@ class ChatWidget(QtWidgets.QWidget):
 
     def mark_mentions_read(self) -> None:
         """The conversation was marked read — forget the pending mentions."""
-        if self._mention_refs:
-            self._mention_refs = []
-            self._update_mention_button()
+        self._mention_refs = []
 
     def unread_mention_count(self) -> int:
         return len(self._mention_refs)
 
-    def _update_mention_button(self) -> None:
-        """Reflect the pending-mention count on the floating ``@`` button."""
-        count = len(self._mention_refs)
-        try:
-            self._view.set_mention_count(count)
-        except (AttributeError, RuntimeError):
-            pass
-
     def _jump_to_next_mention(self) -> None:
         """Scroll to the earliest mention we have not looked at yet."""
         if not self._mention_refs:
-            self._update_mention_button()
             return
         ref = self._mention_refs.pop(0)
-        self._update_mention_button()
         entry = self._find_message(ref)
         if entry is not None:
             self._view.scroll_to_message(self._reply_target_id(entry))
@@ -3319,6 +3331,22 @@ class ChatWidget(QtWidgets.QWidget):
         except (AttributeError, RuntimeError):
             pass
 
+    def set_mention_count(self, count: int) -> None:
+        """Show/refresh the floating ``@`` button with the roster mention count.
+
+        Like the jump count, the number is owned by ``MainWindow`` and ticks
+        down as mentions are seen; the local ``_mention_refs`` only drives the
+        first-click target.
+        """
+        try:
+            self._mention_count = max(0, int(count or 0))
+        except (TypeError, ValueError):
+            self._mention_count = 0
+        try:
+            self._view.set_mention_count(self._mention_count)
+        except (AttributeError, RuntimeError):
+            pass
+
     def _sync_jump_target_from_block(self) -> None:
         """Point the jump button's first click at the first still-unseen message."""
         if (self._released or self._unread_resolving
@@ -3360,9 +3388,29 @@ class ChatWidget(QtWidgets.QWidget):
                 ref, ts, sid)
             self.set_seen(ref, ts, sid)
             self._sync_jump_target_from_block()
+            self._drop_seen_mentions()
             try:
                 self.last_seen_changed.emit(ref, ts, sid)
             except Exception:
                 pass
         except Exception:
             logger.debug("SEEN[widget] failed", exc_info=True)
+
+    def _drop_seen_mentions(self) -> None:
+        """Forget the mention targets that have already scrolled into view.
+
+        The floating ``@`` number is owned by ``MainWindow``; this only keeps
+        the first-click target pointing at the first mention still below the
+        seen point.
+        """
+        if not self._mention_refs or not self._seen_ts:
+            return
+        kept = []
+        for ref in self._mention_refs:
+            entry = self._find_message(ref)
+            ts = str(entry.get("timestamp") or "") if entry else ""
+            if ts and ts <= self._seen_ts:
+                continue
+            kept.append(ref)
+        if len(kept) != len(self._mention_refs):
+            self._mention_refs = kept

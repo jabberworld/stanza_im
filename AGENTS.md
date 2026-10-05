@@ -753,7 +753,11 @@ bottom. Incoming messages no longer force a scroll to the bottom (only the
 user's own outgoing messages do); the HTML button's click sets
 `window.__stanzaJumpPress` and is relayed through the scroll poll, with the
 QWebChannel `bridge.on_jump_clicked` only as an optional fast path (the poll is
-the fallback when the transport is unavailable). The `▼` shares a centred
+the fallback when the transport is unavailable). The 250 ms scroll poll runs
+**only while the view is on screen** (`hideEvent` stops it, `showEvent` starts
+it, and a load starts it only when visible), so background tabs are never
+polled; the last-seen query is skipped while the view sits at the bottom. The
+`▼` shares a centred
 bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
 button below; both labels are replayed after every page load
 (`_on_load_finished` calls `_update_jump_label`/`_update_mention_label`) so a
@@ -762,23 +766,26 @@ count seeded before the document existed still shows.
 
 **Unread mentions & the `@` button**: an unread conference message naming our
 nick is also handed to the tab (`MainWindow._note_unread_mention` →
-`ChatWidget.note_unread_mention`, keyed by the reply target id). The pending
-count drives a **floating `@ N` button left of `▼ N`** (same row/style; the
-WebEngine backend uses the in-page `#stanza-mention` div, the QTextBrowser
-fallback a `QToolButton`, both via `ChatView.set_mention_count`; the click is
-relayed by the scroll poll as `window.__stanzaMentionPress` →
-`mention_jump_requested`). Each click jumps to the oldest mention not yet
-looked at (`_jump_to_next_mention`: `scroll_to_message` when it is rendered,
-else `_jump_to_message` paging the local archive) and drops it from the list;
+`ChatWidget.note_unread_mention`, keyed by the reply target id). A **floating
+`@ N` button left of `▼ N`** (same row/style; the WebEngine backend uses the
+in-page `#stanza-mention` div, the QTextBrowser fallback a `QToolButton`; the
+click is relayed by the scroll poll as `window.__stanzaMentionPress` →
+`mention_jump_requested`) shows the **same mention counter the roster badge
+does**: `MainWindow._push_unread_to_chat` mirrors `_unread_chats[jid]["mentions"]`
+onto it (`ChatWidget.set_mention_count` → `ChatView.set_mention_count`) and the
+counter ticks down as mentions are scrolled into view — `_on_chat_last_seen`
+subtracts `ChatWidget.count_mentions_since(prev_seen, ts)` alongside the unread
+count. The local `_mention_refs` list is only the first-click target: each click
+jumps to the oldest mention not yet looked at (`_jump_to_next_mention`:
+`scroll_to_message` when it is rendered, else `_jump_to_message` paging the
+local archive) and `_drop_seen_mentions` removes the ones already shown;
 `_on_chat_reached_bottom` (reaching the newest message, see the unread
-paragraph below) calls `mark_mentions_read`, which clears the rest and hides the
-button. The list is also **rebuilt from the window** on open
-(`refresh_unread_mentions`: every mention of the loaded history after the read
-anchor is re-armed, so the button survives a restart) and again after a deferred
-archive resolve (`_finish_unread_resolve`); `ChatWidget.mark_read` clears it
-together with the divider. A room joined with unread messages loads its history
-with the read anchor (`MainWindow._on_muc_joined`), so the `@` list and the
-separator are present on open.
+paragraph below) calls `mark_mentions_read`, which clears the rest. The list is
+**rebuilt from the window** on open (`refresh_unread_mentions`: every mention of
+the loaded history after the read anchor is re-armed) and again after a deferred
+archive resolve (`_finish_unread_resolve`); a room joined with unread messages
+loads its history with the read anchor (`MainWindow._on_muc_joined`), so the `@`
+target list and the separator are present on open.
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,

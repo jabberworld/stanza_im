@@ -4690,9 +4690,12 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         entry = self._unread_chats.get(jid)
         count = int(entry["unread"]) if entry else 0
-        logger.debug("UNREAD[push] jid=%s count=%d", jid, count)
+        mentions = int(entry["mentions"]) if entry else 0
+        logger.debug("UNREAD[push] jid=%s count=%d mentions=%d",
+                     jid, count, mentions)
         try:
             chat.set_unread_count(count)
+            chat.set_mention_count(mentions)
         except (AttributeError, RuntimeError):
             pass
 
@@ -4872,14 +4875,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         prev_seen = str(entry.get("seen_ts") or "")
         prev_unread = int(entry.get("unread") or 0)
+        prev_mentions = int(entry.get("mentions") or 0)
         # The seen point is monotonic: scrolling back up or re-showing an
         # already seen message must neither move it backwards nor subtract the
         # same messages again.
         advanced = bool(ts) and (not prev_seen or str(ts) > prev_seen)
         logger.debug(
             "UNREAD[seen] jid=%s ref=%r ts=%r prev_seen=%r prev_unread=%d "
-            "advanced=%s read_ts=%r",
-            jid, ref, ts, prev_seen, prev_unread, advanced,
+            "prev_mentions=%d advanced=%s read_ts=%r",
+            jid, ref, ts, prev_seen, prev_unread, prev_mentions, advanced,
             entry.get("read_ts") or "")
         if advanced:
             if sid:
@@ -4890,17 +4894,21 @@ class MainWindow(QtWidgets.QMainWindow):
             import time
             entry["seen_at"] = time.time()
             boundary_ts = prev_seen or str(entry.get("read_ts") or "")
-            if prev_unread > 0 and boundary_ts:
+            if boundary_ts and (prev_unread > 0 or prev_mentions > 0):
                 chat = self._chat_window.get_chat(jid)
                 if chat is not None:
                     seen_now = chat.count_seen_since(boundary_ts, str(ts))
+                    seen_mentions = chat.count_mentions_since(
+                        boundary_ts, str(ts))
                     logger.debug(
                         "UNREAD[seen] jid=%s boundary=%r seen=%r seen_now=%d "
-                        "unread %d->%d",
-                        jid, boundary_ts, ts, seen_now, prev_unread,
-                        max(0, prev_unread - seen_now))
-                    if seen_now > 0:
+                        "seen_mentions=%d unread %d->%d mentions %d->%d",
+                        jid, boundary_ts, ts, seen_now, seen_mentions,
+                        prev_unread, max(0, prev_unread - seen_now),
+                        prev_mentions, max(0, prev_mentions - seen_mentions))
+                    if seen_now > 0 or seen_mentions > 0:
                         entry["unread"] = max(0, prev_unread - seen_now)
+                        entry["mentions"] = max(0, prev_mentions - seen_mentions)
                         self._recount_unread()
                         self._refresh_unread_badge(jid)
         # Keep the jump-to-bottom number equal to the roster badge as it ticks

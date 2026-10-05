@@ -289,7 +289,7 @@ check("a never-read conversation does not wedge the separator",
 check("the whole window is counted as unread",
       w._view.seeded and w._view.seeded[0][0] == 3)
 check("its mentions are rebuilt for the @ button",
-      bool(w._mention_refs) and w._view.mention_count > 0)
+      bool(w._mention_refs))
 check("it opens at the start of the unread block",
       w._restore_anchor.get("ref") == "m-1")
 
@@ -307,7 +307,7 @@ w._history = [row("2026-10-02T10:02:00Z", "read", "m-2"),
 w._view.messages = []
 w._finish_unread_resolve(w._history[1])
 check("the mentions are rebuilt after the deferred resolve",
-      bool(w._mention_refs) and w._view.mention_count > 0)
+      bool(w._mention_refs))
 
 # 3f. last-seen never advances while the view sits at the bottom ---------------
 w = muc_widget()
@@ -349,6 +349,19 @@ check("a zero pushed count is applied",
 w._view.set_unseen_count(0, "")
 check("a zero pushed count with a target clears it",
       w._view.unseen_target == "")
+
+# 3h. shown mentions leave the @ first-click target list ----------------------
+w = muc_widget()
+w.set_history([row("2026-10-02T10:03:00Z", "read", "m-3"),
+               row("2026-10-02T10:04:00Z", "hey me", "m-4"),
+               row("2026-10-02T10:05:00Z", "hey me again", "m-5")],
+              50, False, anchor=ANCHOR)
+check("both mentions are targets on open",
+      w._mention_refs == ["m-4", "m-5"])
+w._view.bottom = True
+w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
+check("the shown mention leaves the @ target list",
+      w._mention_refs == ["m-5"])
 
 # 4. a timestamp-only anchor falls back to time ---------------------------------
 w = widget()
@@ -444,7 +457,7 @@ w.set_history([row("2026-10-02T10:03:00Z", "read that", "m-3"),
               50, False, anchor=ANCHOR)
 check("mentions inside the unread block reach the @ button",
       w._mention_refs == ["m-4", "m-6"]
-      and w._view.mention_count == 2)
+      and len(w._mention_refs) == 2)
 w.mark_mentions_read()
 check("reading the chat clears the @ button",
       w._mention_refs == [] and w._view.mention_count == 0)
@@ -618,10 +631,15 @@ _create_view = method_source(_cw_src, "_create_view")
 check("the widget wires the mention signal and count",
       "view.mention_jump_requested.connect(self._jump_to_next_mention)"
       in _create_view
-      and "view.set_mention_count(len(self._mention_refs))" in _create_view)
-check("the widget drives the floating @ button",
-      "self._view.set_mention_count(count)"
-      in method_source(_cw_src, "_update_mention_button"))
+      and "view.set_mention_count(self._mention_count)" in _create_view)
+check("the widget takes the @ number from the pushed count",
+      "self._mention_count = max(0, int(count or 0))"
+      in method_source(_cw_src, "set_mention_count")
+      and "self._view.set_mention_count(self._mention_count)"
+      in method_source(_cw_src, "set_mention_count"))
+check("the @ target list drops the mentions already shown",
+      "self._drop_seen_mentions()" in method_source(_cw_src, "_on_last_seen")
+      and "ts <= self._seen_ts" in method_source(_cw_src, "_drop_seen_mentions"))
 
 # 15. the scroll poll only runs while the view is on screen --------------------
 check("the scroll poll stops while the tab is hidden",
