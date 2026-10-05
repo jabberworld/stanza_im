@@ -4333,6 +4333,37 @@ class JabberClient:
             return
         self.request_roster()
 
+    def rename_group(self, old: str, new: str) -> int:
+        """Rename the roster group *old* to *new* for every member.
+
+        Returns the number of roster items changed; the server roster push
+        rebuilds the UI afterwards.
+        """
+        old = str(old or "").strip()
+        new = str(new or "").strip()
+        if not old or not new or old == new:
+            return 0
+        try:
+            cr = self.xmpp.client_roster
+        except Exception:
+            return 0
+        count = 0
+        for jid in list(cr):
+            item = cr[jid]
+            groups = list(item["groups"])
+            if old not in groups:
+                continue
+            groups = [new if g == old else g for g in groups]
+            try:
+                self.xmpp.update_roster(jid, groups=groups)
+            except Exception:
+                logger.exception("Could not rename group for %s", jid)
+                continue
+            count += 1
+        if count:
+            self.request_roster()
+        return count
+
     def resend_subscription(self, jid: str) -> None:
         """Send a fresh presence subscribe request to *jid* (e.g. after a
         rejected or pending subscription)."""

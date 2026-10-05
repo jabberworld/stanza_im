@@ -415,6 +415,8 @@ STRINGS = {
     "ctx_group_name": "Название группы:",
     "ctx_resend_auth": "Повторить запрос авторизации",
     "ctx_mark_read": "Отметить прочитанным",
+    "ctx_rename_group": "Переименовать группу",
+    "ctx_rename_group_prompt": "Новое имя группы:",
     "ctx_clear_history": "Очистить историю",
     "ctx_clear_history_confirm": "Удалить локальную историю сообщений для {jid}? Это действие необратимо.",
     "ctx_remove_contact": "Удалить контакт",

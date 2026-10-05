@@ -359,6 +359,40 @@ check("marking a group read clears only its members",
       win._read_state("bob@example.com")["unread"] == 0
       and win._read_state("carol@example.com")["unread"] == 1)
 
+# 5d. renaming a roster group ------------------------------------------------
+from stanza_im.core.client import JabberClient  # noqa: E402
+
+
+class _FakeRosterXmpp:
+    def __init__(self):
+        self.client_roster = {
+            "bob@example.com": {"groups": ["Friends"]},
+            "carol@example.com": {"groups": ["Friends", "Work"]},
+            "dave@example.com": {"groups": ["Other"]},
+        }
+        self.updated = []
+
+    def update_roster(self, jid, groups=None):
+        self.updated.append((jid, list(groups or [])))
+
+
+class _FakeRosterClient:
+    def __init__(self):
+        self.xmpp = _FakeRosterXmpp()
+        self.requested = 0
+
+    def request_roster(self):
+        self.requested += 1
+
+
+_fc = _FakeRosterClient()
+_count = JabberClient.rename_group(_fc, "Friends", "Amigos")
+check("renaming a group updates its members only",
+      _count == 2 and _fc.requested == 1
+      and ("bob@example.com", ["Amigos"]) in _fc.xmpp.updated
+      and ("carol@example.com", ["Amigos", "Work"]) in _fc.xmpp.updated
+      and all(j != "dave@example.com" for j, _ in _fc.xmpp.updated))
+
 # 6b. the seen point never moves backwards (no repeated subtraction) ------------
 win = make_window(chats=("bob@example.com",))
 win._unread_chats["bob@example.com"] = unread_state.blank()

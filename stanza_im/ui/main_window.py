@@ -4364,7 +4364,42 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         menu.addAction(self._menu_icon("ok.png"), tr("menu_mark_all_read"),
                        lambda: self._mark_group_read(group))
+        # Only a real contact group can be renamed: the virtual groups
+        # (conferences, private messages) and the «Без группы» pseudo-group
+        # are not server groups.
+        if (group not in _virtual_roster_groups()
+                and group != tr("roster_group_ungrouped")):
+            menu.addAction(self._menu_icon("edit.png"),
+                           tr("ctx_rename_group"),
+                           lambda: self._rename_group(group))
         menu.exec(pos)
+
+    def _rename_group(self, old: str) -> None:
+        """Rename the server roster group *old* (all of its members)."""
+        if not old or not self._client:
+            return
+        new, ok = QtWidgets.QInputDialog.getText(
+            self, tr("ctx_rename_group"), tr("ctx_rename_group_prompt"),
+            text=old)
+        new = new.strip()
+        if not ok or not new or new == old:
+            return
+        changed = False
+        for user in self._roster._users:
+            if user.group == old:
+                user.group = new
+                changed = True
+        if changed:
+            groups_by_jid: dict[str, list[str]] = {}
+            for user in self._roster._users:
+                groups_by_jid.setdefault(user.jid, []).append(user.group)
+            for jid, groups in groups_by_jid.items():
+                if new in groups:
+                    self._remember_contact(jid, groups=groups)
+            self._roster.add_group(new)
+            self._roster.remove_group(old)
+            self._roster.sort_and_update()
+        self._client.rename_group(old, new)
 
     def _mark_group_read(self, group: str) -> None:
         """Mark every unread conversation shown in *group* read."""

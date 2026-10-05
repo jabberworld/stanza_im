@@ -415,6 +415,8 @@ STRINGS = {
     "ctx_group_name": "Group name:",
     "ctx_resend_auth": "Resend authorization request",
     "ctx_mark_read": "Mark as Read",
+    "ctx_rename_group": "Rename Group",
+    "ctx_rename_group_prompt": "New group name:",
     "ctx_clear_history": "Clear History",
     "ctx_clear_history_confirm": "Delete the local message history for {jid}? This cannot be undone.",
     "ctx_remove_contact": "Remove Contact",
