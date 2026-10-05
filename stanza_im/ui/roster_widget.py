@@ -23,6 +23,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
     contact_clicked = QtCore.pyqtSignal(str)         # jid
     contact_double_clicked = QtCore.pyqtSignal(str)   # jid
     contact_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)  # jid, global_pos
+    group_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)    # group, global_pos
     roster_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
 
     def __init__(self, parent=None):
@@ -369,8 +370,12 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
         hit = self._item_at(event.pos().y())
-        if hit and hit[0] == "user":
+        if not hit:
+            return
+        if hit[0] == "user":
             self.contact_context_menu.emit(hit[1].jid, event.globalPos())
+        else:
+            self.group_context_menu.emit(hit[1].name, event.globalPos())
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         key = event.key()

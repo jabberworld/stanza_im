@@ -618,6 +618,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sort_by_status_action.isChecked())
         self._roster.contact_double_clicked.connect(self._on_contact_open)
         self._roster.contact_context_menu.connect(self._on_contact_context)
+        self._roster.group_context_menu.connect(self._on_group_context)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self._roster)
@@ -4347,6 +4348,30 @@ class MainWindow(QtWidgets.QMainWindow):
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_remove_contact"), lambda: self._on_remove_contact(jid))
         menu.exec(pos)
+
+    def _group_jids(self, group: str) -> list[str]:
+        """Unique JIDs of the roster rows currently shown in *group*."""
+        seen: list[str] = []
+        for user in self._roster._users:
+            if user.group == group and user.jid not in seen:
+                seen.append(user.jid)
+        return seen
+
+    def _on_group_context(self, group: str, pos) -> None:
+        """Context menu of a roster group header."""
+        if not group:
+            return
+        menu = QtWidgets.QMenu(self)
+        menu.addAction(self._menu_icon("ok.png"), tr("menu_mark_all_read"),
+                       lambda: self._mark_group_read(group))
+        menu.exec(pos)
+
+    def _mark_group_read(self, group: str) -> None:
+        """Mark every unread conversation shown in *group* read."""
+        for jid in self._group_jids(group):
+            entry = self._unread_chats.get(jid)
+            if entry and entry.get("unread"):
+                self._mark_chat_read(jid)
 
     def _build_subscription_menu(self, parent_menu, jid: str) -> None:
         """Add a subscription submenu reflecting the current subscription."""

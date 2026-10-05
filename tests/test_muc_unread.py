@@ -344,6 +344,21 @@ check("marking all read clears every unread chat",
       win._read_state("carol@example.com")["unread"] == 0
       and not win._unread_jids)
 
+# 5c. marking a whole roster group read --------------------------------------
+win = make_window(chats=("bob@example.com",))
+win._mark_chat_read = MainWindow._mark_chat_read.__get__(win)
+win._mark_group_read = MainWindow._mark_group_read.__get__(win)
+win._roster.add_user(UserItem(jid="bob@example.com", name="Bob",
+                              group="Friends"))
+win._roster.add_user(UserItem(jid="carol@example.com", name="Carol",
+                              group="Work"))
+win._bump_unread("bob@example.com")
+win._bump_unread("carol@example.com")
+win._mark_group_read("Friends")
+check("marking a group read clears only its members",
+      win._read_state("bob@example.com")["unread"] == 0
+      and win._read_state("carol@example.com")["unread"] == 1)
+
 # 6b. the seen point never moves backwards (no repeated subtraction) ------------
 win = make_window(chats=("bob@example.com",))
 win._unread_chats["bob@example.com"] = unread_state.blank()

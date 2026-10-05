@@ -922,7 +922,11 @@ loading and the fresh window cannot mark itself read on its own. The explicit
 **«Отметить прочитанным»** actions (a contact's context menu, before «Очистить
 историю», and «Отметить все прочитанным» in the Actions menu) share the same
 `MainWindow._mark_chat_read` helper: it clears the counters, removes the
-divider of an open tab and publishes the XEP-0490 displayed state.
+divider of an open tab and publishes the XEP-0490 displayed state. A right
+click on a roster **group header** opens its own menu
+(`RosterWidget.group_context_menu` → `MainWindow._on_group_context`) with the
+same «Отметить все прочитанным» action, scoped to that group's rows
+(`_mark_group_read`).
 
 **Resuming an unread conversation (full window + unread separator)**: an
 unread chat opens with **every** new message already on screen — the window is
