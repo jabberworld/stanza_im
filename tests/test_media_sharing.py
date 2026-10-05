@@ -112,6 +112,47 @@ check("a plain message has no media",
       message_media(_Msg(ET.fromstring("<message><body>hi</body></message>")))
       is None)
 
+# 5. outgoing build round-trips through the parser ----------------------------
+import slixmpp  # noqa: E402
+from stanza_im.core.client import JabberClient, file_hashes_b64  # noqa: E402
+
+_url = "https://upload.example/u/ab/cd/pic.jpg"
+msg = slixmpp.Message()
+msg["to"] = "room@conf.example"
+msg["type"] = "groupchat"
+msg["body"] = _url
+JabberClient._attach_media_sharing(msg, {
+    "name": "pic.jpg", "size": 2048, "media_type": "image/jpeg",
+    "width": 800, "height": 600,
+    "hashes": {"sha-256": "AAAA", "sha-1": "BBBB"}, "url": _url,
+})
+built = message_media(_Msg(msg.xml))
+check("the built SIMS block round-trips", built is not None)
+check("the built name/size/type round-trip",
+      built and built["name"] == "pic.jpg" and built["size"] == 2048
+      and built["media_type"] == "image/jpeg")
+check("the built hashes round-trip",
+      built and built["hashes"] == {"sha-256": "AAAA", "sha-1": "BBBB"})
+check("the built dimensions round-trip",
+      built and built["width"] == 800 and built["height"] == 600)
+check("the built source URL round-trips", built and built["url"] == _url)
+check("the built fallback range marks the body URL",
+      built and built["hide_body"] == (0, len(_url)))
+check("an OOB url is attached as a fallback",
+      msg.xml.find("{jabber:x:oob}x") is not None)
+
+# 6. XEP-0300 hashes ----------------------------------------------------------
+import tempfile as _tf  # noqa: E402
+_fd, _path = _tf.mkstemp()
+os.write(_fd, b"hello")
+os.close(_fd)
+_hashes = file_hashes_b64(_path)
+os.unlink(_path)
+check("sha-256 and sha-1 are computed",
+      _hashes.get("sha-256")
+      == "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
+      and _hashes.get("sha-1") == "qvTGHdzF6KLavt4PO0gs2a6pQ00=")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -110,6 +110,32 @@ class _UploadProgress:
         self.pct = float(value)
 
 
+def file_hashes_b64(path: str,
+                    algos: tuple[str, ...] = ("sha-256", "sha-1")) -> dict:
+    """Compute XEP-0300 base64 hashes of *path* (``{algo: base64}``)."""
+    import base64 as _b64
+    hashers = {}
+    for algo in algos:
+        try:
+            hashers[algo] = hashlib.new(algo.replace("-", ""))
+        except ValueError:
+            continue
+    if not hashers:
+        return {}
+    try:
+        with open(path, "rb") as fh:
+            while True:
+                chunk = fh.read(128 * 1024)
+                if not chunk:
+                    break
+                for hasher in hashers.values():
+                    hasher.update(chunk)
+    except OSError:
+        return {}
+    return {algo: _b64.b64encode(h.digest()).decode("ascii")
+            for algo, h in hashers.items()}
+
+
 def _replace_reference(stanza) -> str:
     """Return the ``id`` of a XEP-0308 ``<replace/>`` on *stanza* ("" if none)."""
     xml = getattr(stanza, "xml", None)
@@ -1124,6 +1150,11 @@ class JabberClient:
         self.xmpp["xep_0030"].add_feature(NS_ROSTERX)
         # XEP-0444 Message Reactions.
         self.xmpp["xep_0030"].add_feature(NS_REACTIONS)
+        # Media sharing: XEP-0385 SIMS, XEP-0372 References, XEP-0300 hashes,
+        # XEP-0066 OOB and XEP-0428 fallback, plus XEP-0333 chat markers.
+        for _feature in (NS_SIMS, NS_REFERENCE, NS_HASHES, NS_OOB,
+                         NS_FALLBACK, NS_CHAT_MARKERS):
+            self.xmpp["xep_0030"].add_feature(_feature)
         # XEP-0191 blocklist pushes (XEP-0191 §5 carries the full list).
         self.xmpp.add_event_handler("blocked", self._on_blocked_push)
         self.xmpp.add_event_handler("unblocked", self._on_unblocked_push)
@@ -2003,7 +2034,8 @@ class JabberClient:
                      mhtml: str | None = None, reply_to: str = "",
                      reply_id: str = "", reply_ref_sender: str = "",
                      reply_ref_body: str = "",
-                     replace_id: str = "") -> str:
+                     replace_id: str = "",
+                     media: dict | None = None) -> str:
         """Send a message.
 
         With *reply_to* + *reply_id* a XEP-0461 ``<reply/>`` is attached as
@@ -2037,6 +2069,8 @@ class JabberClient:
             msg["request_receipt"] = True  # XEP-0184
         if mhtml:
             msg["html"]["body"] = mhtml
+        if media:
+            self._attach_media_sharing(msg, media)
         logger.debug("Sending %s message to %s (reply_id=%s): %r",
                      mtype, jid, reply_id, body[:200])
         msg.send()
@@ -2217,6 +2251,61 @@ class JabberClient:
         replace.set("id", replace_id)
         xml.remove(replace)
         xml.insert(0, replace)
+
+    @staticmethod
+    def _attach_media_sharing(msg, media: dict) -> None:
+        """Attach the XEP-0385 SIMS block, XEP-0372 reference, XEP-0066 OOB and
+        the XEP-0428 fallbacks marking the URL inside the body.
+
+        *media* carries at least ``url``; ``name``/``size``/``media_type``/
+        ``width``/``height``/``hashes`` are optional.
+        """
+        url = str((media or {}).get("url") or "")
+        if not url:
+            return
+        xml = msg.xml
+        reference = ET.Element("{%s}reference" % NS_REFERENCE)
+        reference.set("type", "data")
+        sharing = ET.SubElement(reference, "{%s}media-sharing" % NS_SIMS)
+        file_el = ET.SubElement(sharing, "{%s}file" % NS_FT)
+        name = str(media.get("name") or "")
+        if name:
+            ET.SubElement(file_el, "{%s}name" % NS_FT).text = name
+        for algo, value in (media.get("hashes") or {}).items():
+            if algo and value:
+                hash_el = ET.SubElement(file_el, "{%s}hash" % NS_HASHES)
+                hash_el.set("algo", str(algo))
+                hash_el.text = str(value)
+        media_type = str(media.get("media_type") or "")
+        if media_type:
+            ET.SubElement(file_el, "{%s}media-type" % NS_FT).text = media_type
+        size = _int_or_zero(media.get("size"))
+        if size:
+            ET.SubElement(file_el, "{%s}size" % NS_FT).text = str(size)
+        width = _int_or_zero(media.get("width"))
+        if width:
+            ET.SubElement(file_el, "{%s}width" % NS_SCHEMA).text = str(width)
+        height = _int_or_zero(media.get("height"))
+        if height:
+            ET.SubElement(file_el, "{%s}height" % NS_SCHEMA).text = str(height)
+        sources = ET.SubElement(sharing, "{%s}sources" % NS_SIMS)
+        src_ref = ET.SubElement(sources, "{%s}reference" % NS_REFERENCE)
+        src_ref.set("type", "data")
+        src_ref.set("uri", url)
+        xml.insert(0, reference)
+        oob = ET.SubElement(xml, "{%s}x" % NS_OOB)
+        ET.SubElement(oob, "{%s}url" % NS_OOB).text = url
+        body = str(msg["body"] or "")
+        start = body.find(url)
+        if start < 0:
+            return
+        end = start + len(url)
+        for for_ns in (NS_SIMS, NS_OOB):
+            fallback = ET.SubElement(xml, "{%s}fallback" % NS_FALLBACK)
+            fallback.set("for", for_ns)
+            fb_body = ET.SubElement(fallback, "{%s}body" % NS_FALLBACK)
+            fb_body.set("start", str(start))
+            fb_body.set("end", str(end))
 
     def send_presence(self, show: str | None = None, status: str = "",
                       priority: int | None = None) -> None:
@@ -3773,13 +3862,14 @@ class JabberClient:
 
     def send_muc_message(self, room: str, body: str, reply_to: str = "",
                          reply_id: str = "", reply_ref_sender: str = "",
-                         reply_ref_body: str = "", replace_id: str = "") -> None:
+                         reply_ref_body: str = "", replace_id: str = "",
+                         media: dict | None = None) -> None:
         """Send a message to a MUC room, optionally replying or correcting."""
         self.send_message(room, body, mtype="groupchat",
                           reply_to=reply_to, reply_id=reply_id,
                           reply_ref_sender=reply_ref_sender,
                           reply_ref_body=reply_ref_body,
-                          replace_id=replace_id)
+                          replace_id=replace_id, media=media)
 
     def edit_message(self, jid: str, body: str, replace_id: str,
                      mtype: str = "chat") -> str:
@@ -4318,10 +4408,16 @@ class JabberClient:
                               str(pct), str(path))
             await put_task
             target = jid.split("/")[0] if "/" in jid else jid
+            media = {
+                "name": filename, "size": size, "media_type": content_type,
+                "width": 0, "height": 0, "url": get_url,
+                "hashes": await asyncio.to_thread(file_hashes_b64, str(path)),
+                "hide_body": None,
+            }
             if self.groupchats.get(target):
-                self.send_muc_message(target, get_url)
+                self.send_muc_message(target, get_url, media=media)
             else:
-                self.send_message(target, get_url)
+                self.send_message(target, get_url, media=media)
             self.emit("file_upload_progress", jid, "done", get_url, str(path))
         except Exception as exc:  # noqa: BLE001 - surfaced as a status line
             logger.warning("HTTP Upload failed for %s: %s", jid, exc)
