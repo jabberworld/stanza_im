@@ -1313,7 +1313,12 @@ JS query of `#chat .stanza-message`; `_last_seen_result` reads its
 `last_seen_changed(ref, ts, sid)` — but only while the view is actually scrolled
 up (`ChatWidget._on_last_seen` skips a view at the bottom), so the transient
 "at the bottom" position during an anchor restore cannot jump the seen point to
-the newest message. `ChatWindow.last_seen` relays it to
+the newest message. The seen point is **monotonic**: `ChatWidget._on_last_seen`
+drops a report whose timestamp is not newer than the highest one already emitted
+(`_last_seen_ts`, never moved back) and the stored `seen_ts` is only rewritten
+when it advances (`MainWindow._on_chat_last_seen`), so scrolling back up or
+re-showing an already seen message never subtracts the same messages again.
+`ChatWindow.last_seen` relays it to
 `MainWindow._on_chat_last_seen`, which advances the persisted `seen_*` point,
 shrinks the unread badge by the messages that just became visible
 (`ChatWidget.count_seen_since`), and arms the `@`/jump state accordingly. The

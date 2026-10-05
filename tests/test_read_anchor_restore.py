@@ -169,6 +169,9 @@ def widget(jid="bob@example.com"):
     w._seen_ts = ""
     w._seen_sid = ""
     w._seen_at = 0.0
+    w._last_seen_ref = ""
+    w._last_seen_ts = ""
+    w._last_seen_sid = ""
     w._anchor_bottom = False
     w._moderation_enabled = False
     w._show_muc_hats = False
@@ -316,9 +319,9 @@ w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
 check("a bottom view does not advance the seen point",
       w._seen_ref == "" and w._seen_ts == "")
 w._view.bottom = True
-w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
+w._on_last_seen("m-4", "2026-10-02T10:05:00Z", "sid-4")
 check("a scrolled-up view records the seen point",
-      w._seen_ts == "2026-10-02T10:04:00Z")
+      w._seen_ts == "2026-10-02T10:05:00Z")
 
 # 3g. the jump number mirrors the unread counter, the target the block ---------
 w = widget()
@@ -333,6 +336,11 @@ w._view.bottom = True
 w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
 check("scrolling moves the first-unseen target to the next message",
       w._view.unseen_target == "m-5")
+# Re-showing the same message (scroll up then down) must not re-report it.
+w._view.unseen_target = None
+w._on_last_seen("m-4", "2026-10-02T10:04:00Z", "sid-4")
+check("re-showing an already seen message is ignored",
+      w._view.unseen_target is None)
 check("scrolling does not overwrite the pushed unread count",
       w._view.unseen_count == 9)
 w.set_unread_count(0)

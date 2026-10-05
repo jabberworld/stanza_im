@@ -3320,10 +3320,24 @@ class ChatWidget(QtWidgets.QWidget):
             # restore from advancing the seen point to the newest message.
             if not self._view.is_scrolled_up():
                 return
+            ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
+            # Only a forward move is a new "seen" point; scrolling back up or
+            # re-showing an already seen message changes nothing, so it must not
+            # be re-reported (which would shrink the unread counter again).
+            # ``_last_seen_ts`` tracks the highest point ever reported, and it is
+            # never moved back, so a return to an earlier message stays ignored.
+            same = (ref, ts, sid) == (
+                self._last_seen_ref, self._last_seen_ts, self._last_seen_sid)
+            not_newer = bool(ts) and bool(self._last_seen_ts) \
+                and ts <= self._last_seen_ts
+            if same or not_newer:
+                return
+            self._last_seen_ref, self._last_seen_ts, self._last_seen_sid = (
+                ref, ts, sid)
             self.set_seen(ref, ts, sid)
             self._sync_jump_target_from_block()
             try:
-                self.last_seen_changed.emit(str(ref or ""), str(ts or ""), str(sid or ""))
+                self.last_seen_changed.emit(ref, ts, sid)
             except Exception:
                 pass
         except Exception:

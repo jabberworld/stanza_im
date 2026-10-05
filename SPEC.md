@@ -1761,9 +1761,12 @@ Registers XEP plugins (conditionally where noted):
   `chat.mds_displayed_throttle` seconds, 1–30, default 3), so a peer sees
   "read up to here" without a stanza per scrolled message. It advances only while
   the view is scrolled up (`ChatWidget._on_last_seen`), so the transient bottom of
-  an anchor restore never marks the newest message seen. The persisted `seen_*`
-  unread-state fields hold that point and are preferred when reopening; reaching
-  the bottom publishes at once.
+  an anchor restore never marks the newest message seen. It is also **monotonic**:
+  a report that is not newer than the highest seen timestamp already emitted is
+  dropped, and the stored `seen_ts` only advances, so scrolling back up or
+  re-showing an already seen message never subtracts the same messages again from
+  the unread counter. The persisted `seen_*` unread-state fields hold that point
+  and are preferred when reopening; reaching the bottom publishes at once.
 
 ### 14.4 Last Message Correction (XEP-0308)
 

@@ -4867,27 +4867,29 @@ class MainWindow(QtWidgets.QMainWindow):
         entry = self._unread_chats.get(jid)
         if not entry:
             return
-        boundary_ts = str(entry.get("seen_ts") or entry.get("read_ts") or "")
+        prev_seen = str(entry.get("seen_ts") or "")
         prev_unread = int(entry.get("unread") or 0)
-        if sid:
-            entry["seen_sid"] = str(sid)
-        if ref:
-            entry["seen_ref"] = str(ref)
-        if ts:
+        # The seen point is monotonic: scrolling back up or re-showing an
+        # already seen message must neither move it backwards nor subtract the
+        # same messages again.
+        advanced = bool(ts) and (not prev_seen or str(ts) > prev_seen)
+        if advanced:
+            if sid:
+                entry["seen_sid"] = str(sid)
+            if ref:
+                entry["seen_ref"] = str(ref)
             entry["seen_ts"] = str(ts)
-        import time
-        entry["seen_at"] = time.time()
-        # Shrink the badge by the messages that just became visible.  Without
-        # a known starting point the count would be guesswork, so leave the
-        # counters alone until the conversation is reopened with an anchor.
-        if ts and prev_unread > 0 and boundary_ts:
-            chat = self._chat_window.get_chat(jid)
-            if chat is not None:
-                seen_now = chat.count_seen_since(boundary_ts, str(ts))
-                if seen_now > 0:
-                    entry["unread"] = max(0, prev_unread - seen_now)
-                    self._recount_unread()
-                    self._refresh_unread_badge(jid)
+            import time
+            entry["seen_at"] = time.time()
+            boundary_ts = prev_seen or str(entry.get("read_ts") or "")
+            if prev_unread > 0 and boundary_ts:
+                chat = self._chat_window.get_chat(jid)
+                if chat is not None:
+                    seen_now = chat.count_seen_since(boundary_ts, str(ts))
+                    if seen_now > 0:
+                        entry["unread"] = max(0, prev_unread - seen_now)
+                        self._recount_unread()
+                        self._refresh_unread_badge(jid)
         # Keep the jump-to-bottom number equal to the roster badge as it ticks
         # down while the user reads.
         self._push_unread_to_chat(jid)

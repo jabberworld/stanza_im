@@ -89,6 +89,14 @@ class _Chat:
     def mark_read(self):
         self.read_marks += 1
 
+    def set_unread_count(self, count):
+        self.unread_count = count
+
+    def count_seen_since(self, boundary_ts, seen_ts):
+        # Count the messages of ``_seen_messages`` in (boundary_ts, seen_ts].
+        return sum(1 for ts in getattr(self, "_seen_messages", [])
+                   if boundary_ts < ts <= seen_ts)
+
     @property
     def _history(self):
         return []
@@ -294,6 +302,37 @@ check("an unread conversation is tracked in the unread set",
 win._reset_unread("bob@example.com")
 check("marking read leaves the unread set",
       "bob@example.com" not in win._unread_jids and win._unread_total == 0)
+
+# 6b. the seen point never moves backwards (no repeated subtraction) ------------
+win = make_window(chats=("bob@example.com",))
+win._unread_chats["bob@example.com"] = unread_state.blank()
+win._unread_chats["bob@example.com"]["unread"] = 50
+win._unread_chats["bob@example.com"]["read_ts"] = "2026-10-01T00:00:00Z"
+win._recount_unread()
+_seen_chat = win._chat_window.get_chat("bob@example.com")
+_seen_chat._seen_messages = [
+    f"2026-10-01T00:00:{i:02d}Z" for i in range(1, 51)]
+
+
+def _feed(ref, i):
+    win._on_chat_last_seen("bob@example.com", ref,
+                           f"2026-10-01T00:00:{i:02d}Z", "")
+
+
+_feed("m20", 20)
+check("scrolling forward shrinks the unread counter",
+      win._read_state("bob@example.com")["unread"] == 30)
+for _ in range(5):
+    _feed("m5", 5)
+check("scrolling back up does not subtract again",
+      win._read_state("bob@example.com")["unread"] == 30)
+for _ in range(5):
+    _feed("m20", 20)
+check("re-showing an already seen message does not subtract again",
+      win._read_state("bob@example.com")["unread"] == 30)
+_feed("m30", 30)
+check("moving further forward subtracts only the new messages",
+      win._read_state("bob@example.com")["unread"] == 20)
 
 contact_open = method_source(_mw_src, "_on_contact_open")
 check("the restore anchor is taken before the tab is opened",
