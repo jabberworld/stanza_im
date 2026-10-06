@@ -93,6 +93,7 @@ STRINGS = {
     "xml_console_send_failed": "Не удалось отправить XML: {error}",
     "menu_show_offline": "Показывать оффлайн-контакты",
     "menu_sort_by_status": "Сортировать по статусу",
+    "menu_sort_by_unread": "Сортировать по непрочитанным",
     "menu_show_transports": "Показывать транспорты",
     # Login
     "login_title": "Jabber ID:",

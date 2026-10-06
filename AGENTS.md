@@ -599,9 +599,12 @@ online/total count through `_recount_groups`. The badge label is
 Contacts sort alphabetically inside a group by default; `set_sort_by_status`
 (the View menu's «Сортировать по статусу», default on) instead ranks them by
 presence — chat («free for chat») → online → away → xa → dnd → offline — with
-the name as the tie-break (both flags live in `appearance.roster_sort_by_status`
-/ `roster_show_offline` and are applied/toggled from the View menu, which also
-drives `set_show_offline`).
+the name as the tie-break. `set_sort_by_unread` (View menu's «Сортировать по
+непрочитанным», default on) makes contacts with unread messages lead the list
+(`RosterWidget._sort_key` puts `0 if unread_count else 1` first), then the
+presence/name order applies inside each part. The flags live in
+`appearance.roster_sort_by_status`/`roster_sort_by_unread`/`roster_show_offline`
+and are applied/toggled from the View menu.
 
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.

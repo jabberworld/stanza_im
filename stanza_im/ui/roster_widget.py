@@ -41,6 +41,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._filter: str = ""
         self._show_offline = True
         self._sort_by_status = True
+        self._sort_by_unread = True
         self._press_pos: QtCore.QPoint | None = None
         self._press_jid: str | None = None
         self._drop_group: str | None = None
@@ -173,6 +174,13 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._recalc_heights()
         self.update()
 
+    def set_sort_by_unread(self, value: bool) -> None:
+        """Give contacts with unread messages priority in the sort order."""
+        self._sort_by_unread = value
+        self._rebuild_sorted()
+        self._recalc_heights()
+        self.update()
+
     def sort_and_update(self) -> None:
         self._rebuild_sorted()
         self._recalc_heights()
@@ -180,21 +188,28 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
 
     # ── Geometry helpers ──────────────────────────────────────────
 
+    def _sort_key(self, user: UserItem) -> tuple:
+        """Sort key: unread first (optional), then presence or name, then name.
+
+        With ``_sort_by_unread`` a contact carrying unread messages always
+        precedes a read one; inside each part the presence rank (when
+        ``_sort_by_status``) or the name orders them.
+        """
+        keys: list = []
+        if self._sort_by_unread:
+            keys.append(0 if user.unread_count > 0 else 1)
+        if self._sort_by_status:
+            status = user.status or "online"
+            keys.append(SHOW_ORDER.get(status, SHOW_ORDER["offline"]))
+        keys.append(user.name.casefold())
+        return tuple(keys)
+
     def _rebuild_sorted(self) -> None:
         self._sorted_users.clear()
         for user in self._users:
             self._sorted_users.setdefault(user.group, []).append(user)
-        if self._sort_by_status:
-            def _key(user: UserItem):
-                # presence rank first, then the name alphabetically
-                status = user.status or "online"
-                return (SHOW_ORDER.get(status, SHOW_ORDER["offline"]),
-                        user.name.casefold())
-        else:
-            def _key(user: UserItem):
-                return user.name.casefold()
         for group in self._sorted_users:
-            self._sorted_users[group].sort(key=_key)
+            self._sorted_users[group].sort(key=self._sort_key)
 
     def _visible_items(self) -> list[tuple[str, GroupItem | UserItem]]:
         """Return the list of items currently visible (respecting group

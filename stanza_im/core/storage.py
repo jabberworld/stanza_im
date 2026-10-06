@@ -135,6 +135,8 @@ class Config:
                         "roster_show_clients": True,
                         "roster_show_offline": True,
                         "roster_sort_by_status": True,
+                        "roster_sort_by_unread": True,
+                        "roster_show_groups": True,
                         "muc_show_avatars": True,
                         "muc_show_clients": True,
                         "muc_show_hats": True,

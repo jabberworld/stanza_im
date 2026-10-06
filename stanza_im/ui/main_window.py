@@ -616,6 +616,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.set_show_offline(self._show_offline_action.isChecked())
         self._roster.set_sort_by_status(
             self._sort_by_status_action.isChecked())
+        self._roster.set_sort_by_unread(
+            self._sort_by_unread_action.isChecked())
         self._roster.contact_double_clicked.connect(self._on_contact_open)
         self._roster.contact_context_menu.connect(self._on_contact_context)
         self._roster.group_context_menu.connect(self._on_group_context)
@@ -1298,6 +1300,14 @@ class MainWindow(QtWidgets.QMainWindow):
                          True)))
         sort_by_status.toggled.connect(self._on_sort_by_status_toggled)
         self._sort_by_status_action = sort_by_status
+        sort_by_unread = view_menu.addAction(
+            self._menu_icon("message.png"), tr("menu_sort_by_unread"))
+        sort_by_unread.setCheckable(True)
+        sort_by_unread.setChecked(
+            bool(getattr(self._config.appearance, "roster_sort_by_unread",
+                         True)))
+        sort_by_unread.toggled.connect(self._on_sort_by_unread_toggled)
+        self._sort_by_unread_action = sort_by_unread
         show_offline = view_menu.addAction(self._menu_icon("aim-offline.png"),
                                            tr("menu_show_offline"))
         show_offline.setCheckable(True)
@@ -5543,6 +5553,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config.appearance.roster_sort_by_status = bool(checked)
         self._config.save()
         self._roster.set_sort_by_status(bool(checked))
+
+    def _on_sort_by_unread_toggled(self, checked: bool) -> None:
+        self._config.appearance.roster_sort_by_unread = bool(checked)
+        self._config.save()
+        self._roster.set_sort_by_unread(bool(checked))
 
     def _on_show_offline_toggled(self, checked: bool) -> None:
         self._config.appearance.roster_show_offline = bool(checked)
