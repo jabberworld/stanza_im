@@ -94,6 +94,7 @@ STRINGS = {
     "menu_show_offline": "Show &offline contacts",
     "menu_sort_by_status": "Sort by status",
     "menu_sort_by_unread": "Sort by unread",
+    "menu_show_groups": "Show groups",
     "menu_show_transports": "Show &transports",
     # Login
     "login_title": "Jabber ID:",

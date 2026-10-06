@@ -270,6 +270,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_clients` | `true` | Show/hide the client icon (XEP-0115 caps node → `include/clients.py` → `resources/clients/<size>/`) in roster rows, drawn right after the avatar (`UserItem.client_icon`). |
 | `appearance.roster_sort_by_status` | `true` | View menu «Сортировать по статусу»: rank contacts by presence (chat → online → away → xa → dnd → offline, name as tie-break) instead of alphabetically inside a group (`RosterWidget.set_sort_by_status`). |
 | `appearance.roster_sort_by_unread` | `true` | View menu «Сортировать по непрочитанным»: contacts with unread messages lead the list, then the presence/name order inside each part (`RosterWidget.set_sort_by_unread`). |
+| `appearance.roster_show_groups` | `true` | View menu «Показывать группы»: off draws the real contacts as one flat list (one row per JID, sorted by the active options); conferences and private messages keep their virtual group headers (`RosterWidget.set_show_groups`). |
 | `appearance.roster_show_offline` | `true` | View menu «Показывать оффлайн-контакты»: show/hide offline contacts (`RosterWidget.set_show_offline`). |
 | `appearance.muc_show_avatars` | `true` | Show/hide participant avatars in the MUC participant sidebar (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_participant_options`). |
 | `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |

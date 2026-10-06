@@ -67,6 +67,35 @@ w.set_sort_by_unread(False)
 check("plain alphabetical order without the unread sort",
       order(w) == ["Alice", "Bob", "Carol"])
 
+# 2. flat list when groups are hidden -----------------------------------------
+w = RosterWidget()
+w.set_trailing_groups({"Conferences", "Personal"})
+w.add_user(UserItem(jid="a@x", name="Alice", group="Friends", status="online"))
+w.add_user(UserItem(jid="b@x", name="Bob", group="Work", status="online"))
+# The same contact in two groups must produce a single flat row.
+w.add_user(UserItem(jid="a@x", name="Alice", group="Work", status="online"))
+w.add_user(UserItem(jid="room@conf", name="Room", group="Conferences",
+                    status="online"))
+w.add_user(UserItem(jid="c@x", name="Carol", group="Personal",
+                    status="online"))
+w.sort_and_update()
+grouped_headers = [item.name for kind, item in w._visible_items()
+                   if kind == "group"]
+check("grouped mode shows the real and virtual headers",
+      grouped_headers == ["Friends", "Work", "Conferences", "Personal"])
+w.set_show_groups(False)
+items = w._visible_items()
+users = [item.name for kind, item in items if kind == "user"]
+headers = [item.name for kind, item in items if kind == "group"]
+check("flat mode lists each real contact once",
+      users.count("Alice") == 1 and users.count("Bob") == 1)
+check("flat mode drops the real group headers",
+      "Friends" not in headers and "Work" not in headers)
+check("flat mode keeps the virtual groups",
+      headers == ["Conferences", "Personal"])
+check("flat mode keeps the virtual group rows",
+      "Room" in users and "Carol" in users)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

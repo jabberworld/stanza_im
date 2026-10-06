@@ -602,9 +602,13 @@ presence — chat («free for chat») → online → away → xa → dnd → off
 the name as the tie-break. `set_sort_by_unread` (View menu's «Сортировать по
 непрочитанным», default on) makes contacts with unread messages lead the list
 (`RosterWidget._sort_key` puts `0 if unread_count else 1` first), then the
-presence/name order applies inside each part. The flags live in
-`appearance.roster_sort_by_status`/`roster_sort_by_unread`/`roster_show_offline`
-and are applied/toggled from the View menu.
+presence/name order applies inside each part. `set_show_groups` (View menu's
+«Показывать группы», default on) draws the real contacts as one flat list
+(one row per JID, sorted by the active options) when turned off, while the
+virtual groups — conferences and private messages (`_trailing_groups`) — keep
+their header. The flags live in
+`appearance.roster_sort_by_status`/`roster_sort_by_unread`/`roster_show_groups`/
+`roster_show_offline` and are applied/toggled from the View menu.
 
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.

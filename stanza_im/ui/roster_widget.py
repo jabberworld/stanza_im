@@ -42,6 +42,8 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._show_offline = True
         self._sort_by_status = True
         self._sort_by_unread = True
+        self._show_groups = True
+        self._flat_sorted: list[UserItem] = []
         self._press_pos: QtCore.QPoint | None = None
         self._press_jid: str | None = None
         self._drop_group: str | None = None
@@ -181,6 +183,18 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._recalc_heights()
         self.update()
 
+    def set_show_groups(self, value: bool) -> None:
+        """Show real contacts as group sections, or as one flat list.
+
+        With groups off the real contacts form a single list (sorted by the
+        active options); the virtual groups (conferences, private messages)
+        keep their headers.
+        """
+        self._show_groups = value
+        self._rebuild_sorted()
+        self._recalc_heights()
+        self.update()
+
     def sort_and_update(self) -> None:
         self._rebuild_sorted()
         self._recalc_heights()
@@ -210,24 +224,47 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             self._sorted_users.setdefault(user.group, []).append(user)
         for group in self._sorted_users:
             self._sorted_users[group].sort(key=self._sort_key)
+        # Flat list of the real contacts (one row per JID, virtual groups
+        # excluded) for the "groups off" display.
+        flat: list[UserItem] = []
+        seen: set[str] = set()
+        for user in self._users:
+            if user.group in self._trailing_groups or user.jid in seen:
+                continue
+            seen.add(user.jid)
+            flat.append(user)
+        flat.sort(key=self._sort_key)
+        self._flat_sorted = flat
+
+    def _filtered(self, users: list[UserItem]) -> list[UserItem]:
+        """Apply the show-offline flag and the search filter to *users*."""
+        if not self._show_offline:
+            users = [u for u in users if u.status != "offline"]
+        if self._filter:
+            users = [u for u in users if self._filter in u.name.lower()
+                     or self._filter in u.jid.lower()]
+        return users
 
     def _visible_items(self) -> list[tuple[str, GroupItem | UserItem]]:
         """Return the list of items currently visible (respecting group
-        expansion and search filter)."""
+        expansion and search filter).
+
+        With «Показывать группы» off the real contacts are drawn as one flat
+        list and only the virtual groups (conferences, private messages) keep
+        their header.
+        """
         result: list[tuple[str, GroupItem | UserItem]] = []
+        if not self._show_groups:
+            for user in self._filtered(self._flat_sorted):
+                result.append(("user", user))
         for group_name in self._sorted_groups:
+            if not self._show_groups \
+                    and group_name not in self._trailing_groups:
+                continue
             group = self._groups[group_name]
-            users = self._sorted_users.get(group_name, [])
-
-            if not self._show_offline:
-                users = [u for u in users if u.status != "offline"]
-
-            if self._filter:
-                users = [u for u in users if self._filter in u.name.lower()
-                         or self._filter in u.jid.lower()]
-                if not users:
-                    continue
-
+            users = self._filtered(self._sorted_users.get(group_name, []))
+            if self._filter and not users:
+                continue
             result.append(("group", group))
             if group.expanded:
                 for user in users:
@@ -278,20 +315,8 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
 
     def _visible_user_jids(self) -> list[str]:
         """JIDs of users currently visible (group expansion + search filter)."""
-        jids: list[str] = []
-        for group_name in self._sorted_groups:
-            group = self._groups[group_name]
-            if not group.expanded:
-                continue
-            users = self._sorted_users.get(group_name, [])
-            if not self._show_offline:
-                users = [u for u in users if u.status != "offline"]
-            if self._filter:
-                users = [u for u in users if self._filter in u.name.lower()
-                         or self._filter in u.jid.lower()]
-            for user in users:
-                jids.append(user.jid)
-        return jids
+        return [item.jid for kind, item in self._visible_items()
+                if kind == "user"]
 
     def _select_jid(self, jid: str) -> None:
         self._selected_jid = jid
