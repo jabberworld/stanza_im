@@ -142,6 +142,73 @@ check("no active profile unscopes history",
 check("no active profile unscopes unread",
       unread_state.path() == os.path.join(DATA_DIR, "unread.json"))
 
+# 6. UI dialogs ---------------------------------------------------------------
+from stanza_im.ui.profile_source_dialog import ProfileSourceDialog
+from stanza_im.ui.existing_account_dialog import ExistingAccountDialog
+from stanza_im.ui.profiles_dialog import ProfilesDialog, ProfileDeleteDialog
+from stanza_im.ui.account_registration_dialog import AccountRegistrationDialog
+
+source = ProfileSourceDialog()
+source._pick("existing")
+check("source dialog returns the choice",
+      source.choice() == "existing"
+      and source.result() == QtWidgets.QDialog.DialogCode.Accepted)
+
+existing = ExistingAccountDialog()
+existing._on_ok()
+check("existing dialog refuses an empty JID",
+      existing.result() != QtWidgets.QDialog.DialogCode.Accepted
+      and existing._status.text())
+existing._jid.setText("dave@example.com")
+existing._password.setText("pw")
+existing._override.setChecked(True)
+existing._host.setText("host.example.com")
+existing._port.setValue(5223)
+_set = existing._tls.findData("direct")
+existing._tls.setCurrentIndex(_set)
+existing._proxy_mode.setCurrentIndex(
+    existing._proxy_mode.findData("socks5"))
+existing._proxy_host.setText("proxy.example.com")
+existing._proxy_port.setValue(1080)
+existing._on_ok()
+p = existing.profile()
+check("existing dialog builds a Profile",
+      p.jid == "dave@example.com" and p.password == "pw"
+      and p.override_host is True and p.host == "host.example.com"
+      and p.port == 5223 and p.tls_mode == "direct"
+      and p.proxy_mode == "socks5" and p.proxy_port == 1080)
+
+delete = ProfileDeleteDialog("dave@example.com")
+delete._pick(True)
+check("delete dialog reports the data choice",
+      delete.delete_with_data() is True
+      and delete.result() == QtWidgets.QDialog.DialogCode.Accepted)
+
+# the manager lists the registry and applies the selection
+profiles.upsert(profiles.Profile("alice@example.com", password="a"))
+profiles.upsert(profiles.Profile("bob@example.com", password="b"))
+cfg.jid = "alice@example.com"
+manager = ProfilesDialog(cfg)
+check("manager lists both profiles", manager._list.count() == 2)
+check("manager marks the active profile bold",
+      manager._list.item(0).font().bold()
+      or manager._list.item(1).font().bold())
+check("apply/delete disabled without a selection",
+      not manager._apply_btn.isEnabled()
+      and not manager._delete_btn.isEnabled())
+manager._select("bob@example.com")
+check("selecting enables apply/delete",
+      manager._apply_btn.isEnabled() and manager._delete_btn.isEnabled())
+_emitted = []
+manager.activated.connect(_emitted.append)
+manager._on_apply()
+check("apply emits the selected JID", _emitted == ["bob@example.com"])
+
+# registration dialog does not touch the config when store_account=False
+reg = AccountRegistrationDialog(cfg, store_account=False)
+check("registration result_profile is None before submitting",
+      reg.result_profile() is None)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

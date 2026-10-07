@@ -47,14 +47,18 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
 
     registered = QtCore.pyqtSignal(str, str)  # jid, password
 
-    def __init__(self, config: Config, parent=None):
+    def __init__(self, config: Config, parent=None,
+                 store_account: bool = True):
         super().__init__(parent)
         self._config = config
+        self._store_account = bool(store_account)
         self._client: JabberClient | None = None
         self._form = None
         self._form_widget: DataFormWidget | None = None
         self._legacy_widget: LegacyFormWidget | None = None
         self._server = ""
+        self._result_jid = ""
+        self._result_password = ""
         self.setWindowTitle(tr("register_account_title"))
         self.resize(470, 0)
         self._build_ui()
@@ -303,9 +307,35 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         if result.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             self.reject()
             return
-        self._save_config(jid, password)
+        self._result_jid, self._result_password = jid, password
+        if self._store_account:
+            self._save_config(jid, password)
         self.registered.emit(jid, password)
         self.accept()
+
+    def result_profile(self):
+        """The newly created account as a :class:`Profile` (or ``None``).
+
+        Used by the profile manager when the dialog is opened with
+        ``store_account=False``: the account is not written to the config, so
+        the caller can register it as a profile instead.
+        """
+        if not self._result_jid:
+            return None
+        from stanza_im.core.profiles import Profile
+        return Profile(
+            jid=self._result_jid,
+            password=self._result_password,
+            save_password=True,
+            override_host=self._override.isChecked(),
+            host=self._host.text().strip(),
+            port=self._port.value(),
+            tls_mode=self._tls.currentData(),
+            starttls_mode=self._enc.currentData(),
+            proxy_mode=self._proxy_mode.currentData(),
+            proxy_host=self._proxy_host.text().strip(),
+            proxy_port=self._proxy_port.value(),
+        )
 
     def _credentials(self, values: dict) -> tuple[str, str]:
         username = str(values.get("username") or "").strip()
