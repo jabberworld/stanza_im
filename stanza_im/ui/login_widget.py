@@ -7,6 +7,8 @@ from PyQt6 import QtCore, QtWidgets, QtGui
 
 from stanza_im.i18n import tr
 from stanza_im.core.storage import Config
+from stanza_im.core import profiles
+from stanza_im.include.constants import find_icon
 
 
 class LoginWidget(QtWidgets.QWidget):
@@ -14,12 +16,14 @@ class LoginWidget(QtWidgets.QWidget):
 
     login_requested = QtCore.pyqtSignal(str, str, str)  # jid, password, show
     register_requested = QtCore.pyqtSignal()            # "Create account" link
+    profile_applied = QtCore.pyqtSignal(str)            # profile JID applied
 
     def __init__(self, config: Config | None = None, parent=None):
         super().__init__(parent)
         self._config = config or Config()
         self._build_ui()
         self._load_config()
+        self.refresh_profiles()
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -37,6 +41,21 @@ class LoginWidget(QtWidgets.QWidget):
             ))
         layout.addWidget(logo_label)
         layout.addSpacing(16)
+
+        # Profile selector: pick a stored account and fill the form from it.
+        profile_row = QtWidgets.QHBoxLayout()
+        profile_row.addWidget(QtWidgets.QLabel(tr("login_profiles")))
+        self._profile_combo = QtWidgets.QComboBox()
+        profile_row.addWidget(self._profile_combo, 1)
+        self._profile_apply_btn = QtWidgets.QToolButton()
+        icon_path = find_icon("ok.png")
+        if icon_path:
+            self._profile_apply_btn.setIcon(QtGui.QIcon(icon_path))
+        self._profile_apply_btn.setToolTip(tr("login_profile_apply"))
+        self._profile_apply_btn.setAccessibleName(tr("login_profile_apply"))
+        self._profile_apply_btn.clicked.connect(self._apply_profile)
+        profile_row.addWidget(self._profile_apply_btn)
+        layout.addLayout(profile_row)
 
         # JID
         layout.addWidget(QtWidgets.QLabel(tr("login_title")))
@@ -113,6 +132,36 @@ class LoginWidget(QtWidgets.QWidget):
             self._show_combo.setCurrentIndex(idx)
         if cfg.auto_connect:
             self._auto_connect.setChecked(True)
+
+    def refresh_profiles(self) -> None:
+        """Rebuild the profile selector from the registry."""
+        current = self._profile_combo.currentData()
+        self._profile_combo.blockSignals(True)
+        self._profile_combo.clear()
+        active = str(getattr(self._config, "jid", "") or "")
+        profiles_list = profiles.load()
+        for profile in profiles_list:
+            self._profile_combo.addItem(profile.jid, profile.jid)
+        index = self._profile_combo.findData(current)
+        if index < 0:
+            index = self._profile_combo.findData(active)
+        if index >= 0:
+            self._profile_combo.setCurrentIndex(index)
+        self._profile_combo.blockSignals(False)
+        self._profile_combo.setEnabled(bool(profiles_list))
+        self._profile_apply_btn.setEnabled(bool(profiles_list))
+
+    def _apply_profile(self) -> None:
+        """Load the selected profile into the config and the login form."""
+        jid = self._profile_combo.currentData()
+        if not jid:
+            return
+        profile = profiles.get(jid)
+        if profile is None:
+            return
+        profiles.apply_to_config(self._config, profile)
+        self._load_config()
+        self.profile_applied.emit(jid)
 
     def _save_config(self, jid: str, password: str, show: str):
         cfg = self._config

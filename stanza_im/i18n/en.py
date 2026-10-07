@@ -106,6 +106,7 @@ STRINGS = {
     "login_register": "Register",
     "login_create_account": "Create account",
     "login_profiles": "Profiles",
+    "login_profile_apply": "Apply the selected profile",
     "login_connecting": "Connecting...",
     "login_connected": "Connected.",
     "login_authenticating": "Authenticating...",

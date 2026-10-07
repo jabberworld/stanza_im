@@ -106,6 +106,7 @@ STRINGS = {
     "login_register": "Зарегистрироваться",
     "login_create_account": "Создать аккаунт",
     "login_profiles": "Профили",
+    "login_profile_apply": "Применить выбранный профиль",
     "login_connecting": "Подключение...",
     "login_connected": "Подключено.",
     "login_authenticating": "Аутентификация...",

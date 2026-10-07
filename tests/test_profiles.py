@@ -209,6 +209,37 @@ reg = AccountRegistrationDialog(cfg, store_account=False)
 check("registration result_profile is None before submitting",
       reg.result_profile() is None)
 
+# 7. login profile selector ---------------------------------------------------
+from stanza_im.ui.login_widget import LoginWidget
+
+cfg.jid = "alice@example.com"
+login = LoginWidget(cfg)
+check("login selector lists the profiles",
+      login._profile_combo.count() == 2)
+login._profile_combo.setCurrentIndex(
+    login._profile_combo.findData("bob@example.com"))
+_applied = []
+login.profile_applied.connect(_applied.append)
+login._apply_profile()
+check("applying a profile writes the active account",
+      cfg.jid == "bob@example.com" and cfg.password == "b")
+check("applying a profile reloads the form",
+      login._jid_edit.text() == "bob@example.com"
+      and login._pw_edit.text() == "b")
+check("profile_applied is emitted", _applied == ["bob@example.com"])
+
+# 8. MainWindow wiring (static) ----------------------------------------------
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
+               encoding="utf-8").read()
+check("MainWindow selects the active profile at startup",
+      "profiles.set_active(self._config.jid)" in _mw_src)
+check("Profiles menu action is enabled and wired",
+      "profiles_act.triggered.connect(self._on_profiles)" in _mw_src)
+check("login submission selects the profile and reloads unread",
+      "profiles.set_active(jid)" in _mw_src
+      and "self._load_unread_for(jid)" in _mw_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -30,7 +30,7 @@ from stanza_im.include.constants import (APP_NAME, VERSION,
 from stanza_im.include import pep
 from stanza_im.include import clients as clients_mod
 from stanza_im.core.storage import Config
-from stanza_im.core import unread_state
+from stanza_im.core import profiles, unread_state
 from stanza_im.ui.icons import init_icons
 from stanza_im.ui.zoom_list import ZoomListWidget as _ZoomListWidget
 from stanza_im.ui.login_widget import LoginWidget
@@ -198,6 +198,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── Initialise subsystems ─────────────────────────────────
         load_i18n()
         self._config = Config()
+        # Select the active profile's data directory before anything reads the
+        # per-account stores (unread counters are loaded just below).
+        profiles.set_active(self._config.jid)
         # Apply the saved application language (empty = system default); it is
         # loaded after Config so a language chosen in Preferences takes effect.
         saved_lang = getattr(self._config.ui, "language", "") or ""
@@ -454,13 +457,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # "read_ts", "read_ref"} keyed by the chat-tab key.  The unread /
         # mention / displayed views below are derived from it, so the badge,
         # the tray and the XEP-0490 seed can never drift apart.
-        self._unread_chats: dict[str, dict] = unread_state.load_chats(
-            self._config.jid)
-        self._unread_jids: set[str] = {key for key, entry in
-                                       self._unread_chats.items()
-                                       if entry["unread"]}
-        self._unread_total = sum(entry["unread"] for entry in
-                                 self._unread_chats.values())
+        self._unread_chats: dict[str, dict] = {}
+        self._unread_jids: set[str] = set()
+        self._unread_total = 0
+        self._load_unread_for(self._config.jid)
         # Unseen reactions on our own messages, keyed by chat-tab key then by
         # the message reference; the value is the number of reactions not yet
         # looked at.  Session-only, never persisted.
@@ -578,6 +578,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._login = LoginWidget(self._config)
         self._login.login_requested.connect(self._on_login)
         self._login.register_requested.connect(self._on_create_account)
+        self._login.profile_applied.connect(self._on_login_profile_applied)
         self._stack.addWidget(self._login)
 
         # Page 1: Splash / connecting
@@ -1280,8 +1281,9 @@ class MainWindow(QtWidgets.QMainWindow):
         prefs = actions_menu.addAction(self._menu_icon("gtk-preferences.png"),
                                        tr("menu_preferences"))
         prefs.triggered.connect(self._on_preferences)
-        profiles = actions_menu.addAction(tr("menu_profiles"))
-        profiles.setEnabled(False)
+        profiles_act = actions_menu.addAction(
+            self._menu_icon("system-users.png"), tr("menu_profiles"))
+        profiles_act.triggered.connect(self._on_profiles)
         xml_console = actions_menu.addAction(
             self._menu_icon("xml-konzole.svg"), tr("menu_xml_console"))
         xml_console.triggered.connect(self._on_xml_console)
@@ -2521,6 +2523,57 @@ class MainWindow(QtWidgets.QMainWindow):
         if prefs is not None and prefs.isVisible():
             prefs.close()
 
+    # ── Profiles ─────────────────────────────────────────────────
+
+    def _on_profiles(self) -> None:
+        """Open the application profile manager."""
+        from stanza_im.ui.profiles_dialog import ProfilesDialog
+        dialog = ProfilesDialog(self._config, self)
+        dialog.activated.connect(self._activate_profile)
+        dialog.exec()
+
+    def _on_login_profile_applied(self, jid: str) -> None:
+        """A profile was applied on the login screen: select its data dir."""
+        profiles.set_active(jid)
+
+    def _confirm_profile_switch(self, jid: str) -> bool:
+        reply = QtWidgets.QMessageBox.question(
+            self, tr("profiles_activate_title"),
+            tr("profiles_activate_question", jid=jid),
+            QtWidgets.QMessageBox.StandardButton.Ok
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Cancel)
+        return reply == QtWidgets.QMessageBox.StandardButton.Ok
+
+    def _activate_profile(self, jid: str) -> None:
+        """Switch the active account to the profile *jid*.
+
+        The profile is written to the config, the per-account data directory
+        is selected and, when a session is open, the user is asked to confirm
+        before the old session is closed and the new account is signed in.  A
+        profile without a stored password only fills the login form.
+        """
+        profile = profiles.get(jid)
+        if profile is None:
+            return
+        connected = (self._client is not None
+                     and self._stack.currentIndex() != _PAGE_LOGIN)
+        if connected and not self._confirm_profile_switch(jid):
+            return
+        if connected:
+            self._logout()
+        profiles.apply_to_config(self._config, profile)
+        profiles.set_active(jid)
+        self._login.refresh_profiles()
+        self._login.prefill(self._config.jid,
+                            self._config.password or "")
+        if connected and self._config.password:
+            self._on_login(self._config.jid, self._config.password,
+                           self._config.last_status)
+        elif connected:
+            # No saved password: stay on the login form, ready to type it.
+            self._login._pw_edit.setFocus()
+
     def _apply_roster_font(self) -> None:
         """Apply the configured roster font (empty family = application font)."""
         roster = getattr(self, "_roster", None)
@@ -2849,6 +2902,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_login(self, jid: str, password: str, show: str):
         """Handle login form submission."""
+        # Select the account's data directory and reload its counters before
+        # the client (and any history) is created.
+        profiles.set_active(jid)
+        self._load_unread_for(jid)
+        # Keep the registry in step with the account actually used (the
+        # password is only remembered when the user asked to save it).
+        if jid:
+            profiles.upsert(profiles.from_config(self._config))
         self._stack.setCurrentIndex(_PAGE_SPLASH)
         self._set_splash(tr("login_connecting"), 10)
 
@@ -4763,6 +4824,15 @@ class MainWindow(QtWidgets.QMainWindow):
                     "sid": entry.get("seen_sid", "")}
         return {"ref": entry["read_ref"], "ts": entry["read_ts"],
                 "sid": entry["read_sid"]}
+
+    def _load_unread_for(self, jid: str) -> None:
+        """(Re)load the persisted read state of the account *jid*.
+
+        Called at startup and on every login so a profile switch never shows
+        the previous account's counters.
+        """
+        self._unread_chats = unread_state.load_chats(jid)
+        self._recount_unread()
 
     def _recount_unread(self) -> None:
         """Recompute the aggregate counters from the stored records."""
@@ -7274,6 +7344,7 @@ class MainWindow(QtWidgets.QMainWindow):
         saved_password = (self._config.password
                           if getattr(self._config, "save_password", False)
                           else "")
+        self._login.refresh_profiles()
         self._login.prefill(self._config.jid or "", saved_password)
         self._login.set_status_text("")
 
