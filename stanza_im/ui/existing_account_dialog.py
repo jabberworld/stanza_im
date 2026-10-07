@@ -2,7 +2,7 @@
 account, used when creating a profile without registering a new one."""
 from __future__ import annotations
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.core.profiles import Profile
