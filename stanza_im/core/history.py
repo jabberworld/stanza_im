@@ -29,6 +29,19 @@ from stanza_im.include.constants import HISTORY_DIR
 
 logger = logging.getLogger(__name__)
 
+
+def set_profile(jid: str) -> None:
+    """Point ``HISTORY_DIR`` at the active profile's data directory.
+
+    Kept as a module global (rather than calling ``constants`` on every path
+    lookup) so tests can still override ``history.HISTORY_DIR`` directly.
+    """
+    global HISTORY_DIR
+    from stanza_im.include import constants
+    constants.set_active_profile(jid)
+    HISTORY_DIR = constants.history_dir()
+
+
 _MAX_CONNECTIONS = 32
 _CONN_TTL = 300.0
 

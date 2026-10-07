@@ -13,13 +13,14 @@ import os
 import time
 import tomllib
 
-from stanza_im.include.constants import CONFIG_DIR, CONFIG_FILE, HISTORY_DIR
+from stanza_im.include import constants
+from stanza_im.include.constants import CONFIG_DIR, CONFIG_FILE
 
 logger = logging.getLogger(__name__)
 
 
 def _ensure_dirs() -> None:
-    for d in (CONFIG_DIR, HISTORY_DIR):
+    for d in (CONFIG_DIR, constants.history_dir()):
         os.makedirs(d, exist_ok=True)
 
 
@@ -277,7 +278,7 @@ class Config:
 def history_path(jid: str) -> str:
     """Return the JSON-lines file for a single JID's history."""
     safe = jid.lower().replace("/", "_")
-    return os.path.join(HISTORY_DIR, f"{safe}.jsonl")
+    return os.path.join(constants.history_dir(), f"{safe}.jsonl")
 
 
 def save_history_entry(jid: str, direction: str, body: str,
@@ -288,7 +289,7 @@ def save_history_entry(jid: str, direction: str, body: str,
     (for outgoing this is typically the local nick).
     """
     try:
-        os.makedirs(HISTORY_DIR, exist_ok=True)
+        os.makedirs(constants.history_dir(), exist_ok=True)
         entry = {
             "direction": direction,
             "sender": sender,

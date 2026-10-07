@@ -37,6 +37,15 @@ from stanza_im.include.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
+
+def set_profile(jid: str) -> None:
+    """Point ``DATA_DIR`` at the active profile's data directory."""
+    global DATA_DIR
+    from stanza_im.include import constants
+    constants.set_active_profile(jid)
+    DATA_DIR = constants.profile_data_dir()
+
+
 _FILE = "unread.json"
 
 _FIELDS = ("unread", "mentions", "read_sid", "read_ts", "read_ref",

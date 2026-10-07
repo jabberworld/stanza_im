@@ -108,3 +108,40 @@ APP_LOG_FILE = os.path.join(_PROJECT_ROOT, "stanza-im.log")
 
 HISTORY_DIR = os.path.join(DATA_DIR, "history")
 AVATARS_DIR = os.path.join(CACHE_DIR, "avatars")
+
+# ── Active profile ─────────────────────────────────────────────────
+# A profile is an account (Jabber ID).  Its per-account data (history, roster
+# cache, unread counters, known contacts) lives in ``DATA_DIR/<jid>/`` so two
+# accounts never share state.  ``set_active_profile`` selects the subdirectory;
+# with no profile (or before the first login) the unscoped ``DATA_DIR`` is used,
+# which keeps the historical single-account layout and the test fixtures working.
+
+_ACTIVE_PROFILE = ""
+
+
+def _safe_profile_name(name: str) -> str:
+    """Sanitize a Jabber ID into a single directory name."""
+    safe = str(name or "").split("/")[0].strip()
+    return safe.replace(os.sep, "_").replace("/", "_")
+
+
+def set_active_profile(jid: str) -> None:
+    """Select the data subdirectory for the active account ("" = unscoped)."""
+    global _ACTIVE_PROFILE
+    _ACTIVE_PROFILE = _safe_profile_name(jid)
+
+
+def active_profile() -> str:
+    """The currently selected profile JID ("" when none)."""
+    return _ACTIVE_PROFILE
+
+
+def profile_data_dir() -> str:
+    """``DATA_DIR`` scoped to the active profile (``DATA_DIR`` when none)."""
+    safe = _safe_profile_name(_ACTIVE_PROFILE)
+    return os.path.join(DATA_DIR, safe) if safe else DATA_DIR
+
+
+def history_dir() -> str:
+    """Per-profile chat-history directory."""
+    return os.path.join(profile_data_dir(), "history")
