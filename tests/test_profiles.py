@@ -228,6 +228,14 @@ check("applying a profile reloads the form",
       and login._pw_edit.text() == "b")
 check("profile_applied is emitted", _applied == ["bob@example.com"])
 
+# empty credentials are rejected with a localized message
+from stanza_im.i18n import tr
+login._jid_edit.setText("")
+login._pw_edit.setText("")
+login._on_connect()
+check("empty credentials show the localized error",
+      login._info_label.text() == tr("login_credentials_required"))
+
 # 8. MainWindow wiring (static) ----------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),

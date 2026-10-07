@@ -184,7 +184,7 @@ class LoginWidget(QtWidgets.QWidget):
         pw = self._pw_edit.text()
         show = self._show_combo.currentData()
         if not jid or not pw:
-            self.set_error("JID and password are required.")
+            self.set_error(tr("login_credentials_required"))
             return
         self._save_config(jid, pw, show)
         self._connect_btn.setEnabled(False)
