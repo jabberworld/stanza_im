@@ -30,6 +30,7 @@ stanza_im/
 │   ├── history.py      — SQLite chat-history access (day/summary + async wrappers)
 │   ├── known_contacts.py — persisted JID → name/groups/conference registry
 │   ├── unread_state.py — persisted per-chat read state (unread/mentions/anchor)
+│   ├── profiles.py     — account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py  — vCard avatar download/cache coordination
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
 │   ├── privacy.py      — XEP-0016 privacy-list parse/build helpers
@@ -37,7 +38,10 @@ stanza_im/
 │   └── memstats.py     — periodic memory statistics (CLI -m)
 ├── ui/
 │   ├── main_window.py  — Main window (3-page stack), actions and menus
-│   ├── login_widget.py — Login form + config prefill/save
+│   ├── login_widget.py — Login form + config prefill/save + profile selector
+│   ├── profiles_dialog.py — application profile manager (create/apply/delete)
+│   ├── profile_source_dialog.py — existing-account vs register-new choice
+│   ├── existing_account_dialog.py — existing-account credentials/connection form
 │   ├── roster_widget.py— Custom-painted contact list
 │   ├── roster_style.py — QPainter rendering strategy
 │   ├── chat_window.py  — Tab container for conversations
@@ -202,9 +206,14 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Path | Location |
 |------|----------|
 | Config (TOML) | `$XDG_CONFIG_HOME/stanza-im/config.toml` |
-| Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/history/<bare-jid>.jsonl` |
-| Chat history (SQLite) | `$XDG_DATA_HOME/stanza-im/history/` |
-| Cache | `$XDG_CACHE_HOME/stanza-im/` |
+| Profiles (JSON) | `$XDG_CONFIG_HOME/stanza-im/profiles.json` |
+| Per-profile data | `$XDG_DATA_HOME/stanza-im/<jid>/` |
+| Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/<jid>/history/<bare-jid>.jsonl` |
+| Chat history (SQLite) | `$XDG_DATA_HOME/stanza-im/<jid>/history/` |
+| Unread counters | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` |
+| Roster cache | `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json` |
+| Known contacts | `$XDG_DATA_HOME/stanza-im/<jid>/known_contacts.json` |
+| Cache (shared) | `$XDG_CACHE_HOME/stanza-im/` |
 | Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
 
 - Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
@@ -214,6 +223,17 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
   literal — `ensure_ascii=True` would emit single-surrogate escapes (`\ud83d`)
   that TOML parsers reject.
 - History appended line-by-line as JSON, one file per bare JID
+- **Per-profile data**: every account keeps its history, roster cache, unread
+  counters and known-contacts registry under `$XDG_DATA_HOME/stanza-im/<jid>/`;
+  `core/profiles.set_active(jid)` re-bases those stores and closes the pooled
+  history connections. The `CACHE_DIR` stores (avatars, media, tiles, discovery,
+  vCard cache) are shared. With no profile selected the unscoped `DATA_DIR`
+  layout is used (tests, before the first login).
+- **Profiles** (`profiles.json`): one entry per account (Jabber ID) with its
+  password (`save_password` controls whether it is stored at all), host/port
+  override, `tls_mode`/`starttls_mode` and proxy settings. The active account's
+  values also live in `config.toml`; the manager writes a profile back to the
+  config when applied (see §11 Profiles).
 
 ### 4.1 Connection Settings (`connection.*`)
 
@@ -588,6 +608,9 @@ server when nothing is selected), non-modally. It has three tabs and one
 
 Widgets:
 - Logo image (from `resources/images/logo.png`)
+- Profile selector (`QComboBox` of the stored profiles) with an `ok.png`
+  apply button (`_apply_profile`) that loads the selected account into the
+  config and the form (`profile_applied(jid)`); `refresh_profiles()` rebuilds it
 - JID input (`QLineEdit`, placeholder "user@server")
 - Password input (`QLineEdit`, echo=Password)
 - Status combo (`QComboBox`): Online, Chatty, Away, XA, DND (with icons)
@@ -641,7 +664,7 @@ service types (`subscribe`/`subscribed`/`unsubscribe`/`unsubscribed`/`probe`/
 `error`) are ignored.
 
 The roster is cached across sessions for **XEP-0237 roster versioning**
-(`core/roster_cache.py` → `$XDG_DATA_HOME/stanza-im/roster/<account>.json`,
+(`core/roster_cache.py` → `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json`,
 0600). `_seed_roster_cache()` (the start of `_on_session_start`, before
 `request_roster`) loads it lazily and preloads `client_roster` and its
 `version`; the request then carries the cached `ver`, and an unchanged
@@ -689,7 +712,50 @@ the shared `Config` and emits `registered(jid, password)`; `MainWindow`
 prefills the login form (`LoginWidget.prefill`), returns to the login page,
 re-applies the settings and closes the Preferences window when it was open. The
 login widget shares `MainWindow._config` (passed into `LoginWidget`), so a
-later `save()` cannot revert the newly written sections.
+later `save()` cannot revert the newly written sections. The dialog also takes
+`store_account` (default `True`): with `False` (used by the profile manager) it
+does not touch the config and only returns the new account through
+`result_profile()`.
+
+### 6.5 Profiles (`core/profiles.py`, `ui/profiles_dialog.py`)
+
+A **profile** is one account; its name is the Jabber ID. The registry is JSON
+at `$XDG_CONFIG_HOME/stanza-im/profiles.json` (0600), one `Profile` per account
+(`jid`, `password`, `save_password`, `override_host`, `host`, `port`,
+`tls_mode`, `starttls_mode`, `proxy_mode`, `proxy_host`, `proxy_port`). The
+active account's values also live in `config.toml`; `apply_to_config` writes a
+profile back into it. `profiles.set_active(jid)` selects the per-account data
+directory (see §4) and closes the pooled history connections.
+
+The Actions menu's «Профили» opens `ProfilesDialog`: the available profiles on
+the left (the active one in bold) and «Создать»/«Применить»/«Удалить» on the
+right, with a separate «Закрыть» button at the bottom.
+
+- «Создать» → `ProfileSourceDialog` with «У меня уже есть учетная запись»
+  (`ExistingAccountDialog`: JID, password, optional host/port, encryption and
+  proxy) or «Зарегистрировать новую учетную запись»
+  (`AccountRegistrationDialog` with `store_account=False`). The resulting
+  `Profile` is only **added** to the list (`profiles.upsert`).
+- «Применить» emits `activated(jid)`; `MainWindow._activate_profile` writes the
+  profile to the config, selects its data directory, reloads the unread
+  counters and — while a session is open — asks for confirmation
+  (`profiles_activate_question`) before logging out and signing in to the new
+  account. A profile without a stored password only fills the login form.
+- «Удалить» → `ProfileDeleteDialog` asks whether to delete the profile's data
+  too (`profiles.delete_data` removes `<DATA_DIR>/<jid>`) or only the list
+  entry (`profiles.remove`).
+
+A manually typed account is upserted into the registry on login; its password
+is stored only when «Сохранить пароль» is checked. [`tests/test_profiles.py`]
+
+### 6.6 Authentication errors
+
+An empty Jabber ID/password is rejected on the client with
+`login_credentials_required`. A server SASL failure arrives as slixmpp's
+`failed_auth` event; `JabberClient._on_auth_failed` forwards the failure
+`condition` (`auth_failed(condition)`) and `MainWindow._on_auth_failed` shows
+`login_bad_credentials` for `not-authorized`, otherwise the generic
+`login_auth_failed`, then returns to the login page.
 
 ## 7. Roster (`ui/roster_widget.py` + `ui/roster_style.py`)
 
@@ -1454,7 +1520,7 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   started on `session_started`/`stream_resumed` and on new unread, stopped on
   `disconnected`/`sm_failed`), so restored counters do not blink on the login
   screen.
-- Unread counters are persisted (`$XDG_DATA_HOME/stanza-im/unread.json`,
+- Unread counters are persisted (`$XDG_DATA_HOME/stanza-im/<jid>/unread.json`,
   `core/unread_state.py`) and restored on startup: the roster badges come back
   exactly as before the restart (`MainWindow._unread_chats` is the single
   record store; `_unread_counts`/`_unread_mentions`/`_unread_displayed` are
