@@ -423,6 +423,7 @@ class ChatWidget(QtWidgets.QWidget):
     add_contact_jid_requested = QtCore.pyqtSignal(str)        # xmpp: contact jid
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
     last_seen_changed = QtCore.pyqtSignal(str, str, str)
+    reaction_seen = QtCore.pyqtSignal(str, str, int)  # jid, ref, cleared count
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, new_body
 
     def __init__(self, jid: str, display_name: str, theme: ChatThemeFactory,
@@ -481,6 +482,10 @@ class ChatWidget(QtWidgets.QWidget):
         self._mention_refs: list[str] = []
         self._unread_count = 0
         self._mention_count = 0
+        # Unseen reactions on our own messages: refs in arrival order with
+        # their pending reaction count (session-only).
+        self._reaction_refs: list[str] = []
+        self._reaction_counts: dict[str, int] = {}
         # Highest "seen" report already accepted (monotonic, never moved back).
         self._last_seen_ref = ""
         self._last_seen_ts = ""
@@ -517,9 +522,11 @@ class ChatWidget(QtWidgets.QWidget):
         view.bottom_reached.connect(self.bottom_reached)
         view.last_seen_changed.connect(self._on_last_seen)
         view.mention_jump_requested.connect(self._jump_to_next_mention)
+        view.reaction_jump_requested.connect(self._jump_to_next_reaction)
         try:
             view.set_mention_count(self._mention_count)
             view.set_unseen_count(self._unread_count)
+            view.set_reaction_count(self.reaction_count())
         except (AttributeError, RuntimeError):
             pass
         return view
@@ -2311,6 +2318,54 @@ class ChatWidget(QtWidgets.QWidget):
         if not self._mention_refs:
             return
         ref = self._mention_refs.pop(0)
+        entry = self._find_message(ref)
+        if entry is not None:
+            self._view.scroll_to_message(self._reply_target_id(entry))
+        else:
+            # Outside the rendered window: walk the local archive towards it.
+            self._jump_to_message(ref)
+
+    # ── Reactions on our own messages ─────────────────────────────
+
+    def set_reaction_pending(self, mapping: dict) -> None:
+        """Replace the pending-reaction map (``{ref: count}``) and refresh.
+
+        The map is owned by ``MainWindow`` (session state); its insertion
+        order is the order the messages first got a reaction, which the button
+        walks on each click.
+        """
+        counts: dict[str, int] = {}
+        for ref, count in (mapping or {}).items():
+            try:
+                value = int(count)
+            except (TypeError, ValueError):
+                value = 0
+            if ref and value > 0:
+                counts[str(ref)] = value
+        self._reaction_counts = counts
+        self._reaction_refs = list(counts)
+        self._update_reaction_button()
+
+    def reaction_count(self) -> int:
+        return sum(self._reaction_counts.values())
+
+    def _update_reaction_button(self) -> None:
+        try:
+            self._view.set_reaction_count(self.reaction_count())
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _jump_to_next_reaction(self) -> None:
+        """Scroll to the first message with unseen reactions, clearing it."""
+        if not self._reaction_refs:
+            return
+        ref = self._reaction_refs.pop(0)
+        count = self._reaction_counts.pop(ref, 0)
+        self._update_reaction_button()
+        try:
+            self.reaction_seen.emit(self.jid, ref, count)
+        except Exception:
+            pass
         entry = self._find_message(ref)
         if entry is not None:
             self._view.scroll_to_message(self._reply_target_id(entry))

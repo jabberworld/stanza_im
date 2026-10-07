@@ -191,6 +191,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             lambda j=widget.jid: self.bottom_reached.emit(j))
         widget.last_seen_changed.connect(
             lambda r, t, s, j=widget.jid: self.last_seen.emit(j, r, t, s))
+        widget.reaction_seen.connect(
+            lambda r, c, j=widget.jid: self.reaction_seen.emit(j, r, c))
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -277,6 +279,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             lambda j=widget.jid: self.bottom_reached.emit(j))
         widget.last_seen_changed.connect(
             lambda r, t, s, j=widget.jid: self.last_seen.emit(j, r, t, s))
+        widget.reaction_seen.connect(
+            lambda r, c, j=widget.jid: self.reaction_seen.emit(j, r, c))
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -436,6 +440,16 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = self._tabs.get(jid)
         if widget is not None:
             widget.set_reactions(ref_id, reactions)
+
+    def set_reaction_pending(self, jid: str, mapping: dict) -> None:
+        """Push the pending-reaction map to the open tab of *jid* (if any)."""
+        widget = self._tabs.get(jid)
+        if widget is not None:
+            widget.set_reaction_pending(mapping)
+
+    def reaction_count(self, jid: str) -> int:
+        widget = self._tabs.get(jid)
+        return widget.reaction_count() if widget is not None else 0
 
     def set_muc_participant_options(self, show_avatars: bool = True,
                                     show_clients: bool = True) -> None:
@@ -714,6 +728,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     tab_focused = QtCore.pyqtSignal(str)                # jid became current
     bottom_reached = QtCore.pyqtSignal(str)             # jid view at the end
     last_seen = QtCore.pyqtSignal(str, str, str, str)   # jid, ref, ts, sid
+    reaction_seen = QtCore.pyqtSignal(str, str, int)    # jid, ref, cleared count
     activity_changed = QtCore.pyqtSignal(str, str)      # jid, state
     tab_closed = QtCore.pyqtSignal(str)                 # a 1-on-1 tab closed
     muc_leave_requested = QtCore.pyqtSignal(str)        # room closed → leave

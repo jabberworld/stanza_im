@@ -777,8 +777,9 @@ it, and a load starts it only when visible), so background tabs are never
 polled; the last-seen query is skipped while the view sits at the bottom. The
 `▼` shares a centred
 bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
-button below; both labels are replayed after every page load
-(`_on_load_finished` calls `_update_jump_label`/`_update_mention_label`) so a
+button (left) and the reaction `♥` button (right, see below); all three labels
+are replayed after every page load (`_on_load_finished` calls
+`_update_jump_label`/`_update_mention_label`/`_update_reaction_label`) so a
 count seeded before the document existed still shows.
 [`tests/test_jump_button.py`]
 
@@ -804,6 +805,29 @@ the loaded history after the read anchor is re-armed) and again after a deferred
 archive resolve (`_finish_unread_resolve`); a room joined with unread messages
 loads its history with the read anchor (`MainWindow._on_muc_joined`), so the `@`
 target list and the separator are present on open.
+
+**Reactions on our own messages (the `♥` button)**: a third floating button
+right of `▼ N` (the WebEngine backend's in-page `#stanza-reaction` div, order
+`2` in `#stanza-fabs`; the QTextBrowser fallback a `QToolButton`; the click is
+relayed by the scroll poll as `window.__stanzaReactionPress`, index 24, with the
+QWebChannel `on_reaction_clicked` as an optional fast path) counts the
+**reactions other participants put on our own messages**. It is session-only and
+never persisted: `MainWindow._reaction_pending` maps each chat-tab key to an
+ordered `{message-ref: count}`. Every XEP-0444 update goes through
+`_store_reactions`, which reads the reactor's previous emoji set
+(`_reactor_set`) and applies the size delta (`_note_reaction_delta`): a reactor
+who adds 5 reactions adds 5, one who takes 2 back subtracts 2, clamped at 0.
+Only reactions on a message we sent (`_is_own_message`, via
+`history.entry_by_ref`, which matches `archive_id`/`origin_id`/`message_id`) and
+never our own reactions (`_reaction_is_mine`) count. The total is pushed to the
+tab (`ChatWindow.set_reaction_pending` → `ChatWidget.set_reaction_pending` →
+`ChatView.set_reaction_count`, mirrored on open by `_focus_chat`), shown as
+`♥ N` (capped `99+`, hidden at 0). A click jumps to the first message with
+pending reactions (`ChatWidget._jump_to_next_reaction`: `scroll_to_message` when
+rendered, else `_jump_to_message`) and clears **that message's** count in one
+batch (`reaction_seen` → `MainWindow._on_reaction_seen`); the button stays while
+other messages still have pending reactions. It only ever decreases by clicking
+it, not by reaching the bottom. [`tests/test_reaction_button.py`]
 
 **MUC mentions & Tab completion**: in groupchats the incoming sender name is
 rendered as a clickable `stanza:mention:` link (`render_message(mention=...)`,

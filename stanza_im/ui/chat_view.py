@@ -182,10 +182,11 @@ class _JumpButtonMixin:
         self._init_jump_state()
 
     def _position_fab_buttons(self):
-        """Lay the floating buttons (``@`` left, ``▼`` right) centred in a row."""
+        """Lay the floating buttons (``@`` left, ``♥`` right) centred in a row."""
         jump = getattr(self, "_jump_button", None)
         mention = getattr(self, "_mention_button", None)
-        shown = [b for b in (mention, jump)
+        reaction = getattr(self, "_reaction_button", None)
+        shown = [b for b in (mention, jump, reaction)
                  if b is not None and b.isVisible()]
         if not shown:
             return
@@ -193,7 +194,7 @@ class _JumpButtonMixin:
         total = sum(b.width() for b in shown) + gap * (len(shown) - 1)
         x = (self.width() - total) // 2
         y = self.height() - 34 - 16
-        for button in (mention, jump):
+        for button in (mention, jump, reaction):
             if button is None or not button.isVisible():
                 continue
             button.move(x, y)
@@ -451,6 +452,74 @@ class _JumpButtonMixin:
             button.setVisible(show)
         self._position_fab_buttons()
 
+    # ── Reaction jump button (floating "♥ N", right of "▼ N") ─────
+
+    @staticmethod
+    def _reaction_label(count: int) -> str:
+        if count <= 0:
+            return "\u2665"
+        return "\u2665 " + ("99+" if count > 99 else str(count))
+
+    def _init_reaction_state(self):
+        self._reaction_count = 0
+        self._update_reaction_label()
+        self._update_reaction_button()
+
+    def set_reaction_count(self, count: int) -> None:
+        """Show/refresh the floating heart with the unseen-reaction count."""
+        try:
+            self._reaction_count = max(0, int(count or 0))
+        except (TypeError, ValueError):
+            self._reaction_count = 0
+        self._update_reaction_label()
+        self._update_reaction_button()
+
+    def _update_reaction_button(self):
+        self._set_reaction_visible(getattr(self, "_reaction_count", 0) > 0)
+
+    def _on_reaction_clicked(self) -> None:
+        try:
+            self.reaction_jump_requested.emit()
+        except Exception:
+            pass
+
+    def _create_reaction_button(self):
+        button = QtWidgets.QToolButton(self)
+        button.setText("\u2665")
+        button.setAutoRaise(True)
+        button.setToolTip(tr("chat_jump_reaction"))
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setFixedSize(34, 34)
+        button.setStyleSheet(
+            "QToolButton {"
+            "  background: #ececec;"
+            "  color: #c0392b; border: none; border-radius: 17px;"
+            "  font-size: 16px;"
+            "}"
+            "QToolButton:hover { background: #d9d9d9; }")
+        button.clicked.connect(self._on_reaction_clicked)
+        button.hide()
+        self._reaction_button = button
+        self._init_reaction_state()
+
+    def _update_reaction_label(self):
+        button = getattr(self, "_reaction_button", None)
+        if button is None:
+            return
+        text = self._reaction_label(getattr(self, "_reaction_count", 0))
+        if button.text() != text:
+            button.setText(text)
+            button.setFixedSize(max(34, button.sizeHint().width() + 8), 34)
+        self._position_fab_buttons()
+
+    def _set_reaction_visible(self, show: bool):
+        button = getattr(self, "_reaction_button", None)
+        if button is None:
+            return
+        if button.isVisible() != show:
+            button.setVisible(show)
+        self._position_fab_buttons()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_fab_buttons()
@@ -468,6 +537,7 @@ if HAS_WEBENGINE:
         scroll_fraction = QtCore.pyqtSignal(float)
         jump_clicked = QtCore.pyqtSignal()
         mention_clicked = QtCore.pyqtSignal()
+        reaction_clicked = QtCore.pyqtSignal()
         reply_requested = QtCore.pyqtSignal(str, str, str, str)  # reply_id, author, sender, snippet
 
         @QtCore.pyqtSlot(str)
@@ -498,6 +568,10 @@ if HAS_WEBENGINE:
         def on_mention_clicked(self):
             self.mention_clicked.emit()
 
+        @QtCore.pyqtSlot()
+        def on_reaction_clicked(self):
+            self.reaction_clicked.emit()
+
         @QtCore.pyqtSlot(str, str, str, str)
         def on_reply(self, reply_id: str, author: str, sender: str, snippet: str):
             self.reply_requested.emit(reply_id, author, sender, snippet)
@@ -527,6 +601,7 @@ if HAS_WEBENGINE:
         document_lost = QtCore.pyqtSignal()
         last_seen_changed = QtCore.pyqtSignal(str, str, str)
         mention_jump_requested = QtCore.pyqtSignal()
+        reaction_jump_requested = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
@@ -562,12 +637,14 @@ if HAS_WEBENGINE:
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self._on_jump_clicked)
             self._bridge.mention_clicked.connect(self._on_mention_clicked)
+            self._bridge.reaction_clicked.connect(self._on_reaction_clicked)
             self._bridge.reply_requested.connect(self.reply_requested)
 
             self._page = _StanzaPage(self, parent=self)
             self.setPage(self._page)
             self._init_jump_state()
             self._init_mention_state()
+            self._init_reaction_state()
 
             channel = QtWebChannel.QWebChannel()
             channel.registerObject("bridge", self._bridge)
@@ -880,13 +957,16 @@ if HAS_WEBENGINE:
                 self._install_scroll_js()
                 self._install_jump_js()
                 self._install_mention_js()
+                self._install_reaction_js()
                 self._install_action_js()
                 # The floating buttons were created just now; replay the
                 # counters that were seeded before the page was ready.
                 self._update_jump_label()
                 self._update_mention_label()
+                self._update_reaction_label()
                 self._update_jump_button()
                 self._update_mention_button()
+                self._update_reaction_button()
                 self.page().runJavaScript(
                     "window.__stanzaNotesEnabled = %s;"
                     % ("true" if getattr(self, "_notes_enabled", False)
@@ -1067,6 +1147,39 @@ if HAS_WEBENGINE:
         })();
         """
 
+        _REACTION_JS = """
+        (function installStanzaReaction() {
+            if (document.getElementById('stanza-reaction')) return;
+            var c = document.getElementById('stanza-fabs');
+            if (!c) return;
+            var d = document.createElement('div');
+            d.id = 'stanza-reaction';
+            d.style.cssText =
+                'width:34px;height:34px;line-height:34px;text-align:center;' +
+                'border-radius:17px;background:#ececec;' +
+                'color:#c0392b;font-size:16px;cursor:pointer;' +
+                'display:none;user-select:none;';
+            d.style.order = '2';
+            d.title = %REACTION_TITLE%;
+            d.addEventListener('mouseenter', function () {
+                d.style.background = '#d9d9d9';
+            });
+            d.addEventListener('mouseleave', function () {
+                d.style.background = '#ececec';
+            });
+            d.addEventListener('click', function () {
+                window.__stanzaReactionPress = 1;
+                if (window.bridge && window.bridge.on_reaction_clicked) {
+                    window.bridge.on_reaction_clicked();
+                    window.__stanzaReactionPress = 0;
+                }
+            });
+            d.textContent = '\\u2665';
+            window.__stanzaReactionPress = 0;
+            c.appendChild(d);
+        })();
+        """
+
         def _install_jump_js(self):
             self.page().runJavaScript(self._FABS_JS)
             self.page().runJavaScript(self._JUMP_JS)
@@ -1076,6 +1189,12 @@ if HAS_WEBENGINE:
             self.page().runJavaScript(
                 self._MENTION_JS.replace(
                     "%MENTION_TITLE%", json.dumps(tr("chat_jump_mention"))))
+
+        def _install_reaction_js(self):
+            self.page().runJavaScript(self._FABS_JS)
+            self.page().runJavaScript(
+                self._REACTION_JS.replace(
+                    "%REACTION_TITLE%", json.dumps(tr("chat_jump_reaction"))))
 
         _ACTION_JS = """
         (function installStanzaActions() {
@@ -1609,6 +1728,22 @@ window.__stanzaMentionRef = '';
                 % (text, "'auto'" if count else "'34px'",
                    "'0 10px'" if count else "'0'"))
 
+        def _set_reaction_visible(self, show: bool):
+            self.evaluate_js(
+                "var d = document.getElementById('stanza-reaction');"
+                "if (d) d.style.display = %s;"
+                % ("'block'" if show else "'none'"))
+
+        def _update_reaction_label(self):
+            count = getattr(self, "_reaction_count", 0)
+            text = json.dumps(self._reaction_label(count))
+            self.evaluate_js(
+                "var d = document.getElementById('stanza-reaction');"
+                "if (d) { d.textContent = %s; d.style.width = %s;"
+                " d.style.padding = %s; }"
+                % (text, "'auto'" if count else "'34px'",
+                   "'0 10px'" if count else "'0'"))
+
         def _poll_scroll_position(self):
             if not self._ready:
                 return
@@ -1640,7 +1775,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaMediaFsRef || '',"
                 " window.__stanzaToNoteRef || '',"
                 " window.__stanzaVoiceRef || '',"
-                " window.__stanzaMentionPress ? 1 : 0]",
+                " window.__stanzaMentionPress ? 1 : 0,"
+                " window.__stanzaReactionPress ? 1 : 0]",
                 self._on_scroll_position,
             )
 
@@ -1938,6 +2074,9 @@ window.__stanzaMentionRef = '';
             if len(value) > 23 and value[23]:
                 self.evaluate_js("window.__stanzaMentionPress = 0;")
                 self._on_mention_clicked()
+            if len(value) > 24 and value[24]:
+                self.evaluate_js("window.__stanzaReactionPress = 0;")
+                self._on_reaction_clicked()
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -2476,6 +2615,7 @@ else:
         document_lost = QtCore.pyqtSignal()
         last_seen_changed = QtCore.pyqtSignal(str, str, str)
         mention_jump_requested = QtCore.pyqtSignal()
+        reaction_jump_requested = QtCore.pyqtSignal()
         zoom_changed = QtCore.pyqtSignal(float)
         media_save_requested = QtCore.pyqtSignal(str)       # url
         media_copy_requested = QtCore.pyqtSignal(str)       # url
@@ -2502,6 +2642,7 @@ else:
             self._overflow = False
             self._create_jump_button()
             self._create_mention_button()
+            self._create_reaction_button()
 
         def _note_bottom(self, *_args) -> None:
             """Edge-triggered "at the newest message" (scrollbar driven)."""

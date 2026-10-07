@@ -387,6 +387,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.tab_focused.connect(self._on_tab_focused)
         self._chat_window.bottom_reached.connect(self._on_chat_reached_bottom)
         self._chat_window.last_seen.connect(self._on_chat_last_seen)
+        self._chat_window.reaction_seen.connect(self._on_reaction_seen)
         self._chat_window.tab_closed.connect(self._on_chat_closed)
         self._chat_window.muc_leave_requested.connect(self._on_muc_leave)
         self._chat_window.set_muc_leave_confirm(self._confirm_muc_leave)
@@ -460,6 +461,10 @@ class MainWindow(QtWidgets.QMainWindow):
                                        if entry["unread"]}
         self._unread_total = sum(entry["unread"] for entry in
                                  self._unread_chats.values())
+        # Unseen reactions on our own messages, keyed by chat-tab key then by
+        # the message reference; the value is the number of reactions not yet
+        # looked at.  Session-only, never persisted.
+        self._reaction_pending: dict[str, dict[str, int]] = {}
         # The tray only blinks once logged in (see _sync_tray_blink); restored
         # unread counters still show as roster badges before that.
         self._muc_users: dict[str, dict[str, dict]] = {}
@@ -4909,6 +4914,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Mirror the unread counter now (relevant for an already-loaded tab; a
         # scheduled reload re-pushes it once the window is applied).
         self._push_unread_to_chat(jid)
+        self._push_reaction_pending(jid)
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -6360,11 +6366,92 @@ class MainWindow(QtWidgets.QMainWindow):
     async def _store_reactions(self, jid: str, ref_id: str, by: str,
                                emojis: list[str], occupant_id: str = "") -> None:
         from stanza_im.core import history
+        before = await history.reactions_async(jid, ref_id)
+        old_size = len(self._reactor_set(before, by, occupant_id))
         await history.set_reactions_async(
             jid, ref_id, by, emojis,
             at=time.strftime("%Y-%m-%dT%H:%M:%S"),
             occupant_id=occupant_id)
         await self._refresh_reactions(jid, ref_id)
+        self._note_reaction_delta(
+            jid, ref_id, by, occupant_id, old_size, len(emojis))
+
+    @staticmethod
+    def _reactor_set(entries: list[dict], by: str,
+                     occupant_id: str) -> list[str]:
+        """The emoji set a given reactor already had on a message."""
+        for item in entries or []:
+            if occupant_id and item.get("occupant_id") == occupant_id:
+                return [str(e) for e in (item.get("emojis") or [])]
+            if not occupant_id and item.get("by") == by:
+                return [str(e) for e in (item.get("emojis") or [])]
+        return []
+
+    def _reaction_is_mine(self, jid: str, by: str,
+                          occupant_id: str) -> bool:
+        """True when the reacting resource is one of our own."""
+        if jid in self._muc_self_nicks:
+            self_nick = self._muc_self_nicks.get(jid, "")
+            mine_occ = str(self._muc_users.get(jid, {}).get(
+                self_nick, {}).get("occupant_id", ""))
+            if occupant_id and mine_occ:
+                return occupant_id == mine_occ
+            return bool(self_nick) and by == self_nick
+        if by == "Me":
+            return True
+        if self._client is not None:
+            return by.split("/")[0] == self._client.jid_str
+        return False
+
+    def _is_own_message(self, jid: str, ref_id: str) -> bool:
+        """True when the reacted message was sent by us."""
+        from stanza_im.core import history
+        entry = history.entry_by_ref(jid, ref_id)
+        if not entry:
+            return False
+        if entry.get("direction") == "outgoing":
+            return True
+        if jid in self._muc_self_nicks:
+            return entry.get("sender") == self._muc_self_nicks.get(jid)
+        return False
+
+    def _note_reaction_delta(self, jid: str, ref_id: str, by: str,
+                             occupant_id: str, old_size: int,
+                             new_size: int) -> None:
+        """Count reactions others put on our own messages (or took back)."""
+        delta = int(new_size) - int(old_size)
+        if delta == 0:
+            return
+        if self._reaction_is_mine(jid, by, occupant_id):
+            return
+        if not self._is_own_message(jid, ref_id):
+            return
+        pending = self._reaction_pending.setdefault(jid, {})
+        value = pending.get(ref_id, 0) + delta
+        if value <= 0:
+            pending.pop(ref_id, None)
+            if not pending:
+                self._reaction_pending.pop(jid, None)
+        else:
+            pending[ref_id] = value
+        self._push_reaction_pending(jid)
+
+    def _push_reaction_pending(self, jid: str) -> None:
+        try:
+            self._chat_window.set_reaction_pending(
+                jid, self._reaction_pending.get(jid, {}))
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _on_reaction_seen(self, jid: str, ref: str, count: int) -> None:
+        """The heart button jumped to *ref*; forget its pending reactions."""
+        pending = self._reaction_pending.get(jid)
+        if not pending:
+            return
+        pending.pop(ref, None)
+        if not pending:
+            self._reaction_pending.pop(jid, None)
+        self._push_reaction_pending(jid)
 
     def _on_message_reactions(self, frm: str, target_id: str,
                               emojis: list[str]) -> None:

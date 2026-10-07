@@ -973,10 +973,11 @@ Single conversation tab. Layout:
   is relayed by the scroll poll to `_on_jump_clicked`; `bridge.on_jump_clicked`
   is only an optional fast path); the QTextBrowser fallback uses a `QToolButton`
   and cannot target a message, so it always scrolls to the bottom. The `@`
-  mention button is a sibling in the same centred `#stanza-fabs` row (see the
-  mention bullet above); both labels are replayed after every page load
-  (`_on_load_finished`) so a count seeded before the document existed still
-  shows. The 250 ms scroll poll runs only while the view is on screen
+  mention button (left) and the `♥` reaction button (right) are siblings in the
+  same centred `#stanza-fabs` row (see the mention and reaction bullets above);
+  all three labels are replayed after every page load (`_on_load_finished`) so a
+  count seeded before the document existed still shows. The 250 ms scroll poll
+  runs only while the view is on screen
   (`hideEvent` stops it, `showEvent` starts it) and skips the last-seen query
   when the view is at the bottom. Incoming messages never force a scroll to the
   bottom — only the user's own outgoing messages do.
@@ -1930,6 +1931,22 @@ Registers XEP plugins (conditionally where noted):
   message the user was reading at the end). All these relays fall back to
   `data-reply-id` when `data-stanza-id` is missing. History stores reactions in
   the `reactions` JSON column (SQLite migration).
+- A third floating button (`♥`, right of `▼ N` in `#stanza-fabs`; see the
+  jump-to-bottom bullet) counts the reactions **others put on our own
+  messages**. `MainWindow._reaction_pending` maps each chat-tab key to an
+  ordered `{ref: count}` (session-only). Each XEP-0444 update reads the
+  reactor's previous emoji set (`_reactor_set`) and adds the size delta
+  (`_note_reaction_delta`: +5 for five new, −2 for two removed, clamped at 0)
+  only when the reactor is not us (`_reaction_is_mine`) and the reacted message
+  is ours (`_is_own_message`, via `history.entry_by_ref`). The total is pushed
+  to the tab (`ChatWindow.set_reaction_pending` →
+  `ChatWidget.set_reaction_pending` → `ChatView.set_reaction_count`, mirrored
+  on open by `_focus_chat`) and shown as `♥ N` (capped `99+`, hidden at 0). A
+  click jumps to the first pending message and clears that message's count in
+  one batch (`ChatWidget._jump_to_next_reaction` → `reaction_seen` →
+  `MainWindow._on_reaction_seen`); the button stays while other messages remain.
+  It only decreases by clicking, never by reaching the bottom.
+  [`tests/test_reaction_button.py`]
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)
 

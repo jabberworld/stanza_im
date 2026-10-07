@@ -129,6 +129,7 @@ STRINGS = {
     "chat_send": "Отправить",
     "chat_jump_mention": "К упоминанию",
     "chat_jump_mention_count": "К упоминанию ({count})",
+    "chat_jump_reaction": "Новые реакции на ваши сообщения",
     "chat_clear": "Очистить чат",
     "chat_history": "История",
     "chat_vcard": "vCard",

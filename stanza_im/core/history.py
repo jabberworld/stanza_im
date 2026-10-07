@@ -752,6 +752,29 @@ def timestamp_for_ref(jid: str, stable_id: str) -> str:
         return ""
 
 
+def entry_by_ref(jid: str, stable_id: str) -> dict | None:
+    """The stored entry carrying *stable_id*, or ``None``.
+
+    *stable_id* matches the same references as :func:`message_exists`.
+    """
+    if not stable_id:
+        return None
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT id, direction, sender, body, timestamp, archive_id,"
+                " origin_id, reply_to, reply_id, message_id, edited,"
+                " retracted, retract_marker, retract_reason, retract_by,"
+                " reactions, media FROM messages WHERE archive_id = ? "
+                "OR origin_id = ? OR message_id = ? "
+                "ORDER BY timestamp DESC, id DESC LIMIT 1",
+                (stable_id, stable_id, stable_id)).fetchone()
+        return _row_to_entry(row) if row else None
+    except sqlite3.Error:
+        return None
+
+
 def first_id(jid: str) -> int | None:
     """Return the smallest stored message id for *jid*, or ``None``."""
     try:

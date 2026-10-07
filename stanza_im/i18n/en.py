@@ -129,6 +129,7 @@ STRINGS = {
     "chat_send": "Send",
     "chat_jump_mention": "Jump to mention",
     "chat_jump_mention_count": "Jump to mention ({count})",
+    "chat_jump_reaction": "New reactions to your messages",
     "chat_clear": "Clear chat",
     "chat_history": "History",
     "chat_vcard": "vCard",
