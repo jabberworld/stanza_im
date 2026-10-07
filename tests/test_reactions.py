@@ -408,6 +408,48 @@ check("empty reaction list shows the notice",
       and _empty._list.itemWidget(_empty._list.item(0)) is None)
 
 
+# 13. MUC bodyless reactions are routed, never rendered as a message ----------
+# (A regression: ``_on_groupchat_message`` had no reactions branch, so every
+# incoming MUC reaction fell through and rendered as an empty message while
+# ``groupchat_message_reactions`` — the event the UI listens for — was never
+# emitted, hiding the reaction chips entirely.)
+import asyncio
+
+_muc_client = JabberClient.__new__(JabberClient)
+_muc_client.xmpp = slixmpp.ClientXMPP("me@example.com/r", "pw")
+_muc_client.groupchats = {"room@conf": object()}
+_muc_client._callbacks = {}
+_react_events = []
+_msg_events = []
+_muc_client.on("groupchat_message_reactions",
+               lambda *a, **k: _react_events.append(a))
+_muc_client.on("groupchat_message", lambda *a, **k: _msg_events.append(a))
+
+_muc_client._on_groupchat_message(_make_reactions(
+    target="sid-1", emojis=("😀",), mtype="groupchat",
+    from_="room@conf/bob"))
+check("a MUC reaction emits groupchat_message_reactions",
+      len(_react_events) == 1 and _react_events[0][:5] == (
+          "room@conf", "bob", "room@conf/bob", "sid-1", ["😀"]))
+check("a MUC reaction never renders an empty message", _msg_events == [])
+
+plain = slixmpp.Message()
+plain["from"] = "room@conf/bob"
+plain["type"] = "groupchat"
+plain["body"] = "hello"
+_muc_client._on_groupchat_message(plain)
+check("a plain MUC message still emits groupchat_message",
+      len(_msg_events) == 1 and _msg_events[0][2] == "hello")
+
+fallback = _make_reactions(target="sid-1", emojis=("😀",),
+                           mtype="groupchat", from_="room@conf/bob")
+fallback["body"] = "reacted 😀"
+_react_before, _msg_before = len(_react_events), len(_msg_events)
+asyncio.run(_muc_client._on_bodyless_reactions_stanza(fallback))
+check("bodyless handler skips a reaction that carries a fallback body",
+      len(_react_events) == _react_before and len(_msg_events) == _msg_before)
+
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} test(s) FAILED: {FAILURES}")

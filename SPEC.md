@@ -1905,7 +1905,11 @@ Registers XEP plugins (conditionally where noted):
   referenced message's `origin-id`/`id` (1:1) or server `stanza-id` (MUC).
 - On receive, `_reactions()` parses the stanza and the bodyless `MatchXPath`
   handler routes it (`_on_message` → `message_reactions`; `_on_groupchat_message`
-  → `groupchat_message_reactions`, carrying the reactor's XEP-0421 occupant-id).
+  → `groupchat_message_reactions`, carrying the reactor's XEP-0421 occupant-id)
+  and returns before any body is rendered, so a MUC reaction never appears as an
+  empty groupchat message; a reactions message that also carries a fallback
+  `<body>` is delivered by slixmpp's own `message`/`groupchat_message` event and
+  skipped by the bodyless handler to avoid handling it twice.
   `MainWindow` persists it with `history.set_reactions` (matched by
   `message_id`/`origin_id`) and refreshes the open tab in place via
   `ChatWindow.update_reactions` → `ChatWidget.set_reactions`.

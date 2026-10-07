@@ -1449,7 +1449,14 @@ class JabberClient:
                       voice["nick"])
 
     async def _on_bodyless_reactions_stanza(self, msg) -> None:
-        """Route a bodyless XEP-0444 ``<reactions/>`` to the right handler."""
+        """Route a bodyless XEP-0444 ``<reactions/>`` to the right handler.
+
+        A reactions message that carries a fallback ``<body>`` is already
+        delivered through the ``message``/``groupchat_message`` events, so it
+        is ignored here to avoid handling it twice.
+        """
+        if str(msg["body"] or ""):
+            return
         if str(msg["type"] or "") == "groupchat":
             self._on_groupchat_message(msg)
         else:
@@ -5467,6 +5474,16 @@ class JabberClient:
         room = frm.split("/")[0]
         nick = frm.split("/", 1)[1] if "/" in frm else ""
         self._mark_muc_activity(room)
+        reactions = _reactions(msg)
+        if reactions is not None:
+            # XEP-0444: a bodyless reaction is never a chat message (and must
+            # not count as unread); route it to the reactions handler.
+            target_id, emojis = reactions
+            logger.debug("MUC reaction(s) in %s from %s for %s",
+                         room, nick, target_id)
+            self.emit("groupchat_message_reactions", room, nick, frm,
+                      target_id, emojis, _occupant_id(msg))
+            return
         body = str(msg["body"])
         retract_ref = _retract_reference(msg)
         if retract_ref:

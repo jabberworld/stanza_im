@@ -1489,7 +1489,11 @@ id='<target>'><reaction>😀</reaction>…</reactions></message>` (1:1 `type='ch
 MUC `type='groupchat'`; an empty set removes our entry); `_reactions()` parses
 incoming stanzas and the bodyless `MatchXPath` handler routes them (`_on_message`
 → `message_reactions`; `_on_groupchat_message` → `groupchat_message_reactions`,
-carrying the reactor's XEP-0421 occupant-id). Each reactor's set replaces its
+carrying the reactor's XEP-0421 occupant-id) and returns before any body is
+rendered — a MUC reaction must never appear as an empty groupchat message. A
+reactions message that also carries a fallback `<body>` is delivered by
+slixmpp's own `message`/`groupchat_message` event, so the bodyless handler skips
+it to avoid processing it twice. Each reactor's set replaces its
 previous set (keyed by occupant-id in MUC — `_occupant_id(pres)` is stored in
 `gi.users[nick]["occupant_id"]` — else nickname/JID). `MainWindow` persists via
 `history.set_reactions` (SQLite `reactions` JSON column, migration) and refreshes
