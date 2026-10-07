@@ -236,7 +236,30 @@ login._on_connect()
 check("empty credentials show the localized error",
       login._info_label.text() == tr("login_credentials_required"))
 
-# 8. MainWindow wiring (static) ----------------------------------------------
+# 8. SASL condition is propagated --------------------------------------------
+import slixmpp
+from stanza_im.core.client import JabberClient
+
+_auth = JabberClient.__new__(JabberClient)
+_auth.xmpp = slixmpp.ClientXMPP("me@example.com/r", "pw")
+_auth._callbacks = {}
+_conds = []
+_auth.on("auth_failed", lambda cond: _conds.append(cond))
+
+
+class _SaslFailure:
+    def __getitem__(self, key):
+        if key == "condition":
+            return "not-authorized"
+        raise KeyError(key)
+
+
+_auth._on_auth_failed(_SaslFailure())
+_auth._on_auth_failed()
+check("auth_failed carries the SASL condition",
+      _conds == ["not-authorized", ""])
+
+# 9. MainWindow wiring (static) ----------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
                encoding="utf-8").read()
@@ -247,6 +270,8 @@ check("Profiles menu action is enabled and wired",
 check("login submission selects the profile and reloads unread",
       "profiles.set_active(jid)" in _mw_src
       and "self._load_unread_for(jid)" in _mw_src)
+check("auth failure distinguishes bad credentials",
+      "login_bad_credentials" in _mw_src)
 
 print()
 if FAILURES:

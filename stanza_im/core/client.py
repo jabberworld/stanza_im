@@ -6001,9 +6001,16 @@ class JabberClient:
         frm = str(pres["from"])
         self.emit("got_online", frm)
 
-    def _on_auth_failed(self, event) -> None:
-        logger.error("Authentication failed")
-        self.emit("auth_failed")
+    def _on_auth_failed(self, event=None) -> None:
+        # slixmpp passes the SASL failure stanza (with a ``condition`` such as
+        # ``not-authorized``); legacy auth raises the event without one.
+        condition = ""
+        try:
+            condition = str(event["condition"] or "") if event is not None else ""
+        except (KeyError, TypeError, AttributeError):
+            condition = ""
+        logger.error("Authentication failed (%s)", condition or "unknown")
+        self.emit("auth_failed", condition)
 
     def _on_disconnected(self, event) -> None:
         logger.info("Disconnected from server")

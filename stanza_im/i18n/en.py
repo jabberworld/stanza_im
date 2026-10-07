@@ -108,6 +108,7 @@ STRINGS = {
     "login_profiles": "Profiles",
     "login_profile_apply": "Apply the selected profile",
     "login_credentials_required": "Enter the Jabber ID and password.",
+    "login_bad_credentials": "Wrong Jabber ID or password.",
     "login_connecting": "Connecting...",
     "login_connected": "Connected.",
     "login_authenticating": "Authenticating...",

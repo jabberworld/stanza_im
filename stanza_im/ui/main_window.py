@@ -3111,9 +3111,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_tray_blink()
         self._set_info_actions_enabled(True)
 
-    def _on_auth_failed(self):
+    def _on_auth_failed(self, condition: str = ""):
         self._set_info_actions_enabled(False)
-        self._login.set_error(tr("login_auth_failed"))
+        if condition == "not-authorized":
+            self._login.set_error(tr("login_bad_credentials"))
+        else:
+            self._login.set_error(tr("login_auth_failed"))
         self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     def _on_tls_required(self):

@@ -108,6 +108,7 @@ STRINGS = {
     "login_profiles": "Профили",
     "login_profile_apply": "Применить выбранный профиль",
     "login_credentials_required": "Введите Jabber ID и пароль.",
+    "login_bad_credentials": "Неверный Jabber ID или пароль.",
     "login_connecting": "Подключение...",
     "login_connected": "Подключено.",
     "login_authenticating": "Аутентификация...",
