@@ -146,6 +146,20 @@ check("MainWindow owns the session pending map",
       and "self._chat_window.reaction_seen.connect(self._on_reaction_seen)"
       in _mw_src)
 
+# 9. ChatWindow relays reaction_seen with the arguments intact ----------------
+# (A `lambda r, c, j=widget.jid` copied from last_seen_changed mismatched the
+# widget's three-argument signal and emitted (count, jid, ref), crashing on
+# the first click.)
+from stanza_im.ui.chat_window import ChatWindow
+
+_win = ChatWindow(ChatThemeFactory())
+_relayed = []
+_win.reaction_seen.connect(lambda j, r, c: _relayed.append((j, r, c)))
+_widget = _win.open_chat("bob@example.com", "Bob")
+_widget.reaction_seen.emit("bob@example.com", "m1", 3)
+check("ChatWindow forwards reaction_seen as (jid, ref, count)",
+      _relayed == [("bob@example.com", "m1", 3)])
+
 cw.detach()
 print()
 if FAILURES:

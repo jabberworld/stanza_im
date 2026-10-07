@@ -191,8 +191,7 @@ class ChatWindow(QtWidgets.QMainWindow):
             lambda j=widget.jid: self.bottom_reached.emit(j))
         widget.last_seen_changed.connect(
             lambda r, t, s, j=widget.jid: self.last_seen.emit(j, r, t, s))
-        widget.reaction_seen.connect(
-            lambda r, c, j=widget.jid: self.reaction_seen.emit(j, r, c))
+        widget.reaction_seen.connect(self.reaction_seen)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
@@ -279,8 +278,7 @@ class ChatWindow(QtWidgets.QMainWindow):
             lambda j=widget.jid: self.bottom_reached.emit(j))
         widget.last_seen_changed.connect(
             lambda r, t, s, j=widget.jid: self.last_seen.emit(j, r, t, s))
-        widget.reaction_seen.connect(
-            lambda r, c, j=widget.jid: self.reaction_seen.emit(j, r, c))
+        widget.reaction_seen.connect(self.reaction_seen)
         widget.link_clicked.connect(self.link_clicked)
         widget.xmpp_link_clicked.connect(self.xmpp_link_clicked)
         widget.clear_history_requested.connect(self.clear_history_requested)
