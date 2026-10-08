@@ -356,7 +356,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.omemo_mode_requested.connect(
             self._on_omemo_mode_requested)
         self._chat_window.omemo_devices_requested.connect(
-            self._open_omemo_devices)
+            self._open_omemo_popup)
         self._chat_window.muc_config_requested.connect(
             self._on_muc_config_requested)
         self._chat_window.input_height_changed.connect(
@@ -2550,6 +2550,18 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
         OmemoDevicesDialog(self._client, jid, self).exec()
 
+    def _open_omemo_popup(self, jid: str) -> None:
+        """Open the quick OMEMO devices popup (chat shield button)."""
+        if (self._client is None
+                or not getattr(self._client.omemo, "available", False)):
+            return
+        from stanza_im.ui.omemo_popup import OmemoPopup
+        popup = OmemoPopup(self._client, jid, self)
+        pos = QtGui.QCursor.pos()
+        popup.move(max(0, pos.x() - 160),
+                   max(0, pos.y() - popup.sizeHint().height()))
+        popup.show()
+
     def _confirm_profile_switch(self, jid: str) -> bool:
         reply = QtWidgets.QMessageBox.question(
             self, tr("profiles_activate_title"),
@@ -2968,6 +2980,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._client.call_devices = self._call_device_config()
         self._client.call_auto_accept = bool(getattr(
             getattr(self._config, "calls", None), "auto_accept", False))
+        if getattr(self._client.omemo, "available", False):
+            self._client.omemo.on_trust_warning = self._on_omemo_trust_warning
         self._client.set_displayed_state(self._unread_displayed)
         # A previous logout deactivated every plugin; re-activate the enabled
         # set now so the tabs/features are back and `_notify_plugins_client_ready`
@@ -3636,6 +3650,24 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._client.omemo.set_chat_mode(jid, mode)
         self._chat_window.set_omemo_mode(jid, mode)
+
+    def _on_omemo_trust_warning(self, kind: str, devices, identifier) -> None:
+        """Show a chat system line when a new/untrusted device appears."""
+        omemo = self._client.omemo if self._client else None
+        if omemo is None:
+            return
+        chat = (self._chat_window.get_chat(identifier)
+                if identifier else None)
+        for device in devices or ():
+            try:
+                name = omemo.device_name(
+                    device.bare_jid, int(device.device_id),
+                    str(getattr(device, "label", "") or ""))
+            except Exception:  # noqa: BLE001
+                name = str(getattr(device, "device_id", ""))
+            if chat is not None:
+                chat.add_status(tr("omemo_new_device_warning", name=name),
+                                _current_timestamp())
 
     def apply_attention_support(self, jid: str) -> None:
         """Sync the XEP-0224 bell of a 1:1 tab.
