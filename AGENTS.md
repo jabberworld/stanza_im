@@ -608,10 +608,13 @@ open, asks for confirmation (`profiles_activate_question`) before logging out
 and signing in to the new account — a profile with no stored password only
 fills the login form. «Удалить» asks whether to delete the profile's data
 (`profiles.delete_data` removes `<DATA_DIR>/<jid>`) or only the list entry.
-The login form carries a profile selector and an `ok.png` apply button
-(`LoginWidget._apply_profile`) that loads a profile into the config and the
-form. A manually typed account is upserted into the registry on login (its
-password only when «Сохранить пароль» is on). [`tests/test_profiles.py`]
+The login form has a «Выбрать профиль» group: a profile selector, an `ok.png`
+apply button (`LoginWidget._apply_profile`) that loads a profile into the config
+and the form, and a `system-users.png` button (`profiles_requested` →
+`MainWindow._on_profiles`) that opens the same manager dialog; the status
+selector sits at the bottom and the Connect button keeps the focus. A manually
+typed account is upserted into the registry on login (its password only when
+«Сохранить пароль» is on). [`tests/test_profiles.py`]
 
 ### 3. Custom-Painted Roster (`roster_widget.py` + `roster_style.py`)
 

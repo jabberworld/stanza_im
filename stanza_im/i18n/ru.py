@@ -106,6 +106,7 @@ STRINGS = {
     "login_register": "Зарегистрироваться",
     "login_create_account": "Создать аккаунт",
     "login_profiles": "Профили",
+    "login_select_profile": "Выбрать профиль",
     "login_profile_apply": "Применить выбранный профиль",
     "login_credentials_required": "Введите Jabber ID и пароль.",
     "login_bad_credentials": "Неверный Jabber ID или пароль.",

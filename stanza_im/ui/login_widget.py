@@ -17,6 +17,7 @@ class LoginWidget(QtWidgets.QWidget):
     login_requested = QtCore.pyqtSignal(str, str, str)  # jid, password, show
     register_requested = QtCore.pyqtSignal()            # "Create account" link
     profile_applied = QtCore.pyqtSignal(str)            # profile JID applied
+    profiles_requested = QtCore.pyqtSignal()            # open the profile manager
 
     def __init__(self, config: Config | None = None, parent=None):
         super().__init__(parent)
@@ -42,9 +43,9 @@ class LoginWidget(QtWidgets.QWidget):
         layout.addWidget(logo_label)
         layout.addSpacing(16)
 
-        # Profile selector: pick a stored account and fill the form from it.
+        # ── Profile group: choose a stored account ───────────────
+        layout.addWidget(QtWidgets.QLabel(tr("login_select_profile")))
         profile_row = QtWidgets.QHBoxLayout()
-        profile_row.addWidget(QtWidgets.QLabel(tr("login_profiles")))
         self._profile_combo = QtWidgets.QComboBox()
         profile_row.addWidget(self._profile_combo, 1)
         self._profile_apply_btn = QtWidgets.QToolButton()
@@ -55,34 +56,31 @@ class LoginWidget(QtWidgets.QWidget):
         self._profile_apply_btn.setAccessibleName(tr("login_profile_apply"))
         self._profile_apply_btn.clicked.connect(self._apply_profile)
         profile_row.addWidget(self._profile_apply_btn)
+        self._profile_manager_btn = QtWidgets.QToolButton()
+        manager_icon = find_icon("system-users.png")
+        if manager_icon:
+            self._profile_manager_btn.setIcon(QtGui.QIcon(manager_icon))
+        self._profile_manager_btn.setToolTip(tr("login_profiles"))
+        self._profile_manager_btn.setAccessibleName(tr("login_profiles"))
+        self._profile_manager_btn.clicked.connect(self.profiles_requested.emit)
+        profile_row.addWidget(self._profile_manager_btn)
         layout.addLayout(profile_row)
 
-        # JID
+        layout.addSpacing(24)
+
+        # ── Credentials group ────────────────────────────────────
         layout.addWidget(QtWidgets.QLabel(tr("login_title")))
         self._jid_edit = QtWidgets.QLineEdit()
         self._jid_edit.setPlaceholderText("user@server")
         self._jid_edit.returnPressed.connect(self._on_connect)
         layout.addWidget(self._jid_edit)
 
-        # Password
         layout.addWidget(QtWidgets.QLabel(tr("login_password")))
         self._pw_edit = QtWidgets.QLineEdit()
         self._pw_edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         self._pw_edit.returnPressed.connect(self._on_connect)
         layout.addWidget(self._pw_edit)
 
-        # Status
-        status_row = QtWidgets.QHBoxLayout()
-        status_row.addWidget(QtWidgets.QLabel(tr("login_status")))
-        self._show_combo = QtWidgets.QComboBox()
-        for key in ("online", "chat", "away", "xa", "dnd"):
-            self._show_combo.addItem(self._make_status_icon(key), tr(f"status_{key}"), key)
-        status_row.addWidget(self._show_combo)
-        layout.addLayout(status_row)
-
-        layout.addSpacing(8)
-
-        # Options
         self._save_pw = QtWidgets.QCheckBox(tr("login_save_password"))
         self._auto_connect = QtWidgets.QCheckBox(tr("login_auto_connect"))
         self._auto_connect.setEnabled(False)
@@ -92,13 +90,11 @@ class LoginWidget(QtWidgets.QWidget):
 
         layout.addSpacing(8)
 
-        # Connect
         self._connect_btn = QtWidgets.QPushButton(tr("login_connect"))
         self._connect_btn.setDefault(True)
         self._connect_btn.clicked.connect(self._on_connect)
         layout.addWidget(self._connect_btn)
 
-        # Create account link
         layout.addSpacing(14)
         self._create_label = QtWidgets.QLabel(
             f'<a href="create">{tr("login_create_account")}</a>')
@@ -111,12 +107,27 @@ class LoginWidget(QtWidgets.QWidget):
             lambda _href: self.register_requested.emit())
         layout.addWidget(self._create_label)
 
-        # Status label
         self._info_label = QtWidgets.QLabel("")
         self._info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._info_label)
 
+        layout.addSpacing(24)
+
+        # ── Status group (bottom) ────────────────────────────────
+        status_row = QtWidgets.QHBoxLayout()
+        status_row.addWidget(QtWidgets.QLabel(tr("login_status")))
+        self._show_combo = QtWidgets.QComboBox()
+        for key in ("online", "chat", "away", "xa", "dnd"):
+            self._show_combo.addItem(self._make_status_icon(key), tr(f"status_{key}"), key)
+        status_row.addWidget(self._show_combo)
+        layout.addLayout(status_row)
+
         layout.addStretch()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Keep the primary action focused so Enter connects right away.
+        self._connect_btn.setFocus()
 
     # ── helpers ──────────────────────────────────────────────────
 

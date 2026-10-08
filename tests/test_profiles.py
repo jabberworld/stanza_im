@@ -238,6 +238,33 @@ check("applying a profile reloads the form",
       and login._pw_edit.text() == "b")
 check("profile_applied is emitted", _applied == ["bob@example.com"])
 
+# the manager button opens the profile manager
+_manager_calls = []
+login.profiles_requested.connect(lambda: _manager_calls.append(1))
+login._profile_manager_btn.click()
+check("the login manager button requests the profile manager",
+      _manager_calls == [1])
+
+# the status selector sits at the bottom, after the connect button
+def _top_index(layout, widget):
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        if item.widget() is widget:
+            return i
+        if item.layout() is not None:
+            if _top_index(item.layout(), widget) >= 0:
+                return i
+    return -1
+
+
+_lay = login.layout()
+check("the status selector is below the connect button",
+      _top_index(_lay, login._show_combo)
+      > _top_index(_lay, login._connect_btn))
+check("the profile selector is above the credentials",
+      _top_index(_lay, login._profile_combo)
+      < _top_index(_lay, login._jid_edit))
+
 # empty credentials are rejected with a localized message
 from stanza_im.i18n import tr
 login._jid_edit.setText("")

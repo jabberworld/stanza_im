@@ -579,6 +579,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._login.login_requested.connect(self._on_login)
         self._login.register_requested.connect(self._on_create_account)
         self._login.profile_applied.connect(self._on_login_profile_applied)
+        self._login.profiles_requested.connect(self._on_profiles)
         self._stack.addWidget(self._login)
 
         # Page 1: Splash / connecting
@@ -2531,6 +2532,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = ProfilesDialog(self._config, self)
         dialog.activated.connect(self._activate_profile)
         dialog.exec()
+        # Profiles may have been created/removed: refresh the login selector.
+        self._login.refresh_profiles()
 
     def _on_login_profile_applied(self, jid: str) -> None:
         """A profile was applied on the login screen: select its data dir."""
