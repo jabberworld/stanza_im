@@ -2206,7 +2206,8 @@ window.__stanzaMentionRef = '';
                                 moderatable: bool = False,
                                 reactions=None,
                                 unread_marker: bool = False,
-                                media: dict | None = None) -> str:
+                                media: dict | None = None,
+                                encrypted: bool = False) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2222,7 +2223,7 @@ window.__stanzaMentionRef = '';
                     retracted=retracted, retract_marker=retract_marker,
                     retract_reason=retract_reason, retract_by=retract_by,
                     reactions=reactions, unread_marker=unread_marker,
-                    media=media)
+                    media=media, encrypted=encrypted)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -2248,7 +2249,8 @@ window.__stanzaMentionRef = '';
                         moderatable: bool = False,
                         reactions=None,
                         unread_marker: bool = False,
-                        media: dict | None = None):
+                        media: dict | None = None,
+                        encrypted: bool = False):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2261,7 +2263,7 @@ window.__stanzaMentionRef = '';
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
                 outgoing, edited, hats, retracted, retract_marker,
                 retract_reason, retract_by, moderatable, reactions,
-                unread_marker, media)
+                unread_marker, media, encrypted)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -2847,7 +2849,8 @@ else:
                         retract_by: str = "",
                         moderatable: bool = False,
                         unread_marker: bool = False,
-                        media: dict | None = None):
+                        media: dict | None = None,
+                        encrypted: bool = False):
             marker_html = (ChatThemeFactory.render_unread_marker()
                            if unread_marker else "")
             if retracted:
@@ -2861,6 +2864,8 @@ else:
                 edited_suffix = ""
             else:
                 body_html = self._escape_body_for_fallback(body)
+                if encrypted:
+                    body_html = "\U0001F512 " + body_html
                 edited_suffix = ""
                 if edited:
                     edited_suffix += " " + tr("msg_edited_tooltip")

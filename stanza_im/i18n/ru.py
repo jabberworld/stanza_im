@@ -215,6 +215,8 @@ STRINGS = {
     "edit_cancel": "Отменить редактирование",
     "edit_in_progress": "Редактирование сообщения…",
     "msg_edited_tooltip": "Сообщение изменено",
+    "msg_encrypted_tooltip": "Зашифровано OMEMO",
+    "omemo_send_failed": "Не удалось отправить зашифрованное сообщение: {error}",
     "msg_retracted": "Сообщение отозвано",
     "msg_retracted_moderated": "Отозвано модератором",
     "msg_retracted_reason": "Причина: {reason}",

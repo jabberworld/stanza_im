@@ -92,8 +92,12 @@ class OmemoManager:
             self.on_devices_changed()
 
     def on_client_ready(self) -> None:
-        """Called when a session starts; kick the lazy session-manager build."""
-        self._client._start_task(self._plugin.get_session_manager())
+        """Called when a session starts.
+
+        The plugin already builds the session manager on ``session_bind``; this
+        hook is a no-op placeholder kept for symmetry with the plugin API.
+        """
+        return None
 
     def set_btbv(self, enabled: bool) -> None:
         self._plugin.set_btbv(enabled)

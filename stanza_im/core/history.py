@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS messages (
     retract_marker INTEGER NOT NULL DEFAULT 0,
     retract_reason TEXT,
     retract_by TEXT,
-    media TEXT
+    media TEXT,
+    encrypted INTEGER NOT NULL DEFAULT 0,
+    encryption TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
@@ -178,6 +180,11 @@ def _connection(jid: str) -> sqlite3.Connection:
                 conn.execute("ALTER TABLE messages ADD COLUMN reactions TEXT")
             if "media" not in columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN media TEXT")
+            if "encrypted" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN encrypted "
+                             "INTEGER NOT NULL DEFAULT 0")
+            if "encryption" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN encryption TEXT")
             _migrate_dedup(conn)
             conn.commit()
         except sqlite3.Error:
@@ -207,7 +214,7 @@ def _parse_media(raw) -> dict | None:
 def _row_to_entry(row) -> dict:
     _id, direction, sender, body, timestamp, archive_id, origin_id, \
         reply_to, reply_id, message_id, edited, retracted, retract_marker, \
-        retract_reason, retract_by, reactions, media = row
+        retract_reason, retract_by, reactions, media, encrypted, encryption = row
     return {
         "id": _id,
         "direction": direction,
@@ -226,6 +233,8 @@ def _row_to_entry(row) -> dict:
         "retract_by": retract_by or "",
         "reactions": _parse_reactions(reactions),
         "media": _parse_media(media),
+        "encrypted": bool(encrypted),
+        "encryption": encryption or "",
     }
 
 
@@ -260,7 +269,8 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             retracted: bool, retract_marker: bool,
             skip_existing: bool,
             retract_reason: str = "", retract_by: str = "",
-            media: str = "") -> bool:
+            media: str = "", encrypted: bool = False,
+            encryption: str = "") -> bool:
     """Insert one row; returns True when a row was actually written."""
     if skip_existing:
         clauses: list[str] = []
@@ -290,13 +300,15 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
         "INSERT INTO messages "
         "(direction, sender, body, timestamp, archive_id, "
         "origin_id, reply_to, reply_id, message_id, edited, "
-        "retracted, retract_marker, retract_reason, retract_by, media) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "retracted, retract_marker, retract_reason, retract_by, media, "
+        "encrypted, encryption) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (direction, sender, body, ts, archive_id or None,
          origin_id or None, reply_to or None, reply_id or None,
          message_id or None, 1 if edited else 0,
          1 if retracted else 0, 1 if retract_marker else 0,
-         retract_reason or None, retract_by or None, media or None),
+         retract_reason or None, retract_by or None, media or None,
+         1 if encrypted else 0, encryption or None),
     )
     return True
 
@@ -309,7 +321,8 @@ def store_message(jid: str, direction: str, body: str,
                   edited: bool = False, retracted: bool = False,
                   retract_marker: bool = False,
                   retract_reason: str = "", retract_by: str = "",
-                  media: dict | None = None) -> bool:
+                  media: dict | None = None, encrypted: bool = False,
+                  encryption: str = "") -> bool:
     """Append a message to *jid*'s history.
 
     By default (``skip_existing``) an already stored message is not duplicated.
@@ -329,7 +342,8 @@ def store_message(jid: str, direction: str, body: str,
                                edited, retracted, retract_marker,
                                skip_existing, retract_reason, retract_by,
                                json.dumps(media, ensure_ascii=False)
-                               if media else "")
+                               if media else "",
+                               encrypted, encryption)
             conn.commit()
             return inserted
     except sqlite3.Error as exc:
@@ -372,7 +386,9 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
                            entry.get("retract_reason", ""),
                            entry.get("retract_by", ""),
                            json.dumps(entry.get("media"), ensure_ascii=False)
-                           if entry.get("media") else ""):
+                           if entry.get("media") else "",
+                           bool(entry.get("encrypted", False)),
+                           entry.get("encryption", "")):
                     inserted += 1
             conn.commit()
         return inserted
@@ -546,7 +562,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
                 f"SELECT id, direction, sender, body, timestamp, archive_id,"
                 f" origin_id, reply_to, reply_id, message_id, edited,"
                 f" retracted, retract_marker, retract_reason, retract_by,"
-                f" reactions, media FROM messages"
+                f" reactions, media, encrypted, encryption FROM messages"
                 f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 f"ORDER BY timestamp ASC, id ASC",
                 params)
@@ -570,7 +586,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media FROM messages "
+                " reactions, media, encrypted, encryption FROM messages "
                 "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (str(int(before_id)), str(int(limit))))
             rows = cur.fetchall()
@@ -589,7 +605,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
                 "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by, reactions, "
-                "media FROM messages WHERE timestamp < ? "
+                "encrypted, encryption, media FROM messages WHERE timestamp < ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
             rows = cur.fetchall()
@@ -670,7 +686,7 @@ def load_day(jid: str, date: str) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media "
+                " reactions, media, encrypted, encryption "
                 "FROM messages "
                 "WHERE substr(timestamp, 1, 10) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
@@ -779,7 +795,7 @@ def entry_by_ref(jid: str, stable_id: str) -> dict | None:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media FROM messages WHERE archive_id = ? "
+                " reactions, media, encrypted, encryption FROM messages WHERE archive_id = ? "
                 "OR origin_id = ? OR message_id = ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT 1",
                 (stable_id, stable_id, stable_id)).fetchone()
@@ -914,12 +930,15 @@ async def store_message_async(jid: str, direction: str, body: str,
                               reply_to: str = "", reply_id: str = "",
                               message_id: str = "",
                               edited: bool = False,
-                              media: dict | None = None) -> bool:
+                              media: dict | None = None,
+                              encrypted: bool = False,
+                              encryption: str = "") -> bool:
     return await asyncio.to_thread(
         store_message, jid, direction, body, timestamp=timestamp,
         sender=sender, skip_existing=skip_existing, archive_id=archive_id,
         origin_id=origin_id, reply_to=reply_to, reply_id=reply_id,
-        message_id=message_id, edited=edited, media=media)
+        message_id=message_id, edited=edited, media=media,
+        encrypted=encrypted, encryption=encryption)
 
 
 async def store_many_async(jid: str, rows: list[dict]) -> int:

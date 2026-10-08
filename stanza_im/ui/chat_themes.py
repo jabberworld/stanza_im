@@ -525,7 +525,8 @@ class ChatThemeFactory:
                        retract_by: str = "",
                        reactions=None,
                        unread_marker: bool = False,
-                       media: dict | None = None) -> str:
+                       media: dict | None = None,
+                       encrypted: bool = False) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -594,6 +595,11 @@ class ChatThemeFactory:
                               'font-size:16px;font-weight:bold;margin-left:4px;'
                               'cursor:help;" title="%s">\u2715</span>'
                               % escape_html(marker_tip))
+        if encrypted and not retracted:
+            body_html = ('<span class="stanza-lock" title="%s" '
+                         'style="color:#2e9e5b;margin-right:4px;">'
+                         '\U0001F512</span>' % escape_html(
+                             tr("msg_encrypted_tooltip"))) + body_html
         if media_html:
             body_html += media_html
 

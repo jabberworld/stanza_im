@@ -2947,6 +2947,8 @@ class MainWindow(QtWidgets.QMainWindow):
             pep_sweep_interval=getattr(connection, "pep_sweep_interval", 0),
             tls_mode=getattr(connection, "tls_mode", "prefer"),
             starttls_mode=getattr(connection, "starttls_mode", "always"),
+            omemo_enabled=bool(getattr(self._config.omemo, "enabled", True)),
+            omemo_btbv=bool(getattr(self._config.omemo, "blind_trust", True)),
         )
         self._client.stun_turn_mode = getattr(connection, "stun_turn_mode",
                                               "auto")
@@ -5191,7 +5193,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              unstyled: bool = False,
                              reply_able_id: str = "", reply_author: str = "",
                              reply_to: str = "", reply_id: str = "",
-                             carbon: bool = False, media: dict | None = None):
+                             carbon: bool = False, media: dict | None = None,
+                             encrypted: bool = False):
         bare_jid = frm.split("/")[0]
         self._touch_tab_activity(bare_jid)
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
@@ -5216,7 +5219,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id=reply_able_id,
                              reply_author=reply_author or frm,
                              reply_to=reply_to, reply_id=reply_id,
-                             media=media)
+                             media=media, encrypted=encrypted)
 
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -5225,7 +5228,8 @@ class MainWindow(QtWidgets.QMainWindow):
             sender=sender_name,
             origin_id=reply_able_id,
             message_id=reply_able_id,
-            reply_to=reply_to, reply_id=reply_id, media=media))
+            reply_to=reply_to, reply_id=reply_id, media=media,
+            encrypted=encrypted))
 
         # Unread badge + tray blink (skip when conversation is on screen)
         active = (self._chat_area_visible()
@@ -5330,7 +5334,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                  body: str, ts, unstyled: bool = False,
                                  reply_able_id: str = "", reply_author: str = "",
                                  reply_to: str = "", reply_id: str = "",
-                                 media: dict | None = None):
+                                 media: dict | None = None,
+                                 encrypted: bool = False):
         info = self._participant_info(room, nick)
         real_jid = info.get("real_jid")
         target = real_jid.strip() if isinstance(real_jid, str) else ""
@@ -5348,14 +5353,16 @@ class MainWindow(QtWidgets.QMainWindow):
                          sender_jid=info.get("avatar_jid", "") or target,
                          reply_able_id=reply_able_id,
                          reply_author=reply_author or f"{room}/{nick}",
-                         reply_to=reply_to, reply_id=reply_id, media=media)
+                         reply_to=reply_to, reply_id=reply_id, media=media,
+                         encrypted=encrypted)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
             timestamp=ts or _current_timestamp(), sender=nick,
             origin_id=reply_able_id,
             message_id=reply_able_id,
-            reply_to=reply_to, reply_id=reply_id, media=media))
+            reply_to=reply_to, reply_id=reply_id, media=media,
+            encrypted=encrypted))
         self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
         # its own roster row (skipping a conversation that is on screen).
@@ -5371,6 +5378,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client and isinstance(jid, str) and jid.strip():
             jid = jid.strip()
             self._touch_tab_activity(jid)
+            if (getattr(self._client.omemo, "available", False)
+                    and self._client.omemo.chat_mode(jid) == "omemo"):
+                self._start_task(self._send_omemo(jid, body))
+                return
             message_id = self._client.send_message(jid, body)
             chat = self._chat_window.get_chat(jid)
             if chat:
@@ -5387,6 +5398,36 @@ class MainWindow(QtWidgets.QMainWindow):
             self._remember_contact(jid)
             self._play_sound("message_send", "sound_on_send")
 
+    async def _send_omemo(self, jid: str, body: str) -> None:
+        """Encrypt and send a 1:1 message with OMEMO, then echo/store it."""
+        try:
+            message_id = await self._client.send_omemo_message(jid, body)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OMEMO send to %s failed: %s", jid, exc)
+            chat = self._chat_window.get_chat(jid)
+            if chat:
+                chat.add_status(
+                    tr("omemo_send_failed", error=str(exc)),
+                    _current_timestamp())
+            return
+        if not message_id:
+            return
+        chat = self._chat_window.get_chat(jid)
+        if chat:
+            chat.add_message(sender="Me", body=body,
+                             timestamp=_current_timestamp(),
+                             direction="outgoing", message_id=message_id,
+                             reply_able_id=message_id, reply_author=jid,
+                             encrypted=True)
+        from stanza_im.core import history
+        self._start_task(history.store_message_async(
+            jid, "outgoing", body,
+            timestamp=_current_timestamp(), sender="Me",
+            origin_id=message_id, message_id=message_id,
+            encrypted=True, encryption="omemo"))
+        self._remember_contact(jid)
+        self._play_sound("message_send", "sound_on_send")
+
     # ── Groupchat ─────────────────────────────────────────────────
 
     def _on_groupchat_message(self, room: str, nick: str, body: str,
@@ -5394,7 +5435,8 @@ class MainWindow(QtWidgets.QMainWindow):
                               archive_id: str = "", unstyled: bool = False,
                               reply_able_id: str = "", reply_author: str = "",
                               reply_to: str = "", reply_id: str = "",
-                              media: dict | None = None):
+                              media: dict | None = None,
+                              encrypted: bool = False):
         self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
@@ -5432,7 +5474,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id=reply_ref_id,
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id,
-                             media=media)
+                             media=media, encrypted=encrypted)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             room, "incoming", body,
@@ -5440,7 +5482,8 @@ class MainWindow(QtWidgets.QMainWindow):
             archive_id=archive_id,
             origin_id=reply_ref_id,
             message_id=reply_ref_id,
-            reply_to=reply_to, reply_id=reply_id, media=media))
+            reply_to=reply_to, reply_id=reply_id, media=media,
+            encrypted=encrypted))
         self._maybe_osd_groupchat(room, nick, body)
         is_mention = bool(self_nick and nick != self_nick
                           and mentions_nick(body, self_nick))

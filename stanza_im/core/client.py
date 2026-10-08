@@ -26,6 +26,7 @@ from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.core import privacy, roster_cache
+from stanza_im.include import constants
 from stanza_im.include.constants import APP_NAME, VERSION
 from stanza_im.i18n import current_language as _current_language
 from stanza_im.xmpp import jingle as jingle_mod
@@ -1020,7 +1021,9 @@ class JabberClient:
                  csi: bool = True,
                  pep_sweep_interval: int = 0,
                  tls_mode: str = "prefer",
-                 starttls_mode: str = "always"):
+                 starttls_mode: str = "always",
+                 omemo_enabled: bool = True,
+                 omemo_btbv: bool = True):
         self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
@@ -1068,6 +1071,8 @@ class JabberClient:
         self.send_chatstates = (self.send_typing_notifications
                                 or self.send_activity_notifications)
         self.send_software = send_software
+        self.omemo_enabled = bool(omemo_enabled)
+        self.omemo_btbv = bool(omemo_btbv)
         self._full_jid = f"{self.jid_str}/{resource}"
 
         self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
@@ -1135,6 +1140,38 @@ class JabberClient:
             self.xmpp.register_plugin("xep_0198")  # Stream Management
         if self.csi:
             self.xmpp.register_plugin("xep_0352")  # Client State Indication
+
+        # XEP-0380 Explicit Message Encryption (used by OMEMO messages).
+        try:
+            self.xmpp.register_plugin("xep_0380")
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not register xep_0380")
+
+        # XEP-0384 OMEMO — optional and detected at runtime.  The feature is
+        # disabled (with a logged warning) when the stack is not installed.
+        from stanza_im.xmpp.omemo import availability
+        from stanza_im.xmpp.omemo.manager import NullOmemo, OmemoManager
+        self.omemo = NullOmemo(self)
+        availability.log_availability()
+        if self.omemo_enabled and availability.AVAILABLE:
+            try:
+                from stanza_im.xmpp.omemo.plugin import OmemoPlugin  # noqa: F401
+                storage_path = os.path.join(
+                    constants.profile_data_dir(), "omemo.json")
+                self.xmpp.register_plugin("xep_0384", {
+                    "storage_path": storage_path,
+                    "btbv": self.omemo_btbv,
+                })
+                self.omemo = OmemoManager(self)
+                # Advertise both protocol versions (XEP-0115 picks these up).
+                for _ns in (availability.LEGACY_NAMESPACE,
+                            availability.OMEMO2_NAMESPACE):
+                    self.xmpp["xep_0030"].add_feature(_ns)
+                self.xmpp["xep_0030"].add_feature(
+                    availability.OMEMO2_NAMESPACE + ":devices+notify")
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not initialise OMEMO", exc_info=True)
+                self.omemo = NullOmemo(self)
 
         # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
         self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
@@ -2082,6 +2119,20 @@ class JabberClient:
             logger.warning("Skipping message with empty target: %r", jid)
             return ""
         jid = jid.strip()
+        msg, message_id = self._compose_message(
+            jid, body, mtype, mhtml, reply_to, reply_id, reply_ref_sender,
+            reply_ref_body, replace_id, media)
+        logger.debug("Sending %s message to %s (reply_id=%s): %r",
+                     mtype, jid, reply_id, str(msg["body"])[:200])
+        msg.send()
+        return message_id
+
+    def _compose_message(self, jid: str, body: str, mtype: str = "chat",
+                         mhtml: str | None = None, reply_to: str = "",
+                         reply_id: str = "", reply_ref_sender: str = "",
+                         reply_ref_body: str = "", replace_id: str = "",
+                         media: dict | None = None):
+        """Build an outgoing ``<message>`` stanza (not sent yet)."""
         msg = self.xmpp.Message()
         msg["to"] = jid
         msg["type"] = mtype
@@ -2107,9 +2158,37 @@ class JabberClient:
             msg["html"]["body"] = mhtml
         if media:
             self._attach_media_sharing(msg, media)
-        logger.debug("Sending %s message to %s (reply_id=%s): %r",
-                     mtype, jid, reply_id, body[:200])
-        msg.send()
+        return msg, message_id
+
+    async def send_omemo_message(self, jid: str, body: str, mtype: str = "chat",
+                                 recipients=None, mhtml: str | None = None,
+                                 reply_to: str = "", reply_id: str = "",
+                                 reply_ref_sender: str = "",
+                                 reply_ref_body: str = "",
+                                 replace_id: str = "",
+                                 media: dict | None = None) -> str:
+        """Encrypt and send a message with OMEMO (XEP-0384).
+
+        *recipients* is the set of bare JIDs to encrypt for (defaults to *jid*,
+        i.e. a 1:1 chat).  Returns the message id, or "" when nothing was sent.
+        """
+        if not isinstance(jid, str) or not jid.strip():
+            return ""
+        if not getattr(self.omemo, "available", False):
+            raise RuntimeError("OMEMO is not available")
+        jid = jid.strip()
+        msg, message_id = self._compose_message(
+            jid, body, mtype, mhtml, reply_to, reply_id, reply_ref_sender,
+            reply_ref_body, replace_id, media)
+        targets = set(recipients) if recipients else {jid}
+        encrypted, errors = await self.omemo.encrypt(
+            msg, targets, identifier=jid)
+        if errors:
+            logger.warning("OMEMO encryption had errors: %s", errors)
+        if encrypted is None:
+            logger.warning("OMEMO produced no message for %s", jid)
+            return ""
+        encrypted.send()
         return message_id
 
     def send_attention(self, jid: str) -> bool:
@@ -5336,6 +5415,51 @@ class JabberClient:
             logger.debug("ATTENTION received from %s", frm)
             self.emit("attention_received", frm.split("/")[0])
 
+    def _is_omemo_encrypted(self, msg) -> bool:
+        omemo = getattr(self, "omemo", None)
+        if omemo is None or not getattr(omemo, "available", False):
+            return False
+        try:
+            return bool(omemo.is_encrypted(msg))
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def _decrypt_and_dispatch(self, msg) -> None:
+        """Decrypt an incoming OMEMO stanza and hand it to the normal path."""
+        try:
+            decrypted, device = await self.omemo.decrypt(msg)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OMEMO decryption failed: %s", exc)
+            self.emit("omemo_decrypt_failed", str(msg["from"]), str(exc))
+            return
+        try:
+            decrypted._omemo_encrypted = True
+            decrypted._omemo_device = device
+        except Exception:  # noqa: BLE001
+            pass
+        if str(decrypted["type"]) == "groupchat":
+            self._on_groupchat_message(decrypted)
+        elif getattr(msg, "_omemo_carbon", False):
+            self._emit_1to1(decrypted, carbon=True)
+        else:
+            self._on_message(decrypted)
+
+    def _emit_1to1(self, msg, carbon: bool = False) -> None:
+        body = str(msg["body"])
+        frm = str(msg["from"])
+        unstyled, ts, reply_to, reply_id, stable_id = self._message_fields(msg)
+        media = message_media(msg)
+        server_sid = _stanza_id(msg, self.jid_str)
+        if server_sid:
+            self._mds_track(frm.split("/")[0], msg, server_sid)
+        self.emit("message_received", frm, body, ts, unstyled, stable_id,
+                  frm, reply_to, reply_id, carbon, media=media,
+                  encrypted=self._omemo_flag(msg))
+
+    @staticmethod
+    def _omemo_flag(msg) -> bool:
+        return bool(getattr(msg, "_omemo_encrypted", False))
+
     def _on_message(self, msg) -> None:
         voice_err = self._voice_request_error(msg)
         if voice_err is not None:
@@ -5347,6 +5471,9 @@ class JabberClient:
         if msg["type"] == "headline":
             self._maybe_mds_event(msg)
             self._maybe_pep_event(msg)
+            return
+        if self._is_omemo_encrypted(msg):
+            self._start_task(self._decrypt_and_dispatch(msg))
             return
         if _is_muc_invite(msg):
             # A MUC invitation is surfaced by its own handler (dialog + OSD);
@@ -5389,7 +5516,8 @@ class JabberClient:
                         return
                     logger.debug("Incoming correction ignored (edits disabled)")
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
-                          stable_id, frm, reply_to, reply_id, media=media)
+                          stable_id, frm, reply_to, reply_id, media=media,
+                          encrypted=self._omemo_flag(msg))
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -5401,7 +5529,8 @@ class JabberClient:
                     return
                 logger.debug("Incoming correction ignored (edits disabled)")
             self.emit("message_received", frm, body, ts, unstyled,
-                      stable_id, frm, reply_to, reply_id, media=media)
+                      stable_id, frm, reply_to, reply_id, media=media,
+                      encrypted=self._omemo_flag(msg))
 
     @staticmethod
     def _message_fields(msg):
@@ -5430,6 +5559,13 @@ class JabberClient:
             return
         if _is_roster_exchange(inner):
             self._start_task(self._on_roster_exchange_stanza(inner))
+            return
+        if self._is_omemo_encrypted(inner):
+            try:
+                inner._omemo_carbon = True
+            except Exception:  # noqa: BLE001
+                pass
+            self._start_task(self._decrypt_and_dispatch(inner))
             return
         if inner["type"] not in ("chat", "normal"):
             return
@@ -5484,6 +5620,9 @@ class JabberClient:
         room = frm.split("/")[0]
         nick = frm.split("/", 1)[1] if "/" in frm else ""
         self._mark_muc_activity(room)
+        if self._is_omemo_encrypted(msg):
+            self._start_task(self._decrypt_and_dispatch(msg))
+            return
         reactions = _reactions(msg)
         if reactions is not None:
             # XEP-0444: a bodyless reaction is never a chat message (and must
@@ -5547,7 +5686,7 @@ class JabberClient:
             logger.debug("Incoming MUC correction ignored (edits disabled)")
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
-                  media=media)
+                  media=media, encrypted=self._omemo_flag(msg))
 
     def _on_groupchat_subject(self, msg) -> None:
         """A MUC subject was set/announced (subject-only message).

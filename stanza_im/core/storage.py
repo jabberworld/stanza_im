@@ -118,6 +118,8 @@ class Config:
                         "conference_servers": [], "service_servers": []},
         "privacy": {"send_software": True, "send_typing_notifications": True,
                      "send_activity_notifications": True, "send_chatstates": True},
+        "omemo": {"enabled": True, "blind_trust": True, "alias_sync": False,
+                  "show_warnings": True, "default_mode": "off"},
         "files": {"auto_accept": False, "download_notifications": True,
                   "download_dir": "", "verify_hashes": True},
         "devices": {"audio_input": "", "audio_output": "", "video_input": ""},

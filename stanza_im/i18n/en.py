@@ -215,6 +215,8 @@ STRINGS = {
     "edit_cancel": "Cancel editing",
     "edit_in_progress": "Editing the message…",
     "msg_edited_tooltip": "Edited message",
+    "msg_encrypted_tooltip": "OMEMO encrypted",
+    "omemo_send_failed": "Could not send the encrypted message: {error}",
     "msg_retracted": "Message retracted",
     "msg_retracted_moderated": "Retracted by a moderator",
     "msg_retracted_reason": "Reason: {reason}",

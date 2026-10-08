@@ -128,6 +128,37 @@ try:
 except ValueError:
     check("non-envelope root is rejected", True)
 
+
+# 4. config section ----------------------------------------------------------
+from stanza_im.core.storage import Config
+
+cfg = Config()
+check("omemo config defaults",
+      cfg.omemo.enabled is True and cfg.omemo.blind_trust is True
+      and cfg.omemo.alias_sync is False)
+cfg.omemo.blind_trust = False
+cfg.save()
+check("omemo config round-trips", Config().omemo.blind_trust is False)
+
+
+# 5. history encryption flag + render ----------------------------------------
+from stanza_im.core import history
+from stanza_im.ui.chat_themes import ChatThemeFactory
+
+history.store_message("omemo@example.com", "incoming", "secret",
+                      origin_id="e1", encrypted=True, encryption="omemo")
+entry = history.entry_by_ref("omemo@example.com", "e1")
+check("history stores the encrypted flag", entry is not None
+      and entry["encrypted"] is True and entry["encryption"] == "omemo")
+
+html = ChatThemeFactory().render_message(
+    sender="Bob", body="secret", timestamp="10:00", direction="incoming",
+    encrypted=True)
+check("encrypted messages render a lock", "stanza-lock" in html)
+html_plain = ChatThemeFactory().render_message(
+    sender="Bob", body="hi", timestamp="10:00", direction="incoming")
+check("plain messages have no lock", "stanza-lock" not in html_plain)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -1632,7 +1632,8 @@ class ChatWidget(QtWidgets.QWidget):
                     message_id: str = "", unstyled: bool = False,
                     reply_able_id: str = "", reply_author: str = "",
                     reply_to: str = "", reply_id: str = "",
-                    edited: bool = False, media: dict | None = None):
+                    edited: bool = False, media: dict | None = None,
+                    encrypted: bool = False):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -1652,7 +1653,8 @@ class ChatWidget(QtWidgets.QWidget):
                   "delivered": False, "unstyled": unstyled,
                   "origin_id": reply_able_id, "reply_author": reply_author,
                   "reply_to": reply_to, "reply_id": reply_id,
-                  "edited": edited, "media": media}
+                  "edited": edited, "media": media,
+                  "encrypted": bool(encrypted)}
         self._messages.append(entry)
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
@@ -1748,6 +1750,7 @@ class ChatWidget(QtWidgets.QWidget):
             "reactions": self.compute_reactions(entry),
             "unread_marker": unread_marker,
             "media": entry.get("media"),
+            "encrypted": bool(entry.get("encrypted")),
         }
 
     def compute_reactions(self, entry: dict) -> list[dict]:
