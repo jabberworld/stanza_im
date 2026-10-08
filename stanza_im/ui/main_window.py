@@ -3102,6 +3102,9 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("Session started, roster arriving...")
         if self._stack.currentIndex() == _PAGE_SPLASH:
             self._set_splash(tr("login_roster"), 80)
+        # A successful login clears any stale "connection lost" status left by
+        # a previous session (e.g. during a profile switch).
+        self._clear_status()
         self._presence_sound_seen.clear()
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
@@ -7338,10 +7341,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._shutting_down or self._client is None:
             return
         self._flush_unread()
-        if self._client is not None:
-            self._client.flush_roster_cache()
-            self._start_task(self._disconnect_for_logout(self._client))
-        self._client = None
+        client, self._client = self._client, None
+        if client is not None:
+            client.flush_roster_cache()
+            # Silence the old instance before its asynchronous disconnect can
+            # emit ``disconnected`` (which would show a stale offline status and
+            # reconnect button over the next session's UI).
+            detach = getattr(client, "detach", None)
+            if callable(detach):
+                detach()
+            self._start_task(self._disconnect_for_logout(client))
         self._reset_account_ui()
         self._stack.setCurrentIndex(_PAGE_LOGIN)
         saved_password = (self._config.password

@@ -269,6 +269,15 @@ _auth._on_auth_failed()
 check("auth_failed carries the SASL condition",
       _conds == ["not-authorized", ""])
 
+# detach() silences a logged-out client so its late events cannot fire
+_detached = []
+_auth.on("disconnected", lambda: _detached.append(1))
+_auth.emit("disconnected")
+check("a callback fires before detach", _detached == [1])
+_auth.detach()
+_auth.emit("disconnected")
+check("detach drops every callback", _detached == [1])
+
 # 9. MainWindow wiring (static) ----------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
@@ -282,6 +291,11 @@ check("login submission selects the profile and reloads unread",
       and "self._load_unread_for(jid)" in _mw_src)
 check("auth failure distinguishes bad credentials",
       "login_bad_credentials" in _mw_src)
+check("logout detaches the old client before its disconnect",
+      'getattr(client, "detach", None)' in _mw_src)
+check("session start clears a stale status bar",
+      "self._clear_status()" in _mw_src.split(
+          "def _on_session_started", 1)[1].split("def ", 1)[0])
 
 print()
 if FAILURES:

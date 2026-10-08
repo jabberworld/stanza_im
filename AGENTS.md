@@ -1123,12 +1123,15 @@ popups are not replayed. [`tests/test_unread_state.py`]
 
 **Session logout**: the Actions menu's «Завершить сеанс» (above «Выход», same
 `gtk-quit.png` icon) calls `MainWindow._logout`: it flushes unread/roster cache,
-disconnects the client and drops `self._client`, clears the per-account UI
+detaches the client (`JabberClient.detach` clears the UI event callbacks) so its
+asynchronous disconnect cannot emit a late `disconnected`/roster event over the
+next session, disconnects and drops `self._client`, clears the per-account UI
 state (`_reset_account_ui`: roster, chat tabs via `ChatWindow.close_all`, MUC
 maps, bookmarks, live unread totals, tray blink/offline icon) and returns to
-the login page with the saved JID prefilled. The unread counters stay on disk
-(bound to that account), so logging back in restores them; the application
-keeps running (unlike `_quit`).
+the login page with the saved JID prefilled. `_on_session_started` clears the
+status bar, so a successful (re)login never keeps a stale offline status. The
+unread counters stay on disk (bound to that account), so logging back in
+restores them; the application keeps running (unlike `_quit`).
 
 **Media previews** (`include/media.py`, `ui/media_preview.py`, `ui/media_viewer.py`):
 `media_kind(url)` classifies URLs by extension (image/audio/video). The

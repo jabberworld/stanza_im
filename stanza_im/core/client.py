@@ -1738,6 +1738,16 @@ class JabberClient:
         """Register a callback for an internal event name."""
         self._callbacks.setdefault(event, []).append(callback)
 
+    def detach(self) -> None:
+        """Drop every internal event callback.
+
+        Called when the client is logged out and replaced: the old instance may
+        still emit ``disconnected`` (and other events) while its stream closes
+        asynchronously, which would otherwise clobber the freshly started
+        session's UI (e.g. show a stale "connection lost" status).
+        """
+        self._callbacks.clear()
+
     def emit(self, event: str, *args: Any, **kwargs: Any) -> None:
         """Invoke all callbacks registered for *event*."""
         for cb in self._callbacks.get(event, []):
