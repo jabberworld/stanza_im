@@ -66,7 +66,10 @@ class LoginWidget(QtWidgets.QWidget):
         profile_row.addWidget(self._profile_manager_btn)
         layout.addLayout(profile_row)
 
-        layout.addSpacing(24)
+        # Equal stretches around the credentials block keep it vertically
+        # centered while the logo/profile stay at the top and the status
+        # selector at the bottom.
+        layout.addStretch(1)
 
         # ── Credentials group ────────────────────────────────────
         layout.addWidget(QtWidgets.QLabel(tr("login_title")))
@@ -111,7 +114,7 @@ class LoginWidget(QtWidgets.QWidget):
         self._info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._info_label)
 
-        layout.addSpacing(24)
+        layout.addStretch(1)
 
         # ── Status group (bottom) ────────────────────────────────
         status_row = QtWidgets.QHBoxLayout()
@@ -119,10 +122,8 @@ class LoginWidget(QtWidgets.QWidget):
         self._show_combo = QtWidgets.QComboBox()
         for key in ("online", "chat", "away", "xa", "dnd"):
             self._show_combo.addItem(self._make_status_icon(key), tr(f"status_{key}"), key)
-        status_row.addWidget(self._show_combo)
+        status_row.addWidget(self._show_combo, 1)
         layout.addLayout(status_row)
-
-        layout.addStretch()
 
     def showEvent(self, event):
         super().showEvent(event)

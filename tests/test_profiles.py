@@ -265,6 +265,21 @@ check("the profile selector is above the credentials",
       _top_index(_lay, login._profile_combo)
       < _top_index(_lay, login._jid_edit))
 
+# the credentials block is centered by two equal stretches (no trailing one)
+_expanding = sum(
+    1 for i in range(_lay.count())
+    if _lay.itemAt(i).spacerItem() is not None
+    and _lay.itemAt(i).spacerItem().sizePolicy().verticalPolicy()
+    == QtWidgets.QSizePolicy.Policy.Expanding)
+check("the credentials block is centered by two stretches", _expanding == 2)
+
+# the status selector is given the row's stretch so it fills the width
+_lw_src = open(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "stanza_im", "ui", "login_widget.py"), encoding="utf-8").read()
+check("the status combo fills the row",
+      "status_row.addWidget(self._show_combo, 1)" in _lw_src)
+
 # empty credentials are rejected with a localized message
 from stanza_im.i18n import tr
 login._jid_edit.setText("")

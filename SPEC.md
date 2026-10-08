@@ -613,17 +613,18 @@ Widgets (top to bottom):
   (`_apply_profile`) that loads the selected account into the config and the
   form (`profile_applied(jid)`), and a `system-users.png` button that opens the
   profile manager (`profiles_requested`); `refresh_profiles()` rebuilds them
-- **Credentials group** (visually separated by a vertical gap): JID input
-  (`QLineEdit`, placeholder "user@server"), password input (echo=Password),
-  "Save password" / "Auto connect" checkboxes (the latter enabled only when
-  save is checked), the Connect button (default, triggers on Enter in
-  JID/password) and the "Create account" link
-- Info/error label
-- **Status group** (bottom, separated by a vertical gap): status combo
-  (`QComboBox`): Online, Chatty, Away, XA, DND (with icons)
+- **Credentials group**: JID input (`QLineEdit`, placeholder "user@server"),
+  password input (echo=Password), "Save password" / "Auto connect" checkboxes
+  (the latter enabled only when save is checked), the Connect button (default,
+  triggers on Enter in JID/password) and the "Create account" link, then the
+  info/error label
+- **Status group** (bottom): status combo (`QComboBox`): Online, Chatty, Away,
+  XA, DND (with icons); it takes the row's stretch so it fills the width
 
-`showEvent` focuses the Connect button. Signal: `login_requested(jid, password,
-show)`.
+The logo/profile group is anchored to the top and the status selector to the
+bottom; two equal stretches around the credentials group keep it vertically
+centered as the window resizes. `showEvent` focuses the Connect button. Signal:
+`login_requested(jid, password, show)`.
 
 ### 6.1 Config Integration
 
