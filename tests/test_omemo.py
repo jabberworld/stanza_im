@@ -159,6 +159,61 @@ html_plain = ChatThemeFactory().render_message(
     sender="Bob", body="hi", timestamp="10:00", direction="incoming")
 check("plain messages have no lock", "stanza-lock" not in html_plain)
 
+# 6. QR encoder --------------------------------------------------------------
+from stanza_im.xmpp.omemo import qr
+
+matrix = qr.encode("HELLO")
+check("QR size for a short string is version 1 (21x21)",
+      len(matrix) == 21 and all(len(row) == 21 for row in matrix))
+check("QR finder pattern is drawn",
+      matrix[0][0] and matrix[0][6] and matrix[6][0] and matrix[6][6]
+      and not matrix[1][1] and matrix[3][3] and not matrix[1][5])
+check("QR timing pattern alternates",
+      matrix[6][8] != matrix[6][9])
+
+# The full codeword polynomial must vanish at the RS generator roots.
+_cw = qr._codewords(b"HELLO", 1)
+_deg = qr._ECC_CODEWORDS[1]
+_ok = True
+for i in range(_deg):
+    x = 1
+    for _ in range(i):
+        x = qr._gf_mul(x, 0x02)
+    acc = 0
+    for coeff in _cw:
+        acc = qr._gf_mul(acc, x) ^ coeff
+    if acc != 0:
+        _ok = False
+check("QR Reed-Solomon codewords are valid", _ok)
+
+_fp = "aa bb cc dd ee ff 00 11 22 33 44 55 66 77 88 99"
+_big = qr.encode(_fp)
+check("QR of a fingerprint fits a small version",
+      1 <= (len(_big) - 17) // 4 <= 5)
+
+# 7. UI: chat OMEMO buttons + QR pixmap --------------------------------------
+from PyQt6 import QtWidgets
+from stanza_im.ui.chat_widget import ChatWidget
+from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.qr_dialog import render_qr_pixmap
+
+_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+_cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
+check("OMEMO lock hidden by default", _cw._omemo_btn.isHidden())
+_cw.set_omemo_support(True)
+check("OMEMO lock shown when supported", not _cw._omemo_btn.isHidden())
+_cw.set_omemo_mode("omemo")
+check("OMEMO mode reflected", _cw.omemo_mode() == "omemo")
+check("OMEMO shield shown in omemo mode", not _cw._omemo_shield_btn.isHidden())
+_cw.set_omemo_mode("off")
+check("OMEMO shield hidden when off", _cw._omemo_shield_btn.isHidden())
+_cw.detach()
+
+_pm = render_qr_pixmap("abc")
+check("QR pixmap renders", _pm is not None and not _pm.isNull())
+check("QR pixmap is square and sized", _pm.width() == _pm.height()
+      and _pm.width() > 21)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

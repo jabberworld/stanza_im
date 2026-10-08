@@ -1021,11 +1021,84 @@ class PreferencesDialog(QtWidgets.QDialog):
                            (tr("prefs_conferences"), muc)])
 
     def _page_privacy(self):
-        page, form = self._page()
+        general, form = self._page()
         form.addRow(self._check("send_software", tr("prefs_send_software")))
         form.addRow(self._check("send_typing_notifications", tr("prefs_send_typing_notifications")))
         form.addRow(self._check("send_activity_notifications", tr("prefs_send_activity_notifications")))
+        omemo = self._page_omemo()
+        tabs = self._tabs([(tr("prefs_general"), general),
+                           (tr("prefs_omemo"), omemo)])
+        from stanza_im.xmpp.omemo import availability
+        if not availability.AVAILABLE:
+            tabs.setTabEnabled(1, False)
+        return tabs
+
+    def _page_omemo(self):
+        from stanza_im.xmpp.omemo import availability
+        page, form = self._page()
+        if not availability.AVAILABLE:
+            note = QtWidgets.QLabel(
+                tr("prefs_omemo_missing", missing=", ".join(availability.MISSING)))
+            note.setWordWrap(True)
+            form.addRow(note)
+            return page
+
+        btbv = self._check("blind_trust", tr("prefs_omemo_blind_trust"))
+        form.addRow(self._row(
+            btbv, self._info_label(tr("prefs_omemo_blind_trust_tip"))))
+        form.addRow(self._check("alias_sync", tr("prefs_omemo_alias_sync")))
+
+        self._omemo_fp = QtWidgets.QLabel(tr("omemo_loading"))
+        self._omemo_fp.setWordWrap(True)
+        self._omemo_fp.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        copy_btn = QtWidgets.QPushButton(tr("prefs_omemo_copy"))
+        copy_btn.clicked.connect(self._on_omemo_copy_fp)
+        qr_btn = QtWidgets.QPushButton(tr("prefs_omemo_qr"))
+        qr_btn.clicked.connect(self._on_omemo_qr)
+        self._omemo_qr_btn = qr_btn
+        form.addRow(tr("prefs_omemo_own_fingerprint"),
+                    self._row(self._omemo_fp, copy_btn, qr_btn))
+
+        manage = QtWidgets.QPushButton(tr("prefs_omemo_manage"))
+        manage.clicked.connect(self._on_omemo_manage)
+        form.addRow(manage)
+
+        self._load_omemo_fingerprint()
         return page
+
+    def _load_omemo_fingerprint(self):
+        client = self._client
+        if client is None or not getattr(client.omemo, "available", False):
+            return
+        import asyncio
+
+        async def _load():
+            try:
+                device = await client.omemo.own_device()
+            except Exception:  # noqa: BLE001
+                return
+            fp = client.omemo.fingerprint(device.identity_key)
+            self._omemo_fp.setText(fp)
+
+        try:
+            asyncio.ensure_future(_load())
+        except RuntimeError:
+            pass
+
+    def _on_omemo_copy_fp(self):
+        QtWidgets.QApplication.clipboard().setText(self._omemo_fp.text())
+
+    def _on_omemo_qr(self):
+        from stanza_im.ui.qr_dialog import show_fingerprint_qr
+        show_fingerprint_qr(self, self._omemo_fp.text())
+
+    def _on_omemo_manage(self):
+        client = self._client
+        if client is None:
+            return
+        from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
+        OmemoDevicesDialog(client, client.jid_str, self, own=True).exec()
 
     def _page_appearance(self):
         themes, form = self._page()
@@ -1399,6 +1472,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "send_software": privacy.send_software,
             "send_typing_notifications": getattr(privacy, "send_typing_notifications", privacy.send_chatstates),
             "send_activity_notifications": getattr(privacy, "send_activity_notifications", privacy.send_chatstates),
+            "blind_trust": bool(getattr(cfg.omemo, "blind_trust", True)),
+            "alias_sync": bool(getattr(cfg.omemo, "alias_sync", False)),
             "chat_theme": appearance.chat_theme or chat.theme,
             "muc_theme": appearance.muc_theme,
             "emoticon_theme": ("default/smileys.cfg"
@@ -1546,6 +1621,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.privacy.send_activity_notifications = self._value("send_activity_notifications")
         cfg.privacy.send_chatstates = (cfg.privacy.send_typing_notifications
                                        or cfg.privacy.send_activity_notifications)
+        cfg.omemo.blind_trust = self._value("blind_trust")
+        cfg.omemo.alias_sync = self._value("alias_sync")
         cfg.notifications.tray_blink = self._value("tray_blink")
         cfg.notifications.popups = self._value("popups")
         cfg.notifications.osd_enabled = self._value("osd_enabled")

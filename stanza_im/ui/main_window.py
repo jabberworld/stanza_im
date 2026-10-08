@@ -353,6 +353,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.muji_call_requested.connect(self._on_muji_call_requested)
         self._chat_window.attention_ping_requested.connect(
             self._on_attention_ping_requested)
+        self._chat_window.omemo_mode_requested.connect(
+            self._on_omemo_mode_requested)
+        self._chat_window.omemo_devices_requested.connect(
+            self._open_omemo_devices)
         self._chat_window.muc_config_requested.connect(
             self._on_muc_config_requested)
         self._chat_window.input_height_changed.connect(
@@ -2539,6 +2543,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """A profile was applied on the login screen: select its data dir."""
         profiles.set_active(jid)
 
+    def _open_omemo_devices(self, jid: str) -> None:
+        """Open the OMEMO device manager for *jid* (roster context menu)."""
+        if self._client is None:
+            return
+        from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
+        OmemoDevicesDialog(self._client, jid, self).exec()
+
     def _confirm_profile_switch(self, jid: str) -> bool:
         reply = QtWidgets.QMessageBox.question(
             self, tr("profiles_activate_title"),
@@ -3587,6 +3598,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_call_support(bare, audio, video)
         self._roster.set_client_icon(bare, self._client.client_icon(bare))
         self.apply_attention_support(bare)
+        self._apply_omemo_support(bare)
 
     def _apply_call_support(self, jid: str) -> None:
         """Apply a 1:1 tab's call support from the already-resolved caps.
@@ -3605,6 +3617,25 @@ class MainWindow(QtWidgets.QMainWindow):
             jid, self._client.supports_calls(bare),
             self._client.supports_calls(bare, video=True))
         self.apply_attention_support(bare)
+        self._apply_omemo_support(jid)
+
+    def _apply_omemo_support(self, jid: str) -> None:
+        """Show the OMEMO lock and reflect the chat's mode (1:1 tabs)."""
+        client = self._client
+        if client is None or not getattr(client.omemo, "available", False):
+            return
+        bare = jid.split("/", 1)[0]
+        if bare in self._conference_roster or bare in self._muc_self_nicks:
+            return
+        self._chat_window.set_omemo_support(jid, client.supports_omemo(bare))
+        self._chat_window.set_omemo_mode(jid, client.omemo.chat_mode(jid))
+
+    def _on_omemo_mode_requested(self, jid: str, mode: str) -> None:
+        if self._client is None or not getattr(self._client.omemo,
+                                               "available", False):
+            return
+        self._client.omemo.set_chat_mode(jid, mode)
+        self._chat_window.set_omemo_mode(jid, mode)
 
     def apply_attention_support(self, jid: str) -> None:
         """Sync the XEP-0224 bell of a 1:1 tab.
@@ -4325,6 +4356,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.ensure_caps(jid)
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
+        if (self._client is not None and not is_conf
+                and getattr(self._client.omemo, "available", False)):
+            menu.addAction(self._menu_icon("system-users.png"), tr("omemo_manage"),
+                           lambda checked=False: defer(
+                               lambda: self._open_omemo_devices(jid)))
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),

@@ -223,6 +223,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.geo_message_corrected.connect(self.geo_message_corrected)
         widget.call_requested.connect(self.call_requested)
         widget.attention_ping_requested.connect(self.attention_ping_requested)
+        widget.omemo_mode_requested.connect(self.omemo_mode_requested)
+        widget.omemo_devices_requested.connect(self.omemo_devices_requested)
         idx = self._tab_widget.addTab(widget, display_name)
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
@@ -311,6 +313,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.muji_call_requested.connect(self.muji_call_requested)
         widget.muc_config_requested.connect(self.muc_config_requested)
         widget.voice_requested.connect(self.voice_requested)
+        widget.omemo_mode_requested.connect(self.omemo_mode_requested)
+        widget.omemo_devices_requested.connect(self.omemo_devices_requested)
         idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, room)
         self._tabs[room] = widget
@@ -510,6 +514,22 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = self._tabs.get(room)
         if widget is not None and widget.is_muc:
             widget.set_muji_support(enabled)
+
+    def set_omemo_support(self, jid: str, enabled: bool) -> None:
+        """Show/ hide the OMEMO lock button of a tab."""
+        widget = self._tabs.get(jid)
+        if widget is not None:
+            widget.set_omemo_support(enabled)
+
+    def set_omemo_mode(self, jid: str, mode: str) -> None:
+        """Reflect the chat's OMEMO mode on the tab's lock/shield buttons."""
+        widget = self._tabs.get(jid)
+        if widget is not None:
+            widget.set_omemo_mode(mode)
+
+    def omemo_mode(self, jid: str) -> str:
+        widget = self._tabs.get(jid)
+        return widget.omemo_mode() if widget is not None else "off"
 
     def set_attention_support(self, jid: str, plugin_active: bool,
                               peer_supports: bool) -> None:
@@ -747,6 +767,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     attention_ping_requested = QtCore.pyqtSignal(str)           # jid (XEP-0224)
+    omemo_mode_requested = QtCore.pyqtSignal(str, str)          # jid, mode
+    omemo_devices_requested = QtCore.pyqtSignal(str)            # jid
     muji_call_requested = QtCore.pyqtSignal(str, bool)          # MUC room, video
     muc_config_requested = QtCore.pyqtSignal(str)               # MUC room
     voice_requested = QtCore.pyqtSignal(str)                   # MUC room

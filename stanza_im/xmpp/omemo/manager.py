@@ -167,6 +167,58 @@ class OmemoManager:
             modes.pop(jid, None)
         self._plugin.storage.set_app("chat_modes", modes)
 
+    # ── device names / aliases / last-seen ──────────────────────
+
+    def _aliases(self) -> dict:
+        data = self._plugin.storage.get_app("device_aliases", {})
+        return data if isinstance(data, dict) else {}
+
+    def device_alias(self, jid: str, device_id: int) -> str:
+        return str(self._aliases().get(f"{jid}/{device_id}", "") or "")
+
+    def set_device_alias(self, jid: str, device_id: int, name: str) -> None:
+        aliases = self._aliases()
+        key = f"{jid}/{device_id}"
+        if name:
+            aliases[key] = name
+        else:
+            aliases.pop(key, None)
+        self._plugin.storage.set_app("device_aliases", aliases)
+
+    def device_name(self, jid: str, device_id: int, label: str = "") -> str:
+        """Best display name: user alias, published label, else the id."""
+        return (self.device_alias(jid, device_id)
+                or (label or "")
+                or f"Device {device_id}")
+
+    def _seen_map(self) -> dict:
+        data = self._plugin.storage.get_app("device_last_seen", {})
+        return data if isinstance(data, dict) else {}
+
+    def note_device_seen(self, jid: str, device_id: int) -> None:
+        import time
+        seen = self._seen_map()
+        seen[f"{jid}/{device_id}"] = time.time()
+        self._plugin.storage.set_app("device_last_seen", seen)
+
+    def device_last_seen(self, jid: str, device_id: int) -> float:
+        try:
+            return float(self._seen_map().get(f"{jid}/{device_id}", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    async def purge_device(self, device) -> None:
+        """Remove one of our own devices from the published device lists."""
+        legacy_ns, omemo2_ns = _namespaces()
+        sm = await self.session_manager()
+        own, others = await sm.get_own_device_information()
+        target = int(device.device_id)
+        keep = [own] + [d for d in others if int(d.device_id) != target]
+        device_list = {int(d.device_id): None for d in keep}
+        for namespace in (omemo2_ns, legacy_ns):
+            await sm.update_device_list(namespace, self._own_bare, device_list)
+        self.set_device_alias(self._own_bare, target, "")
+
     # ── encryption / decryption ─────────────────────────────────
 
     async def encrypt(self, stanza, recipients: Iterable[str],

@@ -5437,6 +5437,11 @@ class JabberClient:
             decrypted._omemo_device = device
         except Exception:  # noqa: BLE001
             pass
+        try:
+            if device is not None:
+                self.omemo.note_device_seen(device.bare_jid, device.device_id)
+        except Exception:  # noqa: BLE001
+            pass
         if str(decrypted["type"]) == "groupchat":
             self._on_groupchat_message(decrypted)
         elif getattr(msg, "_omemo_carbon", False):
@@ -5955,6 +5960,14 @@ class JabberClient:
                      "urn:xmpp:jingle:apps:rtp:1",
                      "urn:xmpp:jingle:apps:dtls:0",
                      "urn:xmpp:jingle:apps:rtp:audio")
+
+    def supports_omemo(self, bare: str) -> bool:
+        """Whether *bare* advertises any OMEMO namespace in its caps."""
+        if not getattr(self.omemo, "available", False):
+            return False
+        from stanza_im.xmpp.omemo import availability
+        return (self.supports_feature(bare, availability.LEGACY_NAMESPACE)
+                or self.supports_feature(bare, availability.OMEMO2_NAMESPACE))
 
     def supports_calls(self, bare: str, video: bool = False) -> bool:
         """Conversations-compatible check: does *bare* support A/V calls?"""
