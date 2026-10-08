@@ -5440,6 +5440,10 @@ class JabberClient:
         try:
             if device is not None:
                 self.omemo.note_device_seen(device.bare_jid, device.device_id)
+                resource = msg.get_from().resource
+                if resource:
+                    self.omemo.note_device_resource(
+                        device.bare_jid, device.device_id, resource)
         except Exception:  # noqa: BLE001
             pass
         if str(decrypted["type"]) == "groupchat":
@@ -5960,6 +5964,14 @@ class JabberClient:
                      "urn:xmpp:jingle:apps:rtp:1",
                      "urn:xmpp:jingle:apps:dtls:0",
                      "urn:xmpp:jingle:apps:rtp:audio")
+
+    async def get_omemo_aliases(self) -> list[dict]:
+        from stanza_im.core import omemo_aliases
+        return await omemo_aliases.fetch(self)
+
+    async def set_omemo_aliases(self, entries: list[dict]) -> bool:
+        from stanza_im.core import omemo_aliases
+        return await omemo_aliases.publish(self, entries)
 
     def supports_omemo(self, bare: str) -> bool:
         """Whether *bare* advertises any OMEMO namespace in its caps."""

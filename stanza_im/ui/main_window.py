@@ -2699,6 +2699,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if csi != bool(self._client.csi):
                 self._client.set_csi_config(csi)
             self._update_csi()
+            if getattr(self._client.omemo, "available", False):
+                self._client.omemo.set_btbv(bool(getattr(
+                    self._config.omemo, "blind_trust", True)))
+                self._client.omemo.alias_sync = bool(getattr(
+                    self._config.omemo, "alias_sync", False))
         self._tray.set_popups_mode(self._config.notifications.popups)
         try:
             sec = int(getattr(self._config.chat, "mds_displayed_throttle", 3) or 3)
@@ -2982,6 +2987,8 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self._config, "calls", None), "auto_accept", False))
         if getattr(self._client.omemo, "available", False):
             self._client.omemo.on_trust_warning = self._on_omemo_trust_warning
+            self._client.omemo.alias_sync = bool(getattr(
+                self._config.omemo, "alias_sync", False))
         self._client.set_displayed_state(self._unread_displayed)
         # A previous logout deactivated every plugin; re-activate the enabled
         # set now so the tabs/features are back and `_notify_plugins_client_ready`
@@ -3147,6 +3154,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recount_unread()
         self._sync_tray_blink()
         self._set_info_actions_enabled(True)
+        if (self._client is not None
+                and getattr(self._client.omemo, "available", False)
+                and getattr(self._client.omemo, "alias_sync", False)):
+            self._start_task(self._client.omemo.sync_aliases())
 
     def _on_auth_failed(self, condition: str = ""):
         self._set_info_actions_enabled(False)

@@ -76,6 +76,10 @@ class OmemoManager:
         self._plugin.on_manual_trust = self._on_manual_trust
         self.on_devices_changed = None
         self.on_trust_warning = None
+        #: Mirror device names to the account's private PEP node (opt-in).
+        self.alias_sync = False
+        #: Learned ``"jid/id" -> display label`` (resource + client name).
+        self._device_resources: dict[str, str] = {}
 
     # ── callbacks from the plugin ───────────────────────────────
 
@@ -184,12 +188,77 @@ class OmemoManager:
         else:
             aliases.pop(key, None)
         self._plugin.storage.set_app("device_aliases", aliases)
+        if self.alias_sync:
+            self._schedule_alias_publish()
 
     def device_name(self, jid: str, device_id: int, label: str = "") -> str:
-        """Best display name: user alias, published label, else the id."""
+        """Best display name: user alias, learned name, label, else the id."""
         return (self.device_alias(jid, device_id)
+                or self._device_resources.get(f"{jid}/{device_id}", "")
                 or (label or "")
                 or f"Device {device_id}")
+
+    def note_device_resource(self, jid: str, device_id: int,
+                             label: str) -> None:
+        """Remember a device's resource/client name (auto-naming fallback)."""
+        if label:
+            self._device_resources[f"{jid}/{device_id}"] = label
+
+    # ── server-side alias sync ──────────────────────────────────
+
+    def _alias_entries(self) -> list[dict]:
+        aliases = self._aliases()
+        seen = self._seen_map()
+        entries: list[dict] = []
+        for key, alias in aliases.items():
+            jid, _, device_id = key.rpartition("/")
+            if not jid or not device_id:
+                continue
+            entries.append({"jid": jid, "id": device_id, "alias": alias,
+                            "last_seen": seen.get(key, "")})
+        return entries
+
+    def _schedule_alias_publish(self) -> None:
+        import asyncio
+        try:
+            asyncio.ensure_future(self._publish_aliases())
+        except RuntimeError:
+            pass
+
+    async def _publish_aliases(self) -> None:
+        try:
+            await self._client.set_omemo_aliases(self._alias_entries())
+        except Exception:  # noqa: BLE001
+            logger.debug("OMEMO alias publish failed", exc_info=True)
+
+    async def sync_aliases(self) -> None:
+        """Merge the server-side aliases into the local store (local wins)."""
+        try:
+            entries = await self._client.get_omemo_aliases()
+        except Exception:  # noqa: BLE001
+            return
+        if not entries:
+            return
+        aliases = self._aliases()
+        seen = self._seen_map()
+        changed = False
+        for entry in entries:
+            key = f"{entry.get('jid', '')}/{entry.get('id', '')}"
+            if not entry.get("jid") or not entry.get("id"):
+                continue
+            if entry.get("alias") and key not in aliases:
+                aliases[key] = entry["alias"]
+                changed = True
+            if entry.get("last_seen"):
+                try:
+                    if float(entry["last_seen"]) > float(seen.get(key, 0)):
+                        seen[key] = entry["last_seen"]
+                        changed = True
+                except (TypeError, ValueError):
+                    pass
+        if changed:
+            self._plugin.storage.set_app("device_aliases", aliases)
+            self._plugin.storage.set_app("device_last_seen", seen)
 
     def _seen_map(self) -> dict:
         data = self._plugin.storage.get_app("device_last_seen", {})

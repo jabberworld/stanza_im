@@ -214,6 +214,22 @@ check("QR pixmap renders", _pm is not None and not _pm.isNull())
 check("QR pixmap is square and sized", _pm.width() == _pm.height()
       and _pm.width() > 21)
 
+# 8. server-side aliases payload ---------------------------------------------
+from stanza_im.core import omemo_aliases
+
+_payload = omemo_aliases.build_payload([
+    {"jid": "alice@example.com", "id": "1", "alias": "Laptop",
+     "last_seen": "1700000000"},
+    {"jid": "bob@example.com", "id": "2", "alias": "", "last_seen": ""},
+])
+_entries = omemo_aliases.parse_payload(_payload)
+check("alias payload round-trips",
+      _entries[0] == {"jid": "alice@example.com", "id": "1",
+                      "alias": "Laptop", "last_seen": "1700000000"}
+      and _entries[1]["alias"] == "" and _entries[1]["jid"] == "bob@example.com")
+check("alias node namespace is private",
+      omemo_aliases.NODE == "urn:xmpp:omemo:aliases:0")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
