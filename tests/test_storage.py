@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tomllib
 
 from stanza_im.core.storage import Config
+from stanza_im.include import constants
 from stanza_im.include.constants import CONFIG_FILE
 
 FAILURES = []
@@ -34,6 +35,11 @@ def check(name, cond):
 cfg = Config()
 cfg.emoji.recent = ["😀", "❤️", "👍", "🎉"]
 cfg.save()
+
+# Loading/saving the config must not create the unscoped history directory
+# (the per-profile history dir is created lazily by the history layer).
+check("config load/save does not create the unscoped history dir",
+      not os.path.isdir(os.path.join(constants.DATA_DIR, "history")))
 
 with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
     raw = fh.read()

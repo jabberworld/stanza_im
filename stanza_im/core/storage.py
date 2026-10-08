@@ -20,8 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_dirs() -> None:
-    for d in (CONFIG_DIR, constants.history_dir()):
-        os.makedirs(d, exist_ok=True)
+    # Only the config directory is needed here.  The chat-history directory is
+    # per-profile and is created lazily by the history layer; creating it here
+    # would run before the active profile is selected and leave an unscoped
+    # ``DATA_DIR/history`` next to the profile directories.
+    os.makedirs(CONFIG_DIR, exist_ok=True)
 
 
 def _chmod_private(path: str) -> None:
