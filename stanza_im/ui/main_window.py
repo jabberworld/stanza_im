@@ -2953,6 +2953,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._client.call_auto_accept = bool(getattr(
             getattr(self._config, "calls", None), "auto_accept", False))
         self._client.set_displayed_state(self._unread_displayed)
+        # A previous logout deactivated every plugin; re-activate the enabled
+        # set now so the tabs/features are back and `_notify_plugins_client_ready`
+        # (inside `_connect_client_signals`) can bind them to the new client.
+        self._apply_plugins()
         self._connect_client_signals()
 
         self._start_task(self._connect_async(jid, show))

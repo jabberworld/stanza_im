@@ -433,7 +433,10 @@ A plugin may also define `on_client_ready(app)`: `MainWindow.
 _notify_plugins_client_ready` (called at the end of `_on_login`, after the
 client exists and its events are wired) runs it for every active plugin — a
 plugin enabled before login (when `app._client` is still `None`) can then
-subscribe to client events and re-apply its UI state.
+subscribe to client events and re-apply its UI state. Because a logout
+deactivates every plugin (`_reset_account_ui` → `_deactivate_plugins`), `_on_login`
+re-runs `_apply_plugins()` before wiring the client, so a profile switch (or a
+plain re-login) brings the plugin tabs/features back without a restart.
 The login splash (`MainWindow._set_splash(text, percent)`, a determinate
 `QProgressBar`) reports the connection stages: «Подключение…» (10 %) →
 «Аутентификация…» (35 %) → «Соединение установлено» (60 %) → «Получение списка

@@ -296,6 +296,10 @@ check("logout detaches the old client before its disconnect",
 check("session start clears a stale status bar",
       "self._clear_status()" in _mw_src.split(
           "def _on_session_started", 1)[1].split("def ", 1)[0])
+_on_login_body = _mw_src.split("def _on_login(self", 1)[1].split("def ", 1)[0]
+check("login re-activates plugins before wiring the client",
+      _on_login_body.index("self._apply_plugins()")
+      < _on_login_body.index("self._connect_client_signals()"))
 
 print()
 if FAILURES:
