@@ -209,6 +209,16 @@ reg = AccountRegistrationDialog(cfg, store_account=False)
 check("registration result_profile is None before submitting",
       reg.result_profile() is None)
 
+# the existing-account dialog enables encryption by default (Prefer TLS)
+defaults = ExistingAccountDialog()
+check("existing dialog defaults to Prefer TLS",
+      defaults._tls.currentData() == "prefer")
+check("encryption selector is enabled by default",
+      defaults._enc.isEnabled())
+defaults._tls.setCurrentIndex(defaults._tls.findData("direct"))
+check("choosing TLS-only disables the encryption selector",
+      not defaults._enc.isEnabled())
+
 # 7. login profile selector ---------------------------------------------------
 from stanza_im.ui.login_widget import LoginWidget
 

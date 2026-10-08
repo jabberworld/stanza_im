@@ -58,6 +58,7 @@ class ExistingAccountDialog(QtWidgets.QDialog):
                            ("conn_mode_prefer", "prefer"),
                            ("conn_mode_normal", "normal")):
             self._tls.addItem(tr(key), value)
+        self._tls.setCurrentIndex(1)  # "Prefer TLS" (default; enables below)
         self._enc = QtWidgets.QComboBox()
         for key, value in (("enc_always", "always"),
                            ("enc_opportunistic", "opportunistic"),
