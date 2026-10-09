@@ -2041,8 +2041,11 @@ Registers XEP plugins (conditionally where noted):
   (`urn:xmpp:omemo:2`, `twomemo`). The stack (`slixmpp-omemo` + `python-omemo`
   + a backend + `cryptography`) is detected at runtime
   (`stanza_im/xmpp/omemo/availability.py`); when a package is missing the
-  feature is disabled with a `logger.warning`, the Preferences «OMEMO» tab is
-  greyed out and the chat/roster entries are hidden.
+  feature is disabled and reported in three places: a detailed `logger.warning`
+  at startup (the missing import modules and an `apt install` hint), a red
+  notice on the Preferences «OMEMO» tab (kept enabled so the reason is
+  readable, with the missing modules and a copyable install command) and an
+  «OMEMO» row on Help → About. The chat/roster entries are hidden.
 - The `xep_0380` (EME) plugin is registered and OMEMO messages carry
   `<encryption xmlns='urn:xmpp:eme:0' namespace='…' name='OMEMO'/>`. The
   `xep_0384` plugin is registered only when available; disco advertises

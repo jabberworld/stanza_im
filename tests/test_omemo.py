@@ -277,6 +277,43 @@ check("aesgcm video renders a viewer link",
       _vmarkup and "<video" not in _vmarkup
       and "stanza:view:video/" in _vmarkup)
 
+# 12. availability detail / install hint / About + prefs ---------------------
+_saved = (availability.AVAILABLE, availability.MISSING,
+          availability.MISSING_MODULES, availability.MISSING_DEBIAN,
+          availability.BACKENDS)
+availability.AVAILABLE = False
+availability.MISSING = ["slixmpp-omemo", "python-omemo"]
+availability.MISSING_MODULES = ["slixmpp_omemo", "omemo"]
+availability.MISSING_DEBIAN = ["python3-slixmpp-omemo", "python3-omemo"]
+availability.BACKENDS = frozenset()
+_hint = availability.install_hint()
+check("install hint is an apt command",
+      _hint.startswith("sudo apt install")
+      and "python3-slixmpp-omemo" in _hint)
+_detail = availability.detail()
+check("detail lists the missing modules and the install hint",
+      "slixmpp_omemo" in _detail and "sudo apt install" in _detail)
+check("summary marks it unavailable",
+      availability.summary().startswith("unavailable"))
+
+from stanza_im.ui.about_dialog import AboutDialog
+_about = AboutDialog()
+_texts = [lb.text() for lb in _about.findChildren(QtWidgets.QLabel)]
+check("About dialog shows the OMEMO row",
+      any(availability.summary() in t for t in _texts))
+_about.deleteLater()
+availability.AVAILABLE, availability.MISSING = _saved[0], _saved[1]
+availability.MISSING_MODULES, availability.MISSING_DEBIAN = _saved[2], _saved[3]
+availability.BACKENDS = _saved[4]
+
+_prefs_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "ui", "preferences.py"), encoding="utf-8").read()
+check("the OMEMO preferences tab is never disabled",
+      "setTabEnabled(1, False)" not in _prefs_src)
+check("the OMEMO tab carries a detail tooltip",
+      "tabs.setTabToolTip(1, availability.detail())" in _prefs_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

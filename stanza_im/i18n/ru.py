@@ -150,6 +150,9 @@ STRINGS = {
     "prefs_omemo_manage": "Управление устройствами…",
     "qr_unavailable": "Генерация QR-кода недоступна.",
     "prefs_omemo_missing": "OMEMO недоступен: {missing}",
+    "omemo_missing_detail": "OMEMO недоступен. Отсутствуют пакеты: {missing}. Установите командой: {hint}",
+    "omemo_missing_modules": "Отсутствуют модули Python: {modules}",
+    "omemo_install_hint": "Команда установки",
     "omemo_devices_title": "Устройства OMEMO: {jid}",
     "omemo_unavailable": "OMEMO недоступен.",
     "omemo_loading": "Загрузка устройств…",
@@ -697,6 +700,7 @@ STRINGS = {
     "about_component_qt": "Qt",
     "about_component_python": "Python",
     "about_component_slixmpp": "slixmpp",
+    "about_component_omemo": "OMEMO",
     "about_license_unavailable": "Текст лицензии недоступен.",
     "about_authors_unavailable": "Список авторов недоступен.",
     # Preferences

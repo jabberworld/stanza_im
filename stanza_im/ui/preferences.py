@@ -1030,17 +1030,36 @@ class PreferencesDialog(QtWidgets.QDialog):
                            (tr("prefs_omemo"), omemo)])
         from stanza_im.xmpp.omemo import availability
         if not availability.AVAILABLE:
-            tabs.setTabEnabled(1, False)
+            # The tab stays enabled so the reason is readable in place; only
+            # the OMEMO controls are absent.
+            tabs.setTabToolTip(1, availability.detail())
         return tabs
 
     def _page_omemo(self):
         from stanza_im.xmpp.omemo import availability
         page, form = self._page()
         if not availability.AVAILABLE:
-            note = QtWidgets.QLabel(
-                tr("prefs_omemo_missing", missing=", ".join(availability.MISSING)))
+            note = QtWidgets.QLabel(tr(
+                "omemo_missing_detail",
+                missing=", ".join(availability.MISSING),
+                hint=availability.install_hint() or "-"))
             note.setWordWrap(True)
+            note.setStyleSheet("color: #c0392b;")
             form.addRow(note)
+            if availability.MISSING_MODULES:
+                modules = QtWidgets.QLabel(
+                    tr("omemo_missing_modules",
+                       modules=", ".join(availability.MISSING_MODULES)))
+                modules.setWordWrap(True)
+                form.addRow(modules)
+            if availability.install_hint():
+                cmd = QtWidgets.QLineEdit(availability.install_hint())
+                cmd.setReadOnly(True)
+                copy_btn = QtWidgets.QPushButton(tr("prefs_omemo_copy"))
+                copy_btn.clicked.connect(
+                    lambda: QtWidgets.QApplication.clipboard().setText(
+                        availability.install_hint()))
+                form.addRow(tr("omemo_install_hint"), self._row(cmd, copy_btn))
             return page
 
         btbv = self._check("blind_trust", tr("prefs_omemo_blind_trust"))

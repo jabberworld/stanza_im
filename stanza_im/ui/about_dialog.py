@@ -57,15 +57,22 @@ class AboutDialog(QtWidgets.QDialog):
             slixmpp_version = getattr(slixmpp, "__version__", "unknown")
         except ImportError:
             slixmpp_version = "unknown"
+        from stanza_im.xmpp.omemo import availability
         values = (
             ("about_component_app", f"{APP_NAME} {VERSION}"),
             ("about_component_pyqt", QtCore.PYQT_VERSION_STR),
             ("about_component_qt", QtCore.QT_VERSION_STR),
             ("about_component_python", platform.python_version()),
             ("about_component_slixmpp", str(slixmpp_version)),
+            ("about_component_omemo", availability.summary()),
         )
         for label_key, value in values:
-            form.addRow(tr(label_key) + ":", QtWidgets.QLabel(value))
+            label = QtWidgets.QLabel(value)
+            if label_key == "about_component_omemo":
+                label.setToolTip(availability.detail())
+                if not availability.AVAILABLE:
+                    label.setStyleSheet("color: #c0392b;")
+            form.addRow(tr(label_key) + ":", label)
         return page
 
     def _text_page(self, filename: str, fallback_key: str) -> QtWidgets.QWidget:

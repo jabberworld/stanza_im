@@ -160,6 +160,10 @@ def run() -> int:
         memstats.start_tracking()
 
     configure_logging(debug, xml_dump, file_log)
+    # Report the optional OMEMO stack at startup (a warning when it is missing),
+    # so the reason is visible in the log even before the first login.
+    from stanza_im.xmpp.omemo import availability
+    availability.log_availability()
     if debug:
         logger.info("Debug logging enabled (-d)")
     if xml_dump:
