@@ -2193,6 +2193,27 @@ class JabberClient:
         encrypted.send()
         return message_id
 
+    async def send_omemo_muc_message(self, room: str, body: str,
+                                     reply_to: str = "", reply_id: str = "",
+                                     reply_ref_sender: str = "",
+                                     reply_ref_body: str = "") -> str:
+        """Encrypt and send a groupchat message with OMEMO (XEP-0384 §5.8)."""
+        if not getattr(self.omemo, "available", False):
+            raise RuntimeError("OMEMO is not available")
+        room = str(room).split("/")[0]
+        msg, message_id = self._compose_message(
+            room, body, "groupchat", None, reply_to, reply_id,
+            reply_ref_sender, reply_ref_body, "", None)
+        recipients = self.omemo.muc_recipients(room)
+        encrypted, errors = await self.omemo.encrypt(
+            msg, recipients, identifier=room)
+        if errors:
+            logger.warning("OMEMO MUC encryption errors: %s", errors)
+        if encrypted is None:
+            return ""
+        encrypted.send()
+        return message_id
+
     async def send_omemo_file(self, jid: str, path: str, caption: str = "",
                               mtype: str = "chat", recipients=None) -> None:
         """Encrypt *path* (XEP-0454) and share it as an OMEMO message.

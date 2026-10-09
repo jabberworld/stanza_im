@@ -276,6 +276,18 @@ class OmemoManager:
         except (TypeError, ValueError):
             return 0.0
 
+    def muc_recipients(self, room: str) -> set[str]:
+        """Bare real JIDs of a room's members (for OMEMO group chat)."""
+        recipients: set[str] = set()
+        users = getattr(self._client, "_muc_users", {}).get(room, {})
+        for info in users.values():
+            real = info.get("real_jid")
+            if real and str(real).lower() not in ("", "none"):
+                recipients.add(str(real).split("/")[0])
+        # Include ourselves so our other devices can read the room too.
+        recipients.add(self._own_bare)
+        return recipients
+
     async def purge_device(self, device) -> None:
         """Remove one of our own devices from the published device lists."""
         legacy_ns, omemo2_ns = _namespaces()

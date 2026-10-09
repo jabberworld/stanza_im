@@ -2057,6 +2057,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._request_vcard(room, force=True)
         self._apply_muji_support(room)
         self._apply_muc_admin(room)
+        self._apply_omemo_support(room)
         users = self._muc_users.setdefault(room, {})
         for occ in occupants or []:
             if isinstance(occ, str):
@@ -3645,15 +3646,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_omemo_support(jid)
 
     def _apply_omemo_support(self, jid: str) -> None:
-        """Show the OMEMO lock and reflect the chat's mode (1:1 tabs)."""
+        """Show the OMEMO lock and reflect the chat's mode."""
         client = self._client
         if client is None or not getattr(client.omemo, "available", False):
             return
         bare = jid.split("/", 1)[0]
-        if bare in self._conference_roster or bare in self._muc_self_nicks:
-            return
-        self._chat_window.set_omemo_support(jid, client.supports_omemo(bare))
-        self._chat_window.set_omemo_mode(jid, client.omemo.chat_mode(jid))
+        if bare in self._muc_self_nicks or bare in self._conference_roster:
+            # A conference needs a non-anonymous room (XEP-0384 §5.8).
+            features = self._muc_room_features.get(bare, set())
+            supported = "muc_nonanonymous" in features
+        else:
+            supported = client.supports_omemo(bare)
+        self._chat_window.set_omemo_support(jid, supported)
+        self._chat_window.set_omemo_mode(jid, client.omemo.chat_mode(bare))
 
     def _on_omemo_mode_requested(self, jid: str, mode: str) -> None:
         if self._client is None or not getattr(self._client.omemo,
@@ -5686,9 +5691,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_groupchat_send(self, room: str, body: str):
         self._touch_tab_activity(room)
-        if self._client:
-            self._client.send_muc_message(room, body)
+        if not self._client:
+            return
+        if (getattr(self._client.omemo, "available", False)
+                and self._client.omemo.chat_mode(room.split("/")[0]) == "omemo"):
+            self._start_task(self._send_omemo_muc(room, body))
+            return
+        self._client.send_muc_message(room, body)
+        self._play_sound("message_send", "sound_on_send")
+
+    async def _send_omemo_muc(self, room: str, body: str) -> None:
+        try:
+            await self._client.send_omemo_muc_message(room, body)
             self._play_sound("message_send", "sound_on_send")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OMEMO MUC send to %s failed: %s", room, exc)
+            chat = self._chat_window.get_chat(room)
+            if chat:
+                chat.add_status(tr("omemo_send_failed", error=str(exc)),
+                                _current_timestamp())
 
     # ── XEP-0461 reply sends ──────────────────────────────────────
 

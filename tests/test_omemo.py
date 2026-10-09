@@ -248,6 +248,19 @@ check("aesgcm URL classifies by extension",
       media_mod.media_kind(
           "aesgcm://example.com/abc.jpg#" + _frag) == "image")
 
+# 10. MUC recipients ---------------------------------------------------------
+import types
+from stanza_im.xmpp.omemo.manager import OmemoManager
+
+_fake = types.SimpleNamespace(
+    _client=types.SimpleNamespace(_muc_users={
+        "room@conf": {"a": {"real_jid": "alice@example.com/x"},
+                      "b": {"real_jid": "none"}}}),
+    _own_bare="me@example.com")
+_recips = OmemoManager.muc_recipients(_fake, "room@conf")
+check("MUC recipients resolve real JIDs",
+      _recips == {"alice@example.com", "me@example.com"})
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
