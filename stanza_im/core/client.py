@@ -642,6 +642,23 @@ def message_media(msg) -> dict | None:
     return None
 
 
+def message_markup(msg) -> dict | None:
+    """XEP-0394 ``<markup/>`` carried by *msg*, or ``None``.
+
+    Returns a JSON-serialisable dict of spans/blocks (see
+    :mod:`stanza_im.xmpp.message_markup`); unknown elements are ignored.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    try:
+        from stanza_im.xmpp import message_markup as _markup
+        return _markup.parse_message(xml)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not parse message markup", exc_info=True)
+        return None
+
+
 def muc_mediated_invite_from_message(msg) -> dict | None:
     """Parse a XEP-0045 §7.8 mediated invitation (room relay).
 
@@ -5592,12 +5609,13 @@ class JabberClient:
         frm = str(msg["from"])
         unstyled, ts, reply_to, reply_id, stable_id = self._message_fields(msg)
         media = message_media(msg)
+        markup = message_markup(msg)
         server_sid = _stanza_id(msg, self.jid_str)
         if server_sid:
             self._mds_track(frm.split("/")[0], msg, server_sid)
         self.emit("message_received", frm, body, ts, unstyled, stable_id,
                   frm, reply_to, reply_id, carbon, media=media,
-                  encrypted=self._omemo_flag(msg))
+                  encrypted=self._omemo_flag(msg), markup=markup)
 
     @staticmethod
     def _omemo_flag(msg) -> bool:
@@ -5645,6 +5663,7 @@ class JabberClient:
             unstyled, ts, reply_to, reply_id, stable_id = \
                 self._message_fields(msg)
             media = message_media(msg)
+            markup = message_markup(msg)
             server_sid = _stanza_id(msg, self.jid_str)
             replace_ref = _replace_reference(msg)
             room, separator, nick = frm.partition("/")
@@ -5655,12 +5674,13 @@ class JabberClient:
                     if self.allow_incoming_edits:
                         self.emit("message_corrected", frm, replace_ref,
                                   body, ts, unstyled, stable_id,
-                                  reply_to, reply_id, media=media)
+                                  reply_to, reply_id, media=media,
+                                  markup=markup)
                         return
                     logger.debug("Incoming correction ignored (edits disabled)")
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
                           stable_id, frm, reply_to, reply_id, media=media,
-                          encrypted=self._omemo_flag(msg))
+                          encrypted=self._omemo_flag(msg), markup=markup)
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -5668,12 +5688,12 @@ class JabberClient:
                 if self.allow_incoming_edits:
                     self.emit("message_corrected", frm, replace_ref,
                               body, ts, unstyled, stable_id,
-                              reply_to, reply_id, media=media)
+                              reply_to, reply_id, media=media, markup=markup)
                     return
                 logger.debug("Incoming correction ignored (edits disabled)")
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id, media=media,
-                      encrypted=self._omemo_flag(msg))
+                      encrypted=self._omemo_flag(msg), markup=markup)
 
     @staticmethod
     def _message_fields(msg):
@@ -5726,11 +5746,13 @@ class JabberClient:
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
         media = message_media(inner)
+        markup = message_markup(inner)
         server_sid = _stanza_id(inner, self.jid_str)
         if server_sid:
             self._mds_track(frm.split("/")[0], inner, server_sid)
         self.emit("message_received", frm, body, ts, unstyled,
-                  stable_id, frm, reply_to, reply_id, True, media=media)
+                  stable_id, frm, reply_to, reply_id, True, media=media,
+                  markup=markup)
 
     def _on_carbon_sent(self, msg) -> None:
         """A 1:1 message sent from another of our resources (XEP-0280)."""
@@ -5755,8 +5777,9 @@ class JabberClient:
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
         media = message_media(inner)
+        markup = message_markup(inner)
         self.emit("message_carbon_sent", bare, body, ts,
-                  stable_id, reply_to, reply_id, media=media)
+                  stable_id, reply_to, reply_id, media=media, markup=markup)
 
     def _on_groupchat_message(self, msg) -> None:
         frm = str(msg["from"])
@@ -5819,17 +5842,19 @@ class JabberClient:
         if stable_id:
             self._mds_track(room, msg, stable_id)
         media = message_media(msg)
+        markup = message_markup(msg)
         replace_ref = _replace_reference(msg)
         if replace_ref:
             if self.allow_incoming_edits:
                 self.emit("groupchat_message_corrected",
                           room, replace_ref, body, ts, unstyled,
-                          stable_id, frm, reply_to, reply_id, media=media)
+                          stable_id, frm, reply_to, reply_id, media=media,
+                          markup=markup)
                 return
             logger.debug("Incoming MUC correction ignored (edits disabled)")
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
-                  media=media, encrypted=self._omemo_flag(msg))
+                  media=media, encrypted=self._omemo_flag(msg), markup=markup)
 
     def _on_groupchat_subject(self, msg) -> None:
         """A MUC subject was set/announced (subject-only message).
@@ -6703,6 +6728,7 @@ class JabberClient:
                     "retracted": bool(tomb_id),
                     "retract_reason": mod_info["reason"],
                     "retract_by": mod_info["by"],
+                    "markup": message_markup(msg),
                 })
             except Exception:
                 skipped += 1

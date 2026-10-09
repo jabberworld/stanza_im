@@ -1571,12 +1571,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._editing_previous = ""
         self._edit_ctx.setVisible(False)
 
-    def edit_message_by_ref(self, ref_id: str, new_body: str) -> bool:
+    def edit_message_by_ref(self, ref_id: str, new_body: str,
+                            markup: dict | None = None) -> bool:
         """Replace the body of *ref_id*'s message and mark it edited."""
         for entry in list(self._messages) + list(self._history):
             if (str(entry.get("message_id") or "") == ref_id
                     or str(self._reply_target_id(entry) or "") == ref_id):
                 entry["body"] = new_body
+                entry["markup"] = markup
                 entry["edited"] = True
                 dom_ref = entry.get("message_id") or self._reply_target_id(entry) \
                     or ref_id
@@ -1674,7 +1676,7 @@ class ChatWidget(QtWidgets.QWidget):
                     reply_able_id: str = "", reply_author: str = "",
                     reply_to: str = "", reply_id: str = "",
                     edited: bool = False, media: dict | None = None,
-                    encrypted: bool = False):
+                    encrypted: bool = False, markup: dict | None = None):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -1695,7 +1697,7 @@ class ChatWidget(QtWidgets.QWidget):
                   "origin_id": reply_able_id, "reply_author": reply_author,
                   "reply_to": reply_to, "reply_id": reply_id,
                   "edited": edited, "media": media,
-                  "encrypted": bool(encrypted)}
+                  "encrypted": bool(encrypted), "markup": markup}
         self._messages.append(entry)
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
@@ -1792,6 +1794,7 @@ class ChatWidget(QtWidgets.QWidget):
             "unread_marker": unread_marker,
             "media": entry.get("media"),
             "encrypted": bool(entry.get("encrypted")),
+            "markup": entry.get("markup"),
         }
 
     def compute_reactions(self, entry: dict) -> list[dict]:

@@ -343,5 +343,25 @@ m6._windows[0]["window"]._close_btn.click()
 check("close dismisses notification", len(m6._windows) == 0)
 m6.hide_preview()
 
+# 11. hover pauses the auto-hide timer ---------------------------------------
+m7 = OsdManager(make_cfg(osd_duration=30))
+m7.show(None, "one", "first")
+_rec = m7._windows[0]
+_timer = _rec["timer"]
+check("hover: timer running before hover",
+      _timer is not None and _timer.isActive())
+check("hover: window exposes a hover callback",
+      _rec["window"]._on_hover is not None)
+m7._hover(_rec, True)
+check("hover: timer paused on enter", not _timer.isActive())
+m7._hover(_rec, False)
+check("hover: timer resumed on leave", _timer.isActive())
+# A preview has no timer and must not be affected.
+m7.show_preview()
+m7._hover(m7._preview, True)
+check("hover: preview without a timer is unaffected",
+      m7._preview is not None and m7._preview["timer"] is None)
+m7.dismiss_all()
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

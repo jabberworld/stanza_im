@@ -400,24 +400,37 @@ class ChatThemeFactory:
         return css
 
     def _transform_body(self, body: str, styled: bool = True,
-                        highlight_nick: str = "", geo_ref: str = "") -> str:
+                        highlight_nick: str = "", geo_ref: str = "",
+                        markup: dict | None = None) -> str:
         """Turn a plain-text body into message HTML.
 
-        With styling enabled the XEP-0393 parser runs first and delegates
-        plain-text regions to :meth:`_body_fragment`, so URLs/emoticons still
-        apply inside styled spans but never inside ``<code>``/``<pre>``.
-        *geo_ref* is the message id used by XEP-0308 corrections, embedded in
-        the ``stanza:geo:`` link so an open map window can follow the fixes.
+        With a XEP-0394 *markup* the structured parser runs first (it is the
+        authoritative styling and takes precedence over XEP-0393).  Otherwise
+        the XEP-0393 parser runs and delegates plain-text regions to
+        :meth:`_body_fragment`, so URLs/emoticons still apply inside styled
+        spans but never inside ``<code>``/``<pre>``.  *geo_ref* is the message
+        id used by XEP-0308 corrections, embedded in the ``stanza:geo:`` link
+        so an open map window can follow the fixes.
         """
         if self._message_styling and styled:
-            from stanza_im.xmpp import message_styling
-            try:
-                return message_styling.render(
-                    body,
-                    lambda raw: self._body_fragment(raw, highlight_nick,
-                                                    geo_ref))
-            except Exception:
-                pass
+            if markup:
+                from stanza_im.xmpp import message_markup
+                try:
+                    return message_markup.render(
+                        body, markup,
+                        lambda raw: self._body_fragment(raw, highlight_nick,
+                                                        geo_ref))
+                except Exception:
+                    pass
+            else:
+                from stanza_im.xmpp import message_styling
+                try:
+                    return message_styling.render(
+                        body,
+                        lambda raw: self._body_fragment(raw, highlight_nick,
+                                                        geo_ref))
+                except Exception:
+                    pass
         return self._body_fragment(body, highlight_nick, geo_ref)
 
     def _body_fragment(self, raw: str, highlight_nick: str = "",
@@ -526,7 +539,8 @@ class ChatThemeFactory:
                        reactions=None,
                        unread_marker: bool = False,
                        media: dict | None = None,
-                       encrypted: bool = False) -> str:
+                       encrypted: bool = False,
+                       markup: dict | None = None) -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -550,7 +564,14 @@ class ChatThemeFactory:
             if self._media is not None and media.get("hashes"):
                 self._media.register_hashes(str(media.get("url") or ""),
                                             media.get("hashes"))
-            body_text, url_visible = self._media_body(body, media)
+            if markup:
+                # XEP-0394 ranges index the body as received, so the media
+                # fallback range must not be stripped (it would shift them).
+                body_text = body
+                url_visible = (bool(media.get("url"))
+                               and str(media.get("url")) in body)
+            else:
+                body_text, url_visible = self._media_body(body, media)
             if url_visible:
                 # The URL stays in the text and the normal linkifier previews
                 # it; only the name/size line is added.
@@ -564,7 +585,7 @@ class ChatThemeFactory:
                 media_html = self._media_card(media)
         body_html = self._transform_body(body_text, styled=not unstyled,
                                          highlight_nick=highlight_nick,
-                                         geo_ref=geo_ref)
+                                         geo_ref=geo_ref, markup=markup)
         if retracted:
             if retract_reason or retract_by:
                 # XEP-0425: a moderator retracted the message.

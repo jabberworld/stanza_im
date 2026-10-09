@@ -86,6 +86,7 @@ notes of the applicable suites).
 | XEP-0066 (Out-of-Band Data) | ✅ | plugin registered; sharing uses Jingle/HTTP Upload; incoming `<x><url/>` parsed as a media fallback |
 | XEP-0392 (Consistent Color Generation) | ✅ | HSLuv hue→RGB for XEP-0317 hat colours |
 | XEP-0393 (Message Styling) | ✅ | `*bold*`/`_em_`/`` `code` ``/quote/pre |
+| XEP-0394 (Message Markup) | ✅ | `urn:xmpp:markup:0` spans/code/list/quote over the body |
 | XEP-0424 (Message Retraction) | ✅ | own-message retraction + tombstones |
 | XEP-0425 (Moderated Message Retraction) | ✅ | MUC moderator retraction |
 | XEP-0157 (Contact Addresses for XMPP Services) | ✅ | server contacts shown in «О сервере» |

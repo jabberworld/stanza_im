@@ -288,6 +288,7 @@ class _OsdWindow(QtWidgets.QWidget):
         self._on_clicked = None
         self._on_moved = None
         self._on_close = None
+        self._on_hover = None
         app = QtWidgets.QApplication.instance()
         platform = (app.platformName() if app else "").lower()
         # startSystemMove() (_NET_WM_MOVERESIZE) is unreliable on some X11
@@ -382,6 +383,20 @@ class _OsdWindow(QtWidgets.QWidget):
         cb = self._on_close
         if cb:
             cb()
+
+    def enterEvent(self, event):  # noqa: N802
+        """Report the cursor entering the bubble (pauses auto-hide)."""
+        cb = self._on_hover
+        if cb:
+            cb(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):  # noqa: N802
+        """Report the cursor leaving the bubble (resumes auto-hide)."""
+        cb = self._on_hover
+        if cb:
+            cb(False)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
@@ -563,8 +578,9 @@ class OsdManager:
                          width=int(getattr(self._cfg, "osd_width", _OSD_WIDTH)
                                    or _OSD_WIDTH))
         rec = {"window": win, "timer": None, "preview": preview,
-               "on_click": None}
+               "on_click": None, "duration": duration, "remaining": None}
         win._on_close = lambda: self._dismiss(rec)
+        win._on_hover = lambda inside: self._hover(rec, inside)
         self._windows.append(rec)
         win.show()
         win.adjustSize()
@@ -580,6 +596,25 @@ class OsdManager:
         # the bubble is translucent (hide/show so it does not capture itself).
         win._refresh_backdrop()
         return rec
+
+    def _hover(self, rec: dict, inside: bool) -> None:
+        """Pause the auto-hide timer while the cursor is over the bubble.
+
+        The remaining time is remembered on entry and resumed (with a short
+        floor) on leave, so a notification the user is reading never vanishes
+        under the cursor.  Preview windows (no timer) are unaffected.
+        """
+        timer = rec.get("timer")
+        if timer is None:
+            return
+        if inside:
+            rec["remaining"] = max(0, timer.remainingTime())
+            timer.stop()
+        else:
+            remaining = rec.get("remaining")
+            delay = (max(1000, int(remaining)) if remaining
+                     else int(float(rec.get("duration") or 5) * 1000))
+            timer.start(delay)
 
     def _dismiss(self, rec: dict) -> None:
         if rec not in self._windows:

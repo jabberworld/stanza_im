@@ -2233,7 +2233,8 @@ window.__stanzaMentionRef = '';
                                 reactions=None,
                                 unread_marker: bool = False,
                                 media: dict | None = None,
-                                encrypted: bool = False) -> str:
+                                encrypted: bool = False,
+                                markup: dict | None = None) -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2249,7 +2250,7 @@ window.__stanzaMentionRef = '';
                     retracted=retracted, retract_marker=retract_marker,
                     retract_reason=retract_reason, retract_by=retract_by,
                     reactions=reactions, unread_marker=unread_marker,
-                    media=media, encrypted=encrypted)
+                    media=media, encrypted=encrypted, markup=markup)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -2276,7 +2277,8 @@ window.__stanzaMentionRef = '';
                         reactions=None,
                         unread_marker: bool = False,
                         media: dict | None = None,
-                        encrypted: bool = False):
+                        encrypted: bool = False,
+                        markup: dict | None = None):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2289,7 +2291,7 @@ window.__stanzaMentionRef = '';
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
                 outgoing, edited, hats, retracted, retract_marker,
                 retract_reason, retract_by, moderatable, reactions,
-                unread_marker, media, encrypted)
+                unread_marker, media, encrypted, markup)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -2418,6 +2420,7 @@ window.__stanzaMentionRef = '';
                         retract_reason=entry.get("retract_reason", ""),
                         retract_by=entry.get("retract_by", ""),
                         reactions=entry.get("reactions"),
+                        markup=entry.get("markup"),
                     )
                 reply_quote = entry.get("reply_quote")
                 if reply_quote is not None:

@@ -1093,7 +1093,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(self._row(
             btbv, self._info_label(tr("prefs_omemo_blind_trust_tip")),
             trailing_stretch=True))
-        form.addRow(self._check("alias_sync", tr("prefs_omemo_alias_sync")))
+        form.addRow(self._row(
+            self._check("alias_sync", tr("prefs_omemo_alias_sync")),
+            self._info_label(tr("prefs_omemo_alias_sync_tip")),
+            trailing_stretch=True))
         form.addRow(self._check("auto_enable",
                                 tr("prefs_omemo_auto_enable")))
 

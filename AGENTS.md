@@ -105,6 +105,7 @@ stanza_im/                      # Python package
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
 ├── xmpp/
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
+│   ├── message_markup.py        # XEP-0394 Message Markup parser/renderer
 │   ├── jingle.py                # XEP-0234/0260/0261 Jingle FT + IBB
 │   ├── jingle_rtp.py            # XEP-0167/0176 Jingle RTP calls + SDP bridge
 │   ├── muji.py                  # XEP-0272 multiparty Jingle coordination
@@ -733,6 +734,17 @@ only for plain spans (escape + URLs + emoticons; never inside `<code>`/`<pre>`).
 `ChatThemeFactory.set_message_styling()` toggles it; `unstyled` messages and the
 preferences switch both fall back to the plain pipeline. Feature advertised as
 `urn:xmpp:styling:0`.
+
+**Message Markup** (`xmpp/message_markup.py`, XEP-0394): when a message carries
+`<markup xmlns='urn:xmpp:markup:0'/>`, `parse_message(msg)` reads its
+`<span>` (emphasis/strong/code/deleted), `<bcode>`, `<list>`/`<li>` and
+`<bquote>` ranges (unicode code points over the body) and `render(body, markup,
+fragment)` applies them, delegating plain regions to the fragment hook; the
+body stays the source of truth and the structured markup takes precedence over
+XEP-0393. Leading quote/list markers (`>`/`*`) are stripped one level per
+nesting. `client.message_markup` parses it on receive and it is stored in the
+history `markup` column and threaded like `media` (1:1/MUC/carbon/corrections/
+MAM). Toggled by the same «Format message text» preference.
 
 **Message Replies** (XEP-0461): the per-message reply trigger is an anchor
 (`<a href="stanza:reply:%REPLY_TARGET%">`) whose target is filled in by

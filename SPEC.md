@@ -92,6 +92,7 @@ stanza_im/
 │   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
+│                          message_markup.py = XEP-0394 parser/renderer,
 │                          jingle.py = XEP-0234/0260/0261 file transfer,
 │                          jingle_rtp.py = XEP-0167/0176 A/V calls,
 │                          muji.py = XEP-0272 conferences,
@@ -1210,7 +1211,7 @@ Template files:
 3. JS creates `<div>`, appends to `#chat`, scrolls to bottom
 4. Auto-scroll only if user was near bottom
 
-### 11.4 Message Styling (XEP-0393)
+### 11.4 Message Styling (XEP-0393/0394)
 
 When enabled (Preferences → Chat), `xmpp/message_styling.py` parses the plain
 text body first: `*strong*`, `_em_`, `~strike~`, `` `code` ``, ```` ``` ````
@@ -1219,6 +1220,17 @@ and swaps emoticons for the remaining plain spans only — never inside
 `<code>`/`<pre>`. Incoming messages that carry `<unstyled/>` (or the setting
 being off) fall back to the plain pipeline. Supported feature is advertised as
 `urn:xmpp:styling:0`.
+
+**XEP-0394 Message Markup** is rendered by `xmpp/message_markup.py` when a
+message carries a `<markup xmlns='urn:xmpp:markup:0'/>` element: the body
+stays the single source of truth and the element's `<span>` (emphasis/strong/
+code/deleted), `<bcode>`, `<list>`/`<li>` and `<bquote>` ranges (unicode code
+points) are applied over it. The structured markup takes precedence over
+XEP-0393, is parsed on receive (`client.message_markup`), stored in the
+history `markup` column and threaded through the same pipeline as `media`.
+Leading quote/list markers (`>`/`*`) are stripped per nesting level for
+presentation; unknown elements are ignored (forward compatibility). Toggleable
+with the same «Format message text» option.
 
 **Chat font override**: `ChatThemeFactory.set_chat_font(family, size)`
 (read from `appearance.chat_font` / `chat_font_size`, empty/0 = Qt default)

@@ -285,6 +285,7 @@ check("new-device warning names the id and fingerprint",
 check("own-device warning names the JID",
       "{jid}" in _EN["omemo_new_own_device_warning"])
 check("the last-seen label exists", "omemo_last_seen" in _EN)
+check("the alias-sync tip exists", "prefs_omemo_alias_sync_tip" in _EN)
 import inspect
 check("the stanza:omemo link is routed",
       "stanza:omemo:" in inspect.getsource(ChatWidget._open_link))

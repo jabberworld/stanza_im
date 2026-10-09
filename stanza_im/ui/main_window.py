@@ -1255,6 +1255,10 @@ class MainWindow(QtWidgets.QMainWindow):
         menubar = self.menuBar()
 
         actions_menu = menubar.addMenu(tr("menu_actions"))
+        add_contact = actions_menu.addAction(self._menu_icon("add-user.png"),
+                                             tr("menu_add_contact"))
+        add_contact.triggered.connect(
+            lambda checked=False: self._on_add_contact())
         create_room = actions_menu.addAction(
             self._menu_icon("conference-add.svg"),
             tr("menu_create_conference"))
@@ -1262,10 +1266,6 @@ class MainWindow(QtWidgets.QMainWindow):
         join_room = actions_menu.addAction(self._menu_icon("muc.png"),
                                            tr("menu_join_groupchat"))
         join_room.triggered.connect(self._on_join_groupchat_dialog)
-        add_contact = actions_menu.addAction(self._menu_icon("add-user.png"),
-                                             tr("menu_add_contact"))
-        add_contact.triggered.connect(
-            lambda checked=False: self._on_add_contact())
         service_discovery = actions_menu.addAction(
             self._menu_icon("service-discovery.png"), tr("menu_service_discovery"))
         service_discovery.triggered.connect(self._on_service_browser)
@@ -5347,7 +5347,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id: str = "", reply_author: str = "",
                              reply_to: str = "", reply_id: str = "",
                              carbon: bool = False, media: dict | None = None,
-                             encrypted: bool = False):
+                             encrypted: bool = False,
+                             markup: dict | None = None):
         bare_jid = frm.split("/")[0]
         self._touch_tab_activity(bare_jid)
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
@@ -5372,7 +5373,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id=reply_able_id,
                              reply_author=reply_author or frm,
                              reply_to=reply_to, reply_id=reply_id,
-                             media=media, encrypted=encrypted)
+                             media=media, encrypted=encrypted, markup=markup)
 
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -5382,7 +5383,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted))
+            encrypted=encrypted, markup=markup))
 
         if encrypted:
             self._maybe_auto_enable_omemo(bare_jid)
@@ -5406,7 +5407,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_message_carbon_sent(self, jid: str, body: str, ts,
                                 stable_id: str = "", reply_to: str = "",
-                                reply_id: str = "", media: dict | None = None):
+                                reply_id: str = "", media: dict | None = None,
+                                markup: dict | None = None):
         """A message sent from another of our resources (XEP-0280 carbon).
 
         Shown as our own outgoing message in the target chat and stored in
@@ -5421,14 +5423,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 timestamp=ts or _current_timestamp(), direction="outgoing",
                 message_id=stable_id,
                 reply_able_id=stable_id, reply_author=jid,
-                reply_to=reply_to, reply_id=reply_id, media=media)
+                reply_to=reply_to, reply_id=reply_id, media=media,
+                markup=markup)
         self._remember_contact(jid)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=ts or _current_timestamp(), sender="Me",
             origin_id=stable_id, message_id=stable_id,
-            reply_to=reply_to, reply_id=reply_id, media=media))
+            reply_to=reply_to, reply_id=reply_id, media=media,
+            markup=markup))
 
     def _resolve_mds_key(self, chat_jid: str) -> str:
         """Map an incoming MDS chat JID onto one of our conversation keys.
@@ -5490,8 +5494,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                  body: str, ts, unstyled: bool = False,
                                  reply_able_id: str = "", reply_author: str = "",
                                  reply_to: str = "", reply_id: str = "",
-                                 media: dict | None = None,
-                                 encrypted: bool = False):
+                                  media: dict | None = None,
+                                  encrypted: bool = False,
+                                  markup: dict | None = None):
         info = self._participant_info(room, nick)
         real_jid = info.get("real_jid")
         target = real_jid.strip() if isinstance(real_jid, str) else ""
@@ -5510,7 +5515,7 @@ class MainWindow(QtWidgets.QMainWindow):
                          reply_able_id=reply_able_id,
                          reply_author=reply_author or f"{room}/{nick}",
                          reply_to=reply_to, reply_id=reply_id, media=media,
-                         encrypted=encrypted)
+                         encrypted=encrypted, markup=markup)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
@@ -5518,7 +5523,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted))
+            encrypted=encrypted, markup=markup))
         self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
         # its own roster row (skipping a conversation that is on screen).
@@ -5592,7 +5597,8 @@ class MainWindow(QtWidgets.QMainWindow):
                               reply_able_id: str = "", reply_author: str = "",
                               reply_to: str = "", reply_id: str = "",
                               media: dict | None = None,
-                              encrypted: bool = False):
+                              encrypted: bool = False,
+                              markup: dict | None = None):
         self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
@@ -5601,7 +5607,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 timestamp=ts or _current_timestamp(),
                 sender=nick, archive_id=archive_id,
                 origin_id=reply_able_id,
-                reply_to=reply_to, reply_id=reply_id))
+                reply_to=reply_to, reply_id=reply_id, markup=markup))
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
@@ -5630,7 +5636,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id=reply_ref_id,
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id,
-                             media=media, encrypted=encrypted)
+                             media=media, encrypted=encrypted, markup=markup)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             room, "incoming", body,
@@ -5639,7 +5645,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_ref_id,
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted))
+            encrypted=encrypted, markup=markup))
         self._maybe_osd_groupchat(room, nick, body)
         is_mention = bool(self_nick and nick != self_nick
                           and mentions_nick(body, self_nick))
@@ -6524,27 +6530,31 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_message_corrected(self, frm: str, ref_id: str, body: str, ts,
                               unstyled: bool = False,
                               stable_id: str = "", reply_to: str = "",
-                              reply_id: str = "", media: dict | None = None):
+                              reply_id: str = "", media: dict | None = None,
+                              markup: dict | None = None):
         """A contact corrected a message they sent (XEP-0308)."""
         bare = frm.split("/")[0]
         chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(frm)
         if chat:
-            chat.edit_message_by_ref(ref_id, body)
+            chat.edit_message_by_ref(ref_id, body, markup=markup)
         from stanza_im.core import history
-        self._start_task(history.replace_message_async(bare, ref_id, body))
+        self._start_task(history.replace_message_async(
+            bare, ref_id, body, markup=markup))
 
     def _on_groupchat_message_corrected(self, room: str, ref_id: str,
                                         body: str, ts, unstyled: bool = False,
                                         stable_id: str = "", frm: str = "",
                                         reply_to: str = "",
                                         reply_id: str = "",
-                                        media: dict | None = None):
+                                        media: dict | None = None,
+                                        markup: dict | None = None):
         """A participant corrected their MUC message (XEP-0308)."""
         chat = self._chat_window.get_chat(room)
         if chat:
-            chat.edit_message_by_ref(ref_id, body)
+            chat.edit_message_by_ref(ref_id, body, markup=markup)
         from stanza_im.core import history
-        self._start_task(history.replace_message_async(room, ref_id, body))
+        self._start_task(history.replace_message_async(
+            room, ref_id, body, markup=markup))
 
     # ── XEP-0444 Message Reactions ────────────────────────────────
 
