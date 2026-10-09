@@ -47,6 +47,7 @@ stanza_im/                      # Python package
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py               # SQLite history; RLock + store_many + async wrappers
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
+│   ├── omemo_aliases.py         # XEP-0384 device-name aliases (private PEP node)
 │   ├── unread_state.py          # Persisted per-chat read state (unread/mentions/anchor)
 │   ├── profiles.py              # Account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
@@ -74,6 +75,9 @@ stanza_im/                      # Python package
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── emoji_picker_dialog.py   # XEP-0444 reaction picker (search/categories/recent)
+│   ├── omemo_devices_dialog.py  # XEP-0384 device/trust manager
+│   ├── omemo_popup.py           # Chat shield: quick device trust/rename popup
+│   ├── qr_dialog.py             # QR code dialog (OMEMO fingerprint)
 │   ├── reactions_list_dialog.py # XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
@@ -106,6 +110,7 @@ stanza_im/                      # Python package
 │   ├── muji.py                  # XEP-0272 multiparty Jingle coordination
 │   ├── media.py                 # aiortc media engine (capture/playback)
 │   ├── bytestream.py            # SOCKS5 bytestream client + direct listener
+│   ├── omemo/                   # XEP-0384 (availability/storage/plugin/manager/SCE/QR)
 │   └── socks5.py                # Dependency-free SOCKS5 CONNECT for the account proxy
 ├── include/
 │   ├── constants.py             # Paths, VERSION, APP_NAME, XDG dirs
@@ -566,6 +571,7 @@ Everything follows the XDG Base Directory spec:
 | Profiles (JSON) | `$XDG_CONFIG_HOME/stanza-im/profiles.json` (0600) |
 | Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/<jid>/history/<bare-jid>.jsonl` (0600) |
 | Unread counters (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` (0600) |
+| OMEMO keys (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
 The minimal TOML writer (`Config._write_toml`) serialises scalars with
@@ -1568,6 +1574,35 @@ reaction grows the last message, so the "jump to end" button never pops up for a
 message the user was already reading at the end. All these relays fall back to
 `data-reply-id` when `data-stanza-id` is absent. Feature advertised as
 `urn:xmpp:reactions:0`. [`tests/test_reactions.py`]
+
+**OMEMO Encryption (XEP-0384, `stanza_im/xmpp/omemo/`)**: optional end-to-end
+encryption with legacy OMEMO 0.3 (`eu.siacs.conversations.axolotl`) and OMEMO 2
+(`urn:xmpp:omemo:2`), detected at runtime (`availability.py`: `slixmpp-omemo` +
+`python-omemo` + `oldmemo`/`twomemo` + `cryptography`). When a package is
+missing the feature is disabled with a `logger.warning` (like the audio codec),
+the Preferences «OMEMO» tab is greyed out and the chat/roster entries are
+hidden. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
+data dir, 0600). The concrete plugin (`plugin.py`, `OmemoPlugin(XEP_0384)`)
+implements the storage and the trust policy: BTBV on (`omemo.blind_trust`,
+default) blindly trusts new devices and warns via `_devices_blindly_trusted`;
+strict mode distrusted undecided devices in `_prompt_manual_trust` so only
+manually trusted devices receive messages. `manager.py` (`client.omemo`,
+`OmemoManager`) wraps the session manager: it encrypts/decrypts, manages device
+names/aliases and last-seen, and — because `slixmpp-omemo` 2.2.0 does not
+implement Stanza Content Encryption — builds and parses the XEP-0420
+`urn:xmpp:sce:1` `<envelope/>` itself (`sce.py`) for `omemo:2` while still
+using the plugin's `SessionManager` for device lists, bundles and trust.
+Sending goes through `client.send_omemo_message` (the 1:1 send handlers route
+to it when `omemo.chat_mode(jid) == "omemo"`); incoming encrypted stanzas are
+decrypted in `_decrypt_and_dispatch` and re-enter the normal paths with an
+`encrypted` flag, stored in the new `history` columns and rendered as a lock
+before the body. Device names can be mirrored to a private PEP node
+(`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
+`omemo.alias_sync`) so they follow the user across clients; the QR code is
+rendered by a bundled pure-Python encoder (`qr.py`). UI: the Privacy
+preferences tabs, `ui/omemo_devices_dialog.py`, the reaction-style
+`ui/omemo_popup.py` (chat shield) and the roster «Управление OMEMO» entry.
+[`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
 `geo:lat,lon;u=accuracy` URIs in message bodies are linkified inside
