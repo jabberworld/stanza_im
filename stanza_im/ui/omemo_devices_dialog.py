@@ -2,7 +2,9 @@
 
 Lists the devices known for an account (our own or a contact's) and lets the
 user change trust, rename a device, copy its fingerprint and — for our own
-account — delete a device.  All operations go through ``client.omemo``.
+account — delete a device.  Every per-device action is an icon button right in
+the device row; the bottom row only carries global actions.  All operations go
+through ``client.omemo``.
 """
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ import logging
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import find_icon
 
 logger = logging.getLogger("stanza_im.omemo")
 
@@ -25,6 +28,17 @@ _TRUST_LABELS = {
 
 def _trust_label(name: str) -> str:
     return tr(_TRUST_LABELS.get(name, "omemo_trust_undecided"))
+
+
+def _icon_button(name: str, tooltip: str) -> QtWidgets.QToolButton:
+    button = QtWidgets.QToolButton()
+    icon = QtGui.QIcon(find_icon(name))
+    if not icon.isNull():
+        button.setIcon(icon)
+    button.setIconSize(QtCore.QSize(16, 16))
+    button.setAutoRaise(True)
+    button.setToolTip(tooltip)
+    return button
 
 
 class OmemoDevicesDialog(QtWidgets.QDialog):
@@ -50,28 +64,7 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         layout.addWidget(self._status)
 
         self._list = QtWidgets.QListWidget()
-        self._list.itemSelectionChanged.connect(self._update_actions)
-        self._list.itemDoubleClicked.connect(lambda _i: self._on_copy())
         layout.addWidget(self._list, 1)
-
-        row = QtWidgets.QHBoxLayout()
-        self._trust_btn = QtWidgets.QPushButton(tr("omemo_trust_verify"))
-        self._trust_btn.clicked.connect(self._on_trust)
-        row.addWidget(self._trust_btn)
-        self._distrust_btn = QtWidgets.QPushButton(tr("omemo_trust_distrust"))
-        self._distrust_btn.clicked.connect(self._on_distrust)
-        row.addWidget(self._distrust_btn)
-        self._rename_btn = QtWidgets.QPushButton(tr("omemo_rename"))
-        self._rename_btn.clicked.connect(self._on_rename)
-        row.addWidget(self._rename_btn)
-        self._copy_btn = QtWidgets.QPushButton(tr("omemo_copy_fingerprint"))
-        self._copy_btn.clicked.connect(self._on_copy)
-        row.addWidget(self._copy_btn)
-        self._delete_btn = QtWidgets.QPushButton(tr("omemo_delete_device"))
-        self._delete_btn.clicked.connect(self._on_delete)
-        self._delete_btn.setVisible(self._own)
-        row.addWidget(self._delete_btn)
-        layout.addLayout(row)
 
         bottom = QtWidgets.QHBoxLayout()
         refresh = QtWidgets.QPushButton(tr("omemo_refresh"))
@@ -100,7 +93,7 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
     async def _reload_async(self) -> None:
         omemo = self._client.omemo
         try:
-            await omemo.refresh_device_lists([self._jid])
+            await omemo.refresh_device_lists([self._jid], force=True)
             devices = await omemo.devices(self._jid)
         except Exception as exc:  # noqa: BLE001
             logger.debug("OMEMO device load failed", exc_info=True)
@@ -114,33 +107,54 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         self._list.clear()
         omemo = self._client.omemo
         for device in self._devices:
-            name = omemo.device_name(self._jid, int(device.device_id),
-                                     str(getattr(device, "label", "") or ""))
-            trust = _trust_label(omemo.trust_level_name(device))
-            fp = omemo.fingerprint(device.identity_key)
-            item = QtWidgets.QListWidgetItem(
-                f"{name}  —  {trust}\n{device.device_id}  ·  {fp}")
+            item = QtWidgets.QListWidgetItem()
             item.setData(QtCore.Qt.ItemDataRole.UserRole, device)
             self._list.addItem(item)
-        self._update_actions()
+            self._list.setItemWidget(item, self._device_row(omemo, device))
 
-    def _selected(self):
-        item = self._list.currentItem()
-        return item.data(QtCore.Qt.ItemDataRole.UserRole) if item else None
+    def _device_row(self, omemo, device) -> QtWidgets.QWidget:
+        row = QtWidgets.QWidget(self)
+        box = QtWidgets.QHBoxLayout(row)
+        box.setContentsMargins(2, 2, 2, 2)
+        box.setSpacing(2)
 
-    def _update_actions(self) -> None:
-        has = self._selected() is not None
-        for button in (self._trust_btn, self._distrust_btn, self._rename_btn,
-                       self._copy_btn):
-            button.setEnabled(has)
-        self._delete_btn.setEnabled(has)
+        name = omemo.device_name(self._jid, int(device.device_id),
+                                 str(getattr(device, "label", "") or ""))
+        trusted = omemo.is_trusted(device)
+        label = QtWidgets.QLabel(
+            f"{name}  —  {_trust_label(omemo.trust_level_name(device))}\n"
+            f"{device.device_id}  ·  {omemo.fingerprint(device.identity_key)}")
+        label.setToolTip(omemo.fingerprint(device.identity_key))
+        box.addWidget(label, 1)
+
+        if trusted:
+            trust_btn = _icon_button("process-stop.png", tr("omemo_trust_distrust"))
+            trust_btn.clicked.connect(
+                lambda: self._set_trust(device, "DISTRUSTED"))
+        else:
+            trust_btn = _icon_button("ok.png", tr("omemo_trust_verify"))
+            trust_btn.clicked.connect(
+                lambda: self._set_trust(device, "TRUSTED"))
+        box.addWidget(trust_btn)
+
+        rename_btn = _icon_button("edit.png", tr("omemo_rename"))
+        rename_btn.clicked.connect(lambda: self._rename(device))
+        box.addWidget(rename_btn)
+
+        copy_btn = _icon_button("copy.svg", tr("omemo_copy_fingerprint"))
+        copy_btn.clicked.connect(lambda: self._copy(device))
+        box.addWidget(copy_btn)
+
+        if self._own:
+            delete_btn = _icon_button("process-stop.png",
+                                      tr("omemo_delete_device"))
+            delete_btn.clicked.connect(lambda: self._delete(device))
+            box.addWidget(delete_btn)
+        return row
 
     # ── actions ─────────────────────────────────────────────────
 
-    def _set_trust(self, level: str) -> None:
-        device = self._selected()
-        if device is None:
-            return
+    def _set_trust(self, device, level: str) -> None:
         asyncio.ensure_future(self._set_trust_async(device, level))
 
     async def _set_trust_async(self, device, level: str) -> None:
@@ -152,24 +166,12 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
             return
         await self._reload_async()
 
-    def _on_trust(self) -> None:
-        self._set_trust("TRUSTED")
-
-    def _on_distrust(self) -> None:
-        self._set_trust("DISTRUSTED")
-
-    def _on_copy(self) -> None:
-        device = self._selected()
-        if device is None:
-            return
+    def _copy(self, device) -> None:
         fp = self._client.omemo.fingerprint(device.identity_key)
         QtWidgets.QApplication.clipboard().setText(fp)
         self._status.setText(tr("omemo_fingerprint_copied"))
 
-    def _on_rename(self) -> None:
-        device = self._selected()
-        if device is None:
-            return
+    def _rename(self, device) -> None:
         omemo = self._client.omemo
         current = omemo.device_name(self._jid, int(device.device_id),
                                     str(getattr(device, "label", "") or ""))
@@ -180,10 +182,7 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         omemo.set_device_alias(self._jid, int(device.device_id), name.strip())
         self._rebuild()
 
-    def _on_delete(self) -> None:
-        device = self._selected()
-        if device is None:
-            return
+    def _delete(self, device) -> None:
         reply = QtWidgets.QMessageBox.question(
             self, tr("omemo_delete_device"),
             tr("omemo_delete_confirm", device=device.device_id),

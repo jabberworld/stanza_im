@@ -3027,10 +3027,17 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_audio_action.setEnabled(bool(enabled))
         self._call_video_action.setEnabled(bool(enabled))
 
-    def set_omemo_support(self, enabled: bool) -> None:
-        """Show the OMEMO lock button when the peer supports OMEMO."""
-        self._omemo_supported = bool(enabled)
-        self._omemo_btn.setVisible(bool(enabled))
+    def set_omemo_support(self, visible: bool,
+                          peer_supported: bool = False) -> None:
+        """Show the OMEMO lock button (when OMEMO is available) and gate the
+        "OMEMO" mode entry on the peer advertising support."""
+        self._omemo_supported = bool(peer_supported)
+        self._omemo_btn.setVisible(bool(visible))
+        self._omemo_on_action.setEnabled(bool(peer_supported))
+        if not peer_supported:
+            self._omemo_on_action.setToolTip(tr("omemo_peer_unsupported"))
+        else:
+            self._omemo_on_action.setToolTip("")
         self._update_omemo_icon()
 
     def set_omemo_mode(self, mode: str) -> None:

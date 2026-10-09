@@ -200,14 +200,24 @@ from stanza_im.ui.qr_dialog import render_qr_pixmap
 _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 _cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
 check("OMEMO lock hidden by default", _cw._omemo_btn.isHidden())
-_cw.set_omemo_support(True)
-check("OMEMO lock shown when supported", not _cw._omemo_btn.isHidden())
+_cw.set_omemo_support(True, peer_supported=False)
+check("OMEMO lock shown while OMEMO is available",
+      not _cw._omemo_btn.isHidden())
+check("OMEMO mode entry disabled for an unsupported peer",
+      not _cw._omemo_on_action.isEnabled())
+_cw.set_omemo_support(True, peer_supported=True)
+check("OMEMO mode entry enabled for a supported peer",
+      _cw._omemo_on_action.isEnabled())
 _cw.set_omemo_mode("omemo")
 check("OMEMO mode reflected", _cw.omemo_mode() == "omemo")
 check("OMEMO shield shown in omemo mode", not _cw._omemo_shield_btn.isHidden())
 _cw.set_omemo_mode("off")
 check("OMEMO shield hidden when off", _cw._omemo_shield_btn.isHidden())
 _cw.detach()
+
+from stanza_im.include.constants import find_icon
+check("the QR icon resolves", bool(find_icon("qr.svg")))
+check("the shield icon resolves", bool(find_icon("shield.svg")))
 
 _pm = render_qr_pixmap("abc")
 check("QR pixmap renders", _pm is not None and not _pm.isNull())
@@ -335,6 +345,45 @@ _client_src = open(os.path.join(
 check("the OMEMO init failure is reported without a traceback",
       "OMEMO could not be initialised: %s" in _client_src
       and 'logger.debug("OMEMO import failed", exc_info=True)' in _client_src)
+
+# 13. own label auto-naming --------------------------------------------------
+class _FakeMgr:
+    def __init__(self, label):
+        self._label = label
+        self.set_called = None
+
+    async def own_device(self):
+        return types.SimpleNamespace(label=self._label)
+
+    async def set_own_label(self, label):
+        self.set_called = label
+
+
+_mgr = _FakeMgr("")
+asyncio.run(OmemoManager.ensure_own_label(_mgr, "host"))
+check("ensure_own_label sets a label when empty",
+      _mgr.set_called and "host" in _mgr.set_called)
+_mgr2 = _FakeMgr("Existing")
+asyncio.run(OmemoManager.ensure_own_label(_mgr2, "host"))
+check("ensure_own_label keeps an existing label", _mgr2.set_called is None)
+
+
+# 14. static wiring: force refresh + menu placement --------------------------
+_dlg_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "ui", "omemo_devices_dialog.py"), encoding="utf-8").read()
+check("the device dialog force-downloads the list",
+      "refresh_device_lists([self._jid], force=True)" in _dlg_src)
+check("device actions are per-row icon buttons",
+      "_device_row" in _dlg_src and "setItemWidget" in _dlg_src
+      and "_trust_btn" not in _dlg_src)
+
+_mw_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "ui", "main_window.py"), encoding="utf-8").read()
+check("the OMEMO entry follows the subscription menu",
+      _mw_src.index('self._menu_icon("shield.svg"), tr("omemo_manage")')
+      > _mw_src.index("_build_subscription_menu(menu"))
 
 print()
 if FAILURES:

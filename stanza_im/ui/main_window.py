@@ -3156,9 +3156,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_tray_blink()
         self._set_info_actions_enabled(True)
         if (self._client is not None
-                and getattr(self._client.omemo, "available", False)
-                and getattr(self._client.omemo, "alias_sync", False)):
-            self._start_task(self._client.omemo.sync_aliases())
+                and getattr(self._client.omemo, "available", False)):
+            # Give our own device a readable label (resource) if it has none.
+            self._start_task(self._client.omemo.ensure_own_label(
+                getattr(self._client, "resource", "") or ""))
+            if getattr(self._client.omemo, "alias_sync", False):
+                self._start_task(self._client.omemo.sync_aliases())
 
     def _on_auth_failed(self, condition: str = ""):
         self._set_info_actions_enabled(False)
@@ -3654,10 +3657,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if bare in self._muc_self_nicks or bare in self._conference_roster:
             # A conference needs a non-anonymous room (XEP-0384 §5.8).
             features = self._muc_room_features.get(bare, set())
-            supported = "muc_nonanonymous" in features
+            peer_supported = "muc_nonanonymous" in features
         else:
-            supported = client.supports_omemo(bare)
-        self._chat_window.set_omemo_support(jid, supported)
+            peer_supported = client.supports_omemo(bare)
+        # The lock button is always visible while OMEMO is available; only the
+        # "OMEMO" mode entry depends on the peer's support.
+        self._chat_window.set_omemo_support(jid, True, peer_supported)
         self._chat_window.set_omemo_mode(jid, client.omemo.chat_mode(bare))
 
     def _on_omemo_mode_requested(self, jid: str, mode: str) -> None:
@@ -4404,11 +4409,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.ensure_caps(jid)
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
-        if (self._client is not None and not is_conf
-                and getattr(self._client.omemo, "available", False)):
-            menu.addAction(self._menu_icon("system-users.png"), tr("omemo_manage"),
-                           lambda checked=False: defer(
-                               lambda: self._open_omemo_devices(jid)))
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
@@ -4504,6 +4504,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 lambda checked=False: defer(lambda: self._create_contact_group(jid)))
             if self._client:
                 self._build_subscription_menu(menu, jid.split("/", 1)[0])
+                if getattr(self._client.omemo, "available", False):
+                    menu.addAction(
+                        self._menu_icon("shield.svg"), tr("omemo_manage"),
+                        lambda checked=False: defer(
+                            lambda: self._open_omemo_devices(jid)))
             if getattr(self._client, "supports_blocking", lambda: False)():
                 menu.addSeparator()
                 bare = jid.split("/", 1)[0]

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import textwrap
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -478,13 +479,26 @@ class PreferencesDialog(QtWidgets.QDialog):
             return icon
         return QtGui.QIcon(find_icon("add-user.svg"))
 
+    @staticmethod
+    def _wrap_tooltip(text: str, width: int = 64) -> str:
+        """Wrap a tooltip to *width* columns so it stays compact on screen.
+
+        Existing line breaks are preserved; each paragraph is filled
+        separately.
+        """
+        if not text:
+            return text
+        return "\n".join(
+            textwrap.fill(part, width=width) if part.strip() else part
+            for part in text.split("\n"))
+
     def _info_label(self, tooltip: str) -> QtWidgets.QLabel:
         """A non-clickable info glyph carrying an explanatory tooltip."""
         label = QtWidgets.QLabel()
         icon = self._info_icon()
         if not icon.isNull():
             label.setPixmap(icon.pixmap(16, 16))
-        label.setToolTip(tooltip)
+        label.setToolTip(self._wrap_tooltip(tooltip))
         return label
 
     def _sound_button(self, event: str) -> QtWidgets.QToolButton:
@@ -505,14 +519,23 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._sound_player.play(event, theme_id)
 
     @staticmethod
-    def _row(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
-        """Lay widgets out side by side inside a form field."""
+    def _row(*widgets: QtWidgets.QWidget, stretch_first: bool = False,
+             trailing_stretch: bool = False) -> QtWidgets.QWidget:
+        """Lay widgets out side by side inside a form field.
+
+        With *stretch_first* the first widget absorbs the spare width (e.g. a
+        long fingerprint label); with *trailing_stretch* the widgets are packed
+        to the left (so an info glyph sits right after its control instead of a
+        gap opening up between them).
+        """
         box = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        for widget in widgets:
-            layout.addWidget(widget)
+        for index, widget in enumerate(widgets):
+            layout.addWidget(widget, 1 if (stretch_first and index == 0) else 0)
+        if trailing_stretch:
+            layout.addStretch(1)
         return box
 
     def _zoom_control(self, key: str) -> QtWidgets.QWidget:
@@ -687,7 +710,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         if not csi_icon.isNull():
             self._csi_keep_info.setPixmap(csi_icon.pixmap(16, 16))
         self._csi_keep_info.setToolTip(tr("prefs_csi_keep_active_tip"))
-        advanced_form.addRow(self._row(csi_keep, self._csi_keep_info))
+        advanced_form.addRow(self._row(
+            csi_keep, self._csi_keep_info, trailing_stretch=True))
         pep_interval = self._combo("pep_sweep_interval", [
             ("prefs_pep_sweep_off", 0),
             ("prefs_pep_sweep_30", 30),
@@ -720,7 +744,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._conn_info.setPixmap(info_icon.pixmap(16, 16))
         self._conn_info.setToolTip(tr("conn_info_not_connected"))
         advanced_form.addRow(tr("prefs_encryption"),
-                             self._row(starttls_mode, self._conn_info))
+                             self._row(starttls_mode, self._conn_info,
+                                       trailing_stretch=True))
 
         self._cert_data: dict = {}
         self._conn_host = ""
@@ -783,7 +808,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_file_proxy_manual", "manual"),
         ])
         self._file_proxy_auto_label = QtWidgets.QLabel("")
-        form.addRow(self._row(mode, self._file_proxy_auto_label))
+        form.addRow(self._row(mode, self._file_proxy_auto_label,
+                              trailing_stretch=True))
         manual = self._line("file_proxy_manual")
         manual.setPlaceholderText(tr("prefs_file_proxy_manual_hint"))
         form.addRow("", manual)
@@ -807,7 +833,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         if not info_icon.isNull():
             self._stun_info.setPixmap(info_icon.pixmap(16, 16))
         self._stun_info.setToolTip(tr("prefs_stun_tip_empty"))
-        form.addRow(self._row(mode, self._stun_info))
+        form.addRow(self._row(mode, self._stun_info, trailing_stretch=True))
         manual = self._line("stun_turn_manual")
         manual.setPlaceholderText(tr("prefs_stun_manual_hint"))
         form.addRow("", manual)
@@ -1009,7 +1035,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         ])
         name_source_info = self._info_label(tr("prefs_muc_name_source_info"))
         muc_form.addRow(tr("prefs_muc_name_source"),
-                        self._row(name_source, name_source_info))
+                        self._row(name_source, name_source_info,
+                                  trailing_stretch=True))
         muc_form.addRow(self._check("muc_confirm_leave",
                                     tr("prefs_muc_confirm_leave")))
         muc_form.addRow(self._check("muc_minimize_startup",
@@ -1064,20 +1091,30 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         btbv = self._check("blind_trust", tr("prefs_omemo_blind_trust"))
         form.addRow(self._row(
-            btbv, self._info_label(tr("prefs_omemo_blind_trust_tip"))))
+            btbv, self._info_label(tr("prefs_omemo_blind_trust_tip")),
+            trailing_stretch=True))
         form.addRow(self._check("alias_sync", tr("prefs_omemo_alias_sync")))
 
         self._omemo_fp = QtWidgets.QLabel(tr("omemo_loading"))
         self._omemo_fp.setWordWrap(True)
         self._omemo_fp.setTextInteractionFlags(
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
-        copy_btn = QtWidgets.QPushButton(tr("prefs_omemo_copy"))
+        copy_btn = QtWidgets.QToolButton()
+        copy_btn.setIcon(QtGui.QIcon(find_icon("copy.svg")))
+        copy_btn.setIconSize(QtCore.QSize(16, 16))
+        copy_btn.setAutoRaise(True)
+        copy_btn.setToolTip(tr("omemo_copy_fingerprint"))
         copy_btn.clicked.connect(self._on_omemo_copy_fp)
-        qr_btn = QtWidgets.QPushButton(tr("prefs_omemo_qr"))
+        qr_btn = QtWidgets.QToolButton()
+        qr_btn.setIcon(QtGui.QIcon(find_icon("qr.svg")))
+        qr_btn.setIconSize(QtCore.QSize(16, 16))
+        qr_btn.setAutoRaise(True)
+        qr_btn.setToolTip(tr("prefs_omemo_qr"))
         qr_btn.clicked.connect(self._on_omemo_qr)
         self._omemo_qr_btn = qr_btn
         form.addRow(tr("prefs_omemo_own_fingerprint"),
-                    self._row(self._omemo_fp, copy_btn, qr_btn))
+                    self._row(self._omemo_fp, copy_btn, qr_btn,
+                              stretch_first=True))
 
         manage = QtWidgets.QPushButton(tr("prefs_omemo_manage"))
         manage.clicked.connect(self._on_omemo_manage)

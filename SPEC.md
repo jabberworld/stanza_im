@@ -2071,11 +2071,20 @@ Registers XEP plugins (conditionally where noted):
   `encrypted`/`encryption` columns and a lock is rendered before the body.
 - UI: the Privacy preferences tabs («Общие» + «OMEMO» — the latter with the
   blind-trust option + info glyph, the alias-sync toggle, the own fingerprint
-  with copy/QR and a device-manager button), the device manager
-  (`ui/omemo_devices_dialog.py`), the chat lock/shield buttons with the
-  reaction-style `ui/omemo_popup.py`, and the roster «Управление OMEMO» entry.
-  The QR code is rendered by a bundled pure-Python encoder
-  (`xmpp/omemo/qr.py`).
+  with compact copy/QR icon buttons and a device-manager button), the device
+  manager (`ui/omemo_devices_dialog.py`, per-row icon actions for
+  trust/rename/copy/delete and only global Refresh/Close at the bottom), the
+  chat lock/shield buttons with the reaction-style `ui/omemo_popup.py`, and the
+  roster «Управление OMEMO» entry (a shield icon, in the rename/group/
+  subscription block). The lock button is shown whenever OMEMO is available —
+  only the «OMEMO» mode entry is gated on the peer's support. The QR code is
+  rendered by a bundled pure-Python encoder (`xmpp/omemo/qr.py`).
+- Opening the device manager or the shield popup force-downloads the contact's
+  device lists (`refresh_device_lists(..., force=True)`), so devices show up
+  even when no PEP push has arrived. Our own device gets a readable label from
+  the resource at login when it has none (`ensure_own_label`); a contact's
+  devices are named by their published label or by the resource learned from an
+  incoming message, falling back to `Device <id>`.
 - Device names/aliases can be mirrored to a private PEP node
   (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, access model
   `whitelist`, opt-in `omemo.alias_sync`); the local store wins on merge.

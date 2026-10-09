@@ -63,7 +63,7 @@ class OmemoPopup(QtWidgets.QFrame):
     async def _reload_async(self) -> None:
         omemo = self._client.omemo
         try:
-            await omemo.refresh_device_lists([self._jid])
+            await omemo.refresh_device_lists([self._jid], force=True)
             self._devices = sorted(await omemo.devices(self._jid),
                                    key=lambda d: int(d.device_id))
         except Exception:  # noqa: BLE001

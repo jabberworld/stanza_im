@@ -1603,8 +1603,15 @@ before the body. Device names can be mirrored to a private PEP node
 (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
 `omemo.alias_sync`) so they follow the user across clients; the QR code is
 rendered by a bundled pure-Python encoder (`qr.py`). UI: the Privacy
-preferences tabs, `ui/omemo_devices_dialog.py`, the reaction-style
-`ui/omemo_popup.py` (chat shield) and the roster «Управление OMEMO» entry.
+preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
+(per-row icon actions for trust/rename/copy/delete; only global Refresh/Close
+at the bottom), the reaction-style `ui/omemo_popup.py` (chat shield) and the
+roster «Управление OMEMO» entry (a shield icon, in the rename/group/
+subscription block). The chat lock button is always shown while OMEMO is
+available — only the «OMEMO» mode entry is gated on the peer's support. The
+device manager and the shield popup force-download the device lists
+(`refresh_device_lists(..., force=True)`), and our own device gets a readable
+label from the resource at login (`ensure_own_label`) when it has none.
 [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:

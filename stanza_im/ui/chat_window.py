@@ -515,11 +515,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         if widget is not None and widget.is_muc:
             widget.set_muji_support(enabled)
 
-    def set_omemo_support(self, jid: str, enabled: bool) -> None:
-        """Show/ hide the OMEMO lock button of a tab."""
+    def set_omemo_support(self, jid: str, visible: bool,
+                          peer_supported: bool = False) -> None:
+        """Show the OMEMO lock button and gate its mode entry."""
         widget = self._tabs.get(jid)
         if widget is not None:
-            widget.set_omemo_support(enabled)
+            widget.set_omemo_support(visible, peer_supported)
 
     def set_omemo_mode(self, jid: str, mode: str) -> None:
         """Reflect the chat's OMEMO mode on the tab's lock/shield buttons."""

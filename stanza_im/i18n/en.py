@@ -142,7 +142,7 @@ STRINGS = {
     # OMEMO (XEP-0384)
     "prefs_omemo": "OMEMO",
     "prefs_omemo_blind_trust": "Blind trust",
-    "prefs_omemo_blind_trust_tip": "On: new devices are trusted (and encrypted to) until you verify them, with a warning in the chat. Off (strict): messages are encrypted only to devices you marked as trusted; new devices are excluded.",
+    "prefs_omemo_blind_trust_tip": "On: new devices are trusted (and encrypted to) until you verify them, with a warning in the chat.\nOff (strict): messages are encrypted only to devices you marked as trusted; new devices are excluded.",
     "prefs_omemo_alias_sync": "Sync device names via the server",
     "prefs_omemo_own_fingerprint": "My fingerprint",
     "prefs_omemo_copy": "Copy",
@@ -178,6 +178,7 @@ STRINGS = {
     "omemo_mode_on": "OMEMO",
     "omemo_button_tip": "Message encryption",
     "omemo_shield_tip": "OMEMO devices and trust",
+    "omemo_peer_unsupported": "The contact does not support OMEMO",
     "omemo_new_device_warning": "A new device appeared ({name}). Check its fingerprint before trusting it.",
     # Roster
     "roster_search_placeholder": "Search contacts...",

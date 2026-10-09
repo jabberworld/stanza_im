@@ -125,9 +125,11 @@ class OmemoManager:
         sm = await self.session_manager()
         return await sm.get_device_information(bare_jid)
 
-    async def refresh_device_lists(self, jids: Iterable[str]) -> None:
+    async def refresh_device_lists(self, jids: Iterable[str],
+                                   force: bool = False) -> None:
         from slixmpp import JID
-        await self._plugin.refresh_device_lists({JID(j) for j in jids})
+        await self._plugin.refresh_device_lists(
+            {JID(j) for j in jids}, force_download=force)
 
     async def set_trust(self, bare_jid: str, identity_key: bytes,
                         level_name: str) -> None:
@@ -137,6 +139,19 @@ class OmemoManager:
     async def set_own_label(self, label: Optional[str]) -> None:
         sm = await self.session_manager()
         await sm.set_own_label(label)
+
+    async def ensure_own_label(self, resource: str) -> None:
+        """Give our own device a readable label if it has none yet."""
+        try:
+            device = await self.own_device()
+        except Exception:  # noqa: BLE001
+            return
+        if getattr(device, "label", None):
+            return
+        from stanza_im.include.constants import APP_NAME
+        label = f"{APP_NAME} · {resource}".strip(" ·")
+        if label:
+            await self.set_own_label(label[:53])
 
     # ── pure helpers ────────────────────────────────────────────
 
