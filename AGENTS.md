@@ -102,6 +102,7 @@ stanza_im/                      # Python package
 │   ├── tray.py                  # System tray icon + blink
 │   ├── osd.py                   # OSD on-screen notification stack
 │   ├── sounds.py                # Sound-effect player (QSoundEffect)
+│   ├── url_schemes.py           # stanza/mam/xmpp QWebEngine scheme registration
 │   └── icons.py                 # LRU icon cache (lazy, auto-evict)
 ├── xmpp/
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
@@ -1596,7 +1597,10 @@ transitive dependency such as `xmlschema`) is reported by its root cause. When a
 package is missing the feature is disabled with a detailed `logger.warning` at
 startup, a red notice on the (kept enabled) Preferences «OMEMO» tab and an
 «OMEMO» row on Help → About; the chat/roster entries are hidden and an
-unexpected init failure is logged without a traceback. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
+unexpected init failure is logged without a traceback. The availability probe
+(which imports the backends) runs in a **background daemon thread** started by
+`app.py`, so the login window never waits for it; the module is imported once,
+so the first access at login/About time is instant. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
 data dir, 0600). The concrete plugin (`plugin.py`, `OmemoPlugin(XEP_0384)`)
 implements the storage and the trust policy: BTBV on (`omemo.blind_trust`,
 default) blindly trusts new devices and warns via `_devices_blindly_trusted`;
@@ -2390,6 +2394,18 @@ Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
 SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
 (periodic memory statistics), `-h/--help`. `app.prepare_qt_argv()` re-prepends
 the program name before `QApplication` — QWebEngine aborts on an empty argv.
+
+**Fast startup**: heavy optional modules are kept off the login-window path.
+The OMEMO availability probe runs in a background thread (`app.py`), the
+`plugins.attention` manifest does not import `core.client` (so plugin discovery
+never pulls aiortc), and QtWebEngine is imported lazily — `chat_widget` imports
+`chat_view` only when a chat view is built, `main_window` imports `media_viewer`
+only when a media viewer opens, and the media-preview mode uses the pure
+`constants.webengine_available()` (`find_spec`) probe. `stanza_im/__init__.py`
+sets `Qt.AA_ShareOpenGLContexts` before any `QApplication` so the lazy WebEngine
+import is still legal; the `stanza`/`mam`/`xmpp` URL schemes are registered by
+the idempotent `ui/url_schemes.ensure_registered()` (called by both WebEngine
+importers). `tests/test_startup.py` guards this laziness.
 
 Requires: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml,
 aiodns (SRV discovery).

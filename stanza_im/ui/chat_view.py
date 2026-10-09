@@ -17,29 +17,6 @@ except ImportError:
     HAS_WEBENGINE = False
 
 
-def _register_custom_url_schemes() -> None:
-    """Register ``stanza``/``mam``/``xmpp`` as application-handled URL schemes.
-
-    Must run before the first QWebEngineProfile is used. Knowing the scheme
-    stops Chromium from attempting (and erroring on) a real navigation when
-    an anchor is clicked; the actual routing still happens in
-    ``acceptNavigationRequest``.  The schemes use the ``Path`` syntax (Qt's
-    default): everything after ``scheme:`` is preserved verbatim, so Chromium
-    keeps the opaque ``stanza:view:…``/``xmpp:…`` anchors intact — the media
-    context menu reads that raw link back through ``linkUrl()``.
-    """
-    try:
-        from PyQt6.QtWebEngineCore import QWebEngineUrlScheme
-        for name in (b"stanza", b"mam", b"xmpp"):
-            scheme = QWebEngineUrlScheme(name)
-            scheme.setSyntax(QWebEngineUrlScheme.Syntax.Path)
-            scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
-            QWebEngineUrlScheme.registerScheme(scheme)
-        logger.info("Registered custom URL schemes stanza/mam/xmpp")
-    except Exception as exc:  # pragma: no cover - optional capability
-        logger.warning("Could not register custom URL schemes: %s", exc)
-
-
 logger = logging.getLogger(__name__)
 
 from stanza_im.i18n import tr
@@ -47,7 +24,8 @@ from stanza_im.ui.chat_themes import ChatThemeFactory
 
 
 if HAS_WEBENGINE:
-    _register_custom_url_schemes()
+    from stanza_im.ui import url_schemes
+    url_schemes.ensure_registered()
 
 TYPING_MARKER = "\u200bStanzaTyping\u200b"
 

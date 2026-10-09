@@ -27,7 +27,6 @@ from stanza_im.include import clients as clients_mod
 from stanza_im.include.avatars import (
     avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
 )
-from stanza_im.ui.chat_view import ChatView
 from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
 from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
@@ -503,6 +502,9 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _create_view(self, theme: ChatThemeFactory):
         """Build and wire a fresh ``ChatView`` (shared by build/resume)."""
+        # Imported lazily so that importing the UI (login window) never pulls
+        # in QtWebEngine; the module registers the custom URL schemes on load.
+        from stanza_im.ui.chat_view import ChatView
         view = ChatView(theme)
         view.mention_senders = self.is_muc
         view.link_clicked.connect(self._open_link)

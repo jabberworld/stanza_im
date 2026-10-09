@@ -20,7 +20,10 @@ PLUGIN_DESCRIPTION = "plugin_attention_desc"
 PLUGIN_ICON = "attention.svg"
 PLUGIN_HAS_SETTINGS = True
 
-from stanza_im.core.client import NS_ATTENTION  # noqa: E402
+# XEP-0224 namespace.  Defined locally (mirrors ``core/client.py``) so that
+# merely importing this plugin — done by ``plugins.discover()`` at startup for
+# every plugin — never pulls in ``core.client`` (and, transitively, aiortc).
+NS_ATTENTION = "urn:xmpp:attention:0"
 
 _SOUND = "effects/door_bell.wav"
 

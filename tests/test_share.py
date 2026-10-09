@@ -175,14 +175,16 @@ _view_src = open(os.path.join(_ROOT, "stanza_im/ui/chat_view.py"),
                  encoding="utf-8").read()
 _widget_src = open(os.path.join(_ROOT, "stanza_im/ui/chat_widget.py"),
                    encoding="utf-8").read()
+_schemes_src = open(os.path.join(_ROOT, "stanza_im/ui/url_schemes.py"),
+                    encoding="utf-8").read()
 check("chat view reads lastContextMenuRequest",
       "lastContextMenuRequest" in _view_src)
 check("chat view no longer reads page().contextMenuData()",
       "contextMenuData" not in _view_src)
 check("chat view maps the prefixed MediaType members",
       "MediaTypeImage" in _view_src)
-check("chat view registers the custom schemes with the Path syntax",
-      "Syntax.Path" in _view_src and "Syntax.Host" not in _view_src)
+check("the custom schemes are registered with the Path syntax",
+      "Syntax.Path" in _schemes_src and "Syntax.Host" not in _schemes_src)
 check("chat view relays the per-message forward menu item",
       "__stanzaForwardRef" in _view_src)
 check("chat widget routes stanza:forward URIs",

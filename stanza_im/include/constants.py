@@ -145,3 +145,15 @@ def profile_data_dir() -> str:
 def history_dir() -> str:
     """Per-profile chat-history directory."""
     return os.path.join(profile_data_dir(), "history")
+
+
+def webengine_available() -> bool:
+    """Whether QtWebEngine is installed, without importing it.
+
+    Used to gate the media-preview mode at startup: importing
+    ``PyQt6.QtWebEngineWidgets`` is expensive, so only its presence is checked
+    (``find_spec``).  The chat view itself imports WebEngine lazily and falls
+    back to ``QTextBrowser`` if the module fails to load.
+    """
+    import importlib.util
+    return importlib.util.find_spec("PyQt6.QtWebEngineWidgets") is not None

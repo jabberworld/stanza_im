@@ -4,6 +4,7 @@ import argparse
 import sys
 import logging
 import os
+import threading
 
 from PyQt6 import QtWidgets
 
@@ -160,10 +161,15 @@ def run() -> int:
         memstats.start_tracking()
 
     configure_logging(debug, xml_dump, file_log)
-    # Report the optional OMEMO stack at startup (a warning when it is missing),
-    # so the reason is visible in the log even before the first login.
-    from stanza_im.xmpp.omemo import availability
-    availability.log_availability()
+    # Probe the optional OMEMO stack in a background thread: importing the
+    # backends pulls in xmlschema/oldmemo/twomemo (hundreds of ms up to a few
+    # seconds cold), which must not delay the login window.  The module is
+    # imported once, so the first access at login/About time is instant.
+    def _probe_omemo():
+        from stanza_im.xmpp.omemo import availability
+        availability.log_availability()
+    threading.Thread(target=_probe_omemo, name="omemo-probe",
+                     daemon=True).start()
     if debug:
         logger.info("Debug logging enabled (-d)")
     if xml_dump:

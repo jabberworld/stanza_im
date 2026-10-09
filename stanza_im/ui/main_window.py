@@ -26,7 +26,8 @@ from stanza_im.include.enumerators import (populate_translations,
 from stanza_im.include.constants import (APP_NAME, VERSION,
                                       ACTIONS_DIR_16, CATEGORIES_DIR_16,
                                       STATUS_DIR_32,
-                                      PLACES_DIR_22, IMAGES_DIR, find_icon)
+                                      PLACES_DIR_22, IMAGES_DIR, find_icon,
+                                      webengine_available)
 from stanza_im.include import pep
 from stanza_im.include import clients as clients_mod
 from stanza_im.core.storage import Config
@@ -43,10 +44,8 @@ from stanza_im.ui.subject_dialog import SubjectDialog
 from stanza_im.ui.tray import TrayIcon
 from stanza_im.ui.sounds import SoundPlayer
 from stanza_im.ui.osd import OsdManager
-from stanza_im.ui.chat_view import HAS_WEBENGINE
 from stanza_im.include.media import MediaCache, filename_from_url
 from stanza_im.ui.media_preview import MediaPreviewService
-from stanza_im.ui.media_viewer import MediaViewer
 from stanza_im.include.geo import extract_geo_uris, parse_geo_uri, TileCache
 from stanza_im.ui.map_widget import GeoMapWindow
 
@@ -246,7 +245,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # timer keeps it in check afterwards.
         QtCore.QTimer.singleShot(5000, self._prune_media_cache)
         self._media_service = MediaPreviewService(self._media_cache, self)
-        media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
+        media_mode = self._config.chat.media_preview if webengine_available() else "none"
         media_size = self._config.appearance.media_preview_size
         self._theme_factory.set_media_preview(
             self._media_service, media_mode, media_size)
@@ -2830,7 +2829,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._muc_theme_factory.set_highlight_mode(highlight_mode)
             self._applied_highlight_mode = highlight_mode
             self._chat_window.rerender_messages()
-        media_mode = self._config.chat.media_preview if HAS_WEBENGINE else "none"
+        media_mode = self._config.chat.media_preview if webengine_available() else "none"
         media_size = self._config.appearance.media_preview_size
         if (media_mode, media_size) != getattr(self, "_applied_media", None):
             self._theme_factory.set_media_preview(
@@ -6198,6 +6197,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if url.startswith("aesgcm://") and str(kind).startswith("audio"):
             self._start_task(self._open_encrypted_audio(url))
             return
+        # Imported lazily so startup never pulls in QtWebEngine.
+        from stanza_im.ui.media_viewer import MediaViewer
         viewer = MediaViewer(url, kind, self._media_service, self,
                              geometry_cfg=self._config.media_viewer)
         viewer_id = id(viewer)

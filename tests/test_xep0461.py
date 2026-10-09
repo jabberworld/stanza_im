@@ -139,6 +139,8 @@ check("no JS click bridge or console channel",
       "stanzaSend" not in _theme_src and "stanza-click|" not in _theme_src)
 _view_src = open(os.path.join(
     _root, "stanza_im", "ui", "chat_view.py"), encoding="utf-8").read()
+_schemes_src = open(os.path.join(
+    _root, "stanza_im", "ui", "url_schemes.py"), encoding="utf-8").read()
 check("clicks routed via acceptNavigationRequest",
       "_StanzaPage" in _view_src and "acceptNavigationRequest" in _view_src
       and "_accept_navigation" in _view_src and "link_clicked.emit" in _view_src)
@@ -456,8 +458,8 @@ check("esc closes last 1:1 tab", not cw_win.has_chat("bob@example.com"))
 
 # 16. document_lost self-heal re-renders the conversation -------------------
 check("scheme registration present",
-      "_register_custom_url_schemes" in _view_src
-      and "registerScheme" in _view_src and "schemeByName" not in _view_src)
+      "ensure_registered" in _schemes_src
+      and "registerScheme" in _schemes_src and "schemeByName" not in _schemes_src)
 check("document_lost signal exists",
       "document_lost = QtCore.pyqtSignal()" in _view_src)
 restore_cw = ChatWidget("bob@example.com", "Bob",

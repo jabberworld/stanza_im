@@ -19,6 +19,15 @@ python -m stanza_im      # as module
 Entry point: `main.py` → `stanza_im.app.run()` → creates QApplication + qasync
 event loop (`qasync.QEventLoop`), creates MainWindow, enters loop.
 
+**Startup stays light**: the OMEMO availability probe runs in a background
+daemon thread (`app.py`); `plugins.attention` avoids importing `core.client`
+(so plugin discovery never pulls aiortc); and QtWebEngine is imported lazily
+(`chat_widget` on first chat view, `main_window` on first media viewer), with
+`stanza_im/__init__.py` setting `Qt.AA_ShareOpenGLContexts` before the
+`QApplication` and `ui/url_schemes.ensure_registered()` handling the
+`stanza`/`mam`/`xmpp` schemes. `constants.webengine_available()` is a pure
+`find_spec` probe. `tests/test_startup.py` guards this.
+
 ## 3. File Structure
 
 ```
@@ -90,6 +99,7 @@ stanza_im/
 │   ├── zoom_list.py         — List with Ctrl+wheel zoom + empty-click deselect
 │   ├── tray.py         — System tray icon
 │   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
+│   ├── url_schemes.py  — stanza/mam/xmpp QWebEngine scheme registration
 │   └── icons.py        — LRU icon cache
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
 │                          message_markup.py = XEP-0394 parser/renderer,

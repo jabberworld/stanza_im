@@ -41,6 +41,8 @@ class _ImageScroll(QtWidgets.QScrollArea):
 
 
 if _HAS_WEBENGINE:
+    from stanza_im.ui import url_schemes
+    url_schemes.ensure_registered()
 
     class _VideoBridge(QtCore.QObject):
         """Bridge for the video page: the JS double-click asks for fullscreen."""
