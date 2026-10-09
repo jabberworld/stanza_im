@@ -282,6 +282,24 @@ class MediaViewer(QtWidgets.QMainWindow):
             label.setWordWrap(True)
             self.setCentralWidget(label)
             return
+        if self._url.startswith("aesgcm://"):
+            # Encrypted media must be decrypted to a local file first (the
+            # browser cannot read the aesgcm: scheme).
+            self._service.ensure_original_async(
+                self._url,
+                lambda path: self._render_video(
+                    QtCore.QUrl.fromLocalFile(path).toString()),
+                lambda _exc: self._render_video_unsupported())
+            return
+        self._render_video(self._url)
+
+    def _render_video_unsupported(self) -> None:
+        label = QtWidgets.QLabel(tr("media_viewer_unsupported"))
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        self.setCentralWidget(label)
+
+    def _render_video(self, src: str) -> None:
         view = QtWebEngineWidgets.QWebEngineView(self)
         view.setPage(_VideoPage(view, self._toggle_fullscreen, parent=view))
         # The double-click asks Python for fullscreen through the WebChannel
@@ -297,7 +315,7 @@ class MediaViewer(QtWidgets.QMainWindow):
             '<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<style>html,body{margin:0;height:100%;background:#000;}'
             'video{width:100%;height:100%;}</style></head><body>'
-            f'<video src="{html.escape(self._url, quote=True)}" '
+            f'<video src="{html.escape(src, quote=True)}" '
             'controls autoplay></video>'
             f'<script>{glue}</script>'
             '<script>'

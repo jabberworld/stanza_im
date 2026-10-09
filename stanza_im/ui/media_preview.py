@@ -150,6 +150,13 @@ class MediaPreviewService(QtCore.QObject):
                 f'href="stanza:view:image/{enc}" data-media-url="{data}">'
                 f'<img class="stanza-media-thumb" data-media-url="{data}" '
                 f'width="{self._size}" alt=""></a>')
+        if url.startswith("aesgcm://"):
+            # Encrypted media can't be played inline (the browser can't read
+            # the aesgcm: scheme); decrypt and open it in the viewer instead.
+            return (
+                f'<span class="stanza-media stanza-media-file">'
+                f'<a class="stanza-media-open" href="stanza:view:{kind}/{enc}">'
+                f'{html.escape(tr("media_open_viewer"))}</a></span>')
         if kind == "audio":
             return (
                 f'<span class="stanza-media stanza-media-audio">'

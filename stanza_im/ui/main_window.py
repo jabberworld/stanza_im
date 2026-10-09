@@ -6117,6 +6117,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                  fullscreen: bool = False):
         if not url:
             return
+        if url.startswith("aesgcm://") and str(kind).startswith("audio"):
+            self._start_task(self._open_encrypted_audio(url))
+            return
         viewer = MediaViewer(url, kind, self._media_service, self,
                              geometry_cfg=self._config.media_viewer)
         viewer_id = id(viewer)
@@ -6129,6 +6132,16 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             viewer.show()
         viewer.raise_()
+
+    async def _open_encrypted_audio(self, url: str) -> None:
+        """Decrypt an aesgcm:// audio file and open it with the OS player."""
+        try:
+            local = await self._media_service.ensure_original(url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not open encrypted audio %s: %s", url, exc)
+            return
+        if local:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(local))
 
     def _on_media_viewer_closed(self):
         self._config.save()

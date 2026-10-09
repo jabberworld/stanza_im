@@ -261,6 +261,22 @@ _recips = OmemoManager.muc_recipients(_fake, "room@conf")
 check("MUC recipients resolve real JIDs",
       _recips == {"alice@example.com", "me@example.com"})
 
+# 11. aesgcm audio/video renders a viewer link (no native player) ------------
+from stanza_im.ui.media_preview import MediaPreviewService
+from stanza_im.include import media as media_mod
+
+_cache = media_mod.MediaCache(os.path.join(_SCRATCH, "mediacache"))
+_svc = MediaPreviewService(_cache)
+_svc.set_mode("all")
+_amarkup = _svc.markup("aesgcm://example.com/song.ogg#" + "a" * 88)
+check("aesgcm audio renders a viewer link",
+      _amarkup and "<audio" not in _amarkup
+      and "stanza:view:audio/" in _amarkup)
+_vmarkup = _svc.markup("aesgcm://example.com/clip.mp4#" + "a" * 88)
+check("aesgcm video renders a viewer link",
+      _vmarkup and "<video" not in _vmarkup
+      and "stanza:view:video/" in _vmarkup)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
