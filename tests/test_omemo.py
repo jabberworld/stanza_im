@@ -230,6 +230,24 @@ check("alias payload round-trips",
 check("alias node namespace is private",
       omemo_aliases.NODE == "urn:xmpp:omemo:aliases:0")
 
+# 9. XEP-0454 OMEMO file encryption ------------------------------------------
+import io
+from slixmpp.plugins.xep_0454 import XEP_0454
+from stanza_im.include import media as media_mod
+
+_data = b"hello omemo file" * 50
+_payload, _frag = XEP_0454.encrypt(io.BytesIO(_data), None)
+check("XEP-0454 file round-trips",
+      XEP_0454.decrypt(io.BytesIO(_payload), _frag) == _data)
+check("XEP-0454 fragment is 88 hex chars",
+      len(_frag) == 88 and all(c in "0123456789abcdef" for c in _frag))
+_url = XEP_0454.format_url("https://example.com/abc.bin", _frag)
+check("aesgcm URL format",
+      _url.startswith("aesgcm://example.com/abc.bin#") and _frag in _url)
+check("aesgcm URL classifies by extension",
+      media_mod.media_kind(
+          "aesgcm://example.com/abc.jpg#" + _frag) == "image")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

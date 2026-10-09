@@ -6193,6 +6193,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._file_upload_states[(jid, path)] = (dlg, index)
             if method in ("p2p", "p2p-ibb"):
                 p2p_paths.append(path)
+                continue
+            target = jid.split("/")[0]
+            omemo_mode = (getattr(self._client.omemo, "available", False)
+                          and self._client.omemo.chat_mode(target) == "omemo"
+                          and not self._client.groupchats.get(target))
+            if omemo_mode:
+                tasks.append(self._start_task(
+                    self._client.send_omemo_file(jid, path)))
             else:
                 tasks.append(
                     self._start_task(self._client.upload_http(jid, path)))
@@ -6216,7 +6224,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._file_upload_states.pop((jid, str(path)), None)
                 self._check_uploads_finished(jid)
 
-    def _display_local_outgoing(self, jid: str, body: str, message_id: str):
+    def _display_local_outgoing(self, jid: str, body: str, message_id: str,
+                                encrypted: bool = False):
         """Show our own 1:1 message locally (no carbons echo reaches the
         sending resource, so the client renders the stanza itself)."""
         chat = self._chat_window.get_chat(jid)
@@ -6225,12 +6234,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 sender="Me", body=body,
                 timestamp=_current_timestamp(), direction="outgoing",
                 message_id=message_id,
-                reply_able_id=message_id, reply_author=jid)
+                reply_able_id=message_id, reply_author=jid,
+                encrypted=encrypted)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=_current_timestamp(), sender="Me",
-            origin_id=message_id, message_id=message_id))
+            origin_id=message_id, message_id=message_id,
+            encrypted=encrypted, encryption="omemo" if encrypted else ""))
         self._remember_contact(jid)
 
     async def _send_caption_after(self, jid: str, caption: str, tasks):
@@ -6279,7 +6290,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # already renders it, so only do this for 1:1.
             target = jid.split("/")[0] if "/" in jid else jid
             if not (self._client and self._client.groupchats.get(target)):
-                self._display_local_outgoing(target, detail, uuid.uuid4().hex)
+                self._display_local_outgoing(
+                    target, detail, uuid.uuid4().hex,
+                    encrypted=str(detail).startswith("aesgcm://"))
         elif phase == "error":
             if dlg is not None:
                 dlg.set_row_failed(index, detail or "")

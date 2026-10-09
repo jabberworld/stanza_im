@@ -230,6 +230,8 @@ class MediaPreviewService(QtCore.QObject):
             self.hash_mismatch.emit(url, algo)
 
     def _download(self, url: str) -> bytes:
+        if url.startswith("aesgcm://"):
+            return self._download_aesgcm(url)
         import urllib.request
         request = urllib.request.Request(url, headers={"User-Agent": self._UA})
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -253,6 +255,26 @@ class MediaPreviewService(QtCore.QObject):
             raw = b"".join(chunks)
         self._verify(url, raw)
         return raw
+
+    def _download_aesgcm(self, url: str) -> bytes:
+        """Download an XEP-0454 ``aesgcm://`` file and decrypt it."""
+        import io
+        import urllib.request
+        from urllib.parse import urlsplit
+        from slixmpp.plugins.xep_0454 import XEP_0454
+        parts = urlsplit(url)
+        https = "https://" + parts.netloc + parts.path
+        request = urllib.request.Request(https, headers={"User-Agent": self._UA})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            length = response.headers.get("Content-Length")
+            if length:
+                try:
+                    if int(length) > self.MAX_DOWNLOAD:
+                        raise RuntimeError("file too large")
+                except ValueError:
+                    pass
+            ciphertext = response.read()
+        return XEP_0454.decrypt(io.BytesIO(ciphertext), parts.fragment)
 
     def _make_thumb(self, raw: bytes) -> bytes:
         image = QtGui.QImage()

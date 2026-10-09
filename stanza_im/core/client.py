@@ -10,8 +10,10 @@ import base64
 import datetime
 import hashlib
 import logging
+import io
 import mimetypes
 import os
+import secrets
 import platform
 import ssl
 import time
@@ -2190,6 +2192,64 @@ class JabberClient:
             return ""
         encrypted.send()
         return message_id
+
+    async def send_omemo_file(self, jid: str, path: str, caption: str = "",
+                              mtype: str = "chat", recipients=None) -> None:
+        """Encrypt *path* (XEP-0454) and share it as an OMEMO message.
+
+        The file is AES-GCM encrypted in memory, the ciphertext is uploaded via
+        HTTP Upload and the resulting ``aesgcm://…#iv+key`` URL is sent inside
+        an OMEMO message.
+        """
+        from pathlib import Path
+        from slixmpp.plugins.xep_0454 import XEP_0454
+
+        if not getattr(self.omemo, "available", False):
+            raise RuntimeError("OMEMO is not available")
+        self.emit("file_upload_progress", jid, "start", "", path)
+        try:
+            payload, fragment = await asyncio.to_thread(
+                XEP_0454.encrypt, None, Path(path))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OMEMO file encryption failed: %s", exc)
+            self.emit("file_upload_progress", jid, "error", str(exc), str(path))
+            return
+        size = len(payload)
+        ext = os.path.splitext(str(path))[1]
+        upload_name = secrets.token_hex(12) + ext
+        try:
+            service = await self._http_upload_service()
+            if not service:
+                raise RuntimeError("HTTP Upload is not available")
+            put_url, get_url, headers = await self._http_upload_slot(
+                service, upload_name, size, "application/octet-stream")
+        except Exception as exc:  # noqa: BLE001
+            if self._is_upload_oversize(exc):
+                self.emit("http_upload_oversize", jid, str(path))
+                return
+            logger.warning("OMEMO file upload failed for %s: %s", jid, exc)
+            self.emit("file_upload_progress", jid, "error", str(exc), str(path))
+            return
+        try:
+            progress = _UploadProgress()
+            put_task = asyncio.create_task(self._http_upload_put(
+                put_url, str(path), headers, progress, data=payload))
+            last = -1
+            while not put_task.done():
+                await asyncio.sleep(0.05)
+                pct = int(progress.pct * 100)
+                if pct != last:
+                    last = pct
+                    self.emit("file_upload_progress", jid, "progress",
+                              str(pct), str(path))
+            await put_task
+            url = XEP_0454.format_url(get_url, fragment)
+            await self.send_omemo_message(jid, url, mtype=mtype,
+                                          recipients=recipients)
+            self.emit("file_upload_progress", jid, "done", url, str(path))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OMEMO file send failed for %s: %s", jid, exc)
+            self.emit("file_upload_progress", jid, "error", str(exc), str(path))
 
     def send_attention(self, jid: str) -> bool:
         """Send a XEP-0224 attention request (a bodyless ``<attention/>``).
@@ -4672,9 +4732,14 @@ class JabberClient:
     @staticmethod
     async def _http_upload_put(url: str, path: str,
                                headers: dict[str, str],
-                               progress: "_UploadProgress | None" = None) -> None:
-        """PUT *path* to *url* streaming the body in chunks. ``progress`` is
-        updated by the worker thread with the upload fraction (0..1)."""
+                               progress: "_UploadProgress | None" = None,
+                               data: bytes | None = None) -> None:
+        """PUT *path* (or *data*) to *url* streaming the body in chunks.
+
+        ``progress`` is updated by the worker thread with the upload fraction
+        (0..1).  When *data* is given it is uploaded instead of the file (used
+        by OMEMO file sharing, where the payload is encrypted in memory).
+        """
         def _upload():
             import http.client as http_client
             import ssl
@@ -4694,7 +4759,12 @@ class JabberClient:
                 if name.lower() not in ("content-type", "content-length",
                                         "transfer-encoding"):
                     put_headers[name] = value
-            total = os.path.getsize(str(path))
+            if data is not None:
+                total = len(data)
+                source = io.BytesIO(data)
+            else:
+                total = os.path.getsize(str(path))
+                source = open(str(path), "rb")
             put_headers["Content-Length"] = str(total)
             if scheme == "https":
                 conn = http_client.HTTPSConnection(
@@ -4708,15 +4778,17 @@ class JabberClient:
                     conn.putheader(name, value)
                 conn.endheaders()
                 sent = 0
-                with open(str(path), "rb") as fh:
+                try:
                     while True:
-                        chunk = fh.read(64 * 1024)
+                        chunk = source.read(64 * 1024)
                         if not chunk:
                             break
                         conn.send(chunk)
                         sent += len(chunk)
                         if progress is not None:
                             progress.update(sent / total if total else 1.0)
+                finally:
+                    source.close()
                 response = conn.getresponse()
                 response.read()
                 if not 200 <= response.status < 300:
