@@ -2557,10 +2557,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 or not getattr(self._client.omemo, "available", False)):
             return
         from stanza_im.ui.omemo_popup import OmemoPopup
-        popup = OmemoPopup(self._client, jid, self)
-        pos = QtGui.QCursor.pos()
-        popup.move(max(0, pos.x() - 160),
-                   max(0, pos.y() - popup.sizeHint().height()))
+        # The popup anchors its bottom-left corner at the click point, so it
+        # opens up and to the right of the button and never covers it.
+        popup = OmemoPopup(self._client, jid, self,
+                           anchor=QtGui.QCursor.pos())
         popup.show()
 
     def _confirm_profile_switch(self, jid: str) -> bool:
@@ -3710,22 +3710,49 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.add_status(tr("omemo_auto_enabled"), _current_timestamp())
 
     def _on_omemo_trust_warning(self, kind: str, devices, identifier) -> None:
-        """Show a chat system line when a new/untrusted device appears."""
+        """Show a chat system line when a new/untrusted device appears.
+
+        The line carries the device id, its JID and a short fingerprint, plus a
+        control link to the device manager, so an unexpected device can be
+        investigated (e.g. a stale own device left in the PEP list).
+        """
         omemo = self._client.omemo if self._client else None
         if omemo is None:
             return
+        from urllib.parse import quote
+        from stanza_im.include.utils import escape_html
+        own_bare = (self._client.jid_str or "").split("/", 1)[0]
         chat = (self._chat_window.get_chat(identifier)
                 if identifier else None)
         for device in devices or ():
+            bare = str(getattr(device, "bare_jid", "") or identifier or "")
+            dev_id = getattr(device, "device_id", "")
             try:
                 name = omemo.device_name(
-                    device.bare_jid, int(device.device_id),
+                    bare, int(device.device_id),
                     str(getattr(device, "label", "") or ""))
             except Exception:  # noqa: BLE001
-                name = str(getattr(device, "device_id", ""))
+                name = str(dev_id)
+            try:
+                fp = omemo.fingerprint(device.identity_key)
+            except Exception:  # noqa: BLE001
+                fp = ""
+            groups = fp.split()
+            short = " ".join(groups[:3]) + ("…" if len(groups) > 3 else "")
+            own = bool(bare) and bare == own_bare
+            key = ("omemo_new_own_device_warning" if own
+                   else "omemo_new_device_warning")
+            plain = tr(key, name=name, id=dev_id, jid=bare, fp=short)
             if chat is not None:
-                chat.add_status(tr("omemo_new_device_warning", name=name),
-                                _current_timestamp())
+                link = (f'<a class="stanza-omemo" '
+                        f'href="stanza:omemo:{quote(bare, safe="")}">'
+                        f'{escape_html(tr("omemo_manage"))}</a>')
+                text = tr(key, name=escape_html(name),
+                          id=escape_html(str(dev_id)),
+                          jid=escape_html(bare), fp=escape_html(short))
+                chat.add_status(text + " " + link, _current_timestamp())
+            else:
+                self._push_system_event(plain)
 
     def apply_attention_support(self, jid: str) -> None:
         """Sync the XEP-0224 bell of a 1:1 tab.

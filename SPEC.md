@@ -2082,6 +2082,22 @@ Registers XEP plugins (conditionally where noted):
   determined by the peer's caps **or** by a non-empty device list (many clients
   publish devices without advertising OMEMO in disco). The QR code is rendered
   by a bundled pure-Python encoder (`xmpp/omemo/qr.py`).
+- On the chat toolbar the lock and shield sit **after** the XEP-0224 attention
+  bell (so the shield appearing/disappearing only moves the trailing stretch),
+  and the lock's mode menu entries are checkable (the active mode carries the
+  tick). The device manager and the shield popup render each device's trust as a
+  **coloured shield icon** — `shield-trusted.svg` (green, trusted/blindly-
+  trusted), `shield-unknown.svg` (yellow, undecided), `shield-distrusted.svg`
+  (red, distrusted); a click toggles trusted↔distrusted and each manager row also
+  shows the device's `device_last_seen`. The shield popup anchors its
+  **bottom-left** corner at the click point and carries a header button
+  (`gtk-preferences.png`) to the full manager.
+- A new/untrusted device warning is a chat status line naming the device id, its
+  JID and a **short** fingerprint (first three groups + `…`) with a
+  `stanza:omemo:<jid>` control link to the device manager (relayed in-page like
+  every `stanza:` link); an own device (`device.bare_jid` == our JID) gets a
+  distinct text. `aesgcm://` URLs are linkified (`include/utils._URL_RE`) so the
+  media preview embeds OMEMO-encrypted images/audio/video.
 - An incoming encrypted message automatically switches its chat to OMEMO mode
   (so the reply is encrypted too) when `omemo.auto_enable` is on (default),
   with an «OMEMO enabled.» status line.

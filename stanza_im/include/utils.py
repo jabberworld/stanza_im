@@ -121,7 +121,7 @@ def escape_html(text: str) -> str:
 
 
 _URL_RE = re.compile(
-    r"(?:(?:https?|ftp)://|www\.)[^\s<>\"']+",
+    r"(?:(?:https?|ftp|aesgcm)://|www\.)[^\s<>\"']+",
     re.IGNORECASE,
 )
 _URL_TRAILING_PUNCT = re.compile(r"[.,;:!?]+$")

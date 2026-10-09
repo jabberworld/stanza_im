@@ -181,7 +181,9 @@ STRINGS = {
     "omemo_peer_unsupported": "Собеседник не поддерживает OMEMO",
     "prefs_omemo_auto_enable": "Автоматически включать OMEMO при получении зашифрованного сообщения",
     "omemo_auto_enabled": "OMEMO включён.",
-    "omemo_new_device_warning": "Появилось новое устройство ({name}). Проверьте отпечаток, прежде чем доверять ему.",
+    "omemo_new_device_warning": "Появилось новое устройство: {name} (id {id}, {jid}), отпечаток {fp}. Проверьте его, прежде чем доверять.",
+    "omemo_new_own_device_warning": "Появилось новое ваше устройство: {name} (id {id}, {jid}), отпечаток {fp}. Проверьте его, прежде чем доверять.",
+    "omemo_last_seen": "Последняя активность",
     # Roster
     "roster_search_placeholder": "Поиск контактов...",
     "roster_no_contacts": "Пока нет контактов.\nДобавьте кого-нибудь!",

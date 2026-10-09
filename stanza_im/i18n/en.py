@@ -181,7 +181,9 @@ STRINGS = {
     "omemo_peer_unsupported": "The contact does not support OMEMO",
     "prefs_omemo_auto_enable": "Enable OMEMO automatically when an encrypted message arrives",
     "omemo_auto_enabled": "OMEMO enabled.",
-    "omemo_new_device_warning": "A new device appeared ({name}). Check its fingerprint before trusting it.",
+    "omemo_new_device_warning": "A new device appeared: {name} (id {id}, {jid}), fingerprint {fp}. Check it before trusting.",
+    "omemo_new_own_device_warning": "A new own device appeared: {name} (id {id}, {jid}), fingerprint {fp}. Check it before trusting.",
+    "omemo_last_seen": "Last seen",
     # Roster
     "roster_search_placeholder": "Search contacts...",
     "roster_no_contacts": "No contacts yet.\nAdd someone to get started!",

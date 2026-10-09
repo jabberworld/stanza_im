@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -25,9 +26,25 @@ _TRUST_LABELS = {
     "DISTRUSTED": "omemo_trust_distrusted",
 }
 
+#: Trust state -> coloured shield icon (state, not the action).
+_TRUST_ICONS = {
+    "TRUSTED": "shield-trusted.svg",
+    "BLINDLY_TRUSTED": "shield-trusted.svg",
+    "UNDECIDED": "shield-unknown.svg",
+    "DISTRUSTED": "shield-distrusted.svg",
+}
+
 
 def _trust_label(name: str) -> str:
     return tr(_TRUST_LABELS.get(name, "omemo_trust_undecided"))
+
+
+def _trust_icon(name: str) -> str:
+    return _TRUST_ICONS.get(name, "shield-unknown.svg")
+
+
+def _is_trusted(name: str) -> bool:
+    return name in ("TRUSTED", "BLINDLY_TRUSTED")
 
 
 def _icon_button(name: str, tooltip: str) -> QtWidgets.QToolButton:
@@ -123,21 +140,26 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
 
         name = omemo.device_name(self._jid, int(device.device_id),
                                  str(getattr(device, "label", "") or ""))
-        trusted = omemo.is_trusted(device)
+        level = omemo.trust_level_name(device)
+        trusted = _is_trusted(level)
+        seen = omemo.device_last_seen(self._jid, int(device.device_id))
+        seen_txt = (time.strftime("%Y-%m-%d %H:%M", time.localtime(seen))
+                    if seen else "—")
         label = QtWidgets.QLabel(
-            f"{name}  —  {_trust_label(omemo.trust_level_name(device))}\n"
-            f"{device.device_id}  ·  {omemo.fingerprint(device.identity_key)}")
+            f"{name}  —  {_trust_label(level)}\n"
+            f"{device.device_id}  ·  {omemo.fingerprint(device.identity_key)}\n"
+            f"{tr('omemo_last_seen')}: {seen_txt}")
         label.setToolTip(omemo.fingerprint(device.identity_key))
         box.addWidget(label, 1)
 
-        if trusted:
-            trust_btn = _icon_button("process-stop.png", tr("omemo_trust_distrust"))
-            trust_btn.clicked.connect(
-                lambda: self._set_trust(device, "DISTRUSTED"))
-        else:
-            trust_btn = _icon_button("ok.png", tr("omemo_trust_verify"))
-            trust_btn.clicked.connect(
-                lambda: self._set_trust(device, "TRUSTED"))
+        # The trust button shows the *state* (coloured shield); a click toggles
+        # between trusted and distrusted.
+        trust_btn = _icon_button(_trust_icon(level),
+                                 tr("omemo_trust_distrust") if trusted
+                                 else tr("omemo_trust_verify"))
+        trust_btn.clicked.connect(
+            lambda: self._set_trust(
+                device, "DISTRUSTED" if trusted else "TRUSTED"))
         box.addWidget(trust_btn)
 
         rename_btn = _icon_button("edit.png", tr("omemo_rename"))

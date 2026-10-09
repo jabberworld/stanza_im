@@ -1615,7 +1615,22 @@ force-downloads the list when the caps are silent). An incoming encrypted
 message auto-enables OMEMO for that chat (`omemo.auto_enable`, default on). The
 device manager and the shield popup force-download the device lists
 (`refresh_device_lists(..., force=True)`), and our own device gets a readable
-label from the resource at login (`ensure_own_label`) when it has none.
+label from the resource at login (`ensure_own_label`) when it has none. On the
+chat toolbar the lock and shield sit **after** the XEP-0224 attention bell, so
+the shield appearing/disappearing only moves the trailing stretch; the lock's
+mode menu entries are checkable (the active mode carries the tick). The device
+manager and the shield popup show each device's trust as a **coloured shield
+icon** (`shield-trusted.svg` green = trusted/blindly-trusted, `shield-unknown.svg`
+yellow = undecided, `shield-distrusted.svg` red = distrusted); a click toggles
+trusted↔distrusted, and each manager row also shows the device's
+`device_last_seen`. The shield popup anchors its **bottom-left** corner at the
+click point and carries a header button (`gtk-preferences.png`) to the full
+manager. A new/untrusted device warning is a chat status line naming the device
+id, JID and a **short** fingerprint (first three groups + `…`) with a
+`stanza:omemo:<jid>` control link to the manager (relayed in-page like every
+`stanza:` link); an own device (`device.bare_jid` == our JID) gets a distinct
+text. `aesgcm://` URLs are linkified (`include/utils._URL_RE`) so the media
+preview embeds OMEMO-encrypted images/audio/video.
 [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:

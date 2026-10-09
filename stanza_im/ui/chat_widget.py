@@ -741,15 +741,30 @@ class ChatWidget(QtWidgets.QWidget):
         self._call_btn.setEnabled(False)
         actions_row.addWidget(self._call_btn)
 
-        # OMEMO (XEP-0384) lock — indicator + mode menu; hidden until the peer
-        # advertises support.
+        # XEP-0224 attention bell — 1:1 only, shown while the attention plugin
+        # is active and enabled once the peer advertises support.
+        self._attention_btn = QtWidgets.QToolButton(self)
+        self._attention_btn.setIcon(self._chat_icon("attention.svg"))
+        self._attention_btn.setToolTip(tr("attention_menu"))
+        self._attention_btn.setAutoRaise(True)
+        self._attention_btn.clicked.connect(
+            lambda: self.attention_ping_requested.emit(self.jid))
+        self._attention_btn.setEnabled(False)
+        self._attention_btn.setVisible(False)
+        actions_row.addWidget(self._attention_btn)
+
+        # OMEMO (XEP-0384) lock + shield — after the bell so the shield
+        # appearing/disappearing only moves the trailing stretch, not the other
+        # icons.  The lock is shown while OMEMO is available.
         self._omemo_mode = "off"
         self._omemo_supported = False
         omemo_menu = QtWidgets.QMenu(self)
         self._omemo_off_action = omemo_menu.addAction(tr("omemo_mode_off"))
+        self._omemo_off_action.setCheckable(True)
         self._omemo_off_action.triggered.connect(
             lambda: self.omemo_mode_requested.emit(self.jid, "off"))
         self._omemo_on_action = omemo_menu.addAction(tr("omemo_mode_on"))
+        self._omemo_on_action.setCheckable(True)
         self._omemo_on_action.triggered.connect(
             lambda: self.omemo_mode_requested.emit(self.jid, "omemo"))
         self._omemo_btn = QtWidgets.QToolButton(self)
@@ -771,17 +786,6 @@ class ChatWidget(QtWidgets.QWidget):
         self._omemo_shield_btn.setVisible(False)
         actions_row.addWidget(self._omemo_shield_btn)
 
-        # XEP-0224 attention bell — 1:1 only, shown while the attention plugin
-        # is active and enabled once the peer advertises support.
-        self._attention_btn = QtWidgets.QToolButton(self)
-        self._attention_btn.setIcon(self._chat_icon("attention.svg"))
-        self._attention_btn.setToolTip(tr("attention_menu"))
-        self._attention_btn.setAutoRaise(True)
-        self._attention_btn.clicked.connect(
-            lambda: self.attention_ping_requested.emit(self.jid))
-        self._attention_btn.setEnabled(False)
-        self._attention_btn.setVisible(False)
-        actions_row.addWidget(self._attention_btn)
         actions_row.addStretch(1)
 
         # "Ask for voice" (XEP-0045 §7.13) — MUC only, enabled for a visitor in
@@ -936,6 +940,11 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:tonote:"):
             self._handle_note_uri(url)
+            return
+        if url.startswith("stanza:omemo:"):
+            # The "manage OMEMO" link in a new-device warning status line.
+            target = unquote(url[len("stanza:omemo:"):]) or self.jid
+            self.omemo_devices_requested.emit(target)
             return
         if url.startswith("stanza:voice"):
             # The "ask for voice" link in the chat status line — same action as
@@ -3044,6 +3053,8 @@ class ChatWidget(QtWidgets.QWidget):
         """Reflect the chat's encryption mode on the lock/shield buttons."""
         self._omemo_mode = "omemo" if mode == "omemo" else "off"
         self._update_omemo_icon()
+        self._omemo_off_action.setChecked(self._omemo_mode == "off")
+        self._omemo_on_action.setChecked(self._omemo_mode == "omemo")
         self._omemo_shield_btn.setVisible(self._omemo_mode == "omemo")
 
     def omemo_mode(self) -> str:

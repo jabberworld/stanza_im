@@ -211,13 +211,90 @@ check("OMEMO mode entry enabled for a supported peer",
 _cw.set_omemo_mode("omemo")
 check("OMEMO mode reflected", _cw.omemo_mode() == "omemo")
 check("OMEMO shield shown in omemo mode", not _cw._omemo_shield_btn.isHidden())
+_cw.set_omemo_mode("omemo")
+check("lock menu checks the OMEMO entry",
+      _cw._omemo_on_action.isChecked()
+      and not _cw._omemo_off_action.isChecked())
 _cw.set_omemo_mode("off")
 check("OMEMO shield hidden when off", _cw._omemo_shield_btn.isHidden())
+check("lock menu checks the off entry",
+      _cw._omemo_off_action.isChecked()
+      and not _cw._omemo_on_action.isChecked())
 _cw.detach()
 
 from stanza_im.include.constants import find_icon
 check("the QR icon resolves", bool(find_icon("qr.svg")))
 check("the shield icon resolves", bool(find_icon("shield.svg")))
+for _name in ("shield-trusted.svg", "shield-unknown.svg",
+              "shield-distrusted.svg"):
+    check("the %s icon resolves" % _name, bool(find_icon(_name)))
+
+# Trust state -> coloured shield (state, not action).
+from stanza_im.ui.omemo_devices_dialog import _trust_icon as _dlg_icon
+from stanza_im.ui.omemo_popup import _trust_icon as _pop_icon
+check("trusted uses the green shield",
+      _dlg_icon("TRUSTED") == "shield-trusted.svg")
+check("blindly-trusted uses the green shield",
+      _dlg_icon("BLINDLY_TRUSTED") == "shield-trusted.svg")
+check("undecided uses the yellow shield",
+      _dlg_icon("UNDECIDED") == "shield-unknown.svg")
+check("distrusted uses the red shield",
+      _dlg_icon("DISTRUSTED") == "shield-distrusted.svg")
+check("the popup mirrors the trust icons",
+      _pop_icon("DISTRUSTED") == "shield-distrusted.svg")
+
+# The popup anchors its bottom-left corner at the click point.
+from stanza_im.ui.omemo_popup import OmemoPopup
+
+
+class _FakeOmemo:
+    async def refresh_device_lists(self, jids, force=False):
+        return None
+
+    async def devices(self, jid):
+        return []
+
+
+class _FakeClient:
+    omemo = _FakeOmemo()
+
+
+_orig_reload = OmemoPopup._reload
+OmemoPopup._reload = lambda self: None
+try:
+    _pop = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
+    _pop.show()
+    check("popup anchors its bottom-left at the click point",
+          _pop.y() < 400 and _pop.y() + _pop.height() <= 401)
+    check("popup left edge does not pass the click x", _pop.x() <= 500)
+    _pop.close()
+finally:
+    OmemoPopup._reload = _orig_reload
+
+# aesgcm:// URLs must be linkified so the media preview can embed them.
+from stanza_im.include.utils import _URL_RE
+check("aesgcm URLs are linkified",
+      bool(_URL_RE.search("aesgcm://example.com/f.enc#abc")))
+
+# The new-device warning carries the id, JID and fingerprint plus a control
+# link to the device manager.
+from stanza_im.i18n.en import STRINGS as _EN
+check("new-device warning names the id and fingerprint",
+      "{id}" in _EN["omemo_new_device_warning"]
+      and "{fp}" in _EN["omemo_new_device_warning"])
+check("own-device warning names the JID",
+      "{jid}" in _EN["omemo_new_own_device_warning"])
+check("the last-seen label exists", "omemo_last_seen" in _EN)
+import inspect
+check("the stanza:omemo link is routed",
+      "stanza:omemo:" in inspect.getsource(ChatWidget._open_link))
+_view_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "ui", "chat_view.py")
+_view_src = open(_view_path, encoding="utf-8").read()
+check("the JS click handler relays stanza:omemo",
+      'a[href^="stanza:omemo"]' in _view_src
+      and "__stanzaOmemoRef" in _view_src)
 
 _pm = render_qr_pixmap("abc")
 check("QR pixmap renders", _pm is not None and not _pm.isNull())

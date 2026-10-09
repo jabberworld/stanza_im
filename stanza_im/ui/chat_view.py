@@ -1230,6 +1230,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaUnreactRef = '';
             window.__stanzaReactLikeRef = '';
             window.__stanzaReactionsRef = '';
+            window.__stanzaOmemoRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
 
@@ -1613,6 +1614,16 @@ window.__stanzaMentionRef = '';
                         vs.getAttribute('href') || '';
                     return;
                 }
+                // OMEMO device link in a new-device warning status line: never
+                // navigate; relay it through the scroll poll.
+                var om = t && t.closest
+                    ? t.closest('a[href^="stanza:omemo"]') : null;
+                if (om) {
+                    e.preventDefault();
+                    window.__stanzaOmemoRef =
+                        om.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -1776,7 +1787,8 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaToNoteRef || '',"
                 " window.__stanzaVoiceRef || '',"
                 " window.__stanzaMentionPress ? 1 : 0,"
-                " window.__stanzaReactionPress ? 1 : 0]",
+                " window.__stanzaReactionPress ? 1 : 0,"
+                " window.__stanzaOmemoRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1831,6 +1843,12 @@ window.__stanzaMentionRef = '';
         def _clear_voice_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaVoiceRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_omemo_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaOmemoRef = '';")
             except RuntimeError:
                 pass
 
@@ -2077,6 +2095,14 @@ window.__stanzaMentionRef = '';
             if len(value) > 24 and value[24]:
                 self.evaluate_js("window.__stanzaReactionPress = 0;")
                 self._on_reaction_clicked()
+            if len(value) > 25 and isinstance(value[25], str) and value[25]:
+                self._clear_omemo_request()
+                requested = value[25]
+                if requested != getattr(self, "_last_omemo_ref", ""):
+                    self._last_omemo_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_omemo_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
