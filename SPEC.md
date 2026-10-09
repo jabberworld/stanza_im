@@ -385,6 +385,7 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 | `omemo.enabled` | `true` | Enable OMEMO (XEP-0384) when the stack is installed. |
 | `omemo.blind_trust` | `true` | BTBV: blindly trust (and encrypt to) new devices until verified; off = strict (only manually trusted devices). |
 | `omemo.alias_sync` | `false` | Mirror device names to the private PEP node `urn:xmpp:omemo:aliases:0`. |
+| `omemo.auto_enable` | `true` | Switch a chat to OMEMO when an encrypted message arrives. |
 | `omemo.show_warnings` | `true` | Show chat warnings for new/untrusted devices. |
 | `omemo.default_mode` | `off` | Default per-chat encryption mode (`off`/`omemo`). |
 
@@ -2077,8 +2078,13 @@ Registers XEP plugins (conditionally where noted):
   chat lock/shield buttons with the reaction-style `ui/omemo_popup.py`, and the
   roster «Управление OMEMO» entry (a shield icon, in the rename/group/
   subscription block). The lock button is shown whenever OMEMO is available —
-  only the «OMEMO» mode entry is gated on the peer's support. The QR code is
-  rendered by a bundled pure-Python encoder (`xmpp/omemo/qr.py`).
+  only the «OMEMO» mode entry is gated on the peer's support, which is
+  determined by the peer's caps **or** by a non-empty device list (many clients
+  publish devices without advertising OMEMO in disco). The QR code is rendered
+  by a bundled pure-Python encoder (`xmpp/omemo/qr.py`).
+- An incoming encrypted message automatically switches its chat to OMEMO mode
+  (so the reply is encrypted too) when `omemo.auto_enable` is on (default),
+  with an «OMEMO enabled.» status line.
 - Opening the device manager or the shield popup force-downloads the contact's
   device lists (`refresh_device_lists(..., force=True)`), so devices show up
   even when no PEP push has arrived. Our own device gets a readable label from

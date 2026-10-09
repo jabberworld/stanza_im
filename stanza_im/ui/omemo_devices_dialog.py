@@ -35,7 +35,8 @@ def _icon_button(name: str, tooltip: str) -> QtWidgets.QToolButton:
     icon = QtGui.QIcon(find_icon(name))
     if not icon.isNull():
         button.setIcon(icon)
-    button.setIconSize(QtCore.QSize(16, 16))
+    button.setIconSize(QtCore.QSize(30, 30))
+    button.setFixedSize(38, 38)
     button.setAutoRaise(True)
     button.setToolTip(tooltip)
     return button
@@ -51,7 +52,7 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         self._own = bool(own)
         self._devices: list = []
         self.setWindowTitle(tr("omemo_devices_title", jid=self._jid))
-        self.resize(560, 420)
+        self.resize(760, 520)
         self._build_ui()
         self._reload()
 
@@ -110,7 +111,9 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
             item = QtWidgets.QListWidgetItem()
             item.setData(QtCore.Qt.ItemDataRole.UserRole, device)
             self._list.addItem(item)
-            self._list.setItemWidget(item, self._device_row(omemo, device))
+            row = self._device_row(omemo, device)
+            self._list.setItemWidget(item, row)
+            item.setSizeHint(row.sizeHint())
 
     def _device_row(self, omemo, device) -> QtWidgets.QWidget:
         row = QtWidgets.QWidget(self)

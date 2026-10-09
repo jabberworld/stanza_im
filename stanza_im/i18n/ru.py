@@ -179,6 +179,8 @@ STRINGS = {
     "omemo_button_tip": "Шифрование сообщений",
     "omemo_shield_tip": "Устройства и доверие OMEMO",
     "omemo_peer_unsupported": "Собеседник не поддерживает OMEMO",
+    "prefs_omemo_auto_enable": "Автоматически включать OMEMO при получении зашифрованного сообщения",
+    "omemo_auto_enabled": "OMEMO включён.",
     "omemo_new_device_warning": "Появилось новое устройство ({name}). Проверьте отпечаток, прежде чем доверять ему.",
     # Roster
     "roster_search_placeholder": "Поиск контактов...",

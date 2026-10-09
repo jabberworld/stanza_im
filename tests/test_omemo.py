@@ -384,6 +384,64 @@ _mw_src = open(os.path.join(
 check("the OMEMO entry follows the subscription menu",
       _mw_src.index('self._menu_icon("shield.svg"), tr("omemo_manage")')
       > _mw_src.index("_build_subscription_menu(menu"))
+check("peer OMEMO support falls back to the device list",
+      "def _check_peer_omemo" in _mw_src
+      and "refresh_device_lists([bare], force=True)" in _mw_src)
+check("encrypted messages auto-enable OMEMO",
+      "self._maybe_auto_enable_omemo(bare_jid)" in _mw_src)
+
+# 15. auto-enable + config option -------------------------------------------
+from stanza_im.core.storage import Config as _Config
+check("omemo.auto_enable defaults on", _Config().omemo.auto_enable is True)
+
+from stanza_im.ui.main_window import MainWindow
+
+
+class _FakeOmemoMgr:
+    def __init__(self):
+        self.available = True
+        self.mode = "off"
+        self.set_calls = []
+
+    def chat_mode(self, jid):
+        return self.mode
+
+    def set_chat_mode(self, jid, mode):
+        self.mode = "omemo" if mode == "omemo" else "off"
+        self.set_calls.append((jid, mode))
+
+
+class _FakeChatWindow:
+    def __init__(self):
+        self.modes = []
+
+    def set_omemo_mode(self, jid, mode):
+        self.modes.append((jid, mode))
+
+    def get_chat(self, jid):
+        return None
+
+
+def _fake_mw(auto_enable):
+    return types.SimpleNamespace(
+        _client=types.SimpleNamespace(omemo=_FakeOmemoMgr()),
+        _config=types.SimpleNamespace(
+            omemo=types.SimpleNamespace(auto_enable=auto_enable)),
+        _apply_omemo_support=lambda jid: None,
+        _chat_window=_FakeChatWindow(),
+    )
+
+
+_mw1 = _fake_mw(True)
+MainWindow._maybe_auto_enable_omemo(_mw1, "bob@example.com")
+check("an encrypted message auto-enables OMEMO",
+      _mw1._client.omemo.mode == "omemo"
+      and _mw1._chat_window.modes == [("bob@example.com", "omemo")])
+
+_mw2 = _fake_mw(False)
+MainWindow._maybe_auto_enable_omemo(_mw2, "bob@example.com")
+check("auto-enable respects the option",
+      _mw2._client.omemo.mode == "off" and _mw2._chat_window.modes == [])
 
 print()
 if FAILURES:

@@ -3664,6 +3664,26 @@ class MainWindow(QtWidgets.QMainWindow):
         # "OMEMO" mode entry depends on the peer's support.
         self._chat_window.set_omemo_support(jid, True, peer_supported)
         self._chat_window.set_omemo_mode(jid, client.omemo.chat_mode(bare))
+        is_conf = (bare in self._muc_self_nicks
+                   or bare in self._conference_roster)
+        if not peer_supported and not is_conf:
+            # Many clients do not advertise OMEMO in their caps but publish a
+            # device list; check that in the background.
+            self._start_task(self._check_peer_omemo(jid, bare))
+
+    async def _check_peer_omemo(self, jid: str, bare: str) -> None:
+        """Enable the OMEMO entry when *bare* has devices (caps may be silent)."""
+        client = self._client
+        if client is None or not getattr(client.omemo, "available", False):
+            return
+        try:
+            await client.omemo.refresh_device_lists([bare], force=True)
+            devices = await client.omemo.devices(bare)
+        except Exception:  # noqa: BLE001
+            logger.debug("OMEMO peer check failed for %s", bare, exc_info=True)
+            return
+        if devices and self._client is not None:
+            self._chat_window.set_omemo_support(jid, True, True)
 
     def _on_omemo_mode_requested(self, jid: str, mode: str) -> None:
         if self._client is None or not getattr(self._client.omemo,
@@ -3671,6 +3691,23 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._client.omemo.set_chat_mode(jid, mode)
         self._chat_window.set_omemo_mode(jid, mode)
+
+    def _maybe_auto_enable_omemo(self, jid: str) -> None:
+        """Enable OMEMO for *jid* after an encrypted message arrived."""
+        client = self._client
+        if client is None or not getattr(client.omemo, "available", False):
+            return
+        if not bool(getattr(self._config.omemo, "auto_enable", True)):
+            return
+        bare = jid.split("/", 1)[0]
+        if client.omemo.chat_mode(bare) == "omemo":
+            return
+        client.omemo.set_chat_mode(bare, "omemo")
+        self._apply_omemo_support(bare)
+        self._chat_window.set_omemo_mode(bare, "omemo")
+        chat = self._chat_window.get_chat(bare)
+        if chat:
+            chat.add_status(tr("omemo_auto_enabled"), _current_timestamp())
 
     def _on_omemo_trust_warning(self, kind: str, devices, identifier) -> None:
         """Show a chat system line when a new/untrusted device appears."""
@@ -5319,6 +5356,9 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
             encrypted=encrypted))
+
+        if encrypted:
+            self._maybe_auto_enable_omemo(bare_jid)
 
         # Unread badge + tray blink (skip when conversation is on screen)
         active = (self._chat_area_visible()

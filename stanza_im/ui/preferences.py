@@ -1094,6 +1094,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             btbv, self._info_label(tr("prefs_omemo_blind_trust_tip")),
             trailing_stretch=True))
         form.addRow(self._check("alias_sync", tr("prefs_omemo_alias_sync")))
+        form.addRow(self._check("auto_enable",
+                                tr("prefs_omemo_auto_enable")))
 
         self._omemo_fp = QtWidgets.QLabel(tr("omemo_loading"))
         self._omemo_fp.setWordWrap(True)
@@ -1530,6 +1532,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "send_activity_notifications": getattr(privacy, "send_activity_notifications", privacy.send_chatstates),
             "blind_trust": bool(getattr(cfg.omemo, "blind_trust", True)),
             "alias_sync": bool(getattr(cfg.omemo, "alias_sync", False)),
+            "auto_enable": bool(getattr(cfg.omemo, "auto_enable", True)),
             "chat_theme": appearance.chat_theme or chat.theme,
             "muc_theme": appearance.muc_theme,
             "emoticon_theme": ("default/smileys.cfg"
@@ -1679,6 +1682,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                                        or cfg.privacy.send_activity_notifications)
         cfg.omemo.blind_trust = self._value("blind_trust")
         cfg.omemo.alias_sync = self._value("alias_sync")
+        cfg.omemo.auto_enable = self._value("auto_enable")
         cfg.notifications.tray_blink = self._value("tray_blink")
         cfg.notifications.popups = self._value("popups")
         cfg.notifications.osd_enabled = self._value("osd_enabled")

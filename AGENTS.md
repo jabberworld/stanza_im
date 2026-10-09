@@ -1608,7 +1608,11 @@ preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
 at the bottom), the reaction-style `ui/omemo_popup.py` (chat shield) and the
 roster «Управление OMEMO» entry (a shield icon, in the rename/group/
 subscription block). The chat lock button is always shown while OMEMO is
-available — only the «OMEMO» mode entry is gated on the peer's support. The
+available — only the «OMEMO» mode entry is gated on the peer's support, which
+is determined by the peer's caps **or** by a non-empty device list (many clients
+publish devices without advertising OMEMO in disco; `_check_peer_omemo`
+force-downloads the list when the caps are silent). An incoming encrypted
+message auto-enables OMEMO for that chat (`omemo.auto_enable`, default on). The
 device manager and the shield popup force-download the device lists
 (`refresh_device_lists(..., force=True)`), and our own device gets a readable
 label from the resource at login (`ensure_own_label`) when it has none.

@@ -179,6 +179,8 @@ STRINGS = {
     "omemo_button_tip": "Message encryption",
     "omemo_shield_tip": "OMEMO devices and trust",
     "omemo_peer_unsupported": "The contact does not support OMEMO",
+    "prefs_omemo_auto_enable": "Enable OMEMO automatically when an encrypted message arrives",
+    "omemo_auto_enabled": "OMEMO enabled.",
     "omemo_new_device_warning": "A new device appeared ({name}). Check its fingerprint before trusting it.",
     # Roster
     "roster_search_placeholder": "Search contacts...",
