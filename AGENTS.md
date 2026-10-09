@@ -1766,7 +1766,12 @@ XEP-0398 bridges the two: both paths funnel into `_apply_avatar(jid, raw)`,
 keyed by the SHA-1 of the image (unchanged avatars are skipped), which saves it
 and emits `avatar_updated(jid, path)`; `MainWindow._on_avatar_updated` reuses
 `_refresh_avatar` (the avatar-only part of `_on_vcard_received`) for the roster,
-contacts and MUC occupants — no new UI. [`tests/test_avatars.py`]
+contacts and MUC occupants — no new UI. A PEP event is attributed to the XEP-0033
+`<addresses><address type='replyto'/>` JID when present (`_replyto_address`), so
+a server that relays it from a service JID still resolves the real sender; an
+expected fetch failure (`IqError`/timeout, e.g. `item-not-found` for a stale
+node) is logged briefly without a traceback and remembered in `_avatar_failed`
+for the session. [`tests/test_avatars.py`]
 
 **Extended presence (XEP-0080/0107/0108/0118)** (`include/pep.py`,
 `core/client.py`): the four PEP nodes (`geoloc`, `mood`, `activity`, `tune`)

@@ -166,6 +166,30 @@ def _carbon_inner(msg, which: str):
     return None
 
 
+_NS_ADDRESSES = "http://jabber.org/protocol/address"
+
+
+def _replyto_address(msg) -> str:
+    """Bare JID of a XEP-0033 ``<address type='replyto'/>`` on *msg* ("" none).
+
+    Some servers relay PEP events from a service JID and carry the real sender
+    in the extended stanza addressing; use it to attribute the event.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return ""
+    for el in xml:
+        if el.tag != "{%s}addresses" % _NS_ADDRESSES:
+            continue
+        for addr in el:
+            if (addr.tag == "{%s}address" % _NS_ADDRESSES
+                    and addr.get("type") == "replyto"):
+                jid = str(addr.get("jid") or "").split("/")[0]
+                if jid:
+                    return jid
+    return ""
+
+
 def _reply_reference(stanza) -> tuple[str, str]:
     """Return ``(to, id)`` of a XEP-0461 ``<reply/>`` on *stanza* ("" if none)."""
     xml = getattr(stanza, "xml", None)
@@ -1306,6 +1330,8 @@ class JabberClient:
         # bare JID -> SHA-1 of the currently applied avatar (XEP-0084/0153/0398)
         self._avatar_ids: dict[str, str] = {}
         self._avatar_inflight: set[str] = set()
+        # (jid, avatar_id) pairs whose fetch failed — don't retry this session.
+        self._avatar_failed: set[tuple[str, str]] = set()
         # XEP-0402 server-side bookmark unification ("unified"/"dual"), cached
         self._bookmarks2_compat: str | None = None
 
@@ -5158,7 +5184,7 @@ class JabberClient:
 
     def _maybe_pep_event(self, msg) -> None:
         """Handle a PEP notification for mood/activity/tune/geoloc/avatar."""
-        frm = str(msg["from"]).split("/")[0]
+        frm = _replyto_address(msg) or str(msg["from"]).split("/")[0]
         for el in msg.xml:
             if el.tag != "{%s}event" % NS_PUBSUB_EVENT:
                 continue
@@ -5205,6 +5231,8 @@ class JabberClient:
         mtype = str(info.get("type") or "")
         if not avatar_id or avatar_id == self._avatar_ids.get(jid):
             return
+        if (jid, avatar_id) in self._avatar_failed:
+            return
         if jid in self._avatar_inflight:
             return
         self._avatar_inflight.add(jid)
@@ -5216,6 +5244,13 @@ class JabberClient:
             result = await asyncio.wait_for(
                 self.xmpp["xep_0084"].retrieve_avatar(jid, avatar_id),
                 timeout=20)
+        except (slixmpp.exceptions.IqError, asyncio.TimeoutError) as exc:
+            # Expected for a stale or absent node (e.g. item-not-found): report
+            # briefly, without a traceback.
+            logger.debug("Avatar retrieval for %s failed: %s", jid, exc)
+            self._avatar_failed.add((jid, avatar_id))
+            self._avatar_inflight.discard(jid)
+            return
         except Exception:
             logger.debug("Avatar retrieval for %s failed", jid, exc_info=True)
             self._avatar_inflight.discard(jid)

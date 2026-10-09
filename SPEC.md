@@ -2678,7 +2678,12 @@ client.leave_muji(room)
   `set_own_vcard` stores a PHOTO, and it registers the `avatar:metadata`
   PEP interest. Incoming `urn:xmpp:avatar:metadata` events (routed through
   `_maybe_pep_event`) trigger `_retrieve_avatar` → `_avatar_data_from_iq` →
-  cache.
+  cache. A PEP event is attributed to its XEP-0033
+  `<addresses><address type='replyto'/>` JID when present (`_replyto_address`),
+  so a service that relays it is resolved to the real sender; an expected fetch
+  failure (`IqError`/timeout, e.g. a stale `item-not-found` node) is logged
+  briefly without a traceback and remembered in `_avatar_failed` for the
+  session.
 - XEP-0398 bridges the two: `JabberClient._apply_avatar(jid, raw)` is the
   single sink for both the vCard and PEP paths, keyed by the SHA-1 of the
   image so an unchanged avatar is not reapplied; it saves the image via

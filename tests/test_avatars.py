@@ -164,5 +164,41 @@ client._handle_avatar_metadata = lambda jid, it: handled.append(jid)
 client._maybe_pep_event(msg)
 check("avatar metadata PEP event routed", handled == ["dave@example.com"])
 
+# XEP-0033 replyto attribution: a PEP event relayed from a service JID is
+# attributed to the real sender carried in <addresses/>.
+from stanza_im.core.client import _replyto_address
+
+relayed = slixmpp.Message()
+relayed["from"] = "pubsub.example.com"
+event = ET.SubElement(
+    relayed.xml, "{http://jabber.org/protocol/pubsub#event}event")
+node = ET.SubElement(
+    event, "{http://jabber.org/protocol/pubsub#event}items")
+node.set("node", "urn:xmpp:avatar:metadata")
+entry = ET.SubElement(
+    node, "{http://jabber.org/protocol/pubsub#event}item")
+metadata = ET.SubElement(entry, "{urn:xmpp:avatar:metadata}metadata")
+info = ET.SubElement(metadata, "{urn:xmpp:avatar:metadata}info")
+info.set("id", "sha1relay")
+addrs = ET.SubElement(relayed.xml, "{http://jabber.org/protocol/address}addresses")
+addr = ET.SubElement(addrs, "{http://jabber.org/protocol/address}address")
+addr.set("type", "replyto")
+addr.set("jid", "real@example.com/bot")
+check("replyto address parsed", _replyto_address(relayed) == "real@example.com")
+handled2 = []
+client._handle_avatar_metadata = lambda jid, it: handled2.append(jid)
+client._maybe_pep_event(relayed)
+check("relayed PEP event attributed to the replyto JID",
+      handled2 == ["real@example.com"])
+check("no replyto address yields empty", _replyto_address(slixmpp.Message()) == "")
+
+# The avatar fetch logs expected failures (IqError/timeout) without a traceback.
+_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "core", "client.py"), encoding="utf-8").read()
+check("avatar fetch handles expected failures without a traceback",
+      "except (slixmpp.exceptions.IqError, asyncio.TimeoutError) as exc:" in _src
+      and 'logger.debug("Avatar retrieval for %s failed: %s", jid, exc)' in _src)
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
