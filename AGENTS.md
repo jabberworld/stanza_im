@@ -1624,8 +1624,14 @@ icon** (`shield-trusted.svg` green = trusted/blindly-trusted, `shield-unknown.sv
 yellow = undecided, `shield-distrusted.svg` red = distrusted); a click toggles
 trusted↔distrusted, and each manager row also shows the device's
 `device_last_seen`. The shield popup anchors its **bottom-left** corner at the
-click point and carries a header button (`gtk-preferences.png`) to the full
-manager. A new/untrusted device warning is a chat status line naming the device
+click point (accepting a `QPoint` or a tuple) and carries a header button
+(`gtk-preferences.png`) to the full manager (opened `own=True` when the popup is
+our own JID). Deleting an own device (`purge_device`) downloads the published
+list per namespace, drops the device and re-uploads it (preserving the remaining
+devices' signed labels) — `SessionManager.update_device_list` only handles
+*incoming* updates and never publishes; `OmemoManager.devices()` filters out
+devices inactive in every namespace, so a removed device (and a peer's removed
+one) disappears from the manager even though the offline cache keeps it. A new/untrusted device warning is a chat status line naming the device
 id, JID and a **short** fingerprint (first three groups + `…`) with a
 `stanza:omemo:<jid>` control link to the manager (relayed in-page like every
 `stanza:` link); an own device (`device.bare_jid` == our JID) gets a distinct

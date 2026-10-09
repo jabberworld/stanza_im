@@ -80,7 +80,11 @@ class OmemoPopup(QtWidgets.QFrame):
             return
         self.adjustSize()
         size = self.size()
-        x, y = self._anchor
+        anchor = self._anchor
+        if isinstance(anchor, QtCore.QPoint):
+            x, y = anchor.x(), anchor.y()
+        else:
+            x, y = anchor
         point = QtCore.QPoint(int(x), int(y))
         screen = (QtWidgets.QApplication.screenAt(point)
                   or QtWidgets.QApplication.primaryScreen())
@@ -201,4 +205,6 @@ class OmemoPopup(QtWidgets.QFrame):
     def _open_manager(self) -> None:
         self.close()
         from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
-        OmemoDevicesDialog(self._client, self._jid, self.parent()).exec()
+        own_bare = (getattr(self._client, "jid_str", "") or "").split("/", 1)[0]
+        OmemoDevicesDialog(self._client, self._jid, self.parent(),
+                           own=(self._jid == own_bare)).exec()

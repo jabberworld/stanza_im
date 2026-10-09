@@ -123,7 +123,22 @@ class OmemoManager:
 
     async def devices(self, bare_jid: str):
         sm = await self.session_manager()
-        return await sm.get_device_information(bare_jid)
+        result = await sm.get_device_information(bare_jid)
+        return [d for d in result if self._device_active(d)]
+
+    @staticmethod
+    def _device_active(device) -> bool:
+        """Whether a device is active in at least one namespace.
+
+        ``get_device_information`` keeps a device in the offline cache even
+        after its owner removes it (the list is only ever extended), so a
+        device that is inactive everywhere must be filtered out of the UI.  A
+        device with no activity information at all is kept (conservative).
+        """
+        active = getattr(device, "active", None) or ()
+        if not active:
+            return True
+        return any(flag for _ns, flag in active)
 
     async def refresh_device_lists(self, jids: Iterable[str],
                                    force: bool = False) -> None:
@@ -304,14 +319,32 @@ class OmemoManager:
         return recipients
 
     async def purge_device(self, device) -> None:
-        """Remove one of our own devices from the published device lists."""
+        """Remove one of our own devices from the published device lists.
+
+        ``SessionManager.update_device_list`` only processes *incoming* PEP
+        updates (it never publishes), so the device list must be downloaded,
+        the device removed and the result re-uploaded — the same dance the
+        library's own ``purge_backend`` performs.  Downloading (rather than
+        rebuilding from device information) preserves the signed labels of the
+        remaining devices.
+        """
         legacy_ns, omemo2_ns = _namespaces()
         sm = await self.session_manager()
-        own, others = await sm.get_own_device_information()
         target = int(device.device_id)
-        keep = [own] + [d for d in others if int(d.device_id) != target]
-        device_list = {int(d.device_id): None for d in keep}
         for namespace in (omemo2_ns, legacy_ns):
+            try:
+                device_list = dict(
+                    await sm._download_device_list(namespace, self._own_bare))
+            except Exception:  # noqa: BLE001
+                logger.debug("OMEMO purge: device list download failed for %s",
+                             namespace, exc_info=True)
+                continue
+            if target not in device_list:
+                continue
+            device_list.pop(target, None)
+            await sm._upload_device_list(namespace, device_list)
+            # Sync the offline cache: marks the removed device inactive so the
+            # filtered `devices()` stops returning it.
             await sm.update_device_list(namespace, self._own_bare, device_list)
         self.set_device_alias(self._own_bare, target, "")
 

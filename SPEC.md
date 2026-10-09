@@ -2107,6 +2107,15 @@ Registers XEP plugins (conditionally where noted):
   the resource at login when it has none (`ensure_own_label`); a contact's
   devices are named by their published label or by the resource learned from an
   incoming message, falling back to `Device <id>`.
+- Deleting an own device (`OmemoManager.purge_device`) downloads the published
+  device list per namespace, removes the device and re-uploads the result
+  (preserving the remaining devices' signed labels), then syncs the offline
+  cache. `SessionManager.update_device_list` only processes *incoming* PEP
+  updates and never publishes, so the download/pop/upload sequence (as in the
+  library's own `purge_backend`) is required. `OmemoManager.devices()` filters
+  out devices that are inactive in every namespace, so a removed device — own or
+  a peer's — no longer appears in the manager or popup even though the offline
+  cache keeps it.
 - Device names/aliases can be mirrored to a private PEP node
   (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, access model
   `whitelist`, opt-in `omemo.alias_sync`); the local store wins on merge.

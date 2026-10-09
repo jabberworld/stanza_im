@@ -520,6 +520,94 @@ MainWindow._maybe_auto_enable_omemo(_mw2, "bob@example.com")
 check("auto-enable respects the option",
       _mw2._client.omemo.mode == "off" and _mw2._chat_window.modes == [])
 
+# 16. device removal + popup anchoring --------------------------------------
+# The popup must accept a QPoint anchor (MainWindow passes QCursor.pos()).
+from PyQt6 import QtCore as _QtCore
+
+_orig_reload = OmemoPopup._reload
+OmemoPopup._reload = lambda self: None
+try:
+    _p = OmemoPopup(_FakeClient(), "bob@example.com",
+                    anchor=_QtCore.QPoint(300, 250))
+    _p.show()
+    check("popup accepts a QPoint anchor", _p.y() < 250)
+    _p.close()
+finally:
+    OmemoPopup._reload = _orig_reload
+
+from stanza_im.xmpp.omemo.manager import OmemoManager
+
+
+class _Dev:
+    def __init__(self, did, active):
+        self.device_id = did
+        self.active = active
+
+
+check("a device active in a namespace counts as active",
+      OmemoManager._device_active(_Dev(1, frozenset({("ns", True)}))))
+check("a device inactive everywhere is filtered",
+      not OmemoManager._device_active(
+          _Dev(2, frozenset({("ns", False), ("ns2", False)}))))
+check("a device with no activity info is kept",
+      OmemoManager._device_active(_Dev(3, frozenset())))
+
+
+class _FakeSM:
+    def __init__(self):
+        self.uploaded = []
+        self.updated = []
+
+    async def _download_device_list(self, namespace, bare):
+        return {111: None, 222: "label"}
+
+    async def _upload_device_list(self, namespace, dl):
+        self.uploaded.append((namespace, dict(dl)))
+
+    async def update_device_list(self, namespace, bare, dl):
+        self.updated.append((namespace, set(dl)))
+
+    async def get_device_information(self, bare):
+        return frozenset([_Dev(111, frozenset({("ns", True)})),
+                          _Dev(222, frozenset({("ns", False)}))])
+
+
+class _Mgr(OmemoManager):
+    def __init__(self, sm):
+        self._sm = sm
+        self._own_bare = "me@example.com"
+        self.alias_cleared = []
+
+    async def session_manager(self):
+        return self._sm
+
+    def set_device_alias(self, jid, did, name):
+        self.alias_cleared.append((jid, did, name))
+
+
+async def _run_purge():
+    sm = _FakeSM()
+    mgr = _Mgr(sm)
+    await mgr.purge_device(_Dev(222, frozenset()))
+    return sm, mgr
+
+
+_sm, _mgr = asyncio.run(_run_purge())
+check("purge uploads a list without the removed device",
+      len(_sm.uploaded) == 2
+      and all(222 not in dl and 111 in dl for _ns, dl in _sm.uploaded))
+check("purge clears the device alias",
+      _mgr.alias_cleared == [("me@example.com", 222, "")])
+
+
+async def _run_filter():
+    return await _Mgr(_FakeSM()).devices("me@example.com")
+
+
+_devs = asyncio.run(_run_filter())
+check("devices() hides inactive devices",
+      [int(d.device_id) for d in _devs] == [111])
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
