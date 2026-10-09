@@ -8,7 +8,7 @@ or missing install never breaks the client.
 """
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import logging
 
 logger = logging.getLogger("stanza_im.omemo")
@@ -22,28 +22,67 @@ LEGACY_NAMESPACE = "eu.siacs.conversations.axolotl"
 OMEMO2_NAMESPACE = "urn:xmpp:omemo:2"
 
 
-def _module_available(name: str) -> bool:
-    try:
-        return importlib.util.find_spec(name) is not None
-    except (ImportError, ValueError):
-        return False
-
-
 #: ``(import module, friendly name, Debian/Ubuntu package)`` of every component
-#: the OMEMO stack needs.
+#: the OMEMO stack needs.  ``xmlschema`` is a transitive dependency of
+#: ``oldmemo``/``twomemo`` (their ElementTree helpers) that some distributions
+#: do not pull in.
 _REQUIRED = (
     ("slixmpp_omemo", "slixmpp-omemo", "python3-slixmpp-omemo"),
     ("omemo", "python-omemo", "python3-omemo"),
     ("oldmemo", "python-oldmemo", "python3-oldmemo"),
     ("twomemo", "python-twomemo", "python3-twomemo"),
+    ("xmlschema", "python-xmlschema", "python3-xmlschema"),
     ("cryptography", "python-cryptography", "python3-cryptography"),
 )
 
-_PLUGIN = _module_available("slixmpp_omemo")
-_CORE = _module_available("omemo")
-_OLD = _module_available("oldmemo")
-_NEW = _module_available("twomemo")
-_CRYPTO = _module_available("cryptography")
+_BY_MODULE = {module: (name, deb) for module, name, deb in _REQUIRED}
+
+
+def _probe(module: str) -> tuple[bool, str]:
+    """Import *module*; return ``(ok, root_cause_module)``.
+
+    A real import (not ``find_spec``) is used so a module that is present but
+    whose transitive import is missing is detected — for example ``oldmemo``
+    raising ``ModuleNotFoundError: xmlschema``.  The returned root cause is the
+    name of the missing dependency (``exc.name``) so the message can point at
+    the real package instead of the top-level one.
+    """
+    try:
+        importlib.import_module(module)
+        return True, ""
+    except ImportError as exc:
+        # A package may re-raise a wrapped ImportError for a missing
+        # dependency (``oldmemo`` -> ``xmlschema``); walk the chain to find the
+        # real root cause.
+        cause: BaseException | None = exc
+        while cause is not None:
+            if isinstance(cause, ModuleNotFoundError) and cause.name:
+                return False, str(cause.name)
+            cause = cause.__cause__ or cause.__context__
+        return False, module
+    except Exception:  # noqa: BLE001 - any import-time failure disables it
+        return False, module
+
+
+def _compute_missing(probe) -> list[str]:
+    """Deduplicated root-cause module names of the components *probe* rejects."""
+    causes: list[str] = []
+    for module, _name, _deb in _REQUIRED:
+        ok, cause = probe(module)
+        if not ok:
+            causes.append(cause or module)
+    return sorted(set(causes))
+
+
+def _available(module: str) -> bool:
+    return _probe(module)[0]
+
+
+_PLUGIN = _available("slixmpp_omemo")
+_CORE = _available("omemo")
+_OLD = _available("oldmemo")
+_NEW = _available("twomemo")
+_CRYPTO = _available("cryptography")
 
 #: Available protocol backends (``BACKEND_LEGACY``/``BACKEND_OMEMO2``).
 BACKENDS: frozenset[str] = frozenset(
@@ -51,22 +90,17 @@ BACKENDS: frozenset[str] = frozenset(
         (BACKEND_LEGACY, _OLD), (BACKEND_OMEMO2, _NEW)) if ok
 )
 
-#: Import names of the missing components (for diagnostics).
-MISSING_MODULES: list[str] = [
-    module for module, _name, _deb in _REQUIRED
-    if not _module_available(module)
-]
+#: Import names of the missing components (root cause) — for diagnostics.
+MISSING_MODULES: list[str] = _compute_missing(_probe)
 
 #: Friendly names of the required packages that are not importable.
 MISSING: list[str] = [
-    name for module, name, _deb in _REQUIRED
-    if module in MISSING_MODULES
+    _BY_MODULE.get(module, (module, module))[0] for module in MISSING_MODULES
 ]
 
 #: Debian/Ubuntu packages of the missing components.
 MISSING_DEBIAN: list[str] = [
-    deb for module, _name, deb in _REQUIRED
-    if module in MISSING_MODULES
+    _BY_MODULE.get(module, (module, module))[1] for module in MISSING_MODULES
 ]
 
 #: True when the whole feature can be used.
@@ -95,8 +129,8 @@ def detail() -> str:
         "OMEMO is unavailable: missing Python modules %s."
         % ", ".join(MISSING_MODULES),
         "OMEMO needs slixmpp-omemo (plugin), python-omemo (core), "
-        "python-oldmemo (OMEMO 0.3), python-twomemo (OMEMO 2) and "
-        "python-cryptography.",
+        "python-oldmemo (OMEMO 0.3), python-twomemo (OMEMO 2), "
+        "python-xmlschema and python-cryptography.",
     ]
     hint = install_hint()
     if hint:

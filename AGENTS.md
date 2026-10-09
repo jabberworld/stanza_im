@@ -1577,11 +1577,14 @@ message the user was already reading at the end. All these relays fall back to
 
 **OMEMO Encryption (XEP-0384, `stanza_im/xmpp/omemo/`)**: optional end-to-end
 encryption with legacy OMEMO 0.3 (`eu.siacs.conversations.axolotl`) and OMEMO 2
-(`urn:xmpp:omemo:2`), detected at runtime (`availability.py`: `slixmpp-omemo` +
-`python-omemo` + `oldmemo`/`twomemo` + `cryptography`). When a package is
-missing the feature is disabled with a `logger.warning` (like the audio codec),
-the Preferences «OMEMO» tab is greyed out and the chat/roster entries are
-hidden. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
+(`urn:xmpp:omemo:2`), detected at runtime by importing the components
+(`availability.py`: `slixmpp-omemo` + `python-omemo` + `oldmemo`/`twomemo` +
+`xmlschema` + `cryptography`), so a present-but-broken package (a missing
+transitive dependency such as `xmlschema`) is reported by its root cause. When a
+package is missing the feature is disabled with a detailed `logger.warning` at
+startup, a red notice on the (kept enabled) Preferences «OMEMO» tab and an
+«OMEMO» row on Help → About; the chat/roster entries are hidden and an
+unexpected init failure is logged without a traceback. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
 data dir, 0600). The concrete plugin (`plugin.py`, `OmemoPlugin(XEP_0384)`)
 implements the storage and the trust policy: BTBV on (`omemo.blind_trust`,
 default) blindly trusts new devices and warns via `_devices_blindly_trusted`;

@@ -2039,13 +2039,17 @@ Registers XEP plugins (conditionally where noted):
 - Optional end-to-end encryption supporting both legacy OMEMO 0.3
   (`eu.siacs.conversations.axolotl`, `oldmemo`) and OMEMO 2
   (`urn:xmpp:omemo:2`, `twomemo`). The stack (`slixmpp-omemo` + `python-omemo`
-  + a backend + `cryptography`) is detected at runtime
-  (`stanza_im/xmpp/omemo/availability.py`); when a package is missing the
-  feature is disabled and reported in three places: a detailed `logger.warning`
-  at startup (the missing import modules and an `apt install` hint), a red
-  notice on the Preferences «OMEMO» tab (kept enabled so the reason is
-  readable, with the missing modules and a copyable install command) and an
-  «OMEMO» row on Help → About. The chat/roster entries are hidden.
+  + a backend + `cryptography`) is detected at runtime by **importing** each
+  component (`stanza_im/xmpp/omemo/availability.py`), so a package that is
+  present but whose transitive dependency is missing (e.g. `oldmemo`/`twomemo`
+  need `xmlschema`, which some distributions do not pull in) is reported by its
+  root cause rather than only by the top-level module. When a package is
+  missing the feature is disabled and reported in three places: a detailed
+  `logger.warning` at startup (the missing import modules and an `apt install`
+  hint), a red notice on the Preferences «OMEMO» tab (kept enabled so the
+  reason is readable, with the missing modules and a copyable install command)
+  and an «OMEMO» row on Help → About. The chat/roster entries are hidden; an
+  unexpected init failure is logged briefly (no traceback at WARNING).
 - The `xep_0380` (EME) plugin is registered and OMEMO messages carry
   `<encryption xmlns='urn:xmpp:eme:0' namespace='…' name='OMEMO'/>`. The
   `xep_0384` plugin is registered only when available; disco advertises

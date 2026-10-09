@@ -278,21 +278,36 @@ check("aesgcm video renders a viewer link",
       and "stanza:view:video/" in _vmarkup)
 
 # 12. availability detail / install hint / About + prefs ---------------------
+check("xmlschema is a required component",
+      availability._BY_MODULE.get("xmlschema")
+      == ("python-xmlschema", "python3-xmlschema"))
+
+# A package that wraps a missing transitive dependency (oldmemo -> xmlschema)
+# must be reported by its root cause, not by the top-level module.
+def _fake_probe(module):
+    if module in ("slixmpp_omemo", "xmlschema"):
+        return False, "xmlschema"
+    return True, ""
+
+
+check("a wrapped missing dependency is reported by its root cause",
+      availability._compute_missing(_fake_probe) == ["xmlschema"])
+
 _saved = (availability.AVAILABLE, availability.MISSING,
           availability.MISSING_MODULES, availability.MISSING_DEBIAN,
           availability.BACKENDS)
 availability.AVAILABLE = False
-availability.MISSING = ["slixmpp-omemo", "python-omemo"]
-availability.MISSING_MODULES = ["slixmpp_omemo", "omemo"]
-availability.MISSING_DEBIAN = ["python3-slixmpp-omemo", "python3-omemo"]
+availability.MISSING = ["python-xmlschema", "slixmpp-omemo"]
+availability.MISSING_MODULES = ["xmlschema", "slixmpp_omemo"]
+availability.MISSING_DEBIAN = ["python3-xmlschema", "python3-slixmpp-omemo"]
 availability.BACKENDS = frozenset()
 _hint = availability.install_hint()
 check("install hint is an apt command",
       _hint.startswith("sudo apt install")
-      and "python3-slixmpp-omemo" in _hint)
+      and "python3-xmlschema" in _hint)
 _detail = availability.detail()
 check("detail lists the missing modules and the install hint",
-      "slixmpp_omemo" in _detail and "sudo apt install" in _detail)
+      "xmlschema" in _detail and "sudo apt install" in _detail)
 check("summary marks it unavailable",
       availability.summary().startswith("unavailable"))
 
@@ -313,6 +328,13 @@ check("the OMEMO preferences tab is never disabled",
       "setTabEnabled(1, False)" not in _prefs_src)
 check("the OMEMO tab carries a detail tooltip",
       "tabs.setTabToolTip(1, availability.detail())" in _prefs_src)
+
+_client_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "core", "client.py"), encoding="utf-8").read()
+check("the OMEMO init failure is reported without a traceback",
+      "OMEMO could not be initialised: %s" in _client_src
+      and 'logger.debug("OMEMO import failed", exc_info=True)' in _client_src)
 
 print()
 if FAILURES:

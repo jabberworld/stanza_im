@@ -1171,6 +1171,12 @@ class JabberClient:
                     self.xmpp["xep_0030"].add_feature(_ns)
                 self.xmpp["xep_0030"].add_feature(
                     availability.OMEMO2_NAMESPACE + ":devices+notify")
+            except ImportError as exc:
+                # A partial install (e.g. a missing transitive dependency):
+                # report it briefly, without a traceback.
+                logger.warning("OMEMO could not be initialised: %s", exc)
+                logger.debug("OMEMO import failed", exc_info=True)
+                self.omemo = NullOmemo(self)
             except Exception:  # noqa: BLE001
                 logger.warning("Could not initialise OMEMO", exc_info=True)
                 self.omemo = NullOmemo(self)
