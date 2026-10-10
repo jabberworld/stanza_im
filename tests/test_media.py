@@ -340,6 +340,11 @@ check("media_viewer config default", cfg.media_viewer.width == 900
 geo_cfg = {"width": 700, "height": 500, "x": 50, "y": 40, "maximized": False}
 v1 = MediaViewer("https://h/p/photo.png", "image", _StubService(),
                  geometry_cfg=geo_cfg)
+_toolbar = v1.findChild(QtWidgets.QToolBar)
+check("the media viewer has save/copy/share actions",
+      _toolbar is not None and len(_toolbar.actions()) == 3
+      and hasattr(v1, "save_requested") and hasattr(v1, "copy_requested")
+      and hasattr(v1, "share_requested"))
 v1.resize(700, 500)
 v1.move(50, 40)
 v1.save_geometry()

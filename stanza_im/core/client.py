@@ -6267,7 +6267,12 @@ class JabberClient:
         # the join task via ``muc_join_error`` or by error callbacks — do not
         # treat them as participants.
         if ptype == "error":
-            self.emit("groupchat_presence_error", room, str(room), ptype, "")
+            try:
+                error = pres.get_error() or {}
+            except Exception:  # noqa: BLE001
+                error = {}
+            condition = str(error.get("condition", "") or "")
+            self.emit("groupchat_presence_error", room, nick, condition)
             return
         # Muji conference coordination (XEP-0272) piggybacks on MUC presence.
         try:

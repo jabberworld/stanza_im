@@ -60,9 +60,9 @@ stanza_im/
 │   ├── chat_themes.py  — Adium-style HTML generator
 │   ├── nick_colors.py  — Session MUC nickname → color allocation
 │   ├── font_zoom.py    — Ctrl+wheel font-size helper (input/roster/MUC list)
-│   ├── preferences.py  — Settings dialog (icon navigation, nested tabs)
+│   ├── preferences.py  — Settings dialog (icon navigation, nested tabs, lazily built pages)
 │   ├── media_preview.py — Inline image/audio/video previews
-│   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom)
+│   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom, Download/Copy/Share toolbar)
 │   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
 │   ├── emoji_picker_dialog.py — XEP-0444 reaction picker (search/categories/recent)
 │   ├── omemo_devices_dialog.py — XEP-0384 device/trust manager
@@ -1520,10 +1520,17 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   are rendered only after a successful join: `MainWindow` tracks `_muc_joined`
   (set in `_on_muc_joined`) and a 2 s `_muc_join_grace`, so the server's initial
   occupant dump is never shown as "X joined" even when history loading lags.
+- A permanent rejection — `muc_join_error` with
+  `forbidden`/`registration-required`/`not-allowed`/`banned`, or an error
+  self-presence routed through `groupchat_presence_error` — aborts the
+  optimistic join (`MainWindow._abort_muc_join`): the pseudo-occupant is dropped,
+  the room is removed from the conference roster and its tab closed, and the
+  reason is shown (message box for a manual join, tray balloon/OSD for an
+  auto-join). A members-only room cannot be entered until we are added.
 - Auto-joined rooms are retried after transient `muc_join_error` conditions
   (`timeout`, `unknown`, `remote-server-timeout`, `internal-server-error`,
   `service-unavailable`) with a bounded 5/15/45 s backoff
-  (`MainWindow._schedule_autojoin_retry`/`_retry_muc_join`); permanent
+  (`MainWindow._schedule_autojoin_retry`/`_retry_muc_join`); other permanent
   conditions surface a failure status.
 - `client._autojoin_bookmarks` retries the bookmarks fetch and skips only rooms
   that actually joined (`GroupChatInfo.joined`), so a stale entry from a failed
@@ -1697,7 +1704,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   draggable preview stores its bottom (`_preview_moved`). Positions are
   recomputed on add/dismiss; `stack_position()` is a pure function. The max
   on-screen count is `osd_max` (oldest is evicted) and each window auto-hides
-  after `osd_duration` seconds.
+  after `osd_duration` seconds. Hovering **any** OSD pauses the auto-hide timer
+  of the whole stack (`_hovered`/`_pause_all`/`_resume_all`) and resumes it once
+  the cursor leaves all of them.
 - Preferences → Notifications → OSD shows a draggable preview at the saved
   base position; dragging moves it by grabbing the mouse and calling
   `move()` on X11 (works even when the window manager ignores the
@@ -1711,7 +1720,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   is not the active window on that conversation.
   - `osd_typing`: a contact starting to compose (XEP-0085).
   - `osd_status`: `never` / `available` (crossings between online+chat and any
-    other show) / `any` (every transition); skips the initial presence sync.
+    other show) / `any` (every transition); skips the first presence per JID and
+    the whole initial presence replay within 5 s after login/`stream_resumed`
+    (`_presence_osd_grace_until`), so a login is not a burst of OSDs.
   - `osd_conference`: `never` / `mention` (own nick in the body) / `all`.
   - `osd_file`: `_notify_osd_file(sender, filename)` entry point reserved for
     incoming p2p file transfers.

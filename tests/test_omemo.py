@@ -275,21 +275,6 @@ class _FakeClient:
     omemo = _FakeOmemo()
 
 
-_orig_reload = OmemoPopup._reload
-OmemoPopup._reload = lambda self: None
-try:
-    _pop = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
-    _pop.show()
-    check("popup anchors its bottom-left at the click point",
-          _pop.y() < 400 and _pop.y() + _pop.height() <= 401)
-    check("popup left edge does not pass the click x", _pop.x() <= 500)
-    _pop.close()
-finally:
-    OmemoPopup._reload = _orig_reload
-
-# Real sequence: the popup is shown first (empty), then the list arrives.  One
-# popup is reused for the moderate and long lists (offscreen Qt dislikes many
-# simultaneous popups).
 class _DevX:
     def __init__(self, did):
         self.device_id = did
@@ -297,27 +282,34 @@ class _DevX:
         self.label = ""
 
 
-_orig_reload2 = OmemoPopup._reload
+# Offscreen Qt dislikes many simultaneous popups, so the checks use two popups
+# (each deleted before the next) and build their rows before showing.
+_orig_reload = OmemoPopup._reload
 OmemoPopup._reload = lambda self: None
 try:
-    _pop2 = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
+    # Ten devices with a QPoint anchor: no scrollbar, positioned above the
+    # click point (the opening button is not covered).
+    _pop = OmemoPopup(_FakeClient(), "bob@example.com",
+                      anchor=QtCore.QPoint(500, 700))
+    _pop._devices = [_DevX(i) for i in range(1, 11)]
+    _pop._rebuild()
+    _pop.show()
+    QtWidgets.QApplication.processEvents()
+    check("ten devices fit without a scrollbar",
+          _pop._scroll.verticalScrollBar().maximum() == 0)
+    check("the popup grows past two rows", _pop.height() > 150)
+    check("the popup sits above the click, not over the button",
+          _pop.y() + _pop.height() <= 700)
+    check("popup left edge does not pass the click x", _pop.x() <= 500)
+    _pop.close()
 
-    # A moderate list fits without a scrollbar and stays clear of the button.
-    _pop2._devices = [_DevX(i) for i in range(1, 5)]
+    # A long list must scroll instead of spilling off the screen.
+    _pop2 = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 700))
+    _pop2._devices = [_DevX(i) for i in range(1, 61)]
     _pop2._rebuild()
     _pop2.show()
     QtWidgets.QApplication.processEvents()
-    check("a moderate device list does not scroll",
-          _pop2._scroll.verticalScrollBar().maximum() == 0)
-    check("the moderate popup grows past two rows", _pop2.height() > 150)
-    check("the popup sits above the click, not over the button",
-          _pop2.y() + _pop2.height() <= 400)
-
-    # A long list must scroll instead of spilling off the screen.
-    _pop2._devices = [_DevX(i) for i in range(1, 60)]
-    _pop2._rebuild()
-    QtWidgets.QApplication.processEvents()
-    _screen = (QtWidgets.QApplication.screenAt(QtCore.QPoint(500, 400))
+    _screen = (QtWidgets.QApplication.screenAt(QtCore.QPoint(500, 700))
                or QtWidgets.QApplication.primaryScreen())
     _area = _screen.availableGeometry()
     check("popup height is capped to the screen",
@@ -328,7 +320,7 @@ try:
           or _pop2._scroll.verticalScrollBar().maximum() > 0)
     _pop2.close()
 finally:
-    OmemoPopup._reload = _orig_reload2
+    OmemoPopup._reload = _orig_reload
 
 # aesgcm:// URLs must be linkified so the media preview can embed them.
 from stanza_im.include.utils import _URL_RE

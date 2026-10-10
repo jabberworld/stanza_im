@@ -283,6 +283,7 @@ from stanza_im.ui.preferences import PreferencesDialog  # noqa: E402
 
 prefs_cfg = Config()
 prefs = PreferencesDialog(prefs_cfg, ChatThemeFactory())
+prefs._ensure_all_pages()
 pm = getattr(prefs, "_plugin_widget", None)
 check("the Preferences → Plugins page embeds the manager widget",
       pm is not None)

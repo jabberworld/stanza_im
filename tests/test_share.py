@@ -199,5 +199,36 @@ check("stanza:forward opens the share window with the message text",
       forwarded == ["[10:00] Alice: hi"])
 cw.close()
 
+# 8. xmpp-link copy + room vCard ?join + join-dialog server prefill ----------
+check("the xmpp link context menu offers Copy",
+      'tr("media_copy_link")' in _view_src)
+
+from stanza_im.ui.vcard_dialog import VCardInfoDialog
+
+_vc = VCardInfoDialog("room@conference.example.com",
+                      {"jid": "room@conference.example.com"}, conference=True)
+_vc._copy_jid()
+check("a room vCard copies the address with ?join",
+      QtWidgets.QApplication.clipboard().text()
+      == "xmpp:room@conference.example.com?join")
+_vc.close()
+
+from stanza_im.ui.conference_dialog import JoinConferenceDialog
+
+
+class _FakeClient:
+    jid_str = "me@example.com"
+
+
+_jd = JoinConferenceDialog(_FakeClient(),
+                           ["conf.a.example", "conf.b.example"], [],
+                           room="room", server="conf.b.example")
+check("the join dialog preselects the link's server",
+      _jd.collect()["server"] == "conf.b.example")
+_jd.close()
+_vc.deleteLater()
+_jd.deleteLater()
+QtWidgets.QApplication.processEvents()
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

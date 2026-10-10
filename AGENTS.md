@@ -305,7 +305,14 @@ server's own form (which raised `('options', None)`).
 `muc_status_changed`) are shown only after a successful join — `MainWindow`
 tracks `_muc_joined`/`_muc_join_grace` and suppresses them until
 `_on_muc_joined` plus a 2 s grace window, so the server's initial occupant dump
-is never rendered as "X joined". Auto-joined rooms are retried on transient
+is never rendered as "X joined". A permanent rejection (`muc_join_error` with
+`forbidden`/`registration-required`/`not-allowed`/`banned`, or an error
+self-presence routed via `groupchat_presence_error`) aborts the optimistic join
+(`_abort_muc_join`): the pseudo-occupant is dropped, the room is removed from the
+conference roster and its tab closed, and the reason is shown (a message box for
+a manual join, a tray balloon/OSD for an auto-join) — a members-only room cannot
+be entered until we are added, so nothing is left looking like a joined room.
+Auto-joined rooms are retried on transient
 `muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
 `internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and
 `client._autojoin_bookmarks` re-fetches the bookmarks and skips only rooms that
@@ -940,10 +947,15 @@ unit-testable. In bottom-up mode `osd_y` is the **bottom line**: every
 notification is anchored by its bottom edge (via `stack_position` subtracting
 its own height) so a tall one grows upward instead of overlapping the one below
 or overflowing the screen; the draggable preview stores its bottom
-(`_preview_moved`). MainWindow triggers gate on `notifications.osd_enabled` and the
+(`_preview_moved`). Hovering **any** OSD pauses the auto-hide timer of the whole
+stack (and resumes it once the cursor leaves all of them), so a notification the
+user is reading — and the ones around it — never vanish under the cursor.
+MainWindow triggers gate on `notifications.osd_enabled` and the
 per-event toggles: `osd_message` (1:1 + private, only while the chat window is
 not the active window on that conversation), `osd_typing`, `osd_status`
-(`never`/`available`/`any`, skipping the initial presence sync),
+(`never`/`available`/`any`, skipping the first presence per JID and, for the
+first 5 s after login/`stream_resumed` — `_presence_osd_grace_until` — the whole
+initial presence replay, so a login is not a burst of "X came online" OSDs),
 `osd_conference` (`never`/`mention`/`all`), plus the `_notify_osd_file` entry
 point wired for future p2p file transfers. The bubble (rounded background +
 `osd_opacity`, border) is painted in `_OsdWindow.paintEvent`. When
@@ -1211,8 +1223,11 @@ off when QtWebEngine is unavailable. Settings changes re-render open chats via
 `ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
 `showEvent` (a cached original returns before layout, so the initial fit is
 deferred) and persists its geometry/position in the shared `media_viewer`
-config section (image and video viewers share it). Covered by
-`tests/test_media.py`.
+config section (image and video viewers share it). Its toolbar carries three
+icon actions — Download (`save_requested`), Copy link (`copy_requested`) and
+Share (`share_requested`) — wired by `MainWindow._on_media_view_requested` to
+the existing `_on_media_save_requested`/`_on_media_copy_requested`/
+`_on_share_requested` handlers. Covered by `tests/test_media.py`.
 
 **CAPTCHA Forms (XEP-0158, `ui/captcha_dialog.py` + XEP-0221 media)**:
 `<media xmlns='urn:xmpp:media-element'/>` on a form field is parsed from the
@@ -1716,10 +1731,12 @@ relay as reply/edit/mention/geo), so the chat document is never reset by the
 click. It then emits `ChatWidget.xmpp_link_clicked`
 → `ChatWindow.xmpp_link_clicked` → `MainWindow._on_xmpp_uri`:
 bare JID / `?message` opens the chat (prefilling `body`), `?join` opens the
-conference join dialog (prepopulating room+server and persisting the server),
+conference join dialog (prepopulating room+server — the link's own server is
+**preselected**, not the account default — and persisting the server),
 `?roster`/`?subscribe` open `AddContactDialog` prefilled with the JID. An
 address-less `xmpp:?message;body=…` (no JID) opens `ShareDialog` with that body
-instead. The chat **context menu** on an `xmpp:` link offers bookmark/contact
+instead. The chat **context menu** on an `xmpp:` link offers a «Скопировать
+ссылку» (copies the raw `xmpp:` URI) plus bookmark/contact
 entries by action (`_xmpp_menu_target`): `?join` → only «Добавить в закладки»
 (opens `BookmarkDialog`, or the edit dialog when it already exists,
 `MainWindow._on_bookmark_jid_requested`), `?roster`/`?subscribe` → only «Добавить
@@ -1727,7 +1744,8 @@ entries by action (`_xmpp_menu_target`): `?join` → only «Добавить в 
 Unrecognized actions warn the user. The vCard dialog shows its JID with an
 icon-only copy button right beside the address (toolbar-style
 `QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",
-`make_xmpp_uri(jid)` → clipboard); the conference roster context menu's
+`make_xmpp_uri(jid)` → clipboard; for a **room** card the copied address carries
+`?join`); the conference roster context menu's
 «Скопировать адрес конференции» entry (directly below «История переписки»)
 copies `xmpp:<jid>?join`. A non-conference roster contact's context menu also
 carries «Пригласить в» (`_build_invite_menu`), a submenu of the conferences we
@@ -2059,7 +2077,12 @@ Preferences use icon navigation and nested tabs. The section icons come from
 `IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
 icon, «Устройства» the headset, «Внешний вид» `draw-brush`, «Приватность» the
 shield, «Плагины» the puzzle piece, «Статус» the speech bubble and «Горячие
-клавиши» the keyboard.
+клавиши» the keyboard. Pages are built **lazily** (`_ensure_page`): only the
+first (visible) section is built when the dialog opens, the rest on first
+selection and, after `showEvent`, one per event-loop turn
+(`_build_pages_deferred`); `_ensure_all_pages` runs before Apply/OK (and
+`_LazyControls` builds every page on a direct `controls[key]` lookup) so no
+setting is lost — this keeps opening the dialog fast.
 «Длина заголовка вкладки» lives only on the Chat tab (with an info glyph) and
 sets `application.tab_title_length` + `chat.tab_title_length` together. The
 «Stanza IM» → «Общие» page carries the «Язык приложения» selector

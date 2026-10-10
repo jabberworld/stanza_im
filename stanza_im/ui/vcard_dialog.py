@@ -45,11 +45,12 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
     def __init__(self, jid: str, card: dict, status: dict | None = None,
                  parent=None, show_edit: bool = False,
-                 can_edit: bool = False):
+                 can_edit: bool = False, conference: bool = False):
         super().__init__(parent)
         self.setWindowTitle(tr("vcard_info_title"))
         self.setMinimumWidth(360)
         self._jid = card.get("jid") or jid
+        self._conference = bool(conference)
         # ``{field key: value QLabel}`` and its owning form, so a refresh
         # updates the text/visibility in place instead of rebuilding.
         self._field_labels: dict[str, QtWidgets.QLabel] = {}
@@ -166,7 +167,9 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
     def _copy_jid(self):
         from stanza_im.include.xmpp_uri import make_xmpp_uri
-        QtWidgets.QApplication.clipboard().setText(make_xmpp_uri(self._jid))
+        action = "join" if getattr(self, "_conference", False) else ""
+        QtWidgets.QApplication.clipboard().setText(
+            make_xmpp_uri(self._jid, action))
 
     def update_status(self, values: dict):
         """Merge *values* and refresh the Status tab in place (no tab switch)."""

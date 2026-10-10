@@ -765,6 +765,10 @@ if HAS_WEBENGINE:
                     lambda c=share_content: self.share_requested.emit(c))
             if xmpp is not None:
                 jid, action = xmpp
+                menu.addAction(
+                    tr("media_copy_link"),
+                    lambda u=link_url:
+                    QtWidgets.QApplication.clipboard().setText(u))
                 if action != "roster" and action != "subscribe":
                     menu.addAction(
                         tr("ctx_bookmark_add"),
@@ -2702,15 +2706,25 @@ else:
             if to_add:
                 actions = menu.actions()
                 anchor_action = actions[0] if actions else None
+
+                def _insert(action):
+                    if anchor_action is not None:
+                        menu.insertAction(anchor_action, action)
+                    else:
+                        menu.addAction(action)
+
                 for label, signal, payload in to_add:
                     action = QtGui.QAction(label, menu)
                     action.triggered.connect(
                         lambda _checked=False, sig=signal, p=payload:
                         sig.emit(p))
-                    if anchor_action is not None:
-                        menu.insertAction(anchor_action, action)
-                    else:
-                        menu.addAction(action)
+                    _insert(action)
+                if xmpp is not None:
+                    copy_action = QtGui.QAction(tr("media_copy_link"), menu)
+                    copy_action.triggered.connect(
+                        lambda _checked=False, u=anchor:
+                        QtWidgets.QApplication.clipboard().setText(u))
+                    _insert(copy_action)
                 if anchor_action is not None:
                     menu.insertSeparator(anchor_action)
             menu.exec(event.globalPos())

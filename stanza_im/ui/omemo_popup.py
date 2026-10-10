@@ -133,7 +133,7 @@ class OmemoPopup(QtWidgets.QFrame):
         natural = chrome + content_h
         row_h = (content_h / rows) if rows else 44
         desired = min(natural + _FIT_PAD,
-                      chrome + int(row_h * _MAX_ROWS_NO_SCROLL))
+                      chrome + int(row_h * _MAX_ROWS_NO_SCROLL) + _FIT_PAD)
         width = max(self.minimumWidth(), content_w,
                     self._header.sizeHint().width())
         width += margins.left() + margins.right()

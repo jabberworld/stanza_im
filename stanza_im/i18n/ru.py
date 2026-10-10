@@ -683,6 +683,7 @@ STRINGS = {
     "muc_user_left": "{nick} вышел из комнаты",
     "muc_status_changed": "Статус {nick} изменён: {status}",
     "muc_join_failed": "Не удалось войти в комнату: {reason}",
+    "muc_join_rejected": "Не удалось войти в комнату ({reason}). Возможно, вас должны сначала добавить в список участников.",
     "muc_join_waiting": "Ожидание подтверждения входа в комнату...",
     "muc_invite": "Пригласить в комнату",
     "muc_nick_retrying": "Ник занят — пробую войти как {nick}",

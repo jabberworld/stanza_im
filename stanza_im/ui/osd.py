@@ -469,6 +469,9 @@ class OsdManager:
         self._icons = icons
         self._windows: list[dict] = []
         self._preview: dict | None = None
+        #: Ids of the OSD records the cursor is currently over; the whole
+        #: stack's auto-hide is paused while this is non-empty.
+        self._hovered: set[int] = set()
 
     @property
     def _cfg(self):
@@ -597,24 +600,39 @@ class OsdManager:
         win._refresh_backdrop()
         return rec
 
-    def _hover(self, rec: dict, inside: bool) -> None:
-        """Pause the auto-hide timer while the cursor is over the bubble.
+    def _pause_all(self) -> None:
+        for other in self._windows:
+            timer = other.get("timer")
+            if timer is not None and timer.isActive():
+                other["remaining"] = max(0, timer.remainingTime())
+                timer.stop()
 
-        The remaining time is remembered on entry and resumed (with a short
-        floor) on leave, so a notification the user is reading never vanishes
+    def _resume_all(self) -> None:
+        for other in self._windows:
+            timer = other.get("timer")
+            if timer is None or timer.isActive():
+                continue
+            remaining = other.get("remaining")
+            delay = (max(1000, int(remaining)) if remaining
+                     else int(float(other.get("duration") or 5) * 1000))
+            timer.start(delay)
+
+    def _hover(self, rec: dict, inside: bool) -> None:
+        """Pause auto-hide for the **whole stack** while the cursor is on any OSD.
+
+        The remaining time of every window is remembered on entry and resumed
+        (with a short floor) once the cursor leaves all of them, so a
+        notification the user is reading — and the ones around it — never vanish
         under the cursor.  Preview windows (no timer) are unaffected.
         """
-        timer = rec.get("timer")
-        if timer is None:
-            return
         if inside:
-            rec["remaining"] = max(0, timer.remainingTime())
-            timer.stop()
+            self._hovered.add(id(rec))
         else:
-            remaining = rec.get("remaining")
-            delay = (max(1000, int(remaining)) if remaining
-                     else int(float(rec.get("duration") or 5) * 1000))
-            timer.start(delay)
+            self._hovered.discard(id(rec))
+        if self._hovered:
+            self._pause_all()
+        else:
+            self._resume_all()
 
     def _dismiss(self, rec: dict) -> None:
         if rec not in self._windows:
@@ -625,6 +643,11 @@ class OsdManager:
             timer.stop()
         if self._preview is rec:
             self._preview = None
+        # A dismissed window can no longer be hovered; if the cursor left the
+        # whole stack, resume the others' auto-hide.
+        self._hovered.discard(id(rec))
+        if not self._hovered:
+            self._resume_all()
         win = rec["window"]
         win.hide()
         win.deleteLater()

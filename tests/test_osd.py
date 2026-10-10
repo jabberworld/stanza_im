@@ -228,6 +228,7 @@ p_cfg.notifications.osd_topdown = False
 p_mgr = OsdManager(p_cfg)
 theme = chat_themes.ChatThemeFactory()
 dlg = PreferencesDialog(p_cfg, theme, osd_manager=p_mgr)
+dlg._ensure_all_pages()
 for key in ("osd_duration", "osd_max", "osd_message", "osd_file",
             "osd_typing", "osd_status", "osd_conference", "osd_topdown"):
     check(f"prefs control {key}", key in dlg._controls)
@@ -300,6 +301,7 @@ m5.hide_preview()
 
 # 9. non-modal settings dialog keeps the preview interactive ---------------
 p_dlg2 = PreferencesDialog(p_cfg, theme, osd_manager=p_mgr)
+p_dlg2._ensure_all_pages()
 p_dlg2.show()
 check("prefs dialog non-modal", not p_dlg2.isModal())
 p_dlg2._on_notifications_tab_changed(1)
@@ -362,6 +364,19 @@ m7._hover(m7._preview, True)
 check("hover: preview without a timer is unaffected",
       m7._preview is not None and m7._preview["timer"] is None)
 m7.dismiss_all()
+
+# Hovering any OSD pauses/resumes the whole stack's auto-hide.
+m8 = OsdManager(make_cfg(osd_duration=30))
+m8.show(None, "one", "first")
+m8.show(None, "two", "second")
+_r0, _r1 = m8._windows[0], m8._windows[1]
+m8._hover(_r0, True)
+check("hover pauses every OSD timer",
+      not _r0["timer"].isActive() and not _r1["timer"].isActive())
+m8._hover(_r0, False)
+check("leaving resumes every OSD timer",
+      _r0["timer"].isActive() and _r1["timer"].isActive())
+m8.dismiss_all()
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

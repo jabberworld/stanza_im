@@ -76,6 +76,7 @@ check("OK accepts on match",
 cfg = Config()
 cfg.save_password = True
 dlg = PreferencesDialog(cfg, ChatThemeFactory())
+dlg._ensure_all_pages()
 check("button disabled when client is None",
       not dlg._btn_change_password.isEnabled())
 check("save_password control present", "save_password" in dlg._controls)
@@ -85,6 +86,7 @@ cfg2 = Config()
 cfg2.save_password = True
 client = _FakeClient()
 dlg2 = PreferencesDialog(cfg2, ChatThemeFactory(), client=client)
+dlg2._ensure_all_pages()
 check("button enabled with client", dlg2._btn_change_password.isEnabled())
 heard = []
 dlg2.password_changed.connect(heard.append)
@@ -100,12 +102,14 @@ cfg3.save_password = False
 cfg3.password = "keepme"
 client3 = _FakeClient(fail=True)
 dlg3 = PreferencesDialog(cfg3, ChatThemeFactory(), client=client3)
+dlg3._ensure_all_pages()
 res = asyncio.run(dlg3._do_change_password("new-pass"))
 check("failure returns error text", res and res != "ok")
 check("config untouched on failure", cfg3.password == "keepme")
 
 # 6. not connected ----------------------------------------------------------
 dlg4 = PreferencesDialog(Config(), ChatThemeFactory())
+dlg4._ensure_all_pages()
 res4 = asyncio.run(dlg4._do_change_password("x"))
 check("not connected reports", res4 == "You are not connected.")
 

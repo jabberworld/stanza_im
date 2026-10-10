@@ -77,11 +77,19 @@ _NOTES_TAG = "Сообщения"
 # Presence status lines are suppressed for this long after a successful join:
 # the server's initial occupant dump must not be rendered as "X joined".
 _MUC_JOIN_GRACE_S = 2.0
+# After login the server replays every contact's presence; suppress the
+# "X came online" OSD for this long so the initial sync is silent.
+_PRESENCE_OSD_GRACE_S = 5.0
 # Auto-join retry backoff (seconds) for transient join failures.
 _MUC_AUTOJOIN_RETRY_DELAYS = (5, 15, 45)
 _MUC_TRANSIENT_JOIN_ERRORS = {
     "timeout", "unknown", "remote-server-timeout", "internal-server-error",
     "service-unavailable",
+}
+# A permanent rejection (e.g. a members-only room we are not a member of):
+# the join cannot succeed without being added, so abort and report it.
+_MUC_AUTH_JOIN_ERRORS = {
+    "forbidden", "registration-required", "not-allowed", "banned",
 }
 
 
@@ -432,6 +440,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Contacts whose first presence after login already happened, so the
         # initial sync does not fire a burst of online/offline sounds.
         self._presence_sound_seen: set[str] = set()
+        # Monotonic time until which presence OSDs are suppressed (login sync).
+        self._presence_osd_grace_until = 0.0
 
         # ── UI ───────────────────────────────────────────────────
         self._build_ui()
@@ -2242,6 +2252,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat.add_status(tr("muc_nick_conflict_give_up"),
                                 format_time())
             return
+        if condition in _MUC_AUTH_JOIN_ERRORS:
+            self._abort_muc_join(room, condition)
+            return
         if self._schedule_autojoin_retry(room, condition):
             return
         chat = self._chat_window.get_chat(room)
@@ -2251,6 +2264,59 @@ class MainWindow(QtWidgets.QMainWindow):
         message = (tr("muc_join_waiting") if condition == "timeout"
                    else tr("muc_join_failed", reason=condition or code))
         chat.add_status(message, format_time())
+
+    def _on_groupchat_presence_error(self, room: str, nick: str,
+                                     condition: str) -> None:
+        """An error presence for our own occupant — abort a failed join.
+
+        Covers servers that reject the join with an error presence that the
+        join task does not surface as ``muc_join_error``.
+        """
+        self_nick = self._muc_self_nicks.get(room)
+        if not self_nick or nick != self_nick:
+            return
+        if room in self._muc_joined:
+            return
+        self._abort_muc_join(room, condition or "error")
+
+    def _abort_muc_join(self, room: str, condition: str) -> None:
+        """A permanent join rejection: report it and drop the room entirely.
+
+        We were never actually in the room (members-only / banned), so the
+        optimistic tab and pseudo-occupant are removed instead of looking like
+        a joined empty room; the user has to be added to rejoin.
+        """
+        from stanza_im.include.utils import format_time
+        chat = self._chat_window.get_chat(room)
+        if chat:
+            chat.add_status(
+                tr("muc_join_rejected", reason=condition or ""),
+                format_time())
+        self._muc_users.pop(room, None)
+        self._muc_self_nicks.pop(room, None)
+        self._muc_base_nicks.pop(room, None)
+        self._muc_joined.discard(room)
+        self._muc_join_grace.pop(room, None)
+        self._muc_join_tries.pop(room, None)
+        self._muc_create_opts.pop(room, None)
+        self._muc_names.pop(room, None)
+        self._muc_vcard_names.pop(room, None)
+        self._muc_avatar_paths.pop(room, None)
+        if room in self._conference_roster:
+            self._roster.remove_user(room)
+            self._conference_roster.discard(room)
+            self._schedule_roster_repaint()
+        if self._chat_window.has_chat(room):
+            self._chat_window.close_chat(room)
+        message = tr("muc_join_rejected", reason=condition or "")
+        if self._client is not None and room in getattr(
+                self._client, "autojoin_rooms", set()):
+            # A background auto-join: a balloon/OSD is less intrusive.
+            self._tray.show_message(APP_NAME, message)
+            self._osd.show(self._menu_icon("info.svg"), APP_NAME, message)
+        else:
+            QtWidgets.QMessageBox.warning(self._chat_dialog_parent(),
+                                          APP_NAME, message)
 
     def _on_captcha_challenge(self, jid: str, form, oob: str = "",
                               body: str = ""):
@@ -3128,6 +3194,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muji_invite", self._on_muji_invite)
         c.on("muc_invite_received", self._on_muc_invite_received)
         c.on("muc_join_error", self._on_muc_join_error)
+        c.on("groupchat_presence_error", self._on_groupchat_presence_error)
         c.on("captcha_challenge", self._on_captcha_challenge)
         c.on("mam_unavailable", self._on_mam_unavailable)
         c.on("mam_parse_error", self._on_mam_parse_error)
@@ -3155,6 +3222,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # a previous session (e.g. during a profile switch).
         self._clear_status()
         self._presence_sound_seen.clear()
+        self._presence_osd_grace_until = time.monotonic() + _PRESENCE_OSD_GRACE_S
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
         self._republish_pep()
@@ -3240,6 +3308,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_stream_resumed(self):
         logger.info("Connection restored (stream resumed)")
         self._resume_pending = False
+        self._presence_osd_grace_until = time.monotonic() + _PRESENCE_OSD_GRACE_S
         self._clear_status()
         self._set_tray_status_icon(self._config.last_status)
         if self._visible:
@@ -3525,7 +3594,8 @@ class MainWindow(QtWidgets.QMainWindow):
         can_edit = is_room and self._can_edit_room_vcard(bare)
         parent = self._chat_dialog_parent() if is_room else self
         dlg = VCardInfoDialog(jid, card, status=status, parent=parent,
-                              show_edit=is_room, can_edit=can_edit)
+                              show_edit=is_room, can_edit=can_edit,
+                              conference=is_room)
         self._vcard_dialogs[jid] = dlg
         dlg.finished.connect(lambda _result, key=jid:
                              self._vcard_dialogs.pop(key, None))
@@ -4252,7 +4322,7 @@ class MainWindow(QtWidgets.QMainWindow):
             servers.insert(0, server)
         dlg = JoinConferenceDialog(self._client, servers,
                                    list(self._bookmarks.values()), self,
-                                   room=room)
+                                   room=room, server=server)
         dlg.vcard_requested.connect(self._show_profile)
 
         def finished(result: int):
@@ -6214,6 +6284,9 @@ class MainWindow(QtWidgets.QMainWindow):
         viewer.destroyed.connect(
             lambda *_, vid=viewer_id: self._media_viewers.pop(vid, None))
         viewer.closed.connect(self._on_media_viewer_closed)
+        viewer.save_requested.connect(self._on_media_save_requested)
+        viewer.copy_requested.connect(self._on_media_copy_requested)
+        viewer.share_requested.connect(self._on_share_requested)
         if fullscreen and kind == "video":
             viewer.showFullScreen()
         else:
@@ -7243,6 +7316,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if jid not in self._osd_status_seen:
             self._osd_status_seen.add(jid)
+            return
+        # The server replays every contact's presence right after login; stay
+        # silent for a short grace window so it is not a burst of OSDs.
+        if time.monotonic() < self._presence_osd_grace_until:
             return
 
         def _available(show: str) -> bool:

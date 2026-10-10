@@ -13,6 +13,7 @@ import logging
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import find_icon
 
 try:
     from PyQt6 import QtWebChannel
@@ -76,6 +77,9 @@ class MediaViewer(QtWidgets.QMainWindow):
     """Non-modal viewer window for an image or video URL."""
 
     closed = QtCore.pyqtSignal()
+    save_requested = QtCore.pyqtSignal(str)   # url
+    copy_requested = QtCore.pyqtSignal(str)   # url
+    share_requested = QtCore.pyqtSignal(str)  # url
 
     def __init__(self, url: str, kind: str, service, parent=None,
                  geometry_cfg=None):
@@ -95,12 +99,31 @@ class MediaViewer(QtWidgets.QMainWindow):
         esc.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
         esc.activated.connect(self.close)
         self.restore_geometry()
+        self._build_toolbar()
         if self._kind == "video":
             self._build_video()
         else:
             self._build_image()
         if self._fullscreen_hint:
             QtCore.QTimer.singleShot(0, self.showFullScreen)
+
+    # ── Toolbar ───────────────────────────────────────────────────
+
+    def _build_toolbar(self) -> None:
+        """Icon-only actions: download, copy the link, share the media."""
+        bar = QtWidgets.QToolBar(self)
+        bar.setMovable(False)
+        bar.setIconSize(QtCore.QSize(16, 16))
+        for icon_name, label, signal in (
+                ("arrow-down.svg", tr("media_save"), self.save_requested),
+                ("copy.svg", tr("media_copy_link"), self.copy_requested),
+                ("send-arrow.svg", tr("ctx_share"), self.share_requested)):
+            action = bar.addAction(QtGui.QIcon(find_icon(icon_name)), label)
+            action.setToolTip(label)
+            action.triggered.connect(
+                lambda _checked=False, sig=signal:
+                sig.emit(self._url))
+        self.addToolBar(bar)
 
     # ── Image ─────────────────────────────────────────────────────
 

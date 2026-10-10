@@ -683,6 +683,7 @@ STRINGS = {
     "muc_user_left": "{nick} left the room",
     "muc_status_changed": "Status changed for {nick}: {status}",
     "muc_join_failed": "Could not join the room: {reason}",
+    "muc_join_rejected": "Could not join the room ({reason}). You may need to be added to the member list first.",
     "muc_join_waiting": "Waiting for the room to accept the join request...",
     "muc_invite": "Invite to room",
     "muc_nick_retrying": "Nickname is busy — trying again as {nick}",

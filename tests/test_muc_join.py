@@ -112,6 +112,15 @@ try:
     check("permanent error does not retry",
           win._muc_autojoin_tries["room@conf.example"] == tries_before)
 
+    # A permanent auth rejection aborts the optimistic join entirely.
+    win._muc_users = {"room@conf.example": {"me": {"nick": "me"}}}
+    win._conference_roster = {"room@conf.example"}
+    win._on_muc_join_error("room@conf.example", "registration-required", "")
+    check("a permanent rejection drops the pseudo-occupant",
+          "room@conf.example" not in win._muc_users)
+    check("a permanent rejection drops the room from the roster",
+          "room@conf.example" not in win._conference_roster)
+
     win._schedule_autojoin_retry("room@conf.example", "timeout")  # 2
     win._schedule_autojoin_retry("room@conf.example", "timeout")  # 3
     check("retry count is bounded at three",

@@ -128,6 +128,29 @@ class _ColorButton(QtWidgets.QPushButton):
             self.set_color(color.name())
 
 
+class _LazyControls(dict):
+    """A control map that builds every page on a missing-key lookup.
+
+    The preferences pages are built lazily, but external callers (and tests)
+    may read ``dialog._controls[key]`` for a control on a not-yet-built page;
+    that lookup then forces all pages to build so the key is present.
+    """
+
+    def __init__(self, owner):
+        super().__init__()
+        self._owner = owner
+
+    def __getitem__(self, key):
+        if key not in self and self._owner is not None:
+            self._owner._ensure_all_pages()
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        if not super().__contains__(key) and self._owner is not None:
+            self._owner._ensure_all_pages()
+        return super().__contains__(key)
+
+
 class PreferencesDialog(QtWidgets.QDialog):
     """Edit application settings grouped like the original Jabbim dialog."""
 
@@ -148,7 +171,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                               else SoundPlayer())
         self.setWindowTitle(tr("prefs_title"))
         self.setMinimumSize(760, 540)
-        self._controls: dict[str, QtWidgets.QWidget] = {}
+        # Pages are built lazily, so a direct ``controls[key]`` lookup for a
+        # not-yet-built page forces every page to build (used by tests/tools);
+        # the UI itself only touches built controls.
+        self._controls: dict[str, QtWidgets.QWidget] = _LazyControls(self)
         self._build_ui()
         self._load_values()
         self._refresh_discovery_labels()
@@ -159,6 +185,8 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def done(self, result):
         self._stop_device_tests()
+        if getattr(self, "_defer_timer", None) is not None:
+            self._defer_timer.stop()
         if self._osd_manager is not None:
             self._osd_manager.hide_preview()
         super().done(result)
@@ -174,8 +202,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "padding: 4px; } QListWidget::item { padding: 7px 4px; } "
             "QListWidget::item:selected { color: palette(highlighted-text); "
             "background: palette(highlight); }")
-        self._sections.currentRowChanged.connect(
-            lambda row: self._stack.setCurrentIndex(max(0, row)))
+        self._sections.currentRowChanged.connect(self._on_section_changed)
         split.addWidget(self._sections)
 
         self._stack = QtWidgets.QStackedWidget()
@@ -208,6 +235,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_status", "status", self._page_status),
             ("prefs_shortcuts", "shortcuts", self._page_shortcuts),
         )
+        # Build pages lazily: only the first one is created up front (so the
+        # dialog opens instantly); the rest are built on first selection and in
+        # the background after show.
+        self._page_factories: list = []
+        self._pages: list = []
         for key, icon_name, page_factory in sections:
             icon = QtGui.QIcon()
             if icons_mod.icons:
@@ -215,8 +247,60 @@ class PreferencesDialog(QtWidgets.QDialog):
                 if not pixmap.isNull():
                     icon = QtGui.QIcon(pixmap)
             self._sections.addItem(QtWidgets.QListWidgetItem(icon, tr(key)))
-            self._stack.addWidget(page_factory())
+            self._page_factories.append(page_factory)
+            self._pages.append(None)
+            self._stack.addWidget(QtWidgets.QWidget())  # placeholder
         self._sections.setCurrentRow(0)
+        self._ensure_page(0)
+
+    def _on_section_changed(self, row: int) -> None:
+        row = max(0, row)
+        self._ensure_page(row)
+        self._stack.setCurrentIndex(row)
+
+    def _ensure_page(self, row: int) -> None:
+        """Build the page at *row* on first use and load its saved values."""
+        if row < 0 or row >= len(self._page_factories):
+            return
+        if self._pages[row] is not None:
+            return
+        factory = self._page_factories[row]
+        before = set(self._controls)
+        page = factory()
+        placeholder = self._stack.widget(row)
+        self._stack.removeWidget(placeholder)
+        if placeholder is not None:
+            placeholder.deleteLater()
+        self._stack.insertWidget(row, page)
+        self._pages[row] = page
+        self._apply_values(self._values_dict(), set(self._controls) - before)
+        self._refresh_discovery_labels()
+        self._refresh_connection_info()
+
+    def _ensure_all_pages(self) -> None:
+        for row in range(len(self._page_factories)):
+            self._ensure_page(row)
+
+    def _build_pages_deferred(self) -> None:
+        """Build any remaining pages one per event-loop turn (keeps UI live)."""
+        if not self.isVisible():
+            return
+        for row in range(len(self._page_factories)):
+            if self._pages[row] is None:
+                self._ensure_page(row)
+                if getattr(self, "_defer_timer", None) is not None:
+                    self._defer_timer.start(0)
+                return
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        # After the dialog is visible, warm up the remaining pages in the
+        # background so the first switch to any section is instant.  The timer
+        # is a child of the dialog so it dies with it (no dangling callback).
+        self._defer_timer = QtCore.QTimer(self)
+        self._defer_timer.setSingleShot(True)
+        self._defer_timer.timeout.connect(self._build_pages_deferred)
+        self._defer_timer.start(0)
 
     @staticmethod
     def _page() -> tuple[QtWidgets.QWidget, QtWidgets.QFormLayout]:
@@ -1473,6 +1557,16 @@ class PreferencesDialog(QtWidgets.QDialog):
             spin.setValue(int(size))
 
     def _load_values(self):
+        self._apply_values(self._values_dict())
+
+    def _apply_values(self, values, keys=None):
+        """Apply *values* to built controls (all, or only *keys*)."""
+        for key, value in values.items():
+            # Use the plain dict membership (no lazy build) here.
+            if key in self._controls.keys() and (keys is None or key in keys):
+                self._set(key, value)
+
+    def _values_dict(self):
         cfg = self._config
         connection = cfg.connection
         chat = cfg.chat
@@ -1618,15 +1712,15 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "sound_ft_finish", "sound_contact_online",
                     "sound_contact_offline"):
             values[key] = bool(getattr(notifications, key, False))
-        for key, value in values.items():
-            if key in self._controls:
-                self._set(key, value)
+        return values
 
     def _on_ok(self):
         self._apply_settings()
         self.accept()
 
     def _apply_settings(self):
+        # Every control must exist before reading values (lazy pages).
+        self._ensure_all_pages()
         cfg = self._config
         cfg.ui.close_to_tray = self._value("close_to_tray")
         cfg.ui.language = self._value("language") or ""

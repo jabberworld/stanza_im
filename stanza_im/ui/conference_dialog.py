@@ -100,7 +100,7 @@ class ConferenceBrowserDialog(QtWidgets.QDialog):
 class JoinConferenceDialog(QtWidgets.QDialog):
     vcard_requested = QtCore.pyqtSignal(str)
     def __init__(self, client, servers: list[str], bookmarks: list[dict],
-                 parent=None, room: str = ""):
+                 parent=None, room: str = "", server: str = ""):
         super().__init__(parent)
         self._client = client
         self._bookmarks = bookmarks
@@ -122,6 +122,9 @@ class JoinConferenceDialog(QtWidgets.QDialog):
         self._room = QtWidgets.QLineEdit(room)
         self._server = QtWidgets.QComboBox(); self._server.setEditable(True)
         self._server.addItems(self._server_values)
+        if server:
+            # Prefer the server from the link/URI over the account default.
+            self._server.setCurrentText(server)
         self._password = QtWidgets.QLineEdit(); self._password.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         form.addRow(tr("conference_nick"), self._nick)
         form.addRow(tr("conference_room"), self._room)
