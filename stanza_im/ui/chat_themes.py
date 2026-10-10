@@ -286,6 +286,11 @@ class ChatThemeFactory:
     def set_emoticon_skin(self, skin: str) -> None:
         self._emoticon_skin = skin
 
+    @property
+    def emoticon_skin(self) -> str:
+        """The active emoticon set id (``<dir>/smileys*.cfg``)."""
+        return self._emoticon_skin
+
     def set_message_styling(self, enabled: bool) -> None:
         """Enable/disable XEP-0393 message styling in rendered bodies."""
         self._message_styling = bool(enabled)

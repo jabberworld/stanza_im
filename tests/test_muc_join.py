@@ -107,8 +107,10 @@ try:
     check("transient error does not show a failure yet", chat.statuses == [])
 
     tries_before = win._muc_autojoin_tries["room@conf.example"]
+    win._muc_self_nicks["room@conf.example"] = "me"
     win._on_muc_join_error("room@conf.example", "forbidden", "")
-    check("permanent error shows a failure", len(chat.statuses) == 1)
+    check("permanent error aborts the join (no fake occupant left)",
+          "room@conf.example" not in win._muc_self_nicks)
     check("permanent error does not retry",
           win._muc_autojoin_tries["room@conf.example"] == tries_before)
 
@@ -145,10 +147,11 @@ class _ErrPres:
         self._err = {"condition": condition, "code": code}
 
     def __getitem__(self, key):
-        return self._frm if key == "from" else ""
-
-    def get_error(self):
-        return self._err
+        if key == "from":
+            return self._frm
+        if key == "error":
+            return self._err
+        return ""
 
 
 class _ErrClient:

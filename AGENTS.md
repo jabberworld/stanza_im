@@ -75,6 +75,7 @@ stanza_im/                      # Python package
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── emoji_picker_dialog.py   # XEP-0444 reaction picker (search/categories/recent)
+│   ├── smiley_picker.py         # Emoticon-set smiley picker (Qt.Popup grid)
 │   ├── omemo_devices_dialog.py  # XEP-0384 device/trust manager
 │   ├── omemo_popup.py           # Chat shield: quick device trust/rename popup
 │   ├── qr_dialog.py             # QR code dialog (OMEMO fingerprint)
@@ -310,13 +311,16 @@ is never rendered as "X joined". A MUC join error presence
 `MatchXPath` handler (`client._on_muc_join_error_stanza`) — `join_muc_wait`
 does not reliably raise for it, and slixmpp routes it to
 `muc::<room>::presence-error` rather than `groupchat_presence` — and emitted as
-`muc_join_error` with the condition. A permanent rejection (`muc_join_error` with
+`muc_join_error` with the condition (the condition/code are read by the pure
+`_presence_error_condition` helper from `stanza["error"]["condition"]`/`["code"]`
+— slixmpp has no `get_error()`). A permanent rejection (`muc_join_error` with
 `forbidden`/`registration-required`/`not-allowed`/`banned`) aborts the optimistic
 join (`_abort_muc_join`, which also cancels the pending join task): the
 pseudo-occupant is dropped, the room is removed from the conference roster and
-its tab closed, and the reason is shown (a message box for a manual join, a tray
-balloon/OSD for an auto-join) — a members-only room cannot be entered until we
-are added, so nothing is left looking like a joined room.
+its tab closed, and the reason is shown — a `QMessageBox` with
+`muc_join_cannot_join` for a manual join, a tray balloon/OSD for an auto-join — a
+members-only room cannot be entered until we are added, so nothing is left
+looking like a joined room.
 Auto-joined rooms are retried on transient
 `muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
 `internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and
@@ -1776,9 +1780,15 @@ bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
 
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries flat
-icon buttons for Clear, vCard and "Send file"; in a 1:1 chat "Send file" is a
-menu ("P2P" / "P2P IBB" / "HTTP Upload"), while a conference only supports HTTP
-Upload and gets a plain button (no menu). The "Send" control is a vertical
+icon buttons for Clear, vCard, Smiley and "Send file"; in a 1:1 chat "Send file"
+is a menu ("P2P" / "P2P IBB" / "HTTP Upload"), while a conference only supports
+HTTP Upload and gets a plain button (no menu). The Smiley button
+(`smiley.svg`, `ChatWidget._open_smiley_picker`) opens
+`ui/smiley_picker.py::SmileyPicker` — a frameless `Qt.Popup` grid of the current
+emoticon set (`EmoticonSetSource` over `include.emoticons.set_items`); the chosen
+code is inserted as plain text (`ChatWidget._insert_smiley`). The source is
+abstracted (`SmileySource`), so a unicode-emoji source can be added to the
+smiley-theme selector later. The "Send" control is a vertical
 icon-only button (an Enter-style arrow) whose height follows the input field.
 The input is vertically
 resizable

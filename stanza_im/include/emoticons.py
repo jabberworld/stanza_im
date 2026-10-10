@@ -99,6 +99,19 @@ def preview_items(skin: str, limit: int = 10) -> list[tuple[str, str]]:
     return result
 
 
+def set_items(skin: str) -> list[tuple[str, str]]:
+    """Every ``(code, image_path)`` pair of a set, in file order."""
+    item = get_set(skin)
+    if not item:
+        return []
+    result: list[tuple[str, str]] = []
+    for code, filename in item["mapping"].items():
+        path = os.path.join(item["directory"], filename)
+        if os.path.isfile(path):
+            result.append((code, path))
+    return result
+
+
 def emoticon_codes(skin: str = "default/smileys.cfg") -> list[str]:
     return sorted(_load_map(skin), key=len, reverse=True)
 

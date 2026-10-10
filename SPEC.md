@@ -2215,7 +2215,11 @@ Registers XEP plugins (conditionally where noted):
 
 - A toolbar above the input offers flat icon buttons: Clear chat, History
   (`history.png`, opens the history manager for this JID — 1:1, MUC and private
-  tabs alike — via `ChatWidget.history_requested`), vCard, and
+  tabs alike — via `ChatWidget.history_requested`), vCard, Smiley
+  (`smiley.svg`, opens `ui/smiley_picker.py` — a frameless `Qt.Popup` grid of
+  the current emoticon set whose chosen code is inserted as plain text into the
+  input; source-agnostic `SmileySource`/`EmoticonSetSource` so a unicode-emoji
+  source can be added to the smiley-theme selector later), and
   Send file (a menu with "P2P" and "HTTP Upload" for 1:1 chats; in a conference
   a plain button, HTTP Upload only). The Send control is a vertical icon-only
   button (an Enter-style arrow) whose height tracks the input field. The input

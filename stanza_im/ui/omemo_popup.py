@@ -243,15 +243,8 @@ class OmemoPopup(QtWidgets.QFrame):
                                  str(getattr(device, "label", "") or ""))
         level = omemo.trust_level_name(device)
         trusted = _is_trusted(level)
-        try:
-            seen = omemo.device_last_seen(self._jid, int(device.device_id))
-        except Exception:  # noqa: BLE001
-            seen = 0.0
-        seen_txt = (time.strftime("%Y-%m-%d %H:%M", time.localtime(seen))
-                    if seen else "\u2014")
         label = QtWidgets.QLabel(
-            f"<b>{escape_html(name)}</b><br>{escape_html(_trust_label(level))}"
-            f"<br>{escape_html(tr('omemo_last_seen'))}: {escape_html(seen_txt)}")
+            f"<b>{escape_html(name)}</b><br>{escape_html(_trust_label(level))}")
         label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         tooltip = omemo.fingerprint(device.identity_key)
         try:
@@ -260,6 +253,13 @@ class OmemoPopup(QtWidgets.QFrame):
             resource = ""
         if resource:
             tooltip += "\n" + tr("omemo_device_resource", resource=resource)
+        try:
+            seen = omemo.device_last_seen(self._jid, int(device.device_id))
+        except Exception:  # noqa: BLE001
+            seen = 0.0
+        seen_txt = (time.strftime("%Y-%m-%d %H:%M", time.localtime(seen))
+                    if seen else "\u2014")
+        tooltip += "\n" + tr("omemo_last_seen") + ": " + seen_txt
         label.setToolTip(tooltip)
         box.addWidget(label, 1)
 

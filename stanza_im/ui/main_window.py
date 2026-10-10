@@ -2286,18 +2286,12 @@ class MainWindow(QtWidgets.QMainWindow):
         optimistic tab and pseudo-occupant are removed instead of looking like
         a joined empty room; the user has to be added to rejoin.
         """
-        from stanza_im.include.utils import format_time
         # Stop the pending join wait so it neither blocks nor reports a late
         # timeout after we have already aborted.
         if self._client is not None:
             task = getattr(self._client, "_muc_join_tasks", {}).get(room)
             if task is not None and not task.done():
                 task.cancel()
-        chat = self._chat_window.get_chat(room)
-        if chat:
-            chat.add_status(
-                tr("muc_join_rejected", reason=condition or ""),
-                format_time())
         self._muc_users.pop(room, None)
         self._muc_self_nicks.pop(room, None)
         self._muc_base_nicks.pop(room, None)
@@ -2314,7 +2308,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._schedule_roster_repaint()
         if self._chat_window.has_chat(room):
             self._chat_window.close_chat(room)
-        message = tr("muc_join_rejected", reason=condition or "")
+        message = tr("muc_join_cannot_join", room=room)
         if self._client is not None and room in getattr(
                 self._client, "autojoin_rooms", set()):
             # A background auto-join: a balloon/OSD is less intrusive.
@@ -5447,11 +5441,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._chat_window.open_chat(bare_jid, sender_name, focus=False)
             self._apply_call_support(bare_jid)
 
+        # One timestamp for both the live row and the stored copy, so the two
+        # de-duplicate (the same message must not render twice on reload).
+        stamp = ts or _current_timestamp()
         chat = self._chat_window.get_chat(bare_jid)
         if chat:
             self._arm_unread_separator(bare_jid, chat)
             chat.add_message(sender=sender_name, body=body,
-                             timestamp=ts or _current_timestamp(),
+                             timestamp=stamp,
                              direction="incoming", unstyled=unstyled,
                              reply_able_id=reply_able_id,
                              reply_author=reply_author or frm,
@@ -5461,7 +5458,7 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             bare_jid, "incoming", body,
-            timestamp=ts or _current_timestamp(),
+            timestamp=stamp,
             sender=sender_name,
             origin_id=reply_able_id,
             message_id=reply_able_id,
@@ -5499,11 +5496,12 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if not isinstance(jid, str) or not jid.strip():
             return
+        stamp = ts or _current_timestamp()
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.add_message(
                 sender="Me", body=body,
-                timestamp=ts or _current_timestamp(), direction="outgoing",
+                timestamp=stamp, direction="outgoing",
                 message_id=stable_id,
                 reply_able_id=stable_id, reply_author=jid,
                 reply_to=reply_to, reply_id=reply_id, media=media,
@@ -5512,7 +5510,7 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             jid, "outgoing", body,
-            timestamp=ts or _current_timestamp(), sender="Me",
+            timestamp=stamp, sender="Me",
             origin_id=stable_id, message_id=stable_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
             markup=markup))
@@ -5588,11 +5586,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember_contact(target, name=nick, is_conference=True)
         self._sync_pm_roster(target, room, nick)
         self._notify_incoming_message(target, body)
+        stamp = ts or _current_timestamp()
         chat = self._chat_window.open_chat(target, nick)
         self._apply_call_support(target)
         self._arm_unread_separator(target, chat)
         chat.add_message(sender=nick, body=body,
-                         timestamp=ts or _current_timestamp(), direction="incoming",
+                         timestamp=stamp, direction="incoming",
                          unstyled=unstyled,
                          sender_jid=info.get("avatar_jid", "") or target,
                          reply_able_id=reply_able_id,
@@ -5602,7 +5601,7 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
-            timestamp=ts or _current_timestamp(), sender=nick,
+            timestamp=stamp, sender=nick,
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
@@ -5707,10 +5706,11 @@ class MainWindow(QtWidgets.QMainWindow):
                        and self._chat_window.current_jid() == room)
         if chat and not room_active and nick != self_nick:
             self._arm_unread_separator(room, chat)
+        stamp = ts or _current_timestamp()
         if chat:
             user = self._muc_users.get(room, {}).get(nick, {})
             chat.add_message(sender=nick, body=body,
-                             timestamp=ts or _current_timestamp(),
+                             timestamp=stamp,
                              direction="incoming",
                              unstyled=unstyled,
                              sender_jid=(user.get("avatar_jid", "")
@@ -5723,7 +5723,7 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             room, "incoming", body,
-            timestamp=ts or _current_timestamp(), sender=nick,
+            timestamp=stamp, sender=nick,
             archive_id=archive_id,
             origin_id=reply_ref_id,
             message_id=reply_ref_id,

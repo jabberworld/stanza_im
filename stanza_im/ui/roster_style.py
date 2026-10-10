@@ -262,6 +262,27 @@ class RosterStyle:
                 painter.drawPixmap(cx, cy, scaled)
                 avail_right -= self.CLIENT_ICON_SIZE + 4
 
+        # PEP activity/mood icons: drawn between the text and the avatar
+        # (visible order: name, badge, mood, activity, client, avatar).
+        for enabled, value, path_getter in (
+                (self._show_activity, item.activity, pep.activity_icon_path),
+                (self._show_mood, item.mood, pep.mood_icon_path)):
+            if enabled and value and icons:
+                el_path = path_getter(value)
+                if el_path:
+                    el_pix = icons.get(el_path)
+                    if not el_pix.isNull():
+                        scaled = el_pix.scaled(
+                            self.MOOD_ACTIVITY_SIZE, self.MOOD_ACTIVITY_SIZE,
+                            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                            QtCore.Qt.TransformationMode.SmoothTransformation)
+                        ex = avail_right - self.MOOD_ACTIVITY_SIZE
+                        ey = y + (rect.height() - self.MOOD_ACTIVITY_SIZE) // 2
+                        painter.drawPixmap(ex, ey, scaled)
+                        avail_right -= self.MOOD_ACTIVITY_SIZE + 4
+
+        # Unread badge: leftmost of the right-side icons, right after the name
+        # (drawn after the mood/activity loop, so it sits closest to the text).
         if item.unread_count > 0:
             badge_text = self.badge_text(item)
             badge_font = painter.font()
@@ -281,25 +302,6 @@ class RosterStyle:
             # would be used for the name/status (the roster font settings
             # would be ignored for contacts with unread messages).
             painter.setFont(base_font)
-
-        # PEP activity/mood icons: drawn between the text and the badge/avatar
-        # (visible order: name, mood, activity, badge, avatar).
-        for enabled, value, path_getter in (
-                (self._show_activity, item.activity, pep.activity_icon_path),
-                (self._show_mood, item.mood, pep.mood_icon_path)):
-            if enabled and value and icons:
-                el_path = path_getter(value)
-                if el_path:
-                    el_pix = icons.get(el_path)
-                    if not el_pix.isNull():
-                        scaled = el_pix.scaled(
-                            self.MOOD_ACTIVITY_SIZE, self.MOOD_ACTIVITY_SIZE,
-                            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                            QtCore.Qt.TransformationMode.SmoothTransformation)
-                        ex = avail_right - self.MOOD_ACTIVITY_SIZE
-                        ey = y + (rect.height() - self.MOOD_ACTIVITY_SIZE) // 2
-                        painter.drawPixmap(ex, ey, scaled)
-                        avail_right -= self.MOOD_ACTIVITY_SIZE + 4
 
         name_rect = QtCore.QRect(name_x, y + 2, avail_right - name_x, 16)
         painter.setPen(text_color)

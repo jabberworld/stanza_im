@@ -691,6 +691,14 @@ class ChatWidget(QtWidgets.QWidget):
         vcard_btn.clicked.connect(lambda: self.vcard_requested.emit(self.jid))
         actions_row.addWidget(vcard_btn)
 
+        # Smiley picker (all chat types): inserts a code from the current set.
+        self._smiley_btn = QtWidgets.QToolButton(self)
+        self._smiley_btn.setIcon(self._chat_icon("smiley.svg"))
+        self._smiley_btn.setToolTip(tr("chat_smiley"))
+        self._smiley_btn.setAutoRaise(True)
+        self._smiley_btn.clicked.connect(self._open_smiley_picker)
+        actions_row.addWidget(self._smiley_btn)
+
         self._send_file_btn = QtWidgets.QToolButton(self)
         self._send_file_btn.setIcon(self._chat_icon("upload.png"))
         self._send_file_btn.setToolTip(tr("chat_send_file"))
@@ -995,6 +1003,32 @@ class ChatWidget(QtWidgets.QWidget):
         before = self._input.toPlainText()[:cursor.position()]
         prefix = " " if before and not before[-1].isspace() else ""
         self._input.insertPlainText(prefix + nick + ": ")
+        self._input.setFocus()
+
+    def _open_smiley_picker(self) -> None:
+        """Open the smiley picker (current emoticon set) above the button."""
+        from stanza_im.ui.smiley_picker import EmoticonSetSource, SmileyPicker
+        skin = getattr(self._theme, "emoticon_skin", "") or "default/smileys.cfg"
+        picker = SmileyPicker(EmoticonSetSource(skin), self)
+        picker.smiley_chosen.connect(self._insert_smiley)
+        pos = self._smiley_btn.mapToGlobal(
+            QtCore.QPoint(0, -picker.height()))
+        screen = (QtWidgets.QApplication.screenAt(
+            self._smiley_btn.mapToGlobal(QtCore.QPoint(0, 0)))
+            or QtWidgets.QApplication.primaryScreen())
+        area = screen.availableGeometry() if screen else None
+        if area is not None and area.isValid():
+            pos.setX(max(area.left(),
+                         min(pos.x(), area.right() - picker.width())))
+            pos.setY(max(area.top(), pos.y()))
+        picker.move(pos)
+        picker.show()
+
+    def _insert_smiley(self, token: str) -> None:
+        """Insert a picked smiley's text code at the cursor."""
+        if not token:
+            return
+        self._input.insertPlainText(token)
         self._input.setFocus()
 
     def _handle_media_view_uri(self, url: str) -> None:
@@ -1951,8 +1985,18 @@ class ChatWidget(QtWidgets.QWidget):
 
     @staticmethod
     def _entry_key(entry: dict) -> tuple:
+        """Stable identity, so a live row and its stored copy de-duplicate.
+
+        Prefers the server/own ids (which the live entry and the SQLite row
+        share) over the content, so a live message and its reloaded row are the
+        same entry even though their timestamps were computed separately.
+        """
         if entry.get("archive_id"):
             return ("archive", entry["archive_id"])
+        if entry.get("origin_id"):
+            return ("origin", entry["origin_id"])
+        if entry.get("message_id"):
+            return ("message", entry["message_id"])
         return (entry.get("direction", "incoming"),
                 entry.get("sender", ""), entry.get("body", ""),
                 entry.get("timestamp", ""))

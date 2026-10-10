@@ -1508,12 +1508,7 @@ class JabberClient:
         gi = self.groupchats.get(room)
         if gi is not None and gi.joined:
             return  # an error for a room we already joined is a kick, not a join
-        try:
-            error = pres.get_error() or {}
-        except Exception:  # noqa: BLE001
-            error = {}
-        condition = str(error.get("condition", "") or "error")
-        code = str(error.get("code", "") or "")
+        condition, code = _presence_error_condition(pres)
         logger.info("MUC join rejected for %s: %s (%s)", room, condition, code)
         self.emit("muc_join_error", room, condition, code)
 
@@ -2869,9 +2864,8 @@ class JabberClient:
                 self.emit("captcha_challenge", room_jid, captcha,
                           _oob_url(pres), body)
                 return
-            error = exc.presence.get_error() if getattr(exc, "presence", None) else {}
-            condition = (error or {}).get("condition", "") or "unknown"
-            code = (error or {}).get("code", "") or ""
+            condition, code = _presence_error_condition(
+                getattr(exc, "presence", None), "unknown")
             logger.info("MUC join rejected for %s: %s (%s)", room, condition, code)
             self.emit("muc_join_error", room, condition, str(code))
             return
@@ -6900,6 +6894,29 @@ def _clean_jid(value) -> str:
         return ""
     result = str(value).strip()
     return "" if result.lower() in ("", "none", "null") else result
+
+
+def _presence_error_condition(stanza, default: str = "error") -> tuple[str, str]:
+    """Return the ``(condition, code)`` of a stanza error.
+
+    slixmpp exposes the error as the ``error`` sub-stanza (``stanza["error"]``);
+    there is no ``get_error()`` helper, so read the condition/code directly.
+    ``default`` is returned when no condition is present.
+    """
+    try:
+        error = stanza["error"]
+    except (KeyError, TypeError, AttributeError):
+        return default, ""
+    condition = code = ""
+    try:
+        condition = str(error["condition"] or "")
+    except (KeyError, TypeError, AttributeError):
+        condition = ""
+    try:
+        code = str(error["code"] or "")
+    except (KeyError, TypeError, AttributeError):
+        code = ""
+    return condition or default, code
 
 
 def _forwarded_stanza(forwarded):
