@@ -3306,6 +3306,32 @@ class JabberClient:
                     return None
         return None
 
+    async def get_last_activity(self, jid: str) -> dict:
+        """XEP-0012: a contact's last activity.
+
+        Returns ``{"seconds": int | None, "status": str}`` — the seconds since
+        the entity's last activity and the free-text status it last broadcast
+        (the ``<query>`` element's text).  ``{}`` when the entity does not
+        answer or does not support the query.
+        """
+        iq = self.xmpp.Iq()
+        iq["type"] = "get"
+        iq["to"] = jid
+        ET.SubElement(iq.xml, "{%s}query" % NS_LAST)
+        try:
+            result = await iq.send(timeout=10)
+        except Exception as exc:
+            logger.debug("Last-activity query failed for %s: %s", jid, exc)
+            return {}
+        for el in result.xml.iter("{%s}query" % NS_LAST):
+            seconds = el.get("seconds")
+            try:
+                secs = int(seconds) if seconds is not None else None
+            except (TypeError, ValueError):
+                secs = None
+            return {"seconds": secs, "status": (el.text or "").strip()}
+        return {}
+
     async def get_commands_list(self, jid: str) -> list[dict]:
         """Return the XEP-0050 ad-hoc command list of a service."""
         node = "http://jabber.org/protocol/commands"

@@ -582,6 +582,8 @@ STRINGS = {
     "vcard_field_os": "Операционная система",
     "vcard_field_ping": "Ping",
     "vcard_field_status_updated": "Статус обновлён",
+    "vcard_field_last_seen": "Последнее появление",
+    "vcard_field_last_status": "Последний статус",
     # Groupchat
     "muc_leave": "Покинуть комнату",
     "muc_leave_confirm": "Покинуть конференцию {room}?",
@@ -1360,6 +1362,7 @@ STRINGS = {
     'plugin_manager_title': 'Плагины',
     'plugin_configure': 'Настроить',
     'plugin_category_communication': 'Общение',
+    'plugin_category_notifications': 'Уведомления',
     'plugin_category_appearance': 'Внешний вид',
     'plugin_category_other': 'Прочее',
     'plugins_missing_warning': 'Включённые плагины отсутствуют и были пропущены:\n{plugins}',

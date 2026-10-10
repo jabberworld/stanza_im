@@ -87,12 +87,31 @@ def _load_map(skin: str) -> dict[str, str]:
     return resolved
 
 
+def _file_codes(mapping: dict[str, str]) -> dict[str, str]:
+    """Map each target image file to a single (longest) text code.
+
+    Several text aliases (``:)`` and ``:-)``) usually point at the same image;
+    a picker/preview list keyed by the code would then show that image once per
+    alias.  Keying by the file and keeping the longest alias collapses them to
+    one row while still rendering every alias in the message text.
+    """
+    result: dict[str, str] = {}
+    for code, filename in mapping.items():
+        current = result.get(filename)
+        if current is None or len(code) > len(current):
+            result[filename] = code
+    return result
+
+
 def preview_items(skin: str, limit: int = 10) -> list[tuple[str, str]]:
+    """Up to *limit* ``(code, image_path)`` pairs, one per distinct image."""
     item = get_set(skin)
     if not item:
         return []
     result = []
-    for code, filename in list(item["mapping"].items())[:limit]:
+    for filename, code in _file_codes(item["mapping"]).items():
+        if len(result) >= limit:
+            break
         path = os.path.join(item["directory"], filename)
         if os.path.isfile(path):
             result.append((code, path))
@@ -100,12 +119,12 @@ def preview_items(skin: str, limit: int = 10) -> list[tuple[str, str]]:
 
 
 def set_items(skin: str) -> list[tuple[str, str]]:
-    """Every ``(code, image_path)`` pair of a set, in file order."""
+    """Every ``(code, image_path)`` pair of a set, one per distinct image."""
     item = get_set(skin)
     if not item:
         return []
     result: list[tuple[str, str]] = []
-    for code, filename in item["mapping"].items():
+    for filename, code in _file_codes(item["mapping"]).items():
         path = os.path.join(item["directory"], filename)
         if os.path.isfile(path):
             result.append((code, path))

@@ -57,6 +57,12 @@ def _current_timestamp() -> str:
         timespec="microseconds").replace("+00:00", "Z")
 
 
+def _format_last_seen(seconds: int) -> str:
+    """Absolute local date-time of a contact's last activity (XEP-0012)."""
+    when = datetime.datetime.now() - datetime.timedelta(seconds=int(seconds))
+    return when.strftime("%Y-%m-%d %H:%M")
+
+
 def _virtual_roster_groups() -> set[str]:
     """Roster groups that hold a computed row, not a real contact group.
 
@@ -80,6 +86,10 @@ _MUC_JOIN_GRACE_S = 2.0
 # After login the server replays every contact's presence; suppress the
 # "X came online" OSD for this long so the initial sync is silent.
 _PRESENCE_OSD_GRACE_S = 5.0
+# While the replay is still arriving every new contact pushes the silence
+# window out by this much, so a slow/large roster is silent until the burst
+# really stops (instead of a fixed window that can expire mid-replay).
+_PRESENCE_OSD_TAIL_S = 2.0
 # Auto-join retry backoff (seconds) for transient join failures.
 _MUC_AUTOJOIN_RETRY_DELAYS = (5, 15, 45)
 _MUC_TRANSIENT_JOIN_ERRORS = {
@@ -197,6 +207,10 @@ class _VoiceRequestRow(QtWidgets.QWidget):
 
 class MainWindow(QtWidgets.QMainWindow):
     """Top-level window that owns the roster, chat window, tray and XMPP client."""
+
+    #: Emitted whenever the per-conversation unread/mention counters change
+    #: (new message, mark-read, recount).  The Digest plugin listens to it.
+    unread_changed = QtCore.pyqtSignal()
 
     def __init__(self, app: QtWidgets.QApplication):
         super().__init__()
@@ -3222,6 +3236,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # a previous session (e.g. during a profile switch).
         self._clear_status()
         self._presence_sound_seen.clear()
+        self._osd_status_seen.clear()
         self._presence_osd_grace_until = time.monotonic() + _PRESENCE_OSD_GRACE_S
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
@@ -3308,6 +3323,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_stream_resumed(self):
         logger.info("Connection restored (stream resumed)")
         self._resume_pending = False
+        # Re-seed the seen set so the resumed session's presence replay is
+        # silent again (the contacts are "new" for this session).
+        self._osd_status_seen.clear()
         self._presence_osd_grace_until = time.monotonic() + _PRESENCE_OSD_GRACE_S
         self._clear_status()
         self._set_tray_status_icon(self._config.last_status)
@@ -3517,6 +3535,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 dialog.activateWindow()
                 if self._client:
                     self._client.probe_entity(jid)
+                    self._request_last_activity(jid, dialog)
                 return
         if jid in self._pending_profile:
             self._pending_profile.discard(jid)
@@ -3576,6 +3595,41 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.fetch_pep(bare)
         return status
 
+    def _request_last_activity(self, jid: str, dialog) -> None:
+        """Fetch XEP-0012 last activity for an **offline** 1:1 contact.
+
+        Rooms and online contacts have no meaningful "last seen", so the query
+        is skipped for them.
+        """
+        if self._client is None or dialog is None:
+            return
+        bare = jid.split("/", 1)[0]
+        if bare in self._conference_roster or bare in self._muc_self_nicks:
+            return
+        contact = self._client.get_contact(bare)
+        show = (getattr(contact, "show", "") or "offline")
+        if show not in ("", "offline"):
+            return
+        self._start_task(self._fetch_last_activity(bare, dialog))
+
+    async def _fetch_last_activity(self, bare: str, dialog) -> None:
+        if self._client is None:
+            return
+        info = await self._client.get_last_activity(bare)
+        if not info:
+            return
+        values: dict[str, str] = {}
+        seconds = info.get("seconds")
+        if isinstance(seconds, int) and seconds > 0:
+            values["last_seen"] = _format_last_seen(seconds)
+        if info.get("status"):
+            values["last_status"] = str(info["status"])
+        if values:
+            try:
+                dialog.update_status(values)
+            except RuntimeError:
+                pass
+
     def _open_vcard_info(self, jid: str, card: dict):
         from stanza_im.ui.vcard_dialog import VCardInfoDialog
         status = self._vcard_status(jid, card)
@@ -3587,6 +3641,7 @@ class MainWindow(QtWidgets.QMainWindow):
             existing.activateWindow()
             if self._client:
                 self._client.probe_entity(jid)
+                self._request_last_activity(jid, existing)
             return
         bare = jid.split("/", 1)[0]
         is_room = bool(bare in self._conference_roster
@@ -3606,6 +3661,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._edit_room_vcard(room, c, p))
         if self._client:
             self._client.probe_entity(jid)
+            self._request_last_activity(jid, dlg)
         dlg.open()
 
     def _can_edit_room_vcard(self, room: str) -> bool:
@@ -5085,6 +5141,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              if entry["unread"]}
         self._unread_total = sum(entry["unread"] for entry in
                                  self._unread_chats.values())
+        self.unread_changed.emit()
 
     def _refresh_unread_badge(self, jid: str) -> None:
         """Repaint the roster badge of *jid* from its stored counters."""
@@ -5130,6 +5187,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._schedule_unread_save()
         self._refresh_unread_badge(jid)
         self._push_unread_to_chat(jid)
+        self.unread_changed.emit()
 
     def _arm_unread_separator(self, jid: str, chat) -> None:
         """Tell an open but unfocused chat that its next message is unread.
@@ -5171,6 +5229,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._schedule_unread_save()
         self._sync_tray_blink()
         self._push_unread_to_chat(jid)
+        self.unread_changed.emit()
         chat = (self._chat_window.get_chat(jid)
                 if self._chat_window is not None else None)
         if chat is not None:
@@ -7324,7 +7383,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not cfg.osd_enabled or mode == "never" or old_show == new_show:
             return
         if jid not in self._osd_status_seen:
+            # First presence of this contact in the session (the server replay):
+            # remember it and push the silence window out, so as long as new
+            # contacts keep arriving the whole initial sync stays quiet.
             self._osd_status_seen.add(jid)
+            self._presence_osd_grace_until = (
+                time.monotonic() + _PRESENCE_OSD_TAIL_S)
             return
         # The server replays every contact's presence right after login; stay
         # silent for a short grace window so it is not a burst of OSDs.

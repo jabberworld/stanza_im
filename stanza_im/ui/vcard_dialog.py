@@ -143,9 +143,9 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._status_index = tabs.addTab(self._fields_page(status_data, (
             "jid", "presence", "subscription", "status_message", "mood", "activity",
             "tune", "location", "resource",
-            "status_updated", "vcard_updated", "client_time", "software",
-            "software_version", "os", "ping"), hide_empty=True),
-            tr("vcard_tab_status"))
+            "status_updated", "last_seen", "last_status", "vcard_updated",
+            "client_time", "software", "software_version", "os", "ping"),
+            hide_empty=True), tr("vcard_tab_status"))
         layout.addWidget(tabs)
         return content
 
@@ -178,8 +178,8 @@ class VCardInfoDialog(QtWidgets.QDialog):
         for key in (
                 "jid", "presence", "subscription", "status_message", "mood",
                 "activity", "tune", "location", "resource", "status_updated",
-                "vcard_updated", "client_time", "software",
-                "software_version", "os", "ping"):
+                "last_seen", "last_status", "vcard_updated", "client_time",
+                "software", "software_version", "os", "ping"):
             self._set_field(key, self._status_data.get(key),
                             hide_empty=(key != "jid"
                                         and key != "vcard_updated"))

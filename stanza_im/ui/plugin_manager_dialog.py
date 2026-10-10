@@ -59,7 +59,6 @@ class PluginManagerWidget(QtWidgets.QWidget):
                 [tr(category) if category else tr("plugin_category_other")])
             header.setFlags(header.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable
                             | QtCore.Qt.ItemFlag.ItemIsAutoTristate)
-            header.setExpanded(True)
             self._tree.addTopLevelItem(header)
             for plugin in plugins:
                 item = QtWidgets.QTreeWidgetItem([tr(plugin.name)])
@@ -75,6 +74,9 @@ class PluginManagerWidget(QtWidgets.QWidget):
                     else QtCore.Qt.CheckState.Unchecked)
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole, plugin.id)
                 header.addChild(item)
+        # Expand only once the children exist: a header set expanded while it is
+        # still empty stays collapsed when its plugins are added.
+        self._tree.expandAll()
 
     def rebuild(self) -> None:
         """Re-read the plugins and their enabled state (e.g. after Apply)."""

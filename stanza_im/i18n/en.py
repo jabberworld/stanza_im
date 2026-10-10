@@ -582,6 +582,8 @@ STRINGS = {
     "vcard_field_os": "Operating system",
     "vcard_field_ping": "Ping",
     "vcard_field_status_updated": "Status updated",
+    "vcard_field_last_seen": "Last seen",
+    "vcard_field_last_status": "Last status",
     # Groupchat
     "muc_leave": "Leave Room",
     "muc_leave_confirm": "Do you really want to leave the conference {room}?",
@@ -1359,6 +1361,7 @@ STRINGS = {
     'plugin_manager_title': 'Plugins',
     'plugin_configure': 'Configure',
     'plugin_category_communication': 'Communication',
+    'plugin_category_notifications': 'Notifications',
     'plugin_category_appearance': 'Appearance',
     'plugin_category_other': 'Other',
     'plugins_missing_warning': 'Enabled plugins are missing and were skipped:\n{plugins}',

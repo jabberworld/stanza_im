@@ -345,6 +345,75 @@ m6._windows[0]["window"]._close_btn.click()
 check("close dismisses notification", len(m6._windows) == 0)
 m6.hide_preview()
 
+# 10b. close button is larger and a press on it closes (never opens) ---------
+_cfg10 = make_cfg()
+_m10 = OsdManager(_cfg10)
+_clicked = []
+_m10.show(None, "t", "b", on_click=lambda: _clicked.append(True))
+_win10 = _m10._windows[0]["window"]
+check("the close button is bigger than 18px",
+      _win10._close_btn.width() >= 24 and _win10._close_btn.height() >= 24)
+
+
+def _press(win, local):
+    gpos = win._close_btn.mapToGlobal(local)
+    ev = QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonPress,
+        QtCore.QPointF(win.mapFromGlobal(gpos)),
+        QtCore.QPointF(gpos), QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.NoModifier)
+    QtWidgets.QApplication.sendEvent(win, ev)
+
+
+# A press on the close button closes the OSD and does NOT run on_click.
+_press(_win10, QtCore.QPoint(_win10._close_btn.width() // 2,
+                             _win10._close_btn.height() // 2))
+check("a press on the close button dismisses the notification",
+      len(_m10._windows) == 0)
+check("a press on the close button does not open the message", _clicked == [])
+# A press elsewhere runs on_click (and dismisses a transient OSD).
+_m10.show(None, "t", "b", on_click=lambda: _clicked.append(True))
+_win10b = _m10._windows[0]["window"]
+_win10b.move(120, 80)
+_ev = QtGui.QMouseEvent(
+    QtCore.QEvent.Type.MouseButtonPress,
+    QtCore.QPointF(5, _win10b.height() - 5),
+    QtCore.QPointF(125, 80 + _win10b.height() - 5),
+    QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.MouseButton.LeftButton,
+    QtCore.Qt.KeyboardModifier.NoModifier)
+QtWidgets.QApplication.sendEvent(_win10b, _ev)
+check("a press outside the close button opens the message", _clicked == [True])
+
+# 10c. sticky notifications: update in place, click keeps, close reports -----
+_cfg10c = make_cfg()
+_m10c = OsdManager(_cfg10c)
+_closed = []
+_opened = []
+_m10c.show_sticky("k", None, "title1", "body1",
+                  on_click=lambda: _opened.append(True),
+                  on_close=lambda: _closed.append(True))
+check("a sticky notification is shown", len(_m10c._windows) == 1)
+check("a sticky notification has no auto-hide timer",
+      _m10c._windows[0]["timer"] is None)
+_m10c.show_sticky("k", None, "title2", "body2",
+                  on_click=lambda: _opened.append(True),
+                  on_close=lambda: _closed.append(True))
+check("show_sticky updates in place (no second window)",
+      len(_m10c._windows) == 1
+      and _m10c._windows[0]["window"]._title_label.text() == "title2"
+      and _m10c._windows[0]["window"]._body_label.text() == "body2")
+_m10c.update_sticky("k", "title3", "body3")
+check("update_sticky rewrites the text",
+      _m10c._windows[0]["window"]._title_label.text() == "title3")
+_swin = _m10c._windows[0]["window"]
+_swin._click()
+check("clicking a sticky keeps it on screen and opens", len(_m10c._windows) == 1
+      and _opened == [True])
+_swin._close()
+check("closing a sticky reports and dismisses",
+      _closed == [True] and len(_m10c._windows) == 0)
+
 # 11. hover pauses the auto-hide timer ---------------------------------------
 m7 = OsdManager(make_cfg(osd_duration=30))
 m7.show(None, "one", "first")

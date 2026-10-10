@@ -132,7 +132,9 @@ stanza_im/                      # Python package
 │   └── ru.py                    # Russian strings
 ├── plugins/
 │   ├── __init__.py              # Plugin registry (discover/manifest/hooks)
-│   └── notes/                   # Notes plugin (XEP-0049 private storage)
+│   ├── notes/                   # Notes plugin (XEP-0049 private storage)
+│   ├── attention/               # XEP-0224 attention plugin
+│   └── digest/                  # Unread/messages digest (sticky OSD)
 resources/                       # Images, chat skins, sounds, etc.
 old/                             # Original Jabbim code (reference only, gitignored)
 README.md                        # Общее описание проекта (назначение, возможности, зависимости)
@@ -217,7 +219,11 @@ matches an open dialog by bare JID so a bare/full-JID key mismatch never opens
 a second window.
 Chat and MUC tabs use separate `ChatThemeFactory` instances, while emoticon
 sets are discovered from `resources/emoticons/*/smileys*.cfg`. Preferences
-show a live preview of the selected emoticon set.
+show a live preview of the selected emoticon set. A set's `smileys*.cfg` maps
+many text aliases to the same image; the picker and the preview list are keyed
+by the **file** (one row per distinct image, `include.emoticons._file_codes`
+keeps the longest alias), so `:)` and `:-)` never duplicate a row, while
+`smile_to_html` still renders every alias.
 
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
@@ -475,7 +481,9 @@ persisted in the shared config under `[plugin_settings.<id>]`
 `plugins` config section (plugin id → bool, `core/storage.py`). The reusable
 `PluginManagerWidget` (`ui/plugin_manager_dialog.py`) is a `QTreeWidget` of
 categories → plugins with a check per plugin (tri-state per category) plus a
-«Настроить» button enabled only for a selected settings-capable plugin. The
+«Настроить» button enabled only for a selected settings-capable plugin; the tree
+opens fully expanded (`_build_tree` ends with `expandAll()`, after the children
+exist). The
 Actions menu's «Плагины» (`exec.png`) wraps it in the singleton
 `PluginManagerDialog` with «Ок»/«Отмена»; «Ок» writes the flags and emits
 `plugins_changed`, and `MainWindow._apply_plugins` activates/deactivates the
@@ -544,6 +552,19 @@ shows an OSD («Пользователь … пытается привлечь �
 Events entry. Its `[plugin_settings.attention]` holds `cooldown` (1–99 s,
 incoming per-contact throttle), `allow_dnd` (notify while we are in «Не
 беспокоить»), `play_sound` and `show_events`. [`tests/test_attention.py`]
+The bundled **Digest** plugin (`stanza_im/plugins/digest/`, category
+«Уведомления», icon `attention.svg`) keeps a single **sticky** OSD on screen
+while there are unread messages from contacts (1:1 and MUC private messages) or
+mentions in conferences: the title is «У вас новые непрочитанные сообщения:» and
+the body lists «N новых сообщений от M контактов» and/or «K упоминаний в J
+конференциях». It subscribes to the new `MainWindow.unread_changed` signal
+(emitted from `_bump_unread`/`_reset_unread`/`_recount_unread`) and recomputes
+the counters from `_unread_chats` (conference keys — in `_conference_roster` or
+`_muc_self_nicks` — counted only by `mentions`); the sticky OSD is updated in
+place via `OsdManager.show_sticky`/`update_sticky`. Closing it (its close
+button, `on_close`) hides it until the total grows again; clicking it opens the
+topmost unread conversation (`_on_tray_cycle_unread`). `deactivate` disconnects
+the signal and `dismiss_sticky`. [`tests/test_digest.py`]
 
 A contact can be **dragged onto a group** (header or row): `RosterWidget`
 starts a `QDrag` (`application/x-stanza-roster-jid`) and emits
@@ -962,11 +983,22 @@ user is reading — and the ones around it — never vanish under the cursor.
 MainWindow triggers gate on `notifications.osd_enabled` and the
 per-event toggles: `osd_message` (1:1 + private, only while the chat window is
 not the active window on that conversation), `osd_typing`, `osd_status`
-(`never`/`available`/`any`, skipping the first presence per JID and, for the
-first 5 s after login/`stream_resumed` — `_presence_osd_grace_until` — the whole
-initial presence replay, so a login is not a burst of "X came online" OSDs),
-`osd_conference` (`never`/`mention`/`all`), plus the `_notify_osd_file` entry
-point wired for future p2p file transfers. The bubble (rounded background +
+(`never`/`available`/`any`; the first presence per JID is skipped and the whole
+initial replay stays silent — `_presence_osd_grace_until` starts at
+login/`stream_resumed` and every **newly-seen** contact pushes it out by
+`_PRESENCE_OSD_TAIL_S` (2 s), so a slow or large roster never bursts into "X
+came online" OSDs, and `_osd_status_seen` is cleared on each session
+start/resume), `osd_conference` (`never`/`mention`/`all`), plus the
+`_notify_osd_file` entry point wired for future p2p file transfers. The close
+button (`#osd-close`) is 24×24; because the frame and its children are
+mouse-transparent, a press that lands on its rectangle is routed to `_close()`
+in `_OsdWindow.mousePressEvent` (never to the notification's `_click()`), so
+the corner always dismisses. `OsdManager` also offers a **sticky** OSD
+(`show_sticky(key, …)` / `update_sticky` / `dismiss_sticky`): no auto-hide,
+excluded from the `osd_max` eviction, updated in place via
+`_OsdWindow.set_text`, kept on a plain click and removed only by its close
+button (which fires the owner's `on_close`) — used by the Digest plugin.
+The bubble (rounded background +
 `osd_opacity`, border) is painted in `_OsdWindow.paintEvent`. When
 `compositing_available()` finds **no** X11 compositor (`_NET_WM_CM_S0` has no
 owner, checked via `libX11`/ctypes) **and** the opacity is below 100 %,
@@ -1918,7 +1950,11 @@ Contacts' mood/activity/tune/location are shown in the roster tooltip
 `location` fields, updated live through `_on_contact_pep_updated`). Both also
 show the roster subscription state (`client.subscription(bare)` →
 `privacy_sub_none/to/from/both`, the tooltip under the JID and the vCard
-`subscription` field).
+`subscription` field). For an **offline** 1:1 contact the Status tab also shows
+its last activity (XEP-0012): `MainWindow._request_last_activity` queries
+`client.get_last_activity(bare)` (raw `jabber:iq:last`) and merges
+`last_seen` (absolute `YYYY-MM-DD HH:MM` of `now − seconds`) and `last_status`
+(the `<query>` text) into the dialog.
 
 **A/V calls & Muji** (`xmpp/jingle_rtp.py`, `xmpp/media.py`,
 `xmpp/muji.py`, `ui/call_window.py`): 1:1 audio/video calls use Jingle RTP

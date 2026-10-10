@@ -57,6 +57,10 @@ check("the notes plugin has the Tools category",
 check("the notes plugin carries an icon", notes.icon == "draw-brush.png")
 check("plugins are sorted deterministically",
       ids == [p.id for p in discover()])
+digest = get("digest")
+check("the digest plugin is discovered", digest is not None)
+check("the digest plugin has the Notifications category",
+      digest.category == "plugin_category_notifications")
 
 # 2. Config state ------------------------------------------------------------
 cfg = Config()
@@ -77,7 +81,11 @@ tree = dlg._widget._tree
 categories = [tree.topLevelItem(i).text(0)
               for i in range(tree.topLevelItemCount())]
 check("the manager groups plugins by category",
-      "Tools" in categories and "Communication" in categories)
+      "Tools" in categories and "Communication" in categories
+      and "Notifications" in categories)
+check("the plugin tree opens expanded",
+      all(tree.topLevelItem(i).isExpanded()
+          for i in range(tree.topLevelItemCount())))
 check("the enabled plugin starts checked", dlg._widget.checked_ids() == ["notes"])
 check("Configure is disabled for a plugin without settings",
       not dlg._widget._configure_btn.isEnabled())

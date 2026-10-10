@@ -180,7 +180,7 @@ class _OsdWindow(QtWidgets.QWidget):
             "#osd-title { font-weight: bold; font-size: 13px; }"
             "#osd-body { font-size: 12px; color: %s; }"
             "#osd-close { color: %s; background: transparent; border: 0; "
-            "border-radius: 9px; font-size: 12px; font-weight: bold; }"
+            "border-radius: 12px; font-size: 16px; font-weight: bold; }"
             "#osd-close:hover { background: rgba(255, 255, 255, 45); }"
             % (fg.name(), fg.name(), fg.name()))
         if self._family or self._size:
@@ -319,12 +319,15 @@ class _OsdWindow(QtWidgets.QWidget):
         text_col.addWidget(title_label)
         text_col.addWidget(body_label)
         row.addLayout(text_col, 1)
+        # Kept so a sticky OSD can be updated in place (``set_text``).
+        self._title_label = title_label
+        self._body_label = body_label
 
         close_btn = QtWidgets.QToolButton(frame)
         close_btn.setObjectName("osd-close")
         close_btn.setText("\u00d7")
         close_btn.setAutoRaise(True)
-        close_btn.setFixedSize(18, 18)
+        close_btn.setFixedSize(24, 24)
         close_btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         close_btn.setToolTip(tr("osd_close"))
         close_btn.clicked.connect(self._close)
@@ -374,6 +377,31 @@ class _OsdWindow(QtWidgets.QWidget):
             frame.setStyleSheet(self._stylesheet())
         self._refresh_backdrop()
 
+    def set_text(self, title: str, body: str) -> None:
+        """Update the title/body of a live OSD in place (sticky digest)."""
+        if getattr(self, "_title_label", None) is not None:
+            self._title_label.setText(title or "")
+        if getattr(self, "_body_label", None) is not None:
+            self._body_label.setText(body or "")
+        self.adjustSize()
+
+    def _over_close(self, event) -> bool:
+        """True when the press landed on the close button's rectangle.
+
+        The frame and its children are transparent for mouse events (so clicks
+        and drags reach the window); the close button is re-enabled, but if a
+        platform still routes its press to the window, the corner must close
+        instead of opening the message.
+        """
+        btn = getattr(self, "_close_btn", None)
+        if btn is None:
+            return False
+        try:
+            local = btn.mapFromGlobal(event.globalPosition().toPoint())
+        except (AttributeError, RuntimeError):
+            return False
+        return btn.rect().contains(local)
+
     def _click(self) -> None:
         cb = self._on_clicked
         if cb:
@@ -400,6 +428,10 @@ class _OsdWindow(QtWidgets.QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            if self._over_close(event):
+                self._close()
+                event.accept()
+                return
             if self._draggable:
                 self._drag_offset = (
                     event.globalPosition().toPoint() - self.pos())
@@ -484,15 +516,62 @@ class OsdManager:
         if not getattr(self._cfg, "osd_enabled", False):
             return
         max_visible = max(1, int(getattr(self._cfg, "osd_max", 3) or 3))
-        non_preview = [r for r in self._windows if not r["preview"]]
+        non_preview = [r for r in self._windows
+                       if not r["preview"] and not r.get("sticky")]
         while len(non_preview) >= max_visible:
             self._dismiss(non_preview[0])
-            non_preview = [r for r in self._windows if not r["preview"]]
+            non_preview = [r for r in self._windows
+                           if not r["preview"] and not r.get("sticky")]
         duration = float(getattr(self._cfg, "osd_duration", 5) or 5)
         rec = self._spawn(icon, title, body, draggable=False,
                           preview=False, duration=duration)
         rec["on_click"] = on_click
         rec["window"]._on_clicked = lambda: self._clicked(rec)
+
+    def show_sticky(self, key: str, icon, title: str, body: str,
+                    on_click=None, on_close=None) -> None:
+        """Show (or update) a persistent OSD identified by *key*.
+
+        Sticky notifications never auto-hide and are not evicted by the
+        transient ``osd_max`` limit; they still stack and pause like the rest.
+        A click does not dismiss them (only the close button does, which calls
+        *on_close* first).
+        """
+        if not getattr(self._cfg, "osd_enabled", False):
+            return
+        rec = self._find_sticky(key)
+        if rec is not None:
+            rec["window"].set_text(title, body)
+            rec["on_click"] = on_click
+            rec["on_close"] = on_close
+            rec["window"]._on_clicked = lambda: self._clicked(rec)
+            rec["window"]._on_close = lambda: self._closed(rec)
+            self._restack()
+            return
+        rec = self._spawn(icon, title, body, draggable=False,
+                          preview=False, duration=0, sticky=True)
+        rec["key"] = key
+        rec["on_click"] = on_click
+        rec["on_close"] = on_close
+        rec["window"]._on_clicked = lambda: self._clicked(rec)
+        rec["window"]._on_close = lambda: self._closed(rec)
+
+    def update_sticky(self, key: str, title: str, body: str) -> None:
+        """Update the text of a sticky OSD (no-op when it is not shown)."""
+        rec = self._find_sticky(key)
+        if rec is not None:
+            rec["window"].set_text(title, body)
+            self._restack()
+
+    def dismiss_sticky(self, key: str) -> None:
+        """Hide the sticky OSD identified by *key* (no-op when absent)."""
+        rec = self._find_sticky(key)
+        if rec is not None:
+            self._dismiss(rec)
+
+    def _find_sticky(self, key: str) -> dict | None:
+        return next((r for r in self._windows
+                     if r.get("sticky") and r.get("key") == key), None)
 
     def show_preview(self):
         """Show (or re-dock) the draggable OSD used in the preferences page."""
@@ -569,10 +648,20 @@ class OsdManager:
         cb = rec.get("on_click")
         if cb:
             cb()
+        # A sticky notification stays on screen when clicked (only its close
+        # button dismisses it); a transient one is dismissed.
+        if not rec.get("sticky"):
+            self._dismiss(rec)
+
+    def _closed(self, rec: dict) -> None:
+        """Close-button handler: notify the owner, then dismiss."""
+        cb = rec.get("on_close")
+        if cb:
+            cb()
         self._dismiss(rec)
 
     def _spawn(self, icon, title: str, body: str, draggable: bool,
-               preview: bool, duration: float) -> dict:
+               preview: bool, duration: float, sticky: bool = False) -> dict:
         family, size = self._osd_font
         bg_color, font_color, opacity = self._osd_colors
         win = _OsdWindow(icon, title, body, draggable=draggable,
@@ -581,7 +670,8 @@ class OsdManager:
                          width=int(getattr(self._cfg, "osd_width", _OSD_WIDTH)
                                    or _OSD_WIDTH))
         rec = {"window": win, "timer": None, "preview": preview,
-               "on_click": None, "duration": duration, "remaining": None}
+               "on_click": None, "duration": duration, "remaining": None,
+               "sticky": sticky, "key": None}
         win._on_close = lambda: self._dismiss(rec)
         win._on_hover = lambda inside: self._hover(rec, inside)
         self._windows.append(rec)

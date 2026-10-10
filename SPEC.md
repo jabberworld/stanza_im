@@ -177,7 +177,10 @@ avatars/activity/mood/client in the roster; «Конференции» toggles t
 participant avatars/client icons).
 Emoticon sets are discovered from cfg files under
 `resources/emoticons`, and the settings dialog previews up to ten images from
-the selected set.
+the selected set. Because one image usually has several text aliases (`:)` and
+`:-)`), the preview list and the chat smiley picker are keyed by the **file**
+(one row per distinct image; `include.emoticons._file_codes` keeps the longest
+alias), while message rendering still replaces every alias.
 The service browser uses XEP-0030 discovery, groups identities by category and
 builds the tree fully lazily with no eager discovery: a node renders its direct
 children "as is" from a single `disco#items` request (with the parent's `node`
@@ -522,7 +525,8 @@ Actions → «Плагины» (`exec.png`) opens the singleton `PluginManagerDi
 (after warning about saved-enabled plugins that are missing on disk, via
 `plugins_missing_warning`; the client keeps running). It wraps the reusable
 `PluginManagerWidget`: a `QTreeWidget` grouped by category (a tri-state checkbox
-per category, one checkbox per plugin), a «Настроить» button and «Ок»/«Отмена».
+per category, one checkbox per plugin) that opens fully expanded, a «Настроить»
+button and «Ок»/«Отмена».
 «Ок» writes the flags to the `plugins` config section and emits
 `plugins_changed`; `MainWindow._apply_plugins` then activates/deactivates the
 affected plugins live — a plugin adds/removes its roster tab through
@@ -843,7 +847,11 @@ icon before the resource name (`<img …>&nbsp;<b>resource</b> — Client: …`)
 prefixes its «Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
 `pep.activity_icon_path` / `pep.tune_icon_path`, and shows the roster
 subscription (`client.subscription(bare)` → `privacy_sub_*`) under the JID. The
-vCard "Status" tab carries the same `subscription` field.
+vCard "Status" tab carries the same `subscription` field and, for an **offline**
+1:1 contact, its last activity (XEP-0012): `MainWindow._request_last_activity`
+queries `client.get_last_activity(bare)` (raw `jabber:iq:last`) and merges
+`last_seen` (absolute `YYYY-MM-DD HH:MM` of `now − seconds`) and `last_status`
+(the `<query>` text) into the dialog.
 
 Dynamic height: 32px without status message, 52px with.
 
@@ -1684,9 +1692,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
 - `OsdManager` owns a stack of translucent frameless always-on-top windows
   (`Qt.Tool | FramelessWindowHint | WindowStaysOnTopHint |
   X11BypassWindowManagerHint | WindowDoesNotAcceptFocus`) with an icon, bold
-  title and word-wrapped body; clicking dismisses (and may focus the chat).
+  title and word-wrapped body; clicking a transient one dismisses it (and may
+  focus the chat), a **sticky** one stays and only its close button removes it.
   Frame and label children are mouse-transparent so drags and clicks reach the
-  window itself, and each window is raised on show/restack. The bubble
+  window itself; the close button (`#osd-close`, 24×24) is re-enabled and a
+  press on its rectangle is routed to `_close()` in `mousePressEvent` (never to
+  the notification's `_click()`), so the corner always dismisses. Each window is
+  raised on show/restack. The bubble
   (rounded background using `appearance.osd_bg_color`/`osd_font_color`/
   `osd_opacity` and a 1px border) is drawn in `_OsdWindow.paintEvent`. When
   `compositing_available()` finds no X11 compositor (no `_NET_WM_CM_S0` owner)
@@ -1707,10 +1719,14 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   overlapping the notification below it or overflowing the screen; the
   draggable preview stores its bottom (`_preview_moved`). Positions are
   recomputed on add/dismiss; `stack_position()` is a pure function. The max
-  on-screen count is `osd_max` (oldest is evicted) and each window auto-hides
-  after `osd_duration` seconds. Hovering **any** OSD pauses the auto-hide timer
-  of the whole stack (`_hovered`/`_pause_all`/`_resume_all`) and resumes it once
-  the cursor leaves all of them.
+  on-screen count is `osd_max` (oldest is evicted; sticky windows are exempt)
+  and each transient window auto-hides after `osd_duration` seconds. Hovering
+  **any** OSD pauses the auto-hide timer of the whole stack
+  (`_hovered`/`_pause_all`/`_resume_all`) and resumes it once the cursor leaves
+  all of them. A **sticky** OSD (`show_sticky(key, …)` / `update_sticky` /
+  `dismiss_sticky`) never auto-hides, is updated in place via
+  `_OsdWindow.set_text`, and calls its owner's `on_close` when dismissed; it
+  backs the Digest plugin.
 - Preferences → Notifications → OSD shows a draggable preview at the saved
   base position; dragging moves it by grabbing the mouse and calling
   `move()` on X11 (works even when the window manager ignores the
@@ -1725,8 +1741,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   - `osd_typing`: a contact starting to compose (XEP-0085).
   - `osd_status`: `never` / `available` (crossings between online+chat and any
     other show) / `any` (every transition); skips the first presence per JID and
-    the whole initial presence replay within 5 s after login/`stream_resumed`
-    (`_presence_osd_grace_until`), so a login is not a burst of OSDs.
+    the whole initial presence replay — `_presence_osd_grace_until` starts at
+    login/`stream_resumed` and every newly-seen contact pushes it out by
+    `_PRESENCE_OSD_TAIL_S` (2 s), and `_osd_status_seen` is cleared per session,
+    so a slow or large roster is never a burst of OSDs.
   - `osd_conference`: `never` / `mention` (own nick in the body) / `all`.
   - `osd_file`: `_notify_osd_file(sender, filename)` entry point reserved for
     incoming p2p file transfers.
@@ -2491,6 +2509,24 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `cooldown` (1–99 s, incoming per-contact throttle), `allow_dnd` (notify while
   our status is «Не беспокоить»), `play_sound`, `show_events`. The settings
   dialog is `ui/attention_settings_dialog.py` (opened via `open_settings`).
+
+### 14.8.4 Notifications Digest (`stanza_im/plugins/digest/`)
+
+- Category «Уведомления» (icon `attention.svg`); no settings. While the plugin
+  is active it keeps a single **sticky** OSD on screen whenever there are unread
+  messages from contacts (1:1 and MUC private messages) or mentions in
+  conferences. The title is «У вас новые непрочитанные сообщения:», the body is
+  «N новых сообщений от M контактов» and/or «K упоминаний в J конференциях»
+  (each line only when non-zero).
+- It subscribes to `MainWindow.unread_changed` (emitted from `_bump_unread`,
+  `_reset_unread`, `_recount_unread`) and recomputes the numbers from
+  `_unread_chats`: a key in `_conference_roster`/`_muc_self_nicks` counts only
+  its `mentions`, every other key counts its `unread`. The sticky OSD is
+  created/updated through `OsdManager.show_sticky`/`update_sticky` and dismissed
+  when nothing is unread. Closing it (its close button, `on_close`) remembers the
+  total and keeps it hidden until the total grows again; clicking it opens the
+  topmost unread conversation (`MainWindow._on_tray_cycle_unread`). `deactivate`
+  disconnects the signal and calls `dismiss_sticky`.
 
 ### 14.9 Event System
 

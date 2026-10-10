@@ -36,7 +36,8 @@ from typing import Callable, Iterable
 logger = logging.getLogger(__name__)
 
 # Preferred category order; unknown categories sort after these, by name.
-CATEGORY_ORDER = ("tools", "communication", "appearance", "other")
+CATEGORY_ORDER = ("tools", "communication", "notifications", "appearance",
+                  "other")
 
 
 @dataclass(frozen=True)

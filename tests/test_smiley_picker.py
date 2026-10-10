@@ -41,6 +41,27 @@ items = emoticons.set_items(skin)
 check("set_items returns pairs", bool(items) and all(
     isinstance(c, str) and isinstance(p, str) for c, p in items))
 check("set_items paths exist", all(os.path.isfile(p) for _c, p in items))
+# One row per distinct image: aliases like ":)" and ":-)" share the file.
+_paths = [p for _c, p in items]
+check("set_items has no duplicate images", len(_paths) == len(set(_paths)))
+_by_file = {os.path.basename(p): c for c, p in items}
+check("the longest alias is kept for a shared image",
+      _by_file.get("smile16.png") == ":-)"
+      and _by_file.get("wink16.png") == ";-)")
+
+
+def _longest(mapping):
+    best = {}
+    for code, fn in mapping.items():
+        if fn not in best or len(code) > len(best[fn]):
+            best[fn] = code
+    return best
+
+
+_item = emoticons.get_set(skin)
+check("preview_items also de-duplicates",
+      len(emoticons.preview_items(skin, 10))
+      == min(10, len(_longest(_item["mapping"]))))
 
 # 2. the source turns them into (token, icon) entries --------------------------
 source = EmoticonSetSource(skin)
