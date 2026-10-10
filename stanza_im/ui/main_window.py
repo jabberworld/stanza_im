@@ -2287,6 +2287,12 @@ class MainWindow(QtWidgets.QMainWindow):
         a joined empty room; the user has to be added to rejoin.
         """
         from stanza_im.include.utils import format_time
+        # Stop the pending join wait so it neither blocks nor reports a late
+        # timeout after we have already aborted.
+        if self._client is not None:
+            task = getattr(self._client, "_muc_join_tasks", {}).get(room)
+            if task is not None and not task.done():
+                task.cancel()
         chat = self._chat_window.get_chat(room)
         if chat:
             chat.add_status(
@@ -6144,7 +6150,7 @@ class MainWindow(QtWidgets.QMainWindow):
                        tr("notes_added_osd_title"), tr("notes_added_osd"),
                        on_click=_open_notes)
 
-    def _on_share_requested(self, content: str) -> None:
+    def _on_share_requested(self, content: str, parent=None) -> None:
         """Open the share window for a chat URL/media/selection or xmpp: body."""
         content = (content or "").strip()
         if not self._client or not content:
@@ -6154,7 +6160,7 @@ class MainWindow(QtWidgets.QMainWindow):
         conferences = self._share_conferences()
         if not contacts and not conferences:
             return
-        dlg = ShareDialog(contacts, conferences, content, self)
+        dlg = ShareDialog(contacts, conferences, content, parent or self)
 
         def finished(result: int):
             if result != QtWidgets.QDialog.DialogCode.Accepted:
@@ -6284,9 +6290,12 @@ class MainWindow(QtWidgets.QMainWindow):
         viewer.destroyed.connect(
             lambda *_, vid=viewer_id: self._media_viewers.pop(vid, None))
         viewer.closed.connect(self._on_media_viewer_closed)
-        viewer.save_requested.connect(self._on_media_save_requested)
+        # Parent the save/share dialogs to the viewer, not the main window.
+        viewer.save_requested.connect(
+            lambda url, v=viewer: self._on_media_save_requested(url, parent=v))
         viewer.copy_requested.connect(self._on_media_copy_requested)
-        viewer.share_requested.connect(self._on_share_requested)
+        viewer.share_requested.connect(
+            lambda content, v=viewer: self._on_share_requested(content, parent=v))
         if fullscreen and kind == "video":
             viewer.showFullScreen()
         else:
@@ -6306,12 +6315,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_media_viewer_closed(self):
         self._config.save()
 
-    def _on_media_save_requested(self, url: str):
+    def _on_media_save_requested(self, url: str, parent=None):
         if not url:
             return
         suggested = filename_from_url(url)
         path, _filter = QtWidgets.QFileDialog.getSaveFileName(
-            self, tr("media_save"), suggested)
+            parent or self, tr("media_save"), suggested)
         if not path:
             return
         self._start_task(self._save_media_to(url, path))

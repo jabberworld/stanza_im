@@ -46,13 +46,28 @@ if _HAS_WEBENGINE:
     url_schemes.ensure_registered()
 
     class _VideoBridge(QtCore.QObject):
-        """Bridge for the video page: the JS double-click asks for fullscreen."""
+        """Bridge for the video page: fullscreen + the overlay action buttons."""
 
         fullscreen_requested = QtCore.pyqtSignal()
+        save_requested = QtCore.pyqtSignal()
+        copy_requested = QtCore.pyqtSignal()
+        share_requested = QtCore.pyqtSignal()
 
         @QtCore.pyqtSlot()
         def toggle_fullscreen(self):
             self.fullscreen_requested.emit()
+
+        @QtCore.pyqtSlot()
+        def save(self):
+            self.save_requested.emit()
+
+        @QtCore.pyqtSlot()
+        def copy(self):
+            self.copy_requested.emit()
+
+        @QtCore.pyqtSlot()
+        def share(self):
+            self.share_requested.emit()
 
     class _VideoPage(QtWebEngineCore.QWebEnginePage):
         """Video page that turns a ``stanza:viewer-fs`` navigation into a
@@ -99,7 +114,7 @@ class MediaViewer(QtWidgets.QMainWindow):
         esc.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
         esc.activated.connect(self.close)
         self.restore_geometry()
-        self._build_toolbar()
+        self._overlay = None
         if self._kind == "video":
             self._build_video()
         else:
@@ -107,23 +122,47 @@ class MediaViewer(QtWidgets.QMainWindow):
         if self._fullscreen_hint:
             QtCore.QTimer.singleShot(0, self.showFullScreen)
 
-    # ── Toolbar ───────────────────────────────────────────────────
+    # ── Floating action overlay ───────────────────────────────────
 
-    def _build_toolbar(self) -> None:
-        """Icon-only actions: download, copy the link, share the media."""
-        bar = QtWidgets.QToolBar(self)
-        bar.setMovable(False)
-        bar.setIconSize(QtCore.QSize(16, 16))
+    def _build_image_overlay(self) -> None:
+        """Floating download/copy/share buttons over the image (no panel)."""
+        overlay = QtWidgets.QFrame(self._scroll)
+        overlay.setObjectName("viewer-overlay")
+        overlay.setStyleSheet(
+            "#viewer-overlay { background: rgba(20, 20, 20, 150); "
+            "border-radius: 6px; }")
+        row = QtWidgets.QHBoxLayout(overlay)
+        row.setContentsMargins(4, 4, 4, 4)
+        row.setSpacing(2)
         for icon_name, label, signal in (
                 ("arrow-down.svg", tr("media_save"), self.save_requested),
                 ("copy.svg", tr("media_copy_link"), self.copy_requested),
                 ("send-arrow.svg", tr("ctx_share"), self.share_requested)):
-            action = bar.addAction(QtGui.QIcon(find_icon(icon_name)), label)
-            action.setToolTip(label)
-            action.triggered.connect(
-                lambda _checked=False, sig=signal:
-                sig.emit(self._url))
-        self.addToolBar(bar)
+            btn = QtWidgets.QToolButton(overlay)
+            btn.setIcon(QtGui.QIcon(find_icon(icon_name)))
+            btn.setIconSize(QtCore.QSize(16, 16))
+            btn.setAutoRaise(True)
+            btn.setToolTip(label)
+            btn.clicked.connect(
+                lambda _checked=False, sig=signal: sig.emit(self._url))
+            row.addWidget(btn)
+        self._overlay = overlay
+        self._place_overlay()
+
+    def _place_overlay(self) -> None:
+        overlay = getattr(self, "_overlay", None)
+        scroll = getattr(self, "_scroll", None)
+        if overlay is None or scroll is None:
+            return
+        overlay.adjustSize()
+        margin = 10
+        x = max(margin, scroll.width() - overlay.width() - margin)
+        overlay.move(x, margin)
+        overlay.raise_()
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._place_overlay()
 
     # ── Image ─────────────────────────────────────────────────────
 
@@ -144,6 +183,7 @@ class MediaViewer(QtWidgets.QMainWindow):
         scroll.zoom_step.connect(self._on_zoom_step)
         self._scroll = scroll
         self.setCentralWidget(scroll)
+        self._build_image_overlay()
         self._load_image()
 
     def _load_image(self) -> None:
@@ -324,6 +364,21 @@ class MediaViewer(QtWidgets.QMainWindow):
         label.setWordWrap(True)
         self.setCentralWidget(label)
 
+    @staticmethod
+    def _svg_data_uri(name: str) -> str:
+        """Inline an action SVG as a data URI (for the video HTML overlay)."""
+        path = find_icon(name)
+        if not path:
+            return ""
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except OSError:
+            return ""
+        import base64
+        return ("data:image/svg+xml;base64,"
+                + base64.b64encode(data).decode("ascii"))
+
     def _render_video(self, src: str) -> None:
         view = QtWebEngineWidgets.QWebEngineView(self)
         view.setPage(_VideoPage(view, self._toggle_fullscreen, parent=view))
@@ -331,19 +386,46 @@ class MediaViewer(QtWidgets.QMainWindow):
         # (reliable); ``stanza:viewer-fs`` navigation stays a harmless fallback.
         bridge = _VideoBridge(self)
         bridge.fullscreen_requested.connect(self._toggle_fullscreen)
+        bridge.save_requested.connect(
+            lambda: self.save_requested.emit(self._url))
+        bridge.copy_requested.connect(
+            lambda: self.copy_requested.emit(self._url))
+        bridge.share_requested.connect(
+            lambda: self.share_requested.emit(self._url))
         channel = QtWebChannel.QWebChannel(self)
         channel.registerObject("bridge", bridge)
         view.page().setWebChannel(channel)
         from stanza_im.ui.chat_themes import _qwebchannel_js
         glue = _qwebchannel_js()
+        save_icon = self._svg_data_uri("arrow-down.svg")
+        copy_icon = self._svg_data_uri("copy.svg")
+        share_icon = self._svg_data_uri("send-arrow.svg")
+        acts = (
+            '<div id="acts">'
+            f'<button title="{html.escape(tr("media_save"), quote=True)}" '
+            f'onclick="act(\'save\')"><img src="{save_icon}"></button>'
+            f'<button title="{html.escape(tr("media_copy_link"), quote=True)}" '
+            f'onclick="act(\'copy\')"><img src="{copy_icon}"></button>'
+            f'<button title="{html.escape(tr("ctx_share"), quote=True)}" '
+            f'onclick="act(\'share\')"><img src="{share_icon}"></button>'
+            '</div>')
         page = (
             '<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<style>html,body{margin:0;height:100%;background:#000;}'
-            'video{width:100%;height:100%;}</style></head><body>'
+            'video{width:100%;height:100%;}'
+            '#acts{position:absolute;top:10px;right:10px;display:flex;gap:2px;'
+            'background:rgba(20,20,20,0.6);border-radius:6px;padding:4px;}'
+            '#acts button{background:transparent;border:0;cursor:pointer;'
+            'padding:2px;line-height:0;}'
+            '#acts img{width:18px;height:18px;filter:invert(1);}'
+            '</style></head><body>'
             f'<video src="{html.escape(src, quote=True)}" '
             'controls autoplay></video>'
+            + acts +
             f'<script>{glue}</script>'
             '<script>'
+            'function act(a){if(window.bridge&&window.bridge[a])'
+            '{window.bridge[a]();}}'
             'var clickTimer=null;'
             'var clk=function(e){clearTimeout(clickTimer);'
             'clickTimer=setTimeout(function(){'

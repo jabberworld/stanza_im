@@ -305,13 +305,18 @@ server's own form (which raised `('options', None)`).
 `muc_status_changed`) are shown only after a successful join — `MainWindow`
 tracks `_muc_joined`/`_muc_join_grace` and suppresses them until
 `_on_muc_joined` plus a 2 s grace window, so the server's initial occupant dump
-is never rendered as "X joined". A permanent rejection (`muc_join_error` with
-`forbidden`/`registration-required`/`not-allowed`/`banned`, or an error
-self-presence routed via `groupchat_presence_error`) aborts the optimistic join
-(`_abort_muc_join`): the pseudo-occupant is dropped, the room is removed from the
-conference roster and its tab closed, and the reason is shown (a message box for
-a manual join, a tray balloon/OSD for an auto-join) — a members-only room cannot
-be entered until we are added, so nothing is left looking like a joined room.
+is never rendered as "X joined". A MUC join error presence
+(`<presence type='error'><x xmlns='…muc'/>`) is caught by a dedicated
+`MatchXPath` handler (`client._on_muc_join_error_stanza`) — `join_muc_wait`
+does not reliably raise for it, and slixmpp routes it to
+`muc::<room>::presence-error` rather than `groupchat_presence` — and emitted as
+`muc_join_error` with the condition. A permanent rejection (`muc_join_error` with
+`forbidden`/`registration-required`/`not-allowed`/`banned`) aborts the optimistic
+join (`_abort_muc_join`, which also cancels the pending join task): the
+pseudo-occupant is dropped, the room is removed from the conference roster and
+its tab closed, and the reason is shown (a message box for a manual join, a tray
+balloon/OSD for an auto-join) — a members-only room cannot be entered until we
+are added, so nothing is left looking like a joined room.
 Auto-joined rooms are retried on transient
 `muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
 `internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and
@@ -1223,11 +1228,14 @@ off when QtWebEngine is unavailable. Settings changes re-render open chats via
 `ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
 `showEvent` (a cached original returns before layout, so the initial fit is
 deferred) and persists its geometry/position in the shared `media_viewer`
-config section (image and video viewers share it). Its toolbar carries three
-icon actions — Download (`save_requested`), Copy link (`copy_requested`) and
-Share (`share_requested`) — wired by `MainWindow._on_media_view_requested` to
-the existing `_on_media_save_requested`/`_on_media_copy_requested`/
-`_on_share_requested` handlers. Covered by `tests/test_media.py`.
+config section (image and video viewers share it). Three actions float over the
+media **without a panel** — Download (`save_requested`), Copy link
+(`copy_requested`) and Share (`share_requested`) — as a Qt overlay frame for
+images and as an HTML overlay (wired through the `_VideoBridge`) for videos;
+`MainWindow._on_media_view_requested` connects them to the existing
+`_on_media_save_requested`/`_on_media_copy_requested`/`_on_share_requested`
+handlers, passing the viewer as the dialog parent so the save/share dialogs open
+over the viewer, not the roster. Covered by `tests/test_media.py`.
 
 **CAPTCHA Forms (XEP-0158, `ui/captcha_dialog.py` + XEP-0221 media)**:
 `<media xmlns='urn:xmpp:media-element'/>` on a form field is parsed from the
@@ -1669,8 +1677,9 @@ manager and the shield popup show each device's trust as a **coloured shield
 icon** (`shield-trusted.svg` solid green = manually trusted, `shield-blindly.svg`
 green outline = blindly trusted, `shield-unknown.svg` yellow = undecided,
 `shield-distrusted.svg` red = distrusted); a click toggles trusted↔distrusted,
-and each manager row also shows the device's `device_last_seen` (the device name
-is bold). Devices are listed by `OmemoManager.sorted_devices` — recent activity
+and each manager **and popup** row also shows the device's `device_last_seen`
+(the device name is bold). Devices are listed by `OmemoManager.sorted_devices` —
+recent activity
 first, then named devices (alias/label/learned), then the rest. The shield popup
 (accepting a `QPoint` or a tuple) sizes to its content and grows **upward** from
 the click point (a small gap keeps the button that opened it uncovered),

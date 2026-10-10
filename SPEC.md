@@ -62,7 +62,7 @@ stanza_im/
 │   ├── font_zoom.py    — Ctrl+wheel font-size helper (input/roster/MUC list)
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs, lazily built pages)
 │   ├── media_preview.py — Inline image/audio/video previews
-│   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom, Download/Copy/Share toolbar)
+│   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom, floating Download/Copy/Share overlay)
 │   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
 │   ├── emoji_picker_dialog.py — XEP-0444 reaction picker (search/categories/recent)
 │   ├── omemo_devices_dialog.py — XEP-0384 device/trust manager
@@ -1520,13 +1520,17 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   are rendered only after a successful join: `MainWindow` tracks `_muc_joined`
   (set in `_on_muc_joined`) and a 2 s `_muc_join_grace`, so the server's initial
   occupant dump is never shown as "X joined" even when history loading lags.
+- A MUC join error presence is caught by a dedicated `MatchXPath` handler
+  (`client._on_muc_join_error_stanza`) because `join_muc_wait` does not reliably
+  raise for it and slixmpp routes it to `muc::<room>::presence-error` rather than
+  `groupchat_presence`; it emits `muc_join_error` with the condition.
 - A permanent rejection — `muc_join_error` with
-  `forbidden`/`registration-required`/`not-allowed`/`banned`, or an error
-  self-presence routed through `groupchat_presence_error` — aborts the
-  optimistic join (`MainWindow._abort_muc_join`): the pseudo-occupant is dropped,
-  the room is removed from the conference roster and its tab closed, and the
-  reason is shown (message box for a manual join, tray balloon/OSD for an
-  auto-join). A members-only room cannot be entered until we are added.
+  `forbidden`/`registration-required`/`not-allowed`/`banned` — aborts the
+  optimistic join (`MainWindow._abort_muc_join`, which also cancels the pending
+  join task): the pseudo-occupant is dropped, the room is removed from the
+  conference roster and its tab closed, and the reason is shown (message box for
+  a manual join, tray balloon/OSD for an auto-join). A members-only room cannot
+  be entered until we are added.
 - Auto-joined rooms are retried after transient `muc_join_error` conditions
   (`timeout`, `unknown`, `remote-server-timeout`, `internal-server-error`,
   `service-unavailable`) with a bounded 5/15/45 s backoff
@@ -2122,8 +2126,9 @@ Registers XEP plugins (conditionally where noted):
   **coloured shield icon** — `shield-trusted.svg` (solid green, manually
   trusted), `shield-blindly.svg` (green outline, blindly trusted),
   `shield-unknown.svg` (yellow, undecided), `shield-distrusted.svg` (red,
-  distrusted); a click toggles trusted↔distrusted and each manager row also
-  shows the device's `device_last_seen` with the name in **bold**. Devices are
+  distrusted); a click toggles trusted↔distrusted and each manager **and popup**
+  row also shows the device's `device_last_seen` with the name in **bold**.
+  Devices are
   ordered by `OmemoManager.sorted_devices` — recent activity first, then named
   devices (alias/peer label/learned), then the rest. The shield popup sizes to
   its content and grows **upward** from the click point (a small gap keeps the

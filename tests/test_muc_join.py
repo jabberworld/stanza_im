@@ -135,6 +135,38 @@ try:
 finally:
     QtCore.QTimer.singleShot = _orig_single_shot
 
+# 2b. a MUC join error presence surfaces muc_join_error ----------------------
+from stanza_im.core.client import JabberClient as _JC
+
+
+class _ErrPres:
+    def __init__(self, frm, condition, code="401"):
+        self._frm = frm
+        self._err = {"condition": condition, "code": code}
+
+    def __getitem__(self, key):
+        return self._frm if key == "from" else ""
+
+    def get_error(self):
+        return self._err
+
+
+class _ErrClient:
+    def __init__(self):
+        self.groupchats = {}
+        self.emitted = []
+
+    def emit(self, *args):
+        self.emitted.append(args)
+
+
+_ec = _ErrClient()
+_JC._on_muc_join_error_stanza(
+    _ec, _ErrPres("room@conf.example/jabbim-test", "registration-required"))
+check("a MUC join error presence emits muc_join_error",
+      _ec.emitted == [("muc_join_error", "room@conf.example",
+                       "registration-required", "401")])
+
 # 3. bookmarked rooms join the conferences group only when auto-joined -------
 win._client = None
 win._conference_roster = set()

@@ -1491,6 +1491,31 @@ class JabberClient:
             "MUC Message Error",
             MatchXPath("%s/{%s}error" % (msg_ns, "jabber:client")),
             self._on_muc_message_error_stanza))
+        # A MUC join rejected by the server (members-only, banned, …) is a
+        # ``<presence type='error'><x xmlns='…muc'/>`` that slixmpp routes to
+        # ``muc::<room>::presence-error``; ``join_muc_wait`` does not reliably
+        # raise for it, so surface it here and abort the join immediately.
+        from slixmpp.xmlstream.handler import Callback
+        self.xmpp.register_handler(Callback(
+            "MUC Join Error",
+            MatchXPath("{jabber:client}presence[@type='error']/"
+                       "{http://jabber.org/protocol/muc}x"),
+            self._on_muc_join_error_stanza))
+
+    def _on_muc_join_error_stanza(self, pres) -> None:
+        """A MUC join was rejected (members-only, banned, …)."""
+        room = str(pres["from"] or "").split("/", 1)[0]
+        gi = self.groupchats.get(room)
+        if gi is not None and gi.joined:
+            return  # an error for a room we already joined is a kick, not a join
+        try:
+            error = pres.get_error() or {}
+        except Exception:  # noqa: BLE001
+            error = {}
+        condition = str(error.get("condition", "") or "error")
+        code = str(error.get("code", "") or "")
+        logger.info("MUC join rejected for %s: %s (%s)", room, condition, code)
+        self.emit("muc_join_error", room, condition, code)
 
     async def _on_muc_message_error_stanza(self, msg) -> None:
         """Surface a MUC message rejected with ``forbidden`` (no voice)."""

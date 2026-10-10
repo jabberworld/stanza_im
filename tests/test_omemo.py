@@ -261,6 +261,9 @@ class _FakeOmemo:
     def device_resource(self, jid, did):
         return ""
 
+    def device_last_seen(self, jid, did):
+        return 0.0
+
     def trust_level_name(self, device):
         return "UNDECIDED"
 
@@ -301,6 +304,11 @@ try:
     check("the popup sits above the click, not over the button",
           _pop.y() + _pop.height() <= 700)
     check("popup left edge does not pass the click x", _pop.x() <= 500)
+    _row_texts = [w.text() for w in _pop._rows[0].findChildren(
+        QtWidgets.QLabel)]
+    check("the popup row shows the last-seen line",
+          any(("Last seen" in t) or ("omemo_last_seen" in t)
+              for t in _row_texts))
     _pop.close()
 
     # A long list must scroll instead of spilling off the screen.
