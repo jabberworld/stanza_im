@@ -13,6 +13,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
+from stanza_im.include.utils import escape_html
 
 logger = logging.getLogger("stanza_im.omemo")
 
@@ -24,7 +25,7 @@ _TRUST_LABELS = {
 }
 _TRUST_ICONS = {
     "TRUSTED": "shield-trusted.svg",
-    "BLINDLY_TRUSTED": "shield-trusted.svg",
+    "BLINDLY_TRUSTED": "shield-blindly.svg",
     "UNDECIDED": "shield-unknown.svg",
     "DISTRUSTED": "shield-distrusted.svg",
 }
@@ -108,8 +109,22 @@ class OmemoPopup(QtWidgets.QFrame):
         manage.clicked.connect(self._open_manager)
         header.addWidget(manage)
         layout.addLayout(header)
-        self._body = QtWidgets.QVBoxLayout()
-        layout.addLayout(self._body)
+
+        # The device rows live in a scroll area so a long list scrolls instead
+        # of making the popup taller than the screen.
+        self._scroll = QtWidgets.QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setSizeAdjustPolicy(
+            QtWidgets.QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        container = QtWidgets.QWidget()
+        self._body = QtWidgets.QVBoxLayout(container)
+        self._body.setContentsMargins(0, 0, 0, 0)
+        self._body.setSpacing(2)
+        self._scroll.setWidget(container)
+        layout.addWidget(self._scroll, 1)
 
     # ── data ────────────────────────────────────────────────────
 
@@ -123,8 +138,10 @@ class OmemoPopup(QtWidgets.QFrame):
         omemo = self._client.omemo
         try:
             await omemo.refresh_device_lists([self._jid], force=True)
-            self._devices = sorted(await omemo.devices(self._jid),
-                                   key=lambda d: int(d.device_id))
+            devices = await omemo.devices(self._jid)
+            sorter = getattr(omemo, "sorted_devices", None)
+            self._devices = (sorter(self._jid, devices) if sorter
+                             else list(devices))
         except Exception:  # noqa: BLE001
             logger.debug("OMEMO popup device load failed", exc_info=True)
             self._devices = []
@@ -154,7 +171,9 @@ class OmemoPopup(QtWidgets.QFrame):
                                  str(getattr(device, "label", "") or ""))
         level = omemo.trust_level_name(device)
         trusted = _is_trusted(level)
-        label = QtWidgets.QLabel(f"{name}\n{_trust_label(level)}")
+        label = QtWidgets.QLabel(
+            f"<b>{escape_html(name)}</b><br>{escape_html(_trust_label(level))}")
+        label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         tooltip = omemo.fingerprint(device.identity_key)
         try:
             resource = omemo.device_resource(self._jid, int(device.device_id))

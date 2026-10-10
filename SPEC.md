@@ -2108,11 +2108,15 @@ Registers XEP plugins (conditionally where noted):
   bell (so the shield appearing/disappearing only moves the trailing stretch),
   and the lock's mode menu entries are checkable (the active mode carries the
   tick). The device manager and the shield popup render each device's trust as a
-  **coloured shield icon** — `shield-trusted.svg` (green, trusted/blindly-
-  trusted), `shield-unknown.svg` (yellow, undecided), `shield-distrusted.svg`
-  (red, distrusted); a click toggles trusted↔distrusted and each manager row also
-  shows the device's `device_last_seen`. The shield popup anchors its
-  **bottom-left** corner at the click point and carries a header button
+  **coloured shield icon** — `shield-trusted.svg` (solid green, manually
+  trusted), `shield-blindly.svg` (green outline, blindly trusted),
+  `shield-unknown.svg` (yellow, undecided), `shield-distrusted.svg` (red,
+  distrusted); a click toggles trusted↔distrusted and each manager row also
+  shows the device's `device_last_seen` with the name in **bold**. Devices are
+  ordered by `OmemoManager.sorted_devices` — recent activity first, then named
+  devices (alias/peer label/learned), then the rest. The shield popup anchors
+  its **bottom-left** corner at the click point, caps its height to the screen
+  and scrolls a long device list, and carries a header button
   (`gtk-preferences.png`) to the full manager.
 - A new/untrusted device warning is a chat status line naming the device id, its
   JID and a **short** fingerprint (first three groups + `…`) with a

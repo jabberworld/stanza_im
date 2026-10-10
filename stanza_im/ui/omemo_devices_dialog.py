@@ -16,6 +16,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
+from stanza_im.include.utils import escape_html
 
 logger = logging.getLogger("stanza_im.omemo")
 
@@ -29,7 +30,7 @@ _TRUST_LABELS = {
 #: Trust state -> coloured shield icon (state, not the action).
 _TRUST_ICONS = {
     "TRUSTED": "shield-trusted.svg",
-    "BLINDLY_TRUSTED": "shield-trusted.svg",
+    "BLINDLY_TRUSTED": "shield-blindly.svg",
     "UNDECIDED": "shield-unknown.svg",
     "DISTRUSTED": "shield-distrusted.svg",
 }
@@ -117,7 +118,8 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
             logger.debug("OMEMO device load failed", exc_info=True)
             self._status.setText(tr("omemo_load_failed", error=str(exc)))
             return
-        self._devices = sorted(devices, key=lambda d: int(d.device_id))
+        sorter = getattr(omemo, "sorted_devices", None)
+        self._devices = sorter(self._jid, devices) if sorter else list(devices)
         self._status.setText(tr("omemo_devices_count", count=len(self._devices)))
         self._rebuild()
 
@@ -146,9 +148,11 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         seen_txt = (time.strftime("%Y-%m-%d %H:%M", time.localtime(seen))
                     if seen else "—")
         label = QtWidgets.QLabel(
-            f"{name}  —  {_trust_label(level)}\n"
-            f"{device.device_id}  ·  {omemo.fingerprint(device.identity_key)}\n"
-            f"{tr('omemo_last_seen')}: {seen_txt}")
+            f"<b>{escape_html(name)}</b>  —  {escape_html(_trust_label(level))}"
+            f"<br>{device.device_id}  ·  "
+            f"{escape_html(omemo.fingerprint(device.identity_key))}"
+            f"<br>{escape_html(tr('omemo_last_seen'))}: {escape_html(seen_txt)}")
+        label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         tooltip = omemo.fingerprint(device.identity_key)
         try:
             resource = omemo.device_resource(self._jid, int(device.device_id))

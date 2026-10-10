@@ -258,6 +258,28 @@ class OmemoManager:
         key = f"{jid}/{device_id}"
         return self._device_resources.get(key) or self._names().get(key, "")
 
+    def device_sort_key(self, jid: str, device) -> tuple:
+        """Sort key: recent activity first, then named devices, then the rest.
+
+        Ordering: devices with a last-seen timestamp lead (newest first), then
+        those without one but with a known/filled name (alias, peer label or
+        learned resource), then the unnamed ones; ties break by name and id.
+        """
+        try:
+            device_id = int(device.device_id)
+        except (AttributeError, TypeError, ValueError):
+            device_id = 0
+        seen = self.device_last_seen(jid, device_id)
+        label = str(getattr(device, "label", "") or "")
+        named = bool(self.device_alias(jid, device_id) or label
+                     or self.device_resource(jid, device_id))
+        return (0 if seen else 1, -seen, 0 if named else 1,
+                self.device_name(jid, device_id, label).casefold(), device_id)
+
+    def sorted_devices(self, jid: str, devices) -> list:
+        """Return *devices* in display order (see :meth:`device_sort_key`)."""
+        return sorted(devices, key=lambda d: self.device_sort_key(jid, d))
+
     def note_device_resource(self, jid: str, device_id: int,
                              resource: str) -> None:
         """Remember a device's resource (auto-naming fallback), persisted."""

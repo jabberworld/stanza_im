@@ -1645,10 +1645,13 @@ chat toolbar the lock and shield sit **after** the XEP-0224 attention bell, so
 the shield appearing/disappearing only moves the trailing stretch; the lock's
 mode menu entries are checkable (the active mode carries the tick). The device
 manager and the shield popup show each device's trust as a **coloured shield
-icon** (`shield-trusted.svg` green = trusted/blindly-trusted, `shield-unknown.svg`
-yellow = undecided, `shield-distrusted.svg` red = distrusted); a click toggles
-trusted↔distrusted, and each manager row also shows the device's
-`device_last_seen`. The shield popup anchors its **bottom-left** corner at the
+icon** (`shield-trusted.svg` solid green = manually trusted, `shield-blindly.svg`
+green outline = blindly trusted, `shield-unknown.svg` yellow = undecided,
+`shield-distrusted.svg` red = distrusted); a click toggles trusted↔distrusted,
+and each manager row also shows the device's `device_last_seen` (the device name
+is bold). Devices are listed by `OmemoManager.sorted_devices` — recent activity
+first, then named devices (alias/label/learned), then the rest; the popup caps
+its height to the screen and scrolls a long list. The shield popup anchors its **bottom-left** corner at the
 click point (accepting a `QPoint` or a tuple) and carries a header button
 (`gtk-preferences.png`) to the full manager (opened `own=True` when the popup is
 our own JID). Deleting an own device (`purge_device`) downloads the published

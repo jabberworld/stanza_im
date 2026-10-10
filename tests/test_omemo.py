@@ -225,8 +225,8 @@ _cw.detach()
 from stanza_im.include.constants import find_icon
 check("the QR icon resolves", bool(find_icon("qr.svg")))
 check("the shield icon resolves", bool(find_icon("shield.svg")))
-for _name in ("shield-trusted.svg", "shield-unknown.svg",
-              "shield-distrusted.svg"):
+for _name in ("shield-trusted.svg", "shield-blindly.svg",
+              "shield-unknown.svg", "shield-distrusted.svg"):
     check("the %s icon resolves" % _name, bool(find_icon(_name)))
 
 # Trust state -> coloured shield (state, not action).
@@ -234,8 +234,8 @@ from stanza_im.ui.omemo_devices_dialog import _trust_icon as _dlg_icon
 from stanza_im.ui.omemo_popup import _trust_icon as _pop_icon
 check("trusted uses the green shield",
       _dlg_icon("TRUSTED") == "shield-trusted.svg")
-check("blindly-trusted uses the green shield",
-      _dlg_icon("BLINDLY_TRUSTED") == "shield-trusted.svg")
+check("blindly-trusted uses the green outline shield",
+      _dlg_icon("BLINDLY_TRUSTED") == "shield-blindly.svg")
 check("undecided uses the yellow shield",
       _dlg_icon("UNDECIDED") == "shield-unknown.svg")
 check("distrusted uses the red shield",
@@ -244,6 +244,7 @@ check("the popup mirrors the trust icons",
       _pop_icon("DISTRUSTED") == "shield-distrusted.svg")
 
 # The popup anchors its bottom-left corner at the click point.
+from PyQt6 import QtCore
 from stanza_im.ui.omemo_popup import OmemoPopup
 
 
@@ -253,6 +254,21 @@ class _FakeOmemo:
 
     async def devices(self, jid):
         return []
+
+    def device_name(self, jid, did, label=""):
+        return f"Device {did}"
+
+    def device_resource(self, jid, did):
+        return ""
+
+    def trust_level_name(self, device):
+        return "UNDECIDED"
+
+    def fingerprint(self, key):
+        return ""
+
+    def sorted_devices(self, jid, devices):
+        return list(devices)
 
 
 class _FakeClient:
@@ -270,6 +286,35 @@ try:
     _pop.close()
 finally:
     OmemoPopup._reload = _orig_reload
+
+# A long device list must scroll instead of spilling off the screen.
+class _DevX:
+    def __init__(self, did):
+        self.device_id = did
+        self.identity_key = b""
+        self.label = ""
+
+
+_orig_reload2 = OmemoPopup._reload
+OmemoPopup._reload = lambda self: None
+try:
+    _pop2 = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
+    _pop2._devices = [_DevX(i) for i in range(1, 60)]
+    _pop2._rebuild()
+    _pop2.show()
+    QtWidgets.QApplication.processEvents()
+    _screen = (QtWidgets.QApplication.screenAt(QtCore.QPoint(500, 400))
+               or QtWidgets.QApplication.primaryScreen())
+    _area = _screen.availableGeometry()
+    check("popup height is capped to the screen",
+          _pop2.height() <= _area.height())
+    check("a long device list scrolls",
+          _pop2._scroll.widget().sizeHint().height()
+          > _pop2._scroll.height()
+          or _pop2._scroll.verticalScrollBar().maximum() > 0)
+    _pop2.close()
+finally:
+    OmemoPopup._reload = _orig_reload2
 
 # aesgcm:// URLs must be linkified so the media preview can embed them.
 from stanza_im.include.utils import _URL_RE
@@ -703,6 +748,28 @@ check("presence refreshes last-seen for the mapped device",
 _mgr2.note_resource_seen("bob@example.com", "unmapped.res")
 check("presence leaves unmapped devices untouched",
       "bob@example.com/9" not in _seen)
+
+# Device ordering: activity first (newest first), then named, then the rest.
+class _D:
+    def __init__(self, did, label=""):
+        self.device_id = did
+        self.label = label
+
+
+_mgr3, _c3 = _make_manager()
+_store3 = _c3.xmpp["xep_0384"].storage
+_store3.set_app("device_last_seen", {"bob@example.com/1": 100.0,
+                                     "bob@example.com/4": 200.0})
+_store3.set_app("device_aliases", {"bob@example.com/2": "Named"})
+_order = [int(d.device_id) for d in _mgr3.sorted_devices(
+    "bob@example.com", [_D(3), _D(1), _D(2), _D(4)])]
+check("devices sort by activity, then name, then the rest",
+      _order == [4, 1, 2, 3])
+# A named device without activity still outranks an unnamed one.
+_order2 = [int(d.device_id) for d in _mgr3.sorted_devices(
+    "bob@example.com", [_D(7), _D(2)])]
+check("a named device without activity leads an unnamed one",
+      _order2 == [2, 7])
 
 # MUC guard: the device<->resource mapping is only learned for 1:1.
 _client_src = open(os.path.join(
