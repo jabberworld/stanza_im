@@ -2556,9 +2556,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 or not getattr(self._client.omemo, "available", False)):
             return
         from stanza_im.ui.omemo_popup import OmemoPopup
-        # The popup anchors its bottom-left corner at the click point, so it
-        # opens up and to the right of the button and never covers it.
-        popup = OmemoPopup(self._client, jid, self,
+        # Parent the popup to the chat window (not the roster): it opens near
+        # the shield button, and the manager it links to should also appear
+        # over the chat window, not the roster.
+        popup = OmemoPopup(self._client, jid, self._chat_dialog_parent(),
                            anchor=QtGui.QCursor.pos())
         popup.show()
 

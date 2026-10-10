@@ -287,7 +287,9 @@ try:
 finally:
     OmemoPopup._reload = _orig_reload
 
-# A long device list must scroll instead of spilling off the screen.
+# Real sequence: the popup is shown first (empty), then the list arrives.  One
+# popup is reused for the moderate and long lists (offscreen Qt dislikes many
+# simultaneous popups).
 class _DevX:
     def __init__(self, did):
         self.device_id = did
@@ -299,9 +301,21 @@ _orig_reload2 = OmemoPopup._reload
 OmemoPopup._reload = lambda self: None
 try:
     _pop2 = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
-    _pop2._devices = [_DevX(i) for i in range(1, 60)]
+
+    # A moderate list fits without a scrollbar and stays clear of the button.
+    _pop2._devices = [_DevX(i) for i in range(1, 5)]
     _pop2._rebuild()
     _pop2.show()
+    QtWidgets.QApplication.processEvents()
+    check("a moderate device list does not scroll",
+          _pop2._scroll.verticalScrollBar().maximum() == 0)
+    check("the moderate popup grows past two rows", _pop2.height() > 150)
+    check("the popup sits above the click, not over the button",
+          _pop2.y() + _pop2.height() <= 400)
+
+    # A long list must scroll instead of spilling off the screen.
+    _pop2._devices = [_DevX(i) for i in range(1, 60)]
+    _pop2._rebuild()
     QtWidgets.QApplication.processEvents()
     _screen = (QtWidgets.QApplication.screenAt(QtCore.QPoint(500, 400))
                or QtWidgets.QApplication.primaryScreen())
@@ -315,23 +329,6 @@ try:
     _pop2.close()
 finally:
     OmemoPopup._reload = _orig_reload2
-
-# A moderate list fits without a scrollbar and stays clear of the button.
-_orig_reload3 = OmemoPopup._reload
-OmemoPopup._reload = lambda self: None
-try:
-    _pop3 = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
-    _pop3._devices = [_DevX(i) for i in range(1, 5)]
-    _pop3._rebuild()
-    _pop3.show()
-    QtWidgets.QApplication.processEvents()
-    check("a moderate device list does not scroll",
-          _pop3._scroll.verticalScrollBar().maximum() == 0)
-    check("the popup sits above the click, not over the button",
-          _pop3.y() + _pop3.height() <= 400)
-    _pop3.close()
-finally:
-    OmemoPopup._reload = _orig_reload3
 
 # aesgcm:// URLs must be linkified so the media preview can embed them.
 from stanza_im.include.utils import _URL_RE

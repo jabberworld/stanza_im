@@ -75,6 +75,8 @@ class OmemoPopup(QtWidgets.QFrame):
         self._client = client
         self._jid = str(jid).split("/")[0]
         self._devices: list = []
+        #: Row widgets currently in the list (for size measurement).
+        self._rows: list = []
         #: Screen point the click happened at; the popup's bottom-left corner.
         self._anchor = anchor
         self.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
@@ -110,20 +112,32 @@ class OmemoPopup(QtWidgets.QFrame):
             self.move(x, y - self.height())
             return
 
-        # Width: natural, but never wider than the screen.
-        self.adjustSize()
-        width = max(self.minimumWidth(), self.sizeHint().width())
-        width = min(width, max(1, area.width() - 2 * _GAP))
-
-        # Natural height (layout preferred size, incl. spacing); cap the
-        # no-scroll part to ~10 rows.
-        content_h = self._scroll.widget().sizeHint().height()
-        natural = self.layout().sizeHint().height()
-        rows = len(self._devices)
+        # Width and natural height are summed from the row widgets: the scroll
+        # area's / container's size hint is 0 until the event loop runs, so it
+        # cannot be measured synchronously right after the list is filled.
+        margins = self.layout().contentsMargins()
+        spacing = self.layout().spacing()
+        if spacing < 0:
+            spacing = 6
+        rows = len(self._rows)
+        if rows:
+            row_gap = self._body.spacing()
+            content_h = sum(r.sizeHint().height() for r in self._rows)
+            content_h += max(0, rows - 1) * row_gap
+            content_w = max(r.sizeHint().width() for r in self._rows)
+        else:
+            content_h = 0
+            content_w = 0
+        chrome = (margins.top() + margins.bottom()
+                  + self._header.sizeHint().height() + spacing)
+        natural = chrome + content_h
         row_h = (content_h / rows) if rows else 44
-        chrome = natural - content_h
         desired = min(natural + _FIT_PAD,
                       chrome + int(row_h * _MAX_ROWS_NO_SCROLL))
+        width = max(self.minimumWidth(), content_w,
+                    self._header.sizeHint().width())
+        width += margins.left() + margins.right()
+        width = min(width, max(1, area.width() - 2 * _GAP))
 
         space_above = y - area.top() - _GAP
         space_below = area.bottom() - y - _GAP
@@ -207,13 +221,16 @@ class OmemoPopup(QtWidgets.QFrame):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        self._rows = []
         if not self._devices:
             self._body.addWidget(QtWidgets.QLabel(tr("omemo_devices_count",
                                                      count=0)))
         else:
             omemo = self._client.omemo
             for device in self._devices:
-                self._body.addWidget(self._device_row(omemo, device))
+                row = self._device_row(omemo, device)
+                self._rows.append(row)
+                self._body.addWidget(row)
         self._reposition()
 
     def _device_row(self, omemo, device) -> QtWidgets.QWidget:

@@ -1656,7 +1656,10 @@ the click point (a small gap keeps the button that opened it uncovered),
 falling back below when there is no room above; it only scrolls once the list
 exceeds ~10 rows or neither side fits, and carries a header button
 (`gtk-preferences.png`) to the full manager (opened `own=True` when the popup is
-our own JID). Deleting an own device (`purge_device`) downloads the published
+our own JID; the popup is parented to `MainWindow._chat_dialog_parent()` so the
+manager opens over the chat window, not the roster). Its height is summed from
+the row widgets (the scroll area's size hint is 0 until the event loop runs).
+Deleting an own device (`purge_device`) downloads the published
 list per namespace, drops the device and re-uploads it (preserving the remaining
 devices' signed labels) — `SessionManager.update_device_list` only handles
 *incoming* updates and never publishes; `OmemoManager.devices()` filters out

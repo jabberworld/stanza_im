@@ -2118,7 +2118,10 @@ Registers XEP plugins (conditionally where noted):
   its content and grows **upward** from the click point (a small gap keeps the
   button uncovered), falling back below when there is no room above; it only
   scrolls once the list exceeds ~10 rows or neither side fits, and carries a
-  header button (`gtk-preferences.png`) to the full manager.
+  header button (`gtk-preferences.png`) to the full manager. The popup is
+  parented to the chat window (`MainWindow._chat_dialog_parent()`) so that
+  manager also opens over the chat, and its height is summed from the row
+  widgets (the scroll area's size hint is 0 until the event loop runs).
 - A new/untrusted device warning is a chat status line naming the device id, its
   JID and a **short** fingerprint (first three groups + `…`) with a
   `stanza:omemo:<jid>` control link to the device manager (relayed in-page like
