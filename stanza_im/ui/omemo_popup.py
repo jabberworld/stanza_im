@@ -17,6 +17,17 @@ from stanza_im.include.utils import escape_html
 
 logger = logging.getLogger("stanza_im.omemo")
 
+#: Gap between the click point and the popup, so the button that opened it is
+#: never covered.
+_GAP = 6
+#: Above this many device rows the popup scrolls instead of growing further.
+_MAX_ROWS_NO_SCROLL = 10
+#: Smallest popup height (keeps the header + a row or two visible).
+_MIN_POPUP_H = 120
+#: Slack added to the natural height so a short list never shows a scrollbar
+#: (the layout size hint can under-report the scroll area's real need).
+_FIT_PAD = 6
+
 _TRUST_LABELS = {
     "TRUSTED": "omemo_trust_trusted",
     "BLINDLY_TRUSTED": "omemo_trust_blindly",
@@ -76,31 +87,74 @@ class OmemoPopup(QtWidgets.QFrame):
         self._reposition()
 
     def _reposition(self) -> None:
-        """Anchor the popup's bottom-left corner at the click point."""
+        """Size and place the popup near the click point.
+
+        The popup grows upward (into the chat view) by default and only scrolls
+        once the list is long (> ``_MAX_ROWS_NO_SCROLL``) or neither side has
+        room.  A small gap keeps the button that opened it uncovered.
+        """
         if self._anchor is None:
             return
-        self.adjustSize()
-        size = self.size()
         anchor = self._anchor
         if isinstance(anchor, QtCore.QPoint):
             x, y = anchor.x(), anchor.y()
         else:
             x, y = anchor
-        point = QtCore.QPoint(int(x), int(y))
+        x, y = int(x), int(y)
+        point = QtCore.QPoint(x, y)
         screen = (QtWidgets.QApplication.screenAt(point)
                   or QtWidgets.QApplication.primaryScreen())
         area = screen.availableGeometry() if screen else None
-        px = int(x)
-        py = int(y) - size.height()
-        if area is not None and area.isValid():
-            px = max(area.left(), min(px, area.right() - size.width()))
-            py = max(area.top(), min(py, area.bottom() - size.height()))
-        self.move(px, py)
+        if area is None or not area.isValid():
+            self.adjustSize()
+            self.move(x, y - self.height())
+            return
+
+        # Width: natural, but never wider than the screen.
+        self.adjustSize()
+        width = max(self.minimumWidth(), self.sizeHint().width())
+        width = min(width, max(1, area.width() - 2 * _GAP))
+
+        # Natural height (layout preferred size, incl. spacing); cap the
+        # no-scroll part to ~10 rows.
+        content_h = self._scroll.widget().sizeHint().height()
+        natural = self.layout().sizeHint().height()
+        rows = len(self._devices)
+        row_h = (content_h / rows) if rows else 44
+        chrome = natural - content_h
+        desired = min(natural + _FIT_PAD,
+                      chrome + int(row_h * _MAX_ROWS_NO_SCROLL))
+
+        space_above = y - area.top() - _GAP
+        space_below = area.bottom() - y - _GAP
+        # The layout enforces a minimum height, so position by the *actual*
+        # size after resizing rather than the requested one.
+        self.resize(int(width), int(desired))
+        height = self.height()
+        if height <= space_above:
+            top = y - _GAP - height
+        elif height <= space_below:
+            top = y + _GAP
+        elif space_above >= space_below:
+            self.resize(int(width), int(max(_MIN_POPUP_H, space_above)))
+            height = self.height()
+            top = area.top() + _GAP
+        else:
+            self.resize(int(width), int(max(_MIN_POPUP_H, space_below)))
+            height = self.height()
+            top = y + _GAP
+        height = min(height, area.height() - 2 * _GAP)
+        self.resize(int(width), int(height))
+        left = max(area.left() + _GAP,
+                   min(x, area.right() - width - _GAP))
+        self.move(int(left), int(top))
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        header = QtWidgets.QHBoxLayout()
+        self._header = QtWidgets.QWidget()
+        header = QtWidgets.QHBoxLayout(self._header)
+        header.setContentsMargins(0, 0, 0, 0)
         title = QtWidgets.QLabel(tr("omemo_devices_title", jid=self._jid))
         title.setStyleSheet("font-weight: bold;")
         header.addWidget(title)
@@ -108,7 +162,7 @@ class OmemoPopup(QtWidgets.QFrame):
         manage = _icon_button("gtk-preferences.png", tr("omemo_manage"), 16, 24)
         manage.clicked.connect(self._open_manager)
         header.addWidget(manage)
-        layout.addLayout(header)
+        layout.addWidget(self._header)
 
         # The device rows live in a scroll area so a long list scrolls instead
         # of making the popup taller than the screen.

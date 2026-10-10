@@ -2114,10 +2114,11 @@ Registers XEP plugins (conditionally where noted):
   distrusted); a click toggles trusted↔distrusted and each manager row also
   shows the device's `device_last_seen` with the name in **bold**. Devices are
   ordered by `OmemoManager.sorted_devices` — recent activity first, then named
-  devices (alias/peer label/learned), then the rest. The shield popup anchors
-  its **bottom-left** corner at the click point, caps its height to the screen
-  and scrolls a long device list, and carries a header button
-  (`gtk-preferences.png`) to the full manager.
+  devices (alias/peer label/learned), then the rest. The shield popup sizes to
+  its content and grows **upward** from the click point (a small gap keeps the
+  button uncovered), falling back below when there is no room above; it only
+  scrolls once the list exceeds ~10 rows or neither side fits, and carries a
+  header button (`gtk-preferences.png`) to the full manager.
 - A new/untrusted device warning is a chat status line naming the device id, its
   JID and a **short** fingerprint (first three groups + `…`) with a
   `stanza:omemo:<jid>` control link to the device manager (relayed in-page like

@@ -316,6 +316,23 @@ try:
 finally:
     OmemoPopup._reload = _orig_reload2
 
+# A moderate list fits without a scrollbar and stays clear of the button.
+_orig_reload3 = OmemoPopup._reload
+OmemoPopup._reload = lambda self: None
+try:
+    _pop3 = OmemoPopup(_FakeClient(), "bob@example.com", anchor=(500, 400))
+    _pop3._devices = [_DevX(i) for i in range(1, 5)]
+    _pop3._rebuild()
+    _pop3.show()
+    QtWidgets.QApplication.processEvents()
+    check("a moderate device list does not scroll",
+          _pop3._scroll.verticalScrollBar().maximum() == 0)
+    check("the popup sits above the click, not over the button",
+          _pop3.y() + _pop3.height() <= 400)
+    _pop3.close()
+finally:
+    OmemoPopup._reload = _orig_reload3
+
 # aesgcm:// URLs must be linkified so the media preview can embed them.
 from stanza_im.include.utils import _URL_RE
 check("aesgcm URLs are linkified",

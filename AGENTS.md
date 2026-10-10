@@ -1650,9 +1650,11 @@ green outline = blindly trusted, `shield-unknown.svg` yellow = undecided,
 `shield-distrusted.svg` red = distrusted); a click toggles trusted↔distrusted,
 and each manager row also shows the device's `device_last_seen` (the device name
 is bold). Devices are listed by `OmemoManager.sorted_devices` — recent activity
-first, then named devices (alias/label/learned), then the rest; the popup caps
-its height to the screen and scrolls a long list. The shield popup anchors its **bottom-left** corner at the
-click point (accepting a `QPoint` or a tuple) and carries a header button
+first, then named devices (alias/label/learned), then the rest. The shield popup
+(accepting a `QPoint` or a tuple) sizes to its content and grows **upward** from
+the click point (a small gap keeps the button that opened it uncovered),
+falling back below when there is no room above; it only scrolls once the list
+exceeds ~10 rows or neither side fits, and carries a header button
 (`gtk-preferences.png`) to the full manager (opened `own=True` when the popup is
 our own JID). Deleting an own device (`purge_device`) downloads the published
 list per namespace, drops the device and re-uploads it (preserving the remaining
