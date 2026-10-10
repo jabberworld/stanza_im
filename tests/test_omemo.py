@@ -721,9 +721,20 @@ class _MgrClient:
         self.xmpp = {"xep_0384": _Plugin()}
         self.jid_str = "me@example.com"
         self._names = {}
+        self.published: list = []      # captured set_omemo_aliases calls
+        self.server_entries: list = []  # returned by get_omemo_aliases
+        self.get_calls = 0
 
     def resource_client_name(self, jid, resource):
         return self._names.get(resource, "")
+
+    async def get_omemo_aliases(self):
+        self.get_calls += 1
+        return list(self.server_entries)
+
+    async def set_omemo_aliases(self, entries):
+        self.published.append(list(entries))
+        return True
 
 
 def _make_manager():
@@ -784,6 +795,76 @@ _order2 = [int(d.device_id) for d in _mgr3.sorted_devices(
     "bob@example.com", [_D(7), _D(2)])]
 check("a named device without activity leads an unnamed one",
       _order2 == [2, 7])
+
+# 18. server-side name sync (learned names fill node gaps) -------------------
+async def _run_learned_publish():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr._server_loaded = True        # node known and empty
+    c._names["gajim.abc"] = "Gajim"
+    mgr.note_device_resource("bob@example.com", 2, "gajim.abc")
+    await asyncio.sleep(0)           # let the scheduled publish run
+    return c
+
+
+_c = asyncio.run(_run_learned_publish())
+check("a learned name is published when the node is empty",
+      bool(_c.published))
+check("the learned name resolves to the client name on the node",
+      any(e.get("alias") == "Gajim" and e.get("id") == "2"
+          for e in (_c.published[-1] if _c.published else [])))
+
+
+async def _run_gap_guard():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr._server_loaded = True
+    mgr._server_names = {"bob@example.com/2": "Existing"}
+    c._names["gajim.abc"] = "Gajim"
+    mgr.note_device_resource("bob@example.com", 2, "gajim.abc")
+    await asyncio.sleep(0)
+    return c
+
+
+_c2b = asyncio.run(_run_gap_guard())
+check("a learned name does not overwrite an existing node name",
+      not _c2b.published)
+
+
+async def _run_manual_publish():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr._server_loaded = True
+    mgr._server_names = {"bob@example.com/2": "Old", "carol@x/9": "Carol Phone"}
+    mgr.set_device_alias("bob@example.com", 2, "My Gajim")
+    await asyncio.sleep(0)
+    return c
+
+
+_c3b = asyncio.run(_run_manual_publish())
+_pub = _c3b.published[-1] if _c3b.published else []
+check("a manual rename is published and overwrites",
+      any(e.get("jid") == "bob@example.com" and e.get("id") == "2"
+          and e.get("alias") == "My Gajim" for e in _pub))
+check("a publish preserves names set by other clients",
+      any(e.get("jid") == "carol@x" and e.get("id") == "9"
+          and e.get("alias") == "Carol Phone" for e in _pub))
+
+
+async def _run_snapshot_load():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    c.server_entries = [{"jid": "carol@x", "id": "9", "alias": "Carol Phone"}]
+    mgr.set_device_alias("bob@example.com", 2, "My Gajim")
+    await asyncio.sleep(0)
+    return c
+
+
+_c4b = asyncio.run(_run_snapshot_load())
+check("the first publish loads the node snapshot (no wipe)",
+      _c4b.get_calls >= 1
+      and any(e.get("jid") == "carol@x" for e in (_c4b.published[-1]
+                                                  if _c4b.published else [])))
 
 # MUC guard: the device<->resource mapping is only learned for 1:1.
 _client_src = open(os.path.join(

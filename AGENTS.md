@@ -1617,7 +1617,13 @@ decrypted in `_decrypt_and_dispatch` and re-enter the normal paths with an
 `encrypted` flag, stored in the new `history` columns and rendered as a lock
 before the body. Device names can be mirrored to a private PEP node
 (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
-`omemo.alias_sync`) so they follow the user across clients; the QR code is
+`omemo.alias_sync`) so they follow the user across clients: a **manual** rename
+is published (overwriting), while a **learned** name is published only when the
+node has no name for that device (it fills gaps, never overwrites); a publish is
+the union of local aliases, the node's current names (preserved) and learned
+names, and the node snapshot is fetched before the first publish so another
+client's names are never wiped. Fetched server names merge into the local
+aliases (local wins). The QR code is
 rendered by a bundled pure-Python encoder (`qr.py`). UI: the Privacy
 preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
 (per-row icon actions for trust/rename/copy/delete; only global Refresh/Close

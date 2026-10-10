@@ -85,6 +85,13 @@ class OmemoManager:
         self.alias_sync = False
         #: Learned ``"jid/id" -> display label`` (resource + client name).
         self._device_resources: dict[str, str] = {}
+        #: Names currently on the private PEP node (``"jid/id" -> name``), so a
+        #: learned name only fills a gap and a publish never wipes a name set
+        #: by another of the user's clients.
+        self._server_names: dict[str, str] = {}
+        self._server_loaded = False
+        #: Coalesces bursts of publishes into one.
+        self._publish_pending = False
 
     # ── callbacks from the plugin ───────────────────────────────
 
@@ -288,9 +295,28 @@ class OmemoManager:
         key = f"{jid}/{device_id}"
         self._device_resources[key] = resource
         names = self._names()
-        if names.get(key) != resource:
-            names[key] = resource
-            self._plugin.storage.set_app("device_names", names)
+        if names.get(key) == resource:
+            return
+        names[key] = resource
+        self._plugin.storage.set_app("device_names", names)
+        # Share the learned name when the node does not have one yet (a name
+        # set on the node, e.g. by another client, is never overwritten here).
+        if self.alias_sync and key not in self._server_names:
+            self._schedule_alias_publish()
+
+    def _publishable_name(self, jid: str, device_id: int) -> str:
+        """The name to store on the server: user alias or resolved client name."""
+        key = f"{jid}/{device_id}"
+        alias = self._aliases().get(key, "")
+        if alias:
+            return str(alias)
+        resource = self._device_resources.get(key) or self._names().get(key, "")
+        if not resource:
+            return ""
+        try:
+            return self._client.resource_client_name(jid, resource) or resource
+        except Exception:  # noqa: BLE001
+            return resource
 
     def note_resource_seen(self, jid: str, resource: str) -> None:
         """Refresh last-seen for the devices mapped to *resource* (presence)."""
@@ -319,18 +345,31 @@ class OmemoManager:
     # ── server-side alias sync ──────────────────────────────────
 
     def _alias_entries(self) -> list[dict]:
+        """The full device-name set to publish.
+
+        Union of user aliases, names already on the server (preserved, so a
+        publish never wipes another client's name) and learned client names.
+        Priority per key: user alias → server name → learned name.
+        """
         aliases = self._aliases()
         seen = self._seen_map()
+        keys = set(aliases) | set(self._server_names) | set(self._names())
         entries: list[dict] = []
-        for key, alias in aliases.items():
+        for key in keys:
             jid, _, device_id = key.rpartition("/")
             if not jid or not device_id:
                 continue
-            entries.append({"jid": jid, "id": device_id, "alias": alias,
+            name = aliases.get(key) or self._server_names.get(key)
+            if not name and device_id.isdigit():
+                name = self._publishable_name(jid, int(device_id))
+            entries.append({"jid": jid, "id": device_id, "alias": name or "",
                             "last_seen": seen.get(key, "")})
         return entries
 
     def _schedule_alias_publish(self) -> None:
+        """Publish the names, coalescing bursts into a single publish."""
+        if self._publish_pending:
+            return
         import asyncio
         try:
             asyncio.ensure_future(self._publish_aliases())
@@ -338,10 +377,28 @@ class OmemoManager:
             pass
 
     async def _publish_aliases(self) -> None:
+        self._publish_pending = True
         try:
-            await self._client.set_omemo_aliases(self._alias_entries())
+            # Load the node's current names first, so a publish preserves what
+            # another client stored instead of wiping it.
+            if not self._server_loaded:
+                try:
+                    entries = await self._client.get_omemo_aliases()
+                    self._server_names = {
+                        f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
+                        for e in entries
+                        if e.get("jid") and e.get("id")}
+                except Exception:  # noqa: BLE001
+                    pass
+                self._server_loaded = True
+            entries = self._alias_entries()
+            await self._client.set_omemo_aliases(entries)
+            self._server_names = {f"{e['jid']}/{e['id']}": e.get("alias", "")
+                                  for e in entries}
         except Exception:  # noqa: BLE001
             logger.debug("OMEMO alias publish failed", exc_info=True)
+        finally:
+            self._publish_pending = False
 
     async def sync_aliases(self) -> None:
         """Merge the server-side aliases into the local store (local wins)."""
@@ -349,6 +406,10 @@ class OmemoManager:
             entries = await self._client.get_omemo_aliases()
         except Exception:  # noqa: BLE001
             return
+        self._server_names = {
+            f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
+            for e in entries if e.get("jid") and e.get("id")}
+        self._server_loaded = True
         if not entries:
             return
         aliases = self._aliases()

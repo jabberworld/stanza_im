@@ -2154,7 +2154,12 @@ Registers XEP plugins (conditionally where noted):
   cache keeps it.
 - Device names/aliases can be mirrored to a private PEP node
   (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, access model
-  `whitelist`, opt-in `omemo.alias_sync`); the local store wins on merge.
+  `whitelist`, opt-in `omemo.alias_sync`): a manual rename is published
+  (overwriting), a learned name only fills a node gap (never overwrites). A
+  publish is the union of local aliases, the node's current names (preserved)
+  and learned names, and the node snapshot is fetched before the first publish
+  so another client's names are not wiped. Fetched names merge into the local
+  aliases (local wins).
   [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)

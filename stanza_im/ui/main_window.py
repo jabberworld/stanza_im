@@ -2703,8 +2703,15 @@ class MainWindow(QtWidgets.QMainWindow):
             if getattr(self._client.omemo, "available", False):
                 self._client.omemo.set_btbv(bool(getattr(
                     self._config.omemo, "blind_trust", True)))
-                self._client.omemo.alias_sync = bool(getattr(
+                alias_sync = bool(getattr(
                     self._config.omemo, "alias_sync", False))
+                self._client.omemo.alias_sync = alias_sync
+                # Load the node's names before the first publish so enabling
+                # the option mid-session cannot wipe another client's names.
+                if (alias_sync
+                        and not getattr(self._client.omemo, "_server_loaded",
+                                        False)):
+                    self._start_task(self._client.omemo.sync_aliases())
         self._tray.set_popups_mode(self._config.notifications.popups)
         try:
             sec = int(getattr(self._config.chat, "mds_displayed_throttle", 3) or 3)
