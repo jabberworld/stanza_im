@@ -5591,10 +5591,14 @@ class JabberClient:
         try:
             if device is not None:
                 self.omemo.note_device_seen(device.bare_jid, device.device_id)
-                resource = msg.get_from().resource
-                if resource:
-                    self.omemo.note_device_resource(
-                        device.bare_jid, device.device_id, resource)
+                # A MUC message's ``from`` resource is the occupant nick and its
+                # real JID is the sender, so the device<->resource mapping only
+                # makes sense for 1:1 conversations.
+                if str(msg["type"]) != "groupchat":
+                    resource = msg.get_from().resource
+                    if resource:
+                        self.omemo.note_device_resource(
+                            device.bare_jid, device.device_id, resource)
         except Exception:  # noqa: BLE001
             pass
         if str(decrypted["type"]) == "groupchat":
@@ -5941,6 +5945,15 @@ class JabberClient:
                 self._start_task(self._prefetch_version(frm))
             if resource:
                 self._start_task(self._load_caps(frm))
+            # Refresh last-seen for OMEMO devices already mapped to this
+            # resource (a device<->resource link only ever comes from a
+            # decrypted message, but presence keeps the timestamp current).
+            if (resource
+                    and getattr(getattr(self, "omemo", None), "available", False)):
+                try:
+                    self.omemo.note_resource_seen(bare, resource)
+                except Exception:  # noqa: BLE001
+                    pass
 
         # Aggregate presence across all resources of the same contact.
         best_show = "offline"
@@ -6069,6 +6082,23 @@ class JabberClient:
             if path:
                 return path
         return ""
+
+    def resource_client_name(self, bare: str, resource: str) -> str:
+        """Human client name for a contact resource.
+
+        Prefers the XEP-0092 ``<name>`` (e.g. "Gajim"), falls back to the
+        XEP-0115 caps mapping, else ``""``.
+        """
+        if not bare or not resource:
+            return ""
+        info = self.get_contact(bare).resources.get(resource)
+        if not info:
+            return ""
+        name = str(info.get("client") or "").strip()
+        if name:
+            return name
+        found = clients_mod.find_client(str(info.get("caps_node") or ""))
+        return found[0] if found else ""
 
     def _on_entity_caps(self, pres) -> None:
         """slixmpp processed a caps presence — resolve our feature cache."""

@@ -149,7 +149,15 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
             f"{name}  —  {_trust_label(level)}\n"
             f"{device.device_id}  ·  {omemo.fingerprint(device.identity_key)}\n"
             f"{tr('omemo_last_seen')}: {seen_txt}")
-        label.setToolTip(omemo.fingerprint(device.identity_key))
+        tooltip = omemo.fingerprint(device.identity_key)
+        try:
+            resource = omemo.device_resource(self._jid, int(device.device_id))
+        except Exception:  # noqa: BLE001
+            resource = ""
+        if resource:
+            tooltip += "\n" + tr("omemo_device_resource", resource=resource)
+        tooltip += "\n" + tr("omemo_last_seen_tip")
+        label.setToolTip(tooltip)
         box.addWidget(label, 1)
 
         # The trust button shows the *state* (coloured shield); a click toggles

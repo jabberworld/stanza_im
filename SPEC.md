@@ -2126,9 +2126,15 @@ Registers XEP plugins (conditionally where noted):
 - Opening the device manager or the shield popup force-downloads the contact's
   device lists (`refresh_device_lists(..., force=True)`), so devices show up
   even when no PEP push has arrived. Our own device gets a readable label from
-  the resource at login when it has none (`ensure_own_label`); a contact's
-  devices are named by their published label or by the resource learned from an
-  incoming message, falling back to `Device <id>`.
+  the resource at login when it has none (`ensure_own_label`). A contact's
+  device name (`OmemoManager.device_name`) is resolved as **user alias → peer
+  label (omemo:2 signed label) → learned client name → raw resource →
+  `Device <id>`**: the learned name comes from the resource that last sent a
+  **decrypted 1:1** message (persisted in `omemo.json` under `device_names`),
+  resolved through XEP-0092 `<name>` or XEP-0115 caps
+  (`JabberClient.resource_client_name`). The device's `device_last_seen` is set
+  when a message from it is decrypted and refreshed from presence for devices
+  already mapped to a resource (throttled to one write per minute).
 - Deleting an own device (`OmemoManager.purge_device`) downloads the published
   device list per namespace, removes the device and re-uploads the result
   (preserving the remaining devices' signed labels), then syncs the offline

@@ -609,6 +609,109 @@ _devs = asyncio.run(_run_filter())
 check("devices() hides inactive devices",
       [int(d.device_id) for d in _devs] == [111])
 
+# 17. device naming + last-seen ---------------------------------------------
+from stanza_im.core.client import JabberClient as _JC
+
+
+class _Contact:
+    def __init__(self):
+        self.resources = {}
+
+
+class _ContactClient:
+    def __init__(self):
+        self.contacts = {}
+
+    def get_contact(self, bare):
+        return self.contacts.setdefault(bare, _Contact())
+
+
+_cc = _ContactClient()
+_cc.get_contact("bob@example.com").resources["gajim.abc"] = {
+    "client": "Gajim", "caps_node": ""}
+_cc.get_contact("bob@example.com").resources["res.caps"] = {
+    "client": "", "caps_node": "https://gajim.org/"}
+_cc.get_contact("bob@example.com").resources["res.bare"] = {
+    "client": "", "caps_node": ""}
+check("resource_client_name prefers XEP-0092 software",
+      _JC.resource_client_name(_cc, "bob@example.com", "gajim.abc") == "Gajim")
+_caps_name = _JC.resource_client_name(_cc, "bob@example.com", "res.caps")
+check("resource_client_name falls back to caps", bool(_caps_name))
+check("resource_client_name is empty without a hint",
+      _JC.resource_client_name(_cc, "bob@example.com", "res.bare") == "")
+
+
+class _Store:
+    def __init__(self):
+        self.data = {}
+
+    def get_app(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set_app(self, key, value):
+        self.data[key] = value
+
+
+class _Plugin:
+    def __init__(self):
+        self.storage = _Store()
+
+
+class _MgrClient:
+    def __init__(self):
+        self.xmpp = {"xep_0384": _Plugin()}
+        self.jid_str = "me@example.com"
+        self._names = {}
+
+    def resource_client_name(self, jid, resource):
+        return self._names.get(resource, "")
+
+
+def _make_manager():
+    client = _MgrClient()
+    return OmemoManager(client), client
+
+
+_mgr2, _c2 = _make_manager()
+check("an unknown device shows Device <id>",
+      _mgr2.device_name("bob@example.com", 1) == "Device 1")
+check("the peer label outranks a learned name",
+      _mgr2.device_name("bob@example.com", 1, label="Bob's phone")
+      == "Bob's phone")
+_mgr2.note_device_resource("bob@example.com", 2, "gajim.abc")
+_c2._names["gajim.abc"] = "Gajim"
+check("a learned resource resolves to the client name",
+      _mgr2.device_name("bob@example.com", 2) == "Gajim")
+check("the peer label outranks the learned client name",
+      _mgr2.device_name("bob@example.com", 2, label="Phone") == "Phone")
+_mgr2.set_device_alias("bob@example.com", 2, "My Gajim")
+check("a user alias outranks everything",
+      _mgr2.device_name("bob@example.com", 2, label="Phone") == "My Gajim")
+check("the learned resource is persisted",
+      _c2.xmpp["xep_0384"].storage.get_app("device_names", {})
+      == {"bob@example.com/2": "gajim.abc"})
+# A fresh manager over the same store still knows the resource.
+_mgr2b = OmemoManager(_c2)
+check("a learned resource survives a restart",
+      _mgr2b.device_resource("bob@example.com", 2) == "gajim.abc")
+
+# Presence refresh: only mapped devices get their last-seen updated.
+_mgr2.note_resource_seen("bob@example.com", "gajim.abc")
+_seen = _c2.xmpp["xep_0384"].storage.get_app("device_last_seen", {})
+check("presence refreshes last-seen for the mapped device",
+      _seen.get("bob@example.com/2", 0) > 0)
+_mgr2.note_resource_seen("bob@example.com", "unmapped.res")
+check("presence leaves unmapped devices untouched",
+      "bob@example.com/9" not in _seen)
+
+# MUC guard: the device<->resource mapping is only learned for 1:1.
+_client_src = open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "stanza_im", "core", "client.py"), encoding="utf-8").read()
+check("resource learning is guarded to non-groupchat",
+      'str(msg["type"]) != "groupchat"' in _client_src
+      and "note_device_resource" in _client_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

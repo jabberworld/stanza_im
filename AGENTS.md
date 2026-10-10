@@ -1631,7 +1631,16 @@ force-downloads the list when the caps are silent). An incoming encrypted
 message auto-enables OMEMO for that chat (`omemo.auto_enable`, default on). The
 device manager and the shield popup force-download the device lists
 (`refresh_device_lists(..., force=True)`), and our own device gets a readable
-label from the resource at login (`ensure_own_label`) when it has none. On the
+label from the resource at login (`ensure_own_label`) when it has none. A
+contact device's display name (`OmemoManager.device_name`) is resolved as
+**user alias → peer label (omemo:2 signed label) → learned client name → raw
+resource → `Device <id>`**: the client name comes from the resource that last
+sent us a **decrypted 1:1** message (`note_device_resource`, persisted in
+`omemo.json` under `device_names`), resolved via XEP-0092 `<name>` or XEP-0115
+caps (`JabberClient.resource_client_name`). The device's last-seen
+(`device_last_seen`, `omemo.json`) is set when we decrypt a message from it and
+refreshed from presence for devices already mapped to a resource
+(`note_resource_seen`, throttled to one write per minute). On the
 chat toolbar the lock and shield sit **after** the XEP-0224 attention bell, so
 the shield appearing/disappearing only moves the trailing stretch; the lock's
 mode menu entries are checkable (the active mode carries the tick). The device

@@ -155,6 +155,14 @@ class OmemoPopup(QtWidgets.QFrame):
         level = omemo.trust_level_name(device)
         trusted = _is_trusted(level)
         label = QtWidgets.QLabel(f"{name}\n{_trust_label(level)}")
+        tooltip = omemo.fingerprint(device.identity_key)
+        try:
+            resource = omemo.device_resource(self._jid, int(device.device_id))
+        except Exception:  # noqa: BLE001
+            resource = ""
+        if resource:
+            tooltip += "\n" + tr("omemo_device_resource", resource=resource)
+        label.setToolTip(tooltip)
         box.addWidget(label, 1)
 
         # Coloured trust shield: the icon is the *state*; a click toggles it.

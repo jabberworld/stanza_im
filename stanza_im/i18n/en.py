@@ -185,6 +185,8 @@ STRINGS = {
     "omemo_new_device_warning": "A new device appeared: {name} (id {id}, {jid}), fingerprint {fp}. Check it before trusting.",
     "omemo_new_own_device_warning": "A new own device appeared: {name} (id {id}, {jid}), fingerprint {fp}. Check it before trusting.",
     "omemo_last_seen": "Last seen",
+    "omemo_last_seen_tip": "Known only for devices that have sent us an encrypted message; refreshed while the device is online once it has been matched to a resource.",
+    "omemo_device_resource": "Resource: {resource}",
     # Roster
     "roster_search_placeholder": "Search contacts...",
     "roster_no_contacts": "No contacts yet.\nAdd someone to get started!",

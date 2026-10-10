@@ -13,6 +13,7 @@ All heavy imports happen lazily so a missing stack never breaks the client.
 from __future__ import annotations
 
 import logging
+import time
 from copy import copy
 from typing import FrozenSet, Iterable, Optional
 
@@ -22,6 +23,10 @@ logger = logging.getLogger("stanza_im.omemo")
 
 MODE_OFF = "off"
 MODE_OMEMO = "omemo"
+
+#: Minimum age before a device's last-seen timestamp is rewritten, so frequent
+#: presence/decryption updates do not rewrite ``omemo.json`` on every event.
+_SEEN_REFRESH_S = 60
 
 
 def _namespaces():
@@ -221,18 +226,73 @@ class OmemoManager:
         if self.alias_sync:
             self._schedule_alias_publish()
 
+    def _names(self) -> dict:
+        """Persisted ``"jid/id" -> resource`` learned from incoming messages."""
+        data = self._plugin.storage.get_app("device_names", {})
+        return data if isinstance(data, dict) else {}
+
     def device_name(self, jid: str, device_id: int, label: str = "") -> str:
-        """Best display name: user alias, learned name, label, else the id."""
-        return (self.device_alias(jid, device_id)
-                or self._device_resources.get(f"{jid}/{device_id}", "")
-                or (label or "")
-                or f"Device {device_id}")
+        """Best display name for a device.
+
+        Priority: user alias, the peer's published label (omemo:2), the client
+        name learned from a message's resource (XEP-0092 / XEP-0115 caps), the
+        raw resource, else ``Device <id>``.
+        """
+        key = f"{jid}/{device_id}"
+        alias = self.device_alias(jid, device_id)
+        if alias:
+            return alias
+        if label:
+            return label
+        resource = self._device_resources.get(key) or self._names().get(key, "")
+        if resource:
+            try:
+                name = self._client.resource_client_name(jid, resource)
+            except Exception:  # noqa: BLE001
+                name = ""
+            return name or resource
+        return f"Device {device_id}"
+
+    def device_resource(self, jid: str, device_id: int) -> str:
+        """The resource last seen sending from this device ("" when unknown)."""
+        key = f"{jid}/{device_id}"
+        return self._device_resources.get(key) or self._names().get(key, "")
 
     def note_device_resource(self, jid: str, device_id: int,
-                             label: str) -> None:
-        """Remember a device's resource/client name (auto-naming fallback)."""
-        if label:
-            self._device_resources[f"{jid}/{device_id}"] = label
+                             resource: str) -> None:
+        """Remember a device's resource (auto-naming fallback), persisted."""
+        if not resource:
+            return
+        key = f"{jid}/{device_id}"
+        self._device_resources[key] = resource
+        names = self._names()
+        if names.get(key) != resource:
+            names[key] = resource
+            self._plugin.storage.set_app("device_names", names)
+
+    def note_resource_seen(self, jid: str, resource: str) -> None:
+        """Refresh last-seen for the devices mapped to *resource* (presence)."""
+        if not jid or not resource:
+            return
+        prefix = jid + "/"
+        mapped = {**self._names(), **self._device_resources}
+        targets = [key for key, res in mapped.items()
+                   if res == resource and key.startswith(prefix)]
+        if not targets:
+            return
+        seen = self._seen_map()
+        now = time.time()
+        changed = False
+        for key in targets:
+            try:
+                old = float(seen.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                old = 0.0
+            if now - old >= _SEEN_REFRESH_S:
+                seen[key] = now
+                changed = True
+        if changed:
+            self._plugin.storage.set_app("device_last_seen", seen)
 
     # ── server-side alias sync ──────────────────────────────────
 
@@ -295,9 +355,16 @@ class OmemoManager:
         return data if isinstance(data, dict) else {}
 
     def note_device_seen(self, jid: str, device_id: int) -> None:
-        import time
+        key = f"{jid}/{device_id}"
         seen = self._seen_map()
-        seen[f"{jid}/{device_id}"] = time.time()
+        now = time.time()
+        try:
+            old = float(seen.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            old = 0.0
+        if now - old < _SEEN_REFRESH_S:
+            return
+        seen[key] = now
         self._plugin.storage.set_app("device_last_seen", seen)
 
     def device_last_seen(self, jid: str, device_id: int) -> float:
