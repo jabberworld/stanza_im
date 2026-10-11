@@ -39,6 +39,8 @@ class _FakeApp(QtCore.QObject):
     def __init__(self, osd):
         super().__init__()
         self._osd = osd
+        # A non-None client means "logged in" (the digest is gated on it).
+        self._client = object()
         self._unread_chats = {}
         self._conference_roster = set()
         self._muc_self_nicks = {}
@@ -54,6 +56,20 @@ def _cfg():
     cfg.notifications.osd_duration = 5
     return cfg
 
+
+# 0. before login (no client) the digest never appears -----------------------
+mgr0 = OsdManager(_cfg())
+fake0 = _FakeApp(mgr0)
+fake0._client = None
+fake0._unread_chats = {"alice@example.com": {"unread": 5, "mentions": 0}}
+digest.activate(fake0)
+check("no digest before login", len(mgr0._windows) == 0)
+fake0.unread_changed.emit()
+check("a pre-login unread change still shows nothing", len(mgr0._windows) == 0)
+fake0._client = object()
+fake0.unread_changed.emit()
+check("the digest appears once logged in", len(mgr0._windows) == 1)
+digest.deactivate(fake0)
 
 # 1. activation shows a sticky digest ----------------------------------------
 mgr = OsdManager(_cfg())

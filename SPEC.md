@@ -2535,10 +2535,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `_unread_chats`: a key in `_conference_roster`/`_muc_self_nicks` counts only
   its `mentions`, every other key counts its `unread`. The sticky OSD is
   created/updated through `OsdManager.show_sticky`/`update_sticky` and dismissed
-  when nothing is unread. Closing it (its close button, `on_close`) remembers the
-  total and keeps it hidden until the total grows again; clicking it opens the
-  topmost unread conversation (`MainWindow._on_tray_cycle_unread`). `deactivate`
-  disconnects the signal and calls `dismiss_sticky`.
+  when nothing is unread. It is **gated on being logged in** (`_refresh`
+  dismisses while `app._client` is `None`), so restored pre-login counters never
+  pop a digest on the login screen. Closing it (its close button, `on_close`)
+  remembers the total and keeps it hidden until the total grows again; clicking
+  it opens the topmost unread conversation (`MainWindow._on_tray_cycle_unread`).
+  `deactivate` disconnects the signal and calls `dismiss_sticky`.
 
 ### 14.9 Event System
 

@@ -385,30 +385,40 @@ class PreferencesDialog(QtWidgets.QDialog):
         file_form.addRow(tr("prefs_file_download_dir"),
                          self._row(directory, browse))
 
-        # Startup / memory tuning (deferred loads, Chromium flags).
+        # Startup / memory tuning (deferred loads, Chromium flags).  Every row
+        # puts its label in the form's label column and the selector in the
+        # field column (a shared, fixed width) so the controls line up.
         perf, perf_form = self._page()
-        perf_form.addRow(self._check("defer_ui_build",
-                                     tr("prefs_defer_ui_build")))
+        defer = self._check("defer_ui_build", tr("prefs_defer_ui_build"))
+        perf_form.addRow(self._row(
+            defer, self._info_label(tr("prefs_defer_ui_build_tip")),
+            trailing_stretch=True))
+
+        def _select(label_key: str, key: str, options, tip: str):
+            combo = self._combo(key, options)
+            perf_form.addRow(
+                tr(label_key),
+                self._row(combo, self._info_label(tip),
+                          trailing_stretch=True))
+            return combo
+
+        _select("prefs_omemo_load", "omemo_load_mode", [
+            ("prefs_load_lazy", "lazy"),
+            ("prefs_load_startup", "startup")], tr("prefs_omemo_load_tip"))
+        _select("prefs_calls_load", "calls_load_mode", [
+            ("prefs_load_lazy", "lazy"),
+            ("prefs_load_startup", "startup")], tr("prefs_calls_load_tip"))
+        _select("prefs_webengine_mode", "webengine_memory_mode", [
+            ("webengine_mode_off", "off"),
+            ("webengine_mode_moderate", "moderate"),
+            ("webengine_mode_aggressive", "aggressive")],
+            tr("prefs_webengine_mode_tip"))
+        cache = self._spin("webengine_cache_mb", 0, 512)
+        cache.setFixedWidth(COMBO_WIDTH)
         perf_form.addRow(
-            self._row(QtWidgets.QLabel(tr("prefs_omemo_load")),
-                      self._combo("omemo_load_mode", [
-                          ("prefs_load_lazy", "lazy"),
-                          ("prefs_load_startup", "startup")])),
-            self._info_label(tr("prefs_performance_restart_tip")))
-        perf_form.addRow(
-            self._row(QtWidgets.QLabel(tr("prefs_calls_load")),
-                      self._combo("calls_load_mode", [
-                          ("prefs_load_lazy", "lazy"),
-                          ("prefs_load_startup", "startup")])))
-        perf_form.addRow(
-            self._row(QtWidgets.QLabel(tr("prefs_webengine_mode")),
-                      self._combo("webengine_memory_mode", [
-                          ("webengine_mode_off", "off"),
-                          ("webengine_mode_moderate", "moderate"),
-                          ("webengine_mode_aggressive", "aggressive")])),
-            self._info_label(tr("prefs_performance_restart_tip")))
-        perf_form.addRow(tr("prefs_webengine_cache_mb"),
-                         self._spin("webengine_cache_mb", 0, 512))
+            tr("prefs_webengine_cache_mb"),
+            self._row(cache, self._info_label(
+                tr("prefs_webengine_cache_mb_tip")), trailing_stretch=True))
         return self._tabs([(tr("prefs_general"), general),
                            (tr("prefs_file_transfer"), files),
                            (tr("prefs_performance"), perf)])

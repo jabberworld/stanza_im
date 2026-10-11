@@ -97,6 +97,12 @@ def _refresh(app) -> None:
     osd = getattr(app, "_osd", None)
     if osd is None:
         return
+    # Only surface notifications for the account actually logged in: the
+    # restored unread counters exist before login (they still drive the roster
+    # badges) but must not pop a digest on the login screen.
+    if getattr(app, "_client", None) is None:
+        osd.dismiss_sticky(_STICKY_KEY)
+        return
     state = _ensure_state(app)
     messages, contacts, mentions, confs = _stats(app)
     total = messages + mentions

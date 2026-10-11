@@ -561,10 +561,13 @@ the body lists «N новых сообщений от M контактов» and
 (emitted from `_bump_unread`/`_reset_unread`/`_recount_unread`) and recomputes
 the counters from `_unread_chats` (conference keys — in `_conference_roster` or
 `_muc_self_nicks` — counted only by `mentions`); the sticky OSD is updated in
-place via `OsdManager.show_sticky`/`update_sticky`. Closing it (its close
-button, `on_close`) hides it until the total grows again; clicking it opens the
-topmost unread conversation (`_on_tray_cycle_unread`). `deactivate` disconnects
-the signal and `dismiss_sticky`. [`tests/test_digest.py`]
+place via `OsdManager.show_sticky`/`update_sticky`. It is **gated on being
+logged in** (`_refresh` dismisses when `app._client` is `None`), so the unread
+counters restored from disk never pop a digest on the login screen (they still
+show as roster badges). Closing it (its close button, `on_close`) hides it until
+the total grows again; clicking it opens the topmost unread conversation
+(`_on_tray_cycle_unread`). `deactivate` disconnects the signal and
+`dismiss_sticky`. [`tests/test_digest.py`]
 
 A contact can be **dragged onto a group** (header or row): `RosterWidget`
 starts a `QDrag` (`application/x-stanza-roster-jid`) and emits
