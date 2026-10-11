@@ -280,6 +280,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # JIDs known (from the persisted registry) to be conferences, so a room
         # with restored unread is classified correctly before it is joined.
         self._known_conferences: set[str] = set()
+        # Per-contact notification priority: {"high"|"low"} (absence = normal).
+        self._notification_priorities: dict[str, str] = {}
+        self._priority_publish_pending = False
+        self._priority_sticky_closed_at: int | None = None
         self._load_unread_for(self._config.jid)
         # Unseen reactions on our own messages, keyed by chat-tab key then by
         # the message reference; the value is the number of reactions not yet
@@ -589,6 +593,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._chat_window.typing_changed.connect(self._on_typing_local)
         self._chat_window.activity_changed.connect(self._on_chat_activity)
+
+        # Keep the «important messages» sticky OSD in step with the counters.
+        self.unread_changed.connect(self._update_priority_sticky)
 
         # Apply the saved settings once, so everything (fonts including the
         # input font, colors, themes, interface mode) matches the config from
@@ -3283,6 +3290,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 getattr(self._client, "resource", "") or ""))
             if getattr(self._client.omemo, "alias_sync", False):
                 self._start_task(self._client.omemo.sync_aliases())
+        # Pull the per-contact notification priorities stored on the server.
+        if self._client is not None:
+            self._start_task(self._sync_notification_priorities())
 
     def _on_auth_failed(self, condition: str = ""):
         self._set_info_actions_enabled(False)
@@ -4692,6 +4702,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 lambda checked=False: defer(
                     lambda: QtWidgets.QApplication.clipboard().setText(
                         make_xmpp_uri(jid, "join"))))
+            self._build_priority_menu(menu, jid=jid)
         if not is_conf:
             self._build_invite_menu(menu, jid.split("/", 1)[0])
             menu.addAction(
@@ -4732,6 +4743,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 lambda checked=False: defer(lambda: self._create_contact_group(jid)))
             if self._client:
                 self._build_subscription_menu(menu, jid.split("/", 1)[0])
+                self._build_priority_menu(menu, jid=jid.split("/", 1)[0])
                 if getattr(self._client.omemo, "available", False):
                     menu.addAction(
                         self._menu_icon("shield.svg"), tr("omemo_manage"),
@@ -4790,6 +4802,10 @@ class MainWindow(QtWidgets.QMainWindow):
             menu.addAction(self._menu_icon("edit.png"),
                            tr("ctx_rename_group"),
                            lambda: self._rename_group(group))
+        # A priority set on a group is written to every member contact; the
+        # private-messages group (computed rows keyed by room/nick) is skipped.
+        if group != tr("roster_group_personal_messages"):
+            self._build_priority_menu(menu, group=group)
         menu.exec(pos)
 
     def _rename_group(self, old: str) -> None:
@@ -5167,7 +5183,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         self._unread_chats = unread_state.load_chats(jid)
         self._load_known_conferences()
+        self._load_notification_priorities()
         self._recount_unread()
+
+    def _load_notification_priorities(self) -> None:
+        """Load the persisted per-contact notification priorities."""
+        from stanza_im.core import notification_priorities
+        try:
+            self._notification_priorities = notification_priorities.all()
+        except Exception:  # noqa: BLE001 - best effort
+            self._notification_priorities = {}
 
     def _load_known_conferences(self) -> None:
         """Seed the conference set from the persisted known-contacts registry.
@@ -5222,7 +5247,8 @@ class MainWindow(QtWidgets.QMainWindow):
         except (AttributeError, RuntimeError):
             pass
 
-    def _bump_unread(self, jid: str, mention: bool = False):
+    def _bump_unread(self, jid: str, mention: bool = False,
+                     important: bool = False):
         """Count an incoming message for *jid* (roster badge + tray blink)."""
         entry = self._unread_chats.get(jid)
         if entry is None:
@@ -5231,6 +5257,8 @@ class MainWindow(QtWidgets.QMainWindow):
         entry["unread"] += 1
         if mention:
             entry["mentions"] += 1
+        if important:
+            entry["important"] = int(entry.get("important", 0) or 0) + 1
         self._unread_jids.add(jid)
         self._unread_total += 1
         self._schedule_unread_save()
@@ -5262,6 +5290,7 @@ class MainWindow(QtWidgets.QMainWindow):
         entry = self._unread_chats.get(jid) or unread_state.blank()
         entry["unread"] = 0
         entry["mentions"] = 0
+        entry["important"] = 0
         if anchor:
             entry["read_ref"] = str(anchor.get("ref") or "")
             entry["read_ts"] = str(anchor.get("ts") or "")
@@ -5533,9 +5562,11 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_to: str = "", reply_id: str = "",
                              carbon: bool = False, media: dict | None = None,
                              encrypted: bool = False,
-                             markup: dict | None = None):
+                             markup: dict | None = None,
+                             urgency: str = ""):
         bare_jid = frm.split("/")[0]
         self._touch_tab_activity(bare_jid)
+        priority = self._effective_priority(bare_jid, urgency)
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
         self._remember_contact(bare_jid, name=sender_name,
                                is_conference=False)
@@ -5580,7 +5611,7 @@ class MainWindow(QtWidgets.QMainWindow):
         active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == bare_jid)
         if not active:
-            self._bump_unread(bare_jid)
+            self._bump_unread(bare_jid, important=(priority == "high"))
             self._sync_tray_blink()
         if active and self._client and self._chat_at_bottom(bare_jid):
             self._client.mds_mark_displayed(bare_jid)
@@ -5589,7 +5620,8 @@ class MainWindow(QtWidgets.QMainWindow):
                           if isinstance(body, str) and body.startswith("/me ")
                           else body)
             self._tray.show_message(sender_name, popup_body, kind="message")
-        self._maybe_osd_message(sender_name, body, bare_jid)
+        if priority != "low":
+            self._maybe_osd_message(sender_name, body, bare_jid)
         if not carbon:
             self._request_vcard(bare_jid)
 
@@ -5685,12 +5717,18 @@ class MainWindow(QtWidgets.QMainWindow):
                                  reply_to: str = "", reply_id: str = "",
                                   media: dict | None = None,
                                   encrypted: bool = False,
-                                  markup: dict | None = None):
+                                  markup: dict | None = None,
+                                  urgency: str = ""):
         info = self._participant_info(room, nick)
         real_jid = info.get("real_jid")
         target = real_jid.strip() if isinstance(real_jid, str) else ""
         if not target or target.lower() == "none":
             target = f"{room}/{nick}"
+        # The priority is the sender's (a bare real JID); a `room/nick` key has
+        # no contact to look up.
+        sender_bare = (target.split("/", 1)[0]
+                       if "@" in target and "/" not in target else "")
+        priority = self._effective_priority(sender_bare, urgency)
         self._remember_contact(target, name=nick, is_conference=True)
         self._sync_pm_roster(target, room, nick)
         self._notify_incoming_message(target, body)
@@ -5714,13 +5752,14 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
             encrypted=encrypted, markup=markup))
-        self._maybe_osd_message(nick, body, target)
+        if priority != "low":
+            self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
         # its own roster row (skipping a conversation that is on screen).
         active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == target)
         if not active:
-            self._bump_unread(target)
+            self._bump_unread(target, important=(priority == "high"))
             self._refresh_unread_badge(target)
         if active and self._client and self._chat_at_bottom(target):
             self._client.mds_mark_displayed(target)
@@ -5788,7 +5827,8 @@ class MainWindow(QtWidgets.QMainWindow):
                               reply_to: str = "", reply_id: str = "",
                               media: dict | None = None,
                               encrypted: bool = False,
-                              markup: dict | None = None):
+                              markup: dict | None = None,
+                              urgency: str = ""):
         self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
@@ -5837,7 +5877,9 @@ class MainWindow(QtWidgets.QMainWindow):
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
             encrypted=encrypted, markup=markup))
-        self._maybe_osd_groupchat(room, nick, body)
+        priority = self._effective_priority(room, urgency)
+        if priority != "low":
+            self._maybe_osd_groupchat(room, nick, body)
         is_mention = bool(self_nick and nick != self_nick
                           and mentions_nick(body, self_nick))
         if is_mention:
@@ -5847,7 +5889,8 @@ class MainWindow(QtWidgets.QMainWindow):
         active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == room)
         if not active and nick != self_nick:
-            self._bump_unread(room, mention=is_mention)
+            self._bump_unread(room, mention=is_mention,
+                              important=(priority == "high"))
             self._refresh_unread_badge(room)
             if is_mention:
                 self._note_unread_mention(room, reply_ref_id or archive_id)
@@ -7409,6 +7452,181 @@ class MainWindow(QtWidgets.QMainWindow):
     def _osd_click(self, jid, nick: str = ""):
         self._raise_chat_area()
         self._on_contact_open(jid)
+
+    # ── Notification priority (per-contact) ───────────────────────
+
+    def _priority_for(self, jid: str) -> str:
+        """The stored priority for *jid* (``"high"``/``"low"``/``""``=normal)."""
+        if not jid:
+            return ""
+        return self._notification_priorities.get(str(jid).split("/", 1)[0], "")
+
+    def _effective_priority(self, jid: str, urgency: str = "") -> str:
+        """Priority applied to a message: the user setting over XEP-0131.
+
+        Returns ``"high"``, ``"normal"`` or ``"low"``.  A stored user priority
+        always wins; otherwise the SHIM ``Urgency`` header decides (``medium``
+        maps to normal).
+        """
+        stored = self._priority_for(jid)
+        if stored in ("high", "low"):
+            return stored
+        if urgency == "high":
+            return "high"
+        if urgency == "low":
+            return "low"
+        return "normal"
+
+    def _set_notification_priority(self, jid: str, priority: str) -> None:
+        from stanza_im.core import notification_priorities
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare:
+            return
+        if priority in ("high", "low"):
+            self._notification_priorities[bare] = priority
+        else:
+            self._notification_priorities.pop(bare, None)
+        try:
+            notification_priorities.set(bare, priority)
+        except Exception:  # noqa: BLE001
+            pass
+        self._schedule_priority_publish()
+        self._update_priority_sticky()
+
+    def _set_group_priority(self, group: str, priority: str) -> None:
+        """Apply *priority* to every contact of *group* (per-contact entries)."""
+        from stanza_im.core import notification_priorities
+        mapping: dict[str, str] = {}
+        for jid in self._group_jids(group):
+            bare = str(jid).split("/", 1)[0]
+            if not bare:
+                continue
+            if priority in ("high", "low"):
+                self._notification_priorities[bare] = priority
+                mapping[bare] = priority
+            else:
+                self._notification_priorities.pop(bare, None)
+                mapping[bare] = ""
+        try:
+            notification_priorities.set_many(mapping)
+        except Exception:  # noqa: BLE001
+            pass
+        self._schedule_priority_publish()
+        self._update_priority_sticky()
+
+    def _schedule_priority_publish(self) -> None:
+        if self._priority_publish_pending:
+            return
+        self._priority_publish_pending = True
+        self._start_task(self._publish_notification_priorities())
+
+    async def _publish_notification_priorities(self) -> None:
+        try:
+            if self._client is None:
+                return
+            entries = [{"jid": jid, "priority": priority}
+                       for jid, priority in self._notification_priorities.items()]
+            await self._client.set_notification_priorities(entries)
+        except Exception:  # noqa: BLE001
+            logger.debug("Notification priority publish failed", exc_info=True)
+        finally:
+            self._priority_publish_pending = False
+
+    async def _sync_notification_priorities(self) -> None:
+        """Merge the server-side priorities into the local map (server wins)."""
+        if self._client is None:
+            return
+        try:
+            entries = await self._client.get_notification_priorities()
+        except Exception:  # noqa: BLE001
+            return
+        if not entries:
+            return
+        changed = False
+        for entry in entries:
+            jid = str(entry.get("jid") or "").split("/", 1)[0]
+            priority = str(entry.get("priority") or "")
+            if jid and priority in ("high", "low") \
+                    and self._notification_priorities.get(jid) != priority:
+                self._notification_priorities[jid] = priority
+                changed = True
+        if changed:
+            from stanza_im.core import notification_priorities
+            try:
+                notification_priorities.save(self._notification_priorities)
+            except Exception:  # noqa: BLE001
+                pass
+            self._update_priority_sticky()
+
+    def _build_priority_menu(self, parent_menu, jid: str = "",
+                             group: str = "") -> None:
+        """Add the «Notification priority» submenu for a contact or a group."""
+        submenu = parent_menu.addMenu(self._menu_icon("high-priority.svg"),
+                                      tr("ctx_priority"))
+        if group:
+            members = [str(j).split("/", 1)[0] for j in self._group_jids(group)]
+            values = {self._priority_for(j) or "normal" for j in members}
+            current = values.pop() if len(values) == 1 else ""
+        else:
+            current = self._priority_for(jid) or "normal"
+        for label_key, value in (("priority_high", "high"),
+                                 ("priority_normal", "normal"),
+                                 ("priority_low", "low")):
+            action = submenu.addAction(tr(label_key))
+            action.setCheckable(True)
+            action.setChecked(current == value)
+            if group:
+                action.triggered.connect(
+                    lambda checked=False, g=group, v=value:
+                    self._set_group_priority(g, v))
+            else:
+                action.triggered.connect(
+                    lambda checked=False, j=jid, v=value:
+                    self._set_notification_priority(j, v))
+
+    def _update_priority_sticky(self) -> None:
+        """Show/update (or dismiss) the sticky «important messages» OSD."""
+        osd = getattr(self, "_osd", None)
+        if osd is None:
+            return
+        cfg = self._config.notifications
+        if self._client is None or not cfg.osd_enabled:
+            osd.dismiss_sticky("priority")
+            return
+        total = 0
+        chats = 0
+        for entry in self._unread_chats.values():
+            count = int(entry.get("important", 0) or 0)
+            if count > 0:
+                total += count
+                chats += 1
+        if total <= 0:
+            osd.dismiss_sticky("priority")
+            self._priority_sticky_closed_at = None
+            return
+        # Respect a manual dismissal: stay hidden until the total grows again.
+        closed_at = self._priority_sticky_closed_at
+        if closed_at is not None and total <= closed_at:
+            return
+        self._priority_sticky_closed_at = None
+        osd.show_sticky(
+            "priority", QtGui.QIcon(find_icon("high-priority.svg")),
+            tr("osd_priority_title"), tr("osd_priority_body", n=total, m=chats),
+            on_click=self._on_priority_click,
+            on_close=self._on_priority_sticky_closed)
+
+    def _on_priority_sticky_closed(self) -> None:
+        """Remember the current important total so it stays hidden until growth."""
+        total = sum(int(entry.get("important", 0) or 0)
+                    for entry in self._unread_chats.values())
+        self._priority_sticky_closed_at = total
+
+    def _on_priority_click(self) -> None:
+        """Open the first conversation with unread important messages."""
+        for key, entry in self._unread_chats.items():
+            if int(entry.get("important", 0) or 0) > 0:
+                self._osd_click(key)
+                return
 
     def _maybe_osd_message(self, title: str, body: str, jid: str):
         cfg = self._config.notifications

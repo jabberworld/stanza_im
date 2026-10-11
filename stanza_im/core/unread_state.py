@@ -48,8 +48,8 @@ def set_profile(jid: str) -> None:
 
 _FILE = "unread.json"
 
-_FIELDS = ("unread", "mentions", "read_sid", "read_ts", "read_ref",
-           "seen_sid", "seen_ts", "seen_ref", "seen_at")
+_FIELDS = ("unread", "mentions", "important", "read_sid", "read_ts",
+           "read_ref", "seen_sid", "seen_ts", "seen_ref", "seen_at")
 
 
 def path() -> str:
@@ -58,9 +58,9 @@ def path() -> str:
 
 def blank() -> dict:
     """Return an empty read-state record."""
-    return {"unread": 0, "mentions": 0, "read_sid": "", "read_ts": "",
-            "read_ref": "", "seen_sid": "", "seen_ts": "", "seen_ref": "",
-            "seen_at": 0.0}
+    return {"unread": 0, "mentions": 0, "important": 0, "read_sid": "",
+            "read_ts": "", "read_ref": "", "seen_sid": "", "seen_ts": "",
+            "seen_ref": "", "seen_at": 0.0}
 
 
 def _positive_int(value) -> int:
@@ -81,6 +81,7 @@ def _entry(value) -> dict:
     if isinstance(value, dict):
         entry["unread"] = _positive_int(value.get("unread", value.get("count")))
         entry["mentions"] = _positive_int(value.get("mentions"))
+        entry["important"] = _positive_int(value.get("important"))
         entry["read_sid"] = _text(value.get("read_sid") or value.get("displayed"))
         entry["read_ts"] = _text(value.get("read_ts"))
         entry["read_ref"] = _text(value.get("read_ref"))

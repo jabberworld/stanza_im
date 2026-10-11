@@ -73,6 +73,7 @@ NS_FALLBACK = "urn:xmpp:fallback:0"        # XEP-0428 Fallback Indication
 NS_HINTS = "urn:xmpp:hints"                # XEP-0334 Message Processing Hints
 NS_CAPTCHA = "urn:xmpp:captcha"            # XEP-0158 CAPTCHA Forms
 NS_MEDIA = "urn:xmpp:media-element"        # XEP-0221 Data Forms Media Element
+NS_SHIM = "http://jabber.org/protocol/shim"  # XEP-0131 Stanza Headers
 NS_OOB = "jabber:x:oob"                    # XEP-0066 Out-of-Band Data
 NS_SIMS = "urn:xmpp:sims:1"                # XEP-0385 Stateless Inline Media Sharing
 NS_REFERENCE = "urn:xmpp:reference:0"      # XEP-0372 References
@@ -210,6 +211,29 @@ def _retract_reference(stanza) -> str:
         if el.tag in ("{%s}retract" % NS_RETRACT,
                       "{%s}retract" % NS_RETRACT_LEGACY):
             return str(el.get("id", ""))
+    return ""
+
+
+def _shim_urgency(stanza) -> str:
+    """Return the XEP-0131 ``Urgency`` SHIM header of *stanza*.
+
+    Values are ``"high"``, ``"medium"`` or ``"low"`` (the XEP's own set), or
+    ``""`` when no urgency header is present.  The caller maps ``medium`` to its
+    ``normal``.
+    """
+    xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
+    if xml is None:
+        return ""
+    for headers in xml.iter(f"{{{NS_SHIM}}}headers"):
+        for header in headers:
+            if header.tag != f"{{{NS_SHIM}}}header":
+                continue
+            if str(header.get("name", "")).lower() == "urgency":
+                value = (header.text or "").strip().lower()
+                if value in ("high", "medium", "low"):
+                    return value
     return ""
 
 
@@ -5747,7 +5771,8 @@ class JabberClient:
                     logger.debug("Incoming correction ignored (edits disabled)")
                 self.emit("muc_private_message", room, nick, body, ts, unstyled,
                           stable_id, frm, reply_to, reply_id, media=media,
-                          encrypted=self._omemo_flag(msg), markup=markup)
+                          encrypted=self._omemo_flag(msg), markup=markup,
+                          urgency=_shim_urgency(msg))
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -5760,7 +5785,8 @@ class JabberClient:
                 logger.debug("Incoming correction ignored (edits disabled)")
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id, media=media,
-                      encrypted=self._omemo_flag(msg), markup=markup)
+                      encrypted=self._omemo_flag(msg), markup=markup,
+                      urgency=_shim_urgency(msg))
 
     @staticmethod
     def _message_fields(msg):
@@ -5819,7 +5845,7 @@ class JabberClient:
             self._mds_track(frm.split("/")[0], inner, server_sid)
         self.emit("message_received", frm, body, ts, unstyled,
                   stable_id, frm, reply_to, reply_id, True, media=media,
-                  markup=markup)
+                  markup=markup, urgency=_shim_urgency(inner))
 
     def _on_carbon_sent(self, msg) -> None:
         """A 1:1 message sent from another of our resources (XEP-0280)."""
@@ -5921,7 +5947,8 @@ class JabberClient:
             logger.debug("Incoming MUC correction ignored (edits disabled)")
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
-                  media=media, encrypted=self._omemo_flag(msg), markup=markup)
+                  media=media, encrypted=self._omemo_flag(msg), markup=markup,
+                  urgency=_shim_urgency(msg))
 
     def _on_groupchat_subject(self, msg) -> None:
         """A MUC subject was set/announced (subject-only message).
@@ -6224,6 +6251,14 @@ class JabberClient:
     async def set_omemo_aliases(self, entries: list[dict]) -> bool:
         from stanza_im.core import omemo_aliases
         return await omemo_aliases.publish(self, entries)
+
+    async def get_notification_priorities(self) -> list[dict]:
+        from stanza_im.core import notification_priorities
+        return await notification_priorities.fetch(self)
+
+    async def set_notification_priorities(self, entries: list[dict]) -> bool:
+        from stanza_im.core import notification_priorities
+        return await notification_priorities.publish(self, entries)
 
     def supports_omemo(self, bare: str) -> bool:
         """Whether *bare* advertises any OMEMO namespace in its caps."""

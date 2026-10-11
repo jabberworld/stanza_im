@@ -572,6 +572,24 @@ the total grows again; clicking it opens the topmost unread conversation
 (`_on_tray_cycle_unread`). `deactivate` disconnects the signal and
 `dismiss_sticky`. [`tests/test_digest.py`]
 
+**Notification priority** (per-contact, `core/notification_priorities.py`): a
+contact can be marked «Высокий»/«Обычный»/«Низкий» from the roster contact
+context menu («Приоритет уведомлений», between «Подписка» and «Управление
+OMEMO») and from a group header menu (applied to every member). The map lives
+in the profile (`notification_priorities.json`) and is mirrored to the private
+PEP node `urn:xmpp:notification-priority:0` (access `whitelist`;
+`JabberClient.get/set_notification_priorities`, like the OMEMO aliases); on
+login the server values are merged in (the server wins) and a change publishes
+the whole set. The **effective** priority is the user setting (`high`/`low`)
+over the XEP-0131 `Urgency` header (`medium` → normal; `JabberClient.
+_shim_urgency`). Handling: `low` suppresses only the message OSD (unread /
+mentions / digest are unchanged); `high` shows the normal message OSD **and** a
+sticky «У вас новые важные сообщения:» OSD (`OsdManager.show_sticky("priority",
+…)`, icon `high-priority.svg`) counting the `important` unread messages (a new
+field in `core/unread_state.py`, bumped by `_bump_unread(important=True)`);
+`normal` keeps the current behaviour. Only **messages** are affected (typing and
+status OSDs are not). [`tests/test_notification_priority.py`]
+
 A contact can be **dragged onto a group** (header or row): `RosterWidget`
 starts a `QDrag` (`application/x-stanza-roster-jid`) and emits
 `contact_dropped_on_group(jid, group)`, which `MainWindow.
@@ -617,6 +635,7 @@ Everything follows the XDG Base Directory spec:
 | Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/<jid>/history/<bare-jid>.jsonl` (0600) |
 | Unread counters (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` (0600) |
 | OMEMO keys (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
+| Notification priorities (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` (0600) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
 The minimal TOML writer (`Config._write_toml`) serialises scalars with
@@ -628,9 +647,11 @@ appended line-by-line as JSON, keyed by bare JID, one file per contact.
 
 **Per-profile data.** Every account (Jabber ID) keeps its own state under
 `$XDG_DATA_HOME/stanza-im/<jid>/`: `history/`, `roster/<account>.json`,
-`unread.json` and `known_contacts.json` (`core/profiles.py` `set_active`).
+`unread.json`, `known_contacts.json` and `notification_priorities.json`
+(`core/profiles.py` `set_active`).
 `include/constants.set_active_profile` selects the subdirectory; each store
-(`history`, `roster_cache`, `unread_state`, `known_contacts`) exposes
+(`history`, `roster_cache`, `unread_state`, `known_contacts`,
+`notification_priorities`) exposes
 `set_profile(jid)` that re-bases its module-level path and the pooled history
 connections are closed, so a contact's history from one account is never served
 to another (the pool is keyed by the *contact* JID). With no profile selected

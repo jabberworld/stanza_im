@@ -192,9 +192,11 @@ def set_active(jid: str) -> None:
     another (the pool is keyed by the *contact* JID).
     """
     from stanza_im.core import (
-        history, known_contacts, roster_cache, unread_state)
+        history, known_contacts, notification_priorities, roster_cache,
+        unread_state)
     history.set_profile(jid)
     roster_cache.set_profile(jid)
     unread_state.set_profile(jid)
     known_contacts.set_profile(jid)
+    notification_priorities.set_profile(jid)
     history.close_all()

@@ -232,6 +232,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Unread counters | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` |
 | Roster cache | `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json` |
 | Known contacts | `$XDG_DATA_HOME/stanza-im/<jid>/known_contacts.json` |
+| Notification priorities | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` |
 | OMEMO keys | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Cache (shared) | `$XDG_CACHE_HOME/stanza-im/` |
 | Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
@@ -2544,6 +2545,29 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   remembers the total and keeps it hidden until the total grows again; clicking
   it opens the topmost unread conversation (`MainWindow._on_tray_cycle_unread`).
   `deactivate` disconnects the signal and calls `dismiss_sticky`.
+
+### 14.8.5 Notification Priority (`core/notification_priorities.py`)
+
+- Each contact (and each conference room) can be assigned a notification
+  priority «Высокий»/«Обычный»/«Низкий» from the roster contact context menu
+  («Приоритет уведомлений», between «Подписка» and «Управление OMEMO»; the room
+  rows carry it too) and from a group header menu (applied to every member).
+  Only `high`/`low` are stored; `normal` is the absence of an entry.
+- The map is kept per profile (`notification_priorities.json`) and mirrored to
+  the private PEP node `urn:xmpp:notification-priority:0` (access `whitelist`;
+  `JabberClient.get/set_notification_priorities`). On login the server values
+  are merged in (the server wins for a stored contact) and a change publishes
+  the whole set.
+- The **effective** priority of a message is the user setting (`high`/`low`)
+  over the XEP-0131 `Urgency` header (`JabberClient._shim_urgency`; `medium`
+  maps to normal). Handling: `low` suppresses only the message OSD (unread /
+  mention counters and the Digest are unchanged); `high` shows the normal
+  message OSD **and** a sticky «У вас новые важные сообщения:» OSD
+  (`OsdManager.show_sticky("priority", …)`, icon `high-priority.svg`) counting
+  the `important` unread messages; `normal` keeps the current behaviour. Only
+  messages are affected (typing/status OSDs are not). The `important` counter is
+  a field of the unread record (`core/unread_state.py`, `_bump_unread(
+  important=True)`).
 
 ### 14.9 Event System
 
