@@ -44,6 +44,8 @@ class _FakeApp(QtCore.QObject):
         self._unread_chats = {}
         self._conference_roster = set()
         self._muc_self_nicks = {}
+        # Persisted conference JIDs (a room with restored unread, not joined).
+        self._known_conferences = set()
         self.opened = []
 
     def _on_tray_cycle_unread(self):
@@ -70,6 +72,29 @@ fake0._client = object()
 fake0.unread_changed.emit()
 check("the digest appears once logged in", len(mgr0._windows) == 1)
 digest.deactivate(fake0)
+
+# 0b. a conference with restored unread is not counted as a contact ----------
+mgr_b = OsdManager(_cfg())
+fake_b = _FakeApp(mgr_b)
+# Only the persisted registry knows the room is a conference (not joined yet).
+fake_b._known_conferences = {"room@conf.example"}
+fake_b._unread_chats = {
+    "alice@example.com": {"unread": 33, "mentions": 0},
+    "room@conf.example": {"unread": 31, "mentions": 0},
+}
+digest.activate(fake_b)
+fake_b.unread_changed.emit()
+_body_b = mgr_b._windows[0]["window"]._body_label.text()
+check("a restored conference unread is not counted as a contact",
+      "33 new messages from 1 contacts" in _body_b)
+check("the restored conference unread adds no messages",
+      "64" not in _body_b and "from 2 contacts" not in _body_b)
+fake_b._unread_chats["room@conf.example"]["mentions"] = 2
+fake_b.unread_changed.emit()
+check("a mention in a known conference is counted",
+      "2 mentions in 1 conferences"
+      in mgr_b._windows[0]["window"]._body_label.text())
+digest.deactivate(fake_b)
 
 # 1. activation shows a sticky digest ----------------------------------------
 mgr = OsdManager(_cfg())

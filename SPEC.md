@@ -2532,8 +2532,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (each line only when non-zero).
 - It subscribes to `MainWindow.unread_changed` (emitted from `_bump_unread`,
   `_reset_unread`, `_recount_unread`) and recomputes the numbers from
-  `_unread_chats`: a key in `_conference_roster`/`_muc_self_nicks` counts only
-  its `mentions`, every other key counts its `unread`. The sticky OSD is
+  `_unread_chats`: a key in `_conference_roster`/`_muc_self_nicks` **or** the
+  persisted `_known_conferences` (seeded from `known_contacts` at
+  startup/profile switch) counts only its `mentions`, every other key counts its
+  `unread` — so a room with restored unread is not counted as a contact before
+  it is joined. The sticky OSD is
   created/updated through `OsdManager.show_sticky`/`update_sticky` and dismissed
   when nothing is unread. It is **gated on being logged in** (`_refresh`
   dismisses while `app._client` is `None`), so restored pre-login counters never

@@ -77,6 +77,9 @@ def _stats(app) -> tuple[int, int, int, int]:
     chats = getattr(app, "_unread_chats", None) or {}
     conferences = set(getattr(app, "_conference_roster", None) or ())
     conferences |= set(getattr(app, "_muc_self_nicks", None) or {})
+    # A room with restored unread is not joined yet at login, so it is only
+    # recognisable from the persisted registry (`_known_conferences`).
+    conferences |= set(getattr(app, "_known_conferences", None) or ())
     messages = contacts = mentions = confs = 0
     for key, entry in chats.items():
         if key in conferences:

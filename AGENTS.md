@@ -559,8 +559,11 @@ mentions in conferences: the title is «У вас новые непрочита�
 the body lists «N новых сообщений от M контактов» and/or «K упоминаний в J
 конференциях». It subscribes to the new `MainWindow.unread_changed` signal
 (emitted from `_bump_unread`/`_reset_unread`/`_recount_unread`) and recomputes
-the counters from `_unread_chats` (conference keys — in `_conference_roster` or
-`_muc_self_nicks` — counted only by `mentions`); the sticky OSD is updated in
+the counters from `_unread_chats` (conference keys — in `_conference_roster`,
+`_muc_self_nicks` or the persisted `_known_conferences` set, seeded from
+`known_contacts` at startup/profile switch — counted only by `mentions`, so a
+room with restored unread is not miscounted as a contact before it is joined);
+the sticky OSD is updated in
 place via `OsdManager.show_sticky`/`update_sticky`. It is **gated on being
 logged in** (`_refresh` dismisses when `app._client` is `None`), so the unread
 counters restored from disk never pop a digest on the login screen (they still

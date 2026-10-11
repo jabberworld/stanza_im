@@ -277,6 +277,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_chats: dict[str, dict] = {}
         self._unread_jids: set[str] = set()
         self._unread_total = 0
+        # JIDs known (from the persisted registry) to be conferences, so a room
+        # with restored unread is classified correctly before it is joined.
+        self._known_conferences: set[str] = set()
         self._load_unread_for(self._config.jid)
         # Unseen reactions on our own messages, keyed by chat-tab key then by
         # the message reference; the value is the number of reactions not yet
@@ -4964,6 +4967,8 @@ class MainWindow(QtWidgets.QMainWindow):
             name=name or entry.get("name", ""),
             groups=list(groups) if groups is not None else None,
             is_conference=is_conference)
+        if is_conference:
+            self._known_conferences.add(jid)
 
     def _history_catalog(self) -> list[dict]:
         """Build the contact catalog for the history manager.
@@ -5161,7 +5166,23 @@ class MainWindow(QtWidgets.QMainWindow):
         the previous account's counters.
         """
         self._unread_chats = unread_state.load_chats(jid)
+        self._load_known_conferences()
         self._recount_unread()
+
+    def _load_known_conferences(self) -> None:
+        """Seed the conference set from the persisted known-contacts registry.
+
+        A room with restored unread messages must be recognised as a conference
+        before it is (re)joined — otherwise the Digest plugin counts its unread
+        as a contact's.
+        """
+        from stanza_im.core import known_contacts
+        try:
+            self._known_conferences = {
+                jid for jid, data in known_contacts.all().items()
+                if data.get("is_conference")}
+        except Exception:  # noqa: BLE001 - the registry is best-effort
+            self._known_conferences = set()
 
     def _recount_unread(self) -> None:
         """Recompute the aggregate counters from the stored records."""
