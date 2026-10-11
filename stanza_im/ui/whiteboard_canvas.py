@@ -12,6 +12,8 @@ import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.include import svg_path
+
 #: Logical canvas size (the SVG ``viewBox``).
 VIEW_W = 600
 VIEW_H = 400
@@ -21,11 +23,42 @@ DRAW_TOOLS = ("pencil", "line", "rect", "ellipse", "polygon")
 #: Shapes whose closed area is filled with the fill colour.
 CLOSED_KINDS = ("rect", "ellipse", "polygon")
 
+_MATRIX_RE = __import__("re").compile(
+    r"matrix\(\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+"
+    r"([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)\s*\)")
+
+
+def _parse_transform(value) -> QtGui.QTransform:
+    """Parse an SVG ``transform`` attribute (``matrix(...)``) into a transform."""
+    if not value:
+        return QtGui.QTransform()
+    match = _MATRIX_RE.search(str(value))
+    if not match:
+        return QtGui.QTransform()
+    try:
+        a, b, c, d, e, f = (float(g) for g in match.groups())
+    except (TypeError, ValueError):
+        return QtGui.QTransform()
+    return QtGui.QTransform(a, b, c, d, e, f)
+
+
+def transform_str(transform: QtGui.QTransform) -> str:
+    """Serialise a transform as an SVG ``matrix(...)`` attribute ("" if identity)."""
+    if transform.isIdentity():
+        return ""
+    return "matrix(%g %g %g %g %g %g)" % (
+        transform.m11(), transform.m12(), transform.m21(), transform.m22(),
+        transform.dx(), transform.dy())
+
 
 class WhiteboardCanvas(QtWidgets.QWidget):
     """Interactive drawing surface backed by a list of shape records."""
 
     changed = QtCore.pyqtSignal()
+    #: Local edit notifications (for the collaborative session).
+    shape_added = QtCore.pyqtSignal(dict)
+    shape_updated = QtCore.pyqtSignal(dict)
+    shape_removed = QtCore.pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,6 +71,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._active: dict | None = None
         self._start: QtCore.QPointF | None = None
         self._last: QtCore.QPointF | None = None
+        self._transformed = False
         self.setMinimumSize(480, 320)
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -71,6 +105,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     # ── Actions ───────────────────────────────────────────────────
 
     def clear(self) -> None:
+        for shape in self._shapes:
+            self.shape_removed.emit(shape)
         self._shapes = []
         self._selected = ""
         self._active = None
@@ -80,10 +116,32 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def delete_selected(self) -> None:
         if not self._selected:
             return
+        shape = self._shape_by_id(self._selected)
         self._shapes = [s for s in self._shapes if s["id"] != self._selected]
         self._selected = ""
         self.update()
         self.changed.emit()
+        if shape is not None:
+            self.shape_removed.emit(shape)
+
+    def set_rid(self, shape_id: str, rid: str) -> None:
+        """Record the SXE record id the collaborative session assigned."""
+        shape = self._shape_by_id(shape_id)
+        if shape is not None:
+            shape["rid"] = str(rid or "")
+
+    @staticmethod
+    def shape_attrs(shape: dict) -> dict:
+        """The SVG attributes of *shape* (for a collaborative edit)."""
+        return {
+            "id": shape["id"],
+            "d": WhiteboardCanvas.shape_d(shape),
+            "stroke": shape["stroke"],
+            "stroke-width": str(shape["stroke_width"]),
+            "fill": (shape["fill"] if WhiteboardCanvas._filled(shape)
+                     else "none"),
+            "transform": transform_str(shape["transform"]),
+        }
 
     def finish_drawing(self) -> None:
         """Commit the in-progress shape (e.g. close a polygon) and stop."""
@@ -111,6 +169,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     @staticmethod
     def _local_path(shape: dict) -> QtGui.QPainterPath:
+        if shape.get("kind") == "remote":
+            return svg_path.parse_path(shape.get("d") or "")
         path = QtGui.QPainterPath()
         kind = shape["kind"]
         if kind in ("pencil", "line", "polygon"):
@@ -135,15 +195,56 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     @staticmethod
     def _filled(shape: dict) -> bool:
+        if shape.get("kind") == "remote":
+            return bool(shape.get("fill"))
         return shape["kind"] in CLOSED_KINDS and bool(shape.get("fill"))
+
+    @staticmethod
+    def shape_d(shape: dict) -> str:
+        """The SVG ``d`` attribute for *shape*."""
+        if shape.get("kind") == "remote":
+            return shape.get("d") or ""
+        kind = shape["kind"]
+        if kind in ("pencil", "line", "polygon"):
+            return svg_path.polyline_d(shape.get("points") or [],
+                                       close=(kind == "polygon"))
+        if kind == "rect":
+            return svg_path.rect_d(*shape["rect"])
+        if kind == "ellipse":
+            return svg_path.ellipse_d(*shape["ellipse"])
+        return ""
+
+    def load_shapes(self, shapes: list[dict]) -> None:
+        """Rebuild the board from a list of shape descriptors (remote state).
+
+        Each descriptor carries ``rid``, ``d`` and the presentation attributes.
+        """
+        loaded: list[dict] = []
+        for item in shapes:
+            shape = {
+                "id": str(item.get("id") or uuid.uuid4().hex),
+                "rid": str(item.get("rid") or ""),
+                "kind": "remote",
+                "d": str(item.get("d") or ""),
+                "stroke": str(item.get("stroke") or "#1a1a1a"),
+                "stroke_width": int(item.get("stroke-width") or 2),
+                "fill": str(item.get("fill") or ""),
+                "transform": _parse_transform(item.get("transform")),
+            }
+            loaded.append(shape)
+        self._shapes = loaded
+        self._selected = ""
+        self._active = None
+        self.update()
+        self.changed.emit()
 
     def _shape_by_id(self, shape_id: str) -> dict | None:
         return next((s for s in self._shapes if s["id"] == shape_id), None)
 
     def _new_shape(self, kind: str, **extra) -> dict:
-        shape = {"id": uuid.uuid4().hex, "kind": kind, "stroke": self._stroke,
-                 "stroke_width": self._width, "fill": self._fill,
-                 "transform": QtGui.QTransform()}
+        shape = {"id": uuid.uuid4().hex, "rid": "", "kind": kind,
+                 "stroke": self._stroke, "stroke_width": self._width,
+                 "fill": self._fill, "transform": QtGui.QTransform()}
         shape.update(extra)
         return shape
 
@@ -259,12 +360,18 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             shape = self._shape_by_id(self._selected)
             if shape is not None:
                 self._transform(shape, tool, self._last, world)
+                self._transformed = True
                 self._last = world
                 self.update()
 
     def mouseReleaseEvent(self, event):  # noqa: N802
         if self._active is not None:
             self._commit_active()
+        elif self._transformed and self._selected:
+            shape = self._shape_by_id(self._selected)
+            if shape is not None:
+                self.shape_updated.emit(shape)
+        self._transformed = False
         self._start = None
         self._last = None
         self.update()
@@ -280,6 +387,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._shapes.append(shape)
         self._selected = shape["id"]
         self.changed.emit()
+        self.shape_added.emit(shape)
 
     @staticmethod
     def _rect_from(start, end) -> tuple[float, float, float, float]:
@@ -338,33 +446,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     @staticmethod
     def _shape_svg(shape: dict) -> str:
+        d = WhiteboardCanvas.shape_d(shape)
+        if not d:
+            return ""
         attrs = [f'id="{shape["id"]}"',
+                 f'd="{d}"',
                  f'stroke="{shape["stroke"]}"',
                  f'stroke-width="{shape["stroke_width"]}"',
                  f'fill="{shape["fill"]}"'
                  if WhiteboardCanvas._filled(shape) else 'fill="none"']
-        transform = shape["transform"]
-        if not transform.isIdentity():
-            attrs.append(
-                'transform="matrix(%g %g %g %g %g %g)"' % (
-                    transform.m11(), transform.m12(), transform.m21(),
-                    transform.m22(), transform.dx(), transform.dy()))
-        attr_text = " ".join(attrs)
-        kind = shape["kind"]
-        if kind == "rect":
-            x, y, w, h = shape["rect"]
-            return f'  <rect x="{x:g}" y="{y:g}" width="{w:g}" ' \
-                   f'height="{h:g}" {attr_text}/>'
-        if kind == "ellipse":
-            cx, cy, rx, ry = shape["ellipse"]
-            return f'  <ellipse cx="{cx:g}" cy="{cy:g}" rx="{rx:g}" ' \
-                   f'ry="{ry:g}" {attr_text}/>'
-        points = shape.get("points") or []
-        if not points:
-            return ""
-        d = "M %g %g" % (points[0][0], points[0][1])
-        for x, y in points[1:]:
-            d += " L %g %g" % (x, y)
-        if kind == "polygon":
-            d += " Z"
-        return f'  <path d="{d}" {attr_text}/>'
+        transform = transform_str(shape["transform"])
+        if transform:
+            attrs.append(f'transform="{transform}"')
+        return "  <path %s/>" % " ".join(attrs)

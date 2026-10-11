@@ -115,6 +115,8 @@ stanza_im/                      # Python package
 │   ├── muji.py                  # XEP-0272 multiparty Jingle coordination
 │   ├── media.py                 # aiortc media engine (capture/playback)
 │   ├── bytestream.py            # SOCKS5 bytestream client + direct listener
+│   ├── sxe.py                   # XEP-0284 Shared XML Editing record model
+│   ├── whiteboard.py            # Collaborative SVG whiteboard (Jingle app + SXE)
 │   ├── omemo/                   # XEP-0384 (availability/storage/plugin/manager/SCE/QR)
 │   └── socks5.py                # Dependency-free SOCKS5 CONNECT for the account proxy
 ├── include/
@@ -127,6 +129,7 @@ stanza_im/                      # Python package
 │   ├── hats.py                  # XEP-0317 Hats + XEP-0392 HSLuv colour generation
 │   ├── clients.py               # XEP-0115 caps node → client name/icon mapping
 │   ├── sounds.py                # Sound-theme discovery/parsing (resources/sounds)
+│   ├── svg_path.py              # SVG path-data parser/builder (QPainterPath)
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -1858,9 +1861,23 @@ select / move / rotate / scale / delete and the draw tools pencil / line /
 rectangle / ellipse / polygon (closed shapes are filled with the fill colour) —
 plus line width, line colour and fill colour pickers, «Завершить рисование»,
 «Очистить» and «Сохранить как SVG». The document is a list of shape records
-(`id`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and a `QTransform`);
-select/move/rotate/scale edit the `transform` and `to_svg()` serialises it.
-(Collaborative sync over Jingle + XEP-0284 SXE is a later phase.)
+(`id`, `rid`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and a
+`QTransform`); select/move/rotate/scale edit the `transform`, every shape is
+exported as a `<path d="…"/>` (`include/svg_path.py`) and `to_svg()` serialises
+it. The dialog's «Поделиться» button starts a **collaborative** session
+(`xmpp/whiteboard.py::WhiteboardManager`, `client.whiteboard`): a Jingle
+application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
+(`urn:xmpp:jingle:transports:sxe`) sharing an `xmpp/sxe.py::SxeDocument`
+(XEP-0284 record model). For 1:1 the initiator is the host; for MUC the room JID
+is the host and the SXE payloads are `groupchat` messages. Bodyless `<sxe>`
+messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
+handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
+features are advertised in disco. Local canvas edits (`shape_added`/
+`shape_updated`/`shape_removed`) become `add_shape`/`update_shape`/
+`remove_shape`; remote state (`whiteboard_state`) rebuilds the canvas
+(`WhiteboardCanvas.load_shapes`); an incoming `session-initiate`
+(`whiteboard_invite`) asks the user to join. [`tests/test_whiteboard.py`,
+`tests/test_whiteboard_sync.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`]
 The "Send" control is a vertical
 icon-only button (an Enter-style arrow) whose height follows the input field.
 The input is vertically

@@ -2373,11 +2373,30 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   «Очистить» and «Сохранить как SVG».
 - The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
   `stroke-width`, `fill`, `QTransform`); select/move/rotate/scale edit the
-  `transform`, and `to_svg()` serialises it to a `600x400` SVG document.
-- Phase 2 (planned): collaborative sync as a Jingle application type
-  `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
-  (`urn:xmpp:jingle:transports:sxe`) with the XEP-0284 Shared XML Editing
-  record model, for 1:1 and MUC.
+  `transform`, and `to_svg()` serialises it to a `600x400` SVG document. Every
+  shape is exported as a `<path d="…"/>` (`include/svg_path.py` builds the `d`
+  strings; the canvas parses `d` back for remote shapes via
+  `svg_path.parse_path`).
+- Phase 2 (collaborative): `xmpp/whiteboard.py::WhiteboardManager` (created as
+  `client.whiteboard`) owns the sessions. A session is a Jingle application
+  type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
+  (`urn:xmpp:jingle:transports:sxe`, `<host/>`); the shared document is a
+  `xmpp/sxe.py::SxeDocument` (XEP-0284 record model). For a 1:1 session the
+  initiator is the host (`session-initiate` → `session-accept`); for a MUC
+  session the room JID is the host and the payloads travel as `groupchat`
+  messages. The SXE messages are `connect` (host answers with a `state-offer`),
+  `state-offer`/`accept-state`/`refuse-state` and `state`
+  (`document-begin` → `new`/`set`/`remove` → `document-end`). Bodyless `<sxe>`
+  messages are routed by a dedicated `MatchXPath` handler
+  (`JabberClient._on_sxe_stanza`), Jingle IQs by `_dispatch_jingle_iq`
+  (`whiteboard.is_whiteboard_jingle` / a known sid), and the features are
+  advertised in disco.
+- The dialog's «Поделиться» button starts a session (`share_requested` →
+  `MainWindow._on_whiteboard_share` → `WhiteboardManager.start_session`); local
+  canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become
+  `add_shape`/`update_shape`/`remove_shape` SXE edits, and remote state
+  (`whiteboard_state`) rebuilds the canvas (`WhiteboardCanvas.load_shapes`).
+  An incoming `session-initiate` (`whiteboard_invite`) asks the user to join.
 
 ### 14.6 Connection Security & Transport
 

@@ -80,8 +80,10 @@ check("a pencil stores its points",
 svg = canvas.to_svg()
 check("the SVG has the root and viewBox",
       "<svg" in svg and 'viewBox="0 0 600 400"' in svg)
-check("the SVG contains rect/ellipse/path",
-      "<rect" in svg and "<ellipse" in svg and "<path" in svg)
+check("the SVG serialises every shape as a path",
+      svg.count("<path") == 5)
+check("the rect geometry is written as path data",
+      "M 100 100 L 200 100 L 200 150 L 100 150 Z" in svg)
 check("a polygon is closed in the path data", " Z" in svg)
 check("a filled shape carries a fill colour", 'fill="#e53935"' in svg)
 
@@ -132,6 +134,45 @@ widget.whiteboard_requested.connect(seen.append)
 widget._whiteboard_btn.click()
 check("the button emits the conversation JID", seen == ["bob@example.com"])
 widget.deleteLater()
+
+# 7. the collaborative canvas model ------------------------------------------
+canvas2 = WhiteboardCanvas()
+canvas2.resize(600, 400)
+canvas2.load_shapes([{"rid": "r1", "id": "s1", "d": "M 0 0 L 50 50",
+                      "stroke": "#123456", "stroke-width": "3",
+                      "fill": "none"}])
+shapes = canvas2.shapes()
+check("load_shapes builds a remote shape",
+      len(shapes) == 1 and shapes[0]["rid"] == "r1")
+check("a remote shape renders from its path data",
+      canvas2._world_path(shapes[0]).boundingRect().width() > 0)
+check("shape_attrs round-trips the path data",
+      WhiteboardCanvas.shape_attrs(shapes[0])["d"] == "M 0 0 L 50 50")
+
+added = []
+canvas2.shape_added.connect(added.append)
+canvas2.set_tool("rect")
+drag(canvas2, 10, 10, 40, 40)
+check("drawing a shape emits shape_added",
+      len(added) == 1 and added[0]["kind"] == "rect")
+removed = []
+canvas2.shape_removed.connect(removed.append)
+canvas2.set_tool("select")
+QtWidgets.QApplication.sendEvent(canvas2, _event(
+    QtCore.QEvent.Type.MouseButtonPress, 25, 25))
+canvas2.delete_selected()
+check("deleting a shape emits shape_removed", len(removed) == 1)
+
+# 8. the dialog exposes the share controls -----------------------------------
+dialog2 = WhiteboardDialog("bob@example.com", client=object())
+check("the dialog has a share button", hasattr(dialog2, "_share_btn"))
+check("the dialog reports no session by default", dialog2.session_id() == "")
+shared = []
+dialog2.share_requested.connect(lambda j, m: shared.append((j, m)))
+dialog2._on_share(True)
+check("the share button requests a session",
+      shared == [("bob@example.com", False)])
+dialog2.close()
 
 print()
 if FAILURES:

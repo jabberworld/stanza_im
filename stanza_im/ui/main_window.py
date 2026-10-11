@@ -3249,6 +3249,10 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muji_left", self._on_muji_left)
         c.on("muji_invite", self._on_muji_invite)
         c.on("muc_invite_received", self._on_muc_invite_received)
+        c.on("whiteboard_invite", self._on_whiteboard_invite)
+        c.on("whiteboard_ready", self._on_whiteboard_ready)
+        c.on("whiteboard_state", self._on_whiteboard_state)
+        c.on("whiteboard_ended", self._on_whiteboard_ended)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("groupchat_presence_error", self._on_groupchat_presence_error)
         c.on("captcha_challenge", self._on_captcha_challenge)
@@ -6413,22 +6417,90 @@ class MainWindow(QtWidgets.QMainWindow):
         win.raise_()
         win.activateWindow()
 
+    def _whiteboard_dialog(self, jid: str):
+        """Return (creating if needed) the whiteboard dialog for *jid*."""
+        dialog = self._whiteboards.get(jid)
+        if dialog is None:
+            from stanza_im.ui.whiteboard_dialog import WhiteboardDialog
+            is_muc = jid in self._muc_self_nicks
+            parent = self._chat_dialog_parent() if is_muc else None
+            dialog = WhiteboardDialog(jid, parent=parent, client=self._client,
+                                      is_muc=is_muc)
+            dialog.share_requested.connect(self._on_whiteboard_share)
+            self._whiteboards[jid] = dialog
+            dialog.finished.connect(
+                lambda _result, key=jid: self._whiteboards.pop(key, None))
+        return dialog
+
     def _on_whiteboard_requested(self, jid: str) -> None:
         """Open (or raise) the whiteboard dialog of the conversation *jid*."""
         if not jid:
             return
-        from stanza_im.ui.whiteboard_dialog import WhiteboardDialog
-        dialog = self._whiteboards.get(jid)
-        if dialog is None:
-            parent = self._chat_dialog_parent() if jid in self._muc_self_nicks \
-                else None
-            dialog = WhiteboardDialog(jid, parent=parent)
-            self._whiteboards[jid] = dialog
-            dialog.finished.connect(
-                lambda _result, key=jid: self._whiteboards.pop(key, None))
+        dialog = self._whiteboard_dialog(jid)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _on_whiteboard_share(self, jid: str, is_muc: bool) -> None:
+        """Start a collaborative whiteboard session for *jid*."""
+        if self._client is None or not jid:
+            return
+        sid = self._client.whiteboard.start_session(jid, is_muc)
+        self._whiteboard_dialog(jid).attach_session(sid)
+
+    def _on_whiteboard_invite(self, sid: str, peer: str,
+                              is_muc: bool) -> None:
+        """Ask the user to join an incoming whiteboard session.
+
+        The event fires from inside the Jingle dispatch coroutine, so the
+        modal prompt is deferred to the next event-loop turn.
+        """
+        if self._client is None:
+            return
+        QtCore.QTimer.singleShot(
+            0, lambda: self._prompt_whiteboard_invite(sid, peer, is_muc))
+
+    def _prompt_whiteboard_invite(self, sid: str, peer: str,
+                                  is_muc: bool) -> None:
+        if self._client is None:
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("whiteboard_invite_title"),
+            tr("whiteboard_invite_text", jid=peer))
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self._client.whiteboard.join_session(peer, sid, is_muc)
+        dialog = self._whiteboard_dialog(peer)
+        dialog.attach_session(sid)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_whiteboard_ready(self, sid: str) -> None:
+        """A session became usable: attach it to its conversation dialog."""
+        if self._client is None:
+            return
+        session = self._client.whiteboard.session(sid)
+        if session is None:
+            return
+        dialog = self._whiteboard_dialog(session.peer)
+        dialog.attach_session(sid)
+
+    def _on_whiteboard_state(self, sid: str) -> None:
+        """Remote edits arrived: refresh the open board."""
+        if self._client is None:
+            return
+        session = self._client.whiteboard.session(sid)
+        if session is None:
+            return
+        dialog = self._whiteboards.get(session.peer)
+        if dialog is not None:
+            dialog.refresh_from_session()
+
+    def _on_whiteboard_ended(self, sid: str) -> None:
+        for dialog in self._whiteboards.values():
+            if dialog.session_id() == sid:
+                dialog.detach_session()
 
     def _on_geo_message_corrected(self, chat: str, ref: str,
                                   new_body: str) -> None:

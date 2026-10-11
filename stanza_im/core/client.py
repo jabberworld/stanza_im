@@ -37,6 +37,8 @@ from stanza_im.xmpp.jingle import JingleFileTransferManager
 from stanza_im.xmpp.jingle_rtp import JingleRtpManager
 from stanza_im.xmpp import muji as muji_mod
 from stanza_im.xmpp.muji import MujiManager
+from stanza_im.xmpp import whiteboard as whiteboard_mod
+from stanza_im.xmpp.whiteboard import WhiteboardManager
 from stanza_im.include import pep
 from stanza_im.include import hats as hats_mod
 from stanza_im.include import clients as clients_mod
@@ -1304,6 +1306,8 @@ class JabberClient:
             self.rtp_calls.warmup()
         # Multiparty Jingle (Muji, XEP-0272).
         self.muji = MujiManager(self)
+        # Collaborative SVG whiteboard (Jingle app + XEP-0284 SXE).
+        self.whiteboard = WhiteboardManager(self)
         # Call settings populated by MainWindow from config.
         self.call_devices: dict = {}
         self.call_auto_accept = False
@@ -1314,7 +1318,9 @@ class JabberClient:
                 jingle_rtp.NS_RTP, jingle_rtp.NS_RTP_AUDIO,
                 jingle_rtp.NS_RTP_VIDEO, jingle_rtp.NS_DTLS,
                 jingle_rtp.NS_ICE, jingle_rtp.NS_JINGLE_MSG,
-                jingle_rtp.NS_MUJI, "urn:xmpp:extdisco:2"):
+                jingle_rtp.NS_MUJI, "urn:xmpp:extdisco:2",
+                whiteboard_mod.NS_WHITEBOARD, whiteboard_mod.NS_SXE,
+                whiteboard_mod.NS_SXE_TRANSPORT):
             self.xmpp["xep_0030"].add_feature(_feature)
 
         # Client identity + caps branding (XEP-0030/0115).  Without a named
@@ -1521,6 +1527,12 @@ class JabberClient:
             "Chat Marker",
             MatchXPath("%s/{%s}displayed" % (msg_ns, NS_CHAT_MARKERS)),
             self._on_bodyless_chat_marker_stanza))
+        # XEP-0284 Shared XML Editing (collaborative whiteboard): a bodyless
+        # ``<sxe/>`` message.
+        self.xmpp.register_handler(CoroutineCallback(
+            "SXE",
+            MatchXPath("%s/{%s}sxe" % (msg_ns, whiteboard_mod.NS_SXE)),
+            self._on_sxe_stanza))
         # XEP-0045 §7.13 voice request — a bodyless ``jabber:x:data`` message
         # (no <body>, so slixmpp's IM handler never fires).
         self.xmpp.register_handler(CoroutineCallback(
@@ -1611,6 +1623,10 @@ class JabberClient:
             self._on_groupchat_message(msg)
         else:
             self._on_message(msg)
+
+    async def _on_sxe_stanza(self, msg) -> None:
+        """A bodyless XEP-0284 ``<sxe/>`` message (whiteboard edits)."""
+        await self.whiteboard.handle_sxe(msg)
 
     async def _on_bodyless_chat_marker_stanza(self, msg) -> None:
         """A bodyless XEP-0333 ``<displayed id='…'/>`` (peer read our message)."""
@@ -1810,12 +1826,17 @@ class JabberClient:
         action = (jingle.get("action") or "").strip()
         sid = jingle.get("sid", "")
         is_rtp = jingle_rtp.is_rtp_jingle(jingle) or sid in self.rtp_calls.sessions
-        logger.debug("JINGLE action=%s sid=%s rtp=%s", action, sid, is_rtp)
+        is_wb = (whiteboard_mod.is_whiteboard_jingle(jingle)
+                 or sid in self.whiteboard.sessions)
+        logger.debug("JINGLE action=%s sid=%s rtp=%s wb=%s", action, sid,
+                     is_rtp, is_wb)
         try:
             self.xmpp.send(iq.reply())
         except Exception:
             logger.debug("Could not ack Jingle IQ", exc_info=True)
-        if is_rtp:
+        if is_wb:
+            self._start_task(self.whiteboard.dispatch(action, jingle, iq))
+        elif is_rtp:
             self._start_task(self.rtp_calls.dispatch(action, jingle, iq))
         else:
             self._start_task(self.file_transfer._dispatch(action, jingle, iq))

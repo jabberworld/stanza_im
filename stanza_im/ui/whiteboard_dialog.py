@@ -1,7 +1,9 @@
 """Whiteboard dialog: a drawing canvas with an icon-only tool palette.
 
-Phase 1 is local (drawing, editing, SVG export); collaborative synchronisation
-(Jingle + XEP-0284 SXE) is added on top of the same document model later.
+The board is local by default (drawing, editing, SVG export); the «Поделиться»
+button starts a collaborative session (Jingle application + XEP-0284 SXE) for
+the conversation, after which local edits are broadcast and remote edits are
+applied to the canvas.
 """
 from __future__ import annotations
 
@@ -29,9 +31,14 @@ _WIDTHS = (1, 2, 3, 5, 8)
 class WhiteboardDialog(QtWidgets.QDialog):
     """A non-modal whiteboard window (one per conversation)."""
 
-    def __init__(self, jid: str, parent=None):
+    share_requested = QtCore.pyqtSignal(str, bool)   # jid, is_muc
+
+    def __init__(self, jid: str, parent=None, client=None, is_muc: bool = False):
         super().__init__(parent)
         self._jid = jid
+        self._client = client
+        self._is_muc = is_muc
+        self._sid = ""
         self.setWindowTitle(tr("whiteboard_title"))
         self.setModal(False)
         self.resize(760, 560)
@@ -93,11 +100,80 @@ class WhiteboardDialog(QtWidgets.QDialog):
         delete.clicked.connect(self._canvas.delete_selected)
         toolbar.addWidget(delete)
 
+        toolbar.addSpacing(10)
+        self._share_btn = self._tool_button("system-users.png",
+                                            tr("whiteboard_share"))
+        self._share_btn.setCheckable(True)
+        self._share_btn.clicked.connect(self._on_share)
+        toolbar.addWidget(self._share_btn)
+
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
         layout.addWidget(self._canvas, 1)
 
+        self._sync_label = QtWidgets.QLabel(tr("whiteboard_not_shared"))
+        self._sync_label.setContentsMargins(6, 2, 6, 4)
+        layout.addWidget(self._sync_label)
+
         self._refresh_swatches()
+
+        self._canvas.shape_added.connect(self._on_shape_added)
+        self._canvas.shape_updated.connect(self._on_shape_updated)
+        self._canvas.shape_removed.connect(self._on_shape_removed)
+
+    # ── Collaboration ─────────────────────────────────────────────
+
+    def session_id(self) -> str:
+        return self._sid
+
+    def _on_share(self, checked: bool) -> None:
+        if not self._client:
+            return
+        if not checked:
+            self._end_session()
+            return
+        self.share_requested.emit(self._jid, self._is_muc)
+
+    def attach_session(self, sid: str) -> None:
+        """Bind the dialog to a running collaborative session."""
+        self._sid = sid
+        self._share_btn.setChecked(True)
+        self._sync_label.setText(tr("whiteboard_shared"))
+        self.refresh_from_session()
+
+    def detach_session(self) -> None:
+        self._sid = ""
+        self._share_btn.setChecked(False)
+        self._sync_label.setText(tr("whiteboard_not_shared"))
+
+    def refresh_from_session(self) -> None:
+        if not (self._client and self._sid):
+            return
+        shapes = self._client.whiteboard.shapes(self._sid)
+        self._canvas.load_shapes(shapes)
+
+    def _end_session(self) -> None:
+        if self._client and self._sid:
+            self._client.whiteboard.end_session(self._sid)
+        self.detach_session()
+
+    def _on_shape_added(self, shape: dict) -> None:
+        if not (self._client and self._sid):
+            return
+        rid = self._client.whiteboard.add_shape(
+            self._sid, WhiteboardCanvas.shape_attrs(shape))
+        self._canvas.set_rid(shape["id"], rid)
+
+    def _on_shape_updated(self, shape: dict) -> None:
+        if not (self._client and self._sid and shape.get("rid")):
+            return
+        self._client.whiteboard.update_shape(
+            self._sid, shape["rid"], WhiteboardCanvas.shape_attrs(shape))
+
+    def _on_shape_removed(self, shape: dict) -> None:
+        if not (self._client and self._sid and shape.get("rid")):
+            return
+        self._client.whiteboard.remove_shape(self._sid, shape["rid"])
 
     # ── Toolbar helpers ───────────────────────────────────────────
 
