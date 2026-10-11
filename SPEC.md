@@ -45,7 +45,7 @@ stanza_im/
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
 │   ├── privacy.py      — XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py — server disco/stream capability report (XEP list)
-│   └── memstats.py     — periodic memory statistics (CLI -m; -mm deep heap)
+│   └── memstats.py     — memory stats (CLI -m; -mm deep heap; gc object counts)
 ├── ui/
 │   ├── main_window.py  — Main window (3-page stack), actions and menus
 │   ├── login_widget.py — Login form + config prefill/save + profile selector

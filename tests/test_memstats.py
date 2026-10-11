@@ -69,6 +69,47 @@ check("site-packages are grouped by distribution",
 check("stdlib files are grouped by basename",
       memstats._package_of("/usr/lib/python3.11/os.py") == "os")
 
+# 2b. child process classification ------------------------------------------
+def _cmdline(*args):
+    return b"\x00".join(a.encode() for a in args) + b"\x00"
+
+
+check("renderer children are classified",
+      memstats._classify_child(
+          _cmdline("QtWebEngineProcess", "--type=renderer")) == "renderer")
+check("gpu children are classified",
+      memstats._classify_child(_cmdline("x", "--type=gpu-process"))
+      == "gpu-process")
+check("utility network children are classified",
+      memstats._classify_child(_cmdline(
+          "x", "--type=utility",
+          "--utility-sub-type=network.mojom.NetworkService")) == "network")
+check("plain utility children are classified",
+      memstats._classify_child(_cmdline("x", "--type=utility")) == "utility")
+check("zygote children are classified",
+      memstats._classify_child(_cmdline("x", "--type=zygote")) == "zygote")
+check("a generic --type value is returned",
+      memstats._classify_child(_cmdline("x", "--type=ppapi")) == "ppapi")
+check("no --type falls back to the process name",
+      memstats._classify_child(b"", "QtWebEngineProc\n") == "QtWebEngineProc")
+check("a gpu-ish name is detected",
+      memstats._classify_child(b"", "gpu-thing") == "gpu-process")
+check("an unknown child is 'other'",
+      memstats._classify_child(b"", "") == "other")
+
+# 2c. gc object-type counts --------------------------------------------------
+# (Only GC-tracked objects are counted; plain atomic dicts may be untracked,
+# so use instances, which are always tracked.)
+class _Obj:
+    def __init__(self):
+        self.x = 1
+
+
+_keep = [_Obj() for _ in range(5000)]
+_counts = dict(memstats._gc_counts(20))
+check("gc counts include the tracked instances",
+      _counts.get("_Obj", 0) >= 5000)
+
 # 3. cheap report ------------------------------------------------------------
 logger, handler = _logger()
 memstats.report(logger)

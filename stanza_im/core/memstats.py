@@ -11,10 +11,12 @@ Two levels, selected on the command line:
 """
 from __future__ import annotations
 
+import gc
 import os
 import resource
 import sys
 import threading
+import time
 import tracemalloc
 
 _PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") or 4096
@@ -81,27 +83,57 @@ def _rss_kb() -> int | None:
     return _proc_kb(os.getpid())[0]
 
 
+def _classify_child(raw: bytes, comm: str = "") -> str:
+    """Classify a Chromium child from its ``cmdline`` bytes and process name.
+
+    QtWebEngine passes the process role as ``--type=renderer|gpu-process|
+    utility|zygote`` (the network service is a ``utility`` with a
+    ``--utility-sub-type=…network…``).  When no ``--type=`` is present the
+    short process name (``/proc/<pid>/comm``) is used as a fallback.
+    """
+    if raw:
+        if b"--type=renderer" in raw:
+            return "renderer"
+        if b"--type=gpu-process" in raw:
+            return "gpu-process"
+        if b"--type=zygote" in raw:
+            return "zygote"
+        if b"--type=utility" in raw:
+            return "network" if b"network" in raw else "utility"
+        marker = b"--type="
+        index = raw.find(marker)
+        if index >= 0:
+            value = raw[index + len(marker):].split(b"\x00", 1)[0]
+            value = value.decode("ascii", "replace").strip()
+            if value:
+                return value
+    name = (comm or "").strip()
+    if not name:
+        return "other"
+    lowered = name.lower()
+    if "gpu" in lowered:
+        return "gpu-process"
+    if "renderer" in lowered:
+        return "renderer"
+    return name
+
+
 def _child_type(pid: int) -> str:
-    """Classify a Chromium child by its ``--type=``/``--utility-sub-type=``."""
+    """Read ``cmdline`` + ``comm`` of *pid* and classify the child."""
+    raw = b""
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            parts = fh.read().split(b"\x00")
+            raw = fh.read()
     except OSError:
-        return "other"
-    ctype = ""
-    sub = ""
-    for part in parts:
-        if part.startswith(b"--type="):
-            ctype = part[len(b"--type="):].decode("ascii", "replace")
-        elif part.startswith(b"--utility-sub-type="):
-            sub = part[len(b"--utility-sub-type="):].decode("ascii", "replace")
-    if ctype == "renderer":
-        return "renderer"
-    if ctype == "gpu-process":
-        return "gpu-process"
-    if ctype == "utility":
-        return "network" if "network" in sub else "utility"
-    return ctype or "other"
+        raw = b""
+    comm = ""
+    try:
+        with open(f"/proc/{pid}/comm", "r", encoding="ascii",
+                  errors="replace") as fh:
+            comm = fh.read()
+    except OSError:
+        comm = ""
+    return _classify_child(raw, comm)
 
 
 def _children() -> list[tuple[int, str, int | None, int | None]]:
@@ -207,6 +239,62 @@ def _schedule_deep(logger, top: int) -> None:
                      name="memstat-snapshot").start()
 
 
+# ── gc object counts (cheap component view, no tracemalloc) ───────
+
+#: The gc scan walks every tracked object, so it is throttled and threaded.
+_GC_MIN_INTERVAL_S = 300.0
+_gc_in_flight = False
+_last_gc_report = 0.0
+
+
+def _gc_counts(top: int = 15) -> list[tuple[str, int]]:
+    """Return the *top* object types by live count (from the garbage collector).
+
+    Only **GC-tracked** objects are counted (instances, containers holding
+    other containers, …); plain dicts/lists of atomic values may be untracked
+    by CPython and are therefore missing.  It is still a good leak indicator
+    for widgets, message objects and other complex types — and it never
+    inflates memory the way ``tracemalloc`` does.
+    """
+    try:
+        objects = gc.get_objects()
+    except Exception:  # noqa: BLE001 - diagnostics must never crash
+        return []
+    counts: dict[str, int] = {}
+    for obj in objects:
+        try:
+            name = type(obj).__name__
+        except Exception:  # noqa: BLE001
+            name = "?"
+        counts[name] = counts.get(name, 0) + 1
+    return sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top]
+
+
+def _log_gc(logger, top: int) -> None:
+    """Log the gc object-type counts (worker thread)."""
+    global _gc_in_flight, _last_gc_report
+    try:
+        counts = _gc_counts(top)
+        if counts:
+            joined = ", ".join(f"{name} x{count}" for name, count in counts)
+            logger.info("    gc objects: %s", joined)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("gc object scan failed: %s", exc)
+    finally:
+        _last_gc_report = time.monotonic()
+        _gc_in_flight = False
+
+
+def _schedule_gc(logger, top: int) -> None:
+    """Run the gc scan in a worker thread, at most every ``_GC_MIN_INTERVAL_S``."""
+    global _gc_in_flight
+    if _gc_in_flight or (time.monotonic() - _last_gc_report) < _GC_MIN_INTERVAL_S:
+        return
+    _gc_in_flight = True
+    threading.Thread(target=_log_gc, args=(logger, top), daemon=True,
+                     name="memstat-gc").start()
+
+
 # ── Report ────────────────────────────────────────────────────────
 
 def report(logger, top: int = 12, deep: bool | None = None) -> None:
@@ -246,6 +334,9 @@ def report(logger, top: int = 12, deep: bool | None = None) -> None:
 
     if deep and tracemalloc.is_tracing():
         _schedule_deep(logger, top)
+    # A gc object-type breakdown is useful in both levels and does not inflate
+    # memory; it is throttled and runs in a worker thread.
+    _schedule_gc(logger, top)
 
 
 def _fmt(kb):
