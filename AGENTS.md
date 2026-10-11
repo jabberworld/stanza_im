@@ -2496,8 +2496,14 @@ python -m stanza_im         # Module
 
 Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
 SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
-(periodic memory statistics), `-h/--help`. `app.prepare_qt_argv()` re-prepends
-the program name before `QApplication` — QWebEngine aborts on an empty argv.
+(periodic memory statistics; repeat as `-mm` for the deep Python-heap
+breakdown), `-h/--help`. `app.prepare_qt_argv()` re-prepends the program name
+before `QApplication` — QWebEngine aborts on an empty argv. `core/memstats.py`
+has two levels: `-m` is cheap (no tracing — main RSS/PSS/peak, the Chromium
+child processes grouped by type, the Qt widget/WebEngine-view counts and the
+loaded heavy stacks); `-mm` additionally enables `tracemalloc(nframe=1)` and
+logs the live Python heap grouped by package, the snapshot taken in a worker
+thread so the event loop is never blocked.
 
 **Fast startup**: heavy optional modules are kept off the login-window path, all
 tunable via Preferences → «Stanza IM» → «Производительность» (`[performance]`):

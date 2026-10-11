@@ -68,8 +68,9 @@ def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
                         help="dump raw SEND/RECV XML to the console")
     parser.add_argument("-l", "--log", action="store_true",
                         help="write a full debug log (messages and XML) to a file")
-    parser.add_argument("-m", "--memstat", action="store_true",
-                        help="print periodic memory statistics to the console")
+    parser.add_argument("-m", "--memstat", action="count", default=0,
+                        help="print periodic memory statistics (repeat: -mm "
+                             "for the deep Python-heap breakdown)")
     return parser
 
 
@@ -199,7 +200,10 @@ def run() -> int:
     memstat = args.memstat
 
     from stanza_im.core import memstats
-    if memstat:
+    # Level 1 (-m) is the cheap report; level 2 (-mm) adds tracemalloc.  The
+    # deep tracing must start early to capture the whole session's allocations,
+    # but it is only enabled when explicitly requested.
+    if memstat >= 2:
         memstats.start_tracking()
 
     configure_logging(debug, xml_dump, file_log)
@@ -214,7 +218,9 @@ def run() -> int:
         logger.info("Debug logging enabled (-d)")
     if xml_dump:
         logger.info("Raw XML message dump enabled (-x)")
-    if memstat:
+    if memstat >= 2:
+        logger.info("Memory statistics enabled (-mm, deep tracemalloc)")
+    elif memstat:
         logger.info("Memory statistics enabled (-m)")
     if file_log:
         logger.info("Detailed file logging enabled (-l): %s", APP_LOG_FILE)
@@ -252,10 +258,12 @@ def run() -> int:
     QtCore.QTimer.singleShot(200, _probe_omemo)
 
     if memstat:
-        memstats.report(logger)
+        # Report off the startup path, then periodically.  The cheap report is
+        # near-free; the deep (tracemalloc) snapshot runs in a worker thread.
+        QtCore.QTimer.singleShot(1000, lambda: memstats.report(logger))
         timer = QtCore.QTimer()
         timer.timeout.connect(lambda: memstats.report(logger))
-        timer.start(30_000)
+        timer.start(60_000)
 
     logger.info("%s %s started", APP_NAME, VERSION)
 

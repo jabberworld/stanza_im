@@ -1,0 +1,105 @@
+"""Tests for the memory statistics (cheap ``-m`` vs deep ``-mm``).
+
+Run with:
+    QT_QPA_PLATFORM=offscreen python3 tests/test_memstats.py
+"""
+import logging
+import os
+import sys
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+_SCRATCH = os.path.join("/tmp", "stanza_memstats")
+os.environ.setdefault("XDG_CONFIG_HOME", os.path.join(_SCRATCH, "config"))
+os.environ.setdefault("XDG_DATA_HOME", os.path.join(_SCRATCH, "data"))
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from PyQt6 import QtWidgets
+
+from stanza_im.core import memstats
+
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["stanza"])
+
+FAILURES = []
+
+
+def check(name, cond):
+    print(("PASS" if cond else "FAIL") + ": " + name)
+    if not cond:
+        FAILURES.append(name)
+
+
+class _Capture(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+def _logger():
+    logger = logging.getLogger("test.memstats")
+    logger.handlers[:] = []
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = _Capture()
+    logger.addHandler(handler)
+    return logger, handler
+
+
+# 1. the cheap level does not touch tracemalloc ------------------------------
+import tracemalloc  # noqa: E402
+
+check("importing memstats does not start tracemalloc",
+      not tracemalloc.is_tracing())
+check("the cheap level is not deep", memstats.is_deep() is False)
+
+# 2. package grouping --------------------------------------------------------
+check("stanza_im subpackages are grouped",
+      memstats._package_of("/x/stanza_im/ui/chat_widget.py")
+      == "stanza_im.ui"
+      and memstats._package_of("/x/stanza_im/core/client.py")
+      == "stanza_im.core")
+check("site-packages are grouped by distribution",
+      memstats._package_of("/x/site-packages/av/audio/frame.py") == "av"
+      and memstats._package_of("/x/site-packages/PyQt6/QtCore.pyi")
+      == "PyQt6")
+check("stdlib files are grouped by basename",
+      memstats._package_of("/usr/lib/python3.11/os.py") == "os")
+
+# 3. cheap report ------------------------------------------------------------
+logger, handler = _logger()
+memstats.report(logger)
+text = "\n".join(handler.messages)
+check("the report mentions the main process",
+      "rss=" in text and "peak=" in text)
+check("the report lists children", "children:" in text)
+check("the report lists Qt counts", "qt: widgets=" in text)
+check("the report lists python modules/stacks", "python: modules=" in text)
+check("the cheap report did not enable tracemalloc",
+      not tracemalloc.is_tracing())
+
+# 4. deep level enables a single-frame tracing -------------------------------
+memstats.start_tracking()
+check("deep mode is reported", memstats.is_deep() is True)
+check("deep mode starts tracemalloc", tracemalloc.is_tracing())
+check("deep mode uses a single frame",
+      tracemalloc.get_traceback_limit() == 1)
+
+# 5. the deep snapshot runs in a worker thread and logs a package breakdown --
+handler.messages.clear()
+memstats.report(logger, deep=True)
+deadline = time.monotonic() + 5.0
+while memstats._snapshot_in_flight and time.monotonic() < deadline:
+    time.sleep(0.05)
+deep_text = "\n".join(handler.messages)
+check("the deep snapshot logs a package breakdown",
+      "python heap by package" in deep_text)
+
+print()
+if FAILURES:
+    print(f"{len(FAILURES)} FAILED: {FAILURES}")
+    sys.exit(1)
+print("All memstats tests passed.")
