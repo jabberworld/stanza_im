@@ -204,6 +204,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.participant_context_requested.connect(
             self.participant_context_requested)
         widget.vcard_requested.connect(self.vcard_requested)
+        widget.whiteboard_requested.connect(self.whiteboard_requested)
         widget.files_upload_requested.connect(self.files_upload_requested)
         widget.input_height_changed.connect(self._on_widget_input_height_changed)
         widget.input_font_zoom_requested.connect(self.input_font_zoom_requested)
@@ -293,6 +294,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.participant_context_requested.connect(
             self.participant_context_requested)
         widget.vcard_requested.connect(self.vcard_requested)
+        widget.whiteboard_requested.connect(self.whiteboard_requested)
         widget.files_upload_requested.connect(self.files_upload_requested)
         widget.input_height_changed.connect(self._on_widget_input_height_changed)
         widget.input_font_zoom_requested.connect(self.input_font_zoom_requested)
@@ -765,6 +767,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)
     vcard_requested = QtCore.pyqtSignal(str)                   # jid
+    whiteboard_requested = QtCore.pyqtSignal(str)              # jid (whiteboard)
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     attention_ping_requested = QtCore.pyqtSignal(str)           # jid (XEP-0224)

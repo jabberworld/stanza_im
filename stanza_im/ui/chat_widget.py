@@ -402,6 +402,7 @@ class ChatWidget(QtWidgets.QWidget):
     participant_context_requested = QtCore.pyqtSignal(
         str, str, QtCore.QPoint)                            # room, nick, global pos
     vcard_requested = QtCore.pyqtSignal(str)                # jid
+    whiteboard_requested = QtCore.pyqtSignal(str)           # jid (whiteboard)
     files_upload_requested = QtCore.pyqtSignal(str, list, str)  # jid, [paths], method
     call_requested = QtCore.pyqtSignal(str, bool)               # jid, video
     omemo_mode_requested = QtCore.pyqtSignal(str, str)          # jid, mode
@@ -698,6 +699,15 @@ class ChatWidget(QtWidgets.QWidget):
         self._smiley_btn.setAutoRaise(True)
         self._smiley_btn.clicked.connect(self._open_smiley_picker)
         actions_row.addWidget(self._smiley_btn)
+
+        # Shared whiteboard (chat + conference): opens the drawing dialog.
+        self._whiteboard_btn = QtWidgets.QToolButton(self)
+        self._whiteboard_btn.setIcon(self._chat_icon("whiteboard.svg"))
+        self._whiteboard_btn.setToolTip(tr("chat_whiteboard"))
+        self._whiteboard_btn.setAutoRaise(True)
+        self._whiteboard_btn.clicked.connect(
+            lambda: self.whiteboard_requested.emit(self.jid))
+        actions_row.addWidget(self._whiteboard_btn)
 
         self._send_file_btn = QtWidgets.QToolButton(self)
         self._send_file_btn.setIcon(self._chat_icon("upload.png"))

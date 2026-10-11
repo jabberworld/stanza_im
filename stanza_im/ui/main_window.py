@@ -441,6 +441,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── Map windows (geo: links) ──────────────────────────────
         self._geo_windows: dict = {}
+        #: Open whiteboard dialogs, keyed by the conversation JID.
+        self._whiteboards: dict = {}
         # ── MDS throttle ─────────────────────────────────────────
         self._mds_pending_sid = ""
         self._mds_pending_jid = ""
@@ -537,6 +539,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.voice_requested.connect(self._on_voice_requested)
         self._chat_window.geo_view_requested.connect(
             self._on_geo_view_requested)
+        self._chat_window.whiteboard_requested.connect(
+            self._on_whiteboard_requested)
         self._chat_window.geo_message_corrected.connect(
             self._on_geo_message_corrected)
         self._chat_window.xmpp_link_clicked.connect(self._on_xmpp_uri)
@@ -6408,6 +6412,23 @@ class MainWindow(QtWidgets.QMainWindow):
         win.show()
         win.raise_()
         win.activateWindow()
+
+    def _on_whiteboard_requested(self, jid: str) -> None:
+        """Open (or raise) the whiteboard dialog of the conversation *jid*."""
+        if not jid:
+            return
+        from stanza_im.ui.whiteboard_dialog import WhiteboardDialog
+        dialog = self._whiteboards.get(jid)
+        if dialog is None:
+            parent = self._chat_dialog_parent() if jid in self._muc_self_nicks \
+                else None
+            dialog = WhiteboardDialog(jid, parent=parent)
+            self._whiteboards[jid] = dialog
+            dialog.finished.connect(
+                lambda _result, key=jid: self._whiteboards.pop(key, None))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _on_geo_message_corrected(self, chat: str, ref: str,
                                   new_body: str) -> None:

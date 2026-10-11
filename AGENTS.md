@@ -73,6 +73,8 @@ stanza_im/                      # Python package
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
+│   ├── whiteboard_dialog.py     # Whiteboard dialog (tool palette + canvas)
+│   ├── whiteboard_canvas.py     # QPainter whiteboard canvas + SVG export
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── emoji_picker_dialog.py   # XEP-0444 reaction picker (search/categories/recent)
 │   ├── smiley_picker.py         # Emoticon-set smiley picker (Qt.Popup grid)
@@ -1839,7 +1841,7 @@ bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
 
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries flat
-icon buttons for Clear, vCard, Smiley and "Send file"; in a 1:1 chat "Send file"
+icon buttons for Clear, vCard, Smiley, Whiteboard and "Send file"; in a 1:1 chat "Send file"
 is a menu ("P2P" / "P2P IBB" / "HTTP Upload"), while a conference only supports
 HTTP Upload and gets a plain button (no menu). The Smiley button
 (`smiley.svg`, `ChatWidget._open_smiley_picker`) opens
@@ -1847,7 +1849,19 @@ HTTP Upload and gets a plain button (no menu). The Smiley button
 emoticon set (`EmoticonSetSource` over `include.emoticons.set_items`); the chosen
 code is inserted as plain text (`ChatWidget._insert_smiley`). The source is
 abstracted (`SmileySource`), so a unicode-emoji source can be added to the
-smiley-theme selector later. The "Send" control is a vertical
+smiley-theme selector later. The Whiteboard button (`whiteboard.svg`,
+`ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
+_on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
+(non-modal, singleton per conversation): a custom `QPainter` canvas
+(`ui/whiteboard_canvas.py::WhiteboardCanvas`) with an icon-only tool palette —
+select / move / rotate / scale / delete and the draw tools pencil / line /
+rectangle / ellipse / polygon (closed shapes are filled with the fill colour) —
+plus line width, line colour and fill colour pickers, «Завершить рисование»,
+«Очистить» and «Сохранить как SVG». The document is a list of shape records
+(`id`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and a `QTransform`);
+select/move/rotate/scale edit the `transform` and `to_svg()` serialises it.
+(Collaborative sync over Jingle + XEP-0284 SXE is a later phase.)
+The "Send" control is a vertical
 icon-only button (an Enter-style arrow) whose height follows the input field.
 The input is vertically
 resizable

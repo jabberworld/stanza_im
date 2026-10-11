@@ -2360,6 +2360,25 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   bodyless `<displayed id='…'/>` (own `MatchXPath` handler) marks the message
   delivered.
 
+### 14.5.3 Whiteboard (`ui/whiteboard_dialog.py`, `ui/whiteboard_canvas.py`)
+
+- Phase 1 (local): the chat/конференция toolbar button `whiteboard.svg`
+  (`ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
+  _on_whiteboard_requested`, a singleton dialog per conversation) opens
+  `WhiteboardDialog` — an icon-only tool palette over a custom `QPainter`
+  canvas (`WhiteboardCanvas`).
+- Tools: select / move / rotate / scale / delete and pencil / line / rectangle
+  / ellipse / polygon (closed shapes are filled with the fill colour), plus
+  line width, line colour and fill colour pickers, «Завершить рисование»,
+  «Очистить» and «Сохранить как SVG».
+- The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
+  `stroke-width`, `fill`, `QTransform`); select/move/rotate/scale edit the
+  `transform`, and `to_svg()` serialises it to a `600x400` SVG document.
+- Phase 2 (planned): collaborative sync as a Jingle application type
+  `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
+  (`urn:xmpp:jingle:transports:sxe`) with the XEP-0284 Shared XML Editing
+  record model, for 1:1 and MUC.
+
 ### 14.6 Connection Security & Transport
 
 - **Resource / priority**: `resource_mode` (`hostname`/`manual`) and
