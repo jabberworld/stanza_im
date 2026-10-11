@@ -12,12 +12,14 @@ Two levels, selected on the command line:
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import resource
 import sys
 import threading
-import time
 import tracemalloc
+
+logger = logging.getLogger("stanza_im.memstats")
 
 _PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") or 4096
 
@@ -136,14 +138,33 @@ def _child_type(pid: int) -> str:
     return _classify_child(raw, comm)
 
 
-def _children() -> list[tuple[int, str, int | None, int | None]]:
-    """``(pid, type, rss_kb, pss_kb)`` for every direct child process."""
-    out: list[tuple[int, str, int | None, int | None]] = []
-    my_pid = os.getpid()
+def _descendants_from(ppid_map: dict[int, list[int]], root: int) -> list[int]:
+    """All descendants of *root* (breadth-first) from a ``ppid -> [pid]`` map.
+
+    Chromium forks its renderer/GPU/network processes from a zygote, so they
+    are *grandchildren* of the browser process; walking the whole tree (not
+    only the direct children) is required to see the real WebEngine memory.
+    """
+    out: list[int] = []
+    seen: set[int] = {root}  # the root is not its own descendant
+    queue = list(ppid_map.get(root, []))
+    while queue:
+        pid = queue.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+        queue.extend(ppid_map.get(pid, []))
+    return out
+
+
+def _proc_tree() -> dict[int, list[int]]:
+    """Build a ``ppid -> [pid]`` map for every readable process."""
+    tree: dict[int, list[int]] = {}
     try:
         entries = os.listdir("/proc")
     except OSError:
-        return out
+        return tree
     for entry in entries:
         if not entry.isdigit():
             continue
@@ -151,11 +172,18 @@ def _children() -> list[tuple[int, str, int | None, int | None]]:
         try:
             with open(f"/proc/{pid}/stat", "r", encoding="ascii") as fh:
                 stat = fh.read().split(") ")[-1].split()
-            # stat fields after the comm): state(1) ppid(2) … rss(23)
-            if len(stat) <= 23 or int(stat[1]) != my_pid:
-                continue
+            ppid = int(stat[1])
         except (OSError, ValueError, IndexError):
             continue
+        tree.setdefault(ppid, []).append(pid)
+    return tree
+
+
+def _children() -> list[tuple[int, str, int | None, int | None]]:
+    """``(pid, type, rss_kb, pss_kb)`` for every descendant process."""
+    pids = _descendants_from(_proc_tree(), os.getpid())
+    out: list[tuple[int, str, int | None, int | None]] = []
+    for pid in pids:
         rss, pss = _proc_kb(pid)
         out.append((pid, _child_type(pid), rss, pss))
     return out
@@ -169,16 +197,25 @@ def _qt_counts() -> tuple[int, int]:
         if app is None:
             return -1, 0
         widgets = app.allWidgets()
-        views = 0
-        try:
-            from PyQt6 import QtWebEngineWidgets
-            views = sum(1 for w in widgets
-                        if isinstance(w, QtWebEngineWidgets.QWebEngineView))
-        except Exception:  # noqa: BLE001 - WebEngine not loaded
-            views = 0
-        return len(widgets), views
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("widget count failed: %s", exc)
         return -1, 0
+    views = 0
+    try:
+        from PyQt6 import QtWebEngineWidgets
+        views = sum(1 for w in widgets
+                    if isinstance(w, QtWebEngineWidgets.QWebEngineView))
+    except Exception as exc:  # noqa: BLE001 - WebEngine not loaded
+        logger.debug("WebEngine view count via isinstance failed: %s", exc)
+        # Fall back to a class-name match so the count never silently reads 0.
+        views = sum(1 for w in widgets
+                    if "WebEngineView" in type(w).__name__)
+    if views == 0:
+        # isinstance can miss a subclass in an odd import layout; a name match
+        # is a safe second opinion.
+        views = sum(1 for w in widgets
+                    if "WebEngineView" in type(w).__name__)
+    return len(widgets), views
 
 
 def _loaded_stacks() -> list[str]:
@@ -241,10 +278,9 @@ def _schedule_deep(logger, top: int) -> None:
 
 # ── gc object counts (cheap component view, no tracemalloc) ───────
 
-#: The gc scan walks every tracked object, so it is throttled and threaded.
-_GC_MIN_INTERVAL_S = 300.0
+#: The gc scan walks every tracked object; it runs on every report, in a
+#: worker thread, guarded so two scans never overlap.
 _gc_in_flight = False
-_last_gc_report = 0.0
 
 
 def _gc_counts(top: int = 15) -> list[tuple[str, int]]:
@@ -272,7 +308,7 @@ def _gc_counts(top: int = 15) -> list[tuple[str, int]]:
 
 def _log_gc(logger, top: int) -> None:
     """Log the gc object-type counts (worker thread)."""
-    global _gc_in_flight, _last_gc_report
+    global _gc_in_flight
     try:
         counts = _gc_counts(top)
         if counts:
@@ -281,14 +317,13 @@ def _log_gc(logger, top: int) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.debug("gc object scan failed: %s", exc)
     finally:
-        _last_gc_report = time.monotonic()
         _gc_in_flight = False
 
 
 def _schedule_gc(logger, top: int) -> None:
-    """Run the gc scan in a worker thread, at most every ``_GC_MIN_INTERVAL_S``."""
+    """Run the gc scan in a worker thread (skipped while one is in flight)."""
     global _gc_in_flight
-    if _gc_in_flight or (time.monotonic() - _last_gc_report) < _GC_MIN_INTERVAL_S:
+    if _gc_in_flight:
         return
     _gc_in_flight = True
     threading.Thread(target=_log_gc, args=(logger, top), daemon=True,

@@ -110,6 +110,29 @@ _counts = dict(memstats._gc_counts(20))
 check("gc counts include the tracked instances",
       _counts.get("_Obj", 0) >= 5000)
 
+# 2d. descendant walk (renderer/GPU are grandchildren of the zygote) ---------
+_tree = {1: [10, 11], 10: [100, 101], 100: [1000], 11: [110]}
+check("the descendant walk includes grandchildren",
+      sorted(memstats._descendants_from(_tree, 1))
+      == [10, 11, 100, 101, 110, 1000])
+check("the descendant walk is cycle-safe",
+      memstats._descendants_from({1: [2], 2: [1]}, 1) == [2])
+check("no children yields an empty list",
+      memstats._descendants_from({1: []}, 1) == [])
+
+# 2e. qt counts never crash and return ints ----------------------------------
+_widgets, _views = memstats._qt_counts()
+check("qt counts return ints",
+      isinstance(_widgets, int) and isinstance(_views, int))
+
+# 2f. the gc scan runs on every report (no throttle) -------------------------
+memstats._gc_in_flight = False
+memstats._schedule_gc(logging.getLogger("test.memstats"), 5)
+_deadline = time.monotonic() + 5.0
+while memstats._gc_in_flight and time.monotonic() < _deadline:
+    time.sleep(0.05)
+check("the gc scan finishes", not memstats._gc_in_flight)
+
 # 3. cheap report ------------------------------------------------------------
 logger, handler = _logger()
 memstats.report(logger)

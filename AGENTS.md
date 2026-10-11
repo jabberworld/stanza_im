@@ -2500,15 +2500,17 @@ SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
 breakdown), `-h/--help`. `app.prepare_qt_argv()` re-prepends the program name
 before `QApplication` — QWebEngine aborts on an empty argv. `core/memstats.py`
 has two levels: `-m` is cheap (no tracing — main RSS/PSS/peak, the Chromium
-child processes grouped by type, the Qt widget/WebEngine-view counts and the
-loaded heavy stacks, plus a **gc object-type breakdown** logged at most every
-5 min from a worker thread); `-mm` additionally enables `tracemalloc(nframe=1)`
+**descendant processes** grouped by type, the Qt widget/WebEngine-view counts
+and the loaded heavy stacks, plus a **gc object-type breakdown** logged on every
+report from a worker thread); `-mm` additionally enables `tracemalloc(nframe=1)`
 and logs the live Python heap grouped by package, the snapshot taken in a
-worker thread so the event loop is never blocked. The child type comes from
-`--type=renderer|gpu-process|utility|zygote` (network = utility with
-`--utility-sub-type=…network…`) with `/proc/<pid>/comm` as a fallback. The gc
-breakdown counts only GC-tracked objects (widgets, message objects, …), so it
-never inflates memory the way tracemalloc does.
+worker thread so the event loop is never blocked. Chromium forks its
+renderer/GPU/network processes from a zygote, so the whole descendant tree is
+walked (not just direct children) via `_descendants_from`/`_proc_tree`; the
+type comes from `--type=renderer|gpu-process|utility|zygote` (network = utility
+with `--utility-sub-type=…network…`) with `/proc/<pid>/comm` as a fallback. The
+gc breakdown counts only GC-tracked objects (widgets, message objects, …), so
+it never inflates memory the way tracemalloc does.
 
 **Fast startup**: heavy optional modules are kept off the login-window path, all
 tunable via Preferences → «Stanza IM» → «Производительность» (`[performance]`):
