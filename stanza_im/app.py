@@ -4,7 +4,6 @@ import argparse
 import sys
 import logging
 import os
-import threading
 
 from PyQt6 import QtWidgets
 
@@ -13,6 +12,49 @@ from stanza_im.include.constants import APP_NAME, VERSION, APP_LOG_FILE
 logger = logging.getLogger(__name__)
 
 _loop: asyncio.AbstractEventLoop | None = None
+
+#: Chromium memory-tuning flag sets for ``QTWEBENGINE_CHROMIUM_FLAGS`` (see
+#: Preferences → «Stanza IM» → «Производительность» → «Веб-движок»).
+_CHROMIUM_MODERATE = (
+    "--renderer-process-limit=1",
+    "--js-flags=--max-old-space-size=128",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-domain-reliability",
+    "--disable-sync",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-features=OptimizationHints,MediaRouter,Translate,"
+    "CalculateNativeWinOcclusion",
+)
+_CHROMIUM_AGGRESSIVE = _CHROMIUM_MODERATE + (
+    "--disable-gpu", "--disable-gpu-compositing",
+)
+_CHROMIUM_MODES = {
+    "off": (),
+    "moderate": _CHROMIUM_MODERATE,
+    "aggressive": _CHROMIUM_AGGRESSIVE,
+}
+
+
+def chromium_flags_for(mode: str) -> tuple[str, ...]:
+    """Return the Chromium flag tuple for *mode* (defaults to moderate)."""
+    return _CHROMIUM_MODES.get(str(mode or "moderate").lower(),
+                               _CHROMIUM_MODERATE)
+
+
+def apply_chromium_flags(mode: str) -> None:
+    """Set ``QTWEBENGINE_CHROMIUM_FLAGS`` for *mode* (before QApplication).
+
+    An already-set environment variable (the user's own choice) is respected
+    and never overwritten.
+    """
+    if os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS"):
+        return
+    flags = chromium_flags_for(mode)
+    if flags:
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(flags)
+        logger.info("WebEngine flags (%s): %s", mode, " ".join(flags))
 
 
 def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
@@ -161,15 +203,13 @@ def run() -> int:
         memstats.start_tracking()
 
     configure_logging(debug, xml_dump, file_log)
-    # Probe the optional OMEMO stack in a background thread: importing the
-    # backends pulls in xmlschema/oldmemo/twomemo (hundreds of ms up to a few
-    # seconds cold), which must not delay the login window.  The module is
-    # imported once, so the first access at login/About time is instant.
-    def _probe_omemo():
-        from stanza_im.xmpp.omemo import availability
-        availability.log_availability()
-    threading.Thread(target=_probe_omemo, name="omemo-probe",
-                     daemon=True).start()
+    # Read the [performance] tuning before Qt/WebEngine initialise (the flags
+    # must be in the environment before the first QWebEngineProfile is used).
+    from stanza_im.core.storage import Config
+    perf = Config().performance
+    apply_chromium_flags(getattr(perf, "webengine_memory_mode", "moderate"))
+    defer_build = bool(getattr(perf, "defer_ui_build", True))
+    omemo_mode = str(getattr(perf, "omemo_load_mode", "lazy") or "lazy")
     if debug:
         logger.info("Debug logging enabled (-d)")
     if xml_dump:
@@ -189,13 +229,29 @@ def run() -> int:
     asyncio.set_event_loop(loop)
     _loop = loop
 
+    from PyQt6 import QtCore
     from stanza_im.ui.main_window import MainWindow
 
-    window = MainWindow(app)
+    window = MainWindow(app, defer=defer_build)
     window.show()
+    if defer_build:
+        # Build the heavy widgets only after the login window is on screen.
+        QtCore.QTimer.singleShot(0, window.build_deferred)
+
+    def _probe_omemo():
+        # Importing the OMEMO backends pulls in xmlschema/oldmemo/twomemo
+        # (hundreds of ms up to a few seconds cold).  Run it after the window
+        # is up so it never starves the login window's construction/paint; in
+        # the "load at startup" mode it also does the real import now, in the
+        # default "lazy" mode the real import happens at login.
+        from stanza_im.xmpp.omemo import availability
+        if omemo_mode == "startup":
+            availability.verify()
+        availability.log_availability()
+
+    QtCore.QTimer.singleShot(200, _probe_omemo)
 
     if memstat:
-        from PyQt6 import QtCore
         memstats.report(logger)
         timer = QtCore.QTimer()
         timer.timeout.connect(lambda: memstats.report(logger))

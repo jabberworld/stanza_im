@@ -1066,7 +1066,9 @@ class JabberClient:
                  tls_mode: str = "prefer",
                  starttls_mode: str = "always",
                  omemo_enabled: bool = True,
-                 omemo_btbv: bool = True):
+                 omemo_btbv: bool = True,
+                 omemo_load_mode: str = "lazy",
+                 calls_load_mode: str = "lazy"):
         self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
@@ -1116,6 +1118,13 @@ class JabberClient:
         self.send_software = send_software
         self.omemo_enabled = bool(omemo_enabled)
         self.omemo_btbv = bool(omemo_btbv)
+        # "lazy" defers the heavy backend import to the OMEMO plugin
+        # registration below; "startup" means the startup probe already
+        # imported them.
+        self.omemo_load_mode = str(omemo_load_mode or "lazy")
+        # "startup" loads the aiortc call engine when the client is created;
+        # "lazy" loads it on the first call.
+        self.calls_load_mode = str(calls_load_mode or "lazy")
         self._full_jid = f"{self.jid_str}/{resource}"
 
         self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
@@ -1195,6 +1204,11 @@ class JabberClient:
         from stanza_im.xmpp.omemo import availability
         from stanza_im.xmpp.omemo.manager import NullOmemo, OmemoManager
         self.omemo = NullOmemo(self)
+        if self.omemo_enabled:
+            # Real import probe (idempotent).  In "lazy" mode this is the
+            # first heavy import — it was kept off the startup/login-screen
+            # path; in "startup" mode the startup probe already ran it.
+            availability.verify()
         availability.log_availability()
         if self.omemo_enabled and availability.AVAILABLE:
             try:
@@ -1260,6 +1274,10 @@ class JabberClient:
         self.file_transfer = JingleFileTransferManager(self)
         # Jingle RTP calls (XEP-0167/0176, DTLS) + XEP-0353 jingle-message.
         self.rtp_calls = JingleRtpManager(self)
+        if self.calls_load_mode == "startup":
+            # Eagerly load the aiortc engine (the default "lazy" loads it on
+            # the first call instead).
+            self.rtp_calls.warmup()
         # Multiparty Jingle (Muji, XEP-0272).
         self.muji = MujiManager(self)
         # Call settings populated by MainWindow from config.

@@ -212,9 +212,11 @@ class MainWindow(QtWidgets.QMainWindow):
     #: (new message, mark-read, recount).  The Digest plugin listens to it.
     unread_changed = QtCore.pyqtSignal()
 
-    def __init__(self, app: QtWidgets.QApplication):
+    def __init__(self, app: QtWidgets.QApplication, defer: bool = False):
         super().__init__()
         self.app = app
+        #: ``True`` once :meth:`build_deferred` has built the heavy widgets.
+        self._deferred_done = False
 
         # ── Initialise subsystems ─────────────────────────────────
         load_i18n()
@@ -244,6 +246,128 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(280, 500)
         self._restore_window_geometry()
+
+        # ── Login UI (built immediately) ──────────────────────────
+        self._build_login_ui()
+
+        # ── XMPP client (created on connect) ─────────────────────
+        self._client = None
+        self._xml_console = None
+        self._pep_manager = None
+        self._plugin_manager = None
+        self._notes_page = None
+        self._notes_feature = False
+        self._applied_plugins: set[str] = set()
+        # Bare JIDs that ever sent us an XEP-0224 attention request (set by the
+        # attention plugin); used to enable the bell even without caps.
+        self._attention_seen: set[str] = set()
+        # Plugins may append entries to the roster contact context menu; each
+        # hook is called as ``hook(menu, jid, is_conf)``.
+        self._contact_menu_hooks: list = []
+        # XEP-0191: JIDs blocked on the server (roster strikethrough).
+        self._blocked_jids: set[str] = set()
+
+        # ── State ────────────────────────────────────────────────
+        self._visible = True
+        self._shutting_down = False
+        # Per-conversation read state: {"unread", "mentions", "read_sid",
+        # "read_ts", "read_ref"} keyed by the chat-tab key.  The unread /
+        # mention / displayed views below are derived from it, so the badge,
+        # the tray and the XEP-0490 seed can never drift apart.
+        self._unread_chats: dict[str, dict] = {}
+        self._unread_jids: set[str] = set()
+        self._unread_total = 0
+        self._load_unread_for(self._config.jid)
+        # Unseen reactions on our own messages, keyed by chat-tab key then by
+        # the message reference; the value is the number of reactions not yet
+        # looked at.  Session-only, never persisted.
+        self._reaction_pending: dict[str, dict[str, int]] = {}
+        # The tray only blinks once logged in (see _sync_tray_blink); restored
+        # unread counters still show as roster badges before that.
+        self._muc_users: dict[str, dict[str, dict]] = {}
+        self._muc_room_features: dict[str, set] = {}
+        self._muc_moderation: dict[str, bool] = {}
+        self._muc_moderation_pending: set[str] = set()
+        self._muc_self_nicks: dict[str, str] = {}
+        self._muc_names: dict[str, str] = {}
+        self._muc_vcard_names: dict[str, dict] = {}
+        self._muc_avatar_paths: dict[str, str] = {}
+        self._muc_join_tries: dict[str, int] = {}
+        self._muc_autojoin_tries: dict[str, int] = {}
+        self._muc_joined: set[str] = set()
+        self._muc_join_grace: dict[str, float] = {}
+        self._muc_config_dialogs: dict[str, object] = {}
+        self._hats_assign_dialogs: dict[str, object] = {}
+        self._captcha_dialogs: dict[str, object] = {}
+        self._muc_base_nicks: dict[str, str] = {}
+        # Room configuration to apply once a room we are creating is joined.
+        self._muc_create_opts: dict[str, dict] = {}
+        self._muc_user_nick_change_from: dict[str, str] = {}
+        self._conference_roster: set[str] = set()
+        # MUC private-message rows: chat key -> (room, nick).
+        self._pm_roster: set[str] = set()
+        self._pm_targets: dict[str, tuple[str, str]] = {}
+        self._bookmarks: dict[str, dict] = {}
+        self._vcard_requested: set[str] = set()
+        self._pending_profile: set[str] = set()
+        # JIDs whose *already open* vCard dialog is being refreshed in place.
+        self._vcard_refreshing: set[str] = set()
+        self._vcard_dialogs: dict[str, object] = {}
+        self._history_manager: object | None = None
+        self._last_activity = time.monotonic()
+        self._auto_status_applied = False
+        self._pep_sweep_active = True
+        self._roster_repaint_pending = False
+        self._roster_repaint_timer: QtCore.QTimer | None = None
+        self.app.installEventFilter(self)
+        self._idle_timer = QtCore.QTimer(self)
+        self._idle_timer.timeout.connect(self._check_auto_status)
+        self._idle_timer.start(30_000)
+
+        # Coalesce unread-counter writes to disk.
+        self._unread_save_timer = QtCore.QTimer(self)
+        self._unread_save_timer.setSingleShot(True)
+        self._unread_save_timer.setInterval(1000)
+        self._unread_save_timer.timeout.connect(self._flush_unread)
+
+        # ``_opening_chat`` suppresses the tab_focused handler while a chat is
+        # being opened on purpose (the opener applies the read anchor itself);
+        # ``_history_loading`` remembers the in-flight history load per chat
+        # (keyed by its anchor timestamp) so a repeated request is not issued.
+        self._opening_chat = False
+        self._history_loading: dict[str, str] = {}
+        # Monotonic token per history load so a superseded (anchor-less) load
+        # cannot apply its stale window over a newer anchored one.
+        self._history_load_seq: dict[str, int] = {}
+
+        # Unload the WebEngine page of tabs that stay cold (see P7).
+        self._tab_activity: dict[str, float] = {}
+        self._suspend_timer = QtCore.QTimer(self)
+        self._suspend_timer.setInterval(60_000)
+        self._suspend_timer.timeout.connect(self._maybe_suspend_tabs)
+        self._suspend_timer.start()
+
+        # Hand freed Python/Qt heap back to the OS periodically.
+        self._memory_timer = QtCore.QTimer(self)
+        self._memory_timer.setInterval(30 * 60 * 1000)
+        self._memory_timer.timeout.connect(self._trim_main_process_memory)
+        self._memory_timer.start()
+
+        # The heavy widgets (theme factories, chat window, tray, OSD, sounds,
+        # roster UI) and the settings/plugins apply are built here — either now
+        # or, with ``defer=True`` (app.run), after the login window is shown.
+        if not defer:
+            self.build_deferred()
+
+    def build_deferred(self) -> None:
+        """Build the heavy widgets, the roster UI and apply the settings.
+
+        Split out of :meth:`__init__` so the login window can be shown before
+        this runs (``defer=True``).  Idempotent.
+        """
+        if self._deferred_done:
+            return
+        self._deferred_done = True
 
         # ── Theme factory (shared by all chat views) ──────────────
         self._theme_factory = ChatThemeFactory()
@@ -457,111 +581,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Monotonic time until which presence OSDs are suppressed (login sync).
         self._presence_osd_grace_until = 0.0
 
-        # ── UI ───────────────────────────────────────────────────
-        self._build_ui()
-
-        # ── XMPP client (created on connect) ─────────────────────
-        self._client = None
-        self._xml_console = None
-        self._pep_manager = None
-        self._plugin_manager = None
-        self._notes_page = None
-        self._notes_feature = False
-        self._applied_plugins: set[str] = set()
-        # Bare JIDs that ever sent us an XEP-0224 attention request (set by the
-        # attention plugin); used to enable the bell even without caps.
-        self._attention_seen: set[str] = set()
-        # Plugins may append entries to the roster contact context menu; each
-        # hook is called as ``hook(menu, jid, is_conf)``.
-        self._contact_menu_hooks: list = []
-        # XEP-0191: JIDs blocked on the server (roster strikethrough).
-        self._blocked_jids: set[str] = set()
-
-        # ── State ────────────────────────────────────────────────
-        self._visible = True
-        self._shutting_down = False
-        # Per-conversation read state: {"unread", "mentions", "read_sid",
-        # "read_ts", "read_ref"} keyed by the chat-tab key.  The unread /
-        # mention / displayed views below are derived from it, so the badge,
-        # the tray and the XEP-0490 seed can never drift apart.
-        self._unread_chats: dict[str, dict] = {}
-        self._unread_jids: set[str] = set()
-        self._unread_total = 0
-        self._load_unread_for(self._config.jid)
-        # Unseen reactions on our own messages, keyed by chat-tab key then by
-        # the message reference; the value is the number of reactions not yet
-        # looked at.  Session-only, never persisted.
-        self._reaction_pending: dict[str, dict[str, int]] = {}
-        # The tray only blinks once logged in (see _sync_tray_blink); restored
-        # unread counters still show as roster badges before that.
-        self._muc_users: dict[str, dict[str, dict]] = {}
-        self._muc_room_features: dict[str, set] = {}
-        self._muc_moderation: dict[str, bool] = {}
-        self._muc_moderation_pending: set[str] = set()
-        self._muc_self_nicks: dict[str, str] = {}
-        self._muc_names: dict[str, str] = {}
-        self._muc_vcard_names: dict[str, dict] = {}
-        self._muc_avatar_paths: dict[str, str] = {}
-        self._muc_join_tries: dict[str, int] = {}
-        self._muc_autojoin_tries: dict[str, int] = {}
-        self._muc_joined: set[str] = set()
-        self._muc_join_grace: dict[str, float] = {}
-        self._muc_config_dialogs: dict[str, object] = {}
-        self._hats_assign_dialogs: dict[str, object] = {}
-        self._captcha_dialogs: dict[str, object] = {}
-        self._muc_base_nicks: dict[str, str] = {}
-        # Room configuration to apply once a room we are creating is joined.
-        self._muc_create_opts: dict[str, dict] = {}
-        self._muc_user_nick_change_from: dict[str, str] = {}
-        self._conference_roster: set[str] = set()
-        # MUC private-message rows: chat key -> (room, nick).
-        self._pm_roster: set[str] = set()
-        self._pm_targets: dict[str, tuple[str, str]] = {}
-        self._bookmarks: dict[str, dict] = {}
-        self._vcard_requested: set[str] = set()
-        self._pending_profile: set[str] = set()
-        # JIDs whose *already open* vCard dialog is being refreshed in place.
-        self._vcard_refreshing: set[str] = set()
-        self._vcard_dialogs: dict[str, object] = {}
-        self._history_manager: object | None = None
-        self._last_activity = time.monotonic()
-        self._auto_status_applied = False
-        self._pep_sweep_active = True
-        self._roster_repaint_pending = False
-        self._roster_repaint_timer: QtCore.QTimer | None = None
-        self.app.installEventFilter(self)
-        self._idle_timer = QtCore.QTimer(self)
-        self._idle_timer.timeout.connect(self._check_auto_status)
-        self._idle_timer.start(30_000)
-
-        # Coalesce unread-counter writes to disk.
-        self._unread_save_timer = QtCore.QTimer(self)
-        self._unread_save_timer.setSingleShot(True)
-        self._unread_save_timer.setInterval(1000)
-        self._unread_save_timer.timeout.connect(self._flush_unread)
-
-        # ``_opening_chat`` suppresses the tab_focused handler while a chat is
-        # being opened on purpose (the opener applies the read anchor itself);
-        # ``_history_loading`` remembers the in-flight history load per chat
-        # (keyed by its anchor timestamp) so a repeated request is not issued.
-        self._opening_chat = False
-        self._history_loading: dict[str, str] = {}
-        # Monotonic token per history load so a superseded (anchor-less) load
-        # cannot apply its stale window over a newer anchored one.
-        self._history_load_seq: dict[str, int] = {}
-
-        # Unload the WebEngine page of tabs that stay cold (see P7).
-        self._tab_activity: dict[str, float] = {}
-        self._suspend_timer = QtCore.QTimer(self)
-        self._suspend_timer.setInterval(60_000)
-        self._suspend_timer.timeout.connect(self._maybe_suspend_tabs)
-        self._suspend_timer.start()
-
-        # Hand freed Python/Qt heap back to the OS periodically.
-        self._memory_timer = QtCore.QTimer(self)
-        self._memory_timer.setInterval(30 * 60 * 1000)
-        self._memory_timer.timeout.connect(self._trim_main_process_memory)
-        self._memory_timer.start()
+        # ── Roster UI + menu ──────────────────────────────────────
+        self._build_roster_ui()
 
         self._chat_window.typing_changed.connect(self._on_typing_local)
         self._chat_window.activity_changed.connect(self._on_chat_activity)
@@ -579,13 +600,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── UI construction ───────────────────────────────────────────
 
-    def _build_ui(self):
+    def _build_login_ui(self):
+        """Phase-1 UI: window shell, status bar, login and splash pages.
+
+        Built immediately so the login window can be shown before the heavy
+        widgets (``build_deferred``).
+        """
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._build_menu()
 
         # Status bar (problem states only) + a "Reconnect" button shown offline.
         self._status_bar = QtWidgets.QStatusBar()
@@ -624,6 +648,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._splash_cancel.clicked.connect(self._on_connect_cancel)
         splash_layout.addWidget(self._splash_cancel, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
         self._stack.addWidget(splash)
+
+        # Start on login page
+        self._stack.setCurrentIndex(_PAGE_LOGIN)
+
+    def _build_roster_ui(self):
+        """Phase-2 UI: the menu bar and the roster page (stack index 2)."""
+        self._build_menu()
 
         # Page 2: Roster
         roster_content = QtWidgets.QWidget()
@@ -696,9 +727,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         roster_page = self._build_roster_tabs(roster_content)
         self._add_roster_page(roster_page)
-
-        # Start on login page
-        self._stack.setCurrentIndex(_PAGE_LOGIN)
 
     # ── Interface mode (separate / unified chat layout) ───────────
 

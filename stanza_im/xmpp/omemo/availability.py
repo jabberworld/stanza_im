@@ -5,10 +5,19 @@ The OMEMO feature is optional: it needs the ``slixmpp-omemo`` plugin plus the
 0.3, ``twomemo`` for ``urn:xmpp:omemo:2``).  Everything here degrades to a
 disabled feature with a human-readable reason instead of raising, so a partial
 or missing install never breaks the client.
+
+Detection is **cheap by default**: the module only checks that the packages are
+importable (``find_spec``) so merely importing this module never pulls in the
+heavy ``oldmemo``/``twomemo``/``xmlschema``/``slixmpp_omemo`` stack.  A real
+import (:func:`verify`) is done later — when the OMEMO plugin is actually
+registered (login) or, in the "load at startup" mode, from the startup probe —
+and it also catches a package that is present but whose *transitive* dependency
+is missing (for example ``oldmemo`` raising ``ModuleNotFoundError: xmlschema``).
 """
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
 
 logger = logging.getLogger("stanza_im.omemo")
@@ -20,7 +29,6 @@ BACKEND_OMEMO2 = "omemo2"
 
 LEGACY_NAMESPACE = "eu.siacs.conversations.axolotl"
 OMEMO2_NAMESPACE = "urn:xmpp:omemo:2"
-
 
 #: ``(import module, friendly name, Debian/Ubuntu package)`` of every component
 #: the OMEMO stack needs.  ``xmlschema`` is a transitive dependency of
@@ -37,8 +45,19 @@ _REQUIRED = (
 
 _BY_MODULE = {module: (name, deb) for module, name, deb in _REQUIRED}
 
+#: Top-level components that must all be present for the feature to work.
+_CORE_MODULES = ("slixmpp_omemo", "omemo", "cryptography")
 
-def _probe(module: str) -> tuple[bool, str]:
+
+def _has_spec(module: str) -> bool:
+    """Cheap availability check that never imports the module."""
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
+
+
+def _real_import_ok(module: str) -> tuple[bool, str]:
     """Import *module*; return ``(ok, root_cause_module)``.
 
     A real import (not ``find_spec``) is used so a module that is present but
@@ -64,6 +83,26 @@ def _probe(module: str) -> tuple[bool, str]:
         return False, module
 
 
+def _apply_state(ok_map: dict[str, bool]) -> None:
+    """Recompute the module-level availability globals from *ok_map*."""
+    global AVAILABLE, BACKENDS, MISSING_MODULES, MISSING, MISSING_DEBIAN
+    global WARNING, OMEMO2_CONTENT
+    missing = sorted({module for module, ok in ok_map.items() if not ok})
+    backends = frozenset(
+        backend for backend, module in (
+            (BACKEND_LEGACY, "oldmemo"), (BACKEND_OMEMO2, "twomemo"))
+        if ok_map.get(module))
+    MISSING_MODULES = missing
+    MISSING = [_BY_MODULE.get(module, (module, module))[0] for module in missing]
+    MISSING_DEBIAN = [_BY_MODULE.get(module, (module, module))[1]
+                      for module in missing]
+    BACKENDS = backends
+    AVAILABLE = all(ok_map.get(module) for module in _CORE_MODULES) and bool(backends)
+    WARNING = ("" if AVAILABLE
+               else "OMEMO disabled: missing " + ", ".join(MISSING))
+    OMEMO2_CONTENT = AVAILABLE and BACKEND_OMEMO2 in BACKENDS
+
+
 def _compute_missing(probe) -> list[str]:
     """Deduplicated root-cause module names of the components *probe* rejects."""
     causes: list[str] = []
@@ -74,43 +113,34 @@ def _compute_missing(probe) -> list[str]:
     return sorted(set(causes))
 
 
-def _available(module: str) -> bool:
-    return _probe(module)[0]
+# ── Initial (cheap, spec-based) state ─────────────────────────────
+_apply_state({module: _has_spec(module) for module, _n, _d in _REQUIRED})
+
+#: True once the real import probe (:func:`verify`) has run.
+_verified = False
 
 
-_PLUGIN = _available("slixmpp_omemo")
-_CORE = _available("omemo")
-_OLD = _available("oldmemo")
-_NEW = _available("twomemo")
-_CRYPTO = _available("cryptography")
+def verify() -> bool:
+    """Run the real import probe (once) and return the true availability.
 
-#: Available protocol backends (``BACKEND_LEGACY``/``BACKEND_OMEMO2``).
-BACKENDS: frozenset[str] = frozenset(
-    backend for backend, ok in (
-        (BACKEND_LEGACY, _OLD), (BACKEND_OMEMO2, _NEW)) if ok
-)
-
-#: Import names of the missing components (root cause) — for diagnostics.
-MISSING_MODULES: list[str] = _compute_missing(_probe)
-
-#: Friendly names of the required packages that are not importable.
-MISSING: list[str] = [
-    _BY_MODULE.get(module, (module, module))[0] for module in MISSING_MODULES
-]
-
-#: Debian/Ubuntu packages of the missing components.
-MISSING_DEBIAN: list[str] = [
-    _BY_MODULE.get(module, (module, module))[1] for module in MISSING_MODULES
-]
-
-#: True when the whole feature can be used.
-AVAILABLE: bool = _PLUGIN and _CORE and _CRYPTO and bool(BACKENDS)
-
-#: Human-readable reason shown when the feature is disabled.
-WARNING: str = (
-    "" if AVAILABLE
-    else "OMEMO disabled: missing " + ", ".join(MISSING)
-)
+    Called when the OMEMO plugin is about to be registered (login) and, in the
+    "load at startup" mode, from the startup probe.  Idempotent: the heavy
+    import happens at most once per process.
+    """
+    global _verified
+    if _verified:
+        return AVAILABLE
+    _verified = True
+    ok_map: dict[str, bool] = {}
+    for module, _name, _deb in _REQUIRED:
+        ok, cause = _real_import_ok(module)
+        ok_map[module] = ok
+        if not ok and cause:
+            # Surface the real root cause (e.g. a missing transitive
+            # dependency) instead of / in addition to the top-level module.
+            ok_map.setdefault(cause, False)
+    _apply_state(ok_map)
+    return AVAILABLE
 
 
 def install_hint() -> str:
@@ -137,10 +167,6 @@ def detail() -> str:
         lines.append("Install: " + hint)
     return "\n".join(lines)
 
-#: Whether the OMEMO 2 (twomemo) content can be handled.  slixmpp-omemo does
-#: not implement Stanza Content Encryption (XEP-0420) yet, so the manager ships
-#: its own SCE implementation; that only needs the twomemo backend.
-OMEMO2_CONTENT: bool = AVAILABLE and BACKEND_OMEMO2 in BACKENDS
 
 _logged = False
 

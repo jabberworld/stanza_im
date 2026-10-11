@@ -353,6 +353,18 @@ menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
 `client.ice_servers()` from XEP-0215, then the connection settings' STUN/TURN
 endpoint, then DNS SRV.
 
+### 4.5 Performance Settings (`performance.*`, Preferences → Stanza IM → Performance)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `performance.defer_ui_build` | `true` | Show the login window before the heavy widgets are built. `MainWindow(app, defer=True)` builds only the shell + login/splash pages; `app.run()` shows it and then calls `build_deferred()` (idempotent) on the next event-loop turn. `false` = the old synchronous build (used by tests). |
+| `performance.omemo_load_mode` | `lazy` | `lazy`: `xmpp/omemo/availability.py` uses `find_spec` (no heavy import) and the real import runs at OMEMO plugin registration (login); `startup`: the background probe imports the backends right after the window is shown. |
+| `performance.calls_load_mode` | `lazy` | `lazy`: the aiortc engine is created on the first call; `startup`: `JingleRtpManager.warmup()` loads it when the client is created. |
+| `performance.webengine_memory_mode` | `moderate` | `QTWEBENGINE_CHROMIUM_FLAGS` set before `QApplication`: `off` / `moderate` (`--renderer-process-limit=1`, `--js-flags=--max-old-space-size=128` and background-service disables) / `aggressive` (+ `--disable-gpu`). A user-set env value is respected. |
+| `performance.webengine_cache_mb` | `50` | HTTP cache cap of the default `QWebEngineProfile` (`ui/url_schemes.configure_default_profile`; cookies in memory only, plugins/popups disabled); `0` = no cap. |
+
+Deferred loads and the Chromium flags/cache apply on the next restart.
+
 The Devices page also provides hardware **self-tests** (disabled while a call
 owns the devices): a live microphone peak meter, a speaker test tone and a
 camera preview window (`ui/device_test.py`). The self-test controls are

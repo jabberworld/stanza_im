@@ -65,6 +65,24 @@ check("the attention plugin defines NS_ATTENTION locally",
 check("importing the attention plugin does not load the client",
       "stanza_im.core.client" not in sys.modules)
 
+# The OMEMO availability probe is spec-based: importing it must not pull the
+# heavy backends (oldmemo/twomemo/slixmpp_omemo/xmlschema/doubleratchet).
+import stanza_im.xmpp.omemo.availability as availability  # noqa: E402
+
+check("the OMEMO probe reports availability without importing backends",
+      isinstance(availability.AVAILABLE, bool))
+for module in ("oldmemo", "twomemo", "slixmpp_omemo", "xmlschema",
+               "doubleratchet"):
+    check("importing availability does not load %s" % module,
+          module not in sys.modules)
+
+# Importing the Jingle RTP signalling must not pull in aiortc/av either.
+import stanza_im.xmpp.jingle_rtp  # noqa: E402,F401
+
+for module in ("stanza_im.xmpp.media", "aiortc", "av"):
+    check("importing jingle_rtp does not load %s" % module,
+          module not in sys.modules)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

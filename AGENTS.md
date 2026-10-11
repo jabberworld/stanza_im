@@ -2496,8 +2496,34 @@ SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
 (periodic memory statistics), `-h/--help`. `app.prepare_qt_argv()` re-prepends
 the program name before `QApplication` — QWebEngine aborts on an empty argv.
 
-**Fast startup**: heavy optional modules are kept off the login-window path.
-The OMEMO availability probe runs in a background thread (`app.py`), the
+**Fast startup**: heavy optional modules are kept off the login-window path, all
+tunable via Preferences → «Stanza IM» → «Производительность» (`[performance]`):
+- `defer_ui_build` (default on): `MainWindow(app, defer=True)` builds only the
+  shell + login/splash pages, `app.run()` calls `window.show()` and then
+  `QTimer.singleShot(0, window.build_deferred)`; `build_deferred` (idempotent)
+  builds the theme factories, chat window, tray, OSD, sounds, roster UI and
+  applies the settings/plugins. `defer=False` (the default, used by tests)
+  builds everything synchronously.
+- `omemo_load_mode` (default `lazy`): `xmpp/omemo/availability.py` computes
+  `AVAILABLE`/`BACKENDS`/`MISSING*` from `importlib.util.find_spec` (never
+  importing `oldmemo`/`twomemo`/`slixmpp_omemo`/`xmlschema`/`doubleratchet`);
+  `availability.verify()` does the real import once, at OMEMO plugin
+  registration (login) or from the startup probe in `startup` mode, and catches
+  a present-but-broken transitive dependency.
+- `calls_load_mode` (default `lazy`): `xmpp/jingle_rtp.py` no longer imports
+  `xmpp.media` (aiortc/av); `JingleRtpManager.available` uses
+  `find_spec("aiortc")` and the engine is created on the first call
+  (`_ensure_engine`), or eagerly in `startup` mode (`warmup`).
+- `webengine_memory_mode` (`off`/`moderate`/`aggressive`): `app.apply_chromium_flags`
+  sets `QTWEBENGINE_CHROMIUM_FLAGS` before `QApplication` (moderate =
+  `--renderer-process-limit=1`, `--js-flags=--max-old-space-size=128` and the
+  background-service disables; aggressive adds `--disable-gpu`); a user-set
+  environment value is respected. `webengine_cache_mb` caps the default
+  `QWebEngineProfile` HTTP cache (`ui/url_schemes.configure_default_profile`,
+  also sets in-memory cookies and disables plugins/popups; a no-op without a
+  live `QApplication`).
+The OMEMO startup probe runs in a background thread started only **after** the
+window is shown (`app.py`, ~200 ms), so it never starves the login window; the
 `plugins.attention` manifest does not import `core.client` (so plugin discovery
 never pulls aiortc), and QtWebEngine is imported lazily — `chat_widget` imports
 `chat_view` only when a chat view is built, `main_window` imports `media_viewer`
@@ -2506,7 +2532,8 @@ only when a media viewer opens, and the media-preview mode uses the pure
 sets `Qt.AA_ShareOpenGLContexts` before any `QApplication` so the lazy WebEngine
 import is still legal; the `stanza`/`mam`/`xmpp` URL schemes are registered by
 the idempotent `ui/url_schemes.ensure_registered()` (called by both WebEngine
-importers). `tests/test_startup.py` guards this laziness.
+importers). `tests/test_startup.py` guards this laziness,
+`tests/test_performance_prefs.py` the settings.
 
 Requires: Python 3.10+, PyQt6, PyQt6-WebEngine, slixmpp, qasync, defusedxml,
 aiodns (SRV discovery).

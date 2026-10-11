@@ -12,15 +12,38 @@ Everything logs through ``stanza_im.call`` / ``stanza_im.call.rtp`` with
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 import logging
 import re
 import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
-from stanza_im.xmpp import media
-
 logger = logging.getLogger("stanza_im.call.rtp")
+
+#: The media engine (``stanza_im.xmpp.media`` → aiortc/av) is heavy (~34 MB),
+#: so it is imported lazily — on the first call, or up front in the "load at
+#: startup" mode (``JingleRtpManager.warmup``).  Importing this module must not
+#: pull aiortc onto the login path.
+_media_mod = None
+
+
+def _media():
+    """Import and cache :mod:`stanza_im.xmpp.media` on demand."""
+    global _media_mod
+    if _media_mod is None:
+        from stanza_im.xmpp import media as _m
+        _media_mod = _m
+    return _media_mod
+
+
+def _aiortc_spec_ok() -> bool:
+    """Cheap availability check that never imports aiortc."""
+    try:
+        return importlib.util.find_spec("aiortc") is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
 
 NS_JINGLE = "urn:xmpp:jingle:1"
 NS_RTP = "urn:xmpp:jingle:apps:rtp:1"
@@ -568,17 +591,35 @@ class JingleRtpManager:
     def __init__(self, client):
         self.client = client
         self.sessions: dict[str, CallSession] = {}
-        self.engine = media.get_engine()
+        #: The media engine is created lazily (see :meth:`_ensure_engine`) so
+        #: the heavy aiortc import stays off the startup/login path.
+        self.engine = None
         self._muji_local_previews: dict[str, object] = {}   # room -> capture
         self._proceed_futures: dict[str, object] = {}
         self._pending_proposals: dict[str, dict] = {}
         self._proceeded: set[str] = set()
         self._proceed_timers: dict[str, object] = {}
-        logger.info("CALL manager ready, engine=%s", self.engine.name)
+        logger.info("CALL manager created (engine loaded lazily)")
+
+    def _ensure_engine(self):
+        """Create (once) and return the media engine, importing aiortc."""
+        if self.engine is None:
+            self.engine = _media().get_engine()
+            logger.info("CALL engine loaded, name=%s available=%s",
+                        self.engine.name, self.engine.available)
+        return self.engine
+
+    def warmup(self) -> None:
+        """Load the media engine now (``calls_load_mode = startup``)."""
+        self._ensure_engine()
 
     @property
     def available(self) -> bool:
-        return self.engine.available
+        if self.engine is not None:
+            return self.engine.available
+        # Not loaded yet: report what a lazy load would find without importing
+        # aiortc (the engine is created on the first call).
+        return _aiortc_spec_ok()
 
     # ── helpers ───────────────────────────────────────────────────
     def _devices(self) -> dict:
@@ -731,7 +772,7 @@ class JingleRtpManager:
                     to_jid, sid)
 
     async def _send_session_initiate(self, session: CallSession) -> None:
-        call = self.engine.create_call(
+        call = self._ensure_engine().create_call(
             self._ice_servers(), self._devices(),
             on_ice_candidate=lambda cand: self._on_local_candidate(session, cand),
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
@@ -853,7 +894,7 @@ class JingleRtpManager:
         """
         if room in self._muji_local_previews:
             return
-        factory = getattr(self.engine, "create_local_preview", None)
+        factory = getattr(self._ensure_engine(), "create_local_preview", None)
         if not callable(factory):
             return
         try:
@@ -956,7 +997,7 @@ class JingleRtpManager:
     async def _accept(self, session: CallSession) -> None:
         # Build a remote offer SDP from the stored peer transport/descriptions.
         offer = sdp_from_jingle(self._stored_contents(session), session.sid)
-        call = self.engine.create_call(
+        call = self._ensure_engine().create_call(
             self._ice_servers(), self._devices(),
             on_ice_candidate=lambda cand: self._on_local_candidate(session, cand),
             on_remote_track=lambda *a: self._on_remote_track(session, *a),

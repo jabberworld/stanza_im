@@ -98,6 +98,21 @@ class Config:
                            "x": 0, "y": 0, "maximized": False}},
         "application": {"close_to_tray": True, "history_limit": 50,
                          "tab_title_length": 30},
+        # Startup / memory tuning (Preferences → «Stanza IM» → «Производительность»).
+        "performance": {
+            # Show the login window before the heavy widgets are built.
+            "defer_ui_build": True,
+            # OMEMO backends: "lazy" = find_spec at startup, real import on
+            # login; "startup" = eager import during startup.
+            "omemo_load_mode": "lazy",
+            # Call engine (aiortc/av): "lazy" = load on the first call;
+            # "startup" = load when the client is created.
+            "calls_load_mode": "lazy",
+            # Chromium memory profile: "off" / "moderate" / "aggressive".
+            "webengine_memory_mode": "moderate",
+            # HTTP cache cap of the default WebEngine profile (MB, 0 = off).
+            "webengine_cache_mb": 50,
+        },
         "connection": {"auto_join_conferences": True,
                         "save_status_message": True, "resource": "jabbim",
                         "resource_mode": "hostname",

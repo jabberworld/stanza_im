@@ -384,8 +384,34 @@ class PreferencesDialog(QtWidgets.QDialog):
         browse.clicked.connect(self._pick_download_dir)
         file_form.addRow(tr("prefs_file_download_dir"),
                          self._row(directory, browse))
+
+        # Startup / memory tuning (deferred loads, Chromium flags).
+        perf, perf_form = self._page()
+        perf_form.addRow(self._check("defer_ui_build",
+                                     tr("prefs_defer_ui_build")))
+        perf_form.addRow(
+            self._row(QtWidgets.QLabel(tr("prefs_omemo_load")),
+                      self._combo("omemo_load_mode", [
+                          ("prefs_load_lazy", "lazy"),
+                          ("prefs_load_startup", "startup")])),
+            self._info_label(tr("prefs_performance_restart_tip")))
+        perf_form.addRow(
+            self._row(QtWidgets.QLabel(tr("prefs_calls_load")),
+                      self._combo("calls_load_mode", [
+                          ("prefs_load_lazy", "lazy"),
+                          ("prefs_load_startup", "startup")])))
+        perf_form.addRow(
+            self._row(QtWidgets.QLabel(tr("prefs_webengine_mode")),
+                      self._combo("webengine_memory_mode", [
+                          ("webengine_mode_off", "off"),
+                          ("webengine_mode_moderate", "moderate"),
+                          ("webengine_mode_aggressive", "aggressive")])),
+            self._info_label(tr("prefs_performance_restart_tip")))
+        perf_form.addRow(tr("prefs_webengine_cache_mb"),
+                         self._spin("webengine_cache_mb", 0, 512))
         return self._tabs([(tr("prefs_general"), general),
-                           (tr("prefs_file_transfer"), files)])
+                           (tr("prefs_file_transfer"), files),
+                           (tr("prefs_performance"), perf)])
 
     def _pick_download_dir(self):
         current = self._value("file_download_dir") or _default_download_dir()
@@ -1705,6 +1731,17 @@ class PreferencesDialog(QtWidgets.QDialog):
             "devices_video_input": getattr(
                 getattr(cfg, "devices", None), "video_input", "") or "",
         }
+        performance = getattr(cfg, "performance", None)
+        values["defer_ui_build"] = bool(getattr(
+            performance, "defer_ui_build", True))
+        values["omemo_load_mode"] = getattr(
+            performance, "omemo_load_mode", "lazy")
+        values["calls_load_mode"] = getattr(
+            performance, "calls_load_mode", "lazy")
+        values["webengine_memory_mode"] = getattr(
+            performance, "webengine_memory_mode", "moderate")
+        values["webengine_cache_mb"] = int(
+            getattr(performance, "webengine_cache_mb", 50) or 0)
         values["sound_theme"] = getattr(notifications, "sound_theme",
                                         "default") or "default"
         for key in ("sound_first_message", "sound_any_message",
@@ -1727,6 +1764,14 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.application.close_to_tray = self._value("close_to_tray")
         cfg.application.history_limit = self._value("history_limit_chat")
         cfg.application.tab_title_length = self._value("tab_title_length_chat")
+        # Startup / memory tuning (applied on the next restart).
+        cfg.performance.defer_ui_build = bool(self._value("defer_ui_build"))
+        cfg.performance.omemo_load_mode = self._value("omemo_load_mode") or "lazy"
+        cfg.performance.calls_load_mode = self._value("calls_load_mode") or "lazy"
+        cfg.performance.webengine_memory_mode = (
+            self._value("webengine_memory_mode") or "moderate")
+        cfg.performance.webengine_cache_mb = int(
+            self._value("webengine_cache_mb") or 0)
         cfg.chat.history_limit = self._value("history_limit_chat")
         cfg.chat.tab_title_length = self._value("tab_title_length_chat")
         cfg.jid = self._value("jid")
