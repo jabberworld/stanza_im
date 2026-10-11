@@ -2499,18 +2499,23 @@ SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
 (periodic memory statistics; repeat as `-mm` for the deep Python-heap
 breakdown), `-h/--help`. `app.prepare_qt_argv()` re-prepends the program name
 before `QApplication` — QWebEngine aborts on an empty argv. `core/memstats.py`
-has two levels: `-m` is cheap (no tracing — main RSS/PSS/peak, the Chromium
-**descendant processes** grouped by type, the Qt widget/WebEngine-view counts
-and the loaded heavy stacks, plus a **gc object-type breakdown** logged on every
-report from a worker thread); `-mm` additionally enables `tracemalloc(nframe=1)`
-and logs the live Python heap grouped by package, the snapshot taken in a
-worker thread so the event loop is never blocked. Chromium forks its
-renderer/GPU/network processes from a zygote, so the whole descendant tree is
-walked (not just direct children) via `_descendants_from`/`_proc_tree`; the
-type comes from `--type=renderer|gpu-process|utility|zygote` (network = utility
-with `--utility-sub-type=…network…`) with `/proc/<pid>/comm` as a fallback. The
-gc breakdown counts only GC-tracked objects (widgets, message objects, …), so
-it never inflates memory the way tracemalloc does.
+has two levels: `-m` is cheap (no tracing — main RSS/PSS/peak plus
+`private_dirty`/`anonymous`/`shared_clean` from `smaps_rollup` (heap vs
+library growth), the Chromium **descendant processes** grouped by type *and*
+listed one per line (`pid`, type, `comm`, rss, pss), the Qt
+widget/WebEngine-view counts and `QPixmapCache` limit, the loaded heavy stacks,
+plus a **gc object-type breakdown** logged on every report from a worker
+thread); `-mm` additionally enables `tracemalloc(nframe=1)` and logs the live
+Python heap grouped by package, the snapshot taken in a worker thread so the
+event loop is never blocked. Chromium forks its renderer/GPU/network processes
+from a zygote, so the whole descendant tree is walked (not just direct children)
+via `_descendants_from`/`_proc_tree`; the type comes from
+`--type=renderer|gpu-process|utility|zygote` (network = utility with
+`--utility-sub-type=…network…`) with `/proc/<pid>/comm` as a fallback (a zygote
+fork inherits the zygote's `cmdline`, so the per-process `comm` line is what
+tells the roles apart). The gc breakdown counts only GC-tracked objects
+(widgets, message objects, …), so it never inflates memory the way tracemalloc
+does.
 
 **Fast startup**: heavy optional modules are kept off the login-window path, all
 tunable via Preferences → «Stanza IM» → «Производительность» (`[performance]`):

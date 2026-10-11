@@ -133,6 +133,13 @@ while memstats._gc_in_flight and time.monotonic() < _deadline:
     time.sleep(0.05)
 check("the gc scan finishes", not memstats._gc_in_flight)
 
+# 2g. per-process memory fields ----------------------------------------------
+_mem = memstats._proc_mem(os.getpid())
+check("_proc_mem reports an integer rss", isinstance(_mem.get("rss"), int))
+check("_proc_mem exposes the smaps fields",
+      {"rss", "pss", "private_dirty", "anonymous", "shared_clean"}
+      <= set(_mem))
+
 # 3. cheap report ------------------------------------------------------------
 logger, handler = _logger()
 memstats.report(logger)

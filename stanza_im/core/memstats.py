@@ -56,33 +56,38 @@ def is_deep() -> bool:
 
 # ── Process memory (cheap, from /proc) ────────────────────────────
 
-def _proc_kb(pid: int) -> tuple[int | None, int | None]:
-    """Return ``(rss_kb, pss_kb)`` for *pid*.
+def _proc_mem(pid: int) -> dict[str, int | None]:
+    """Return memory figures (KiB) for *pid* from ``/proc``.
 
-    PSS (proportional set size) accounts for shared pages, so it is a fairer
-    per-process figure than RSS; it comes from ``smaps_rollup`` when available.
+    ``rss``/``pss`` come from ``statm``/``smaps_rollup``; ``private_dirty``,
+    ``anonymous`` and ``shared_clean`` help tell heap growth (private/anonymous)
+    apart from shared-library growth (shared_clean).
     """
-    rss = None
-    pss = None
+    info: dict[str, int | None] = {
+        "rss": None, "pss": None, "private_dirty": None,
+        "anonymous": None, "shared_clean": None,
+    }
     try:
         with open(f"/proc/{pid}/statm", "r", encoding="ascii") as fh:
-            rss = int(fh.read().split()[1]) * _PAGE_SIZE // 1024
+            info["rss"] = int(fh.read().split()[1]) * _PAGE_SIZE // 1024
     except (OSError, ValueError, IndexError):
         pass
+    keys = {"Pss:": "pss", "Private_Dirty:": "private_dirty",
+            "Anonymous:": "anonymous", "Shared_Clean:": "shared_clean"}
     try:
         with open(f"/proc/{pid}/smaps_rollup", "r", encoding="ascii") as fh:
             for line in fh:
-                if line.startswith("Pss:"):
-                    pss = int(line.split()[1])
-                    break
+                field = keys.get(line.split(":", 1)[0] + ":")
+                if field is not None and info[field] is None:
+                    info[field] = int(line.split()[1])
     except (OSError, ValueError, IndexError):
         pass
-    return rss, pss
+    return info
 
 
 def _rss_kb() -> int | None:
     """Resident set size of the current process in KiB."""
-    return _proc_kb(os.getpid())[0]
+    return _proc_mem(os.getpid())["rss"]
 
 
 def _classify_child(raw: bytes, comm: str = "") -> str:
@@ -120,22 +125,39 @@ def _classify_child(raw: bytes, comm: str = "") -> str:
     return name
 
 
-def _child_type(pid: int) -> str:
-    """Read ``cmdline`` + ``comm`` of *pid* and classify the child."""
-    raw = b""
+def _read_cmdline(pid: int) -> bytes:
+    """Raw ``/proc/<pid>/cmdline`` (empty when unreadable)."""
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            raw = fh.read()
+            return fh.read()
     except OSError:
-        raw = b""
-    comm = ""
+        return b""
+
+
+def _read_comm(pid: int) -> str:
+    """Short process name from ``/proc/<pid>/comm`` (``Name:`` fallback)."""
     try:
         with open(f"/proc/{pid}/comm", "r", encoding="ascii",
                   errors="replace") as fh:
-            comm = fh.read()
+            name = fh.read().strip()
+            if name:
+                return name
     except OSError:
-        comm = ""
-    return _classify_child(raw, comm)
+        pass
+    try:
+        with open(f"/proc/{pid}/status", "r", encoding="ascii",
+                  errors="replace") as fh:
+            for line in fh:
+                if line.startswith("Name:"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def _child_type(pid: int) -> str:
+    """Classify the process *pid* (``cmdline`` + ``comm``)."""
+    return _classify_child(_read_cmdline(pid), _read_comm(pid))
 
 
 def _descendants_from(ppid_map: dict[int, list[int]], root: int) -> list[int]:
@@ -179,13 +201,15 @@ def _proc_tree() -> dict[int, list[int]]:
     return tree
 
 
-def _children() -> list[tuple[int, str, int | None, int | None]]:
-    """``(pid, type, rss_kb, pss_kb)`` for every descendant process."""
+def _children() -> list[tuple[int, str, str, int | None, int | None]]:
+    """``(pid, type, comm, rss_kb, pss_kb)`` for every descendant process."""
     pids = _descendants_from(_proc_tree(), os.getpid())
-    out: list[tuple[int, str, int | None, int | None]] = []
+    out: list[tuple[int, str, str, int | None, int | None]] = []
     for pid in pids:
-        rss, pss = _proc_kb(pid)
-        out.append((pid, _child_type(pid), rss, pss))
+        comm = _read_comm(pid)
+        ctype = _classify_child(_read_cmdline(pid), comm)
+        mem = _proc_mem(pid)
+        out.append((pid, ctype, comm, mem["rss"], mem["pss"]))
     return out
 
 
@@ -215,7 +239,26 @@ def _qt_counts() -> tuple[int, int]:
         # is a safe second opinion.
         views = sum(1 for w in widgets
                     if "WebEngineView" in type(w).__name__)
+    if views == 0 and widgets:
+        # Diagnostic: no WebEngine view found in allWidgets() although widgets
+        # exist — log the classes that could be a chat view so the reason is
+        # visible in the log.
+        interesting = sorted({
+            type(w).__name__ for w in widgets
+            if any(tag in type(w).__name__
+                   for tag in ("View", "Chat", "Engine", "Web"))})
+        logger.debug("no WebEngine view in allWidgets (%d widgets); "
+                     "candidates=%s", len(widgets), interesting or "none")
     return len(widgets), views
+
+
+def _pixmap_cache_limit() -> int | None:
+    """``QPixmapCache`` limit in KiB (None when Qt is unavailable)."""
+    try:
+        from PyQt6 import QtGui
+        return int(QtGui.QPixmapCache.cacheLimit())
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _loaded_stacks() -> list[str]:
@@ -341,18 +384,22 @@ def report(logger, top: int = 12, deep: bool | None = None) -> None:
     except (OSError, AttributeError):
         peak_kb = None
 
-    rss, pss = _proc_kb(os.getpid())
+    main = _proc_mem(os.getpid())
     children = _children()
     widgets, views = _qt_counts()
+    pixmap_limit = _pixmap_cache_limit()
     stacks = _loaded_stacks()
     traced, _peak = (tracemalloc.get_traced_memory()
                      if tracemalloc.is_tracing() else (0, 0))
 
-    lines = [f"--- memory: rss={_fmt(rss)} pss={_fmt(pss)}"
+    lines = [f"--- memory: rss={_fmt(main['rss'])} pss={_fmt(main['pss'])}"
              f" peak={_fmt(peak_kb)} traced={_fmt_bytes(traced)}"]
+    lines.append(f"    main: private_dirty={_fmt(main['private_dirty'])}"
+                 f" anonymous={_fmt(main['anonymous'])}"
+                 f" shared_clean={_fmt(main['shared_clean'])}")
 
     by_type: dict[str, list[int]] = {}
-    for _pid, ctype, crss, cpss in children:
+    for _pid, ctype, _comm, crss, cpss in children:
         agg = by_type.setdefault(ctype, [0, 0])
         agg[0] += 1
         agg[1] += cpss if cpss is not None else (crss or 0)
@@ -362,7 +409,16 @@ def report(logger, top: int = 12, deep: bool | None = None) -> None:
     for ctype, (count, kb) in sorted(by_type.items(),
                                      key=lambda kv: kv[1][1], reverse=True):
         lines.append(f"      {ctype}: {count} proc {_fmt(kb)}")
-    lines.append(f"    qt: widgets={widgets} webengine_views={views}")
+    # Per-process lines (top by memory) so a zygote fork's role and name are
+    # visible even when the cmdline is inherited from the zygote.
+    ranked = sorted(children,
+                    key=lambda c: (c[4] if c[4] is not None else (c[3] or 0)),
+                    reverse=True)
+    for pid, ctype, comm, crss, cpss in ranked[:top]:
+        lines.append(f"      child pid={pid} type={ctype}"
+                     f" comm={comm or '?'} rss={_fmt(crss)} pss={_fmt(cpss)}")
+    lines.append(f"    qt: widgets={widgets} webengine_views={views}"
+                 f" pixmap_cache_limit={pixmap_limit}K")
     lines.append(f"    python: modules={len(sys.modules)}"
                  f" heavy=[{', '.join(stacks)}]")
     logger.info("\n".join(lines))
