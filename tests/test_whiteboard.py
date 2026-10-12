@@ -149,6 +149,28 @@ check("a remote shape renders from its path data",
 check("shape_attrs round-trips the path data",
       WhiteboardCanvas.shape_attrs(shapes[0])["d"] == "M 0 0 L 50 50")
 
+# 7b. fill="none" means an unfilled remote shape (line/pencil stay lines) -----
+line_canvas = WhiteboardCanvas()
+line_canvas.load_shapes([
+    {"rid": "l1", "id": "l1", "d": "M 0 0 L 100 0",
+     "stroke": "#000000", "stroke-width": "2", "fill": "none"},
+    {"rid": "p1", "id": "p1", "d": "M 0 0 L 10 10",
+     "stroke": "#000000", "stroke-width": "2", "fill": "none"},
+    {"rid": "r1", "id": "r1", "d": "M 0 0 L 10 0 L 10 10 L 0 10 Z",
+     "stroke": "#000000", "stroke-width": "2", "fill": "#e53935"},
+])
+remote = line_canvas.shapes()
+check("a remote line with fill=none is not filled",
+      WhiteboardCanvas._filled(remote[0]) is False)
+check("a remote pencil with fill=none is not filled",
+      WhiteboardCanvas._filled(remote[1]) is False)
+check("a remote closed shape keeps its fill",
+      WhiteboardCanvas._filled(remote[2]) is True)
+check("load_shapes normalises fill=none to empty",
+      remote[0]["fill"] == "")
+check("shape_attrs keeps fill=none for an unfilled shape",
+      WhiteboardCanvas.shape_attrs(remote[0])["fill"] == "none")
+
 added = []
 canvas2.shape_added.connect(added.append)
 canvas2.set_tool("rect")

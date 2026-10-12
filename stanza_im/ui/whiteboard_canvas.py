@@ -195,9 +195,14 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     @staticmethod
     def _filled(shape: dict) -> bool:
+        # ``fill="none"`` (sent for open shapes: line, pencil) means "no fill"
+        # — a bare ``bool("none")`` is True and would fill a remote line.
+        value = str(shape.get("fill") or "")
+        if not value or value.lower() == "none":
+            return False
         if shape.get("kind") == "remote":
-            return bool(shape.get("fill"))
-        return shape["kind"] in CLOSED_KINDS and bool(shape.get("fill"))
+            return True
+        return shape["kind"] in CLOSED_KINDS
 
     @staticmethod
     def shape_d(shape: dict) -> str:
@@ -221,6 +226,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         """
         loaded: list[dict] = []
         for item in shapes:
+            fill = str(item.get("fill") or "")
+            if fill.lower() == "none":
+                fill = ""
             shape = {
                 "id": str(item.get("id") or uuid.uuid4().hex),
                 "rid": str(item.get("rid") or ""),
@@ -228,7 +236,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 "d": str(item.get("d") or ""),
                 "stroke": str(item.get("stroke") or "#1a1a1a"),
                 "stroke_width": int(item.get("stroke-width") or 2),
-                "fill": str(item.get("fill") or ""),
+                "fill": fill,
                 "transform": _parse_transform(item.get("transform")),
             }
             loaded.append(shape)
