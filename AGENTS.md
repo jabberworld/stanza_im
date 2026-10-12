@@ -1867,22 +1867,32 @@ smiley-theme selector later. The Whiteboard button (`whiteboard.svg`,
 _on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
 (non-modal, singleton per conversation): a custom `QPainter` canvas
 (`ui/whiteboard_canvas.py::WhiteboardCanvas`, logical board `1280×720` from
-`include.constants.WHITEBOARD_WIDTH/HEIGHT`) with an icon-only tool palette —
-select / move / rotate / scale / delete, the draw tools pencil / line /
-rectangle / ellipse / polygon and a **bucket** «Заливка» that fills (or, on a
-second click, unfills) only the closed shape under the cursor — plus line
-width, line colour, fill colour, a «Заливка» toggle (whether newly drawn closed
-shapes are filled), «Завершить рисование», «Очистить» and «Сохранить как SVG».
-The document is a list of shape records (`id`, `rid`, `kind`, geometry,
-`stroke`/`stroke-width`/`fill` and a `QTransform`); every shape is exported as a
-`<path d="…"/>` (`include/svg_path.py`) and `to_svg()` serialises it. In the
+`include.constants.WHITEBOARD_WIDTH/HEIGHT`) with an icon-only tool palette
+grouped by `QFrame` separators: the tools (select / move / rotate / scale, the
+draw tools pencil / line / **arrow** / rectangle / ellipse / polygon and a
+**bucket** «Заливка» that fills — or, on a second click, unfills — only the
+closed shape under the cursor) plus «Удалить» (an object operation); then the
+line width (a menu whose actions are checkable, the active width ticked), line
+colour, fill colour and a «Заливка» toggle (whether newly drawn closed shapes
+are filled); then the board operations «Завершить», «Очистить», «Сохранить как
+SVG», «Сохранить как PNG»; then «Поделиться». An arrow is serialised as one
+path — a shaft plus an **open (V) head** (`WhiteboardCanvas._arrow_d`), so it
+renders identically locally and for a remote peer. The document is a list of
+shape records (`id`, `rid`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and
+a `QTransform`); every shape is exported as a `<path d="…"/>`
+(`include/svg_path.py`) and `to_svg()`/`save_svg()`/`render_image()`/`save_png()`
+serialise it (the PNG is a 1× board render, shapes only on white). In the
 **select** tool a click selects a shape and shows rotate/resize handles
 (dragging the shape body moves it; the handles rotate/scale it about the centre
-— the move/rotate/scale tools remain as an alternative); `Ctrl+wheel` zooms the
-view anchored at the cursor, `Ctrl+0` and a double click on empty space reset
-it, and dragging empty space pans (the view transform is local, never part of
-the document). The dialog's «Поделиться» button starts a **collaborative**
-session
+— the move/rotate/scale tools remain as an alternative); `Delete`/`Backspace`
+removes the selection; `Ctrl+wheel` zooms the view anchored at the cursor,
+`Ctrl+0` and a double click on empty space reset it, and dragging empty space
+pans (the view transform is local, never part of the document). `Esc` only
+clears the selection (it never closes the board) and closing the window
+**hides** it — the board and its session live in `MainWindow._whiteboards`
+until «Завершить» (confirm → end session → clear → hide) or logout
+(`_reset_account_ui`), so a reopened window continues the drawing.
+The dialog's «Поделиться» button starts a **collaborative** session
 (`xmpp/whiteboard.py::WhiteboardManager`, `client.whiteboard`): a Jingle
 application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 (`urn:xmpp:jingle:transports:sxe`) sharing an `xmpp/sxe.py::SxeDocument`

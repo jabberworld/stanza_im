@@ -2373,26 +2373,35 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   _on_whiteboard_requested`, a singleton dialog per conversation) opens
   `WhiteboardDialog` — an icon-only tool palette over a custom `QPainter`
   canvas (`WhiteboardCanvas`).
-- Tools: select / move / rotate / scale / delete, pencil / line / rectangle /
-  ellipse / polygon and a **bucket** «Заливка» (fills, or on a second click
-  unfills, only the closed shape under the cursor — the empty background is
-  never flooded), plus line width, line colour, fill colour, a «Заливка»
-  toggle (whether newly drawn closed shapes are filled; off → `fill=""` →
-  `fill="none"`), «Завершить рисование», «Очистить» and «Сохранить как SVG».
+- Tools (grouped by `QFrame` separators): select / move / rotate / scale,
+  pencil / line / **arrow** / rectangle / ellipse / polygon and a **bucket**
+  «Заливка» (fills, or on a second click unfills, only the closed shape under
+  the cursor — the empty background is never flooded), plus «Удалить» (an object
+  operation, placed with the tools); then the line width (a menu whose actions
+  are checkable, the active width ticked), line colour, fill colour and a
+  «Заливка» toggle (whether newly drawn closed shapes are filled; off →
+  `fill=""` → `fill="none"`); then «Завершить», «Очистить», «Сохранить как SVG»
+  and «Сохранить как PNG». An arrow is one path — a shaft plus an open (V) head
+  (`WhiteboardCanvas._arrow_d`) — so it renders identically locally and remotely.
 - The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
-  `stroke-width`, `fill`, `QTransform`); `to_svg()` serialises it to a
-  `1280x720` SVG document (the board size comes from
-  `include.constants.WHITEBOARD_WIDTH/HEIGHT`, shared with the seeded SXE
-  `viewBox`). Every shape is exported as a `<path d="…"/>`
-  (`include/svg_path.py` builds the `d` strings; the canvas parses `d` back for
-  remote shapes via `svg_path.parse_path`).
+  `stroke-width`, `fill`, `QTransform`); `to_svg()`/`save_svg()` and
+  `render_image()`/`save_png()` serialise it (the SVG viewBox and the PNG are
+  `1280x720`, the board size from `include.constants.WHITEBOARD_WIDTH/HEIGHT`,
+  shared with the seeded SXE `viewBox`; the PNG is a 1× shapes-only render on
+  white). Every shape is exported as a `<path d="…"/>` (`include/svg_path.py`
+  builds the `d` strings; the canvas parses `d` back for remote shapes via
+  `svg_path.parse_path`).
 - In the **select** tool a click selects a shape and draws rotate/resize
   handles (constant screen size, hit-tested in widget coordinates); dragging
   the shape body moves it and the handles rotate/scale it about the bounding-box
-  centre (the move/rotate/scale tools remain as an alternative). `Ctrl+wheel`
-  zooms the view anchored at the cursor (0.25–8×), `Ctrl+0` and a double click
-  on empty space reset it, and dragging empty space pans — the view transform is
-  local and never part of the document or the session.
+  centre (the move/rotate/scale tools remain as an alternative). `Delete` /
+  `Backspace` removes the selection. `Ctrl+wheel` zooms the view anchored at the
+  cursor (0.25–8×), `Ctrl+0` and a double click on empty space reset it, and
+  dragging empty space pans — the view transform is local and never part of the
+  document or the session. `Esc` only clears the selection (it never closes the
+  board); closing the window hides it (the board and its session live in
+  `MainWindow._whiteboards`), and «Завершить» (confirm → end session → clear →
+  hide) or logout (`_reset_account_ui`) discards it.
 - Phase 2 (collaborative): `xmpp/whiteboard.py::WhiteboardManager` (created as
   `client.whiteboard`) owns the sessions. A session is a Jingle application
   type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport

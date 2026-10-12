@@ -116,7 +116,7 @@ check("clear empties the board", canvas.shapes() == [])
 dialog = WhiteboardDialog("bob@example.com")
 check("the dialog has every tool button",
       set(dialog._tool_buttons) == {
-          "select", "move", "rotate", "scale", "pencil", "line",
+          "select", "move", "rotate", "scale", "pencil", "line", "arrow",
           "rect", "ellipse", "polygon", "fill"})
 check("the pencil tool is active by default",
       dialog._tool_buttons["pencil"].isChecked())
@@ -302,6 +302,76 @@ drag(hc, rotate_pt.x(), rotate_pt.y(),
      rotate_pt.x() + 30, rotate_pt.y() + 10, steps=3)
 check("dragging the rotate handle rotates the shape",
       abs(hc._shape_by_id(sid)["transform"].m12() - before_rot) > 1e-3)
+
+# 12. arrow tool -------------------------------------------------------------
+ac = WhiteboardCanvas()
+ac.resize(1280, 720)
+ac.set_tool("arrow")
+drag(ac, 100, 100, 300, 200, steps=3)
+ash = ac.shapes()[0]
+check("the arrow tool draws an arrow", ash["kind"] == "arrow")
+arrow_d = WhiteboardCanvas.shape_attrs(ash)["d"]
+check("the arrow path has a shaft and a head", arrow_d.count("M") == 2)
+check("an arrow is not filled", WhiteboardCanvas._filled(ash) is False)
+check("an arrow renders locally",
+      ac._world_path(ash).boundingRect().width() > 0)
+rc = WhiteboardCanvas()
+rc.load_shapes([{"rid": "a1", "id": "a1", "d": arrow_d, "stroke": "#000000",
+                 "stroke-width": "2", "fill": "none"}])
+check("a remote arrow renders",
+      rc._world_path(rc.shapes()[0]).boundingRect().width() > 0)
+
+# 13. width menu checkmark ---------------------------------------------------
+wdlg = WhiteboardDialog("bob@example.com")
+wdlg._set_width(5)
+check("the width menu checks the active width",
+      wdlg._width_actions[5].isChecked()
+      and not wdlg._width_actions[2].isChecked())
+
+# 14. toolbar layout: delete with the tools, separators between the groups ---
+_tb = wdlg.layout().itemAt(0).layout()
+check("delete sits with the tools (before the width/colour options)",
+      _tb.indexOf(wdlg._delete_btn) < _tb.indexOf(wdlg._width_btn))
+check("the toolbar uses separators",
+      any(isinstance(_tb.itemAt(i).widget(), QtWidgets.QFrame)
+          for i in range(_tb.count())))
+
+# 15. PNG export + deselect + finish -----------------------------------------
+img = ac.render_image()
+check("render_image is the board size",
+      img.width() == 1280 and img.height() == 720)
+png_path = os.path.join(_SCRATCH, "whiteboard.png")
+check("save_png writes a non-empty file",
+      ac.save_png(png_path) and os.path.getsize(png_path) > 0)
+
+hc._selected = sid
+hc.deselect()
+check("deselect clears the selection", hc.selected_id() == "")
+
+
+class _WbMgr:
+    def __init__(self):
+        self.ended = []
+
+    def end_session(self, sid):
+        self.ended.append(sid)
+
+
+class _WbClient:
+    def __init__(self):
+        self.whiteboard = _WbMgr()
+
+
+fd = WhiteboardDialog("bob@example.com", client=_WbClient())
+fd._sid = "s1"
+fd._canvas._shapes.append({
+    "id": "x", "rid": "", "kind": "rect", "rect": (0, 0, 10, 10),
+    "stroke": "#000000", "stroke_width": 2, "fill": "",
+    "transform": QtGui.QTransform()})
+fd._end_board()
+check("finish ends the session", fd._client.whiteboard.ended == ["s1"])
+check("finish clears the board", fd._canvas.shapes() == [])
+check("finish detaches the session", fd.session_id() == "")
 
 print()
 if FAILURES:

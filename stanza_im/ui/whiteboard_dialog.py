@@ -20,6 +20,7 @@ _TOOLS = (
     ("scale", "wb-scale.svg", "whiteboard_tool_scale"),
     ("pencil", "wb-pencil.svg", "whiteboard_tool_pencil"),
     ("line", "wb-line.svg", "whiteboard_tool_line"),
+    ("arrow", "wb-arrow.svg", "whiteboard_tool_arrow"),
     ("rect", "wb-rect.svg", "whiteboard_tool_rect"),
     ("ellipse", "wb-ellipse.svg", "whiteboard_tool_ellipse"),
     ("polygon", "wb-polygon.svg", "whiteboard_tool_polygon"),
@@ -57,6 +58,9 @@ class WhiteboardDialog(QtWidgets.QDialog):
         # Ctrl+0 resets the view zoom/pan (Ctrl+wheel zooms, in the canvas).
         zoom_reset = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+0"), self)
         zoom_reset.activated.connect(self._canvas.reset_view)
+        for _key in ("Delete", "Backspace"):
+            sc = QtGui.QShortcut(QtGui.QKeySequence(_key), self)
+            sc.activated.connect(self._canvas.delete_selected)
         self._tool_group = QtWidgets.QButtonGroup(self)
         self._tool_group.setExclusive(True)
         self._tool_buttons: dict[str, QtWidgets.QToolButton] = {}
@@ -69,17 +73,31 @@ class WhiteboardDialog(QtWidgets.QDialog):
             toolbar.addWidget(button)
         self._tool_buttons["pencil"].setChecked(True)
 
-        toolbar.addSpacing(10)
+        # «Удалить» is an operation on the drawn object, so it belongs with the
+        # tools rather than with the board operations.
+        self._delete_btn = self._tool_button("remove.svg",
+                                             tr("whiteboard_tool_delete"))
+        self._delete_btn.clicked.connect(self._canvas.delete_selected)
+        toolbar.addWidget(self._delete_btn)
+
+        toolbar.addWidget(self._separator())
         self._width_btn = self._tool_button("wb-line-width.svg",
                                             tr("whiteboard_line_width"))
-        width_menu = QtWidgets.QMenu(self)
+        self._width_menu = QtWidgets.QMenu(self)
+        self._width_group = QtGui.QActionGroup(self)
+        self._width_group.setExclusive(True)
+        self._width_actions: dict[int, QtGui.QAction] = {}
         for value in _WIDTHS:
-            action = width_menu.addAction(f"{value} px")
+            action = self._width_menu.addAction(f"{value} px")
+            action.setCheckable(True)
             action.triggered.connect(
                 lambda _checked=False, w=value: self._set_width(w))
+            self._width_group.addAction(action)
+            self._width_actions[value] = action
+        self._width_actions[self._width].setChecked(True)
         self._width_btn.setPopupMode(
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._width_btn.setMenu(width_menu)
+        self._width_btn.setMenu(self._width_menu)
         toolbar.addWidget(self._width_btn)
 
         self._stroke_btn = self._tool_button("", tr("whiteboard_line_color"))
@@ -97,9 +115,9 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._fill_on_btn.toggled.connect(self._canvas.set_fill_enabled)
         toolbar.addWidget(self._fill_on_btn)
 
-        toolbar.addSpacing(10)
-        finish = self._tool_button("ok.png", tr("whiteboard_finish"))
-        finish.clicked.connect(self._canvas.finish_drawing)
+        toolbar.addWidget(self._separator())
+        finish = self._tool_button("gtk-quit.png", tr("whiteboard_finish"))
+        finish.clicked.connect(self._confirm_finish)
         toolbar.addWidget(finish)
         clear = self._tool_button("clear.png", tr("whiteboard_clear"))
         clear.clicked.connect(self._confirm_clear)
@@ -107,11 +125,12 @@ class WhiteboardDialog(QtWidgets.QDialog):
         save = self._tool_button("wb-save.svg", tr("whiteboard_save_svg"))
         save.clicked.connect(self._save_svg)
         toolbar.addWidget(save)
-        delete = self._tool_button("remove.svg", tr("whiteboard_tool_delete"))
-        delete.clicked.connect(self._canvas.delete_selected)
-        toolbar.addWidget(delete)
+        save_png = self._tool_button("wb-save-png.svg",
+                                     tr("whiteboard_save_png"))
+        save_png.clicked.connect(self._save_png)
+        toolbar.addWidget(save_png)
 
-        toolbar.addSpacing(10)
+        toolbar.addWidget(self._separator())
         self._share_btn = self._tool_button("system-users.png",
                                             tr("whiteboard_share"))
         self._share_btn.setCheckable(True)
@@ -241,6 +260,9 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._canvas.set_width(self._width)
         self._width_btn.setToolTip(
             f"{tr('whiteboard_line_width')}: {self._width} px")
+        action = self._width_actions.get(self._width)
+        if action is not None:
+            action.setChecked(True)
 
     def _pick_stroke(self) -> None:
         color = QtWidgets.QColorDialog.getColor(
@@ -275,3 +297,46 @@ class WhiteboardDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.warning(
                     self, tr("whiteboard_save_svg"),
                     tr("whiteboard_save_failed"))
+
+    def _save_png(self) -> None:
+        path, _filter = QtWidgets.QFileDialog.getSaveFileName(
+            self, tr("whiteboard_save_png"), "whiteboard.png", "PNG (*.png)")
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        if not self._canvas.save_png(path):
+            QtWidgets.QMessageBox.warning(
+                self, tr("whiteboard_save_png"), tr("whiteboard_save_failed"))
+
+    def _confirm_finish(self) -> None:
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("whiteboard_finish"), tr("whiteboard_finish_confirm"))
+        if answer == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._end_board()
+
+    def _end_board(self) -> None:
+        """End the collaborative session, clear the board and hide the window."""
+        if self._client and self._sid:
+            self._client.whiteboard.end_session(self._sid)
+        self.detach_session()
+        self._canvas.clear()
+        self._canvas.reset_view()
+        self.hide()
+
+    def reject(self) -> None:  # noqa: D401
+        """Esc must not close the board — it only clears the selection."""
+        self._canvas.deselect()
+
+    def closeEvent(self, event):  # noqa: N802
+        # Hide instead of destroying so the board and its session survive and a
+        # reopened window continues where the user left off.
+        self.hide()
+        event.ignore()
+
+    @staticmethod
+    def _separator() -> QtWidgets.QFrame:
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.Shape.VLine)
+        line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        return line

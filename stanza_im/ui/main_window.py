@@ -6483,9 +6483,9 @@ class MainWindow(QtWidgets.QMainWindow):
             dialog = WhiteboardDialog(jid, parent=parent, client=self._client,
                                       is_muc=is_muc)
             dialog.share_requested.connect(self._on_whiteboard_share)
+            # The dialog hides (never closes) so the board and its session
+            # survive a reopen; it is torn down by _reset_account_ui.
             self._whiteboards[jid] = dialog
-            dialog.finished.connect(
-                lambda _result, key=jid: self._whiteboards.pop(key, None))
         return dialog
 
     def _on_whiteboard_requested(self, jid: str) -> None:
@@ -8260,6 +8260,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_vcard_names.clear()
         self._muc_avatar_paths.clear()
         self._bookmarks = {}
+        for dialog in self._whiteboards.values():
+            dialog.deleteLater()
+        self._whiteboards.clear()
         self._roster.clear()
         self._roster.sort_and_update()
         self._schedule_roster_repaint()

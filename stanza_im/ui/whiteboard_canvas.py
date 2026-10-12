@@ -21,7 +21,7 @@ VIEW_W = WHITEBOARD_WIDTH
 VIEW_H = WHITEBOARD_HEIGHT
 
 #: Tools that draw a new shape (as opposed to editing an existing one).
-DRAW_TOOLS = ("pencil", "line", "rect", "ellipse", "polygon")
+DRAW_TOOLS = ("pencil", "line", "arrow", "rect", "ellipse", "polygon")
 #: Shapes whose closed area is filled with the fill colour.
 CLOSED_KINDS = ("rect", "ellipse", "polygon")
 
@@ -143,6 +143,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if shape is not None:
             self.shape_removed.emit(shape)
 
+    def deselect(self) -> None:
+        if self._selected:
+            self._selected = ""
+            self.update()
+
     def set_rid(self, shape_id: str, rid: str) -> None:
         """Record the SXE record id the collaborative session assigned."""
         shape = self._shape_by_id(shape_id)
@@ -161,13 +166,6 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                      else "none"),
             "transform": transform_str(shape["transform"]),
         }
-
-    def finish_drawing(self) -> None:
-        """Commit the in-progress shape (e.g. close a polygon) and stop."""
-        if self._active is not None:
-            self._commit_active()
-        self.set_tool("select")
-        self.update()
 
     # ── Geometry helpers ──────────────────────────────────────────
 
@@ -229,6 +227,14 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._view_pan = QtCore.QPointF(0.0, 0.0)
         self.update()
 
+    def keyPressEvent(self, event):  # noqa: N802
+        if event.key() in (QtCore.Qt.Key.Key_Delete,
+                           QtCore.Qt.Key.Key_Backspace):
+            self.delete_selected()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def wheelEvent(self, event):  # noqa: N802
         if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
@@ -243,6 +249,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def _local_path(shape: dict) -> QtGui.QPainterPath:
         if shape.get("kind") == "remote":
             return svg_path.parse_path(shape.get("d") or "")
+        if shape.get("kind") == "arrow":
+            return svg_path.parse_path(WhiteboardCanvas._arrow_d(shape))
         path = QtGui.QPainterPath()
         kind = shape["kind"]
         if kind in ("pencil", "line", "polygon"):
@@ -282,6 +290,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if shape.get("kind") == "remote":
             return shape.get("d") or ""
         kind = shape["kind"]
+        if kind == "arrow":
+            return WhiteboardCanvas._arrow_d(shape)
         if kind in ("pencil", "line", "polygon"):
             return svg_path.polyline_d(shape.get("points") or [],
                                        close=(kind == "polygon"))
@@ -290,6 +300,24 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if kind == "ellipse":
             return svg_path.ellipse_d(*shape["ellipse"])
         return ""
+
+    @staticmethod
+    def _arrow_d(shape: dict) -> str:
+        """The path data of an arrow: a shaft plus an open (V) head."""
+        points = shape.get("points") or []
+        if len(points) < 2:
+            return svg_path.polyline_d(points)
+        ax, ay = points[0]
+        bx, by = points[1]
+        size = 12.0 + float(shape.get("stroke_width", 2)) * 2.0
+        angle = math.atan2(by - ay, bx - ax)
+        spread = math.radians(25.0)
+        h1x = bx - size * math.cos(angle - spread)
+        h1y = by - size * math.sin(angle - spread)
+        h2x = bx - size * math.cos(angle + spread)
+        h2y = by - size * math.sin(angle + spread)
+        return ("M %g %g L %g %g M %g %g L %g %g L %g %g"
+                % (ax, ay, bx, by, h1x, h1y, bx, by, h2x, h2y))
 
     def load_shapes(self, shapes: list[dict]) -> None:
         """Rebuild the board from a list of shape descriptors (remote state).
@@ -517,10 +545,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             elif tool == "ellipse":
                 self._active = self._new_shape(
                     "ellipse", ellipse=(world.x(), world.y(), 0.0, 0.0))
-            elif tool == "line":
+            elif tool in ("line", "arrow"):
                 self._active = self._new_shape(
-                    "line", points=[(world.x(), world.y()),
-                                    (world.x(), world.y())])
+                    tool, points=[(world.x(), world.y()),
+                                  (world.x(), world.y())])
             else:  # pencil / polygon
                 self._active = self._new_shape(
                     tool, points=[(world.x(), world.y())])
@@ -538,7 +566,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             kind = self._active["kind"]
             if kind in ("pencil", "polygon"):
                 self._active["points"].append((world.x(), world.y()))
-            elif kind == "line":
+            elif kind in ("line", "arrow"):
                 self._active["points"][1] = (world.x(), world.y())
             elif kind == "rect":
                 self._active["rect"] = self._rect_from(self._start, world)
@@ -672,6 +700,21 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def save_svg(self, path: str) -> None:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(self.to_svg())
+
+    def render_image(self) -> QtGui.QImage:
+        """Render the board (shapes only, white background) to a 1x image."""
+        image = QtGui.QImage(VIEW_W, VIEW_H, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(QtGui.QColor("#ffffff"))
+        painter = QtGui.QPainter(image)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        for shape in self._shapes:
+            self._draw_shape(painter, shape)
+        painter.end()
+        return image
+
+    def save_png(self, path: str) -> bool:
+        """Write the board to *path* as a PNG; returns success."""
+        return bool(self.render_image().save(path, "PNG"))
 
     @staticmethod
     def _shape_svg(shape: dict) -> str:
