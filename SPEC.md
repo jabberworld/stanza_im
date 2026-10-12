@@ -313,6 +313,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_sort_by_unread` | `true` | View menu «Сортировать по непрочитанным»: contacts with unread messages lead the list, then the presence/name order inside each part (`RosterWidget.set_sort_by_unread`). |
 | `appearance.roster_show_groups` | `true` | View menu «Показывать группы»: off draws the real contacts as one flat list (one row per JID, sorted by the active options); conferences and private messages keep their virtual group headers (`RosterWidget.set_show_groups`). |
 | `appearance.roster_show_offline` | `true` | View menu «Показывать оффлайн-контакты»: show/hide offline contacts (`RosterWidget.set_show_offline`). |
+| `appearance.roster_show_self` | `false` | View menu «Показывать свой контакт»: show the account's own JID (a self-contact the server may return) as a virtual «Свой контакт» row at the top of the roster (`MainWindow._sync_self_roster`); off hides it (`_add_roster_item` always skips the own JID). |
 | `appearance.muc_show_avatars` | `true` | Show/hide participant avatars in the MUC participant sidebar (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_participant_options`). |
 | `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |
 | `appearance.muc_show_hats` | `true` | Show/hide XEP-0317 hat chips under messages in a MUC chat (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_hats_visible`). Off keeps the hats in the participant tooltip. |
@@ -884,13 +885,18 @@ widget's viewport palette so the area below the last contact matches.
 Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
 `MainWindow` to the conferences group, `roster_group_conferences`, and to the
 private-messages group, `roster_group_personal_messages`) forces those
-groups after all contact groups.
+groups after all contact groups, and `set_leading_groups` (set to the
+self-contact group, `roster_group_self`) forces it before them.
 
-Both of those groups hold a row **computed by the app** rather than a real
+Those groups hold a row **computed by the app** rather than a real
 contact group, so they are excluded from the group pickers and from
 roster sharing (`_virtual_roster_groups()`) and are never persisted into the
-known-contacts registry. A conference renders as one row per joined room
-(`MainWindow._sync_conference_roster`). A **MUC private message** is
+known-contacts registry. The account's own JID (a self-contact the server may
+return in the roster) is never rendered as an ordinary contact
+(`_add_roster_item` skips `client.jid_str`); it is shown on demand as a single
+virtual «Свой контакт» row by `MainWindow._sync_self_roster` when
+`appearance.roster_show_self` is on. A conference renders as one row per joined
+room (`MainWindow._sync_conference_roster`). A **MUC private message** is
 attributed to its sender, so it gets its own row in the private-messages group
 keyed by the chat key (the real JID when the room revealed one, otherwise
 `room/nick`) — `MainWindow._sync_pm_roster` creates/updates it when the
@@ -2390,7 +2396,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   messages are routed by a dedicated `MatchXPath` handler
   (`JabberClient._on_sxe_stanza`), Jingle IQs by `_dispatch_jingle_iq`
   (`whiteboard.is_whiteboard_jingle` / a known sid), and the features are
-  advertised in disco.
+  advertised in disco. `_dispatch_jingle_iq` ignores `type='error'` IQs (an
+  error echoes the original `<jingle action>`; routing it as an action caused a
+  bogus invite and a phantom `session-accept`), and `WhiteboardManager.dispatch`
+  only acts on `type='set'`. Sharing a board in a chat whose JID is our **own**
+  (`start_session`) is kept local-only — no invite is ever sent to ourselves.
 - The dialog's «Поделиться» button starts a session (`share_requested` →
   `MainWindow._on_whiteboard_share` → `WhiteboardManager.start_session`); local
   canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become

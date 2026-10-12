@@ -703,11 +703,20 @@ and allows full visual control (avatars, status icons, unread badges, mood icons
 flat lists and sorted dicts. Hit-testing iterates items by accumulated Y offset.
 Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
 used by `MainWindow` for the conferences group **and** the private-messages
-group) which always come last. Two groups hold an app-computed row rather than
-a real contact group — conferences (`MainWindow._sync_conference_roster`, one
-row per joined room) and MUC private messages — so they are excluded from the
-group pickers and roster sharing via `_virtual_roster_groups()` and are never
-persisted into `core/known_contacts.py`. A **private message is attributed to
+group) which always come last, and the leading groups (`set_leading_groups`,
+used for the self-contact group) which always come first. Three groups hold an
+app-computed row rather than a real contact group — conferences
+(`MainWindow._sync_conference_roster`, one row per joined room), MUC private
+messages **and** the account's own contact (`MainWindow._sync_self_roster`) — so
+they are excluded from the group pickers and roster sharing via
+`_virtual_roster_groups()` and are never persisted into
+`core/known_contacts.py`. The server often returns the account itself in the
+roster; `_add_roster_item` **always** skips the own JID (`client.jid_str`), so it
+never becomes an ordinary contact. `_sync_self_roster` shows it on demand as a
+single virtual row in the leading «Свой контакт» group
+(`roster_group_self`) — only when `appearance.roster_show_self` is on (View
+menu «Показывать свой контакт», default off) — with the account's name/JID;
+clicking it opens a self-chat (notes to self via MAM). A **private message is attributed to
 its sender**: `MainWindow._sync_pm_roster(target, room, nick)` gives the
 conversation its own row in the «Личные сообщения» group
 (`roster_group_personal_messages`) keyed by the chat key (the real JID when the
@@ -731,10 +740,11 @@ the name as the tie-break. `set_sort_by_unread` (View menu's «Сортиров�
 presence/name order applies inside each part. `set_show_groups` (View menu's
 «Показывать группы», default on) draws the real contacts as one flat list
 (one row per JID, sorted by the active options) when turned off, while the
-virtual groups — conferences and private messages (`_trailing_groups`) — keep
-their header. The flags live in
+virtual groups — conferences and private messages (`_trailing_groups`) and the
+self-contact (`_leading_groups`) — keep their header. The flags live in
 `appearance.roster_sort_by_status`/`roster_sort_by_unread`/`roster_show_groups`/
-`roster_show_offline` and are applied/toggled from the View menu.
+`roster_show_offline`/`roster_show_self` and are applied/toggled from the View
+menu.
 
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.
@@ -1872,12 +1882,16 @@ application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 is the host and the SXE payloads are `groupchat` messages. Bodyless `<sxe>`
 messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
 handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
-features are advertised in disco. Local canvas edits (`shape_added`/
-`shape_updated`/`shape_removed`) become `add_shape`/`update_shape`/
-`remove_shape`; remote state (`whiteboard_state`) rebuilds the canvas
-(`WhiteboardCanvas.load_shapes`); an incoming `session-initiate`
-(`whiteboard_invite`) asks the user to join. [`tests/test_whiteboard.py`,
-`tests/test_whiteboard_sync.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`]
+features are advertised in disco. `_dispatch_jingle_iq` **ignores error replies**
+(an error echoes the original `<jingle action>` and must never be routed as an
+incoming action — that produced a bogus invite); sharing a board in a chat with
+our **own** JID is kept local-only (`start_session` never sends an invite).
+Local canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become
+`add_shape`/`update_shape`/`remove_shape`; remote state (`whiteboard_state`)
+rebuilds the canvas (`WhiteboardCanvas.load_shapes`); an incoming
+`session-initiate` (`whiteboard_invite`) asks the user to join.
+[`tests/test_whiteboard.py`, `tests/test_whiteboard_sync.py`,
+`tests/test_jingle_error_router.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`]
 The "Send" control is a vertical
 icon-only button (an Enter-style arrow) whose height follows the input field.
 The input is vertically

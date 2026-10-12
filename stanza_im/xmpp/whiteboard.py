@@ -47,6 +47,7 @@ class WhiteboardSession:
     is_host: bool = False
     name: str = ""
     full_peer: str = ""
+    local_only: bool = False
     doc: SxeDocument = field(default_factory=SxeDocument)
     ready: bool = False
     offered: bool = False       # we sent a state offer
@@ -113,6 +114,13 @@ class WhiteboardManager:
             self._advertise(session)
             session.ready = True
             self._send(session, self._sxe(session, "connect"))
+            self.client.emit("whiteboard_ready", sid)
+        elif peer.split("/", 1)[0] == (self.client.jid_str or ""):
+            # Sharing a board with our own JID is pointless (the invite would
+            # loop back to us): keep the board local, never send an invite.
+            session.local_only = True
+            session.ready = True
+            logger.info("Whiteboard: local-only board for %s", peer)
             self.client.emit("whiteboard_ready", sid)
         else:
             self._send_jingle(session, "session-initiate")
@@ -208,6 +216,10 @@ class WhiteboardManager:
     # ── Jingle ────────────────────────────────────────────────────
 
     async def dispatch(self, action: str, jingle: ET.Element, iq) -> None:
+        if str(iq["type"] or "") != "set":
+            # Defensive: only a `set` Jingle IQ carries an action we must act
+            # on (error replies echo the original action and must be ignored).
+            return
         sid = jingle.get("sid", "")
         frm = str(iq["from"])
         peer = frm.split("/", 1)[0]

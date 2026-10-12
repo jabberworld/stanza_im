@@ -1547,7 +1547,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         return page
 
     def _value(self, key: str, default=None):
-        widget = self._controls[key]
+        try:
+            widget = self._controls[key]
+        except KeyError:
+            # A control can be absent when its page could not build its
+            # optional part (e.g. the OMEMO controls without OMEMO); never
+            # crash Apply — fall back to the caller's default.
+            return default
         if isinstance(widget, QtWidgets.QCheckBox):
             return widget.isChecked()
         if isinstance(widget, QtWidgets.QSpinBox):
@@ -1832,9 +1838,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.privacy.send_activity_notifications = self._value("send_activity_notifications")
         cfg.privacy.send_chatstates = (cfg.privacy.send_typing_notifications
                                        or cfg.privacy.send_activity_notifications)
-        cfg.omemo.blind_trust = self._value("blind_trust")
-        cfg.omemo.alias_sync = self._value("alias_sync")
-        cfg.omemo.auto_enable = self._value("auto_enable")
+        if "blind_trust" in self._controls:
+            # Only write the OMEMO settings when the controls exist; without
+            # OMEMO the page omits them, and writing would clobber the stored
+            # values.
+            cfg.omemo.blind_trust = self._value("blind_trust")
+            cfg.omemo.alias_sync = self._value("alias_sync")
+            cfg.omemo.auto_enable = self._value("auto_enable")
         cfg.notifications.tray_blink = self._value("tray_blink")
         cfg.notifications.popups = self._value("popups")
         cfg.notifications.osd_enabled = self._value("osd_enabled")

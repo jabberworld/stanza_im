@@ -34,6 +34,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._users: list[UserItem] = []
         self._sorted_groups: list[str] = []
         self._sorted_users: dict[str, list[UserItem]] = {}
+        self._leading_groups: set[str] = set()
         self._trailing_groups: set[str] = set()
         self._selected_jid: str | None = None
         self._hover_jid: str | None = None
@@ -78,8 +79,24 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         super().wheelEvent(event)
 
     def _group_sort_key(self, name: str):
-        """Sort contact groups alphabetically, trailing groups last."""
-        return (name in self._trailing_groups, name.casefold())
+        """Leading groups first, then contact groups, then trailing groups."""
+        if name in self._leading_groups:
+            rank = 0
+        elif name in self._trailing_groups:
+            rank = 2
+        else:
+            rank = 1
+        return (rank, name.casefold())
+
+    def _virtual_groups(self) -> set[str]:
+        """Groups rendered by the app itself (leading + trailing)."""
+        return self._leading_groups | self._trailing_groups
+
+    def set_leading_groups(self, names) -> None:
+        """Groups (e.g. the self-contact) that always sort before the rest."""
+        self._leading_groups = set(names or ())
+        self._sorted_groups.sort(key=self._group_sort_key)
+        self.update()
 
     def set_trailing_groups(self, names) -> None:
         """Groups (e.g. conferences) that always sort after the rest."""
@@ -228,8 +245,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         # excluded) for the "groups off" display.
         flat: list[UserItem] = []
         seen: set[str] = set()
+        virtual = self._virtual_groups()
         for user in self._users:
-            if user.group in self._trailing_groups or user.jid in seen:
+            if user.group in virtual or user.jid in seen:
                 continue
             seen.add(user.jid)
             flat.append(user)
@@ -257,9 +275,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         if not self._show_groups:
             for user in self._filtered(self._flat_sorted):
                 result.append(("user", user))
+        virtual = self._virtual_groups()
         for group_name in self._sorted_groups:
-            if not self._show_groups \
-                    and group_name not in self._trailing_groups:
+            if not self._show_groups and group_name not in virtual:
                 continue
             group = self._groups[group_name]
             users = self._filtered(self._sorted_users.get(group_name, []))

@@ -101,6 +101,7 @@ STRINGS = {
     "menu_sort_by_status": "Сортировать по статусу",
     "menu_sort_by_unread": "Сортировать по непрочитанным",
     "menu_show_groups": "Показывать группы",
+    "menu_show_self": "Показывать свой контакт",
     "menu_show_transports": "Показывать транспорты",
     # Login
     "login_title": "Jabber ID:",
@@ -200,6 +201,7 @@ STRINGS = {
     "roster_group_ungrouped": "Без группы",
     "roster_group_conferences": "Конференции",
     "roster_group_personal_messages": "Личные сообщения",
+    "roster_group_self": "Свой контакт",
     "category_personal": "Личные сообщения",
     # Chat
     "chat_is_typing": "{name} пишет...",
@@ -237,6 +239,7 @@ STRINGS = {
     "whiteboard_share": "Поделиться доской",
     "whiteboard_shared": "Совместная доска — синхронизируется с собеседником.",
     "whiteboard_not_shared": "Локальная доска — нажмите «Поделиться» для синхронизации.",
+    "whiteboard_local_only": "Локальная доска — это ваш собственный контакт, делиться не с кем.",
     "whiteboard_invite_title": "Приглашение на доску",
     "whiteboard_invite_text": "{jid} приглашает вас на общую доску. Присоединиться?",
     "chat_send_file": "Отправить файл",

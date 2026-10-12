@@ -1825,6 +1825,21 @@ class JabberClient:
             return
         action = (jingle.get("action") or "").strip()
         sid = jingle.get("sid", "")
+        iq_type = str(iq["type"] or "")
+        if iq_type == "error":
+            # An error reply to a Jingle IQ echoes the original <jingle> (with
+            # its action), so it must never be routed to a manager as if it
+            # were an incoming action — that produced a bogus whiteboard
+            # invite from an error stanza.  Errors are not answered with a
+            # result either.
+            condition = ""
+            try:
+                condition = str((iq.get_error() or {}).get("condition", "") or "")
+            except Exception:  # noqa: BLE001
+                pass
+            logger.debug("JINGLE error reply action=%s sid=%s condition=%s",
+                         action, sid, condition)
+            return
         is_rtp = jingle_rtp.is_rtp_jingle(jingle) or sid in self.rtp_calls.sessions
         is_wb = (whiteboard_mod.is_whiteboard_jingle(jingle)
                  or sid in self.whiteboard.sessions)

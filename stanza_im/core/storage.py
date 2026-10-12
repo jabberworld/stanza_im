@@ -159,6 +159,7 @@ class Config:
                         "roster_sort_by_status": True,
                         "roster_sort_by_unread": True,
                         "roster_show_groups": True,
+                        "roster_show_self": False,
                         "muc_show_avatars": True,
                         "muc_show_clients": True,
                         "muc_show_hats": True,

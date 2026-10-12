@@ -101,6 +101,7 @@ STRINGS = {
     "menu_sort_by_status": "Sort by status",
     "menu_sort_by_unread": "Sort by unread",
     "menu_show_groups": "Show groups",
+    "menu_show_self": "Show own contact",
     "menu_show_transports": "Show &transports",
     # Login
     "login_title": "Jabber ID:",
@@ -200,6 +201,7 @@ STRINGS = {
     "roster_group_ungrouped": "Ungrouped",
     "roster_group_conferences": "Conferences",
     "roster_group_personal_messages": "Private messages",
+    "roster_group_self": "Own contact",
     "category_personal": "Personal messages",
     # Chat
     "chat_is_typing": "{name} is typing...",
@@ -237,6 +239,7 @@ STRINGS = {
     "whiteboard_share": "Share board",
     "whiteboard_shared": "Shared — the board is synchronized with the conversation.",
     "whiteboard_not_shared": "Local board — press Share to synchronize.",
+    "whiteboard_local_only": "Local board — this is your own contact, nothing to share.",
     "whiteboard_invite_title": "Whiteboard invitation",
     "whiteboard_invite_text": "{jid} invites you to a shared whiteboard. Join?",
     "chat_send_file": "Send file",

@@ -193,6 +193,18 @@ check("ending a 1:1 session sends session-terminate",
 check("ending emits whiteboard_ended",
       ("whiteboard_ended", sid) in client.events)
 
+# 10. sharing with our own JID stays local (no invite loop) ------------------
+own_client = _FakeClient()
+mgr_own = WhiteboardManager(own_client)
+sid_own = mgr_own.start_session("me@example.com", is_muc=False)
+check("sharing with our own JID sends no session-initiate",
+      not any(s.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "jingle")) is not None
+              for s in own_client.xmpp.sent))
+check("the own-JID session is marked local-only",
+      mgr_own.session(sid_own).local_only)
+check("the local-only session is ready",
+      ("whiteboard_ready", sid_own) in own_client.events)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

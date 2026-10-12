@@ -71,7 +71,7 @@ def _virtual_roster_groups() -> set[str]:
     persisted as such in the known-contacts registry).
     """
     return {tr("roster_group_conferences"), tr("roster_group_transports"),
-            tr("roster_group_personal_messages")}
+            tr("roster_group_personal_messages"), tr("roster_group_self")}
 
 _PAGE_LOGIN = 0
 _PAGE_SPLASH = 1
@@ -688,6 +688,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.set_trailing_groups({
             tr("roster_group_conferences"),
             tr("roster_group_personal_messages")})
+        self._roster.set_leading_groups({tr("roster_group_self")})
         self._apply_roster_font()
         self._roster.set_tooltip_provider(self._roster_tooltip)
         self._roster.roster_font_zoom_requested.connect(
@@ -1400,6 +1401,13 @@ class MainWindow(QtWidgets.QMainWindow):
             bool(getattr(self._config.appearance, "roster_show_offline", True)))
         show_offline.toggled.connect(self._on_show_offline_toggled)
         self._show_offline_action = show_offline
+        show_self = view_menu.addAction(self._menu_icon("v-card.png"),
+                                        tr("menu_show_self"))
+        show_self.setCheckable(True)
+        show_self.setChecked(
+            bool(getattr(self._config.appearance, "roster_show_self", False)))
+        show_self.toggled.connect(self._on_show_self_toggled)
+        self._show_self_action = show_self
         show_transports = view_menu.addAction(self._menu_icon("transports.png"),
                                               tr("menu_show_transports"))
         show_transports.setCheckable(True)
@@ -1824,6 +1832,42 @@ class MainWindow(QtWidgets.QMainWindow):
     def _sync_all_conference_roster(self):
         for room in self._muc_self_nicks:
             self._sync_conference_roster(room)
+
+    def _sync_self_roster(self):
+        """Show/hide the account's own JID as a virtual «Свой контакт» row.
+
+        The server often returns the account itself in the roster; it is never
+        rendered as an ordinary contact (``_add_roster_item`` skips it) but can
+        be shown on demand via View → «Показывать свой контакт».
+        """
+        if not self._client or not self._client.jid_str:
+            return
+        jid = self._client.jid_str
+        group = tr("roster_group_self")
+        if not bool(getattr(self._config.appearance, "roster_show_self",
+                            False)):
+            self._roster.remove_user(jid)
+            if group in self._roster._groups \
+                    and not self._roster._sorted_users.get(group):
+                self._roster.remove_group(group)
+            self._schedule_roster_repaint()
+            return
+        contact = self._client.get_contact(jid)
+        status = getattr(contact, "show", "") or "online"
+        fields = {
+            "name": getattr(contact, "name", "") or jid,
+            "status": status,
+            "status_message": getattr(contact, "status", "") or "",
+            "icon_key": show_to_icon_key(status),
+            "avatar_path": getattr(contact, "avatar_path", None),
+        }
+        existing = next((u for u in self._roster._users if u.jid == jid), None)
+        if existing is not None:
+            self._roster.update_user(jid, **fields)
+        else:
+            self._roster.add_user(UserItem(jid=jid, group=group, **fields))
+        self._roster._groups[group].single_count = True
+        self._schedule_roster_repaint()
 
     def _classify_bookmarked_conferences(self) -> None:
         """Group bookmarked rooms under Conferences while they are active.
@@ -3434,6 +3478,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._rebuild_roster(items)
         self._sync_all_conference_roster()
         self._sync_all_pm_roster()
+        self._sync_self_roster()
         self._recount_groups()
         self._roster.sort_and_update()
         # Prefetch bookmarks so MUC bookmark buttons are correct before the
@@ -3458,6 +3503,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _add_roster_item(self, item: dict):
         jid = item["jid"]
+        if self._client is not None and jid == self._client.jid_str:
+            # The account's own JID (a self-contact returned by the server) is
+            # never an ordinary roster contact: it is shown on demand by
+            # _sync_self_roster as a virtual «Свой контакт» row.
+            return
         name = item["name"] or jid.split("@")[0]
         groups = item["groups"]
         if not groups:
@@ -6129,6 +6179,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config.save()
         self._roster.set_show_offline(bool(checked))
 
+    def _on_show_self_toggled(self, checked: bool) -> None:
+        self._config.appearance.roster_show_self = bool(checked)
+        self._config.save()
+        self._sync_self_roster()
+
     def _on_input_font_zoom(self, size: int):
         size = int(size)
         family = getattr(self._config.appearance, "input_font", "") or ""
@@ -6446,7 +6501,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client is None or not jid:
             return
         sid = self._client.whiteboard.start_session(jid, is_muc)
-        self._whiteboard_dialog(jid).attach_session(sid)
+        dialog = self._whiteboard_dialog(jid)
+        dialog.attach_session(sid)
+        session = self._client.whiteboard.session(sid)
+        if session is not None and session.local_only:
+            dialog.set_local_only()
 
     def _on_whiteboard_invite(self, sid: str, peer: str,
                               is_muc: bool) -> None:
@@ -6485,6 +6544,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         dialog = self._whiteboard_dialog(session.peer)
         dialog.attach_session(sid)
+        if session.local_only:
+            dialog.set_local_only()
 
     def _on_whiteboard_state(self, sid: str) -> None:
         """Remote edits arrived: refresh the open board."""

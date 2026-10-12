@@ -146,6 +146,11 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._share_btn.setChecked(False)
         self._sync_label.setText(tr("whiteboard_not_shared"))
 
+    def set_local_only(self) -> None:
+        """Mark the board as local (a session with our own JID is pointless)."""
+        self._share_btn.setChecked(False)
+        self._sync_label.setText(tr("whiteboard_local_only"))
+
     def refresh_from_session(self) -> None:
         if not (self._client and self._sid):
             return
