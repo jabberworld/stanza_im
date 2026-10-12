@@ -2383,10 +2383,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   width ticked), line colour, fill colour and a «Заливка» toggle (whether newly
   drawn closed shapes are filled; off → `fill=""` → `fill="none"`); then the
   board operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
-  «Поделиться снимком» (a temp PNG → `JabberClient.upload_http_url` (HTTP
-  Upload/XEP-0363) → the link is sent through the normal `ShareDialog`); then
-  «Поделиться доской» and «Завершить сеанс». An arrow is one path — a shaft plus
-  an open (V) head (`WhiteboardCanvas._arrow_d`) — so it renders identically
+  «Поделиться снимком» (a temp PNG → `JabberClient.upload_http_media` (HTTP
+  Upload/XEP-0363), which returns the full XEP-0385 media dict → the link is
+  sent **with SIMS metadata** through the normal `ShareDialog`); then
+  «Поделиться доской» and «Завершить сеанс». The «Заливка» toggle has its own
+  bucket-plus-check icon (`wb-fill-toggle.svg`). An arrow is one path — a shaft
+  plus an open (V) head (`WhiteboardCanvas._arrow_d`) — so it renders identically
   locally and remotely.
 - The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
   `stroke-width`, `fill`, `QTransform`); `to_svg()`/`save_svg()` and
@@ -2401,9 +2403,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   the shape body moves it and the handles rotate/scale it about the bounding-box
   centre (the move/rotate/scale tools remain as an alternative). `Delete` /
   `Backspace` removes the selection. `Ctrl+wheel` zooms the view anchored at the
-  cursor (0.25–8×), `Ctrl+0` and a double click on empty space reset it, and
-  dragging empty space pans — the view transform is local and never part of the
-  document or the session. `Esc` only clears the selection (it never closes the
+  cursor (0.25–8×), `Ctrl+0` and a double click on empty space reset it, and the
+  view pans by dragging empty space in the select tool or by dragging with the
+  middle mouse button in any tool — the view transform is local and never part
+  of the document or the session. `Esc` only clears the selection (it never closes the
   board); closing the window hides it (the board and its session live in
   `MainWindow._whiteboards`), and «Завершить сеанс» (confirm → end session →
   clear → hide) or logout (`_reset_account_ui`) discards it.
@@ -2982,10 +2985,16 @@ class GroupChatInfo:     # room, nick, subject, users
   conferences we are in) and sends each target a `«Переслано:»` line plus the
   content as a XEP-0393 quote (`compose_reply_body`): 1:1 targets are echoed via
   `_display_local_outgoing` and stored in history, conferences get a groupchat
-  message, and a tray notice confirms the count. The per-message menu's
-  "Forward" entry forwards the whole message (`[time] sender: text`) through the
-  same dialog, and the QTextBrowser fallback adds «Поделиться» to its standard
-  menu.
+  message, and a tray notice confirms the count. When the shared content is a
+  media URL, `MainWindow._resolve_share_media` attaches XEP-0385 SIMS metadata
+  (so clients build a preview) — the original message's stored media dict
+  (name/size/media-type/width/height/hashes) looked up by URL
+  (`ChatWindow.media_for_url` / `ChatWidget.media_for_url`), else the media
+  cache (`MediaCache.info`), else a URL-only descriptor — and `_send_share`
+  passes it as `media=` to `send_message`/`send_muc_message`. The per-message
+  menu's "Forward" entry forwards the whole message (`[time] sender: text`)
+  through the same dialog, and the QTextBrowser fallback adds «Поделиться» to
+  its standard menu.
 - **Copy to clipboard** — the vCard dialog shows an icon-only copy button
   right beside the JID address (`copy.svg`, tooltip "Copy XMPP address")
   copying `xmpp:<jid>`; the conference roster context menu ("Copy conference

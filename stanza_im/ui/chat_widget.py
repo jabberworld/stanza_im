@@ -1778,6 +1778,16 @@ class ChatWidget(QtWidgets.QWidget):
                 return True
         return False
 
+    def media_for_url(self, url: str) -> dict | None:
+        """The stored XEP-0385 media dict referencing *url* (or ``None``)."""
+        if not url:
+            return None
+        for entry in list(self._messages) + list(self._history):
+            media = entry.get("media")
+            if media and str(media.get("url") or "") == url:
+                return dict(media)
+        return None
+
     def show_voice_prompt(self) -> None:
         """Prompt (once per 10 s) to ask for voice when a send was rejected."""
         from stanza_im.include.utils import escape_html

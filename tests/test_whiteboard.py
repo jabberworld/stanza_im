@@ -415,6 +415,75 @@ check("the snapshot-share button exists after the tools",
 check("the end-session button follows the share-board button",
       sp_tb.indexOf(sp._finish_btn) > sp_tb.indexOf(sp._share_btn))
 
+# 18. middle-button pan (any tool) + fill-toggle icon ------------------------
+mc = WhiteboardCanvas()
+mc.resize(1280, 720)
+mc.set_tool("pencil")
+QtWidgets.QApplication.sendEvent(mc, _event(
+    QtCore.QEvent.Type.MouseButtonPress, 300, 200,
+    buttons=QtCore.Qt.MouseButton.MiddleButton,
+    button=QtCore.Qt.MouseButton.MiddleButton))
+QtWidgets.QApplication.sendEvent(mc, _event(
+    QtCore.QEvent.Type.MouseMove, 360, 240,
+    buttons=QtCore.Qt.MouseButton.MiddleButton,
+    button=QtCore.Qt.MouseButton.NoButton))
+QtWidgets.QApplication.sendEvent(mc, _event(
+    QtCore.QEvent.Type.MouseButtonRelease, 360, 240,
+    buttons=QtCore.Qt.MouseButton.NoButton,
+    button=QtCore.Qt.MouseButton.MiddleButton))
+check("middle-button drag pans the view in a drawing tool",
+      mc._view_pan.x() > 50 and mc._view_pan.y() > 30)
+check("middle-button pan starts no shape", mc.shapes() == [])
+
+from stanza_im.include.constants import find_icon  # noqa: E402
+check("the fill-toggle icon exists", bool(find_icon("wb-fill-toggle.svg")))
+check("the fill toggle carries an icon",
+      not wdlg._fill_on_btn.icon().isNull())
+
+# 19. media metadata lookup for a shared URL ---------------------------------
+cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
+cw.add_message(sender="Bob", body="http://x/img.png", timestamp="12:00",
+               direction="incoming",
+               media={"url": "http://x/img.png", "name": "img.png",
+                      "size": 123, "media_type": "image/png"})
+m = cw.media_for_url("http://x/img.png")
+check("ChatWidget.media_for_url returns the stored media dict",
+      bool(m) and m.get("size") == 123 and m.get("media_type") == "image/png")
+check("media_for_url misses an unknown url",
+      cw.media_for_url("http://x/other.png") is None)
+cw.deleteLater()
+
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
+
+
+class _CWStub:
+    def __init__(self, media):
+        self._media = media
+
+    def media_for_url(self, url):
+        return self._media
+
+
+class _MCStub:
+    def info(self, url):
+        return {"mime": "image/png", "size": 999}
+
+
+mw = MainWindow.__new__(MainWindow)
+mw._chat_window = _CWStub(None)
+mw._media_cache = _MCStub()
+res = mw._resolve_share_media("http://x/a.png")
+check("share media falls back to the media cache",
+      bool(res) and res.get("media_type") == "image/png"
+      and res.get("size") == 999)
+mw._chat_window = _CWStub({"url": "http://x/a.png", "size": 42,
+                           "media_type": "image/png"})
+res2 = mw._resolve_share_media("http://x/a.png")
+check("share media prefers the stored message metadata",
+      bool(res2) and res2.get("size") == 42)
+check("share media ignores a non-media URL",
+      mw._resolve_share_media("hello world") is None)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

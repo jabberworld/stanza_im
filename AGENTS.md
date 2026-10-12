@@ -1301,7 +1301,14 @@ all". Sharing (and an address-less
 roster contacts and the conferences we are in — and sends each chosen target a
 `«Переслано:»` line followed by the content as a XEP-0393 quote
 (`compose_reply_body`); 1:1 targets are echoed locally via
-`_display_local_outgoing` (and stored), conferences get a groupchat message. Previews are
+`_display_local_outgoing` (and stored), conferences get a groupchat message.
+When the shared content is a media URL, `MainWindow._resolve_share_media`
+attaches XEP-0385 SIMS metadata so clients build a preview: the original
+message's stored media dict (name/size/media-type/width/height/hashes) looked up
+by URL via `ChatWindow.media_for_url` (`ChatWidget.media_for_url`), else the
+media cache (`MediaCache.info`), else a URL-only descriptor (name/media-type
+from the extension); `_send_share` passes it as `media=` to
+`send_message`/`send_muc_message`. Previews are
 off when QtWebEngine is unavailable. Settings changes re-render open chats via
 `ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
 `showEvent` (a cached original returns before layout, so the initial fit is
@@ -1878,9 +1885,9 @@ checkable, the active width ticked), line colour, fill colour and a «Залив
 toggle (whether newly drawn closed shapes are filled); then the board
 operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
 «Поделиться снимком» (renders the board to a temp PNG, uploads it via
-`JabberClient.upload_http_url` — HTTP Upload/XEP-0363 — and shares the link
-through the normal `ShareDialog`); then «Поделиться доской» and «Завершить
-сеанс». An arrow is serialised as one
+`JabberClient.upload_http_media` — HTTP Upload/XEP-0363 — which returns the full
+XEP-0385 media dict, and shares the link **with SIMS metadata** through the
+normal `ShareDialog`); then «Поделиться доской» and «Завершить сеанс». An arrow is serialised as one
 path — a shaft plus an **open (V) head** (`WhiteboardCanvas._arrow_d`), so it
 renders identically locally and for a remote peer. The document is a list of
 shape records (`id`, `rid`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and
@@ -1891,8 +1898,11 @@ serialise it (the PNG is a 1× board render, shapes only on white). In the
 (dragging the shape body moves it; the handles rotate/scale it about the centre
 — the move/rotate/scale tools remain as an alternative); `Delete`/`Backspace`
 removes the selection; `Ctrl+wheel` zooms the view anchored at the cursor,
-`Ctrl+0` and a double click on empty space reset it, and dragging empty space
-pans (the view transform is local, never part of the document). `Esc` only
+`Ctrl+0` and a double click on empty space reset it, and the view pans by
+dragging empty space in the select tool **or** by dragging with the middle mouse
+button in any tool (the view transform is local, never part of the document).
+The «Заливка» toggle uses its own bucket-plus-check icon
+(`wb-fill-toggle.svg`), distinct from the bucket tool. `Esc` only
 clears the selection (it never closes the board) and closing the window
 **hides** it — the board and its session live in `MainWindow._whiteboards`
 until «Завершить сеанс» (confirm → end session → clear → hide) or logout

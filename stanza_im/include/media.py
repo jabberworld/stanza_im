@@ -215,6 +215,20 @@ class MediaCache:
         self._touch(key)
         return path
 
+    def info(self, url: str) -> dict:
+        """Return the cached ``{mime, size, kind}`` for *url* (empty if none)."""
+        entry = self._index.get(url_key(url))
+        if not entry:
+            return {}
+        out: dict = {}
+        if entry.get("mime"):
+            out["mime"] = str(entry["mime"])
+        if entry.get("size"):
+            out["size"] = int(entry["size"])
+        if entry.get("kind"):
+            out["kind"] = str(entry["kind"])
+        return out
+
     def _touch(self, key: str) -> None:
         entry = self._index.get(key)
         if entry is not None:

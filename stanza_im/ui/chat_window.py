@@ -700,6 +700,18 @@ class ChatWindow(QtWidgets.QMainWindow):
             return w.jid
         return None
 
+    def media_for_url(self, url: str) -> dict | None:
+        """The XEP-0385 media dict for *url* from any open chat (or ``None``)."""
+        if not url:
+            return None
+        for i in range(self._tab_widget.count()):
+            w = self._tab_widget.widget(i)
+            if isinstance(w, ChatWidget):
+                media = w.media_for_url(url)
+                if media:
+                    return media
+        return None
+
     def _update_title(self):
         """Title reflects the currently active chat."""
         if self._embedded:

@@ -95,9 +95,13 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def set_tool(self, tool: str) -> None:
         self._tool = tool
-        self.setCursor(QtCore.Qt.CursorShape.CrossCursor
-                       if tool in DRAW_TOOLS or tool in ("fill", "eraser")
-                       else QtCore.Qt.CursorShape.ArrowCursor)
+        self._apply_tool_cursor()
+
+    def _apply_tool_cursor(self) -> None:
+        if self._tool in DRAW_TOOLS or self._tool in ("fill", "eraser"):
+            self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
+        else:
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
 
     def tool(self) -> str:
         return self._tool
@@ -518,6 +522,13 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     # ── Mouse ─────────────────────────────────────────────────────
 
     def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == QtCore.Qt.MouseButton.MiddleButton:
+            # Middle-button drag pans the view in any tool.
+            self._pan_origin = event.position()
+            self._pan_start = QtCore.QPointF(self._view_pan)
+            self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return
         world = self._to_world(event.position())
@@ -627,7 +638,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def mouseReleaseEvent(self, event):  # noqa: N802
         if self._pan_origin is not None:
             self._pan_origin = None
-            self._update_select_cursor(event.position())
+            self._apply_tool_cursor()
             return
         if self._active is not None:
             self._commit_active()

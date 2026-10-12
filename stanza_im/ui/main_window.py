@@ -6365,11 +6365,13 @@ class MainWindow(QtWidgets.QMainWindow):
                        tr("notes_added_osd_title"), tr("notes_added_osd"),
                        on_click=_open_notes)
 
-    def _on_share_requested(self, content: str, parent=None) -> None:
+    def _on_share_requested(self, content: str, parent=None, media=None) -> None:
         """Open the share window for a chat URL/media/selection or xmpp: body."""
         content = (content or "").strip()
         if not self._client or not content:
             return
+        if media is None:
+            media = self._resolve_share_media(content)
         from stanza_im.ui.share_dialog import ShareDialog
         contacts = self._share_contacts()
         conferences = self._share_conferences()
@@ -6380,9 +6382,30 @@ class MainWindow(QtWidgets.QMainWindow):
         def finished(result: int):
             if result != QtWidgets.QDialog.DialogCode.Accepted:
                 return
-            self._send_share(content, dlg.selected_targets())
+            self._send_share(content, dlg.selected_targets(), media=media)
         dlg.finished.connect(finished)
         dlg.open()
+
+    def _resolve_share_media(self, content: str) -> dict | None:
+        """XEP-0385 metadata to attach when sharing a media URL (or ``None``).
+
+        Prefers the original message's stored media dict (name/size/media-type/
+        width/height/hashes), then the media cache (mime/size), then a
+        URL-only descriptor (name/media-type from the extension).
+        """
+        from stanza_im.include.media import media_kind
+        if media_kind(content) is None:
+            return None
+        media = self._chat_window.media_for_url(content)
+        if media:
+            return media
+        cached = self._media_cache.info(content) if self._media_cache else {}
+        out: dict = {"url": content, "name": filename_from_url(content)}
+        if cached.get("mime"):
+            out["media_type"] = cached["mime"]
+        if cached.get("size"):
+            out["size"] = cached["size"]
+        return out
 
     def _share_contacts(self) -> list:
         """``(jid, name)`` pairs for the non-conference roster contacts."""
@@ -6405,16 +6428,16 @@ class MainWindow(QtWidgets.QMainWindow):
                        key=lambda room: self._muc_display_name(room).casefold())
         return [(room, self._muc_display_name(room)) for room in rooms]
 
-    def _send_share(self, content: str, targets: list) -> None:
+    def _send_share(self, content: str, targets: list, media=None) -> None:
         """Forward *content* (as a "Forwarded:" quote) to the chosen targets."""
         from stanza_im.core.client import compose_reply_body
         body = tr("share_forwarded") + "\n" + compose_reply_body(content)
         count = 0
         for jid, is_conference in targets:
             if is_conference:
-                self._client.send_muc_message(jid, body)
+                self._client.send_muc_message(jid, body, media=media)
             else:
-                message_id = self._client.send_message(jid, body)
+                message_id = self._client.send_message(jid, body, media=media)
                 self._display_local_outgoing(jid, body, message_id)
             count += 1
         if count:
@@ -6527,9 +6550,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_task(self._whiteboard_share_png_async(path, parent))
 
     async def _whiteboard_share_png_async(self, path: str, parent=None) -> None:
-        url = ""
+        from stanza_im.include.constants import (WHITEBOARD_HEIGHT,
+                                                 WHITEBOARD_WIDTH)
+        media = None
         try:
-            url = await self._client.upload_http_url(path)
+            media = await self._client.upload_http_media(
+                path, WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Whiteboard snapshot upload failed: %s", exc)
             if self._config.notifications.osd_enabled:
@@ -6542,7 +6568,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 os.remove(path)
             except OSError:
                 pass
-        self._on_share_requested(url, parent=parent)
+        if media:
+            self._on_share_requested(media["url"], media=media, parent=parent)
 
     def _whiteboard_peer_supports(self, bare: str) -> bool:
         """True when *bare* advertises the whiteboard or SXE feature."""

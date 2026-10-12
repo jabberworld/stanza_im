@@ -248,7 +248,7 @@ check("a session-initiate error emits whiteboard_failed",
       ("whiteboard_failed", sid_f, "service-unavailable") in c.events)
 check("the failed session is dropped", m.session(sid_f) is None)
 
-# 13. upload_http_url returns the public URL --------------------------------
+# 13. upload_http_media returns a full XEP-0385 media dict ------------------
 import tempfile as _tf  # noqa: E402
 from stanza_im.core.client import JabberClient  # noqa: E402
 
@@ -273,9 +273,13 @@ jc._http_upload_put = _put
 _tmp = _tf.NamedTemporaryFile(suffix=".png", delete=False)
 _tmp.write(b"png")
 _tmp.close()
-url = asyncio.run(jc.upload_http_url(_tmp.name))
-check("upload_http_url returns the public URL",
-      url == "https://upload.example/" + os.path.basename(_tmp.name))
+_media = asyncio.run(jc.upload_http_media(_tmp.name, 1280, 720))
+check("upload_http_media returns a full media dict",
+      _media["url"] == "https://upload.example/" + os.path.basename(_tmp.name)
+      and _media["name"] == os.path.basename(_tmp.name)
+      and _media["size"] == 3 and _media["media_type"] == "image/png"
+      and _media["width"] == 1280 and _media["height"] == 720
+      and "sha-256" in _media["hashes"])
 os.remove(_tmp.name)
 
 print()

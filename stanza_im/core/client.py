@@ -4773,11 +4773,13 @@ class JabberClient:
         """
         return self._http_upload_flow(jid, path, caption)
 
-    async def upload_http_url(self, path: str) -> str:
-        """Upload *path* via HTTP Upload and return the public URL.
+    async def upload_http_media(self, path: str, width: int = 0,
+                                height: int = 0) -> dict:
+        """Upload *path* via HTTP Upload and return its XEP-0385 media dict.
 
-        Unlike :meth:`upload_http` this does not send the URL anywhere — the
-        caller decides the targets (e.g. the whiteboard snapshot share).
+        Unlike :meth:`upload_http` this does not send anything — the caller
+        decides the targets and reuses the returned ``media`` (name, size,
+        media-type, width/height, hashes) for the SIMS block.
         """
         service = await self._http_upload_service()
         if not service:
@@ -4790,7 +4792,12 @@ class JabberClient:
             service, filename, size, content_type)
         progress = _UploadProgress()
         await self._http_upload_put(put_url, str(path), headers, progress)
-        return get_url
+        return {
+            "name": filename, "size": size, "media_type": content_type,
+            "width": int(width or 0), "height": int(height or 0),
+            "url": get_url,
+            "hashes": await asyncio.to_thread(file_hashes_b64, str(path)),
+        }
 
     async def _http_upload_flow(self, jid: str, path: str, caption: str = "") -> None:
         self.emit("file_upload_progress", jid, "start", "", path)
