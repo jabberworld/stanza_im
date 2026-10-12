@@ -1868,14 +1868,19 @@ _on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
 (non-modal, singleton per conversation): a custom `QPainter` canvas
 (`ui/whiteboard_canvas.py::WhiteboardCanvas`, logical board `1280×720` from
 `include.constants.WHITEBOARD_WIDTH/HEIGHT`) with an icon-only tool palette
-grouped by `QFrame` separators: the tools (select / move / rotate / scale, the
-draw tools pencil / line / **arrow** / rectangle / ellipse / polygon and a
-**bucket** «Заливка» that fills — or, on a second click, unfills — only the
-closed shape under the cursor) plus «Удалить» (an object operation); then the
-line width (a menu whose actions are checkable, the active width ticked), line
-colour, fill colour and a «Заливка» toggle (whether newly drawn closed shapes
-are filled); then the board operations «Завершить», «Очистить», «Сохранить как
-SVG», «Сохранить как PNG»; then «Поделиться». An arrow is serialised as one
+grouped by `QFrame` separators: the manipulation tools (select / move / rotate /
+scale and «Удалить», an object operation) then, after a separator, the drawing
+tools (pencil / line / **arrow** / rectangle / ellipse / polygon, a **bucket**
+«Заливка» that fills — or, on a second click, unfills — only the closed shape
+under the cursor, and an **eraser** that removes the shape under the cursor on a
+click and while dragging); then the line width (a menu whose actions are
+checkable, the active width ticked), line colour, fill colour and a «Заливка»
+toggle (whether newly drawn closed shapes are filled); then the board
+operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
+«Поделиться снимком» (renders the board to a temp PNG, uploads it via
+`JabberClient.upload_http_url` — HTTP Upload/XEP-0363 — and shares the link
+through the normal `ShareDialog`); then «Поделиться доской» and «Завершить
+сеанс». An arrow is serialised as one
 path — a shaft plus an **open (V) head** (`WhiteboardCanvas._arrow_d`), so it
 renders identically locally and for a remote peer. The document is a list of
 shape records (`id`, `rid`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and
@@ -1890,9 +1895,9 @@ removes the selection; `Ctrl+wheel` zooms the view anchored at the cursor,
 pans (the view transform is local, never part of the document). `Esc` only
 clears the selection (it never closes the board) and closing the window
 **hides** it — the board and its session live in `MainWindow._whiteboards`
-until «Завершить» (confirm → end session → clear → hide) or logout
+until «Завершить сеанс» (confirm → end session → clear → hide) or logout
 (`_reset_account_ui`), so a reopened window continues the drawing.
-The dialog's «Поделиться» button starts a **collaborative** session
+The dialog's «Поделиться доской» button starts a **collaborative** session
 (`xmpp/whiteboard.py::WhiteboardManager`, `client.whiteboard`): a Jingle
 application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 (`urn:xmpp:jingle:transports:sxe`) sharing an `xmpp/sxe.py::SxeDocument`

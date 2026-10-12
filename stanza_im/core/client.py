@@ -4773,6 +4773,25 @@ class JabberClient:
         """
         return self._http_upload_flow(jid, path, caption)
 
+    async def upload_http_url(self, path: str) -> str:
+        """Upload *path* via HTTP Upload and return the public URL.
+
+        Unlike :meth:`upload_http` this does not send the URL anywhere — the
+        caller decides the targets (e.g. the whiteboard snapshot share).
+        """
+        service = await self._http_upload_service()
+        if not service:
+            raise RuntimeError("HTTP Upload is not available")
+        filename = os.path.basename(str(path))
+        size = os.path.getsize(str(path))
+        content_type = (mimetypes.guess_type(filename)[0]
+                        or "application/octet-stream")
+        put_url, get_url, headers = await self._http_upload_slot(
+            service, filename, size, content_type)
+        progress = _UploadProgress()
+        await self._http_upload_put(put_url, str(path), headers, progress)
+        return get_url
+
     async def _http_upload_flow(self, jid: str, path: str, caption: str = "") -> None:
         self.emit("file_upload_progress", jid, "start", "", path)
         try:

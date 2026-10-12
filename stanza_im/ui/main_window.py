@@ -6483,6 +6483,8 @@ class MainWindow(QtWidgets.QMainWindow):
             dialog = WhiteboardDialog(jid, parent=parent, client=self._client,
                                       is_muc=is_muc)
             dialog.share_requested.connect(self._on_whiteboard_share)
+            dialog.share_png_requested.connect(
+                lambda path, d=dialog: self._on_whiteboard_share_png(path, d))
             # The dialog hides (never closes) so the board and its session
             # survive a reopen; it is torn down by _reset_account_ui.
             self._whiteboards[jid] = dialog
@@ -6517,6 +6519,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._osd.show(self._menu_icon("whiteboard.svg"),
                                tr("whiteboard_title"),
                                tr("whiteboard_peer_maybe_unsupported"))
+
+    def _on_whiteboard_share_png(self, path: str, parent=None) -> None:
+        """Upload a board snapshot and share its link with chosen contacts."""
+        if self._client is None or not path:
+            return
+        self._start_task(self._whiteboard_share_png_async(path, parent))
+
+    async def _whiteboard_share_png_async(self, path: str, parent=None) -> None:
+        url = ""
+        try:
+            url = await self._client.upload_http_url(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Whiteboard snapshot upload failed: %s", exc)
+            if self._config.notifications.osd_enabled:
+                self._osd.show(self._menu_icon("whiteboard.svg"),
+                               tr("whiteboard_title"),
+                               tr("whiteboard_share_png_failed"))
+            return
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        self._on_share_requested(url, parent=parent)
 
     def _whiteboard_peer_supports(self, bare: str) -> bool:
         """True when *bare* advertises the whiteboard or SXE feature."""

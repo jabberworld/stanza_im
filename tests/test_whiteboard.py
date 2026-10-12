@@ -117,7 +117,7 @@ dialog = WhiteboardDialog("bob@example.com")
 check("the dialog has every tool button",
       set(dialog._tool_buttons) == {
           "select", "move", "rotate", "scale", "pencil", "line", "arrow",
-          "rect", "ellipse", "polygon", "fill"})
+          "rect", "ellipse", "polygon", "fill", "eraser"})
 check("the pencil tool is active by default",
       dialog._tool_buttons["pencil"].isChecked())
 check("the dialog embeds the canvas",
@@ -372,6 +372,48 @@ fd._end_board()
 check("finish ends the session", fd._client.whiteboard.ended == ["s1"])
 check("finish clears the board", fd._canvas.shapes() == [])
 check("finish detaches the session", fd.session_id() == "")
+
+# 16. eraser (click + drag) --------------------------------------------------
+ec = WhiteboardCanvas()
+ec.resize(1280, 720)
+ec.set_tool("rect")
+drag(ec, 100, 100, 200, 160)
+ec.set_tool("rect")
+drag(ec, 300, 100, 400, 160)
+ec.set_tool("eraser")
+removed = []
+ec.shape_removed.connect(removed.append)
+QtWidgets.QApplication.sendEvent(ec, _event(
+    QtCore.QEvent.Type.MouseButtonPress, 150, 130))
+check("the eraser removes the shape under the cursor",
+      len(ec.shapes()) == 1 and len(removed) == 1)
+drag(ec, 320, 120, 380, 150, steps=3)
+check("dragging the eraser removes more shapes", ec.shapes() == [])
+check("the eraser emits shape_removed per shape", len(removed) == 2)
+
+# 17. snapshot share + toolbar placement -------------------------------------
+sp = WhiteboardDialog("bob@example.com", client=object())
+sp._canvas._shapes.append({
+    "id": "s", "rid": "", "kind": "rect", "rect": (0, 0, 10, 10),
+    "stroke": "#000000", "stroke_width": 2, "fill": "",
+    "transform": QtGui.QTransform()})
+paths = []
+sp.share_png_requested.connect(paths.append)
+sp._on_share_png()
+check("share snapshot writes a temp PNG and emits the path",
+      len(paths) == 1 and paths[0].endswith(".png")
+      and os.path.getsize(paths[0]) > 0)
+os.remove(paths[0])
+
+sp_tb = sp.layout().itemAt(0).layout()
+check("delete is before the drawing tools",
+      sp_tb.indexOf(sp._delete_btn)
+      < sp_tb.indexOf(sp._tool_buttons["pencil"]))
+check("the snapshot-share button exists after the tools",
+      sp_tb.indexOf(sp._share_png_btn)
+      > sp_tb.indexOf(sp._tool_buttons["pencil"]))
+check("the end-session button follows the share-board button",
+      sp_tb.indexOf(sp._finish_btn) > sp_tb.indexOf(sp._share_btn))
 
 print()
 if FAILURES:

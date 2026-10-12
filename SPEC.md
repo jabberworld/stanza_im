@@ -2373,16 +2373,21 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   _on_whiteboard_requested`, a singleton dialog per conversation) opens
   `WhiteboardDialog` — an icon-only tool palette over a custom `QPainter`
   canvas (`WhiteboardCanvas`).
-- Tools (grouped by `QFrame` separators): select / move / rotate / scale,
-  pencil / line / **arrow** / rectangle / ellipse / polygon and a **bucket**
-  «Заливка» (fills, or on a second click unfills, only the closed shape under
-  the cursor — the empty background is never flooded), plus «Удалить» (an object
-  operation, placed with the tools); then the line width (a menu whose actions
-  are checkable, the active width ticked), line colour, fill colour and a
-  «Заливка» toggle (whether newly drawn closed shapes are filled; off →
-  `fill=""` → `fill="none"`); then «Завершить», «Очистить», «Сохранить как SVG»
-  and «Сохранить как PNG». An arrow is one path — a shaft plus an open (V) head
-  (`WhiteboardCanvas._arrow_d`) — so it renders identically locally and remotely.
+- Tools (grouped by `QFrame` separators): the manipulation tools (select /
+  move / rotate / scale and «Удалить», an object operation) then, after a
+  separator, the drawing tools (pencil / line / **arrow** / rectangle / ellipse
+  / polygon, a **bucket** «Заливка» that fills — or on a second click unfills —
+  only the closed shape under the cursor, the empty background is never flooded,
+  and an **eraser** that removes the shape under the cursor on a click and while
+  dragging); then the line width (a menu whose actions are checkable, the active
+  width ticked), line colour, fill colour and a «Заливка» toggle (whether newly
+  drawn closed shapes are filled; off → `fill=""` → `fill="none"`); then the
+  board operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
+  «Поделиться снимком» (a temp PNG → `JabberClient.upload_http_url` (HTTP
+  Upload/XEP-0363) → the link is sent through the normal `ShareDialog`); then
+  «Поделиться доской» and «Завершить сеанс». An arrow is one path — a shaft plus
+  an open (V) head (`WhiteboardCanvas._arrow_d`) — so it renders identically
+  locally and remotely.
 - The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
   `stroke-width`, `fill`, `QTransform`); `to_svg()`/`save_svg()` and
   `render_image()`/`save_png()` serialise it (the SVG viewBox and the PNG are
@@ -2400,8 +2405,8 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   dragging empty space pans — the view transform is local and never part of the
   document or the session. `Esc` only clears the selection (it never closes the
   board); closing the window hides it (the board and its session live in
-  `MainWindow._whiteboards`), and «Завершить» (confirm → end session → clear →
-  hide) or logout (`_reset_account_ui`) discards it.
+  `MainWindow._whiteboards`), and «Завершить сеанс» (confirm → end session →
+  clear → hide) or logout (`_reset_account_ui`) discards it.
 - Phase 2 (collaborative): `xmpp/whiteboard.py::WhiteboardManager` (created as
   `client.whiteboard`) owns the sessions. A session is a Jingle application
   type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport

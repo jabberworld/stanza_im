@@ -7,6 +7,10 @@ applied to the canvas.
 """
 from __future__ import annotations
 
+import os
+import tempfile
+import time
+
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
@@ -25,6 +29,7 @@ _TOOLS = (
     ("ellipse", "wb-ellipse.svg", "whiteboard_tool_ellipse"),
     ("polygon", "wb-polygon.svg", "whiteboard_tool_polygon"),
     ("fill", "wb-fill.svg", "whiteboard_tool_fill"),
+    ("eraser", "wb-eraser.svg", "whiteboard_tool_eraser"),
 )
 
 _WIDTHS = (1, 2, 3, 5, 8)
@@ -34,6 +39,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
     """A non-modal whiteboard window (one per conversation)."""
 
     share_requested = QtCore.pyqtSignal(str, bool)   # jid, is_muc
+    share_png_requested = QtCore.pyqtSignal(str)     # temp PNG path
 
     def __init__(self, jid: str, parent=None, client=None, is_muc: bool = False):
         super().__init__(parent)
@@ -65,6 +71,14 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._tool_group.setExclusive(True)
         self._tool_buttons: dict[str, QtWidgets.QToolButton] = {}
         for tool, icon, tip_key in _TOOLS:
+            if tool == "pencil":
+                # «Удалить» is an object operation: it closes the manipulation
+                # group, then a separator starts the drawing tools.
+                self._delete_btn = self._tool_button(
+                    "remove.svg", tr("whiteboard_tool_delete"))
+                self._delete_btn.clicked.connect(self._canvas.delete_selected)
+                toolbar.addWidget(self._delete_btn)
+                toolbar.addWidget(self._separator())
             button = self._tool_button(icon, tr(tip_key), checkable=True)
             button.clicked.connect(
                 lambda _checked=False, t=tool: self._canvas.set_tool(t))
@@ -72,13 +86,6 @@ class WhiteboardDialog(QtWidgets.QDialog):
             self._tool_buttons[tool] = button
             toolbar.addWidget(button)
         self._tool_buttons["pencil"].setChecked(True)
-
-        # «Удалить» is an operation on the drawn object, so it belongs with the
-        # tools rather than with the board operations.
-        self._delete_btn = self._tool_button("remove.svg",
-                                             tr("whiteboard_tool_delete"))
-        self._delete_btn.clicked.connect(self._canvas.delete_selected)
-        toolbar.addWidget(self._delete_btn)
 
         toolbar.addWidget(self._separator())
         self._width_btn = self._tool_button("wb-line-width.svg",
@@ -116,9 +123,6 @@ class WhiteboardDialog(QtWidgets.QDialog):
         toolbar.addWidget(self._fill_on_btn)
 
         toolbar.addWidget(self._separator())
-        finish = self._tool_button("gtk-quit.png", tr("whiteboard_finish"))
-        finish.clicked.connect(self._confirm_finish)
-        toolbar.addWidget(finish)
         clear = self._tool_button("clear.png", tr("whiteboard_clear"))
         clear.clicked.connect(self._confirm_clear)
         toolbar.addWidget(clear)
@@ -129,6 +133,10 @@ class WhiteboardDialog(QtWidgets.QDialog):
                                      tr("whiteboard_save_png"))
         save_png.clicked.connect(self._save_png)
         toolbar.addWidget(save_png)
+        self._share_png_btn = self._tool_button("send-arrow.svg",
+                                                tr("whiteboard_share_png"))
+        self._share_png_btn.clicked.connect(self._on_share_png)
+        toolbar.addWidget(self._share_png_btn)
 
         toolbar.addWidget(self._separator())
         self._share_btn = self._tool_button("system-users.png",
@@ -136,6 +144,10 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._share_btn.setCheckable(True)
         self._share_btn.clicked.connect(self._on_share)
         toolbar.addWidget(self._share_btn)
+        self._finish_btn = self._tool_button("gtk-quit.png",
+                                             tr("whiteboard_finish"))
+        self._finish_btn.clicked.connect(self._confirm_finish)
+        toolbar.addWidget(self._finish_btn)
 
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
@@ -308,6 +320,17 @@ class WhiteboardDialog(QtWidgets.QDialog):
         if not self._canvas.save_png(path):
             QtWidgets.QMessageBox.warning(
                 self, tr("whiteboard_save_png"), tr("whiteboard_save_failed"))
+
+    def _on_share_png(self) -> None:
+        """Render the board to a temp PNG and ask to share its link."""
+        name = "whiteboard-%s.png" % time.strftime("%Y%m%d-%H%M%S")
+        path = os.path.join(tempfile.gettempdir(), name)
+        if not self._canvas.save_png(path):
+            QtWidgets.QMessageBox.warning(
+                self, tr("whiteboard_share_png"),
+                tr("whiteboard_share_png_failed"))
+            return
+        self.share_png_requested.emit(path)
 
     def _confirm_finish(self) -> None:
         answer = QtWidgets.QMessageBox.question(

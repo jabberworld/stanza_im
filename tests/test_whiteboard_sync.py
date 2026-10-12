@@ -248,6 +248,36 @@ check("a session-initiate error emits whiteboard_failed",
       ("whiteboard_failed", sid_f, "service-unavailable") in c.events)
 check("the failed session is dropped", m.session(sid_f) is None)
 
+# 13. upload_http_url returns the public URL --------------------------------
+import tempfile as _tf  # noqa: E402
+from stanza_im.core.client import JabberClient  # noqa: E402
+
+jc = JabberClient.__new__(JabberClient)
+
+
+async def _svc():
+    return "upload.example"
+
+
+async def _slot(service, name, size, ctype):
+    return ("http://put", "https://upload.example/%s" % name, {})
+
+
+async def _put(url, path, headers, progress):
+    return None
+
+
+jc._http_upload_service = _svc
+jc._http_upload_slot = _slot
+jc._http_upload_put = _put
+_tmp = _tf.NamedTemporaryFile(suffix=".png", delete=False)
+_tmp.write(b"png")
+_tmp.close()
+url = asyncio.run(jc.upload_http_url(_tmp.name))
+check("upload_http_url returns the public URL",
+      url == "https://upload.example/" + os.path.basename(_tmp.name))
+os.remove(_tmp.name)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

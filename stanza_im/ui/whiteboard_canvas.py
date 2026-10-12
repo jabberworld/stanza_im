@@ -96,7 +96,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def set_tool(self, tool: str) -> None:
         self._tool = tool
         self.setCursor(QtCore.Qt.CursorShape.CrossCursor
-                       if tool in DRAW_TOOLS or tool == "fill"
+                       if tool in DRAW_TOOLS or tool in ("fill", "eraser")
                        else QtCore.Qt.CursorShape.ArrowCursor)
 
     def tool(self) -> str:
@@ -136,12 +136,25 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if not self._selected:
             return
         shape = self._shape_by_id(self._selected)
-        self._shapes = [s for s in self._shapes if s["id"] != self._selected]
-        self._selected = ""
+        if shape is not None:
+            self.delete_shape(shape)
+
+    def delete_shape(self, shape: dict) -> None:
+        """Remove *shape* and notify (used by delete/eraser)."""
+        self._shapes = [s for s in self._shapes if s["id"] != shape["id"]]
+        if self._selected == shape["id"]:
+            self._selected = ""
         self.update()
         self.changed.emit()
-        if shape is not None:
-            self.shape_removed.emit(shape)
+        self.shape_removed.emit(shape)
+
+    def erase_at(self, world: QtCore.QPointF) -> bool:
+        """Erase the shape under *world*; returns True when one was removed."""
+        shape = self._shape_at(world)
+        if shape is None:
+            return False
+        self.delete_shape(shape)
+        return True
 
     def deselect(self) -> None:
         if self._selected:
@@ -534,6 +547,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if tool == "fill":
             self.bucket_fill(world)
             return
+        if tool == "eraser":
+            self.erase_at(world)
+            return
         if tool in ("move", "rotate", "scale"):
             if self._selected and self._shape_by_id(self._selected):
                 self._last = world
@@ -562,6 +578,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             self.update()
             return
         world = self._to_world(event.position())
+        if self._tool == "eraser" \
+                and event.buttons() & QtCore.Qt.MouseButton.LeftButton:
+            self.erase_at(world)
+            return
         if self._active is not None:
             kind = self._active["kind"]
             if kind in ("pencil", "polygon"):
