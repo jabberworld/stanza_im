@@ -228,6 +228,8 @@ STRINGS = {
     "whiteboard_tool_rect": "Rectangle",
     "whiteboard_tool_ellipse": "Ellipse",
     "whiteboard_tool_polygon": "Polygon",
+    "whiteboard_tool_fill": "Fill a closed shape",
+    "whiteboard_fill_toggle": "Fill new shapes",
     "whiteboard_line_width": "Line width",
     "whiteboard_line_color": "Line color",
     "whiteboard_fill_color": "Fill color",

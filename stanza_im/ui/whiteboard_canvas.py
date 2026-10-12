@@ -72,6 +72,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._tool = "pencil"
         self._stroke = "#1a1a1a"
         self._fill = "#e53935"
+        self._fill_enabled = True
         self._width = 2
         self._active: dict | None = None
         self._start: QtCore.QPointF | None = None
@@ -91,7 +92,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def set_tool(self, tool: str) -> None:
         self._tool = tool
         self.setCursor(QtCore.Qt.CursorShape.CrossCursor
-                       if tool in DRAW_TOOLS
+                       if tool in DRAW_TOOLS or tool == "fill"
                        else QtCore.Qt.CursorShape.ArrowCursor)
 
     def tool(self) -> str:
@@ -102,6 +103,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def set_fill(self, color: str) -> None:
         self._fill = color
+
+    def set_fill_enabled(self, enabled: bool) -> None:
+        """Whether newly drawn closed shapes get the fill colour."""
+        self._fill_enabled = bool(enabled)
 
     def set_width(self, width: int) -> None:
         self._width = max(1, int(width))
@@ -315,9 +320,42 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def _new_shape(self, kind: str, **extra) -> dict:
         shape = {"id": uuid.uuid4().hex, "rid": "", "kind": kind,
                  "stroke": self._stroke, "stroke_width": self._width,
-                 "fill": self._fill, "transform": QtGui.QTransform()}
+                 "fill": (self._fill if self._fill_enabled else ""),
+                 "transform": QtGui.QTransform()}
         shape.update(extra)
         return shape
+
+    # ── Bucket fill ───────────────────────────────────────────────
+
+    @staticmethod
+    def _is_closed(shape: dict) -> bool:
+        """True when the shape encloses an area (fillable by the bucket)."""
+        if shape.get("kind") == "remote":
+            return "z" in (shape.get("d") or "").lower()
+        return shape.get("kind") in CLOSED_KINDS
+
+    def _closed_shape_at(self, world: QtCore.QPointF) -> dict | None:
+        for shape in reversed(self._shapes):
+            if not self._is_closed(shape):
+                continue
+            if self._world_path(shape).contains(world):
+                return shape
+        return None
+
+    def bucket_fill(self, world: QtCore.QPointF) -> bool:
+        """Fill (or, if already filled, unfill) the closed shape at *world*.
+
+        Only a closed region can be filled, so clicking the empty background
+        never floods the whole board.  Returns ``True`` when something changed.
+        """
+        shape = self._closed_shape_at(world)
+        if shape is None:
+            return False
+        shape["fill"] = "" if self._filled(shape) else self._fill
+        self.update()
+        self.changed.emit()
+        self.shape_updated.emit(shape)
+        return True
 
     def _shape_at(self, world: QtCore.QPointF) -> dict | None:
         """The topmost shape under *world* (hit-test), or ``None``."""
@@ -397,6 +435,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 self._pan_start = QtCore.QPointF(self._view_pan)
                 self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
             self.update()
+            return
+        if tool == "fill":
+            self.bucket_fill(world)
             return
         if tool in ("move", "rotate", "scale"):
             if self._selected and self._shape_by_id(self._selected):

@@ -117,7 +117,7 @@ dialog = WhiteboardDialog("bob@example.com")
 check("the dialog has every tool button",
       set(dialog._tool_buttons) == {
           "select", "move", "rotate", "scale", "pencil", "line",
-          "rect", "ellipse", "polygon"})
+          "rect", "ellipse", "polygon", "fill"})
 check("the pencil tool is active by default",
       dialog._tool_buttons["pencil"].isChecked())
 check("the dialog embeds the canvas",
@@ -234,6 +234,37 @@ vc.zoom_by(2.0)
 vc.mouseDoubleClickEvent(_event(
     QtCore.QEvent.Type.MouseButtonDblClick, 10, 10))
 check("a double click on empty space resets the view", vc.view_zoom() == 1.0)
+
+# 10. fill toggle + bucket ---------------------------------------------------
+fc = WhiteboardCanvas()
+fc.resize(1280, 720)   # 1:1 -> world == widget
+fc.set_fill_enabled(False)
+fc.set_tool("rect")
+drag(fc, 100, 100, 200, 160)
+check("fill disabled -> a new closed shape is unfilled",
+      not WhiteboardCanvas._filled(fc.shapes()[0]))
+check("an unfilled closed shape serialises fill=none",
+      WhiteboardCanvas.shape_attrs(fc.shapes()[0])["fill"] == "none")
+
+fc.set_fill_enabled(True)
+fc.set_tool("rect")
+drag(fc, 300, 100, 400, 160)
+check("fill enabled -> a new closed shape is filled",
+      WhiteboardCanvas._filled(fc.shapes()[1]))
+
+fc.set_tool("fill")
+fc.bucket_fill(QtCore.QPointF(350, 130))   # inside the filled rect
+check("bucket unfills a filled closed shape",
+      not WhiteboardCanvas._filled(fc.shapes()[1]))
+fc.bucket_fill(QtCore.QPointF(350, 130))   # again
+check("bucket fills an unfilled closed shape",
+      WhiteboardCanvas._filled(fc.shapes()[1]))
+check("bucket ignores the empty background",
+      fc.bucket_fill(QtCore.QPointF(600, 400)) is False)
+check("the dialog has a fill toggle button",
+      hasattr(WhiteboardDialog("bob@example.com"), "_fill_on_btn"))
+check("the dialog has a bucket tool",
+      "fill" in WhiteboardDialog("bob@example.com")._tool_buttons)
 
 print()
 if FAILURES:

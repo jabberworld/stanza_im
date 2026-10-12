@@ -23,6 +23,7 @@ _TOOLS = (
     ("rect", "wb-rect.svg", "whiteboard_tool_rect"),
     ("ellipse", "wb-ellipse.svg", "whiteboard_tool_ellipse"),
     ("polygon", "wb-polygon.svg", "whiteboard_tool_polygon"),
+    ("fill", "wb-fill.svg", "whiteboard_tool_fill"),
 )
 
 _WIDTHS = (1, 2, 3, 5, 8)
@@ -88,6 +89,13 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._fill_btn = self._tool_button("", tr("whiteboard_fill_color"))
         self._fill_btn.clicked.connect(self._pick_fill)
         toolbar.addWidget(self._fill_btn)
+
+        self._fill_on_btn = self._tool_button("wb-fill.svg",
+                                              tr("whiteboard_fill_toggle"),
+                                              checkable=True)
+        self._fill_on_btn.setChecked(True)
+        self._fill_on_btn.toggled.connect(self._canvas.set_fill_enabled)
+        toolbar.addWidget(self._fill_on_btn)
 
         toolbar.addSpacing(10)
         finish = self._tool_button("ok.png", tr("whiteboard_finish"))

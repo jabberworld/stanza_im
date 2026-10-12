@@ -228,6 +228,8 @@ STRINGS = {
     "whiteboard_tool_rect": "Прямоугольник",
     "whiteboard_tool_ellipse": "Эллипс",
     "whiteboard_tool_polygon": "Многоугольник",
+    "whiteboard_tool_fill": "Залить замкнутую фигуру",
+    "whiteboard_fill_toggle": "Заливать новые фигуры",
     "whiteboard_line_width": "Ширина линии",
     "whiteboard_line_color": "Цвет линии",
     "whiteboard_fill_color": "Цвет заливки",
