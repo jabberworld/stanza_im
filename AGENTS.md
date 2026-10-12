@@ -526,7 +526,12 @@ message in the same "[date] sender: text" format as Forward to
 OSD notice when notifications are on. That shared format (Copy / «Переслать» /
 «В заметки») uses the **local** time: `fmtCopyTime` in `_ACTION_JS` parses the
 stored UTC `data-stanza-time` with `new Date(...)` and formats it with the local
-getters. [`tests/test_plugins.py`]
+getters. For a media message the URL is hidden behind the preview, so the menu
+prefers the original media URL (`wrap.querySelector('[data-media-url]')`) over
+the visible SIMS label ("name · size"): `content = mediaUrl || body`. The
+forwarded text is then the composed `[time] sender: <url>`, which
+`MainWindow._resolve_share_media` parses (via `_URL_RE`) to attach the SIMS
+metadata. [`tests/test_plugins.py`, `tests/test_ui_tweaks.py`]
 The core exposes two generic extension points plugins may use: a contact-menu
 hook list (`MainWindow.add_contact_menu_hook`/`remove_contact_menu_hook`, called
 as `hook(menu, jid, is_conf)` inside `_on_contact_context`) and a 1:1 toolbar

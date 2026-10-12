@@ -1277,6 +1277,11 @@ window.__stanzaMentionRef = '';
                 var body = bodyNode
                     ? (bodyNode.innerText || bodyNode.textContent).trim() : '';
                 var sender = wrap.getAttribute('data-stanza-sender') || '';
+                // A media message hides the URL behind a preview, so prefer the
+                // original media URL over the visible SIMS label ("name · size").
+                var mediaEl = wrap.querySelector('[data-media-url]');
+                var mediaUrl = mediaEl
+                    ? (mediaEl.getAttribute('data-media-url') || '') : '';
 
                 menu = document.createElement('div');
                 menu.className = MENU_CLASS;
@@ -1328,7 +1333,7 @@ window.__stanzaMentionRef = '';
                 item.textContent = btn.getAttribute('data-copy-label') || 'Copy';
                 item.addEventListener('click', function (ev) {
                     ev.stopPropagation();
-                    copyText(composeCopyText(sender, timeRaw, body));
+                    copyText(composeCopyText(sender, timeRaw, mediaUrl || body));
                     closeMenu();
                 });
                 menu.appendChild(item);
@@ -1339,15 +1344,7 @@ window.__stanzaMentionRef = '';
                     ev.stopPropagation();
                     // Never navigate: leave the whole message for the scroll
                     // poll, which delivers it to Python as a link_clicked.
-                    var content = body;
-                    if (!content) {
-                        var media = wrap.querySelector(
-                            'a.stanza-media, a.stanza-media-open');
-                        if (media) {
-                            content = media.getAttribute('data-media-url')
-                                || media.getAttribute('href') || '';
-                        }
-                    }
+                    var content = mediaUrl || body;
                     if (content) {
                         window.__stanzaForwardRef = 'stanza:forward:'
                             + encodeURIComponent(
@@ -1362,15 +1359,7 @@ window.__stanzaMentionRef = '';
                     tonote.textContent = TONOTE_LABEL || 'Add to notes';
                     tonote.addEventListener('click', function (ev) {
                         ev.stopPropagation();
-                        var content = body;
-                        if (!content) {
-                            var media = wrap.querySelector(
-                                'a.stanza-media, a.stanza-media-open');
-                            if (media) {
-                                content = media.getAttribute('data-media-url')
-                                    || media.getAttribute('href') || '';
-                            }
-                        }
+                        var content = mediaUrl || body;
                         if (content) {
                             window.__stanzaToNoteRef = 'stanza:tonote:'
                                 + encodeURIComponent(

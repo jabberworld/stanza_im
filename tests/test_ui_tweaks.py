@@ -164,6 +164,12 @@ fmt_body = fmt.group(1) if fmt else ""
 check("fmtCopyTime parses the timestamp with Date", "new Date(full)" in fmt_body)
 check("fmtCopyTime uses local getters",
       "getHours" in fmt_body and "getMinutes" in fmt_body)
+# A media message hides the URL behind a preview, so Copy/Forward/Notes must
+# prefer the original media URL (data-media-url) over the visible SIMS label.
+check("the menu reads the original media URL",
+      "querySelector('[data-media-url]')" in js)
+check("Copy/Forward/Notes prefer the media URL",
+      js.count("mediaUrl || body") >= 3)
 
 # 6b. The xmpp: context-menu routing (conference -> bookmark, contact -> add).
 from stanza_im.ui.chat_view import ChatView  # noqa: E402

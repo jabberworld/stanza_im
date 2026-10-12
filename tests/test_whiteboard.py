@@ -483,6 +483,12 @@ check("share media prefers the stored message metadata",
       bool(res2) and res2.get("size") == 42)
 check("share media ignores a non-media URL",
       mw._resolve_share_media("hello world") is None)
+mw._chat_window = _CWStub(None)
+mw._media_cache = _MCStub()
+res3 = mw._resolve_share_media(
+    "Переслано:\n> [2026-10-13 00:32:15] jabbim-test: https://h/a.png")
+check("share media extracts the URL from a composed forward",
+      bool(res3) and res3.get("url") == "https://h/a.png")
 
 print()
 if FAILURES:

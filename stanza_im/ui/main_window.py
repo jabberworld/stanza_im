@@ -6394,13 +6394,20 @@ class MainWindow(QtWidgets.QMainWindow):
         URL-only descriptor (name/media-type from the extension).
         """
         from stanza_im.include.media import media_kind
-        if media_kind(content) is None:
+        from stanza_im.include.utils import _URL_RE
+        # The content may be a bare URL (media viewer / context menu) or a
+        # composed forward ("[time] sender: <url>") — extract the first URL.
+        match = _URL_RE.search(content or "")
+        if not match:
             return None
-        media = self._chat_window.media_for_url(content)
+        url = match.group(0).rstrip(").,;!?")
+        if media_kind(url) is None:
+            return None
+        media = self._chat_window.media_for_url(url)
         if media:
             return media
-        cached = self._media_cache.info(content) if self._media_cache else {}
-        out: dict = {"url": content, "name": filename_from_url(content)}
+        cached = self._media_cache.info(url) if self._media_cache else {}
+        out: dict = {"url": url, "name": filename_from_url(url)}
         if cached.get("mime"):
             out["media_type"] = cached["mime"]
         if cached.get("size"):

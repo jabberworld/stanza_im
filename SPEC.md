@@ -1963,12 +1963,18 @@ Registers XEP plugins (conditionally where noted):
 - Replaced messages render a large bold «✎» at the very end of the edited
   phrase (`render_message(edited=True)`, i18n tooltip;
   `data-stanza-outgoing`/`data-edited` on the wrapper drives the menu).
-- The same message menu carries "Copy" and "Forward". "Forward" stores the whole
-  message (`[time] sender: text`, or the media URL for a media-only message) in
+- The same message menu carries "Copy" and "Forward". For a media message the
+  URL is hidden behind the preview, so the menu prefers the original media URL
+  (`wrap.querySelector('[data-media-url]')`) over the visible SIMS label
+  ("name · size") — Copy, "Forward" and «В заметки» all use
+  `mediaUrl || body`. "Forward" stores the whole message
+  (`[time] sender: text`, or `[time] sender: <media-url>`) in
   `window.__stanzaForwardRef`; the scroll poll delivers it as a
   `stanza:forward:<urlencoded>` ``link_clicked`` and
   `ChatWidget._handle_forward_uri` emits `share_requested` — the same
-  `ShareDialog` flow as a URL/media/selection share (never navigation).
+  `ShareDialog` flow as a URL/media/selection share (never navigation);
+  `MainWindow._resolve_share_media` extracts the URL from that composed text to
+  attach the SIMS metadata.
 
 ### 14.4.1 Message Retraction (XEP-0424)
 
