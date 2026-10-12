@@ -72,7 +72,7 @@ python main.py
 В Debian 13 нужные пакеты можно установить следующей командой:
 
 ```
-sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine python3-defusedxml python3-qasync python3-aiodns python3-aiortc
+sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine python3-defusedxml python3-qasync python3-aiodns python3-aiortc python3-pyqt6.qtmultimedia fonts-noto-color-emoji
 ```
 
 ## Документация проекта
