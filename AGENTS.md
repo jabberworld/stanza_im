@@ -1882,10 +1882,19 @@ application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 is the host and the SXE payloads are `groupchat` messages. Bodyless `<sxe>`
 messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
 handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
-features are advertised in disco. `_dispatch_jingle_iq` **ignores error replies**
-(an error echoes the original `<jingle action>` and must never be routed as an
-incoming action — that produced a bogus invite); sharing a board in a chat with
-our **own** JID is kept local-only (`start_session` never sends an invite).
+features are advertised in disco. A 1:1 `session-initiate` is addressed to the
+peer's **best full JID** (`WhiteboardManager._best_full_jid`: a resource whose
+XEP-0115 caps announce the whiteboard/SXE, else the best available resource) —
+a bare-JID Jingle IQ is rejected by the server (`service-unavailable`), so with
+no known resource the share fails fast and `whiteboard_failed(sid, "unavailable")`
+is emitted (the dialog and an OSD report it; `MainWindow._on_whiteboard_share`
+also warns — without blocking — when the peer's caps do not announce the
+feature). `_dispatch_jingle_iq` **ignores error replies** (an error echoes the
+original `<jingle action>` and must never be routed as an incoming action — that
+produced a bogus invite) but routes an error for a known session to
+`WhiteboardManager.handle_error` → `whiteboard_failed(sid, condition)`; sharing a
+board in a chat with our **own** JID is kept local-only (`start_session` never
+sends an invite).
 Local canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become
 `add_shape`/`update_shape`/`remove_shape`; remote state (`whiteboard_state`)
 rebuilds the canvas (`WhiteboardCanvas.load_shapes`); an incoming

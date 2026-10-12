@@ -31,12 +31,12 @@ class _Reply:
 
 
 class _Iq:
-    def __init__(self, iq_type):
+    def __init__(self, iq_type, sid="s1"):
         self._type = iq_type
         self.xml = ET.Element("{jabber:client}iq")
         jingle = ET.SubElement(self.xml, "{%s}jingle" % jingle_mod.NS_JINGLE)
         jingle.set("action", "session-initiate")
-        jingle.set("sid", "s1")
+        jingle.set("sid", sid)
         ET.SubElement(jingle, "{%s}description" % wb_mod.NS_WHITEBOARD)
 
     def __getitem__(self, key):
@@ -74,6 +74,9 @@ class _Manager:
         self.calls.append(args)
         return self._noop()
 
+    def handle_error(self, action, sid, condition=""):
+        self.calls.append(("error", action, sid, condition))
+
 
 def _client():
     client = JabberClient.__new__(JabberClient)
@@ -100,6 +103,20 @@ asyncio.run(client._dispatch_jingle_iq(_Iq("set")))
 check("a set Jingle IQ reaches the whiteboard manager",
       len(client.whiteboard.calls) == 1)
 check("a set Jingle IQ is acked", len(client.xmpp.sent) == 1)
+
+# 3. an error for a KNOWN whiteboard session surfaces the failure ------------
+client = _client()
+client.whiteboard.sessions = {"s1": object()}
+asyncio.run(client._dispatch_jingle_iq(_Iq("error", sid="s1")))
+check("a Jingle error for a known session is handed to the whiteboard",
+      client.whiteboard.calls
+      == [("error", "session-initiate", "s1", "service-unavailable")])
+
+# 4. an error for an UNKNOWN session is ignored ------------------------------
+client = _client()
+asyncio.run(client._dispatch_jingle_iq(_Iq("error", sid="other")))
+check("a Jingle error for an unknown session is ignored",
+      client.whiteboard.calls == [])
 
 print()
 if FAILURES:

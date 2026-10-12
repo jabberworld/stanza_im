@@ -1839,6 +1839,8 @@ class JabberClient:
                 pass
             logger.debug("JINGLE error reply action=%s sid=%s condition=%s",
                          action, sid, condition)
+            if sid and sid in self.whiteboard.sessions:
+                self.whiteboard.handle_error(action, sid, condition)
             return
         is_rtp = jingle_rtp.is_rtp_jingle(jingle) or sid in self.rtp_calls.sessions
         is_wb = (whiteboard_mod.is_whiteboard_jingle(jingle)

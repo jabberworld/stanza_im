@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
+from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import sxe
 from stanza_im.xmpp.sxe import NS_SXE, NS_SXE_TRANSPORT, SxeDocument
 
@@ -48,6 +49,7 @@ class WhiteboardSession:
     name: str = ""
     full_peer: str = ""
     local_only: bool = False
+    failure: str = ""
     doc: SxeDocument = field(default_factory=SxeDocument)
     ready: bool = False
     offered: bool = False       # we sent a state offer
@@ -101,6 +103,36 @@ class WhiteboardManager:
 
     # ── Session lifecycle ─────────────────────────────────────────
 
+    def _best_full_jid(self, bare: str) -> str:
+        """The peer's best resource full JID for a 1:1 Jingle session.
+
+        Prefers a resource whose XEP-0115 caps announce the whiteboard/SXE
+        feature, then the best available resource (by ``show``), else the bare
+        JID (no resource known).
+        """
+        bare = bare.split("/", 1)[0]
+        caps = getattr(self.client, "contact_features", None) or {}
+        presences = getattr(self.client, "presences", None) or {}
+
+        def best(predicate) -> str:
+            chosen, chosen_show = "", 99
+            for full in presences:
+                if full.split("/")[0] != bare:
+                    continue
+                info = presences.get(full) or {}
+                if info.get("type") != "available":
+                    continue
+                if not predicate(full, info):
+                    continue
+                show = SHOW_ORDER.get(info.get("show", "online"), 99)
+                if not chosen or show < chosen_show:
+                    chosen, chosen_show = full, show
+            return chosen
+
+        chosen = best(lambda full, _info: (
+            NS_WHITEBOARD in caps.get(full, ()) or NS_SXE in caps.get(full, ())))
+        return chosen or best(lambda _full, _info: True) or bare
+
     def start_session(self, peer: str, is_muc: bool = False,
                       name: str = "") -> str:
         """Create a new session hosted by us and invite/announce it."""
@@ -123,8 +155,32 @@ class WhiteboardManager:
             logger.info("Whiteboard: local-only board for %s", peer)
             self.client.emit("whiteboard_ready", sid)
         else:
+            full = self._best_full_jid(peer)
+            if full == peer.split("/", 1)[0]:
+                # No resource known: a bare-JID Jingle IQ is rejected by the
+                # server (service-unavailable), so fail fast instead of sending.
+                logger.info("Whiteboard: peer %s has no available resource",
+                            peer)
+                session.failure = "unavailable"
+                return sid
+            session.full_peer = full
+            logger.info("Whiteboard: invite %s -> %s (sid=%s)", peer, full, sid)
             self._send_jingle(session, "session-initiate")
         return sid
+
+    def handle_error(self, action: str, sid: str, condition: str = "") -> None:
+        """A Jingle error reply arrived for *sid* (from the router)."""
+        session = self.sessions.get(sid)
+        if session is None:
+            return
+        logger.info("Whiteboard: Jingle %s failed for %s (%s)", action,
+                    session.peer, condition or "error")
+        if action == "session-initiate" and not session.ready:
+            self.sessions.pop(sid, None)
+            if self._by_peer.get(session.peer) == sid:
+                self._by_peer.pop(session.peer, None)
+            self.client.emit("whiteboard_failed", sid,
+                             condition or "service-unavailable")
 
     def join_session(self, peer: str, sid: str, is_muc: bool = False,
                      name: str = "") -> None:

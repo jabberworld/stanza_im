@@ -3297,6 +3297,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("whiteboard_ready", self._on_whiteboard_ready)
         c.on("whiteboard_state", self._on_whiteboard_state)
         c.on("whiteboard_ended", self._on_whiteboard_ended)
+        c.on("whiteboard_failed", self._on_whiteboard_failed)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("groupchat_presence_error", self._on_groupchat_presence_error)
         c.on("captcha_challenge", self._on_captcha_challenge)
@@ -6501,11 +6502,46 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client is None or not jid:
             return
         sid = self._client.whiteboard.start_session(jid, is_muc)
-        dialog = self._whiteboard_dialog(jid)
-        dialog.attach_session(sid)
         session = self._client.whiteboard.session(sid)
+        dialog = self._whiteboard_dialog(jid)
+        if session is not None and session.failure:
+            dialog.show_failed(session.failure)
+            self._notify_whiteboard_failed(session.failure)
+            return
+        dialog.attach_session(sid)
         if session is not None and session.local_only:
             dialog.set_local_only()
+        elif not is_muc and not self._whiteboard_peer_supports(jid):
+            dialog.show_warning(tr("whiteboard_peer_maybe_unsupported"))
+            if self._config.notifications.osd_enabled:
+                self._osd.show(self._menu_icon("whiteboard.svg"),
+                               tr("whiteboard_title"),
+                               tr("whiteboard_peer_maybe_unsupported"))
+
+    def _whiteboard_peer_supports(self, bare: str) -> bool:
+        """True when *bare* advertises the whiteboard or SXE feature."""
+        if self._client is None:
+            return False
+        from stanza_im.xmpp.whiteboard import NS_WHITEBOARD
+        from stanza_im.xmpp.sxe import NS_SXE
+        return (self._client.supports_feature(bare, NS_WHITEBOARD)
+                or self._client.supports_feature(bare, NS_SXE))
+
+    def _notify_whiteboard_failed(self, reason: str) -> None:
+        if reason == "unavailable":
+            text = tr("whiteboard_failed_offline")
+        else:
+            text = tr("whiteboard_failed_error", condition=reason)
+        if self._config.notifications.osd_enabled:
+            self._osd.show(self._menu_icon("whiteboard.svg"),
+                           tr("whiteboard_title"), text)
+
+    def _on_whiteboard_failed(self, sid: str, reason: str) -> None:
+        """A collaborative session could not be established."""
+        for dialog in self._whiteboards.values():
+            if dialog.session_id() == sid:
+                dialog.show_failed(reason)
+        self._notify_whiteboard_failed(reason)
 
     def _on_whiteboard_invite(self, sid: str, peer: str,
                               is_muc: bool) -> None:

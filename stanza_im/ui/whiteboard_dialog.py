@@ -151,6 +151,20 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._share_btn.setChecked(False)
         self._sync_label.setText(tr("whiteboard_local_only"))
 
+    def show_warning(self, text: str) -> None:
+        """Show a non-blocking notice without changing the session state."""
+        self._sync_label.setText(text)
+
+    def show_failed(self, reason: str) -> None:
+        """Report a failed share and reset the dialog to the local board."""
+        self._sid = ""
+        self._share_btn.setChecked(False)
+        if reason == "unavailable":
+            self._sync_label.setText(tr("whiteboard_failed_offline"))
+        else:
+            self._sync_label.setText(
+                tr("whiteboard_failed_error", condition=reason))
+
     def refresh_from_session(self) -> None:
         if not (self._client and self._sid):
             return

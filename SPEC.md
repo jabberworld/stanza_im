@@ -2396,11 +2396,20 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   messages are routed by a dedicated `MatchXPath` handler
   (`JabberClient._on_sxe_stanza`), Jingle IQs by `_dispatch_jingle_iq`
   (`whiteboard.is_whiteboard_jingle` / a known sid), and the features are
-  advertised in disco. `_dispatch_jingle_iq` ignores `type='error'` IQs (an
-  error echoes the original `<jingle action>`; routing it as an action caused a
-  bogus invite and a phantom `session-accept`), and `WhiteboardManager.dispatch`
-  only acts on `type='set'`. Sharing a board in a chat whose JID is our **own**
-  (`start_session`) is kept local-only — no invite is ever sent to ourselves.
+  advertised in disco. A 1:1 `session-initiate` is addressed to the peer's
+  **best full JID** (`WhiteboardManager._best_full_jid`: a resource advertising
+  the whiteboard/SXE caps first, else the best available resource) — a bare-JID
+  Jingle IQ is rejected by the server (`service-unavailable`); with no known
+  resource the share fails fast and `whiteboard_failed(sid, "unavailable")` is
+  emitted, and `MainWindow._on_whiteboard_share` warns (without blocking) when
+  the peer's caps do not announce the feature.
+  `_dispatch_jingle_iq` ignores `type='error'` IQs (an error echoes the original
+  `<jingle action>`; routing it as an action caused a bogus invite and a phantom
+  `session-accept`) but routes an error for a known session to
+  `WhiteboardManager.handle_error` → `whiteboard_failed(sid, condition)`, and
+  `WhiteboardManager.dispatch` only acts on `type='set'`. Sharing a board in a
+  chat whose JID is our **own** (`start_session`) is kept local-only — no invite
+  is ever sent to ourselves.
 - The dialog's «Поделиться» button starts a session (`share_requested` →
   `MainWindow._on_whiteboard_share` → `WhiteboardManager.start_session`); local
   canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become

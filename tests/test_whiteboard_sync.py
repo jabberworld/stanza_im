@@ -61,9 +61,15 @@ class _FakeClient:
         self.jid_str = "me@example.com"
         self._full_jid = "me@example.com/pc"
         self.groupchats = {}
+        self.presences = {}
+        self.contact_features = {}
 
     def emit(self, *args):
         self.events.append(args)
+
+    def _add_resource(self, full, show="online", features=()):
+        self.presences[full] = {"show": show, "type": "available"}
+        self.contact_features[full] = set(features)
 
 
 class _FakeIncoming:
@@ -103,12 +109,14 @@ check("a plain jingle is not a whiteboard", not is_whiteboard_jingle(empty))
 
 # 2. start a 1:1 session -----------------------------------------------------
 client = _FakeClient()
+client._add_resource("bob@example.com/desktop", show="online",
+                     features=(wb_mod.NS_WHITEBOARD,))
 mgr = WhiteboardManager(client)
 sid = mgr.start_session("bob@example.com", is_muc=False)
 check("a session is created", sid in mgr.sessions)
 initiate = client.xmpp.sent[0]
-check("session-initiate targets the peer",
-      initiate.fields.get("to") == "bob@example.com")
+check("session-initiate targets the peer's full JID",
+      initiate.fields.get("to") == "bob@example.com/desktop")
 check("session-initiate carries the whiteboard description",
       initiate.xml.find(".//%s" % _q(wb_mod.NS_WHITEBOARD, "description"))
       is not None)
@@ -186,8 +194,8 @@ check("the host offers the state to the joiner",
 # 9. end a 1:1 session -------------------------------------------------------
 mgr.end_session(sid)
 check("ending a session drops it", sid not in mgr.sessions)
-check("ending a 1:1 session sends session-terminate",
-      any(s.fields.get("to") == "bob@example.com"
+check("ending a 1:1 session sends session-terminate to the full JID",
+      any(s.fields.get("to") == "bob@example.com/desktop"
           and s.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "jingle")) is not None
           for s in client.xmpp.sent))
 check("ending emits whiteboard_ended",
@@ -204,6 +212,41 @@ check("the own-JID session is marked local-only",
       mgr_own.session(sid_own).local_only)
 check("the local-only session is ready",
       ("whiteboard_ready", sid_own) in own_client.events)
+
+# 11. resource resolution for 1:1 --------------------------------------------
+c = _FakeClient()
+c._add_resource("carol@x/phone", show="online")
+c._add_resource("carol@x/laptop", show="away",
+                features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+m.start_session("carol@x", is_muc=False)
+check("a whiteboard-capable resource is preferred",
+      c.xmpp.sent[0].fields.get("to") == "carol@x/laptop")
+
+c = _FakeClient()
+c._add_resource("dave@x/phone", show="online")
+m = WhiteboardManager(c)
+m.start_session("dave@x", is_muc=False)
+check("falls back to the best available resource",
+      c.xmpp.sent[0].fields.get("to") == "dave@x/phone")
+
+c = _FakeClient()
+m = WhiteboardManager(c)
+sid_none = m.start_session("erin@x", is_muc=False)
+check("no resource fails fast", m.session(sid_none).failure == "unavailable")
+check("no session-initiate is sent without a resource",
+      not any(s.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "jingle")) is not None
+              for s in c.xmpp.sent))
+
+# 12. a Jingle error for a known session surfaces whiteboard_failed ----------
+c = _FakeClient()
+c._add_resource("frank@x/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid_f = m.start_session("frank@x", is_muc=False)
+m.handle_error("session-initiate", sid_f, "service-unavailable")
+check("a session-initiate error emits whiteboard_failed",
+      ("whiteboard_failed", sid_f, "service-unavailable") in c.events)
+check("the failed session is dropped", m.session(sid_f) is None)
 
 print()
 if FAILURES:
