@@ -2373,16 +2373,26 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   _on_whiteboard_requested`, a singleton dialog per conversation) opens
   `WhiteboardDialog` — an icon-only tool palette over a custom `QPainter`
   canvas (`WhiteboardCanvas`).
-- Tools: select / move / rotate / scale / delete and pencil / line / rectangle
-  / ellipse / polygon (closed shapes are filled with the fill colour), plus
-  line width, line colour and fill colour pickers, «Завершить рисование»,
-  «Очистить» and «Сохранить как SVG».
+- Tools: select / move / rotate / scale / delete, pencil / line / rectangle /
+  ellipse / polygon and a **bucket** «Заливка» (fills, or on a second click
+  unfills, only the closed shape under the cursor — the empty background is
+  never flooded), plus line width, line colour, fill colour, a «Заливка»
+  toggle (whether newly drawn closed shapes are filled; off → `fill=""` →
+  `fill="none"`), «Завершить рисование», «Очистить» and «Сохранить как SVG».
 - The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
-  `stroke-width`, `fill`, `QTransform`); select/move/rotate/scale edit the
-  `transform`, and `to_svg()` serialises it to a `600x400` SVG document. Every
-  shape is exported as a `<path d="…"/>` (`include/svg_path.py` builds the `d`
-  strings; the canvas parses `d` back for remote shapes via
-  `svg_path.parse_path`).
+  `stroke-width`, `fill`, `QTransform`); `to_svg()` serialises it to a
+  `1280x720` SVG document (the board size comes from
+  `include.constants.WHITEBOARD_WIDTH/HEIGHT`, shared with the seeded SXE
+  `viewBox`). Every shape is exported as a `<path d="…"/>`
+  (`include/svg_path.py` builds the `d` strings; the canvas parses `d` back for
+  remote shapes via `svg_path.parse_path`).
+- In the **select** tool a click selects a shape and draws rotate/resize
+  handles (constant screen size, hit-tested in widget coordinates); dragging
+  the shape body moves it and the handles rotate/scale it about the bounding-box
+  centre (the move/rotate/scale tools remain as an alternative). `Ctrl+wheel`
+  zooms the view anchored at the cursor (0.25–8×), `Ctrl+0` and a double click
+  on empty space reset it, and dragging empty space pans — the view transform is
+  local and never part of the document or the session.
 - Phase 2 (collaborative): `xmpp/whiteboard.py::WhiteboardManager` (created as
   `client.whiteboard`) owns the sessions. A session is a Jingle application
   type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport

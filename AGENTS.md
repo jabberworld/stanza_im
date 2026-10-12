@@ -1866,15 +1866,23 @@ smiley-theme selector later. The Whiteboard button (`whiteboard.svg`,
 `ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
 _on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
 (non-modal, singleton per conversation): a custom `QPainter` canvas
-(`ui/whiteboard_canvas.py::WhiteboardCanvas`) with an icon-only tool palette —
-select / move / rotate / scale / delete and the draw tools pencil / line /
-rectangle / ellipse / polygon (closed shapes are filled with the fill colour) —
-plus line width, line colour and fill colour pickers, «Завершить рисование»,
-«Очистить» and «Сохранить как SVG». The document is a list of shape records
-(`id`, `rid`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and a
-`QTransform`); select/move/rotate/scale edit the `transform`, every shape is
-exported as a `<path d="…"/>` (`include/svg_path.py`) and `to_svg()` serialises
-it. The dialog's «Поделиться» button starts a **collaborative** session
+(`ui/whiteboard_canvas.py::WhiteboardCanvas`, logical board `1280×720` from
+`include.constants.WHITEBOARD_WIDTH/HEIGHT`) with an icon-only tool palette —
+select / move / rotate / scale / delete, the draw tools pencil / line /
+rectangle / ellipse / polygon and a **bucket** «Заливка» that fills (or, on a
+second click, unfills) only the closed shape under the cursor — plus line
+width, line colour, fill colour, a «Заливка» toggle (whether newly drawn closed
+shapes are filled), «Завершить рисование», «Очистить» and «Сохранить как SVG».
+The document is a list of shape records (`id`, `rid`, `kind`, geometry,
+`stroke`/`stroke-width`/`fill` and a `QTransform`); every shape is exported as a
+`<path d="…"/>` (`include/svg_path.py`) and `to_svg()` serialises it. In the
+**select** tool a click selects a shape and shows rotate/resize handles
+(dragging the shape body moves it; the handles rotate/scale it about the centre
+— the move/rotate/scale tools remain as an alternative); `Ctrl+wheel` zooms the
+view anchored at the cursor, `Ctrl+0` and a double click on empty space reset
+it, and dragging empty space pans (the view transform is local, never part of
+the document). The dialog's «Поделиться» button starts a **collaborative**
+session
 (`xmpp/whiteboard.py::WhiteboardManager`, `client.whiteboard`): a Jingle
 application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 (`urn:xmpp:jingle:transports:sxe`) sharing an `xmpp/sxe.py::SxeDocument`
