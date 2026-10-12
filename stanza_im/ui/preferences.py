@@ -1186,10 +1186,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         from stanza_im.xmpp.omemo import availability
         page, form = self._page()
         if not availability.AVAILABLE:
-            note = QtWidgets.QLabel(tr(
-                "omemo_missing_detail",
-                missing=", ".join(availability.MISSING),
-                hint=availability.install_hint() or "-"))
+            # No distribution-specific install instructions (the client runs on
+            # many platforms): just the reason and the missing Python modules.
+            note = QtWidgets.QLabel(tr("omemo_unavailable"))
             note.setWordWrap(True)
             note.setStyleSheet("color: #c0392b;")
             form.addRow(note)
@@ -1199,14 +1198,6 @@ class PreferencesDialog(QtWidgets.QDialog):
                        modules=", ".join(availability.MISSING_MODULES)))
                 modules.setWordWrap(True)
                 form.addRow(modules)
-            if availability.install_hint():
-                cmd = QtWidgets.QLineEdit(availability.install_hint())
-                cmd.setReadOnly(True)
-                copy_btn = QtWidgets.QPushButton(tr("prefs_omemo_copy"))
-                copy_btn.clicked.connect(
-                    lambda: QtWidgets.QApplication.clipboard().setText(
-                        availability.install_hint()))
-                form.addRow(tr("omemo_install_hint"), self._row(cmd, copy_btn))
             return page
 
         btbv = self._check("blind_trust", tr("prefs_omemo_blind_trust"))

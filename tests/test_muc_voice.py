@@ -227,12 +227,16 @@ class _StubClient:
     def __init__(self):
         self.granted = []
         self.requested = []
+        self.affiliations = []
 
     def __getattr__(self, _name):
         return lambda *a, **k: None
 
     async def grant_voice(self, room, nick, jid=""):
         self.granted.append((room, nick, jid))
+
+    async def muc_set_affiliation(self, room, jid, affiliation, reason=""):
+        self.affiliations.append((room, jid, affiliation))
 
     def request_voice(self, room):
         self.requested.append(room)
@@ -283,6 +287,12 @@ row2.refused.emit(room, "other", "other@x")
 check("refuse does not send anything to the server",
       stub.granted == [(room, "guest", "guest@x")]
       and row2._result.text() != "")
+
+# Changing an occupant's rank (affiliation) uses the real JID.
+w._change_muc_affiliation(room, "guest@x", "member")
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.05))
+check("changing the rank calls muc_set_affiliation",
+      stub.affiliations == [(room, "guest@x", "member")])
 
 # 3b. Surfacing a rejected voice request ------------------------------------
 w._chat_window.open_groupchat(room, "me", "Room")

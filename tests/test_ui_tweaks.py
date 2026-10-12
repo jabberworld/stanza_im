@@ -232,6 +232,13 @@ for ref in sorted(poll_refs):
     check(f"a _clear_*_request helper exists for {ref}",
           split in clear_funcs or flat in clear_funcs)
 
+# The MUC participant menu offers a rank (affiliation) submenu next to the role.
+mw_src = _src("stanza_im", "ui", "main_window.py")
+check("the participant menu offers «Change rank»",
+      "muc_user_change_affiliation" in mw_src
+      and "_change_muc_affiliation" in mw_src
+      and "muc_set_affiliation" in mw_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

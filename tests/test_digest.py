@@ -35,6 +35,7 @@ def check(name, cond):
 
 class _FakeApp(QtCore.QObject):
     unread_changed = QtCore.pyqtSignal()
+    events_changed = QtCore.pyqtSignal()
 
     def __init__(self, osd):
         super().__init__()
@@ -46,10 +47,15 @@ class _FakeApp(QtCore.QObject):
         self._muc_self_nicks = {}
         # Persisted conference JIDs (a room with restored unread, not joined).
         self._known_conferences = set()
+        self._event_unread = 0
         self.opened = []
+        self.events_shown = []
 
     def _on_tray_cycle_unread(self):
         self.opened.append(True)
+
+    def _show_events_tab(self):
+        self.events_shown.append(True)
 
 
 def _cfg():
@@ -158,6 +164,20 @@ digest.deactivate(fake)
 check("deactivation dismisses the digest", len(mgr._windows) == 0)
 check("deactivation clears the plugin state",
       getattr(fake, digest._STATE, None) is None)
+
+# 7. unread events add a line and steer the click to the Events tab ----------
+mgr_e = OsdManager(_cfg())
+fake_e = _FakeApp(mgr_e)
+digest.activate(fake_e)
+fake_e._event_unread = 2
+fake_e.events_changed.emit()
+check("unread events show a digest", len(mgr_e._windows) == 1)
+check("the digest counts events",
+      "2 new events" in mgr_e._windows[0]["window"]._body_label.text())
+mgr_e._windows[0]["window"]._click()
+check("clicking with unread events opens the Events tab",
+      fake_e.events_shown == [True] and fake_e.opened == [])
+digest.deactivate(fake_e)
 
 print()
 if FAILURES:

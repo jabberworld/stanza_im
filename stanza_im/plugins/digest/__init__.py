@@ -40,25 +40,29 @@ def activate(app) -> None:
 
 
 def on_client_ready(app) -> None:
-    """Subscribe to unread changes (idempotent across login/activation)."""
+    """Subscribe to unread/event changes (idempotent across login)."""
     state = _ensure_state(app)
-    signal = getattr(app, "unread_changed", None)
-    if state.get("slot") is None and signal is not None:
-        slot = lambda: _refresh(app)  # noqa: E731
-        signal.connect(slot)
-        state["slot"] = slot
+    for key, attr in (("slot", "unread_changed"),
+                      ("event_slot", "events_changed")):
+        signal = getattr(app, attr, None)
+        if state.get(key) is None and signal is not None:
+            slot = lambda: _refresh(app)  # noqa: E731
+            signal.connect(slot)
+            state[key] = slot
     _refresh(app)
 
 
 def deactivate(app) -> None:
     state = getattr(app, _STATE, None)
-    slot = (state or {}).get("slot")
-    signal = getattr(app, "unread_changed", None)
-    if slot is not None and signal is not None:
-        try:
-            signal.disconnect(slot)
-        except (TypeError, RuntimeError):
-            pass
+    for key, attr in (("slot", "unread_changed"),
+                      ("event_slot", "events_changed")):
+        slot = (state or {}).get(key)
+        signal = getattr(app, attr, None)
+        if slot is not None and signal is not None:
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
     setattr(app, _STATE, None)
     osd = getattr(app, "_osd", None)
     if osd is not None:
@@ -68,11 +72,12 @@ def deactivate(app) -> None:
 # ── Statistics ────────────────────────────────────────────────────
 
 
-def _stats(app) -> tuple[int, int, int, int]:
-    """``(messages, contacts, mentions, conferences)`` from the unread state.
+def _stats(app) -> tuple[int, int, int, int, int]:
+    """``(messages, contacts, mentions, conferences, events)`` from the state.
 
     Contacts are 1:1 chats and MUC private messages (any key that is not a
-    conference); conferences are counted only by their unread **mentions**.
+    conference); conferences are counted only by their unread **mentions**;
+    events is the Events-tab unread count.
     """
     chats = getattr(app, "_unread_chats", None) or {}
     conferences = set(getattr(app, "_conference_roster", None) or ())
@@ -92,7 +97,8 @@ def _stats(app) -> tuple[int, int, int, int]:
             if count > 0:
                 messages += count
                 contacts += 1
-    return messages, contacts, mentions, confs
+    events = int(getattr(app, "_event_unread", 0) or 0)
+    return messages, contacts, mentions, confs, events
 
 
 def _refresh(app) -> None:
@@ -107,8 +113,8 @@ def _refresh(app) -> None:
         osd.dismiss_sticky(_STICKY_KEY)
         return
     state = _ensure_state(app)
-    messages, contacts, mentions, confs = _stats(app)
-    total = messages + mentions
+    messages, contacts, mentions, confs, events = _stats(app)
+    total = messages + mentions + events
     if total <= 0:
         osd.dismiss_sticky(_STICKY_KEY)
         state["closed_at"] = None
@@ -124,6 +130,8 @@ def _refresh(app) -> None:
         lines.append(tr("digest_contacts", n=messages, m=contacts))
     if mentions > 0:
         lines.append(tr("digest_mentions", n=mentions, m=confs))
+    if events > 0:
+        lines.append(tr("digest_events", n=events))
     osd.show_sticky(_STICKY_KEY, _icon(), tr("digest_title"),
                     "\n".join(lines),
                     on_click=lambda: _open_top_unread(app),
@@ -133,12 +141,17 @@ def _refresh(app) -> None:
 def _on_closed(app) -> None:
     """Remember the current total so it stays hidden until it grows."""
     state = _ensure_state(app)
-    messages, _contacts, mentions, _confs = _stats(app)
-    state["closed_at"] = messages + mentions
+    messages, _contacts, mentions, _confs, events = _stats(app)
+    state["closed_at"] = messages + mentions + events
 
 
 def _open_top_unread(app) -> None:
-    """Open the topmost conversation with unread messages (tray behaviour)."""
+    """Open the Events tab when there are unread events, else a chat."""
+    if int(getattr(app, "_event_unread", 0) or 0) > 0:
+        handler = getattr(app, "_show_events_tab", None)
+        if callable(handler):
+            handler()
+            return
     handler = getattr(app, "_on_tray_cycle_unread", None)
     if callable(handler):
         handler()

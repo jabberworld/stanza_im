@@ -103,6 +103,15 @@ _MUC_AUTH_JOIN_ERRORS = {
 }
 
 
+def _event_separator() -> QtWidgets.QFrame:
+    """A thin line under an Events row so adjacent events are distinguishable."""
+    line = QtWidgets.QFrame()
+    line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+    line.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+    line.setStyleSheet("color: rgba(0, 0, 0, 40);")
+    return line
+
+
 class _SubscriptionRequestRow(QtWidgets.QWidget):
     """Events tab row: an authorization request with Approve/Reject buttons."""
 
@@ -113,6 +122,7 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
                  groups=None, parent=None):
         super().__init__(parent)
         self.jid = jid
+        self._resolved = False
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(3)
@@ -145,9 +155,14 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
         layout.addLayout(self._buttons)
         self._result = QtWidgets.QLabel("", self)
         layout.addWidget(self._result)
+        layout.addWidget(_event_separator())
+
+    def resolved(self) -> bool:
+        return self._resolved
 
     def mark(self, approved: bool) -> None:
         """Show the decision in place of the buttons (the row stays)."""
+        self._resolved = True
         self._approve.setVisible(False)
         self._reject.setVisible(False)
         self._result.setText(tr("event_approved") if approved
@@ -196,6 +211,7 @@ class _VoiceRequestRow(QtWidgets.QWidget):
         layout.addLayout(buttons)
         self._result = QtWidgets.QLabel("", self)
         layout.addWidget(self._result)
+        layout.addWidget(_event_separator())
 
     def mark(self, granted: bool) -> None:
         """Show the decision in place of the buttons (the row stays)."""
@@ -211,6 +227,9 @@ class MainWindow(QtWidgets.QMainWindow):
     #: Emitted whenever the per-conversation unread/mention counters change
     #: (new message, mark-read, recount).  The Digest plugin listens to it.
     unread_changed = QtCore.pyqtSignal()
+    #: Emitted whenever the Events-tab unread count changes.  The Digest plugin
+    #: listens to it (for its "new events" line).
+    events_changed = QtCore.pyqtSignal()
 
     def __init__(self, app: QtWidgets.QApplication, defer: bool = False):
         super().__init__()
@@ -946,6 +965,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._events_list.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self._events_list.setWordWrap(True)
+        # A separator line under every plain event row (custom request rows draw
+        # their own via _event_separator) so adjacent events are distinguishable.
+        self._events_list.setStyleSheet(
+            "QListWidget::item { border-bottom: 1px solid rgba(0, 0, 0, 40);"
+            " padding: 3px; }")
         self._events_list.font_zoom_requested.connect(self._on_roster_font_zoom)
         layout.addWidget(self._events_list, stretch=1)
 
@@ -984,8 +1008,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_events_placeholder()
         self._events_list.addItem(
             "%s  %s" % (time.strftime("%H:%M"), title))
-        self._event_unread += 1
-        self._start_event_blink()
+        self._bump_event_unread()
 
     def _on_subscription_request(self, jid: str, nick: str = "",
                                  name: str = "", groups=None) -> None:
@@ -1001,16 +1024,18 @@ class MainWindow(QtWidgets.QMainWindow):
         widget.rejected.connect(self._on_subscription_rejected)
         item.setSizeHint(widget.sizeHint())
         self._events_list.setItemWidget(item, widget)
-        self._event_unread += 1
-        self._start_event_blink()
+        self._bump_event_unread()
 
     def _on_muc_voice_request(self, room: str, jid: str, nick: str) -> None:
         """A visitor asks for voice — surface it (moderators only)."""
         if self._client is None or not self._can_moderate_room(room):
             return
-        bare = (jid.split("/", 1)[0] if isinstance(jid, str) and "@" in jid
-                else "")
-        target = bare or f"{room}/{nick}"
+        # *jid* is the requester's occupant JID (``room/nick``) or its real JID:
+        # keep it as the target (a role change needs the nick, not the bare
+        # room) and derive the nick from an occupant JID when none was given.
+        target = jid if (isinstance(jid, str) and jid) else ""
+        nick = nick or (target.split("/", 1)[1] if "/" in target else "")
+        target = target or (f"{room}/{nick}" if nick else room)
         self._clear_events_placeholder()
         item = QtWidgets.QListWidgetItem(self._events_list)
         widget = _VoiceRequestRow(room, nick, target, parent=self._events_list)
@@ -1018,9 +1043,8 @@ class MainWindow(QtWidgets.QMainWindow):
         widget.refused.connect(self._on_voice_refuse)
         item.setSizeHint(widget.sizeHint())
         self._events_list.setItemWidget(item, widget)
-        self._event_unread += 1
-        self._start_event_blink()
-        text = tr("event_voice_request", who=nick or bare or room, room=room)
+        self._bump_event_unread()
+        text = tr("event_voice_request", who=nick or target or room, room=room)
         if getattr(self._config.notifications, "osd_enabled", False):
             self._osd.show(self._menu_icon("voice-request.svg"),
                            tr("event_voice_osd_title"), text,
@@ -1090,6 +1114,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 widget.mark(approved)
                 break
 
+    def _resolve_pending_subscriptions(self) -> None:
+        """Mark a pending request approved once the roster shows ``to``/``both``.
+
+        A server with subscription pre-approval (``urn:xmpp:features:
+        pre-approval``) may grant a mutual subscription without the user
+        confirming; the Events row shown for the incoming request then lingers
+        as pending, so resolve it from the roster state.
+        """
+        if self._client is None:
+            return
+        for i in range(self._events_list.count()):
+            item = self._events_list.item(i)
+            widget = self._events_list.itemWidget(item)
+            if (isinstance(widget, _SubscriptionRequestRow)
+                    and not widget.resolved()
+                    and self._client.subscription(widget.jid) in ("to", "both")):
+                widget.mark(True)
+
     def _on_subscription_cancelled(self, jid: str) -> None:
         name = ""
         if self._client:
@@ -1099,6 +1141,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 name = ""
         self._push_system_event(
             tr("event_unsubscribed", who=name or jid))
+
+    def _bump_event_unread(self) -> None:
+        """A new Events row: blink the tab icon and notify the digest."""
+        self._event_unread += 1
+        self._start_event_blink()
+        self.events_changed.emit()
 
     def _start_event_blink(self) -> None:
         if self._event_blink_active:
@@ -1114,7 +1162,15 @@ class MainWindow(QtWidgets.QMainWindow):
         index = self._tab_index("events")
         if index >= 0:
             self._roster_tabs.setTabIcon(index, self._tab_icon("event.svg"))
-        self._event_unread = 0
+        if self._event_unread:
+            self._event_unread = 0
+            self.events_changed.emit()
+
+    def _show_events_tab(self) -> None:
+        """Switch the roster tab bar to the Events tab (used by the digest)."""
+        index = self._tab_index("events")
+        if index >= 0:
+            self._roster_tabs.setCurrentIndex(index)
 
     def _events_tab_pixmap(self) -> QtGui.QPixmap:
         icon = self._tab_icon("event.svg")
@@ -3482,6 +3538,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_self_roster()
         self._recount_groups()
         self._roster.sort_and_update()
+        self._resolve_pending_subscriptions()
         # Prefetch bookmarks so MUC bookmark buttons are correct before the
         # Bookmarks menu is ever opened.
         self._start_task(self._load_bookmarks())
@@ -3490,6 +3547,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_roster_item(item)
         self._classify_bookmarked_conferences()
         self._roster.sort_and_update()
+        self._resolve_pending_subscriptions()
 
     def _on_roster_item_removed(self, jid: str):
         self._roster.remove_user(jid)
@@ -7429,6 +7487,20 @@ class MainWindow(QtWidgets.QMainWindow):
             action.triggered.connect(
                 lambda checked=False, value=role:
                 self._change_muc_role(room, nick, value))
+        # «Изменить ранг» (affiliation): per-JID, so it needs the real JID and
+        # owner/admin rights (owner may set owner/admin; admin only member/
+        # outcast/none).
+        own_aff = self._muc_affiliation(room)
+        ranks = menu.addMenu(tr("muc_user_change_affiliation"))
+        for aff in ("owner", "admin", "member", "outcast", "none"):
+            action = ranks.addAction(tr(f"muc_affiliation_{aff}"))
+            action.setEnabled(bool(real_jid) and (
+                own_aff == "owner"
+                or (own_aff == "admin" and aff in ("member", "outcast",
+                                                   "none"))))
+            action.triggered.connect(
+                lambda checked=False, value=aff:
+                self._change_muc_affiliation(room, real_jid, value))
         can_hats = self._muc_affiliation(room) in ("owner", "admin")
         hats_menu = menu.addMenu(tr("muc_user_hats"))
         assign = hats_menu.addAction(tr("hats_assign"))
@@ -7455,6 +7527,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         self._client.set_muc_role(room, nick, role)
+
+    def _change_muc_affiliation(self, room: str, jid: str, affiliation: str):
+        if not self._client or not jid:
+            return
+        self._start_task(self._client.muc_set_affiliation(
+            room, jid, affiliation))
 
     # ── XEP-0317 Hats ─────────────────────────────────────────────
 

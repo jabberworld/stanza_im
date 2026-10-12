@@ -7,4 +7,5 @@ STRINGS = {
     "digest_title": "You have new unread messages:",
     "digest_contacts": "{n} new messages from {m} contacts",
     "digest_mentions": "{n} mentions in {m} conferences",
+    "digest_events": "{n} new events",
 }

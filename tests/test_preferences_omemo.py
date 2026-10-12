@@ -45,7 +45,7 @@ saved = (availability.AVAILABLE, availability.MISSING,
          availability.MISSING_MODULES)
 availability.AVAILABLE = False
 availability.MISSING = ["oldmemo"]
-availability.MISSING_MODULES = []
+availability.MISSING_MODULES = ["oldmemo"]
 
 try:
     cfg = Config()
@@ -68,6 +68,14 @@ try:
           cfg.omemo.blind_trust is False
           and cfg.omemo.alias_sync is True
           and cfg.omemo.auto_enable is False)
+    _texts = " ".join(w.text() for w in dlg.findChildren(QtWidgets.QLabel)
+                      if hasattr(w, "text"))
+    check("no distribution install command is shown",
+          "apt" not in _texts.lower())
+    check("the unavailable note is shown",
+          "OMEMO is not available" in _texts)
+    check("the missing modules are listed",
+          "Missing Python modules" in _texts)
     dlg.close()
 finally:
     (availability.AVAILABLE, availability.MISSING,

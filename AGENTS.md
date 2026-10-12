@@ -268,7 +268,10 @@ only to moderators/owners/admins (`_can_moderate_room`): an Events row
 (`_VoiceRequestRow`) «Пользователь … просит право голоса» with «Предоставить»
 (`client.grant_voice(room, nick, jid)` → `muc#admin` `<item role='participant'/>`,
 XEP-0045 §8.3) / «Отклонить» (marks the row only), plus an OSD and a tray
-balloon. A **failed** request (`voice_request_failed`, e.g. the server rate-limit
+balloon. `MainWindow._on_muc_voice_request` uses the requester's **occupant JID**
+(`room/nick`, not the bare room) as the target and derives the nick from it when
+the stanza carried none, so the row names the visitor and the grant reaches the
+right occupant. A **failed** request (`voice_request_failed`, e.g. the server rate-limit
 `resource-constraint`) is shown to the user via a tray balloon, an OSD (when
 enabled) and a chat status line; the «Попросить голос» button stays enabled.
 When a message is **rejected** because we have no voice (the server returns
@@ -300,7 +303,11 @@ the literal `complete`), and the URI field is whatever var the returned form
 declares (`hats#uri` for create, `hat` for destroy/assign/unassign on
 ejabberd). An error `<note/>`/status surfaces in the tab instead of being
 silently reloaded away. The participant context menu
-gains a gated «Шапка» submenu (after «Изменить роль») with «Назначить»
+offers «Изменить роль» (visitor/participant/moderator, via
+`client.set_muc_role`) and «Изменить ранг» (owner/admin/member/outcast/none, via
+`client.muc_set_affiliation`), the latter enabled only when the occupant's real
+JID is known and we are owner/admin (owner/admin options are the owner's alone);
+then a gated «Шапка» submenu with «Назначить»
 (preselects the user in `HatAssignDialog`) and «Снять» (`HatUnassignDialog`
 lists the user's hats, then confirms). Messages render the sender's hats as
 coloured `.stanza-hat` chips right of the nick. [`tests/test_hats.py`]
@@ -565,21 +572,24 @@ incoming per-contact throttle), `allow_dnd` (notify while we are in «Не
 The bundled **Digest** plugin (`stanza_im/plugins/digest/`, category
 «Уведомления», icon `attention.svg`) keeps a single **sticky** OSD on screen
 while there are unread messages from contacts (1:1 and MUC private messages) or
-mentions in conferences: the title is «У вас новые непрочитанные сообщения:» and
-the body lists «N новых сообщений от M контактов» and/or «K упоминаний в J
-конференциях». It subscribes to the new `MainWindow.unread_changed` signal
-(emitted from `_bump_unread`/`_reset_unread`/`_recount_unread`) and recomputes
+mentions in conferences, or unread Events-tab entries: the title is «У вас новые
+непрочитанные сообщения:» and the body lists «N новых сообщений от M контактов»,
+«K упоминаний в J конференциях» and/or «Y новых событий». It subscribes to the
+`MainWindow.unread_changed` signal (emitted from
+`_bump_unread`/`_reset_unread`/`_recount_unread`) and the `events_changed` one
+(emitted from `_bump_event_unread`/`_stop_event_blink`), and recomputes
 the counters from `_unread_chats` (conference keys — in `_conference_roster`,
 `_muc_self_nicks` or the persisted `_known_conferences` set, seeded from
 `known_contacts` at startup/profile switch — counted only by `mentions`, so a
-room with restored unread is not miscounted as a contact before it is joined);
-the sticky OSD is updated in
+room with restored unread is not miscounted as a contact before it is joined)
+plus `_event_unread`; the sticky OSD is updated in
 place via `OsdManager.show_sticky`/`update_sticky`. It is **gated on being
 logged in** (`_refresh` dismisses when `app._client` is `None`), so the unread
 counters restored from disk never pop a digest on the login screen (they still
 show as roster badges). Closing it (its close button, `on_close`) hides it until
-the total grows again; clicking it opens the topmost unread conversation
-(`_on_tray_cycle_unread`). `deactivate` disconnects the signal and
+the total grows again; clicking it opens the **Events tab** when there are
+unread events (`MainWindow._show_events_tab`), otherwise the topmost unread
+conversation (`_on_tray_cycle_unread`). `deactivate` disconnects the signals and
 `dismiss_sticky`. [`tests/test_digest.py`]
 
 **Notification priority** (per-contact, `core/notification_priorities.py`): a
@@ -1514,7 +1524,15 @@ auto-answered with `unsubscribed` and surfaced as an event, and an incoming
 The Events list is kept **in memory** (lost on restart): a decision does not
 remove the row — `_mark_event_for_jid` calls `_SubscriptionRequestRow.mark`,
 which hides the buttons and shows «Разрешено»/«Отклонено», so the search box
-stays useful. The contact context menu carries a subscription **submenu**
+stays useful. A server with subscription **pre-approval**
+(`urn:xmpp:features:pre-approval`, e.g. ejabberd) may grant a mutual
+subscription without the user confirming, so `MainWindow.
+_resolve_pending_subscriptions` (called on every roster update) marks a still
+pending row approved once `client.subscription(jid)` is `to`/`both` — otherwise
+a request the server already satisfied would linger. Events rows are separated
+by a thin line (the list's `QListWidget::item` bottom border for plain events,
+`_event_separator()` for the request rows). The contact context menu carries a
+subscription **submenu**
 (`_build_subscription_menu`, icon `reload.png`) built from the current
 subscription and the roster `ask`: «Запросить подписку» (`arrow-up.svg`,
 `subscribe`) for `none`/`from`, «Отправить подписку» (`arrow-down.svg`,
@@ -1708,9 +1726,11 @@ encryption with legacy OMEMO 0.3 (`eu.siacs.conversations.axolotl`) and OMEMO 2
 `xmlschema` + `cryptography`), so a present-but-broken package (a missing
 transitive dependency such as `xmlschema`) is reported by its root cause. When a
 package is missing the feature is disabled with a detailed `logger.warning` at
-startup, a red notice on the (kept enabled) Preferences «OMEMO» tab and an
-«OMEMO» row on Help → About; the chat/roster entries are hidden and an
-unexpected init failure is logged without a traceback. The availability probe
+startup, a red notice on the (kept enabled) Preferences «OMEMO» tab — a
+distribution-neutral «OMEMO недоступен» and the missing Python modules, with no
+install command (the client runs on many platforms) — and an «OMEMO» row on
+Help → About; the chat/roster entries are hidden and an unexpected init failure
+is logged without a traceback. The availability probe
 (which imports the backends) runs in a **background daemon thread** started by
 `app.py`, so the login window never waits for it; the module is imported once,
 so the first access at login/About time is instant. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's

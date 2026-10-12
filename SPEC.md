@@ -2128,8 +2128,9 @@ Registers XEP plugins (conditionally where noted):
   missing the feature is disabled and reported in three places: a detailed
   `logger.warning` at startup (the missing import modules and an `apt install`
   hint), a red notice on the Preferences «OMEMO» tab (kept enabled so the
-  reason is readable, with the missing modules and a copyable install command)
-  and an «OMEMO» row on Help → About. The chat/roster entries are hidden; an
+  reason is readable — a distribution-neutral «OMEMO недоступен» plus the
+  missing Python modules, with no install command, since the client runs on
+  many platforms) and an «OMEMO» row on Help → About. The chat/roster entries are hidden; an
   unexpected init failure is logged briefly (no traceback at WARNING).
 - The `xep_0380` (EME) plugin is registered and OMEMO messages carry
   `<encryption xmlns='urn:xmpp:eme:0' namespace='…' name='OMEMO'/>`. The

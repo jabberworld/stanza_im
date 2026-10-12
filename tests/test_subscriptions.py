@@ -191,6 +191,17 @@ app.processEvents()
 _last = win._events_list.item(win._events_list.count() - 1)
 check("unsubscribed shows an info event",
       "bob@example" in _last.text())
+
+# 5b. a request the server auto-satisfied (pre-approval) is resolved ---------
+win._client.subscription = lambda jid: "both"
+win._on_subscription_request("auto@example")
+app.processEvents()
+_auto = win._events_list.itemWidget(
+    win._events_list.item(win._events_list.count() - 1))
+check("a new request row starts pending", not _auto.resolved())
+win._resolve_pending_subscriptions()
+check("a to/both subscription resolves the pending request",
+      _auto.resolved() and _auto._result.text() == "Approved")
 win.close()
 
 print()
