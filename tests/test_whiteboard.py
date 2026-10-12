@@ -266,6 +266,43 @@ check("the dialog has a fill toggle button",
 check("the dialog has a bucket tool",
       "fill" in WhiteboardDialog("bob@example.com")._tool_buttons)
 
+# 11. selection handles + body drag (select tool) ----------------------------
+hc = WhiteboardCanvas()
+hc.resize(1280, 720)   # 1:1 -> widget == world
+hc.set_tool("rect")
+drag(hc, 100, 100, 200, 160)
+sid = hc.selected_id()
+check("drawing selects the new shape", bool(sid))
+hc.set_tool("select")
+handles = hc._selection_handles()
+check("the selected shape has rotate and resize handles",
+      set(handles) == {"rotate", "resize"})
+check("the resize handle is hit-testable",
+      hc._handle_at(handles["resize"].center()) == "resize")
+check("the rotate handle is hit-testable",
+      hc._handle_at(handles["rotate"].center()) == "rotate")
+
+updates = []
+hc.shape_updated.connect(updates.append)
+drag(hc, 150, 130, 190, 150, steps=2)
+check("dragging the body moves the shape",
+      hc._shape_by_id(sid)["transform"].dx() > 10)
+check("a body move emits shape_updated", len(updates) == 1)
+
+before_scale = hc._shape_by_id(sid)["transform"].m11()
+resize_pt = hc._selection_handles()["resize"].center()
+drag(hc, resize_pt.x(), resize_pt.y(),
+     resize_pt.x() + 40, resize_pt.y() + 20, steps=3)
+check("dragging the resize handle scales the shape",
+      hc._shape_by_id(sid)["transform"].m11() != before_scale)
+
+before_rot = hc._shape_by_id(sid)["transform"].m12()
+rotate_pt = hc._selection_handles()["rotate"].center()
+drag(hc, rotate_pt.x(), rotate_pt.y(),
+     rotate_pt.x() + 30, rotate_pt.y() + 10, steps=3)
+check("dragging the rotate handle rotates the shape",
+      abs(hc._shape_by_id(sid)["transform"].m12() - before_rot) > 1e-3)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

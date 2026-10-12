@@ -13,7 +13,8 @@ import uuid
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include import svg_path
-from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH)
+from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH,
+                                         find_icon)
 
 #: Logical canvas size (the SVG ``viewBox``).
 VIEW_W = WHITEBOARD_WIDTH
@@ -78,6 +79,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._start: QtCore.QPointF | None = None
         self._last: QtCore.QPointF | None = None
         self._transformed = False
+        # Object manipulation in the select tool ("move"/"rotate"/"scale").
+        self._manip = ""
+        self._manip_id = ""
         # View transform (zoom/pan) — local, never part of the document.
         self._view_zoom = 1.0
         self._view_pan = QtCore.QPointF(0.0, 0.0)
@@ -373,6 +377,36 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         shape = self._shape_at(world)
         self._selected = shape["id"] if shape is not None else ""
 
+    # ── Selection handles (select tool) ───────────────────────────
+
+    _HANDLE_SIZE = 18.0
+
+    def _widget_bbox(self, shape: dict) -> QtCore.QRectF:
+        rect = self._world_path(shape).boundingRect()
+        tl = self._to_screen(rect.topLeft())
+        br = self._to_screen(rect.bottomRight())
+        return QtCore.QRectF(tl, br).normalized()
+
+    def _selection_handles(self) -> dict[str, QtCore.QRectF]:
+        """The rotate/resize handles of the selected shape (widget coords)."""
+        shape = self._shape_by_id(self._selected)
+        if shape is None:
+            return {}
+        r = self._widget_bbox(shape)
+        size = self._HANDLE_SIZE
+        return {
+            "rotate": QtCore.QRectF(r.center().x() - size / 2,
+                                    r.top() - size - 8, size, size),
+            "resize": QtCore.QRectF(r.right() - size / 2,
+                                    r.bottom() - size / 2, size, size),
+        }
+
+    def _handle_at(self, pos: QtCore.QPointF) -> str:
+        for name, rect in self._selection_handles().items():
+            if rect.contains(pos):
+                return name
+        return ""
+
     # ── Painting ──────────────────────────────────────────────────
 
     def paintEvent(self, event):  # noqa: N802
@@ -406,6 +440,26 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
         painter.restore()
+        if self._selected and self._tool == "select":
+            self._draw_handles(painter)
+
+    def _draw_handles(self, painter: QtGui.QPainter) -> None:
+        """Rotate/resize handles of the selected shape (constant screen size)."""
+        handles = self._selection_handles()
+        if not handles:
+            return
+        painter.save()
+        for name, rect in handles.items():
+            painter.setPen(QtGui.QPen(QtGui.QColor("#1a73e8"), 1.5))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("#ffffff")))
+            painter.drawEllipse(rect)
+            icon_name = ("wb-rotate.svg" if name == "rotate"
+                         else "wb-scale.svg")
+            path = find_icon(icon_name)
+            if path:
+                QtGui.QIcon(path).paint(
+                    painter, rect.adjusted(3, 3, -3, -3).toRect())
+        painter.restore()
 
     def _draw_shape(self, painter: QtGui.QPainter, shape: dict) -> None:
         path = self._world_path(shape)
@@ -428,12 +482,25 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         world = self._to_world(event.position())
         tool = self._tool
         if tool == "select":
-            self._select_at(world)
-            if not self._selected:
-                # Dragging empty space pans the view.
-                self._pan_origin = event.position()
-                self._pan_start = QtCore.QPointF(self._view_pan)
-                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+            handle = self._handle_at(event.position())
+            if handle:
+                self._manip = handle
+                self._manip_id = self._selected
+                self._last = world
+                return
+            shape = self._shape_at(world)
+            if shape is not None:
+                self._selected = shape["id"]
+                self._manip = "move"
+                self._manip_id = shape["id"]
+                self._last = world
+                self.update()
+                return
+            # Empty space: deselect and pan the view.
+            self._selected = ""
+            self._pan_origin = event.position()
+            self._pan_start = QtCore.QPointF(self._view_pan)
+            self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
             self.update()
             return
         if tool == "fill":
@@ -479,6 +546,14 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 self._active["ellipse"] = self._ellipse_from(self._start, world)
             self.update()
             return
+        if self._manip:
+            shape = self._shape_by_id(self._manip_id)
+            if shape is not None and self._last is not None:
+                self._transform(shape, self._manip, self._last, world)
+                self._transformed = True
+                self._last = world
+                self.update()
+            return
         tool = self._tool
         if tool in ("move", "rotate", "scale") and self._selected \
                 and self._last is not None:
@@ -494,6 +569,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def _update_select_cursor(self, pos: QtCore.QPointF) -> None:
         if self._tool != "select":
             return
+        if self._handle_at(pos):
+            self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+            return
         over = self._shape_at(self._to_world(pos)) is not None
         self.setCursor(QtCore.Qt.CursorShape.ArrowCursor if over
                        else QtCore.Qt.CursorShape.OpenHandCursor)
@@ -505,11 +583,14 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             return
         if self._active is not None:
             self._commit_active()
-        elif self._transformed and self._selected:
-            shape = self._shape_by_id(self._selected)
+        elif self._transformed:
+            sid = self._manip_id or self._selected
+            shape = self._shape_by_id(sid) if sid else None
             if shape is not None:
                 self.shape_updated.emit(shape)
         self._transformed = False
+        self._manip = ""
+        self._manip_id = ""
         self._start = None
         self._last = None
         self.update()
