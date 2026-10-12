@@ -4,6 +4,10 @@ import os
 APP_NAME = "Stanza IM"
 VERSION = "0.1.0"
 
+# Logical size (the SVG viewBox) of the collaborative whiteboard document.
+WHITEBOARD_WIDTH = 1280
+WHITEBOARD_HEIGHT = 720
+
 # Path to the resources/ directory.  When running from a source checkout the
 # package lives in <project>/stanza_im and resources are a sibling
 # (<project>/resources).  When installed site-packages/<pkg>/stanza_im may

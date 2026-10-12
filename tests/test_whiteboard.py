@@ -56,7 +56,7 @@ def drag(widget, x1, y1, x2, y2, steps=3):
 
 # 1. drawing every shape type ------------------------------------------------
 canvas = WhiteboardCanvas()
-canvas.resize(600, 400)   # 1:1 with the 600x400 viewBox
+canvas.resize(1280, 720)   # 1:1 with the 1280x720 viewBox
 canvas.set_tool("rect")
 drag(canvas, 100, 100, 200, 150)
 canvas.set_tool("ellipse")
@@ -79,7 +79,7 @@ check("a pencil stores its points",
 # 2. SVG export --------------------------------------------------------------
 svg = canvas.to_svg()
 check("the SVG has the root and viewBox",
-      "<svg" in svg and 'viewBox="0 0 600 400"' in svg)
+      "<svg" in svg and 'viewBox="0 0 1280 720"' in svg)
 check("the SVG serialises every shape as a path",
       svg.count("<path") == 5)
 check("the rect geometry is written as path data",
@@ -137,7 +137,7 @@ widget.deleteLater()
 
 # 7. the collaborative canvas model ------------------------------------------
 canvas2 = WhiteboardCanvas()
-canvas2.resize(600, 400)
+canvas2.resize(1280, 720)
 canvas2.load_shapes([{"rid": "r1", "id": "s1", "d": "M 0 0 L 50 50",
                       "stroke": "#123456", "stroke-width": "3",
                       "fill": "none"}])

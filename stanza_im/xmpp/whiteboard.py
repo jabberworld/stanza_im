@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
+from stanza_im.include.constants import WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import sxe
 from stanza_im.xmpp.sxe import NS_SXE, NS_SXE_TRANSPORT, SxeDocument
@@ -223,7 +224,8 @@ class WhiteboardManager:
     def _seed_document(doc: SxeDocument) -> None:
         doc.set_attr(doc.root_rid, "version", "1.2")
         doc.set_attr(doc.root_rid, "baseProfile", "tiny")
-        doc.set_attr(doc.root_rid, "viewBox", "0 0 600 400")
+        doc.set_attr(doc.root_rid, "viewBox",
+                     "0 0 %d %d" % (WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT))
 
     # ── Local edits ───────────────────────────────────────────────
 

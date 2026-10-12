@@ -41,7 +41,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sid = ""
         self.setWindowTitle(tr("whiteboard_title"))
         self.setModal(False)
-        self.resize(760, 560)
+        self.resize(1040, 680)
 
         self._stroke = "#1a1a1a"
         self._fill = "#e53935"

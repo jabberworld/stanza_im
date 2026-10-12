@@ -13,10 +13,11 @@ import uuid
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include import svg_path
+from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH)
 
 #: Logical canvas size (the SVG ``viewBox``).
-VIEW_W = 600
-VIEW_H = 400
+VIEW_W = WHITEBOARD_WIDTH
+VIEW_H = WHITEBOARD_HEIGHT
 
 #: Tools that draw a new shape (as opposed to editing an existing one).
 DRAW_TOOLS = ("pencil", "line", "rect", "ellipse", "polygon")
@@ -283,9 +284,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         # A light grid helps the empty canvas.
         grid = QtGui.QPen(QtGui.QColor("#eef1f4"), 1.0)
         painter.setPen(grid)
-        for gx in range(0, VIEW_W + 1, 50):
+        for gx in range(0, VIEW_W + 1, 100):
             painter.drawLine(gx, 0, gx, VIEW_H)
-        for gy in range(0, VIEW_H + 1, 50):
+        for gy in range(0, VIEW_H + 1, 100):
             painter.drawLine(0, gy, VIEW_W, gy)
         for shape in self._shapes:
             self._draw_shape(painter, shape)
