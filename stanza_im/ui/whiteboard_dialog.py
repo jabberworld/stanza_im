@@ -53,6 +53,9 @@ class WhiteboardDialog(QtWidgets.QDialog):
         toolbar.setSpacing(2)
 
         self._canvas = WhiteboardCanvas(self)
+        # Ctrl+0 resets the view zoom/pan (Ctrl+wheel zooms, in the canvas).
+        zoom_reset = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+0"), self)
+        zoom_reset.activated.connect(self._canvas.reset_view)
         self._tool_group = QtWidgets.QButtonGroup(self)
         self._tool_group.setExclusive(True)
         self._tool_buttons: dict[str, QtWidgets.QToolButton] = {}

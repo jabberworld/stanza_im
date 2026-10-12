@@ -24,6 +24,10 @@ DRAW_TOOLS = ("pencil", "line", "rect", "ellipse", "polygon")
 #: Shapes whose closed area is filled with the fill colour.
 CLOSED_KINDS = ("rect", "ellipse", "polygon")
 
+#: View (zoom) limits.
+MIN_VIEW_ZOOM = 0.25
+MAX_VIEW_ZOOM = 8.0
+
 _MATRIX_RE = __import__("re").compile(
     r"matrix\(\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+"
     r"([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)\s*\)")
@@ -73,6 +77,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._start: QtCore.QPointF | None = None
         self._last: QtCore.QPointF | None = None
         self._transformed = False
+        # View transform (zoom/pan) — local, never part of the document.
+        self._view_zoom = 1.0
+        self._view_pan = QtCore.QPointF(0.0, 0.0)
+        self._pan_origin: QtCore.QPointF | None = None
+        self._pan_start = QtCore.QPointF(0.0, 0.0)
         self.setMinimumSize(480, 320)
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -153,20 +162,73 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     # ── Geometry helpers ──────────────────────────────────────────
 
-    def _scale(self) -> float:
+    def _fit_scale(self) -> float:
+        """The board-to-widget scale at zoom 1 (fits the whole board)."""
         if self.width() <= 0 or self.height() <= 0:
             return 1.0
         return min(self.width() / VIEW_W, self.height() / VIEW_H)
 
+    def _scale(self) -> float:
+        """The current view scale (fit scale times the view zoom)."""
+        return self._fit_scale() * self._view_zoom
+
     def _offset(self) -> tuple[float, float]:
         s = self._scale()
-        return ((self.width() - VIEW_W * s) / 2.0,
-                (self.height() - VIEW_H * s) / 2.0)
+        return ((self.width() - VIEW_W * s) / 2.0 + self._view_pan.x(),
+                (self.height() - VIEW_H * s) / 2.0 + self._view_pan.y())
 
     def _to_world(self, pos: QtCore.QPointF) -> QtCore.QPointF:
         s = self._scale()
         ox, oy = self._offset()
         return QtCore.QPointF((pos.x() - ox) / s, (pos.y() - oy) / s)
+
+    def _to_screen(self, world: QtCore.QPointF) -> QtCore.QPointF:
+        s = self._scale()
+        ox, oy = self._offset()
+        return QtCore.QPointF(ox + world.x() * s, oy + world.y() * s)
+
+    # ── View zoom / pan ───────────────────────────────────────────
+
+    def view_zoom(self) -> float:
+        return self._view_zoom
+
+    def set_view_zoom(self, zoom: float,
+                      anchor: QtCore.QPointF | None = None) -> None:
+        """Set the view zoom, keeping the point under *anchor* (widget px)."""
+        zoom = max(MIN_VIEW_ZOOM, min(MAX_VIEW_ZOOM, float(zoom)))
+        if abs(zoom - self._view_zoom) < 1e-9:
+            return
+        world = self._to_world(anchor) if anchor is not None else None
+        self._view_zoom = zoom
+        if world is not None:
+            s = self._scale()
+            cx = (self.width() - VIEW_W * s) / 2.0
+            cy = (self.height() - VIEW_H * s) / 2.0
+            self._view_pan = QtCore.QPointF(
+                anchor.x() - cx - world.x() * s,
+                anchor.y() - cy - world.y() * s)
+        self.update()
+
+    def zoom_by(self, factor: float,
+                anchor: QtCore.QPointF | None = None) -> None:
+        self.set_view_zoom(self._view_zoom * factor, anchor)
+
+    def reset_view(self) -> None:
+        if self._view_zoom == 1.0 and self._view_pan.isNull():
+            return
+        self._view_zoom = 1.0
+        self._view_pan = QtCore.QPointF(0.0, 0.0)
+        self.update()
+
+    def wheelEvent(self, event):  # noqa: N802
+        if event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta:
+                self.zoom_by(1.1 if delta > 0 else 1.0 / 1.1,
+                             event.position())
+                event.accept()
+                return
+        super().wheelEvent(event)
 
     @staticmethod
     def _local_path(shape: dict) -> QtGui.QPainterPath:
@@ -257,18 +319,21 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         shape.update(extra)
         return shape
 
-    def _select_at(self, world: QtCore.QPointF) -> None:
+    def _shape_at(self, world: QtCore.QPointF) -> dict | None:
+        """The topmost shape under *world* (hit-test), or ``None``."""
         for shape in reversed(self._shapes):
             path = self._world_path(shape)
             stroker = QtGui.QPainterPathStroker()
             stroker.setWidth(max(8.0, shape["stroke_width"] + 4.0))
             if stroker.createStroke(path).contains(world):
-                self._selected = shape["id"]
-                return
+                return shape
             if self._filled(shape) and path.contains(world):
-                self._selected = shape["id"]
-                return
-        self._selected = ""
+                return shape
+        return None
+
+    def _select_at(self, world: QtCore.QPointF) -> None:
+        shape = self._shape_at(world)
+        self._selected = shape["id"] if shape is not None else ""
 
     # ── Painting ──────────────────────────────────────────────────
 
@@ -326,6 +391,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         tool = self._tool
         if tool == "select":
             self._select_at(world)
+            if not self._selected:
+                # Dragging empty space pans the view.
+                self._pan_origin = event.position()
+                self._pan_start = QtCore.QPointF(self._view_pan)
+                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
             self.update()
             return
         if tool in ("move", "rotate", "scale"):
@@ -350,6 +420,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             self.update()
 
     def mouseMoveEvent(self, event):  # noqa: N802
+        if self._pan_origin is not None:
+            self._view_pan = self._pan_start + (event.position()
+                                                - self._pan_origin)
+            self.update()
+            return
         world = self._to_world(event.position())
         if self._active is not None:
             kind = self._active["kind"]
@@ -372,8 +447,21 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 self._transformed = True
                 self._last = world
                 self.update()
+        elif tool == "select":
+            self._update_select_cursor(event.position())
+
+    def _update_select_cursor(self, pos: QtCore.QPointF) -> None:
+        if self._tool != "select":
+            return
+        over = self._shape_at(self._to_world(pos)) is not None
+        self.setCursor(QtCore.Qt.CursorShape.ArrowCursor if over
+                       else QtCore.Qt.CursorShape.OpenHandCursor)
 
     def mouseReleaseEvent(self, event):  # noqa: N802
+        if self._pan_origin is not None:
+            self._pan_origin = None
+            self._update_select_cursor(event.position())
+            return
         if self._active is not None:
             self._commit_active()
         elif self._transformed and self._selected:
@@ -384,6 +472,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._start = None
         self._last = None
         self.update()
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if self._tool == "select" \
+                and event.button() == QtCore.Qt.MouseButton.LeftButton:
+            world = self._to_world(event.position())
+            if self._shape_at(world) is None:
+                self.reset_view()
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
 
     def _commit_active(self) -> None:
         shape = self._active

@@ -196,6 +196,45 @@ check("the share button requests a session",
       shared == [("bob@example.com", False)])
 dialog2.close()
 
+# 9. view zoom / pan ---------------------------------------------------------
+vc = WhiteboardCanvas()
+vc.resize(1280, 720)   # 1:1 with the viewBox -> fit scale 1.0
+anchor = QtCore.QPointF(300, 200)
+world_before = vc._to_world(anchor)
+vc.zoom_by(1.5, anchor)
+world_after = vc._to_world(anchor)
+check("zooming keeps the point under the cursor fixed",
+      abs(world_before.x() - world_after.x()) < 1e-6
+      and abs(world_before.y() - world_after.y()) < 1e-6)
+check("zooming changes the view scale", abs(vc._scale() - 1.5) < 1e-9)
+check("zoom is clamped to the maximum",
+      (vc.set_view_zoom(99.0), vc.view_zoom())[1] == 8.0)
+
+wheel = QtGui.QWheelEvent(
+    QtCore.QPointF(300, 200), QtCore.QPointF(300, 200),
+    QtCore.QPoint(0, 0), QtCore.QPoint(0, 120),
+    QtCore.Qt.MouseButton.NoButton,
+    QtCore.Qt.KeyboardModifier.ControlModifier,
+    QtCore.Qt.ScrollPhase.NoScrollPhase, False)
+vc.reset_view()
+before = vc.view_zoom()
+vc.wheelEvent(wheel)
+check("Ctrl+wheel zooms in", vc.view_zoom() > before)
+
+vc.reset_view()
+check("reset restores zoom/pan",
+      vc.view_zoom() == 1.0 and vc._view_pan.isNull())
+
+# Panning: drag on empty space in select mode.
+vc.set_tool("select")
+drag(vc, 400, 300, 460, 330, steps=2)
+check("dragging empty space pans the view",
+      vc._view_pan.x() > 50 and vc._view_pan.y() > 20)
+vc.zoom_by(2.0)
+vc.mouseDoubleClickEvent(_event(
+    QtCore.QEvent.Type.MouseButtonDblClick, 10, 10))
+check("a double click on empty space resets the view", vc.view_zoom() == 1.0)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
