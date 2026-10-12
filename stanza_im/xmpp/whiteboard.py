@@ -12,6 +12,7 @@ incoming edits are applied to the document and the UI is told to rebuild.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -27,6 +28,11 @@ logger = logging.getLogger("stanza_im.whiteboard")
 NS_WHITEBOARD = "urn:xmpp:jingle:apps:svg-whiteboard:0"
 NS_JINGLE = "urn:xmpp:jingle:1"
 NS_SVG = "http://www.w3.org/2000/svg"
+
+#: Fixed root record id of the shared SVG document.  Every participant uses the
+#: same value, so an incremental ``<new parent="…"/>`` edit refers to a record
+#: that exists locally without needing a full snapshot first.
+WHITEBOARD_ROOT_RID = "svg-root"
 
 
 def _q(ns: str, tag: str) -> str:
@@ -51,7 +57,8 @@ class WhiteboardSession:
     full_peer: str = ""
     local_only: bool = False
     failure: str = ""
-    doc: SxeDocument = field(default_factory=SxeDocument)
+    doc: SxeDocument = field(
+        default_factory=lambda: SxeDocument(root_rid=WHITEBOARD_ROOT_RID))
     ready: bool = False
     offered: bool = False       # we sent a state offer
     accepted: bool = False      # our offer was accepted
@@ -134,21 +141,42 @@ class WhiteboardManager:
             NS_WHITEBOARD in caps.get(full, ()) or NS_SXE in caps.get(full, ())))
         return chosen or best(lambda _full, _info: True) or bare
 
+    @staticmethod
+    def _muc_sid(room: str) -> str:
+        """A deterministic session id shared by every participant of a room.
+
+        A random sid per participant would give each its own session, so the
+        peers would never see each other's edits; deriving it from the room JID
+        makes everyone converge on the same shared document.
+        """
+        bare = room.split("/", 1)[0]
+        return hashlib.sha1(
+            ("urn:xmpp:sxe:0:" + bare).encode("utf-8")).hexdigest()
+
     def start_session(self, peer: str, is_muc: bool = False,
                       name: str = "") -> str:
-        """Create a new session hosted by us and invite/announce it."""
+        """Create (or, for a MUC, reuse) a session hosted by us and announce it."""
+        if is_muc:
+            sid = self._muc_sid(peer)
+            session = self.sessions.get(sid)
+            if session is None:
+                session = WhiteboardSession(sid=sid, peer=peer, is_muc=True,
+                                            is_host=True, name=name)
+                self._seed_document(session.doc)
+                self.sessions[sid] = session
+            self._by_peer[peer] = sid
+            session.ready = True
+            self._advertise(session)
+            self._send(session, self._sxe(session, "connect"))
+            self.client.emit("whiteboard_ready", sid)
+            return sid
         sid = uuid.uuid4().hex
-        session = WhiteboardSession(sid=sid, peer=peer, is_muc=is_muc,
+        session = WhiteboardSession(sid=sid, peer=peer, is_muc=False,
                                     is_host=True, name=name)
         self._seed_document(session.doc)
         self.sessions[sid] = session
         self._by_peer[peer] = sid
-        if is_muc:
-            self._advertise(session)
-            session.ready = True
-            self._send(session, self._sxe(session, "connect"))
-            self.client.emit("whiteboard_ready", sid)
-        elif peer.split("/", 1)[0] == (self.client.jid_str or ""):
+        if peer.split("/", 1)[0] == (self.client.jid_str or ""):
             # Sharing a board with our own JID is pointless (the invite would
             # loop back to us): keep the board local, never send an invite.
             session.local_only = True
@@ -390,14 +418,15 @@ class WhiteboardManager:
 
     def _apply_state(self, session: WhiteboardSession, state: ET.Element) -> None:
         doc = session.doc
-        if state.find(_q(NS_SXE, "document-begin")) is not None:
-            # A fresh snapshot: rebuild the drawable records.
-            for rid in list(doc.records):
-                if rid != doc.root_rid:
-                    doc.records.pop(rid, None)
-            doc.records[doc.root_rid].children = []
+        # A snapshot (document-begin … document-end) is **merged**, not applied
+        # as a replace: every peer shares the fixed WHITEBOARD_ROOT_RID (so the
+        # root <new> is skipped) and the drawable records are unioned — a peer
+        # that joined later gains the existing shapes without the active peers
+        # losing theirs.
         for child in state:
             if child.tag == _q(NS_SXE, "new"):
+                if not (child.get("parent") or ""):
+                    continue  # the root element already exists locally
                 doc.apply_new(child)
             elif child.tag == _q(NS_SXE, "set"):
                 doc.apply_set(child)

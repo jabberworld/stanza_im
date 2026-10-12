@@ -153,13 +153,38 @@ check("a remote manager applies the snapshot",
       len(mgr2.shapes("remote")) == 1
       and mgr2.shapes("remote")[0]["d"] == "M 0 0 L 20 20")
 
-# 5. a full snapshot overwrites the remote document --------------------------
+# 5. a snapshot is merged, not a replace ------------------------------------
 extra = ET.Element(_q(NS_SXE, "state"))
 begin = ET.SubElement(extra, _q(NS_SXE, "document-begin"))
 begin.set("prolog", "data:text/xml,")
 mgr2._apply_state(sess2, extra)
-check("document-begin clears the drawable records",
-      mgr2.shapes("remote") == [])
+check("an empty snapshot keeps the local shapes",
+      len(mgr2.shapes("remote")) == 1)
+
+snap = ET.Element(_q(NS_SXE, "state"))
+ET.SubElement(snap, _q(NS_SXE, "document-begin"))
+root_new = ET.SubElement(snap, _q(NS_SXE, "new"))
+root_new.set("rid", "other-root")
+root_new.set("type", "element")
+root_new.set("name", "svg")
+root_new.set("primary-weight", "0")
+shape_new = ET.SubElement(snap, _q(NS_SXE, "new"))
+shape_new.set("rid", "shape2")
+shape_new.set("type", "element")
+shape_new.set("parent", "svg-root")
+shape_new.set("name", "path")
+shape_new.set("primary-weight", "1")
+d_attr = ET.SubElement(snap, _q(NS_SXE, "new"))
+d_attr.set("rid", "shape2-d")
+d_attr.set("type", "attr")
+d_attr.set("parent", "shape2")
+d_attr.set("name", "d")
+d_attr.set("chdata", "M 5 5 L 9 9")
+ET.SubElement(snap, _q(NS_SXE, "document-end"))
+mgr2._apply_state(sess2, snap)
+remote = mgr2.shapes("remote")
+check("a snapshot merges a new shape (root skipped)",
+      len(remote) == 2 and any(s["d"] == "M 5 5 L 9 9" for s in remote))
 
 # 6. remove ------------------------------------------------------------------
 mgr.remove_shape(sid, rid)
@@ -281,6 +306,27 @@ check("upload_http_media returns a full media dict",
       and _media["width"] == 1280 and _media["height"] == 720
       and "sha-256" in _media["hashes"])
 os.remove(_tmp.name)
+
+# 14. MUC: one deterministic session per room, edits render across peers -----
+a = WhiteboardManager(_FakeClient())
+b = WhiteboardManager(_FakeClient())
+sid_a = a.start_session("room@conference.example", is_muc=True)
+sid_b = b.start_session("room@conference.example", is_muc=True)
+check("both peers of a room get the same session id", sid_a == sid_b)
+check("the shared document uses the fixed root rid",
+      a.document(sid_a).root_rid == "svg-root")
+
+a.add_shape(sid_a, {"id": "s1", "d": "M 0 0 L 10 10"})
+_edit = _state_of(a.client)
+_in = _FakeIncoming("room@conference.example/a",
+                    ET.Element("{jabber:client}message"))
+_sxe = ET.SubElement(_in.xml, _q(NS_SXE, "sxe"))
+_sxe.set("session", sid_a)
+_sxe.append(_edit)
+asyncio.run(b.handle_sxe(_in))
+check("a peer's incremental edit lands in the shared document",
+      len(b.shapes(sid_b)) == 1
+      and b.shapes(sid_b)[0]["d"] == "M 0 0 L 10 10")
 
 print()
 if FAILURES:

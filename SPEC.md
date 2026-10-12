@@ -2423,9 +2423,17 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `xmpp/sxe.py::SxeDocument` (XEP-0284 record model). For a 1:1 session the
   initiator is the host (`session-initiate` → `session-accept`); for a MUC
   session the room JID is the host and the payloads travel as `groupchat`
-  messages. The SXE messages are `connect` (host answers with a `state-offer`),
-  `state-offer`/`accept-state`/`refuse-state` and `state`
-  (`document-begin` → `new`/`set`/`remove` → `document-end`). Bodyless `<sxe>`
+  messages. The document root uses a **fixed record id**
+  (`whiteboard.WHITEBOARD_ROOT_RID`, `"svg-root"`), so an incremental
+  `<new parent="…"/>` refers to a record every peer already has; a MUC session
+  id is **derived from the room JID** (`WhiteboardManager._muc_sid`) so all
+  participants converge on one shared document, and `start_session` reuses an
+  existing room session. The SXE messages are `connect` (host answers with a
+  `state-offer`), `state-offer`/`accept-state`/`refuse-state` and `state`
+  (`document-begin` → `new`/`set`/`remove` → `document-end`); a `document-begin`
+  snapshot is **merged** (`_apply_state` skips the root `<new>` and unions the
+  drawable records) so a late joiner gains the existing shapes without the
+  active peers losing theirs. Bodyless `<sxe>`
   messages are routed by a dedicated `MatchXPath` handler
   (`JabberClient._on_sxe_stanza`), Jingle IQs by `_dispatch_jingle_iq`
   (`whiteboard.is_whiteboard_jingle` / a known sid), and the features are

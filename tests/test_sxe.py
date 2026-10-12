@@ -89,6 +89,11 @@ removed = doc3.remove(el_rid)
 check("remove cascades to descendants",
       set(removed) == {el_rid, child_rid, attr_id})
 
+# 9. a fixed root rid is honoured --------------------------------------------
+fixed = SxeDocument(root_rid="fixed-root")
+check("SxeDocument uses the given root rid", fixed.root_rid == "fixed-root")
+check("the fixed root record exists", "fixed-root" in fixed.records)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

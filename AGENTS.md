@@ -1917,7 +1917,16 @@ The dialog's «Поделиться доской» button starts a **collaborati
 application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 (`urn:xmpp:jingle:transports:sxe`) sharing an `xmpp/sxe.py::SxeDocument`
 (XEP-0284 record model). For 1:1 the initiator is the host; for MUC the room JID
-is the host and the SXE payloads are `groupchat` messages. Bodyless `<sxe>`
+is the host and the SXE payloads are `groupchat` messages. Every document uses a
+**fixed root record id** (`whiteboard.WHITEBOARD_ROOT_RID`, `"svg-root"`), so an
+incremental `<new parent="…"/>` edit refers to a record every peer already has —
+no snapshot is needed first. A MUC session id is **derived from the room JID**
+(`WhiteboardManager._muc_sid`), so all participants converge on one shared
+document (a random per-participant sid gave each its own session and nothing
+synced); `start_session` reuses an existing room session. A `document-begin`
+snapshot is **merged**, not applied as a replace (`_apply_state` skips the root
+`<new>` and unions the drawable records), so a late joiner gains the existing
+shapes without the active peers losing theirs. Bodyless `<sxe>`
 messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
 handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
 features are advertised in disco. A 1:1 `session-initiate` is addressed to the

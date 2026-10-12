@@ -85,10 +85,13 @@ class SxeDocument:
     """A shared XML document synchronized with the SXE record model."""
 
     def __init__(self, root_name: str = "svg",
-                 root_ns: str = "http://www.w3.org/2000/svg"):
+                 root_ns: str = "http://www.w3.org/2000/svg",
+                 root_rid: str = ""):
         self.records: dict[str, Record] = {}
         self._next_weight: dict[str, float] = {}
-        self.root_rid = _new_rid()
+        # A fixed root rid lets every participant of a shared document agree on
+        # the ``parent`` a ``<new>`` edit refers to (the whiteboard uses it).
+        self.root_rid = root_rid or _new_rid()
         root = Record(rid=self.root_rid, type="element", name=root_name,
                       ns=root_ns)
         self.records[self.root_rid] = root
