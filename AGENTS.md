@@ -143,6 +143,7 @@ stanza_im/                      # Python package
 resources/                       # Images, chat skins, sounds, etc.
 old/                             # Original Jabbim code (reference only, gitignored)
 README.md                        # Общее описание проекта (назначение, возможности, зависимости)
+FEATURES.md                      # User-facing feature list (living document)
 main.py                          # python main.py entry point
 pyproject.toml                   # Package config (distribution: stanza-im)
 AGENTS.md                        # This architecture guide (living document)
@@ -2742,9 +2743,9 @@ change every hash and require a force-push.
 
 ## Documentation Maintenance
 
-`AGENTS.md`, `SPEC.md`, `XEPs.md` and `CHECKLIST.md` are living documents and
-MUST be updated in the same logical unit of work as any change that makes them
-stale:
+`AGENTS.md`, `SPEC.md`, `XEPs.md`, `CHECKLIST.md` and `FEATURES.md` are living
+documents and MUST be updated in the same logical unit of work as any change
+that makes them stale:
 
 - supported XEP added/removed or used differently → `XEPs.md` (+ `SPEC.md` §14)
   and, when it is a XEP-0479 compliance extension, `CHECKLIST.md`;
@@ -2753,7 +2754,12 @@ stale:
 - new/removed modules or files → both directory-structure blocks
   (`AGENTS.md` Directory Structure, `SPEC.md` §3);
 - architecture, UI patterns, shortcuts or dependencies → `AGENTS.md` and
-  `SPEC.md` (relevant section).
+  `SPEC.md` (relevant section);
+- new/removed **user-facing feature** → `FEATURES.md` (and, when it changes the
+  XEP surface, `XEPs.md`).  `FEATURES.md` is the user-facing feature list: a
+  Russian bulleted list of bold categories with short, jargon-free phrases
+  describing what the user sees.  Keep it in that style — no XEP numbers, no
+  internal mode names, no implementation jargon.
 
 Before committing, check `git status`: when a change affects any of the above,
 the corresponding spec file must appear in the same commit. `tests/test_spec_sync.py`

@@ -118,6 +118,10 @@ stanza_im/
                            <name>/strings/ = the plugin's own en/ru UI strings)
 ```
 
+Root-level documents: `README.md` (overview), `FEATURES.md` (user-facing feature
+list), `AGENTS.md` (architecture), `SPEC.md` (this file), `XEPs.md` (supported
+extensions) and `CHECKLIST.md` (XEP-0479 compliance).
+
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
 and `ui/conference_dialog.py`. The add-contact dialog keeps the "Service ID
 translator" compact (description over a prompt + a fixed-size "Get XMPP address"
