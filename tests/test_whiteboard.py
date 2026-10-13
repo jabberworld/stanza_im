@@ -57,6 +57,8 @@ def drag(widget, x1, y1, x2, y2, steps=3):
 # 1. drawing every shape type ------------------------------------------------
 canvas = WhiteboardCanvas()
 canvas.resize(1280, 720)   # 1:1 with the 1280x720 viewBox
+check("fill is off by default", canvas._fill_enabled is False)
+canvas.set_fill_enabled(True)
 canvas.set_tool("rect")
 drag(canvas, 100, 100, 200, 150)
 canvas.set_tool("ellipse")

@@ -74,7 +74,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._tool = "pencil"
         self._stroke = "#1a1a1a"
         self._fill = "#e53935"
-        self._fill_enabled = True
+        self._fill_enabled = False
         self._width = 2
         self._active: dict | None = None
         self._start: QtCore.QPointF | None = None
@@ -455,7 +455,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             stroker.setWidth(max(8.0, shape["stroke_width"] + 4.0))
             if stroker.createStroke(path).contains(world):
                 return shape
-            if self._filled(shape) and path.contains(world):
+            # A closed shape is selectable by its interior even when unfilled.
+            if (self._filled(shape) or self._is_closed(shape)) \
+                    and path.contains(world):
                 return shape
         return None
 

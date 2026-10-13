@@ -132,7 +132,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._fill_on_btn = self._tool_button("wb-fill-toggle.svg",
                                               tr("whiteboard_fill_toggle"),
                                               checkable=True)
-        self._fill_on_btn.setChecked(True)
+        self._fill_on_btn.setChecked(False)
         self._fill_on_btn.toggled.connect(self._canvas.set_fill_enabled)
         toolbar.addWidget(self._fill_on_btn)
 
