@@ -229,6 +229,8 @@ STRINGS = {
     "whiteboard_tool_fill": "Залить замкнутую фигуру",
     "whiteboard_tool_eraser": "Ластик (удаляет фигуры)",
     "whiteboard_tool_text": "Текст",
+    "whiteboard_undo": "Отмена",
+    "whiteboard_redo": "Вернуть",
     "whiteboard_text_title": "Текст",
     "whiteboard_text_prompt": "Текст для размещения на доске (многострочный):",
     "whiteboard_fill_toggle": "Заливать новые фигуры",

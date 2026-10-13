@@ -432,6 +432,33 @@ rt.load_shapes([{"rid": "t1", "id": "t1",
 check("a remote text shape renders",
       rt._world_path(rt.shapes()[0]).boundingRect().width() > 0)
 
+# 17c. undo / redo buttons ---------------------------------------------------
+class _WbStub:
+    def __init__(self):
+        self.calls = []
+
+    def undo(self, sid):
+        self.calls.append(("undo", sid))
+
+    def redo(self, sid):
+        self.calls.append(("redo", sid))
+
+
+class _ClientStub:
+    def __init__(self):
+        self.whiteboard = _WbStub()
+
+
+ud = WhiteboardDialog("bob@example.com", client=_ClientStub())
+ud._sid = "s1"
+check("the dialog has undo/redo buttons",
+      hasattr(ud, "_undo_btn") and hasattr(ud, "_redo_btn"))
+ud._on_undo()
+ud._on_redo()
+check("undo/redo call the manager",
+      ud._client.whiteboard.calls == [("undo", "s1"), ("redo", "s1")])
+ud.close()
+
 # 18. middle-button pan (any tool) + fill-toggle icon ------------------------
 mc = WhiteboardCanvas()
 mc.resize(1280, 720)

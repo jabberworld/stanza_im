@@ -2449,7 +2449,15 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `<close/>`** (client extension) so all occupants see the end, and a passive
   occupant / late room joiner learns of a board from any incoming SXE or the
   presence `<sxe>` advertisement (`JabberClient._on_sxe_presence` →
-  `handle_sxe_presence`). Bodyless `<sxe>`
+  `handle_sxe_presence`). **Undo/redo** (buttons after «Удалить», `Ctrl+Z` /
+  `Ctrl+Shift+Z`) is a shared history: every operation — own
+  (`add_shape`/`update_shape`/`remove_shape`) or remote (`_apply_state`
+  incremental edits; a join snapshot is not recorded) — pushes a patch of
+  forward + inverse `<new>`/`<set>`/`<remove>` edits onto a per-session stack
+  (`WhiteboardManager._undo`/`_redo`, capped at 100); `undo`/`redo` apply the
+  inverse/forward, broadcast it and emit `whiteboard_state`, so the last
+  move/rotate/scale/fill/add/delete is reverted for everyone; a new operation
+  clears the redo stack. Bodyless `<sxe>`
   messages are routed by a dedicated `MatchXPath` handler
   (`JabberClient._on_sxe_stanza`), Jingle IQs by `_dispatch_jingle_iq`
   (`whiteboard.is_whiteboard_jingle` / a known sid), and the features are

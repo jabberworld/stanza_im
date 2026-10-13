@@ -379,6 +379,70 @@ asyncio.run(m4.handle_sxe_presence(_pres))
 check("a presence board advertisement announces activity",
       ("whiteboard_activity", "room@conference.example", True) in c4.events)
 
+# 16. undo / redo ------------------------------------------------------------
+c = _FakeClient()
+c._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid = m.start_session("bob@example.com", is_muc=False)
+rid = m.add_shape(sid, {"id": "s1", "d": "M 0 0 L 10 10"})
+check("the shape is present", len(m.shapes(sid)) == 1)
+check("undo is available", m.can_undo(sid))
+_sent_before = len(c.xmpp.sent)
+m.undo(sid)
+check("undo removes the added shape", m.shapes(sid) == [])
+check("undo broadcasts the inverse edit", len(c.xmpp.sent) > _sent_before)
+check("redo is available", m.can_redo(sid))
+m.redo(sid)
+check("redo re-adds the shape", len(m.shapes(sid)) == 1)
+
+# undo a transform (an attribute <set>)
+rid2 = m.shapes(sid)[0]["rid"]
+m.update_shape(sid, rid2, {"transform": "matrix(1 0 0 1 50 50)"})
+check("the transform is applied", m.shapes(sid)[0]["transform"] != "")
+m.undo(sid)
+check("undo restores the previous transform",
+      m.shapes(sid)[0]["transform"] == "")
+
+# a new operation clears the redo stack
+m.undo(sid)
+check("redo is available after an undo", m.can_redo(sid))
+m.add_shape(sid, {"id": "s2", "d": "M 1 1 L 2 2"})
+check("a new operation clears the redo stack", not m.can_redo(sid))
+
+# undo a remove restores the shape
+rid3 = m.add_shape(sid, {"id": "s3", "d": "M 3 3 L 4 4"})
+_before = len(m.shapes(sid))
+m.remove_shape(sid, rid3)
+check("remove drops the shape", len(m.shapes(sid)) == _before - 1)
+m.undo(sid)
+check("undo restores the removed shape", len(m.shapes(sid)) == _before)
+
+# undo a remote edit
+c5 = _FakeClient()
+m5 = WhiteboardManager(c5)
+sid5 = m5.start_session("room@conference.example", is_muc=True)
+_in = _FakeIncoming("room@conference.example/alice",
+                    ET.Element("{jabber:client}message"))
+_sxe = ET.SubElement(_in.xml, _q(NS_SXE, "sxe"))
+_sxe.set("session", sid5)
+_state = ET.SubElement(_sxe, _q(NS_SXE, "state"))
+_n = ET.SubElement(_state, _q(NS_SXE, "new"))
+_n.set("rid", "remote-1")
+_n.set("type", "element")
+_n.set("parent", "svg-root")
+_n.set("name", "path")
+_n.set("primary-weight", "1")
+_d = ET.SubElement(_state, _q(NS_SXE, "new"))
+_d.set("rid", "remote-1-d")
+_d.set("type", "attr")
+_d.set("parent", "remote-1")
+_d.set("name", "d")
+_d.set("chdata", "M 0 0 L 5 5")
+asyncio.run(m5.handle_sxe(_in))
+check("a remote edit is applied", len(m5.shapes(sid5)) == 1)
+m5.undo(sid5)
+check("undo reverts a remote edit", m5.shapes(sid5) == [])
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

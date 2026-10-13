@@ -68,17 +68,30 @@ class WhiteboardDialog(QtWidgets.QDialog):
         for _key in ("Delete", "Backspace"):
             sc = QtGui.QShortcut(QtGui.QKeySequence(_key), self)
             sc.activated.connect(self._canvas.delete_selected)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Z"), self,
+                        activated=self._on_undo)
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+Z"), self,
+                        activated=self._on_redo)
         self._tool_group = QtWidgets.QButtonGroup(self)
         self._tool_group.setExclusive(True)
         self._tool_buttons: dict[str, QtWidgets.QToolButton] = {}
         for tool, icon, tip_key in _TOOLS:
             if tool == "pencil":
-                # «Удалить» is an object operation: it closes the manipulation
-                # group, then a separator starts the drawing tools.
+                # «Удалить» / «Отмена» / «Вернуть» are object operations: they
+                # close the manipulation group, then a separator starts the
+                # drawing tools.
                 self._delete_btn = self._tool_button(
                     "remove.svg", tr("whiteboard_tool_delete"))
                 self._delete_btn.clicked.connect(self._canvas.delete_selected)
                 toolbar.addWidget(self._delete_btn)
+                self._undo_btn = self._tool_button("wb-undo.svg",
+                                                   tr("whiteboard_undo"))
+                self._undo_btn.clicked.connect(self._on_undo)
+                toolbar.addWidget(self._undo_btn)
+                self._redo_btn = self._tool_button("wb-redo.svg",
+                                                   tr("whiteboard_redo"))
+                self._redo_btn.clicked.connect(self._on_redo)
+                toolbar.addWidget(self._redo_btn)
                 toolbar.addWidget(self._separator())
             button = self._tool_button(icon, tr(tip_key), checkable=True)
             button.clicked.connect(
@@ -332,6 +345,14 @@ class WhiteboardDialog(QtWidgets.QDialog):
                 tr("whiteboard_share_png_failed"))
             return
         self.share_png_requested.emit(path)
+
+    def _on_undo(self) -> None:
+        if self._client and self._sid:
+            self._client.whiteboard.undo(self._sid)
+
+    def _on_redo(self) -> None:
+        if self._client and self._sid:
+            self._client.whiteboard.redo(self._sid)
 
     def _confirm_finish(self) -> None:
         answer = QtWidgets.QMessageBox.question(

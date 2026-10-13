@@ -12,6 +12,7 @@ incoming edits are applied to the document and the UI is told to rebuild.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
 import uuid
@@ -75,6 +76,10 @@ class WhiteboardManager:
         # Peers (bare JID / room) with a currently active board, so the
         # start/end chat status line is emitted once per activity span.
         self._active_peers: set[str] = set()
+        # Per-session undo/redo stacks of edit patches (forward + inverse), so a
+        # shared board can undo the last operation whatever its author.
+        self._undo: dict[str, list[dict]] = {}
+        self._redo: dict[str, list[dict]] = {}
 
     @property
     def available(self) -> bool:
@@ -279,6 +284,72 @@ class WhiteboardManager:
         doc.set_attr(doc.root_rid, "viewBox",
                      "0 0 %d %d" % (WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT))
 
+    # ── Undo / redo ───────────────────────────────────────────────
+
+    _UNDO_MAX = 100
+
+    @staticmethod
+    def _batch() -> dict:
+        return {"new": [], "set": [], "remove": []}
+
+    def _record(self, sid: str, forward: dict, inverse: dict) -> None:
+        """Push a patch (forward + inverse edits) onto the undo stack."""
+        if not any(forward[k] or inverse[k]
+                   for k in ("new", "set", "remove")):
+            return
+        stack = self._undo.setdefault(sid, [])
+        stack.append({"forward": forward, "inverse": inverse})
+        if len(stack) > self._UNDO_MAX:
+            del stack[0]
+        self._redo.pop(sid, None)  # a new operation invalidates the redo stack
+
+    def can_undo(self, sid: str) -> bool:
+        return bool(self._undo.get(sid))
+
+    def can_redo(self, sid: str) -> bool:
+        return bool(self._redo.get(sid))
+
+    def undo(self, sid: str) -> bool:
+        """Revert the last operation (own or remote); broadcast the inverse."""
+        stack = self._undo.get(sid)
+        if not stack:
+            return False
+        patch = stack.pop()
+        self._apply_patch(sid, patch["inverse"])
+        self._redo.setdefault(sid, []).append(patch)
+        return True
+
+    def redo(self, sid: str) -> bool:
+        """Re-apply the last undone operation."""
+        stack = self._redo.get(sid)
+        if not stack:
+            return False
+        patch = stack.pop()
+        self._apply_patch(sid, patch["forward"])
+        self._undo.setdefault(sid, []).append(patch)
+        return True
+
+    def _apply_patch(self, sid: str, batch: dict) -> None:
+        session = self.sessions.get(sid)
+        if session is None:
+            return
+        doc = session.doc
+        for el in batch.get("new", []):
+            if not (el.get("parent") or ""):
+                continue  # the root element already exists
+            doc.apply_new(el)
+        for el in batch.get("set", []):
+            doc.apply_set(el)
+        for el in batch.get("remove", []):
+            doc.apply_remove(el)
+        if not session.local_only:
+            self._send_edits(
+                session,
+                new=[copy.deepcopy(e) for e in batch.get("new", [])],
+                sets=[copy.deepcopy(e) for e in batch.get("set", [])],
+                removes=[copy.deepcopy(e) for e in batch.get("remove", [])])
+        self.client.emit("whiteboard_state", sid)
+
     # ── Local edits ───────────────────────────────────────────────
 
     def add_shape(self, sid: str, attrs: dict) -> str:
@@ -292,7 +363,10 @@ class WhiteboardManager:
             value = attrs.get(key)
             if value:
                 doc.add_attr(rid, key, str(value))
-        self._send_edits(session, new=doc.new_elements_for(rid))
+        new = doc.new_elements_for(rid)
+        self._send_edits(session, new=new)
+        self._record(sid, {"new": new, "set": [], "remove": []},
+                     {"new": [], "set": [], "remove": [self._remove_element(rid)]})
         return rid
 
     def update_shape(self, sid: str, rid: str, attrs: dict) -> None:
@@ -304,13 +378,24 @@ class WhiteboardManager:
         if rid not in doc.records:
             return
         sets: list[ET.Element] = []
+        inv_sets: list[ET.Element] = []
+        inv_removes: list[ET.Element] = []
         for key in ("d", "stroke", "stroke-width", "fill", "transform"):
             if key not in attrs:
                 continue
+            existing = doc.find_attr(rid, key)
+            old = doc.records[existing] if existing else None
             attr_rid = doc.set_attr(rid, key, str(attrs[key] or ""))
             sets.append(self._set_element(attr_rid, doc))
+            if old is not None:
+                inv_sets.append(self._set_element_values(
+                    attr_rid, old.chdata, old.version))
+            else:
+                inv_removes.append(self._remove_element(attr_rid))
         if sets:
             self._send_edits(session, sets=sets)
+            self._record(sid, {"new": [], "set": sets, "remove": []},
+                         {"new": [], "set": inv_sets, "remove": inv_removes})
 
     def remove_shape(self, sid: str, rid: str) -> None:
         """Remove a shape and broadcast the ``<remove>`` edits (children first)."""
@@ -318,10 +403,13 @@ class WhiteboardManager:
         if session is None:
             return
         doc = session.doc
+        captured = doc.new_elements_for(rid) if rid in doc.records else []
         removed = doc.remove(rid)
         removes = [self._remove_element(r) for r in removed]
         if removes:
             self._send_edits(session, removes=removes)
+            self._record(sid, {"new": [], "set": [], "remove": removes},
+                         {"new": captured, "set": [], "remove": []})
 
     # ── Jingle ────────────────────────────────────────────────────
 
@@ -475,16 +563,39 @@ class WhiteboardManager:
         # as a replace: every peer shares the fixed WHITEBOARD_ROOT_RID (so the
         # root <new> is skipped) and the drawable records are unioned — a peer
         # that joined later gains the existing shapes without the active peers
-        # losing theirs.
+        # losing theirs.  A snapshot is a join, not an action, so it is not
+        # recorded for undo; an incremental edit is.
+        is_snapshot = state.find(_q(NS_SXE, "document-begin")) is not None
+        forward = self._batch()
+        inverse = self._batch()
         for child in state:
             if child.tag == _q(NS_SXE, "new"):
                 if not (child.get("parent") or ""):
                     continue  # the root element already exists locally
+                rid = str(child.get("rid") or "")
+                if rid and rid in doc.records:
+                    inverse["new"].append(
+                        copy.deepcopy(doc.records[rid].new_element()))
+                elif rid:
+                    inverse["remove"].append(self._remove_element(rid))
+                forward["new"].append(copy.deepcopy(child))
                 doc.apply_new(child)
             elif child.tag == _q(NS_SXE, "set"):
+                rid = str(child.get("target") or "")
+                if rid and rid in doc.records:
+                    rec = doc.records[rid]
+                    inverse["set"].append(self._set_element_values(
+                        rid, rec.chdata, rec.version))
+                forward["set"].append(copy.deepcopy(child))
                 doc.apply_set(child)
             elif child.tag == _q(NS_SXE, "remove"):
+                rid = str(child.get("target") or "")
+                if rid and rid in doc.records:
+                    inverse["new"].extend(doc.new_elements_for(rid))
+                forward["remove"].append(copy.deepcopy(child))
                 doc.apply_remove(child)
+        if not is_snapshot:
+            self._record(session.sid, forward, inverse)
         if state.find(_q(NS_SXE, "document-end")) is not None:
             session.ready = True
         self.client.emit("whiteboard_state", session.sid)
@@ -557,6 +668,15 @@ class WhiteboardManager:
         el.set("target", rid)
         el.set("version", str(record.version))
         el.set("chdata", record.chdata)
+        return el
+
+    @staticmethod
+    def _set_element_values(rid: str, chdata: str, version: int) -> ET.Element:
+        """A ``<set>`` restoring an attribute to explicit *chdata*/*version*."""
+        el = ET.Element(_q(NS_SXE, "set"))
+        el.set("target", rid)
+        el.set("version", str(version))
+        el.set("chdata", str(chdata))
         return el
 
     @staticmethod

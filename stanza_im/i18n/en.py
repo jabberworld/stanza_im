@@ -229,6 +229,8 @@ STRINGS = {
     "whiteboard_tool_fill": "Fill a closed shape",
     "whiteboard_tool_eraser": "Eraser (removes shapes)",
     "whiteboard_tool_text": "Text",
+    "whiteboard_undo": "Undo",
+    "whiteboard_redo": "Redo",
     "whiteboard_text_title": "Text",
     "whiteboard_text_prompt": "Text to place on the board (multiline):",
     "whiteboard_fill_toggle": "Fill new shapes",

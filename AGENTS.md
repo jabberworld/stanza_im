@@ -1961,7 +1961,15 @@ board **broadcasts a `<close/>`** on `end_session` (a client extension, since a
 MUC board has no Jingle session) so every occupant sees the end; a passive
 occupant (or a late room joiner, via the XEP-0284 §4.2 presence `<sxe>`
 advertisement — `JabberClient._on_sxe_presence` → `handle_sxe_presence`) learns
-of a board from any incoming SXE and gets the start line. Bodyless `<sxe>`
+of a board from any incoming SXE and gets the start line. **Undo/redo** (buttons
+after «Удалить», `Ctrl+Z`/`Ctrl+Shift+Z`) is a **shared** history: every document
+operation — own (`add_shape`/`update_shape`/`remove_shape`) or remote
+(`_apply_state` incremental edits; a join snapshot is not recorded) — pushes a
+patch of forward + inverse `<new>`/`<set>`/`<remove>` edits onto a per-session
+stack (`WhiteboardManager._undo`/`_redo`, capped at 100); `undo`/`redo` apply the
+inverse/forward to the document, **broadcast** it and emit `whiteboard_state`, so
+the last move/rotate/scale/fill/add/delete is reverted for everyone; a new
+operation clears the redo stack. Bodyless `<sxe>`
 messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
 handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
 features are advertised in disco. A 1:1 `session-initiate` is addressed to the
