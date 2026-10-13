@@ -19,6 +19,7 @@ class AdhocDialog(QtWidgets.QDialog):
         self._current: dict | None = None
         self._form_widget: DataFormWidget | None = None
         self._commands_widget: QtWidgets.QTreeWidget | None = None
+        self._run_btn: QtWidgets.QPushButton | None = None
         self.setWindowTitle(tr("adhoc_title"))
         self.resize(520, 420)
         layout = QtWidgets.QVBoxLayout(self)
@@ -51,6 +52,7 @@ class AdhocDialog(QtWidgets.QDialog):
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, command)
             self._commands_widget.addTopLevelItem(item)
         self._commands_widget.itemDoubleClicked.connect(self._on_command)
+        self._commands_widget.itemSelectionChanged.connect(self._sync_run)
         self._body.addWidget(self._commands_widget)
         self._rebuild_buttons()
 
@@ -58,6 +60,19 @@ class AdhocDialog(QtWidgets.QDialog):
                     _column: int) -> None:
         command = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         asyncio.get_event_loop().create_task(self._execute(command))
+
+    def _sync_run(self) -> None:
+        """Enable «Execute» only while a command is selected."""
+        if self._run_btn is not None and self._commands_widget is not None:
+            self._run_btn.setEnabled(
+                bool(self._commands_widget.selectedItems()))
+
+    def _run_selected(self) -> None:
+        if self._commands_widget is None:
+            return
+        items = self._commands_widget.selectedItems()
+        if items:
+            self._on_command(items[0], 0)
 
     async def _execute(self, command: dict) -> None:
         self._set_loading(tr("adhoc_executing"))
@@ -131,6 +146,14 @@ class AdhocDialog(QtWidgets.QDialog):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        if self._commands_widget is not None:
+            self._run_btn = QtWidgets.QPushButton(tr("adhoc_execute"))
+            self._run_btn.clicked.connect(self._run_selected)
+            self._run_btn.setEnabled(
+                bool(self._commands_widget.selectedItems()))
+            self._buttons.addWidget(self._run_btn)
+        else:
+            self._run_btn = None
         actions = set((self._current or {}).get("actions") or ())
         completed = (self._current or {}).get("status") in ("completed", "canceled")
         if self._current is not None and not completed:

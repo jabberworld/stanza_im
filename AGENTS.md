@@ -402,6 +402,11 @@ and runs the full join flow (server persistence, bookmark support).
 separately and assembles `room@server` when the room carries no `@` — both
 dialog callers pass `data["server"]`, so a join never sends a bare localpart
 or a `remote-server-not-found` disco to the room name alone.
+An XEP-0050 ad-hoc command dialog (`ui/adhoc_dialog.AdhocDialog`) browses a
+service's command list, executes one and walks its data form; the command list
+carries an «Выполнить» button enabled only while a command is selected
+(double-click still works), and the dialog is opened **non-modally** from the
+service browser and the roster contact menu. [`tests/test_adhoc.py`]
 The Actions menu's first item «Создать конференцию»
 (`ui/create_conference_dialog.py`, `conference-add.svg`) collects the room
 **address** (required, the part before «@», with an info glyph), an optional
@@ -614,6 +619,14 @@ sticky «У вас новые важные сообщения:» OSD (`OsdManage
 field in `core/unread_state.py`, bumped by `_bump_unread(important=True)`);
 `normal` keeps the current behaviour. Only **messages** are affected (typing and
 status OSDs are not). [`tests/test_notification_priority.py`]
+
+The roster contact context menu also offers **«Выполнить команду»** (right after
+«Приоритет уведомлений»): `MainWindow._build_adhoc_menu` lists the contact's
+resources (`client.get_contact(bare).resources`), one entry per `bare/resource`
+(or a single «пусто» entry targeting the bare JID when the contact has no known
+resource); picking one opens `ui/adhoc_dialog.AdhocDialog` for that target
+**non-modally** (`_open_adhoc`, kept referenced in `_adhoc_dialogs` and dropped
+on `finished`). [`tests/test_adhoc.py`]
 
 A contact can be **dragged onto a group** (header or row): `RosterWidget`
 starts a `QDrag` (`application/x-stanza-roster-jid`) and emits

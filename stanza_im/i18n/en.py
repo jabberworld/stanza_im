@@ -40,6 +40,8 @@ STRINGS = {
     "event_rejected": "Rejected",
     "ctx_subscription": "Subscription",
     "ctx_priority": "Notification priority",
+    "ctx_adhoc_command": "Execute command",
+    "adhoc_no_resource": "empty",
     "priority_high": "High",
     "priority_normal": "Normal",
     "priority_low": "Low",

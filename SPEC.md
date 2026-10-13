@@ -2694,6 +2694,22 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   a field of the unread record (`core/unread_state.py`, `_bump_unread(
   important=True)`).
 
+### 14.8.6 Ad-hoc commands (`ui/adhoc_dialog.py`)
+
+- `AdhocDialog(client, jid)` browses a service's XEP-0050 command list, executes
+  one and walks its data form. The command list carries an «Выполнить» button
+  (`adhoc_execute`) enabled only while a command is selected
+  (`itemSelectionChanged`); double-click still works.
+- The roster contact context menu offers «Выполнить команду» right after
+  «Приоритет уведомлений» (`MainWindow._build_adhoc_menu`): one entry per known
+  resource (`bare/resource`), or a single «пусто» entry targeting the bare JID
+  when the contact has no resource. Picking one opens `AdhocDialog` for that
+  target.
+- The dialog is opened **non-modally** (`setModal(False)` + `show()`, the
+  reference kept in `_adhoc_dialogs` and dropped on `finished`) from both the
+  service browser and the roster contact menu. Other dialogs are still modal
+  (future work).
+
 ### 14.9 Event System
 
 ```

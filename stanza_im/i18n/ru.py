@@ -40,6 +40,8 @@ STRINGS = {
     "event_rejected": "Отклонено",
     "ctx_subscription": "Подписка",
     "ctx_priority": "Приоритет уведомлений",
+    "ctx_adhoc_command": "Выполнить команду",
+    "adhoc_no_resource": "пусто",
     "priority_high": "Высокий",
     "priority_normal": "Обычный",
     "priority_low": "Низкий",

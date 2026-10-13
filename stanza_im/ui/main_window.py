@@ -462,6 +462,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._geo_windows: dict = {}
         #: Open whiteboard dialogs, keyed by the conversation JID.
         self._whiteboards: dict = {}
+        #: Open (non-modal) ad-hoc command dialogs, kept referenced.
+        self._adhoc_dialogs: list = []
         # ── MDS throttle ─────────────────────────────────────────
         self._mds_pending_sid = ""
         self._mds_pending_jid = ""
@@ -4862,6 +4864,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._client:
                 self._build_subscription_menu(menu, jid.split("/", 1)[0])
                 self._build_priority_menu(menu, jid=jid.split("/", 1)[0])
+                self._build_adhoc_menu(menu, jid)
                 if getattr(self._client.omemo, "available", False):
                     menu.addAction(
                         self._menu_icon("shield.svg"), tr("omemo_manage"),
@@ -7923,6 +7926,46 @@ class MainWindow(QtWidgets.QMainWindow):
                 action.triggered.connect(
                     lambda checked=False, j=jid, v=value:
                     self._set_notification_priority(j, v))
+
+    def _build_adhoc_menu(self, parent_menu, jid: str) -> None:
+        """Add the «Execute command» submenu for a contact's resources."""
+        if self._client is None:
+            return
+        bare = jid.split("/", 1)[0]
+        contact = self._client.get_contact(bare)
+        resources = sorted(getattr(contact, "resources", {}) or {})
+        submenu = parent_menu.addMenu(self._menu_icon("exec.png"),
+                                      tr("ctx_adhoc_command"))
+        if resources:
+            for resource in resources:
+                target = f"{bare}/{resource}"
+                submenu.addAction(
+                    resource,
+                    lambda checked=False, t=target: self._open_adhoc(t))
+        else:
+            submenu.addAction(
+                tr("adhoc_no_resource"),
+                lambda checked=False: self._open_adhoc(bare))
+
+    def _open_adhoc(self, target: str) -> None:
+        """Open the ad-hoc command dialog for *target* (non-modal)."""
+        if self._client is None:
+            return
+        from stanza_im.ui.adhoc_dialog import AdhocDialog
+        dialog = AdhocDialog(self._client, target, self)
+        dialog.setModal(False)
+        self._adhoc_dialogs.append(dialog)
+        dialog.finished.connect(lambda _r, d=dialog: self._forget_adhoc(d))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _forget_adhoc(self, dialog) -> None:
+        try:
+            self._adhoc_dialogs.remove(dialog)
+        except ValueError:
+            pass
+        dialog.deleteLater()
 
     def _update_priority_sticky(self) -> None:
         """Show/update (or dismiss) the sticky «important messages» OSD."""

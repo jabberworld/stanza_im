@@ -83,6 +83,8 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         self._kid_futures: dict[str, asyncio.Future] = {}
         self._info_futures: dict[tuple[str, str], asyncio.Future] = {}
         self._selected: QtWidgets.QTreeWidgetItem | None = None
+        #: Open (non-modal) ad-hoc command dialogs, kept referenced.
+        self._adhoc_dialogs: list = []
         self._seen: set[tuple[str, str]] = set()
         self._visited: set[tuple[str, str]] = set()
         self._roots: dict[str, QtWidgets.QTreeWidgetItem] = {}
@@ -529,7 +531,20 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         if not data or not data.get("jid"):
             return
         from stanza_im.ui.adhoc_dialog import AdhocDialog
-        AdhocDialog(self._client, data["jid"], self).exec()
+        dialog = AdhocDialog(self._client, data["jid"], self)
+        dialog.setModal(False)
+        self._adhoc_dialogs.append(dialog)
+        dialog.finished.connect(lambda _r, d=dialog: self._forget_adhoc(d))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _forget_adhoc(self, dialog) -> None:
+        try:
+            self._adhoc_dialogs.remove(dialog)
+        except ValueError:
+            pass
+        dialog.deleteLater()
 
     def _unregister(self) -> None:
         data = self._current_data()

@@ -238,6 +238,13 @@ check("the participant menu offers «Change rank»",
       "muc_user_change_affiliation" in mw_src
       and "_change_muc_affiliation" in mw_src
       and "muc_set_affiliation" in mw_src)
+# The roster contact menu offers ad-hoc commands; the dialogs are non-modal.
+check("the contact menu offers «Execute command»",
+      "ctx_adhoc_command" in mw_src and "_build_adhoc_menu" in mw_src
+      and "_open_adhoc" in mw_src)
+check("the roster ad-hoc dialog is non-modal", "setModal(False)" in mw_src)
+check("the service-browser ad-hoc dialog is non-modal",
+      "setModal(False)" in _src("stanza_im", "ui", "service_browser.py"))
 
 print()
 if FAILURES:
