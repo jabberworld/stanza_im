@@ -285,6 +285,29 @@ if widget._list.count():
     check("a click on empty space clears the note selection",
           widget._list.selectedItems() == [])
 
+# 6b·2. Sharing a note + the context menu ------------------------------------
+check("_note_content joins the title and text",
+      NotesWidget._note_content({"title": "A", "text": "B"}) == "A\n\nB")
+check("_note_content drops an empty part",
+      NotesWidget._note_content({"title": "", "text": "B"}) == "B")
+check("_note_content excludes the tags",
+      "tag" not in NotesWidget._note_content(
+          {"title": "A", "tags": "tag", "text": "B"}))
+
+shared: list = []
+share_widget = NotesWidget(lambda: _FakeClient(), _run_task,
+                           share=shared.append)
+stored["notes"] = [{"title": "T", "tags": "x", "text": "Body"}]
+share_widget.reload()
+loop.run_until_complete(__import__("asyncio").sleep(0.2))
+share_widget._list.setCurrentRow(0)
+share_widget._on_share_clicked()
+check("sharing a note passes title + blank line + text",
+      shared == ["T\n\nBody"])
+check("the notes list has a context-menu policy",
+      share_widget._list.contextMenuPolicy()
+      == QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+
 # 6c. Preferences → Plugins mirrors the manager -------------------------------
 from stanza_im.ui.chat_themes import ChatThemeFactory  # noqa: E402
 from stanza_im.ui.preferences import PreferencesDialog  # noqa: E402

@@ -8,6 +8,7 @@ STRINGS = {
     "notes_open": "Open",
     "notes_new": "Create",
     "notes_edit": "Edit",
+    "notes_share": "Forward",
     "notes_remove": "Remove",
     "notes_untitled": "(untitled)",
     "notes_dialog_new_title": "New note",

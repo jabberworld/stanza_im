@@ -28,7 +28,9 @@ def activate(app) -> None:
         return
     from stanza_im.i18n import tr
     from stanza_im.ui.notes_widget import NotesWidget
-    page = NotesWidget(lambda: app._client, app._start_task)
+    page = NotesWidget(
+        lambda: app._client, app._start_task,
+        share=lambda content: app._on_share_requested(content, parent=app))
     app._notes_page = page
     app._add_roster_tab(
         _TAB_KEY, app._tab_icon(PLUGIN_ICON), tr(PLUGIN_NAME), page)

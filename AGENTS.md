@@ -514,7 +514,11 @@ built-ins through `MainWindow._add_roster_tab`/`_remove_roster_tab`, and
 The bundled **Notes** plugin (`stanza_im/plugins/notes/`, category «Инструменты»)
 adds a tab after the built-ins (icon `draw-brush.png`): a search box, a tag
 filter («Все теги» + the collected tags), the note titles and the bookmarks-style
-toolbar (Открыть/Создать/Изменить/Удалить, with a delete confirmation). Notes
+toolbar (Открыть/Создать/Изменить/Удалить, with a delete confirmation). The list
+also has a **context menu** (like the bookmarks tab) with Открыть / Изменить /
+**Переслать** / Удалить; «Переслать» opens the share window with the note's
+`title\n\ntext` (tags excluded) via the plugin's `share` callback →
+`MainWindow._on_share_requested`. Notes
 live on the server in XEP-0049 private storage using the Miranda payload
 (`http://miranda-im.org/storage#notes`): `JabberClient.get_notes`/`set_notes`
 build raw IQs (one packet for the whole set) and `_parse_notes` reads

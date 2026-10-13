@@ -32,10 +32,12 @@ class NotesWidget(QtWidgets.QWidget):
 
     note_added = QtCore.pyqtSignal(bool)  # True when the note was stored
 
-    def __init__(self, get_client, run_task, parent=None):
+    def __init__(self, get_client, run_task, share=None, parent=None):
         super().__init__(parent)
         self._get_client = get_client
         self._run_task = run_task
+        # Optional callback ``(content) -> None`` opening the share window.
+        self._share = share
         self._notes: list[dict] = []
         self._loading = False
         self._lock = asyncio.Lock()
@@ -59,6 +61,9 @@ class NotesWidget(QtWidgets.QWidget):
         self._list = ZoomListWidget()
         self._list.itemDoubleClicked.connect(self._on_activated)
         self._list.itemSelectionChanged.connect(self._update_actions)
+        self._list.setContextMenuPolicy(
+            QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self._list, stretch=1)
 
         bar = QtWidgets.QWidget()
@@ -303,3 +308,39 @@ class NotesWidget(QtWidgets.QWidget):
             return
         del self._notes[index]
         self._save()
+
+    @staticmethod
+    def _note_content(note: dict) -> str:
+        """The shareable text of a note: title + blank line + body (no tags)."""
+        parts = [str(note.get("title") or "").strip(),
+                 str(note.get("text") or "").strip()]
+        return "\n\n".join(part for part in parts if part)
+
+    def _on_share_clicked(self) -> None:
+        index = self._selected_index()
+        if index < 0 or self._share is None:
+            return
+        content = self._note_content(self._notes[index])
+        if content:
+            self._share(content)
+
+    def _on_context_menu(self, pos: QtCore.QPoint) -> None:
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        self._list.setCurrentItem(item)
+        menu = QtWidgets.QMenu(self._list)
+        menu.addAction(QtGui.QIcon(find_icon("ok.png")),
+                       tr("notes_open"),
+                       lambda: self._on_open_clicked())
+        menu.addAction(QtGui.QIcon(find_icon("edit.png")),
+                       tr("notes_edit"),
+                       lambda: self._on_edit_clicked())
+        share = menu.addAction(QtGui.QIcon(find_icon("send-arrow.svg")),
+                               tr("notes_share"),
+                               lambda: self._on_share_clicked())
+        share.setEnabled(self._share is not None)
+        menu.addAction(QtGui.QIcon(find_icon("process-stop.png")),
+                       tr("notes_remove"),
+                       lambda: self._on_delete_clicked())
+        menu.exec(self._list.mapToGlobal(pos))

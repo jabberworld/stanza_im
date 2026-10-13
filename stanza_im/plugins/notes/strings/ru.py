@@ -8,6 +8,7 @@ STRINGS = {
     "notes_open": "Открыть",
     "notes_new": "Создать",
     "notes_edit": "Изменить",
+    "notes_share": "Переслать",
     "notes_remove": "Удалить",
     "notes_untitled": "(без заголовка)",
     "notes_dialog_new_title": "Новая заметка",
