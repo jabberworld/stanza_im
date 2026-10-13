@@ -30,6 +30,7 @@ _TOOLS = (
     ("polygon", "wb-polygon.svg", "whiteboard_tool_polygon"),
     ("fill", "wb-fill.svg", "whiteboard_tool_fill"),
     ("eraser", "wb-eraser.svg", "whiteboard_tool_eraser"),
+    ("text", "wb-text.svg", "whiteboard_tool_text"),
 )
 
 _WIDTHS = (1, 2, 3, 5, 8)

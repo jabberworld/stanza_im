@@ -2389,8 +2389,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   separator, the drawing tools (pencil / line / **arrow** / rectangle / ellipse
   / polygon, a **bucket** «Заливка» that fills — or on a second click unfills —
   only the closed shape under the cursor, the empty background is never flooded,
-  and an **eraser** that removes the shape under the cursor on a click and while
-  dragging); then the line width (a menu whose actions are checkable, the active
+  an **eraser** that removes the shape under the cursor on a click and while
+  dragging, and a **text** tool — a click opens a multiline input
+  (`QInputDialog.getMultiLineText`) and the text becomes a vector glyph-outline
+  path (`QPainterPath.addText` → `svg_path.path_to_d`) stored as a plain
+  `<path d="…"/>`); then the line width (a menu whose actions are checkable, the active
   width ticked), line colour, fill colour and a «Заливка» toggle (whether newly
   drawn closed shapes are filled; off → `fill=""` → `fill="none"`); then the
   board operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and

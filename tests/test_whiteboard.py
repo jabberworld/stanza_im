@@ -117,7 +117,7 @@ dialog = WhiteboardDialog("bob@example.com")
 check("the dialog has every tool button",
       set(dialog._tool_buttons) == {
           "select", "move", "rotate", "scale", "pencil", "line", "arrow",
-          "rect", "ellipse", "polygon", "fill", "eraser"})
+          "rect", "ellipse", "polygon", "fill", "eraser", "text"})
 check("the pencil tool is active by default",
       dialog._tool_buttons["pencil"].isChecked())
 check("the dialog embeds the canvas",
@@ -414,6 +414,23 @@ check("the snapshot-share button exists after the tools",
       > sp_tb.indexOf(sp._tool_buttons["pencil"]))
 check("the end-session button follows the share-board button",
       sp_tb.indexOf(sp._finish_btn) > sp_tb.indexOf(sp._share_btn))
+
+# 17b. text tool -------------------------------------------------------------
+tc = WhiteboardCanvas()
+tc.resize(1280, 720)
+sh = tc.add_text(QtCore.QPointF(100, 100), "Hello\nWorld")
+check("add_text creates a text shape", sh is not None and sh["kind"] == "text")
+check("a text shape has path data",
+      bool(WhiteboardCanvas.shape_attrs(sh)["d"]))
+check("a text shape is filled", WhiteboardCanvas._filled(sh) is True)
+check("a text shape renders", tc._world_path(sh).boundingRect().width() > 0)
+rt = WhiteboardCanvas()
+rt.load_shapes([{"rid": "t1", "id": "t1",
+                 "d": WhiteboardCanvas.shape_attrs(sh)["d"],
+                 "stroke": "#000000", "stroke-width": "1",
+                 "fill": "#000000"}])
+check("a remote text shape renders",
+      rt._world_path(rt.shapes()[0]).boundingRect().width() > 0)
 
 # 18. middle-button pan (any tool) + fill-toggle icon ------------------------
 mc = WhiteboardCanvas()

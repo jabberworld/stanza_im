@@ -280,3 +280,39 @@ def ellipse_d(cx: float, cy: float, rx: float, ry: float) -> str:
     ry = abs(ry)
     return ("M %g %g A %g %g 0 1 0 %g %g A %g %g 0 1 0 %g %g Z"
             % (cx - rx, cy, rx, ry, cx + rx, cy, rx, ry, cx - rx, cy))
+
+
+def path_to_d(path: QtGui.QPainterPath) -> str:
+    """Serialise a :class:`QPainterPath` to SVG path data.
+
+    Used to turn text glyph outlines (``QPainterPath.addText``) into a plain
+    ``<path d="…"/>``; every contour is closed with ``Z`` (glyph outlines are
+    filled, matching Qt's implicit closing when filling).
+    """
+    move = QtGui.QPainterPath.ElementType.MoveToElement
+    line = QtGui.QPainterPath.ElementType.LineToElement
+    curve = QtGui.QPainterPath.ElementType.CurveToElement
+    parts: list[str] = []
+    i = 0
+    count = path.elementCount()
+    while i < count:
+        el = path.elementAt(i)
+        if el.type == move:
+            if parts and parts[-1] != "Z":
+                parts.append("Z")
+            parts.append("M %g %g" % (el.x, el.y))
+            i += 1
+        elif el.type == line:
+            parts.append("L %g %g" % (el.x, el.y))
+            i += 1
+        elif el.type == curve and i + 2 < count:
+            c2 = path.elementAt(i + 1)
+            end = path.elementAt(i + 2)
+            parts.append("C %g %g %g %g %g %g"
+                         % (el.x, el.y, c2.x, c2.y, end.x, end.y))
+            i += 3
+        else:
+            i += 1
+    if parts and parts[-1] != "Z":
+        parts.append("Z")
+    return " ".join(parts)

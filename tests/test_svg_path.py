@@ -74,6 +74,35 @@ check("arc is converted to curves", path.elementCount() >= 4)
 check("empty path is empty", svg_path.parse_path("").elementCount() == 0)
 check("polyline_d of nothing is empty", svg_path.polyline_d([]) == "")
 
+# 8. path_to_d (QPainterPath -> SVG path data) ------------------------------
+from PyQt6 import QtGui as _QtGui  # noqa: E402
+
+p = _QtGui.QPainterPath()
+p.moveTo(0, 0)
+p.lineTo(10, 0)
+p.lineTo(10, 10)
+p.closeSubpath()
+d = svg_path.path_to_d(p)
+check("path_to_d emits move/line/close",
+      d.startswith("M") and "L" in d and d.endswith("Z"))
+rt = svg_path.parse_path(d)
+check("path_to_d round-trips through parse_path",
+      abs(rt.boundingRect().width() - 10) < 1e-6
+      and abs(rt.boundingRect().height() - 10) < 1e-6)
+
+ellipse = _QtGui.QPainterPath()
+ellipse.addEllipse(0, 0, 10, 10)
+check("path_to_d emits curves for an ellipse",
+      "C" in svg_path.path_to_d(ellipse))
+
+font = _QtGui.QFont()
+font.setPointSizeF(24.0)
+glyphs = _QtGui.QPainterPath()
+glyphs.addText(0, 0, font, "Ag")
+glyph_d = svg_path.path_to_d(glyphs)
+check("text glyphs produce non-empty path data", bool(glyph_d))
+check("glyph path data parses", svg_path.parse_path(glyph_d).elementCount() > 0)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

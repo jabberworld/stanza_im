@@ -1906,9 +1906,13 @@ scale and «Удалить», an object operation) then, after a separator, the 
 tools (pencil / line / **arrow** / rectangle / ellipse / polygon, a **bucket**
 «Заливка» that fills — or, on a second click, unfills — only the closed shape
 under the cursor, and an **eraser** that removes the shape under the cursor on a
-click and while dragging); then the line width (a menu whose actions are
-checkable, the active width ticked), line colour, fill colour and a «Заливка»
-toggle (whether newly drawn closed shapes are filled); then the board
+click and while dragging, plus a **text** tool: a click opens a multiline input
+(`QInputDialog.getMultiLineText`) and the text is converted to vector glyph
+outlines (`QPainterPath.addText` → `svg_path.path_to_d`) and stored as a plain
+`<path d="…"/>` shape so it syncs/renders like any other); then the line width
+(a menu whose actions are checkable, the active width ticked), line colour, fill
+colour and a «Заливка» toggle (whether newly drawn closed shapes are filled);
+then the board
 operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
 «Поделиться снимком» (renders the board to a temp PNG, uploads it via
 `JabberClient.upload_http_media` — HTTP Upload/XEP-0363 — which returns the full

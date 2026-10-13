@@ -15,6 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.include import svg_path
 from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH,
                                          find_icon)
+from stanza_im.i18n import tr
 
 #: Logical canvas size (the SVG ``viewBox``).
 VIEW_W = WHITEBOARD_WIDTH
@@ -98,7 +99,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._apply_tool_cursor()
 
     def _apply_tool_cursor(self) -> None:
-        if self._tool in DRAW_TOOLS or self._tool in ("fill", "eraser"):
+        if self._tool in DRAW_TOOLS or self._tool in ("fill", "eraser", "text"):
             self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
@@ -264,7 +265,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     @staticmethod
     def _local_path(shape: dict) -> QtGui.QPainterPath:
-        if shape.get("kind") == "remote":
+        if shape.get("kind") in ("remote", "text"):
             return svg_path.parse_path(shape.get("d") or "")
         if shape.get("kind") == "arrow":
             return svg_path.parse_path(WhiteboardCanvas._arrow_d(shape))
@@ -297,14 +298,14 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         value = str(shape.get("fill") or "")
         if not value or value.lower() == "none":
             return False
-        if shape.get("kind") == "remote":
+        if shape.get("kind") in ("remote", "text"):
             return True
         return shape["kind"] in CLOSED_KINDS
 
     @staticmethod
     def shape_d(shape: dict) -> str:
         """The SVG ``d`` attribute for *shape*."""
-        if shape.get("kind") == "remote":
+        if shape.get("kind") in ("remote", "text"):
             return shape.get("d") or ""
         kind = shape["kind"]
         if kind == "arrow":
@@ -405,6 +406,46 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.changed.emit()
         self.shape_updated.emit(shape)
         return True
+
+    # ── Text ──────────────────────────────────────────────────────
+
+    def _request_text(self, world: QtCore.QPointF) -> None:
+        """Ask for text (multiline) and place it as a vector object."""
+        text, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self, tr("whiteboard_text_title"), tr("whiteboard_text_prompt"), "")
+        if ok and (text or "").strip():
+            self.add_text(world, text)
+
+    def add_text(self, world: QtCore.QPointF, text: str,
+                 font_size: float = 24.0) -> dict | None:
+        """Place *text* at *world* as a filled glyph-outline path.
+
+        The text is converted to a vector path (``QPainterPath.addText`` ->
+        ``svg_path.path_to_d``) so it serialises as a plain ``<path d="…"/>``
+        and syncs/renders like any other shape.
+        """
+        text = (text or "").strip("\n")
+        if not text:
+            return None
+        font = QtGui.QFont()
+        font.setPointSizeF(float(font_size))
+        metrics = QtGui.QFontMetricsF(font)
+        path = QtGui.QPainterPath()
+        y = 0.0
+        for line in text.split("\n"):
+            path.addText(0.0, y + metrics.ascent(), font, line)
+            y += metrics.lineSpacing()
+        path.translate(world.x(), world.y())
+        shape = self._new_shape("text")
+        shape["d"] = svg_path.path_to_d(path)
+        shape["points"] = [(world.x(), world.y())]
+        shape["fill"] = self._stroke  # the text colour is the line colour
+        self._shapes.append(shape)
+        self._selected = shape["id"]
+        self.update()
+        self.changed.emit()
+        self.shape_added.emit(shape)
+        return shape
 
     def _shape_at(self, world: QtCore.QPointF) -> dict | None:
         """The topmost shape under *world* (hit-test), or ``None``."""
@@ -560,6 +601,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             return
         if tool == "eraser":
             self.erase_at(world)
+            return
+        if tool == "text":
+            self._request_text(world)
             return
         if tool in ("move", "rotate", "scale"):
             if self._selected and self._shape_by_id(self._selected):
