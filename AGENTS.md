@@ -1951,7 +1951,17 @@ document (a random per-participant sid gave each its own session and nothing
 synced); `start_session` reuses an existing room session. A `document-begin`
 snapshot is **merged**, not applied as a replace (`_apply_state` skips the root
 `<new>` and unions the drawable records), so a late joiner gains the existing
-shapes without the active peers losing theirs. Bodyless `<sxe>`
+shapes without the active peers losing theirs. The session lifecycle is surfaced
+as a **chat status line** («Начата сессия рисования» / «Сессия рисования
+завершена») gated by `chat.whiteboard_show_status` (default on): the manager
+emits `whiteboard_activity(peer, active)` once per activity span
+(`_active_peers`) from `start_session`/`_on_state_offer`/`session-initiate`
+(start) and `end_session`/`session-terminate`/a received `<close/>` (end). A MUC
+board **broadcasts a `<close/>`** on `end_session` (a client extension, since a
+MUC board has no Jingle session) so every occupant sees the end; a passive
+occupant (or a late room joiner, via the XEP-0284 §4.2 presence `<sxe>`
+advertisement — `JabberClient._on_sxe_presence` → `handle_sxe_presence`) learns
+of a board from any incoming SXE and gets the start line. Bodyless `<sxe>`
 messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
 handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
 features are advertised in disco. A 1:1 `session-initiate` is addressed to the

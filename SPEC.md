@@ -294,6 +294,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.allow_incoming_deletions` | `true` | Apply a peer's XEP-0424 retraction (Preferences → Chat → «Общие»/«General»). On: the message becomes a tombstone; off: it keeps its body and gains a "✕" marker. Applied live to the client from `_on_settings_applied`. |
 | `chat.allow_moderation` | `true` | Apply a moderator's XEP-0425 retraction (Preferences → Chat → «Конференции»/«Conferences»). On: the message becomes a "Retracted by a moderator" tombstone with the reason; off: it keeps its body and gains a "✕" marker. It only governs the receive side — the moderator action in the message menu is unaffected. |
 | `chat.confirm_retraction` | `false` | Ask for confirmation before retracting one of our own messages (message menu "Delete" / inline "✕"). |
+| `chat.whiteboard_show_status` | `true` | Show a chat status line when a whiteboard session starts/ends («Начата сессия рисования» / «Сессия рисования завершена»), Preferences → Chat → «Общие»/«General». `MainWindow._on_whiteboard_activity` (from the manager's `whiteboard_activity(peer, active)`). |
 | `emoji.recent` | `[]` | Most recently used XEP-0444 reaction emoji (up to 24, most recent first), shown in the picker's «Недавние» area above the category tabs. Updated by `MainWindow._remember_emoji`. Stored as literal UTF-8 emoji (the TOML writer uses `ensure_ascii=False`). |
 | `chat.muc_name_source` | `from_name` | Conference display-name source (Preferences → Chat → «Конференции» + info label tooltip): `from_name` = bookmark name → room/disco name → JID localpart; `from_vcard` = bookmark name → vCard `fn` → vCard `nickname` → room/disco name → JID localpart. A bookmark name equal to the room JID is ignored. Applied live by `MainWindow._refresh_muc_names` (tab title + roster). |
 | `appearance.roster_font` / `roster_font_size` | `""` / `0` | Roster typeface (QSS); `""`/`0` = Qt default. Rendered by `MainWindow._apply_roster_font`. |
@@ -2441,7 +2442,14 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (`document-begin` → `new`/`set`/`remove` → `document-end`); a `document-begin`
   snapshot is **merged** (`_apply_state` skips the root `<new>` and unions the
   drawable records) so a late joiner gains the existing shapes without the
-  active peers losing theirs. Bodyless `<sxe>`
+  active peers losing theirs. The session lifecycle is a chat status line
+  («Начата сессия рисования» / «Сессия рисования завершена») gated by
+  `chat.whiteboard_show_status`: the manager emits `whiteboard_activity(peer,
+  active)` once per span (`_active_peers`); a MUC `end_session` **broadcasts a
+  `<close/>`** (client extension) so all occupants see the end, and a passive
+  occupant / late room joiner learns of a board from any incoming SXE or the
+  presence `<sxe>` advertisement (`JabberClient._on_sxe_presence` →
+  `handle_sxe_presence`). Bodyless `<sxe>`
   messages are routed by a dedicated `MatchXPath` handler
   (`JabberClient._on_sxe_stanza`), Jingle IQs by `_dispatch_jingle_iq`
   (`whiteboard.is_whiteboard_jingle` / a known sid), and the features are

@@ -248,6 +248,8 @@ STRINGS = {
     "whiteboard_shared": "Совместная доска — синхронизируется с собеседником.",
     "whiteboard_not_shared": "Локальная доска — нажмите «Поделиться» для синхронизации.",
     "whiteboard_local_only": "Локальная доска — это ваш собственный контакт, делиться не с кем.",
+    "whiteboard_started": "Начата сессия рисования",
+    "whiteboard_ended_status": "Сессия рисования завершена",
     "whiteboard_failed_offline": "Не удалось поделиться: у собеседника нет доступного ресурса.",
     "whiteboard_failed_error": "Не удалось поделиться доской: {condition}.",
     "whiteboard_peer_maybe_unsupported": "Собеседник может не поддерживать доску; всё равно делимся.",
@@ -986,6 +988,7 @@ STRINGS = {
     "prefs_allow_incoming_deletions": "Разрешать собеседнику удалять сообщения (XEP-0424)",
     "prefs_confirm_retraction": "Подтверждать удаление сообщений",
     "prefs_show_status": "Показывать статусы",
+    "prefs_whiteboard_show_status": "Показывать начало/конец сессии рисования",
     "prefs_show_receipts": "Показывать уведомление о доставке",
 
     "prefs_muc_show_presence": "Показывать входы и выходы пользователей",

@@ -3354,6 +3354,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("whiteboard_state", self._on_whiteboard_state)
         c.on("whiteboard_ended", self._on_whiteboard_ended)
         c.on("whiteboard_failed", self._on_whiteboard_failed)
+        c.on("whiteboard_activity", self._on_whiteboard_activity)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("groupchat_presence_error", self._on_groupchat_presence_error)
         c.on("captcha_challenge", self._on_captcha_challenge)
@@ -6716,6 +6717,17 @@ class MainWindow(QtWidgets.QMainWindow):
         for dialog in self._whiteboards.values():
             if dialog.session_id() == sid:
                 dialog.detach_session()
+
+    def _on_whiteboard_activity(self, peer: str, active: bool) -> None:
+        """A board session started/ended — a chat status line (like Muji)."""
+        if not peer or not self._config.chat.whiteboard_show_status:
+            return
+        chat = self._chat_window.get_chat(peer)
+        if chat is None:
+            return
+        from stanza_im.include.utils import format_time
+        key = "whiteboard_started" if active else "whiteboard_ended_status"
+        chat.add_status(tr(key), format_time())
 
     def _on_geo_message_corrected(self, chat: str, ref: str,
                                   new_body: str) -> None:

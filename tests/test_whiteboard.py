@@ -500,6 +500,42 @@ check("share media prefers the stored message metadata",
       bool(res2) and res2.get("size") == 42)
 check("share media ignores a non-media URL",
       mw._resolve_share_media("hello world") is None)
+
+# 20. board session start/end status line ------------------------------------
+from types import SimpleNamespace  # noqa: E402
+
+
+class _ChatStub:
+    def __init__(self):
+        self.lines = []
+
+    def add_status(self, text, ts):
+        self.lines.append(text)
+
+
+class _CWStub2:
+    def __init__(self):
+        self.chats = {}
+
+    def get_chat(self, jid):
+        return self.chats.get(jid)
+
+
+bw = MainWindow.__new__(MainWindow)
+bw._config = SimpleNamespace(
+    chat=SimpleNamespace(whiteboard_show_status=True))
+_bchat = _ChatStub()
+_bcw = _CWStub2()
+_bcw.chats["bob@example.com"] = _bchat
+bw._chat_window = _bcw
+bw._on_whiteboard_activity("bob@example.com", True)
+check("a board start shows a chat status line", len(_bchat.lines) == 1)
+bw._on_whiteboard_activity("bob@example.com", False)
+check("a board end shows a chat status line", len(_bchat.lines) == 2)
+bw._config.chat.whiteboard_show_status = False
+bw._on_whiteboard_activity("bob@example.com", True)
+check("the board status line is gated by the setting",
+      len(_bchat.lines) == 2)
 mw._chat_window = _CWStub(None)
 mw._media_cache = _MCStub()
 res3 = mw._resolve_share_media(

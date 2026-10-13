@@ -328,6 +328,57 @@ check("a peer's incremental edit lands in the shared document",
       len(b.shapes(sid_b)) == 1
       and b.shapes(sid_b)[0]["d"] == "M 0 0 L 10 10")
 
+# 15. board activity (start/end) announcements ------------------------------
+c = _FakeClient()
+m = WhiteboardManager(c)
+sid = m.start_session("room@conference.example", is_muc=True)
+check("starting a MUC board announces activity",
+      ("whiteboard_activity", "room@conference.example", True) in c.events)
+
+# A passive occupant learns from a peer's <connect>.
+c2 = _FakeClient()
+m2 = WhiteboardManager(c2)
+_in = _FakeIncoming("room@conference.example/alice",
+                    ET.Element("{jabber:client}message"))
+_sxe = ET.SubElement(_in.xml, _q(NS_SXE, "sxe"))
+_sxe.set("session", "peer-sid")
+ET.SubElement(_sxe, _q(NS_SXE, "connect"))
+asyncio.run(m2.handle_sxe(_in))
+check("a passive occupant sees the board activity",
+      ("whiteboard_activity", "room@conference.example", True) in c2.events)
+
+_in2 = _FakeIncoming("room@conference.example/alice",
+                     ET.Element("{jabber:client}message"))
+_sxe2 = ET.SubElement(_in2.xml, _q(NS_SXE, "sxe"))
+_sxe2.set("session", "peer-sid")
+ET.SubElement(_sxe2, _q(NS_SXE, "close"))
+asyncio.run(m2.handle_sxe(_in2))
+check("a <close/> ends the board activity",
+      ("whiteboard_activity", "room@conference.example", False) in c2.events)
+check("a <close/> emits whiteboard_ended",
+      ("whiteboard_ended", "peer-sid") in c2.events)
+
+# end_session broadcasts <close/> in a MUC.
+c3 = _FakeClient()
+m3 = WhiteboardManager(c3)
+sid3 = m3.start_session("room@conference.example", is_muc=True)
+m3.end_session(sid3)
+check("ending a MUC board broadcasts <close/>",
+      _last_sxe(c3) is not None
+      and _last_sxe(c3).find(_q(NS_SXE, "close")) is not None)
+check("ending a MUC board announces inactivity",
+      ("whiteboard_activity", "room@conference.example", False) in c3.events)
+
+# A presence advertisement (late room joiner).
+c4 = _FakeClient()
+m4 = WhiteboardManager(c4)
+_pres = _FakeIncoming("room@conference.example/bob",
+                      ET.Element("{jabber:client}presence"))
+ET.SubElement(_pres.xml, _q(NS_SXE, "sxe"))
+asyncio.run(m4.handle_sxe_presence(_pres))
+check("a presence board advertisement announces activity",
+      ("whiteboard_activity", "room@conference.example", True) in c4.events)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

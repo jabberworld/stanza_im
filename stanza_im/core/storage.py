@@ -75,7 +75,7 @@ class Config:
                  "tab_title_length": 30, "send_ctrl_enter": False,
                  "show_status": True, "show_receipts": True,
                  "muc_show_presence": True, "muc_show_status": True,
-                 "muc_show_status_text": True,
+                 "muc_show_status_text": True, "whiteboard_show_status": True,
                  "muc_auto_nick": True, "muc_confirm_leave": True,
                  "muc_minimize_startup": True, "message_styling": True,
                  "message_displayed_sync": True,

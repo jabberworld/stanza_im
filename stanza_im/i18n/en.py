@@ -248,6 +248,8 @@ STRINGS = {
     "whiteboard_shared": "Shared — the board is synchronized with the conversation.",
     "whiteboard_not_shared": "Local board — press Share to synchronize.",
     "whiteboard_local_only": "Local board — this is your own contact, nothing to share.",
+    "whiteboard_started": "Drawing session started",
+    "whiteboard_ended_status": "Drawing session ended",
     "whiteboard_failed_offline": "Could not share: the contact has no available resource.",
     "whiteboard_failed_error": "Could not share the board: {condition}.",
     "whiteboard_peer_maybe_unsupported": "The contact may not support the whiteboard; sharing anyway.",
@@ -986,6 +988,7 @@ STRINGS = {
     "prefs_allow_incoming_deletions": "Allow the contact to delete messages (XEP-0424)",
     "prefs_confirm_retraction": "Confirm before deleting a message",
     "prefs_show_status": "Show statuses",
+    "prefs_whiteboard_show_status": "Show whiteboard session start/end",
     "prefs_show_receipts": "Show delivery notifications",
 
     "prefs_muc_show_presence": "Show user joins and leaves",

@@ -1533,6 +1533,12 @@ class JabberClient:
             "SXE",
             MatchXPath("%s/{%s}sxe" % (msg_ns, whiteboard_mod.NS_SXE)),
             self._on_sxe_stanza))
+        # A MUC presence advertisement of a board (XEP-0284 §4.2): how a late
+        # room joiner learns the room already has an active board.
+        self.xmpp.register_handler(CoroutineCallback(
+            "SXE Presence",
+            MatchXPath("{jabber:client}presence/{%s}sxe" % whiteboard_mod.NS_SXE),
+            self._on_sxe_presence))
         # XEP-0045 §7.13 voice request — a bodyless ``jabber:x:data`` message
         # (no <body>, so slixmpp's IM handler never fires).
         self.xmpp.register_handler(CoroutineCallback(
@@ -1627,6 +1633,10 @@ class JabberClient:
     async def _on_sxe_stanza(self, msg) -> None:
         """A bodyless XEP-0284 ``<sxe/>`` message (whiteboard edits)."""
         await self.whiteboard.handle_sxe(msg)
+
+    async def _on_sxe_presence(self, pres) -> None:
+        """A MUC presence board advertisement (XEP-0284 §4.2)."""
+        await self.whiteboard.handle_sxe_presence(pres)
 
     async def _on_bodyless_chat_marker_stanza(self, msg) -> None:
         """A bodyless XEP-0333 ``<displayed id='…'/>`` (peer read our message)."""

@@ -72,10 +72,23 @@ class WhiteboardManager:
         self.client = client
         self.sessions: dict[str, WhiteboardSession] = {}
         self._by_peer: dict[str, str] = {}
+        # Peers (bare JID / room) with a currently active board, so the
+        # start/end chat status line is emitted once per activity span.
+        self._active_peers: set[str] = set()
 
     @property
     def available(self) -> bool:
         return True
+
+    def _announce_active(self, peer: str) -> None:
+        if peer and peer not in self._active_peers:
+            self._active_peers.add(peer)
+            self.client.emit("whiteboard_activity", peer, True)
+
+    def _announce_inactive(self, peer: str) -> None:
+        if peer in self._active_peers:
+            self._active_peers.discard(peer)
+            self.client.emit("whiteboard_activity", peer, False)
 
     # ── Lookups ───────────────────────────────────────────────────
 
@@ -169,6 +182,7 @@ class WhiteboardManager:
             self._advertise(session)
             self._send(session, self._sxe(session, "connect"))
             self.client.emit("whiteboard_ready", sid)
+            self._announce_active(peer)
             return sid
         sid = uuid.uuid4().hex
         session = WhiteboardSession(sid=sid, peer=peer, is_muc=False,
@@ -183,6 +197,7 @@ class WhiteboardManager:
             session.ready = True
             logger.info("Whiteboard: local-only board for %s", peer)
             self.client.emit("whiteboard_ready", sid)
+            self._announce_active(peer)
         else:
             full = self._best_full_jid(peer)
             if full == peer.split("/", 1)[0]:
@@ -195,6 +210,7 @@ class WhiteboardManager:
             session.full_peer = full
             logger.info("Whiteboard: invite %s -> %s (sid=%s)", peer, full, sid)
             self._send_jingle(session, "session-initiate")
+            self._announce_active(peer)
         return sid
 
     def handle_error(self, action: str, sid: str, condition: str = "") -> None:
@@ -230,11 +246,19 @@ class WhiteboardManager:
             return
         if self._by_peer.get(session.peer) == sid:
             self._by_peer.pop(session.peer, None)
-        if not session.is_muc:
+        if session.is_muc:
+            # A MUC board has no Jingle session: broadcast an explicit close so
+            # every occupant learns the session ended (a client extension).
+            try:
+                self._send(session, self._sxe(session, "close"))
+            except Exception:  # noqa: BLE001
+                pass
+        else:
             try:
                 self._send_jingle(session, "session-terminate")
             except Exception:  # noqa: BLE001
                 pass
+        self._announce_inactive(session.peer)
         self.client.emit("whiteboard_ended", sid)
 
     def _advertise(self, session: WhiteboardSession) -> None:
@@ -315,6 +339,7 @@ class WhiteboardManager:
             self._seed_document(session.doc)
             self.sessions[sid] = session
             self._by_peer[peer] = sid
+            self._announce_active(peer)
             self.client.emit("whiteboard_invite", sid, peer, False)
         elif action == "session-accept":
             session = self.sessions.get(sid)
@@ -325,6 +350,7 @@ class WhiteboardManager:
         elif action == "session-terminate":
             session = self.sessions.pop(sid, None)
             if session is not None:
+                self._announce_inactive(session.peer)
                 self.client.emit("whiteboard_ended", sid)
         else:
             logger.debug("Whiteboard: unhandled Jingle action %s", action)
@@ -375,6 +401,17 @@ class WhiteboardManager:
         if child is None:
             return
         tag = child.tag
+        if tag == _q(NS_SXE, "close"):
+            # A peer ended the session (MUC client extension): notify and drop.
+            self._announce_inactive(session.peer)
+            self.sessions.pop(sid, None)
+            if self._by_peer.get(session.peer) == sid:
+                self._by_peer.pop(session.peer, None)
+            self.client.emit("whiteboard_ended", sid)
+            return
+        # Any other SXE from a peer means a board is active for that peer (this
+        # is how a passive MUC occupant learns the room has a board).
+        self._announce_active(session.peer)
         if tag == _q(NS_SXE, "connect"):
             self._on_connect(session, frm)
         elif tag == _q(NS_SXE, "state-offer"):
@@ -385,6 +422,21 @@ class WhiteboardManager:
             session.offered = False
         elif tag == _q(NS_SXE, "state"):
             self._apply_state(session, child)
+
+    async def handle_sxe_presence(self, pres) -> None:
+        """A MUC presence advertisement of a board (XEP-0284 §4.2).
+
+        A late room joiner receives the existing occupants' presence, so this is
+        how it learns the room already has an active board.
+        """
+        room = str(pres["from"] or "").split("/", 1)[0]
+        if not room:
+            return
+        nick = str(pres["from"] or "").split("/", 1)[1] if "/" in str(
+            pres["from"] or "") else ""
+        if self._is_self_reflection(room, nick):
+            return
+        self._announce_active(room)
 
     def _is_self_reflection(self, bare: str, nick: str) -> bool:
         if not nick:
@@ -407,6 +459,7 @@ class WhiteboardManager:
         session.accepted = True
         session.ready = True
         self._send(session, self._sxe(session, "accept-state"), to=frm)
+        self._announce_active(session.peer)
         self.client.emit("whiteboard_ready", session.sid)
 
     def _on_accept_state(self, session: WhiteboardSession, frm: str) -> None:
