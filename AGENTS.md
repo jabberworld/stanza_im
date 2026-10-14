@@ -446,7 +446,11 @@ contacts with history by their roster groups or the
 `core/known_contacts.py` registry (persisted JID → name/groups/conference flag
 so removed contacts keep their names), shows per-day bold dates in a
 `QCalendarWidget`, and supports day-scoped and all-time substring search
-(`core/history.dates/load_day/search_dates`). `_select_jid_async` records the
+(`core/history.dates/load_day/search_dates`). An export button
+(`document-save.png`, `_on_export`) writes the **whole** conversation with the
+selected contact to a `.txt` file in a worker thread (`history.dates` +
+`load_day`), one `[YYYY-MM-DD HH:MM:SS] sender: body` line per message (own
+messages as «Я»/«Me», newlines collapsed). `_select_jid_async` records the
 target JID **before** awaiting the JSONL migration so the stale-selection guard
 does not abort the first pick (a regression from moving the SQLite I/O off the
 event loop). The dialog is a **reused singleton** (`MainWindow._history_manager`),

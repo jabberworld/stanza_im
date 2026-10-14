@@ -8,6 +8,7 @@ and day-navigation buttons.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -18,6 +19,8 @@ from stanza_im.include.constants import ACTIONS_DIR_16, APP_ICON_16, \
 from stanza_im.include.utils import escape_html
 from stanza_im.i18n import tr
 
+logger = logging.getLogger(__name__)
+
 
 def _time_of(ts: str) -> str:
     """Return ``HH:MM:SS`` from a stored timestamp string."""
@@ -25,6 +28,15 @@ def _time_of(ts: str) -> str:
         return ""
     if len(ts) >= 19 and ts[10] == "T":
         return ts[11:19]
+    return ts
+
+
+def _stamp(ts: str) -> str:
+    """Return ``YYYY-MM-DD HH:MM:SS`` from a stored timestamp string."""
+    if not ts:
+        return ""
+    if len(ts) >= 19 and ts[10] == "T":
+        return ts[:10] + " " + ts[11:19]
     return ts
 
 
@@ -169,6 +181,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_refresh.setToolTip(tr("history_refresh"))
         self._btn_refresh.clicked.connect(self._refresh)
         nav_row.addWidget(self._btn_refresh)
+        self._btn_export = QtWidgets.QToolButton()
+        self._btn_export.setIcon(_icon("document-save.png"))
+        self._btn_export.setToolTip(tr("history_export"))
+        self._btn_export.setEnabled(False)
+        self._btn_export.clicked.connect(self._on_export)
+        nav_row.addWidget(self._btn_export)
         nav_row.addStretch(1)
         self._btn_first = QtWidgets.QPushButton(tr("history_first_day"))
         self._btn_first.setAutoDefault(False)
@@ -308,6 +326,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _set_contact(self, jid: str, name: str) -> None:
         self._jid = jid
         self._name = name
+        self._btn_export.setEnabled(bool(jid))
         self._search.setText("")
         self._all_days = []
         self._clear_search_state()
@@ -459,16 +478,21 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         else:
             self._status.setText(f"{self._name or self._jid} — {date}")
 
+    def _sender_of(self, entry: dict) -> str:
+        """Resolve a message's sender (own messages show as «Я»/«Me»)."""
+        sender = entry.get("sender", "") or (
+            tr("history_me") if entry.get("direction") == "outgoing" else "")
+        if not sender.strip():
+            sender = self._jid.split("@", 1)[0]
+        return sender
+
     def _render_messages(self) -> None:
         parts = ["<html><body>"]
         for entry in self._entries:
             ts = entry.get("timestamp", "")
             date = ts[:10] if len(ts) >= 10 else ""
             time_s = _time_of(ts)
-            sender = entry.get("sender", "") or (
-                "Me" if entry.get("direction") == "outgoing" else "")
-            if not sender.strip():
-                sender = self._jid.split("@", 1)[0]
+            sender = self._sender_of(entry)
             body = escape_html(entry.get("body", ""))
             body = body.replace("\r\n", "\n").replace("\r", "\n").replace(
                 "\n", "<br>")
@@ -497,6 +521,58 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 self._message_blocks.append(block.position())
                 entry_index += 1
             block = block.next()
+
+    # ── Export ────────────────────────────────────────────────────
+
+    def _on_export(self) -> None:
+        if not self._jid:
+            return
+        default = os.path.join(
+            os.path.expanduser("~"), f"{self._jid.split('@', 1)[0]}.txt")
+        path, _selected = QtWidgets.QFileDialog.getSaveFileName(
+            self, tr("history_export_dialog"), default,
+            "Text files (*.txt);;All files (*)")
+        if not path:
+            return
+        self._start_task(self._export_async(path))
+
+    async def _export_async(self, path: str) -> None:
+        jid = self._jid
+
+        def _collect() -> list[str]:
+            lines: list[str] = []
+            for date in history.dates(jid):
+                for entry in history.load_day(jid, date):
+                    body = (entry.get("body", "") or "").replace(
+                        "\r\n", "\n").replace("\r", "\n")
+                    body = body.replace("\n", " ")
+                    lines.append(
+                        f"[{_stamp(entry.get('timestamp', ''))}] "
+                        f"{self._sender_of(entry)}: {body}")
+            return lines
+
+        def _write(lines: list[str]) -> None:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines))
+                handle.write("\n")
+
+        try:
+            lines = await asyncio.to_thread(_collect)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("History export read failed for %s: %s", jid, exc)
+            self._status.setText(tr("history_export_error"))
+            return
+        if not lines:
+            self._status.setText(tr("history_export_empty"))
+            return
+        try:
+            await asyncio.to_thread(_write, lines)
+        except Exception as exc:
+            logger.warning("History export write failed for %s: %s", path, exc)
+            self._status.setText(tr("history_export_error"))
+            return
+        self._status.setText(
+            tr("history_export_done", n=len(lines), path=path))
 
     # ── Search ────────────────────────────────────────────────────
 
