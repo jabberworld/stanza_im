@@ -1921,6 +1921,15 @@ class JabberClient:
                 tzo = tzo_el.text.strip()
         return {"utc": utc, "tzo": tzo}
 
+    async def _entity_tzo(self, jid: str) -> str:
+        """Return the XEP-0202 timezone offset of *jid* (``""`` on failure)."""
+        try:
+            result = await asyncio.wait_for(
+                self._get_entity_time(jid), timeout=8)
+        except Exception:
+            return ""
+        return str(result.get("tzo") or "")
+
     def _start_task(self, coro):
         """Schedule *coro* on the current event loop; returns the task."""
         try:
@@ -6099,10 +6108,13 @@ class JabberClient:
             if resource:
                 contact.resources.pop(resource, None)
         else:
-            previous_client = contact.resources.get(resource, {}).get("client", "")
+            previous = contact.resources.get(resource, {})
             contact.resources[resource] = {
                 "show": show, "status": status, "priority": priority,
-                "client": previous_client, "caps_node": caps_node,
+                "client": previous.get("client", ""),
+                "client_version": previous.get("client_version", ""),
+                "client_tzo": previous.get("client_tzo", ""),
+                "caps_node": caps_node,
             }
             if resource and frm not in self._version_probed:
                 self._version_probed.add(frm)
@@ -6162,21 +6174,31 @@ class JabberClient:
         self._pep_refresh(bare)
 
     async def _prefetch_version(self, full_jid: str) -> None:
-        """Best-effort XEP-0092 lookup for a contact resource (for tooltips)."""
+        """Best-effort XEP-0092/0202 lookup for a contact resource (tooltips)."""
         try:
             info = await asyncio.wait_for(
                 self.get_entity_version(full_jid), timeout=8)
         except Exception:
-            return
+            info = {}
         software = info.get("software") or ""
+        version = info.get("version") or ""
+        tzo = await self._entity_tzo(full_jid)
         bare, _, resource = full_jid.partition("/")
-        try:
-            self.presences[full_jid]["client"] = software
-        except KeyError:
-            return
+        pres = self.presences.get(full_jid)
+        if pres is not None:
+            pres["client"] = software
+            if version:
+                pres["client_version"] = version
+            if tzo:
+                pres["client_tzo"] = tzo
         contact = self.get_contact(bare)
         if resource and resource in contact.resources:
-            contact.resources[resource]["client"] = software
+            entry = contact.resources[resource]
+            entry["client"] = software
+            if version:
+                entry["client_version"] = version
+            if tzo:
+                entry["client_tzo"] = tzo
 
     # ── Capabilities (XEP-0115) for call gating ───────────────────
 
@@ -6483,14 +6505,16 @@ class JabberClient:
         if show == "unavailable":
             gi.users.pop(nick, None)
         else:
-            previous_client = gi.users.get(nick, {}).get("client", "")
+            previous = gi.users.get(nick, {})
             gi.users[nick] = {
                 "show": show,
                 "status": status,
                 "role": role,
                 "affiliation": affiliation,
                 "real_jid": real_jid,
-                "client": previous_client,
+                "client": previous.get("client", ""),
+                "client_version": previous.get("client_version", ""),
+                "client_tzo": previous.get("client_tzo", ""),
                 "caps_node": _caps_node(pres),
                 "occupant_id": _occupant_id(pres),
                 "hats": hats,
@@ -6514,16 +6538,22 @@ class JabberClient:
 
     async def _prefetch_muc_version(self, room: str, nick: str,
                                     jid: str) -> None:
-        """Best-effort XEP-0092 lookup for a MUC participant's client."""
+        """Best-effort XEP-0092/0202 lookup for a MUC participant's client."""
         try:
             info = await asyncio.wait_for(
                 self.get_entity_version(jid), timeout=8)
         except Exception:
-            return
+            info = {}
         software = info.get("software") or ""
+        version = info.get("version") or ""
+        tzo = await self._entity_tzo(jid)
         gi = self.groupchats.get(room)
         if gi and nick in gi.users:
             gi.users[nick]["client"] = software
+            if version:
+                gi.users[nick]["client_version"] = version
+            if tzo:
+                gi.users[nick]["client_tzo"] = tzo
         self.emit("groupchat_presence_details", room, nick)
 
     def _on_subscribed(self, pres) -> None:

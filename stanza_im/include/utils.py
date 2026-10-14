@@ -199,6 +199,70 @@ def restore_url_tokens(text: str, anchors: list[str]) -> str:
     return text
 
 
+def format_local_datetime(value) -> str:
+    """Format a unix timestamp or ISO string as local ``YYYY-MM-DD HH:MM:SS``."""
+    dt = None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            dt = datetime.datetime.fromtimestamp(float(value))
+        except (OverflowError, OSError, ValueError):
+            dt = None
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        if len(text) >= 19 and text[10] == "T":
+            try:
+                parsed = datetime.datetime.fromisoformat(
+                    text.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone()
+                dt = parsed
+            except ValueError:
+                dt = None
+        elif text.isdigit():
+            try:
+                dt = datetime.datetime.fromtimestamp(float(text))
+            except (OverflowError, OSError, ValueError):
+                dt = None
+    if dt is None:
+        return str(value) if value not in (None, "") else ""
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+_TZO_RE = re.compile(r"^([+-])(\d{2}):?(\d{2})$")
+
+
+def local_time_from_tzo(tzo: str, now: float | None = None) -> str:
+    """Return an entity's local ``YYYY-MM-DD HH:MM:SS`` from its tzo offset.
+
+    *tzo* is the XEP-0202 offset (``+HH:MM``/``-HH:MM``); the current UTC time
+    is shifted by it.  Returns ``""`` when *tzo* is missing or malformed.
+    """
+    if not tzo:
+        return ""
+    match = _TZO_RE.match(str(tzo).strip())
+    if not match:
+        return ""
+    sign = 1 if match.group(1) == "+" else -1
+    minutes = sign * (int(match.group(2)) * 60 + int(match.group(3)))
+    if now is None:
+        base = datetime.datetime.now(datetime.timezone.utc)
+    else:
+        base = datetime.datetime.fromtimestamp(now, datetime.timezone.utc)
+    local = base + datetime.timedelta(minutes=minutes)
+    return local.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def status_icon_html(show: str, size: int = 16) -> str:
+    """Return an ``<img>`` tag for the presence status icon of *show*."""
+    from stanza_im.include.constants import STATUS_DIR_16
+    from stanza_im.include.enumerators import show_to_icon_key
+    path = os.path.join(STATUS_DIR_16,
+                        f"jabber-{show_to_icon_key(show)}.png")
+    if not os.path.exists(path):
+        return ""
+    return f'<img src="{path}" width="{size}" height="{size}">'
+
+
 def linkify(text: str) -> str:
     """Turn URLs in *text* (already HTML-escaped) into clickable links."""
     tmp, anchors = tokenize_urls(text)

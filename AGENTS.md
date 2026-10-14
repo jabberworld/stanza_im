@@ -808,7 +808,11 @@ with a known node and maps it through `include/clients.py` (`find_client`,
 longest caps prefix; `icon_path`, size fallback) to an icon under
 `resources/clients/<size>/`. `UserItem.client_icon` is drawn by
 `RosterStyle.paint_user` right after the avatar (16px, before the unread
-badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`. The
+badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`.
+`_prefetch_version` (XEP-0092) additionally caches the resource's
+`client_version` and, from XEP-0202, its `client_tzo` offset (both preserved
+across presence updates like `client`), which the tooltip turns into the
+contact's live local time. The
 contact tooltip marks each resource line with the client icon before the
 resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and prefixes the
 «Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
