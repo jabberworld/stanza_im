@@ -130,7 +130,6 @@ class VCardInfoDialog(QtWidgets.QDialog):
         head_col = QtWidgets.QVBoxLayout()
         head_col.addWidget(title)
         head_col.addLayout(jid_row)
-        head_col.addStretch()
         head.addLayout(head_col, 1)
         layout.addLayout(head)
 
@@ -155,7 +154,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._status_data = status_data
         self._status_index = tabs.addTab(
             self._status_page(status_data), tr("vcard_tab_status"))
-        layout.addWidget(tabs)
+        layout.addWidget(tabs, 1)
         return content
 
     def update_card(self, card: dict, status: dict | None = None) -> None:

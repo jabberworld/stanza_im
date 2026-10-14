@@ -3892,7 +3892,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.probe_entity(jid)
             self._request_last_activity(jid, dlg)
-        dlg.open()
+        # Non-modal: the user may want to copy the address from another window.
+        dlg.setModal(False)
+        dlg.show()
 
     def _can_edit_room_vcard(self, room: str) -> bool:
         """Owners and admins may edit the room's vCard."""

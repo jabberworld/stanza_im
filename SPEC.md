@@ -161,7 +161,9 @@ publish/retract items and, unless the server announces
 refresh the Bookmarks tab and auto-join/leave the affected rooms.
 The conference browser consumes room names and metadata directly from
 `disco#items`; it does not probe every room individually. Contact and room
-vCard dialogs are opened asynchronously without nested modal event loops.
+vCard dialogs are opened asynchronously without nested modal event loops; the
+info dialog is **non-modal** (`setModal(False)` + `show()`) so its address can
+be copied from another window, and the tab widget stretches to the header.
 `VCardInfoDialog` has a "Обновить"/"Refresh" button (`refresh_requested` →
 `MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
 updates the open window's header and field labels in place (`update_card`, no

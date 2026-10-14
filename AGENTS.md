@@ -210,8 +210,11 @@ the roster tabs only in the `separate` layout with the main window active
 (`_cycle_roster_tab`); in `unified` the chat keeps the shortcut for its own tabs.
 The conference browser uses the names and metadata returned by the service's
 `disco#items` response and does not issue one `disco#info` request per room.
-vCard information dialogs are opened non-modally from async callbacks.
-`VCardInfoDialog` carries a "Обновить"/"Refresh" button (`refresh_requested`
+vCard information dialogs are opened **non-modally** (`_open_vcard_info`:
+`setModal(False)` + `show()`, never `open()`/`exec()`) so the user can copy the
+address from another window while it is open; the tab widget stretches
+(`layout.addWidget(tabs, 1)`) so the tabs hug the header instead of leaving a
+gap above them. `VCardInfoDialog` carries a "Обновить"/"Refresh" button (`refresh_requested`
 → `MainWindow._refresh_vcard` → `get_vcard(force=True)`); when the vCard
 arrives, `_open_vcard_info` updates the already-open window in place
 (`update_card`: header + field labels rewritten, the content widget is not

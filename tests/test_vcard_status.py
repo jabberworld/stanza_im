@@ -58,6 +58,9 @@ class _FakeClient:
     def fetch_pep(self, jid):
         pass
 
+    def probe_entity(self, jid):
+        pass
+
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
@@ -126,6 +129,35 @@ check("dialog renders the status message", "Working" in html)
 check("dialog uses the status icon", "jabber-online.png" in html)
 check("dialog uses the clock icon", "clock.svg" in html)
 check("status label present", tr("tooltip_status") in html)
+
+# 5. the tabs take the extra space (they hug the header) -------------------
+box = dlg._content.layout()
+check("tabs have stretch 1", box.stretch(box.indexOf(dlg._tabs)) == 1)
+
+# 6. the info dialog is opened non-modally (show, not open) ----------------
+import stanza_im.ui.vcard_dialog as vd
+
+shown = {}
+_orig_cls = vd.VCardInfoDialog
+
+
+class _Probe(_orig_cls):
+    def open(self, *a):
+        shown["open"] = True
+
+    def show(self, *a):
+        shown["show"] = True
+
+
+vd.VCardInfoDialog = _Probe
+win._request_last_activity = lambda *a: None
+try:
+    win._vcard_dialogs.clear()
+    win._open_vcard_info("bob@example.com", CARD)
+finally:
+    vd.VCardInfoDialog = _orig_cls
+check("vCard opened with show(), not open()",
+      shown.get("show") and not shown.get("open"))
 
 print()
 if FAILURES:
