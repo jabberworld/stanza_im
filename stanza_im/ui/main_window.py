@@ -2551,7 +2551,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _roster_tooltip(self, jid: str) -> tuple[str, str | None]:
         """Build the roster contact/conference tooltip (html, avatar path)."""
-        from stanza_im.include.utils import escape_html
+        from stanza_im.include.utils import escape_html, \
+            local_time_from_tzo, status_icon_html
         if not self._client:
             return "", None
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
@@ -2572,45 +2573,65 @@ class MainWindow(QtWidgets.QMainWindow):
         if sub in ("none", "to", "from", "both"):
             lines.append(f"{tr('tooltip_subscription')}: "
                          + escape_html(tr(f"privacy_sub_{sub}")))
+        # Extended presence (mood/activity/tune/location) sits right below the
+        # subscription line, before the per-resource blocks.
+        entry = self._client.pep_data.get(jid, {})
+        summary = pep.format_summary(entry)
+        mood = entry.get("mood") or {}
+        activity = entry.get("activity") or {}
+        pep_icons = {
+            "mood": pep.mood_icon_path(str(mood.get("key") or "")),
+            "activity": pep.activity_icon_path(str(
+                activity.get("sub") or activity.get("group") or "")),
+            "tune": pep.tune_icon_path(),
+        }
+        for kind, label in (("mood", tr("pep_mood")),
+                            ("activity", tr("pep_activity")),
+                            ("tune", tr("pep_now_playing")),
+                            ("location", tr("pep_location"))):
+            value = summary.get(kind)
+            if value:
+                icon = pep_icons.get(kind, "")
+                prefix = (f'<img src="{icon}" width="16" height="16"> '
+                          if icon else "")
+                lines.append(prefix + f"{label}: {escape_html(value)}")
+        # Per-resource blocks (tree): status icon + resource + local time, then
+        # an indented client line and the resource's own status message.
+        clock = find_icon("clock.svg")
         resources = sorted(
             contact.resources.items(),
             key=lambda item: (-item[1].get("priority", 0),
                               item[0].casefold()))
-        for resource, info in resources:
-            icon = clients_mod.client_icon_for(
-                str(info.get("caps_node") or ""), 16)
-            marker = (f'<img src="{icon}" width="16" height="16">&nbsp;'
-                      if icon else "&nbsp;&nbsp;&middot;&nbsp;")
-            parts = [f"<b>{escape_html(resource or '*')}</b>"]
-            client = info.get("client", "") or ""
-            if client:
-                parts.append(tr("tooltip_client") + ": " + escape_html(client))
-            lines.append(marker + " " + " &mdash; ".join(parts))
-        if contact.status:
-            lines.append("<i>"
-                         + escape_html(contact.status).replace("\n", "<br>")
-                         + "</i>")
-        if self._client:
-            entry = self._client.pep_data.get(jid, {})
-            summary = pep.format_summary(entry)
-            mood = entry.get("mood") or {}
-            activity = entry.get("activity") or {}
-            pep_icons = {
-                "mood": pep.mood_icon_path(str(mood.get("key") or "")),
-                "activity": pep.activity_icon_path(str(
-                    activity.get("sub") or activity.get("group") or "")),
-                "tune": pep.tune_icon_path(),
-            }
-            for kind, label in (("mood", tr("pep_mood")),
-                                ("activity", tr("pep_activity")),
-                                ("tune", tr("pep_now_playing")),
-                                ("location", tr("pep_location"))):
-                value = summary.get(kind)
-                if value:
-                    icon = pep_icons.get(kind, "")
+        indent = "&nbsp;&nbsp;&nbsp;"
+        if resources:
+            for resource, info in resources:
+                head = [status_icon_html(str(info.get("show") or ""))]
+                head.append(f"<b>{escape_html(resource or '*')}</b>")
+                local = local_time_from_tzo(
+                    str(info.get("client_tzo") or ""))
+                if local:
+                    head.append(
+                        f'<img src="{clock}" width="16" height="16"> '
+                        + escape_html(local))
+                lines.append(" ".join(part for part in head if part))
+                client = info.get("client", "") or ""
+                version = info.get("client_version", "") or ""
+                client_name = (client + (" " + version if version else "")
+                               ).strip()
+                if client_name:
+                    icon = clients_mod.client_icon_for(
+                        str(info.get("caps_node") or ""), 16)
                     prefix = (f'<img src="{icon}" width="16" height="16"> '
                               if icon else "")
-                    lines.append(prefix + f"{label}: {escape_html(value)}")
+                    lines.append(indent + prefix + tr("tooltip_client") + ": "
+                                 + escape_html(client_name))
+                status = info.get("status", "") or ""
+                if status.strip():
+                    lines.append(indent + tr("tooltip_status") + ": "
+                                 + escape_html(status).replace("\n", "<br>"))
+        elif contact.status:
+            lines.append(tr("tooltip_status") + ": "
+                         + escape_html(contact.status).replace("\n", "<br>"))
         return "<br>".join(lines), contact.avatar_path
 
     def _on_preferences(self):

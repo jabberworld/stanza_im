@@ -813,10 +813,14 @@ badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`.
 `client_version` and, from XEP-0202, its `client_tzo` offset (both preserved
 across presence updates like `client`), which the tooltip turns into the
 contact's live local time. The
-contact tooltip marks each resource line with the client icon before the
-resource name (`<img …>&nbsp;<b>resource</b> — Client: …`) and prefixes the
-«Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
-`pep.activity_icon_path` / `pep.tune_icon_path`.
+contact tooltip is a per-resource **tree**: after the name/JID/subscription the
+extended-presence lines (mood/activity/now playing/location, each prefixed with
+`pep.mood_icon_path`/`pep.activity_icon_path`/`pep.tune_icon_path`) come first,
+then one block per resource — the status icon (`status_icon_html`, i.e.
+`jabber-<show>.png`) before the bold resource name, the `clock.svg` icon and the
+resource's live local time (`local_time_from_tzo`, XEP-0202 `client_tzo`) beside
+it, an indented client line (`<img client-icon> Клиент: name version`) and an
+indented «Статус: message» (`tooltip_status`).
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
 before the nick; roster and participant avatars are clipped by
