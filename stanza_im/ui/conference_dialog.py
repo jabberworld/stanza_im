@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import CATEGORIES_DIR_16
+from stanza_im.ui.dialogs import show_modeless
 
 
 class ConferenceBrowserDialog(QtWidgets.QDialog):
@@ -161,7 +162,7 @@ class JoinConferenceDialog(QtWidgets.QDialog):
         dlg.room_selected.connect(self._room.setText)
         dlg.vcard_requested.connect(self.vcard_requested)
         self._browser_dialog = dlg
-        dlg.open()
+        show_modeless(dlg)
 
     def collect(self):
         return {"room": self._room.text().strip(), "nick": self._nick.text().strip(),

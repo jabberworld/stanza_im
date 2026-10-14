@@ -14,6 +14,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include import hats as hats_mod
+from stanza_im.ui.dialogs import show_modeless
 
 
 def _hue_color(hue, saturation: float = 85.0,
@@ -410,10 +411,13 @@ class HatsTab(QtWidgets.QWidget):
         if not (self._can_manage and self._supported):
             return
         dialog = HatEditDialog(title_key="hats_create_title", parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        title, hue = dialog.values()
-        self._run(self._client.hats_create(self._room, title, hue=hue))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            title, hue = dialog.values()
+            self._run(self._client.hats_create(self._room, title, hue=hue))
+        show_modeless(dialog, finished)
 
     def _on_edit(self) -> None:
         ref = self._current_ref()
@@ -423,11 +427,14 @@ class HatsTab(QtWidgets.QWidget):
         dialog = HatEditDialog(title=hat.get("title") or "",
                                hue=hat.get("hue"),
                                title_key="hats_edit_title", parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        title, hue = dialog.values()
-        self._run(self._client.hats_update(
-            self._room, hat.get("uri") or "", title, hue=hue))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            title, hue = dialog.values()
+            self._run(self._client.hats_update(
+                self._room, hat.get("uri") or "", title, hue=hue))
+        show_modeless(dialog, finished)
 
     def _on_delete(self) -> None:
         ref = self._current_ref()
@@ -445,9 +452,12 @@ class HatsTab(QtWidgets.QWidget):
         if not (self._can_manage and self._supported and self._hats):
             return
         dialog = HatAssignDialog(self._hats, self._participants(), parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self._run(self._assign_many(dialog.hat_uri(), dialog.jids()))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._run(self._assign_many(dialog.hat_uri(), dialog.jids()))
+        show_modeless(dialog, finished)
 
     async def _assign_many(self, uri: str, jids: list[str]) -> None:
         for jid in jids:
@@ -459,9 +469,12 @@ class HatsTab(QtWidgets.QWidget):
             return
         dialog = HatAssignDialog(self._hats, self._participants(),
                                  preselect=preselect, parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self._run(self._assign_many(dialog.hat_uri(), dialog.jids()))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._run(self._assign_many(dialog.hat_uri(), dialog.jids()))
+        show_modeless(dialog, finished)
 
     def _on_unassign(self) -> None:
         ref = self._current_ref()

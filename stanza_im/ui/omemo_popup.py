@@ -15,6 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
 from stanza_im.include.utils import escape_html
+from stanza_im.ui.dialogs import show_modeless
 
 logger = logging.getLogger("stanza_im.omemo")
 
@@ -312,5 +313,6 @@ class OmemoPopup(QtWidgets.QFrame):
         self.close()
         from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
         own_bare = (getattr(self._client, "jid_str", "") or "").split("/", 1)[0]
-        OmemoDevicesDialog(self._client, self._jid, self.parent(),
-                           own=(self._jid == own_bare)).exec()
+        show_modeless(OmemoDevicesDialog(
+            self._client, self._jid, self.parent(),
+            own=(self._jid == own_bare)))

@@ -17,6 +17,7 @@ from xml.etree import ElementTree as ET
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui.dialogs import show_modeless
 
 _CLIENT_NS = "jabber:client"
 _SM_NS_PREFIX = "urn:xmpp:sm:"
@@ -395,20 +396,24 @@ class XmlConsoleDialog(QtWidgets.QDialog):
                 self, tr("xml_console_title"), tr("xml_console_not_connected"))
             return
         dialog = XmlInputDialog(self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        text = dialog.text().strip()
-        if not text:
-            return
-        try:
-            client.send_raw_xml(text)
-        except ET.ParseError:
-            QtWidgets.QMessageBox.warning(
-                self, tr("xml_console_title"), tr("xml_console_invalid_xml"))
-        except Exception as exc:  # NotConnectedError and friends
-            QtWidgets.QMessageBox.warning(
-                self, tr("xml_console_title"),
-                tr("xml_console_send_failed", error=str(exc)))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            text = dialog.text().strip()
+            if not text:
+                return
+            try:
+                client.send_raw_xml(text)
+            except ET.ParseError:
+                QtWidgets.QMessageBox.warning(
+                    self, tr("xml_console_title"),
+                    tr("xml_console_invalid_xml"))
+            except Exception as exc:  # NotConnectedError and friends
+                QtWidgets.QMessageBox.warning(
+                    self, tr("xml_console_title"),
+                    tr("xml_console_send_failed", error=str(exc)))
+        show_modeless(dialog, finished)
 
     def closeEvent(self, event):
         # Stop capturing when the window is closed; the buffer stays until the

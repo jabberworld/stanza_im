@@ -655,6 +655,15 @@ UI convention: context menus and menu-bar menus always use icons. Load them via
 `include.constants.find_icon` (scalable dirs first, then the sized dirs);
 `SearchDialog._icon` mirrors it.
 
+**Non-modal dialogs**: a blocking (`exec()`/`open()`) dialog prevents copying
+data from another window (e.g. a room name from a chat) into it, so every
+dialog that holds editable fields or copyable data is shown modeless via
+`ui/dialogs.py::show_modeless(dialog, on_finished)` — the accept/reject logic
+moves into the `finished` slot and the dialog stays alive through its parent.
+Only pure confirmations, checkbox-only selectors (`ShareDialog`,
+`RosterExchangeDialog`), immediate prompts (`IncomingFileDialog`,
+`IncomingCallDialog`, `CaptchaDialog`) and pickers stay modal.
+
 The shared rich-text tooltip (`ui/tooltip.py`) is a frameless popup used by the
 roster and the MUC participant list; its avatar is scaled to
 `notifications`-independent `appearance.tooltip_avatar_size`

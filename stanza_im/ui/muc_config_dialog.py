@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.ui.data_form_widget import DataFormWidget
+from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.hats_dialog import HatsTab
 
 _AFFILIATIONS = ("owner", "admin", "member", "outcast")
@@ -254,12 +255,15 @@ class MucConfigDialog(QtWidgets.QDialog):
             self, affiliation="member",
             actor_affiliation=self._actor_affiliation,
             original_affiliation="none")
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        affiliation, jid, note = dlg.values()
-        self._participants[jid] = {"affiliation": affiliation, "note": note}
-        self._changes[jid] = {"affiliation": affiliation, "note": note}
-        self._rebuild_tree()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            affiliation, jid, note = dlg.values()
+            self._participants[jid] = {"affiliation": affiliation, "note": note}
+            self._changes[jid] = {"affiliation": affiliation, "note": note}
+            self._rebuild_tree()
+        show_modeless(dlg, finished)
 
     def _on_edit(self) -> None:
         jid = self._selected_jid()
@@ -271,15 +275,19 @@ class MucConfigDialog(QtWidgets.QDialog):
             note=current.get("note", ""), title_key="muc_config_edit_title",
             actor_affiliation=self._actor_affiliation,
             original_affiliation=current.get("affiliation", "none"))
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        affiliation, new_jid, note = dlg.values()
-        if new_jid != jid:
-            self._participants.pop(jid, None)
-            self._changes[jid] = {"affiliation": "none", "note": ""}
-        self._participants[new_jid] = {"affiliation": affiliation, "note": note}
-        self._changes[new_jid] = {"affiliation": affiliation, "note": note}
-        self._rebuild_tree()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            affiliation, new_jid, note = dlg.values()
+            if new_jid != jid:
+                self._participants.pop(jid, None)
+                self._changes[jid] = {"affiliation": "none", "note": ""}
+            self._participants[new_jid] = {"affiliation": affiliation,
+                                           "note": note}
+            self._changes[new_jid] = {"affiliation": affiliation, "note": note}
+            self._rebuild_tree()
+        show_modeless(dlg, finished)
 
     def _on_delete(self) -> None:
         jid = self._selected_jid()

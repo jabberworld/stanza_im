@@ -11,6 +11,7 @@ from stanza_im.core.storage import Config
 from stanza_im.core.discovery import DiscoveryCache, HAS_AIODNS
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui import icons as icons_mod
 from stanza_im.ui.sounds import SoundPlayer
 from stanza_im.ui.tray import normalize_popups_mode
@@ -1272,7 +1273,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         if client is None:
             return
         from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
-        OmemoDevicesDialog(client, client.jid_str, self, own=True).exec()
+        show_modeless(OmemoDevicesDialog(client, client.jid_str, self,
+                                         own=True))
 
     def _page_appearance(self):
         themes, form = self._page()
@@ -1903,10 +1905,13 @@ class PreferencesDialog(QtWidgets.QDialog):
             return
         from stanza_im.ui.change_password_dialog import ChangePasswordDialog
         dlg = ChangePasswordDialog(self)
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self._btn_change_password.setEnabled(False)
-        asyncio.create_task(self._run_change_password(dlg.password()))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._btn_change_password.setEnabled(False)
+            asyncio.create_task(self._run_change_password(dlg.password()))
+        show_modeless(dlg, finished)
 
     async def _run_change_password(self, new_password: str):
         result = await self._do_change_password(new_password)

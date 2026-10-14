@@ -395,22 +395,30 @@ gate._client = _FakeRegClient()
 gate._legacy_widget = _LegacyStub()
 emitted = []
 gate.registered.connect(lambda jid, pw: emitted.append((jid, pw)))
-_original_exec = reg.RegistrationResultDialog.exec
-reg.RegistrationResultDialog.exec = (
-    lambda self: QtWidgets.QDialog.DialogCode.Rejected)
+_original_show = reg.show_modeless
+
+
+def _auto_show(code):
+    def _show(dialog, on_finished=None, delete_on_close=False):
+        if on_finished is not None:
+            on_finished(code)
+        return dialog
+    return _show
+
+
+reg.show_modeless = _auto_show(QtWidgets.QDialog.DialogCode.Rejected)
 asyncio.run(gate._submit())
 check("closing the result dialog keeps the account unsaved",
       not gate._config.jid and emitted == [])
 gate._client = _FakeRegClient()
-reg.RegistrationResultDialog.exec = (
-    lambda self: QtWidgets.QDialog.DialogCode.Accepted)
+reg.show_modeless = _auto_show(QtWidgets.QDialog.DialogCode.Accepted)
 asyncio.run(gate._submit())
 check("applying the result dialog saves and announces the account",
       gate._config.jid == "bob@example.com" and emitted
       == [("bob@example.com", "pw")])
 check("applying the result dialog saves the connection settings",
       gate._config.connection.tls_mode == "prefer")
-reg.RegistrationResultDialog.exec = _original_exec
+reg.show_modeless = _original_show
 
 
 # ── static wiring ────────────────────────────────────────────────
@@ -425,7 +433,7 @@ def _read(*parts):
 reg_src = _read("stanza_im", "ui", "account_registration_dialog.py")
 check("the result dialog gates the config write",
       "RegistrationResultDialog" in reg_src
-      and "if result.exec()" in reg_src)
+      and "show_modeless(result" in reg_src)
 check("registration fits the dialog to the form content",
       "QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))"
       in reg_src)

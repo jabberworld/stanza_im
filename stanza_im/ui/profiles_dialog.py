@@ -12,6 +12,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.i18n import tr
 from stanza_im.core import profiles
 from stanza_im.include.constants import find_icon
+from stanza_im.ui.dialogs import show_modeless
 
 
 def _icon(name: str) -> QtGui.QIcon:
@@ -170,20 +171,26 @@ class ProfilesDialog(QtWidgets.QDialog):
             AccountRegistrationDialog)
         dialog = AccountRegistrationDialog(
             self._config, self, store_account=False)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        profile = dialog.result_profile()
-        if profile is not None:
-            profiles.upsert(profile)
-            self.reload()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            profile = dialog.result_profile()
+            if profile is not None:
+                profiles.upsert(profile)
+                self.reload()
+        show_modeless(dialog, finished)
 
     def _create_existing(self) -> None:
         from stanza_im.ui.existing_account_dialog import ExistingAccountDialog
         dialog = ExistingAccountDialog(self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        profiles.upsert(dialog.profile())
-        self.reload()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            profiles.upsert(dialog.profile())
+            self.reload()
+        show_modeless(dialog, finished)
 
     def _on_apply(self) -> None:
         jid = self._selected_jid()

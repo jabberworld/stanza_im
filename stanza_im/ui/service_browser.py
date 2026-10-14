@@ -20,6 +20,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
+from stanza_im.ui.dialogs import show_modeless
 
 logger = logging.getLogger(__name__)
 
@@ -437,13 +438,16 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
                              tr("roster_group_ungrouped"))
         }, key=str.casefold)
         dlg = AddContactDialog(groups, self._client, self, jid=jid)
-        if not dlg.exec():
-            return
-        data = dlg.collect()
-        self._client.add_contact(data["jid"], data["name"],
-                                 [data["group"]] if data["group"] else [],
-                                 data["message"], data["subscribe"])
-        self._client.request_roster()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            data = dlg.collect()
+            self._client.add_contact(data["jid"], data["name"],
+                                     [data["group"]] if data["group"] else [],
+                                     data["message"], data["subscribe"])
+            self._client.request_roster()
+        show_modeless(dlg, finished)
 
     def _current_data(self) -> dict | None:
         item = self._tree.currentItem()
@@ -515,7 +519,7 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         if not data or not data.get("jid"):
             return
         from stanza_im.ui.registration_dialog import RegistrationDialog
-        RegistrationDialog(self._client, data["jid"], self).exec()
+        show_modeless(RegistrationDialog(self._client, data["jid"], self))
 
     def _search(self) -> None:
         data = self._current_data()
@@ -524,7 +528,7 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         from stanza_im.ui.search_dialog import SearchDialog
         dlg = SearchDialog(self._client, data["jid"], self)
         dlg.vcard_requested.connect(self.vcard_requested)
-        dlg.exec()
+        show_modeless(dlg)
 
     def _commands(self) -> None:
         data = self._current_data()

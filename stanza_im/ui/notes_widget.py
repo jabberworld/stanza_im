@@ -15,6 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
+from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.notes_dialog import NoteDialog
 from stanza_im.ui.zoom_list import ZoomListWidget
 
@@ -283,18 +284,24 @@ class NotesWidget(QtWidgets.QWidget):
 
     def _on_new_clicked(self) -> None:
         dialog = NoteDialog(parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self._notes.append(dialog.collect())
-        self._save()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._notes.append(dialog.collect())
+            self._save()
+        show_modeless(dialog, finished)
 
     def _edit_note(self, index: int, note: dict) -> None:
         dialog = NoteDialog(note, parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        if 0 <= index < len(self._notes):
-            self._notes[index] = dialog.collect()
-        self._save()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            if 0 <= index < len(self._notes):
+                self._notes[index] = dialog.collect()
+            self._save()
+        show_modeless(dialog, finished)
 
     def _on_delete_clicked(self) -> None:
         index = self._selected_index()

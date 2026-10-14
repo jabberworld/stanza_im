@@ -6,6 +6,7 @@ import logging
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui.dialogs import show_modeless
 
 logger = logging.getLogger("stanza_im.omemo")
 
@@ -69,4 +70,4 @@ def show_fingerprint_qr(parent, text: str) -> None:
     """Open the QR dialog for *text* (no-op for empty text)."""
     if not text:
         return
-    QrDialog(text, parent).exec()
+    show_modeless(QrDialog(text, parent))

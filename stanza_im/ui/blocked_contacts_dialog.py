@@ -6,6 +6,7 @@ import asyncio
 from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui.dialogs import show_modeless
 
 
 class BlockedContactsDialog(QtWidgets.QDialog):
@@ -138,10 +139,13 @@ class BlockedContactsDialog(QtWidgets.QDialog):
             return
         from stanza_im.ui.report_dialog import ReportDialog
         dialog = ReportDialog(jids[0], self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        asyncio.create_task(self._report(jids[0], dialog.reason(),
-                                         dialog.text()))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            asyncio.create_task(self._report(jids[0], dialog.reason(),
+                                             dialog.text()))
+        show_modeless(dialog, finished)
 
     async def _report(self, jid: str, reason: str, text: str) -> None:
         try:

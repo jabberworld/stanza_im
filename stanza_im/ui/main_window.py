@@ -33,6 +33,7 @@ from stanza_im.include import clients as clients_mod
 from stanza_im.core.storage import Config
 from stanza_im.core import profiles, unread_state
 from stanza_im.ui.icons import init_icons
+from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.zoom_list import ZoomListWidget as _ZoomListWidget
 from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.roster_widget import RosterWidget, UserItem
@@ -1506,13 +1507,16 @@ class MainWindow(QtWidgets.QMainWindow):
                         key=str.casefold)
         dlg = AddContactDialog(groups, self._client, self, jid=jid)
         dlg.vcard_requested.connect(self._show_profile)
-        if not dlg.exec():
-            return
-        data = dlg.collect()
-        self._client.add_contact(data["jid"], data["name"],
-                                 [data["group"]] if data["group"] else [],
-                                 data["message"], data["subscribe"])
-        self._client.request_roster()
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            data = dlg.collect()
+            self._client.add_contact(data["jid"], data["name"],
+                                     [data["group"]] if data["group"] else [],
+                                     data["message"], data["subscribe"])
+            self._client.request_roster()
+        show_modeless(dlg, finished)
 
     def _on_service_browser(self):
         if not self._client:
@@ -1527,7 +1531,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.vcard_requested.connect(self._show_profile)
         dlg.servers_updated.connect(self._on_service_servers)
         dlg.xmpp_uri_requested.connect(self._on_xmpp_uri)
-        dlg.open()
+        show_modeless(dlg)
 
     def _on_service_servers(self, servers: list[str]):
         self._config.connection.service_servers = list(servers)
@@ -1558,8 +1562,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            bookmark_name=data["name"],
                            autojoin=data["autojoin"],
                            server=data["server"])
-        dlg.finished.connect(finished)
-        dlg.open()
+        show_modeless(dlg, finished)
 
     def _on_create_conference(self):
         if not self._client:
@@ -1588,8 +1591,7 @@ class MainWindow(QtWidgets.QMainWindow):
             nick = self._client.jid_str.split("@", 1)[0]
             self._join_muc(data["room"], nick, "", server=data["server"],
                            create_opts=data)
-        dlg.finished.connect(finished)
-        dlg.open()
+        show_modeless(dlg, finished)
 
     def _on_join_groupchat_dialog(self):
         if not self._client:
@@ -1622,8 +1624,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            bookmark_name=data["name"],
                            autojoin=data["autojoin"],
                            server=data["server"])
-        dlg.finished.connect(finished)
-        dlg.open()
+        show_modeless(dlg, finished)
 
     async def _load_bookmarks(self):
         bookmarks = await self._client.list_bookmarks()
@@ -1708,9 +1709,12 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.bookmark_dialog import BookmarkDialog
         dlg = BookmarkDialog(self._conference_servers(),
                              default_nick=self._default_nick(), parent=self)
-        if not dlg.exec():
-            return
-        self._save_bookmark_values(dlg.collect())
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._save_bookmark_values(dlg.collect())
+        show_modeless(dlg, finished)
 
     def _on_bookmark_jid_requested(self, jid: str) -> None:
         """Add/edit a bookmark for an ``xmpp:`` link's room JID."""
@@ -1726,23 +1730,29 @@ class MainWindow(QtWidgets.QMainWindow):
             servers.insert(0, server)
         dlg = BookmarkDialog(servers, bookmark=bookmark,
                              default_nick=self._default_nick(), parent=self)
-        if not dlg.exec():
-            return
-        self._save_bookmark_values(dlg.collect())
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._save_bookmark_values(dlg.collect())
+        show_modeless(dlg, finished)
 
     def _edit_bookmark(self, bookmark: dict) -> None:
         from stanza_im.ui.bookmark_dialog import BookmarkDialog
         dlg = BookmarkDialog(self._conference_servers(), bookmark=bookmark,
                              parent=self)
-        if not dlg.exec():
-            return
-        old_room = bookmark.get("jid", "")
-        data = dlg.collect()
-        new_room = data["jid"]
-        if old_room and new_room and old_room != new_room:
-            # The room address changed: drop the old bookmark, add the new one.
-            self._remove_bookmark(old_room)
-        self._save_bookmark_values(data)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            old_room = bookmark.get("jid", "")
+            data = dlg.collect()
+            new_room = data["jid"]
+            if old_room and new_room and old_room != new_room:
+                # The room address changed: drop the old bookmark, add the new.
+                self._remove_bookmark(old_room)
+            self._save_bookmark_values(data)
+        show_modeless(dlg, finished)
 
     def _save_bookmark_values(self, data: dict) -> None:
         room = data.get("jid", "")
@@ -1787,12 +1797,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         dialog = SubjectDialog(room, self._client.get_muc_subjects(room),
                                self._chat_window)
-        if not dialog.exec():
-            return
-        result = dialog.result_subjects()
-        default = next((text for lang, text in result if not lang), "")
-        langs = [(lang, text) for lang, text in result if lang]
-        self._client.set_muc_subject(room, default, langs=langs)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            subjects = dialog.result_subjects()
+            default = next((text for lang, text in subjects if not lang), "")
+            langs = [(lang, text) for lang, text in subjects if lang]
+            self._client.set_muc_subject(room, default, langs=langs)
+        show_modeless(dialog, finished)
 
     def _sync_conference_roster(self, room: str):
         """Represent an active MUC using the normal roster row renderer."""
@@ -2765,7 +2778,7 @@ class MainWindow(QtWidgets.QMainWindow):
             AccountRegistrationDialog)
         dialog = AccountRegistrationDialog(self._config, self)
         dialog.registered.connect(self._on_account_registered)
-        dialog.exec()
+        show_modeless(dialog)
 
     def _on_account_registered(self, jid: str, password: str) -> None:
         """Prefill the login form after a successful registration."""
@@ -2783,9 +2796,9 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.profiles_dialog import ProfilesDialog
         dialog = ProfilesDialog(self._config, self)
         dialog.activated.connect(self._activate_profile)
-        dialog.exec()
-        # Profiles may have been created/removed: refresh the login selector.
-        self._login.refresh_profiles()
+        # Profiles may have been created/removed: refresh the login selector
+        # once the (non-modal) manager is closed.
+        show_modeless(dialog, lambda *_: self._login.refresh_profiles())
 
     def _on_login_profile_applied(self, jid: str) -> None:
         """A profile was applied on the login screen: select its data dir."""
@@ -2796,7 +2809,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client is None:
             return
         from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
-        OmemoDevicesDialog(self._client, jid, self).exec()
+        show_modeless(OmemoDevicesDialog(self._client, jid, self))
 
     def _open_omemo_popup(self, jid: str) -> None:
         """Open the quick OMEMO devices popup (chat shield button)."""
@@ -3134,7 +3147,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_about(self):
         from stanza_im.ui.about_dialog import AboutDialog
-        AboutDialog(self).exec()
+        self._show_info_dialog(AboutDialog(self))
 
     def _set_info_actions_enabled(self, enabled: bool) -> None:
         """Enable the Help → connection/certificate/server entries."""
@@ -3908,11 +3921,14 @@ class MainWindow(QtWidgets.QMainWindow):
         data["jid"] = room
         dlg = VCardEditDialog(data, parent or self,
                               title_key="vcard_edit_room_title")
-        if not dlg.exec():
-            return
-        collected = dlg.collect()
-        collected["jid"] = room
-        self._start_task(self._save_room_vcard(room, collected, parent))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            collected = dlg.collect()
+            collected["jid"] = room
+            self._start_task(self._save_room_vcard(room, collected, parent))
+        show_modeless(dlg, finished)
 
     async def _save_room_vcard(self, room: str, card: dict,
                                parent=None) -> None:
@@ -4541,8 +4557,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(card, dict) and "jid" in card:
             card["jid"] = my
         dlg = VCardEditDialog(card or {"jid": my}, self)
-        if not dlg.exec():
-            return
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._start_task(self._save_my_vcard(dlg))
+        show_modeless(dlg, finished)
+
+    async def _save_my_vcard(self, dlg) -> None:
         if await self._client.set_own_vcard(dlg.collect()):
             QtWidgets.QMessageBox.information(self, APP_NAME,
                                               tr("vcard_saved"))
@@ -4628,8 +4650,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            bookmark_name=data["name"],
                            autojoin=data["autojoin"],
                            server=data["server"])
-        dlg.finished.connect(finished)
-        dlg.open()
+        show_modeless(dlg, finished)
 
     # ── vCard error ────────────────────────────────────────────────
 
@@ -5152,10 +5173,13 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.report_dialog import ReportDialog
         bare = jid.split("/", 1)[0]
         dialog = ReportDialog(bare, self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self._start_task(self._client.report_contact(
-            bare, dialog.reason(), dialog.text()))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._start_task(self._client.report_contact(
+                bare, dialog.reason(), dialog.text()))
+        show_modeless(dialog, finished)
 
     # ── History manager ───────────────────────────────────────────
 
@@ -7707,18 +7731,22 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.hats_dialog import HatUnassignDialog
         dialog = HatUnassignDialog(hats, nick,
                                    parent=self._chat_dialog_parent())
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        hat = dialog.hat()
-        if not hat:
-            return
-        answer = QtWidgets.QMessageBox.question(
-            self, tr("hats_unassign_title"),
-            tr("hats_confirm_unassign", title=hat.get("title") or "",
-               user=nick))
-        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-            return
-        self._start_task(self._unassign_hat(room, jid, hat.get("uri") or ""))
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            hat = dialog.hat()
+            if not hat:
+                return
+            answer = QtWidgets.QMessageBox.question(
+                self, tr("hats_unassign_title"),
+                tr("hats_confirm_unassign", title=hat.get("title") or "",
+                   user=nick))
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            self._start_task(
+                self._unassign_hat(room, jid, hat.get("uri") or ""))
+        show_modeless(dialog, finished)
 
     async def _unassign_hat(self, room: str, jid: str, uri: str):
         if self._client is None or not uri:
@@ -7780,8 +7808,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if result != QtWidgets.QDialog.DialogCode.Accepted:
                 return
             self._join_muc(room, dlg.nick(), password)
-        dlg.finished.connect(finished)
-        dlg.open()
+        show_modeless(dlg, finished)
 
     def _notify_osd_invite(self, label: str, room: str) -> None:
         """An OSD notification for an incoming conference invitation."""
@@ -8331,11 +8358,14 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.status_message_dialog import StatusMessageDialog
         current = getattr(self._config.status, "message", "") or ""
         dlg = StatusMessageDialog(current, self)
-        if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self._config.status.message = dlg.text()
-        self._config.save()
-        self._send_presence(self._config.last_status)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            self._config.status.message = dlg.text()
+            self._config.save()
+            self._send_presence(self._config.last_status)
+        show_modeless(dlg, finished)
 
     def _republish_pep(self) -> None:
         """Re-publish the stored mood/activity after a (re)connect."""

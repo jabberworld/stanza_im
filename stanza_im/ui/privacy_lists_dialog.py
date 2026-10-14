@@ -12,6 +12,7 @@ from PyQt6 import QtGui, QtWidgets
 
 from stanza_im.core import privacy
 from stanza_im.i18n import tr
+from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.privacy_rule_dialog import PrivacyRuleDialog, describe_item
 
 
@@ -371,14 +372,17 @@ class PrivacyListsDialog(QtWidgets.QDialog):
     def _on_add_rule(self) -> None:
         dialog = PrivacyRuleDialog(self._roster_jids(), self._roster_groups(),
                                    parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        item = dialog.result_item()
-        item["order"] = privacy.next_order(self._items)
-        self._items.insert(0, item)
-        self._dirty = True
-        self._refresh_rules()
-        self._rules.setCurrentRow(0)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            item = dialog.result_item()
+            item["order"] = privacy.next_order(self._items)
+            self._items.insert(0, item)
+            self._dirty = True
+            self._refresh_rules()
+            self._rules.setCurrentRow(0)
+        show_modeless(dialog, finished)
 
     def _on_edit_rule(self) -> None:
         index = self._selected_index()
@@ -387,14 +391,17 @@ class PrivacyListsDialog(QtWidgets.QDialog):
         current = self._items[index]
         dialog = PrivacyRuleDialog(self._roster_jids(), self._roster_groups(),
                                    current, parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        item = dialog.result_item()
-        item["order"] = current.get("order", 0)
-        self._items[index] = item
-        self._dirty = True
-        self._refresh_rules()
-        self._rules.setCurrentRow(index)
+
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            item = dialog.result_item()
+            item["order"] = current.get("order", 0)
+            self._items[index] = item
+            self._dirty = True
+            self._refresh_rules()
+            self._rules.setCurrentRow(index)
+        show_modeless(dialog, finished)
 
     def _on_delete_rule(self) -> None:
         index = self._selected_index()

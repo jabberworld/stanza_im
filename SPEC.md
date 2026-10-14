@@ -163,7 +163,11 @@ The conference browser consumes room names and metadata directly from
 `disco#items`; it does not probe every room individually. Contact and room
 vCard dialogs are opened asynchronously without nested modal event loops; the
 info dialog is **non-modal** (`setModal(False)` + `show()`) so its address can
-be copied from another window, and the tab widget stretches to the header.
+be copied from another window, and the tab widget stretches to the header. In
+general, dialogs with editable fields or copyable data are shown modeless via
+`ui/dialogs.py::show_modeless(dialog, on_finished)` (accept/reject logic in the
+`finished` slot); only confirmations, checkbox-only selectors and immediate
+prompts stay modal.
 `VCardInfoDialog` has a "Обновить"/"Refresh" button (`refresh_requested` →
 `MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
 updates the open window's header and field labels in place (`update_card`, no
