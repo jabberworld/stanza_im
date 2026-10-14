@@ -15,7 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core import history
 from stanza_im.include.constants import ACTIONS_DIR_16, APP_ICON_16, \
-    CATEGORIES_DIR_16, STATUS_DIR_32
+    CATEGORIES_DIR_16, STATUS_DIR_32, find_icon
 from stanza_im.include.utils import escape_html
 from stanza_im.i18n import tr
 
@@ -182,7 +182,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_refresh.clicked.connect(self._refresh)
         nav_row.addWidget(self._btn_refresh)
         self._btn_export = QtWidgets.QToolButton()
-        self._btn_export.setIcon(_icon("document-save.png"))
+        self._btn_export.setIcon(QtGui.QIcon(find_icon("export.svg")))
         self._btn_export.setToolTip(tr("history_export"))
         self._btn_export.setEnabled(False)
         self._btn_export.clicked.connect(self._on_export)
