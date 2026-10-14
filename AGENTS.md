@@ -220,25 +220,27 @@ gap above them. `VCardInfoDialog` carries a "Обновить"/"Refresh" button 
 arrives, `_open_vcard_info` updates the already-open window in place
 (`update_card`: header + field labels rewritten, the content widget is not
 recreated and the active tab is preserved) instead of opening a second one,
-and re-issues `probe_entity` so the Status tab (version/ping) refreshes too
-(`update_status` merges values without switching tabs). The Status tab renders
-per-resource client blocks (`_render_clients` → the shared
+and re-issues `probe_entity` (now a client **ping** only) so the Status tab
+refreshes too (`update_status` merges values without switching tabs). The Status
+tab renders per-resource client blocks (`_render_clients` → the shared
 `ui/resource_tree.py::resource_tree_html`, the same tree as the roster tooltip)
 in a dedicated **«Клиенты:»** form row (label left, tree right, hidden when
 empty) built by `MainWindow._vcard_status` from `contact.resources` — or, for a
 MUC participant opened from the room (`_show_muc_participant_profile` sets
 `_vcard_muc_ctx`), from the single occupant — while a plain 1:1 contact is never
-given a room nick (the old bogus «Ресурс»). The «Клиенты» caption is
-top-aligned so the first resource name lines up with it, the dialog opens with
-headroom (`_apply_default_size`, 520×600 clamped to the screen) and every tab
-page is wrapped in a `QScrollArea` (`_scrolled`, widget-resizable, no frame) so
-a long wrapped value (a status message) is never clipped when the dialog is
-smaller than its content. The tree fills in as answers arrive
+given a room nick (the old bogus «Ресурс»). Each client line reads «Клиент: name
+version / OS»; the old per-entity «Клиент»/«Версия клиента»/«ОС»/«Время
+клиента» rows are gone (client, version, OS and the local time live only in the
+tree, per resource), leaving `ping` as the single entity row. The «Клиенты»
+caption is top-aligned so the first resource name lines up with it, the dialog
+opens with headroom (`_apply_default_size`, 700×550 clamped to the screen) and
+every tab page is wrapped in a `QScrollArea` (`_scrolled`, widget-resizable, no
+frame) so a long wrapped value (a status message) is never clipped when the
+dialog is smaller than its content. The tree fills in as answers arrive
 (`contact_client_updated` → `update_status`, and `groupchat_presence_details`
 for a MUC occupant), and the "Refresh" button re-requests the resource versions
-(`probe_resource_versions`). «Визитка обновлена» and «Время
-клиента» are shown as local `YYYY-MM-DD HH:MM:SS`
-(`format_local_datetime`/`local_time_from_tzo`). Only the Close button
+(`probe_resource_versions`). «Визитка обновлена» is shown as local
+`YYYY-MM-DD HH:MM:SS` (`format_local_datetime`). Only the Close button
 accepts the dialog — the `QDialogButtonBox.clicked` signal fires for every
 button, so it must not be connected wholesale (a refresh would otherwise
 close the window). `_find_open_vcard`
@@ -840,9 +842,9 @@ longest caps prefix; `icon_path`, size fallback) to an icon under
 `RosterStyle.paint_user` right after the avatar (16px, before the unread
 badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`.
 `_prefetch_version` (XEP-0092) additionally caches the resource's
-`client_version` and, from XEP-0202, its `client_tzo` offset (both preserved
-across presence updates like `client`), which the tooltip turns into the
-contact's live local time; its `asyncio.wait_for` uses a generous
+`client_version` and `client_os` and, from XEP-0202, its `client_tzo` offset
+(all preserved across presence updates like `client`), which the tooltip turns
+into the contact's live local time; its `asyncio.wait_for` uses a generous
 `_ENTITY_TIMEOUT` (30 s — a slow server can take >10 s) and it emits
 `contact_client_updated(bare)` so an open vCard re-renders as each answer
 arrives. `JabberClient.probe_resource_versions(bare)` re-runs it for every
@@ -861,7 +863,7 @@ between resources) whose first column holds the status icon
 the following lines align under the name's first letter: the `clock.svg` icon
 and the resource's live local time (`local_time_from_tzo`, XEP-0202 `client_tzo`)
 on their **own** row, then the client line (`<img client-icon> Клиент: name
-version`) and «Статус: message» (`tooltip_status`).
+version / OS`) and «Статус: message» (`tooltip_status`).
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
 before the nick; roster and participant avatars are clipped by

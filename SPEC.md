@@ -173,22 +173,23 @@ prompts stay modal.
 `MainWindow._refresh_vcard` → `get_vcard(force=True)`); the refreshed vCard
 updates the open window's header and field labels in place (`update_card`, no
 content rebuild and no tab switch) rather than opening another, and
-`probe_entity` is re-issued so the Status tab (version/ping) refreshes too
-(`update_status` merges values without changing the active tab). The Status tab
-shows per-resource client blocks (`ui/resource_tree.py::resource_tree_html`, one
-`<table>` for all resources — no blank line between them — status icon before
-the name, the live local time on its own row, the client line «Клиент: name
-version» and «Статус: message», all aligned under the name) in a **«Клиенты:»**
-row (label left, top-aligned, tree right) built by `MainWindow._vcard_status`; a
-MUC participant opened from the room (`_show_muc_participant_profile` →
-`_vcard_muc_ctx`) shows the single occupant, a 1:1 contact shows
-`contact.resources`. The dialog opens with headroom (520×600 clamped) and every
-tab page is wrapped in a `QScrollArea` so long wrapped text is never clipped; the
-tree fills in as each resource answers (`contact_client_updated`), and the
-"Refresh" button re-requests the versions (`probe_resource_versions`).
-«Визитка обновлена»/«Время клиента» are formatted as local
-`YYYY-MM-DD HH:MM:SS`. The entity probe (software/time/ping) targets the
-client's `best_full_jid`, skipped when offline.
+`probe_entity` (now a client **ping** only) is re-issued so the Status tab
+refreshes too (`update_status` merges values without changing the active tab).
+The Status tab shows per-resource client blocks
+(`ui/resource_tree.py::resource_tree_html`, one `<table>` for all resources — no
+blank line between them — status icon before the name, the live local time on
+its own row, the client line «Клиент: name version / OS» and «Статус: message»,
+all aligned under the name) in a **«Клиенты:»** row (label left, top-aligned,
+tree right) built by `MainWindow._vcard_status`; a MUC participant opened from
+the room (`_show_muc_participant_profile` → `_vcard_muc_ctx`) shows the single
+occupant, a 1:1 contact shows `contact.resources`. The old per-entity
+«Клиент»/«Версия клиента»/«ОС»/«Время клиента» rows are gone (they live only in
+the tree, per resource); `ping` is the single entity row. The dialog opens with
+headroom (700×550 clamped) and every tab page is wrapped in a `QScrollArea` so
+long wrapped text is never clipped; the tree fills in as each resource answers
+(`contact_client_updated`), and the "Refresh" button re-requests the versions
+(`probe_resource_versions`). «Визитка обновлена» is formatted as local
+`YYYY-MM-DD HH:MM:SS`.
 `_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
 "open a new dialog" `_pending_profile`) so the result updates the visible
 window; `_find_open_vcard` matches by bare JID to tolerate a bare/full-JID key

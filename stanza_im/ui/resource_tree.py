@@ -44,13 +44,16 @@ def _block_rows(info: dict, clock: str) -> list[str]:
             f'{escape_html(local)}</td></tr>')
     client = str(info.get("client") or "")
     version = str(info.get("version") or "")
+    os_name = str(info.get("os") or "")
     client_name = (client + (" " + version if version else "")).strip()
     if client_name:
         icon = clients_mod.client_icon_for(
             str(info.get("caps_node") or ""), 16)
         prefix = (f'<img src="{icon}" width="16" height="16"> ' if icon else "")
-        rows.append(f'<tr><td></td><td>{prefix}{tr("tooltip_client")}: '
-                    f'{escape_html(client_name)}</td></tr>')
+        line = f'{tr("tooltip_client")}: {escape_html(client_name)}'
+        if os_name:
+            line += " / " + escape_html(os_name)
+        rows.append(f'<tr><td></td><td>{prefix}{line}</td></tr>')
     status = str(info.get("status") or "")
     if status.strip():
         status_html = escape_html(status).replace("\n", "<br>")

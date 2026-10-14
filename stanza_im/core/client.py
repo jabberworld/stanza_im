@@ -3695,44 +3695,24 @@ class JabberClient:
         asyncio.get_event_loop().create_task(self._probe_entity(jid))
 
     async def _probe_entity(self, jid: str) -> None:
+        """Ping the contact's **client** for the vCard Status tab.
+
+        A bare JID is answered by the server, so the ping targets the best
+        online resource's full JID; an offline contact is not pinged at all
+        (``"-"`` keeps a stale value from a refresh hidden).
+        """
         info: dict[str, str] = {}
-        # For a 1:1 contact probe the **client** (the best online resource's
-        # full JID): a bare JID is answered by the server, which reports neither
-        # the client's software nor its local time.  An offline contact is not
-        # probed at all (``"-"`` keeps a stale value from a refresh hidden).
         target = jid
         if "/" not in jid and jid not in self.groupchats:
             target = self.best_full_jid(jid)
         if not target:
-            info = {"software": "-", "software_version": "-", "os": "-",
-                    "ping": "-", "client_time": "-"}
-            self.emit("entity_info_received", jid, info)
-            return
-        try:
-            result = await asyncio.wait_for(
-                self.xmpp.plugin["xep_0092"].get_version(target),
-                timeout=_ENTITY_TIMEOUT)
-            version = result["software_version"]
-            info["software"] = str(version.get("name", "") or "")
-            info["software_version"] = str(version.get("version", "") or "")
-            info["os"] = str(version.get("os", "") or "")
-        except Exception:
-            logger.debug("Software version unavailable for %s", target)
-        try:
-            info["ping"] = (
-                f"{await self.xmpp.plugin['xep_0199'].ping(target, timeout=5):.3f}s")
-        except Exception:
-            logger.debug("Ping unavailable for %s", target)
-        try:
-            result = await self._get_entity_time(target)
-            utc = result.get("utc", "")
-            tzo = result.get("tzo", "")
-            from stanza_im.include.utils import (format_local_datetime,
-                                                 local_time_from_tzo)
-            info["client_time"] = (local_time_from_tzo(tzo) if tzo
-                                   else format_local_datetime(utc))
-        except Exception:
-            logger.debug("Entity time unavailable for %s", target)
+            info["ping"] = "-"
+        else:
+            try:
+                info["ping"] = (
+                    f"{await self.xmpp.plugin['xep_0199'].ping(target, timeout=5):.3f}s")
+            except Exception:
+                logger.debug("Ping unavailable for %s", target)
         self.emit("entity_info_received", jid, info)
 
     def _store_muc_history(self, room: str, entries) -> None:
@@ -6134,6 +6114,7 @@ class JabberClient:
                 "show": show, "status": status, "priority": priority,
                 "client": previous.get("client", ""),
                 "client_version": previous.get("client_version", ""),
+                "client_os": previous.get("client_os", ""),
                 "client_tzo": previous.get("client_tzo", ""),
                 "caps_node": caps_node,
             }
@@ -6203,6 +6184,7 @@ class JabberClient:
             info = {}
         software = info.get("software") or ""
         version = info.get("version") or ""
+        os_name = info.get("os") or ""
         tzo = await self._entity_tzo(full_jid)
         bare, _, resource = full_jid.partition("/")
         pres = self.presences.get(full_jid)
@@ -6210,6 +6192,8 @@ class JabberClient:
             pres["client"] = software
             if version:
                 pres["client_version"] = version
+            if os_name:
+                pres["client_os"] = os_name
             if tzo:
                 pres["client_tzo"] = tzo
         contact = self.get_contact(bare)
@@ -6218,6 +6202,8 @@ class JabberClient:
             entry["client"] = software
             if version:
                 entry["client_version"] = version
+            if os_name:
+                entry["client_os"] = os_name
             if tzo:
                 entry["client_tzo"] = tzo
         # Let an open vCard re-render its client tree as each answer arrives.
@@ -6572,6 +6558,7 @@ class JabberClient:
                 "real_jid": real_jid,
                 "client": previous.get("client", ""),
                 "client_version": previous.get("client_version", ""),
+                "client_os": previous.get("client_os", ""),
                 "client_tzo": previous.get("client_tzo", ""),
                 "caps_node": _caps_node(pres),
                 "occupant_id": _occupant_id(pres),
@@ -6604,12 +6591,15 @@ class JabberClient:
             info = {}
         software = info.get("software") or ""
         version = info.get("version") or ""
+        os_name = info.get("os") or ""
         tzo = await self._entity_tzo(jid)
         gi = self.groupchats.get(room)
         if gi and nick in gi.users:
             gi.users[nick]["client"] = software
             if version:
                 gi.users[nick]["client_version"] = version
+            if os_name:
+                gi.users[nick]["client_os"] = os_name
             if tzo:
                 gi.users[nick]["client_tzo"] = tzo
         self.emit("groupchat_presence_details", room, nick)

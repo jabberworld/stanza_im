@@ -14,8 +14,7 @@ from stanza_im.ui.resource_tree import resource_tree_html
 # client blocks follow them in a dedicated "Clients" row.
 _STATUS_SCALARS = (
     "jid", "presence", "subscription", "status_message", "mood", "activity",
-    "tune", "location", "status_updated", "last_seen", "last_status",
-    "client_time", "software", "software_version", "os", "ping",
+    "tune", "location", "status_updated", "last_seen", "last_status", "ping",
     "vcard_updated")
 
 
@@ -100,7 +99,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
     def _apply_default_size(self) -> None:
         """Open with a little headroom so late-arriving values (a long last
         status, a last-seen time) do not immediately force a scrollbar."""
-        width, height = 520, 600
+        width, height = 700, 550
         screen = self.screen() or QtWidgets.QApplication.primaryScreen()
         if screen is not None:
             area = screen.availableGeometry()

@@ -82,7 +82,7 @@ CARD = {"jid": "bob@example.com", "fn": "Bob", "fetched_at": 1700000000}
 client.contacts["bob@example.com"] = _Contact({
     "laptop": {"show": "online", "status": "Working", "priority": 5,
                "client": "Gajim", "client_version": "1.5.0",
-               "client_tzo": "+03:00", "caps_node": ""},
+               "client_os": "Linux", "client_tzo": "+03:00", "caps_node": ""},
 })
 status = win._vcard_status("bob@example.com", CARD)
 check("one client block", len(status["clients"]) == 1)
@@ -90,9 +90,16 @@ block = status["clients"][0]
 check("block resource", block["resource"] == "laptop")
 check("block client+version", block["client"] == "Gajim"
       and block["version"] == "1.5.0")
+check("block carries the OS", block["os"] == "Linux")
 check("block caches the tzo offset", block["tzo"] == "+03:00")
 check("vcard_updated formatted", bool(_STAMP.match(status["vcard_updated"])))
 check("no flat resource field", "resource" not in status)
+
+from stanza_im.ui.vcard_dialog import _STATUS_SCALARS  # noqa: E402
+check("the old per-entity fields are gone",
+      not {"software", "software_version", "os", "client_time"}
+      & set(_STATUS_SCALARS))
+check("ping stays in the general block", "ping" in _STATUS_SCALARS)
 
 # 2. a roster contact that shares a MUC occupant's JID is not hijacked -----
 win._muc_users = {"room@conf.example": {
@@ -128,6 +135,7 @@ dlg = VCardInfoDialog("bob@example.com", CARD, status=status)
 html = dlg._clients_label.text()
 check("dialog renders the resource", "<b>laptop</b>" in html)
 check("dialog renders the client version", "Gajim 1.5.0" in html)
+check("dialog renders the client OS", "Gajim 1.5.0 / Linux" in html)
 check("dialog renders the status message", "Working" in html)
 check("dialog uses the status icon", "jabber-online.png" in html)
 check("dialog uses the clock icon", "clock.svg" in html)

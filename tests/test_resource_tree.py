@@ -33,9 +33,11 @@ app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
 b1 = {"resource": "laptop", "show": "online", "status": "Working",
-      "client": "Gajim", "version": "2.6.0", "tzo": "+03:00", "caps_node": ""}
+      "client": "Gajim", "version": "2.6.0", "os": "Linux", "tzo": "+03:00",
+      "caps_node": ""}
 b2 = {"resource": "phone", "show": "away", "status": "",
-      "client": "Conversations", "version": "2.20.1", "tzo": "", "caps_node": ""}
+      "client": "Conversations", "version": "2.20.1", "os": "", "tzo": "",
+      "caps_node": ""}
 
 tree = resource_tree_html([b1, b2])
 check("one table for all resources",
@@ -47,7 +49,9 @@ check("status icon before the name", "jabber-online.png" in tree)
 check("clock icon on its own row",
       tree.index("<b>laptop</b>") < tree.index("clock.svg"))
 check("local time formatted", bool(_STAMP.search(tree)))
-check("client version shown", "Gajim 2.6.0" in tree)
+check("client version and OS shown", "Gajim 2.6.0 / Linux" in tree)
+check("client without an OS has no separator",
+      "Conversations 2.20.1</td>" in tree)
 check("status label present", tr("tooltip_status") in tree)
 check("no empty resource rows", "<td></td><td></td>" not in tree)
 check("empty tree renders nothing", resource_tree_html([]) == "")

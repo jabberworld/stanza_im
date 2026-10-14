@@ -3744,14 +3744,15 @@ class MainWindow(QtWidgets.QMainWindow):
         return None
 
     @staticmethod
-    def _client_block(resource: str, show, status, client, version, tzo,
-                      caps_node) -> dict:
+    def _client_block(resource: str, show, status, client, version, os_name,
+                      tzo, caps_node) -> dict:
         return {
             "resource": resource or "*",
             "show": show or "",
             "status": status or "",
             "client": client or "",
             "version": version or "",
+            "os": os_name or "",
             "tzo": tzo or "",
             "caps_node": caps_node or "",
         }
@@ -3766,7 +3767,8 @@ class MainWindow(QtWidgets.QMainWindow):
             blocks.append(self._client_block(
                 resource, info.get("show"), info.get("status"),
                 info.get("client"), info.get("client_version"),
-                info.get("client_tzo"), info.get("caps_node")))
+                info.get("client_os"), info.get("client_tzo"),
+                info.get("caps_node")))
         return blocks
 
     def _muc_occupant_block(self, jid: str) -> tuple[str, dict] | None:
@@ -3813,7 +3815,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 status["clients"] = [self._client_block(
                     nick, info.get("show"), info.get("status"),
                     info.get("client"), info.get("client_version"),
-                    info.get("client_tzo"), info.get("caps_node"))]
+                    info.get("client_os"), info.get("client_tzo"),
+                    info.get("caps_node"))]
         elif self._client:
             status["clients"] = self._contact_clients(
                 self._client.get_contact(bare))
@@ -6222,6 +6225,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if nick in users:
             users[nick]["client"] = client
             users[nick]["client_version"] = info.get("client_version", "")
+            users[nick]["client_os"] = info.get("client_os", "")
             users[nick]["client_tzo"] = info.get("client_tzo", "")
         chat = self._chat_window.get_chat(room)
         if chat:
@@ -6234,8 +6238,8 @@ class MainWindow(QtWidgets.QMainWindow):
         occ_nick, occ = occupant
         clients = [self._client_block(
             occ_nick, occ.get("show"), occ.get("status"), occ.get("client"),
-            occ.get("client_version"), occ.get("client_tzo"),
-            occ.get("caps_node"))]
+            occ.get("client_version"), occ.get("client_os"),
+            occ.get("client_tzo"), occ.get("caps_node"))]
         for key in (f"{room}/{nick}", occ.get("real_jid", "")):
             dialog = self._find_open_vcard(key) if key else None
             if dialog is not None:
