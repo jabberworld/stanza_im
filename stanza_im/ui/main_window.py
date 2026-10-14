@@ -7495,9 +7495,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if real_jid:
             self._build_invite_menu(menu, real_jid, exclude_room=room)
         menu.addSeparator()
+        current_role = str(info.get("role") or "")
         roles = menu.addMenu(tr("muc_user_change_role"))
         for role in ("visitor", "participant", "moderator"):
             action = roles.addAction(tr(f"muc_role_{role}"))
+            action.setCheckable(True)
+            action.setChecked(role == current_role)
             action.setEnabled(can_manage)
             action.triggered.connect(
                 lambda checked=False, value=role:
@@ -7506,9 +7509,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # owner/admin rights (owner may set owner/admin; admin only member/
         # outcast/none).
         own_aff = self._muc_affiliation(room)
+        current_aff = str(info.get("affiliation") or "")
         ranks = menu.addMenu(tr("muc_user_change_affiliation"))
         for aff in ("owner", "admin", "member", "outcast", "none"):
             action = ranks.addAction(tr(f"muc_affiliation_{aff}"))
+            action.setCheckable(True)
+            action.setChecked(aff == current_aff)
             action.setEnabled(bool(real_jid) and (
                 own_aff == "owner"
                 or (own_aff == "admin" and aff in ("member", "outcast",
