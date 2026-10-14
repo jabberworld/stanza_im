@@ -137,6 +137,12 @@ check("client tree is a table", "<table" in html)
 check("time sits on its own row after the resource",
       html.index("<b>laptop</b>") < html.index("clock.svg"))
 
+from PyQt6 import QtCore  # noqa: E402
+caption = dlg._status_form.labelForField(dlg._clients_label)
+check("clients caption is top-aligned",
+      bool(caption.alignment() & QtCore.Qt.AlignmentFlag.AlignTop))
+check("vCard opens with headroom", dlg.width() >= 480 and dlg.height() >= 480)
+
 # 5. the tabs take the extra space (they hug the header) -------------------
 box = dlg._content.layout()
 check("tabs have stretch 1", box.stretch(box.indexOf(dlg._tabs)) == 1)

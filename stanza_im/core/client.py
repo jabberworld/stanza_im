@@ -45,6 +45,10 @@ from stanza_im.include import clients as clients_mod
 
 logger = logging.getLogger(__name__)
 
+# XEP-0092/0202 responses from a slow server can take >10 s; keep a generous
+# but finite limit (an unbounded ``Iq.send`` would leak a task per dead entity).
+_ENTITY_TIMEOUT = 30
+
 _XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 NS_REPLY = "urn:xmpp:reply:0"      # XEP-0461 Message Replies
 NS_SID = "urn:xmpp:sid:0"          # XEP-0359 Unique and Stable Stanza IDs
@@ -3692,31 +3696,35 @@ class JabberClient:
 
     async def _probe_entity(self, jid: str) -> None:
         info: dict[str, str] = {}
+        # For a 1:1 contact probe the **client** (the best online resource's
+        # full JID): a bare JID is answered by the server, which reports neither
+        # the client's software nor its local time.  An offline contact is not
+        # probed at all (``"-"`` keeps a stale value from a refresh hidden).
+        target = jid
+        if "/" not in jid and jid not in self.groupchats:
+            target = self.best_full_jid(jid)
+        if not target:
+            info = {"software": "-", "software_version": "-", "os": "-",
+                    "ping": "-", "client_time": "-"}
+            self.emit("entity_info_received", jid, info)
+            return
         try:
-            result = await self.xmpp.plugin["xep_0092"].get_version(jid)
+            result = await asyncio.wait_for(
+                self.xmpp.plugin["xep_0092"].get_version(target),
+                timeout=_ENTITY_TIMEOUT)
             version = result["software_version"]
             info["software"] = str(version.get("name", "") or "")
-            info["version"] = str(version.get("version", "") or "")
+            info["software_version"] = str(version.get("version", "") or "")
             info["os"] = str(version.get("os", "") or "")
         except Exception:
-            logger.debug("Software version unavailable for %s", jid)
-        # Ping the contact's **client** (a full JID); a bare-JID ping is
-        # answered by the server and would succeed even when the client is
-        # offline.  A contact with no online resource is not pinged at all
-        # (``"-"`` keeps a stale value from a previous refresh hidden).
-        ping_target = jid
-        if "/" not in jid and jid not in self.groupchats:
-            ping_target = self.best_full_jid(jid)
-        if ping_target:
-            try:
-                info["ping"] = (
-                    f"{await self.xmpp.plugin['xep_0199'].ping(ping_target, timeout=5):.3f}s")
-            except Exception:
-                logger.debug("Ping unavailable for %s", ping_target)
-        else:
-            info["ping"] = "-"
+            logger.debug("Software version unavailable for %s", target)
         try:
-            result = await self._get_entity_time(jid)
+            info["ping"] = (
+                f"{await self.xmpp.plugin['xep_0199'].ping(target, timeout=5):.3f}s")
+        except Exception:
+            logger.debug("Ping unavailable for %s", target)
+        try:
+            result = await self._get_entity_time(target)
             utc = result.get("utc", "")
             tzo = result.get("tzo", "")
             from stanza_im.include.utils import (format_local_datetime,
@@ -3724,7 +3732,7 @@ class JabberClient:
             info["client_time"] = (local_time_from_tzo(tzo) if tzo
                                    else format_local_datetime(utc))
         except Exception:
-            logger.debug("Entity time unavailable for %s", jid)
+            logger.debug("Entity time unavailable for %s", target)
         self.emit("entity_info_received", jid, info)
 
     def _store_muc_history(self, room: str, entries) -> None:
@@ -6190,7 +6198,7 @@ class JabberClient:
         """Best-effort XEP-0092/0202 lookup for a contact resource (tooltips)."""
         try:
             info = await asyncio.wait_for(
-                self.get_entity_version(full_jid), timeout=8)
+                self.get_entity_version(full_jid), timeout=_ENTITY_TIMEOUT)
         except Exception:
             info = {}
         software = info.get("software") or ""
@@ -6212,6 +6220,22 @@ class JabberClient:
                 entry["client_version"] = version
             if tzo:
                 entry["client_tzo"] = tzo
+        # Let an open vCard re-render its client tree as each answer arrives.
+        self.emit("contact_client_updated", bare)
+
+    async def probe_resource_versions(self, bare: str) -> None:
+        """Force a fresh XEP-0092/0202 lookup for every resource of *bare*.
+
+        Used by the vCard "Refresh" so a version that was dropped earlier (a
+        slow server, a timeout) is requested again, bypassing the once-per-
+        session ``_version_probed`` guard.
+        """
+        if not bare:
+            return
+        resources = [res for res in self.get_contact(bare).resources if res]
+        tasks = [self._prefetch_version(f"{bare}/{res}") for res in resources]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     # ── Capabilities (XEP-0115) for call gating ───────────────────
 
@@ -6575,7 +6599,7 @@ class JabberClient:
         """Best-effort XEP-0092/0202 lookup for a MUC participant's client."""
         try:
             info = await asyncio.wait_for(
-                self.get_entity_version(jid), timeout=8)
+                self.get_entity_version(jid), timeout=_ENTITY_TIMEOUT)
         except Exception:
             info = {}
         software = info.get("software") or ""

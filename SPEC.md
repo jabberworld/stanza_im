@@ -175,16 +175,20 @@ updates the open window's header and field labels in place (`update_card`, no
 content rebuild and no tab switch) rather than opening another, and
 `probe_entity` is re-issued so the Status tab (version/ping) refreshes too
 (`update_status` merges values without changing the active tab). The Status tab
-shows per-resource client blocks (`ui/resource_tree.py::resource_tree_html`, a
-`<table>` per resource: status icon before the name, the live local time on its
-own row, the client line «Клиент: name version» and «Статус: message», all
-aligned under the name) in a **«Клиенты:»** row (label left, tree right) built
-by `MainWindow._vcard_status`; a MUC participant opened from the room
-(`_show_muc_participant_profile` → `_vcard_muc_ctx`) shows the single occupant,
-a 1:1 contact shows `contact.resources`. Every tab page is wrapped in a
-`QScrollArea` so long wrapped text is never clipped. «Визитка
-обновлена»/«Время клиента» are formatted as local `YYYY-MM-DD HH:MM:SS`. The
-Status tab's ping targets the client (`best_full_jid`, skipped when offline).
+shows per-resource client blocks (`ui/resource_tree.py::resource_tree_html`, one
+`<table>` for all resources — no blank line between them — status icon before
+the name, the live local time on its own row, the client line «Клиент: name
+version» and «Статус: message», all aligned under the name) in a **«Клиенты:»**
+row (label left, top-aligned, tree right) built by `MainWindow._vcard_status`; a
+MUC participant opened from the room (`_show_muc_participant_profile` →
+`_vcard_muc_ctx`) shows the single occupant, a 1:1 contact shows
+`contact.resources`. The dialog opens with headroom (520×600 clamped) and every
+tab page is wrapped in a `QScrollArea` so long wrapped text is never clipped; the
+tree fills in as each resource answers (`contact_client_updated`), and the
+"Refresh" button re-requests the versions (`probe_resource_versions`).
+«Визитка обновлена»/«Время клиента» are formatted as local
+`YYYY-MM-DD HH:MM:SS`. The entity probe (software/time/ping) targets the
+client's `best_full_jid`, skipped when offline.
 `_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
 "open a new dialog" `_pending_profile`) so the result updates the visible
 window; `_find_open_vcard` matches by bare JID to tolerate a bare/full-JID key

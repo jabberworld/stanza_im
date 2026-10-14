@@ -67,6 +67,30 @@ check("a conference is never a ping target",
 check("nameless resource is skipped",
       best({"": {"show": "online", "priority": 50}}) == "")
 
+
+# ── probe_resource_versions forces a fresh lookup for every resource ────────
+import asyncio  # noqa: E402
+
+
+class _VerClient:
+    def __init__(self, resources):
+        self._contact = _Contact(resources)
+        self.calls = []
+
+    def get_contact(self, bare):
+        return self._contact
+
+    async def _prefetch_version(self, full_jid):
+        self.calls.append(full_jid)
+
+
+vc = _VerClient({"laptop": {}, "phone": {}, "": {}})
+asyncio.run(JabberClient.probe_resource_versions(vc, "bob@example.com"))
+check("probe_resource_versions hits every named resource",
+      sorted(vc.calls) == ["bob@example.com/laptop", "bob@example.com/phone"])
+check("probe_resource_versions tolerates an empty bare",
+      asyncio.run(JabberClient.probe_resource_versions(vc, "")) is None)
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)

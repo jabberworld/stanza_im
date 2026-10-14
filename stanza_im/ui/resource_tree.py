@@ -1,9 +1,9 @@
 """Render a contact's per-resource client blocks as rich HTML.
 
 Shared by the roster tooltip and the vCard Status tab so both show the same
-tree: a status icon before the resource name, then — indented to the resource's
+tree: a status icon before the resource name, then — aligned under the name's
 first letter — the local time on its own line, the client line and the status
-message.
+message.  All resources share **one** table (no blank line between them).
 """
 from __future__ import annotations
 
@@ -15,17 +15,23 @@ from stanza_im.include.utils import (escape_html, local_time_from_tzo,
 
 
 def resource_tree_html(blocks: list[dict]) -> str:
-    """Render *blocks* as one aligned ``<table>`` per resource.
+    """Render *blocks* as one aligned ``<table>``.
 
     A block is ``{"resource", "show", "status", "client", "version", "tzo",
     "caps_node"}`` (``tzo`` is the XEP-0202 offset, turned into a live local
     time).
     """
     clock = find_icon("clock.svg")
-    return "<br>".join(_block_html(info, clock) for info in blocks)
+    rows: list[str] = []
+    for info in blocks:
+        rows.extend(_block_rows(info, clock))
+    if not rows:
+        return ""
+    return ('<table cellspacing="0" cellpadding="0" border="0">'
+            + "".join(rows) + "</table>")
 
 
-def _block_html(info: dict, clock: str) -> str:
+def _block_rows(info: dict, clock: str) -> list[str]:
     rows: list[str] = []
     name = escape_html(str(info.get("resource") or "*"))
     rows.append(
@@ -50,5 +56,4 @@ def _block_html(info: dict, clock: str) -> str:
         status_html = escape_html(status).replace("\n", "<br>")
         rows.append(f'<tr><td></td><td>{tr("tooltip_status")}: '
                     f'{status_html}</td></tr>')
-    return ('<table cellspacing="0" cellpadding="0" border="0">'
-            + "".join(rows) + "</table>")
+    return rows

@@ -95,6 +95,18 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._edit_btn.clicked.connect(
             lambda: self.edit_requested.emit(self._jid))
         layout.addWidget(btn)
+        self._apply_default_size()
+
+    def _apply_default_size(self) -> None:
+        """Open with a little headroom so late-arriving values (a long last
+        status, a last-seen time) do not immediately force a scrollbar."""
+        width, height = 520, 600
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            width = min(width, int(area.width() * 0.9))
+            height = min(height, int(area.height() * 0.9))
+        self.resize(width, height)
 
     def _build_content(self, card: dict,
                        status: dict) -> QtWidgets.QWidget:
@@ -229,7 +241,11 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._clients_label = QtWidgets.QLabel()
         self._clients_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self._clients_label.setWordWrap(True)
-        form.addRow(f"{tr('vcard_field_clients')}:", self._clients_label)
+        clients_caption = QtWidgets.QLabel(f"{tr('vcard_field_clients')}:")
+        clients_caption.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignTop)
+        form.addRow(clients_caption, self._clients_label)
         outer.addStretch(1)
         self._render_clients(values.get("clients") or [])
         return self._scrolled(inner)

@@ -3352,6 +3352,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("voice_request_failed", self._on_voice_request_failed)
         c.on("muc_send_forbidden", self._on_muc_send_forbidden)
         c.on("entity_info_received", self._on_entity_info_received)
+        c.on("contact_client_updated", self._on_contact_client_updated)
         c.on("contact_pep_updated", self._on_contact_pep_updated)
         c.on("contact_caps", self._on_contact_caps)
         c.on("call_incoming", self._on_call_incoming)
@@ -3718,6 +3719,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self._client:
                     self._client.probe_entity(jid)
                     self._request_last_activity(jid, dialog)
+                    # Re-request the resource versions (a slow server may have
+                    # dropped the earlier ones); the tree updates as they arrive.
+                    self._start_task(self._reprobe_versions(jid))
                 return
         if jid in self._pending_profile:
             self._pending_profile.discard(jid)
@@ -3934,6 +3938,27 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = self._vcard_dialogs.get(jid)
         if dialog is not None:
             dialog.update_status(info)
+
+    def _on_contact_client_updated(self, bare: str) -> None:
+        """A resource's client/version/time arrived — re-render an open vCard.
+
+        Lets the «Клиенты» tree fill in as each resource answers, instead of
+        staying a snapshot taken when the dialog opened.
+        """
+        if self._client is None or self._vcard_muc_ctx.get(bare):
+            return
+        dialog = self._find_open_vcard(bare)
+        if dialog is None:
+            return
+        dialog.update_status(
+            {"clients": self._contact_clients(
+                self._client.get_contact(bare))})
+
+    async def _reprobe_versions(self, jid: str) -> None:
+        """Force a fresh resource-version lookup on a vCard refresh."""
+        if self._client is None:
+            return
+        await self._client.probe_resource_versions(jid.split("/", 1)[0])
 
     def _on_contact_pep_updated(self, jid: str, kind: str, data: dict):
         """A contact's mood/activity/tune/location changed (XEP-0163 PEP)."""
@@ -6189,16 +6214,32 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._client:
             return
         gi = self._client.groupchats.get(room)
-        client = gi.users.get(nick, {}).get("client", "") if gi else ""
+        info = gi.users.get(nick, {}) if gi else {}
+        client = info.get("client", "")
         if not client:
             return
         users = self._muc_users.setdefault(room, {})
         if nick in users:
             users[nick]["client"] = client
+            users[nick]["client_version"] = info.get("client_version", "")
+            users[nick]["client_tzo"] = info.get("client_tzo", "")
         chat = self._chat_window.get_chat(room)
         if chat:
             chat.update_muc_users(list(users.values()),
                                   self_nick=self._muc_self_nicks.get(room, ""))
+        # Re-render an open participant vCard's client tree.
+        occupant = self._muc_occupant_block(f"{room}/{nick}")
+        if occupant is None:
+            return
+        occ_nick, occ = occupant
+        clients = [self._client_block(
+            occ_nick, occ.get("show"), occ.get("status"), occ.get("client"),
+            occ.get("client_version"), occ.get("client_tzo"),
+            occ.get("caps_node"))]
+        for key in (f"{room}/{nick}", occ.get("real_jid", "")):
+            dialog = self._find_open_vcard(key) if key else None
+            if dialog is not None:
+                dialog.update_status({"clients": clients})
 
     def _on_groupchat_send(self, room: str, body: str):
         self._touch_tab_activity(room)

@@ -228,12 +228,17 @@ in a dedicated **«Клиенты:»** form row (label left, tree right, hidden 
 empty) built by `MainWindow._vcard_status` from `contact.resources` — or, for a
 MUC participant opened from the room (`_show_muc_participant_profile` sets
 `_vcard_muc_ctx`), from the single occupant — while a plain 1:1 contact is never
-given a room nick (the old bogus «Ресурс»). «Визитка обновлена» and «Время
+given a room nick (the old bogus «Ресурс»). The «Клиенты» caption is
+top-aligned so the first resource name lines up with it, the dialog opens with
+headroom (`_apply_default_size`, 520×600 clamped to the screen) and every tab
+page is wrapped in a `QScrollArea` (`_scrolled`, widget-resizable, no frame) so
+a long wrapped value (a status message) is never clipped when the dialog is
+smaller than its content. The tree fills in as answers arrive
+(`contact_client_updated` → `update_status`, and `groupchat_presence_details`
+for a MUC occupant), and the "Refresh" button re-requests the resource versions
+(`probe_resource_versions`). «Визитка обновлена» and «Время
 клиента» are shown as local `YYYY-MM-DD HH:MM:SS`
-(`format_local_datetime`/`local_time_from_tzo`). Every tab page is wrapped in a
-`QScrollArea` (`_scrolled`, widget-resizable, no frame) so a long wrapped value
-(a status message) is never clipped when the dialog is smaller than its content.
-Only the Close button
+(`format_local_datetime`/`local_time_from_tzo`). Only the Close button
 accepts the dialog — the `QDialogButtonBox.clicked` signal fires for every
 button, so it must not be connected wholesale (a refresh would otherwise
 close the window). `_find_open_vcard`
@@ -837,21 +842,26 @@ badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`.
 `_prefetch_version` (XEP-0092) additionally caches the resource's
 `client_version` and, from XEP-0202, its `client_tzo` offset (both preserved
 across presence updates like `client`), which the tooltip turns into the
-contact's live local time. `JabberClient.best_full_jid(bare)` returns the full
-JID of the best **online** resource; `probe_entity` pings it (not the bare JID,
-which the server answers) and skips the request entirely for an offline
-contact. The
+contact's live local time; its `asyncio.wait_for` uses a generous
+`_ENTITY_TIMEOUT` (30 s — a slow server can take >10 s) and it emits
+`contact_client_updated(bare)` so an open vCard re-renders as each answer
+arrives. `JabberClient.probe_resource_versions(bare)` re-runs it for every
+resource (the vCard "Refresh" bypasses the once-per-session `_version_probed`).
+`JabberClient.best_full_jid(bare)` returns the full
+JID of the best **online** resource; `probe_entity` probes **it** for the
+software version, local time and ping (not the bare JID, which the server
+answers) and skips the request entirely for an offline contact. The
 contact tooltip is a per-resource **tree**: after the name/JID/subscription the
 extended-presence lines (mood/activity/now playing/location, each prefixed with
 `pep.mood_icon_path`/`pep.activity_icon_path`/`pep.tune_icon_path`) come first,
-then one block per resource rendered by the shared
-`ui/resource_tree.py::resource_tree_html` — a `<table>` per resource whose first
-column holds the status icon (`status_icon_html`, i.e. `jabber-<show>.png`)
-before the bold resource name, so the following lines align under the name's
-first letter: the `clock.svg` icon and the resource's live local time
-(`local_time_from_tzo`, XEP-0202 `client_tzo`) on their **own** row, then the
-client line (`<img client-icon> Клиент: name version`) and «Статус: message»
-(`tooltip_status`).
+then all resources rendered by the shared
+`ui/resource_tree.py::resource_tree_html` as **one** `<table>` (no blank line
+between resources) whose first column holds the status icon
+(`status_icon_html`, i.e. `jabber-<show>.png`) before the bold resource name, so
+the following lines align under the name's first letter: the `clock.svg` icon
+and the resource's live local time (`local_time_from_tzo`, XEP-0202 `client_tzo`)
+on their **own** row, then the client line (`<img client-icon> Клиент: name
+version`) and «Статус: message» (`tooltip_status`).
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
 before the nick; roster and participant avatars are clipped by
