@@ -2830,7 +2830,12 @@ that makes them stale:
   XEP surface, `XEPs.md`).  `FEATURES.md` is the user-facing feature list: a
   Russian bulleted list of bold categories with short, jargon-free phrases
   describing what the user sees.  Keep it in that style — no XEP numbers, no
-  internal mode names, no implementation jargon.
+  internal mode names, no implementation jargon.  **Any change to `FEATURES.md`
+  MUST be proposed to and approved by the user first** (a new bullet, a
+  reworded one, a removal); never add entries unilaterally.  Only genuinely new
+  user-visible capabilities belong there — a bug fix or the correction of an
+  oversight (e.g. a dialog that used to block other windows) is **not** a
+  feature and must not be listed.
 
 Before committing, check `git status`: when a change affects any of the above,
 the corresponding spec file must appear in the same commit. `tests/test_spec_sync.py`
