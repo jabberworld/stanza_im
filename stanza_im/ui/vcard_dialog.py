@@ -7,12 +7,11 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import ACTIONS_DIR_16, find_icon
-from stanza_im.include.utils import (escape_html, format_local_datetime,
-                                     status_icon_html)
-from stanza_im.include import clients as clients_mod
+from stanza_im.include.utils import format_local_datetime
+from stanza_im.ui.resource_tree import resource_tree_html
 
 # Scalar fields of the Status tab (rendered as a QFormLayout); the per-resource
-# client blocks are rendered separately below them.
+# client blocks follow them in a dedicated "Clients" row.
 _STATUS_SCALARS = (
     "jid", "presence", "subscription", "status_message", "mood", "activity",
     "tune", "location", "status_updated", "last_seen", "last_status",
@@ -201,12 +200,23 @@ class VCardInfoDialog(QtWidgets.QDialog):
         if form is not None:
             form.setRowVisible(label, has_value if hide_empty else True)
 
+    @staticmethod
+    def _scrolled(inner: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
+        """Wrap *inner* in a frame-less scroll area so long wrapped text is
+        never clipped when the dialog is smaller than its content."""
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setWidget(inner)
+        return scroll
+
     def _status_page(self, values: dict) -> QtWidgets.QWidget:
         """Status tab: scalar fields plus per-resource client blocks."""
-        page = QtWidgets.QWidget()
-        outer = QtWidgets.QVBoxLayout(page)
+        inner = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(inner)
         form = QtWidgets.QFormLayout()
         outer.addLayout(form)
+        self._status_form = form
         for key in _STATUS_SCALARS:
             label = QtWidgets.QLabel(str(values.get(key) or "-"))
             label.setWordWrap(True)
@@ -219,48 +229,27 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._clients_label = QtWidgets.QLabel()
         self._clients_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self._clients_label.setWordWrap(True)
-        outer.addWidget(self._clients_label)
+        form.addRow(f"{tr('vcard_field_clients')}:", self._clients_label)
         outer.addStretch(1)
         self._render_clients(values.get("clients") or [])
-        return page
+        return self._scrolled(inner)
 
     def _render_clients(self, clients: list) -> None:
         """Render the per-resource client blocks (mirrors the roster tooltip)."""
-        clock = find_icon("clock.svg")
-        indent = "&nbsp;&nbsp;&nbsp;"
-        rows: list[str] = []
-        for info in clients:
-            head = [status_icon_html(str(info.get("show") or ""))]
-            head.append(
-                f"<b>{escape_html(str(info.get('resource') or '*'))}</b>")
-            local = str(info.get("client_time") or "")
-            if local:
-                head.append(f'<img src="{clock}" width="16" height="16"> '
-                            + escape_html(local))
-            rows.append(" ".join(part for part in head if part))
-            client = str(info.get("client") or "")
-            version = str(info.get("version") or "")
-            name = (client + (" " + version if version else "")).strip()
-            if name:
-                icon = clients_mod.client_icon_for(
-                    str(info.get("caps_node") or ""), 16)
-                prefix = (f'<img src="{icon}" width="16" height="16"> '
-                          if icon else "")
-                rows.append(indent + prefix + tr("tooltip_client") + ": "
-                            + escape_html(name))
-            status = str(info.get("status") or "")
-            if status.strip():
-                rows.append(indent + tr("tooltip_status") + ": "
-                            + escape_html(status).replace("\n", "<br>"))
-        self._clients_label.setText("<br>".join(rows))
-        self._clients_label.setVisible(bool(rows))
+        html = resource_tree_html(clients) if clients else ""
+        self._clients_label.setText(html)
+        self._clients_label.setVisible(bool(html))
+        form = getattr(self, "_status_form", None)
+        if form is not None:
+            form.setRowVisible(self._clients_label, bool(html))
 
     def _fields_page(self, values: dict, keys: tuple[str, ...],
                      hide_empty: bool = False) -> QtWidgets.QWidget:
-        page = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(page)
+        inner = QtWidgets.QWidget()
+        form = QtWidgets.QFormLayout(inner)
         for key in keys:
             label = QtWidgets.QLabel(str(values.get(key) or "-"))
+            label.setWordWrap(True)
             form.addRow(f"{tr(f'vcard_field_{key}')}:", label)
             self._field_labels[key] = label
             self._field_forms[key] = form
@@ -271,7 +260,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
-        return page
+        return self._scrolled(inner)
 
 
 class VCardEditDialog(QtWidgets.QDialog):

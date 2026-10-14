@@ -63,6 +63,7 @@ stanza_im/                      # Python package
 │   ├── existing_account_dialog.py # Existing-account credentials/connection form
 │   ├── roster_widget.py         # Custom-painted contact list
 │   ├── roster_style.py          # QPainter roster rendering strategy
+│   ├── resource_tree.py         # Shared per-resource client-block HTML
 │   ├── chat_window.py           # Tab container for conversations
 │   ├── chat_widget.py           # Single chat tab content
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
@@ -221,14 +222,18 @@ arrives, `_open_vcard_info` updates the already-open window in place
 recreated and the active tab is preserved) instead of opening a second one,
 and re-issues `probe_entity` so the Status tab (version/ping) refreshes too
 (`update_status` merges values without switching tabs). The Status tab renders
-per-resource client blocks (`_render_clients`, the roster-tooltip tree: status
-icon + resource + live local time, an indented client line and «Статус») built
-by `MainWindow._vcard_status` from `contact.resources` — or, for a MUC
-participant opened from the room (`_show_muc_participant_profile` sets
+per-resource client blocks (`_render_clients` → the shared
+`ui/resource_tree.py::resource_tree_html`, the same tree as the roster tooltip)
+in a dedicated **«Клиенты:»** form row (label left, tree right, hidden when
+empty) built by `MainWindow._vcard_status` from `contact.resources` — or, for a
+MUC participant opened from the room (`_show_muc_participant_profile` sets
 `_vcard_muc_ctx`), from the single occupant — while a plain 1:1 contact is never
 given a room nick (the old bogus «Ресурс»). «Визитка обновлена» and «Время
 клиента» are shown as local `YYYY-MM-DD HH:MM:SS`
-(`format_local_datetime`/`local_time_from_tzo`). Only the Close button
+(`format_local_datetime`/`local_time_from_tzo`). Every tab page is wrapped in a
+`QScrollArea` (`_scrolled`, widget-resizable, no frame) so a long wrapped value
+(a status message) is never clipped when the dialog is smaller than its content.
+Only the Close button
 accepts the dialog — the `QDialogButtonBox.clicked` signal fires for every
 button, so it must not be connected wholesale (a refresh would otherwise
 close the window). `_find_open_vcard`
@@ -832,15 +837,21 @@ badge/mood/activity) and refreshed on `presence_changed`/`contact_caps`.
 `_prefetch_version` (XEP-0092) additionally caches the resource's
 `client_version` and, from XEP-0202, its `client_tzo` offset (both preserved
 across presence updates like `client`), which the tooltip turns into the
-contact's live local time. The
+contact's live local time. `JabberClient.best_full_jid(bare)` returns the full
+JID of the best **online** resource; `probe_entity` pings it (not the bare JID,
+which the server answers) and skips the request entirely for an offline
+contact. The
 contact tooltip is a per-resource **tree**: after the name/JID/subscription the
 extended-presence lines (mood/activity/now playing/location, each prefixed with
 `pep.mood_icon_path`/`pep.activity_icon_path`/`pep.tune_icon_path`) come first,
-then one block per resource — the status icon (`status_icon_html`, i.e.
-`jabber-<show>.png`) before the bold resource name, the `clock.svg` icon and the
-resource's live local time (`local_time_from_tzo`, XEP-0202 `client_tzo`) beside
-it, an indented client line (`<img client-icon> Клиент: name version`) and an
-indented «Статус: message» (`tooltip_status`).
+then one block per resource rendered by the shared
+`ui/resource_tree.py::resource_tree_html` — a `<table>` per resource whose first
+column holds the status icon (`status_icon_html`, i.e. `jabber-<show>.png`)
+before the bold resource name, so the following lines align under the name's
+first letter: the `clock.svg` icon and the resource's live local time
+(`local_time_from_tzo`, XEP-0202 `client_tzo`) on their **own** row, then the
+client line (`<img client-icon> Клиент: name version`) and «Статус: message»
+(`tooltip_status`).
 The MUC participant sidebar shows the same client icon before the avatar
 (`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
 before the nick; roster and participant avatars are clipped by

@@ -632,6 +632,7 @@ STRINGS = {
     "vcard_field_presence": "Presence",
     "vcard_field_status_message": "Status message",
     "vcard_field_resource": "Resource",
+    "vcard_field_clients": "Clients",
     "vcard_field_vcard_updated": "vCard updated",
     "vcard_field_client_time": "Client time",
     "vcard_field_software": "Client",

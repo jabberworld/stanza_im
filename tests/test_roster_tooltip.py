@@ -87,7 +87,9 @@ check("PEP mood line present", tr("pep_mood") in html)
 
 check("PEP statuses above the resource block",
       html.index(tr("pep_mood")) < html.index("<b>laptop</b>"))
-check("client line indented (nbsp)", "&nbsp;&nbsp;&nbsp;" in html)
+check("resource tree is a table", "<table" in html)
+check("time sits on its own row after the resource",
+      html.index("<b>laptop</b>") < html.index("clock.svg"))
 check("client line after the resource line",
       html.index("<b>laptop</b>") < html.index("Gajim 1.5.0"))
 check("status after the client line",

@@ -632,6 +632,7 @@ STRINGS = {
     "vcard_field_presence": "Присутствие",
     "vcard_field_status_message": "Статусное сообщение",
     "vcard_field_resource": "Ресурс",
+    "vcard_field_clients": "Клиенты",
     "vcard_field_vcard_updated": "Визитка обновлена",
     "vcard_field_client_time": "Время клиента",
     "vcard_field_software": "Клиент",

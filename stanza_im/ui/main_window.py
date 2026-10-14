@@ -2567,8 +2567,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _roster_tooltip(self, jid: str) -> tuple[str, str | None]:
         """Build the roster contact/conference tooltip (html, avatar path)."""
-        from stanza_im.include.utils import escape_html, \
-            local_time_from_tzo, status_icon_html
+        from stanza_im.include.utils import escape_html
+        from stanza_im.ui.resource_tree import resource_tree_html
         if not self._client:
             return "", None
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
@@ -2611,40 +2611,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 prefix = (f'<img src="{icon}" width="16" height="16"> '
                           if icon else "")
                 lines.append(prefix + f"{label}: {escape_html(value)}")
-        # Per-resource blocks (tree): status icon + resource + local time, then
-        # an indented client line and the resource's own status message.
-        clock = find_icon("clock.svg")
+        # Per-resource blocks (tree): the status icon precedes the resource
+        # name and the local time / client / status lines are aligned under the
+        # name's first letter (shared with the vCard Status tab).
         resources = sorted(
             contact.resources.items(),
             key=lambda item: (-item[1].get("priority", 0),
                               item[0].casefold()))
-        indent = "&nbsp;&nbsp;&nbsp;"
-        if resources:
-            for resource, info in resources:
-                head = [status_icon_html(str(info.get("show") or ""))]
-                head.append(f"<b>{escape_html(resource or '*')}</b>")
-                local = local_time_from_tzo(
-                    str(info.get("client_tzo") or ""))
-                if local:
-                    head.append(
-                        f'<img src="{clock}" width="16" height="16"> '
-                        + escape_html(local))
-                lines.append(" ".join(part for part in head if part))
-                client = info.get("client", "") or ""
-                version = info.get("client_version", "") or ""
-                client_name = (client + (" " + version if version else "")
-                               ).strip()
-                if client_name:
-                    icon = clients_mod.client_icon_for(
-                        str(info.get("caps_node") or ""), 16)
-                    prefix = (f'<img src="{icon}" width="16" height="16"> '
-                              if icon else "")
-                    lines.append(indent + prefix + tr("tooltip_client") + ": "
-                                 + escape_html(client_name))
-                status = info.get("status", "") or ""
-                if status.strip():
-                    lines.append(indent + tr("tooltip_status") + ": "
-                                 + escape_html(status).replace("\n", "<br>"))
+        blocks = [{
+            "resource": resource,
+            "show": info.get("show"),
+            "status": info.get("status"),
+            "client": info.get("client"),
+            "version": info.get("client_version"),
+            "tzo": info.get("client_tzo"),
+            "caps_node": info.get("caps_node"),
+        } for resource, info in resources]
+        if blocks:
+            lines.append(resource_tree_html(blocks))
         elif contact.status:
             lines.append(tr("tooltip_status") + ": "
                          + escape_html(contact.status).replace("\n", "<br>"))
@@ -3758,14 +3742,13 @@ class MainWindow(QtWidgets.QMainWindow):
     @staticmethod
     def _client_block(resource: str, show, status, client, version, tzo,
                       caps_node) -> dict:
-        from stanza_im.include.utils import local_time_from_tzo
         return {
             "resource": resource or "*",
             "show": show or "",
             "status": status or "",
             "client": client or "",
             "version": version or "",
-            "client_time": local_time_from_tzo(str(tzo or "")),
+            "tzo": tzo or "",
             "caps_node": caps_node or "",
         }
 

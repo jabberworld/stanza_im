@@ -183,9 +183,10 @@ check("the roster widget can update the client icon",
       "def set_client_icon" in widget)
 
 mw = _read("stanza_im", "ui", "main_window.py")
+tree = _read("stanza_im", "ui", "resource_tree.py")
 check("the main window applies the client option and tooltip icon",
-      'roster_show_clients' in mw and "client_icon_for" in mw
-      and "set_client_icon" in mw)
+      'roster_show_clients' in mw and "set_client_icon" in mw
+      and "client_icon_for" in tree)
 
 prefs = _read("stanza_im", "ui", "preferences.py")
 check("the preferences roster tab has the clients checkbox",

@@ -61,6 +61,9 @@ class _FakeClient:
     def probe_entity(self, jid):
         pass
 
+    def set_client_active(self, active):
+        pass
+
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
@@ -87,7 +90,7 @@ block = status["clients"][0]
 check("block resource", block["resource"] == "laptop")
 check("block client+version", block["client"] == "Gajim"
       and block["version"] == "1.5.0")
-check("block local time formatted", bool(_STAMP.match(block["client_time"])))
+check("block caches the tzo offset", block["tzo"] == "+03:00")
 check("vcard_updated formatted", bool(_STAMP.match(status["vcard_updated"])))
 check("no flat resource field", "resource" not in status)
 
@@ -128,7 +131,11 @@ check("dialog renders the client version", "Gajim 1.5.0" in html)
 check("dialog renders the status message", "Working" in html)
 check("dialog uses the status icon", "jabber-online.png" in html)
 check("dialog uses the clock icon", "clock.svg" in html)
+check("dialog renders the local time", bool(_STAMP.search(html)))
 check("status label present", tr("tooltip_status") in html)
+check("client tree is a table", "<table" in html)
+check("time sits on its own row after the resource",
+      html.index("<b>laptop</b>") < html.index("clock.svg"))
 
 # 5. the tabs take the extra space (they hug the header) -------------------
 box = dlg._content.layout()
@@ -158,6 +165,23 @@ finally:
     vd.VCardInfoDialog = _orig_cls
 check("vCard opened with show(), not open()",
       shown.get("show") and not shown.get("open"))
+
+# 7. a long wrapped status is not clipped (the page scrolls, the row is tall) --
+long_card = {"jid": "bob@example.com", "fn": "Bob", "fetched_at": 1700000000}
+status_long = win._vcard_status("bob@example.com", long_card)
+status_long["last_status"] = "a fairly long last-seen status message " * 12
+dlg2 = VCardInfoDialog("bob@example.com", long_card, status=status_long)
+dlg2.show()
+app.processEvents()
+dlg2._tabs.setCurrentIndex(dlg2._status_index)
+app.processEvents()
+label = dlg2._field_labels["last_status"]
+check("long status label gets its wrapped height",
+      label.height() >= label.heightForWidth(label.width()) - 2)
+check("status page is a scroll area",
+      isinstance(dlg2._tabs.widget(dlg2._status_index),
+                 QtWidgets.QScrollArea))
+dlg2.close()
 
 print()
 if FAILURES:
