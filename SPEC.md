@@ -167,7 +167,13 @@ vCard dialogs are opened asynchronously without nested modal event loops.
 updates the open window's header and field labels in place (`update_card`, no
 content rebuild and no tab switch) rather than opening another, and
 `probe_entity` is re-issued so the Status tab (version/ping) refreshes too
-(`update_status` merges values without changing the active tab).
+(`update_status` merges values without changing the active tab). The Status tab
+shows per-resource client blocks (status icon, resource and its live local
+time, an indented client line «Клиент: name version» and «Статус: message»)
+built by `MainWindow._vcard_status`; a MUC participant opened from the room
+(`_show_muc_participant_profile` → `_vcard_muc_ctx`) shows the single occupant,
+a 1:1 contact shows `contact.resources`. «Визитка обновлена»/«Время клиента»
+are formatted as local `YYYY-MM-DD HH:MM:SS`.
 `_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
 "open a new dialog" `_pending_profile`) so the result updates the visible
 window; `_find_open_vcard` matches by bare JID to tolerate a bare/full-JID key

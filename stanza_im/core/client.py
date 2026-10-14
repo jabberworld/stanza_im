@@ -3708,8 +3708,10 @@ class JabberClient:
             result = await self._get_entity_time(jid)
             utc = result.get("utc", "")
             tzo = result.get("tzo", "")
-            info["client_time"] = (f"{utc} ({tzo})".strip()
-                                   if tzo else utc)
+            from stanza_im.include.utils import (format_local_datetime,
+                                                 local_time_from_tzo)
+            info["client_time"] = (local_time_from_tzo(tzo) if tzo
+                                   else format_local_datetime(utc))
         except Exception:
             logger.debug("Entity time unavailable for %s", jid)
         self.emit("entity_info_received", jid, info)

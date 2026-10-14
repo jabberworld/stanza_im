@@ -7,6 +7,17 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import ACTIONS_DIR_16, find_icon
+from stanza_im.include.utils import (escape_html, format_local_datetime,
+                                     status_icon_html)
+from stanza_im.include import clients as clients_mod
+
+# Scalar fields of the Status tab (rendered as a QFormLayout); the per-resource
+# client blocks are rendered separately below them.
+_STATUS_SCALARS = (
+    "jid", "presence", "subscription", "status_message", "mood", "activity",
+    "tune", "location", "status_updated", "last_seen", "last_status",
+    "client_time", "software", "software_version", "os", "ping",
+    "vcard_updated")
 
 
 def _photo_pixmap(card: dict, size: int = 96) -> QtGui.QIcon:
@@ -138,14 +149,12 @@ class VCardInfoDialog(QtWidgets.QDialog):
                     tr("vcard_tab_about"))
         status_data = dict(status or {})
         status_data.setdefault("jid", card.get("jid") or self._jid)
-        status_data.setdefault("vcard_updated", card.get("fetched_at", ""))
+        status_data.setdefault(
+            "vcard_updated",
+            format_local_datetime(card.get("fetched_at", "")))
         self._status_data = status_data
-        self._status_index = tabs.addTab(self._fields_page(status_data, (
-            "jid", "presence", "subscription", "status_message", "mood", "activity",
-            "tune", "location", "resource",
-            "status_updated", "last_seen", "last_status", "vcard_updated",
-            "client_time", "software", "software_version", "os", "ping"),
-            hide_empty=True), tr("vcard_tab_status"))
+        self._status_index = tabs.addTab(
+            self._status_page(status_data), tr("vcard_tab_status"))
         layout.addWidget(tabs)
         return content
 
@@ -175,14 +184,12 @@ class VCardInfoDialog(QtWidgets.QDialog):
         """Merge *values* and refresh the Status tab in place (no tab switch)."""
         self._status_data.update({key: value for key, value in values.items()
                                   if value not in (None, "")})
-        for key in (
-                "jid", "presence", "subscription", "status_message", "mood",
-                "activity", "tune", "location", "resource", "status_updated",
-                "last_seen", "last_status", "vcard_updated", "client_time",
-                "software", "software_version", "os", "ping"):
+        for key in _STATUS_SCALARS:
             self._set_field(key, self._status_data.get(key),
                             hide_empty=(key != "jid"
                                         and key != "vcard_updated"))
+        if "clients" in values:
+            self._render_clients(values.get("clients") or [])
 
     def _set_field(self, key: str, value, hide_empty: bool = False) -> None:
         """Update a field label in place (toggle its row for the Status tab)."""
@@ -194,6 +201,60 @@ class VCardInfoDialog(QtWidgets.QDialog):
         form = self._field_forms.get(key)
         if form is not None:
             form.setRowVisible(label, has_value if hide_empty else True)
+
+    def _status_page(self, values: dict) -> QtWidgets.QWidget:
+        """Status tab: scalar fields plus per-resource client blocks."""
+        page = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(page)
+        form = QtWidgets.QFormLayout()
+        outer.addLayout(form)
+        for key in _STATUS_SCALARS:
+            label = QtWidgets.QLabel(str(values.get(key) or "-"))
+            label.setWordWrap(True)
+            form.addRow(f"{tr(f'vcard_field_{key}')}:", label)
+            self._field_labels[key] = label
+            self._field_forms[key] = form
+            has_value = bool(values.get(key))
+            if not has_value and key not in ("jid", "vcard_updated"):
+                form.setRowVisible(label, False)
+        self._clients_label = QtWidgets.QLabel()
+        self._clients_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._clients_label.setWordWrap(True)
+        outer.addWidget(self._clients_label)
+        outer.addStretch(1)
+        self._render_clients(values.get("clients") or [])
+        return page
+
+    def _render_clients(self, clients: list) -> None:
+        """Render the per-resource client blocks (mirrors the roster tooltip)."""
+        clock = find_icon("clock.svg")
+        indent = "&nbsp;&nbsp;&nbsp;"
+        rows: list[str] = []
+        for info in clients:
+            head = [status_icon_html(str(info.get("show") or ""))]
+            head.append(
+                f"<b>{escape_html(str(info.get('resource') or '*'))}</b>")
+            local = str(info.get("client_time") or "")
+            if local:
+                head.append(f'<img src="{clock}" width="16" height="16"> '
+                            + escape_html(local))
+            rows.append(" ".join(part for part in head if part))
+            client = str(info.get("client") or "")
+            version = str(info.get("version") or "")
+            name = (client + (" " + version if version else "")).strip()
+            if name:
+                icon = clients_mod.client_icon_for(
+                    str(info.get("caps_node") or ""), 16)
+                prefix = (f'<img src="{icon}" width="16" height="16"> '
+                          if icon else "")
+                rows.append(indent + prefix + tr("tooltip_client") + ": "
+                            + escape_html(name))
+            status = str(info.get("status") or "")
+            if status.strip():
+                rows.append(indent + tr("tooltip_status") + ": "
+                            + escape_html(status).replace("\n", "<br>"))
+        self._clients_label.setText("<br>".join(rows))
+        self._clients_label.setVisible(bool(rows))
 
     def _fields_page(self, values: dict, keys: tuple[str, ...],
                      hide_empty: bool = False) -> QtWidgets.QWidget:

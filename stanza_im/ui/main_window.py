@@ -336,6 +336,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks: dict[str, dict] = {}
         self._vcard_requested: set[str] = set()
         self._pending_profile: set[str] = set()
+        # JIDs whose vCard was opened as a MUC participant (their Status tab
+        # shows the occupant's client block, never a roster contact's one).
+        self._vcard_muc_ctx: dict[str, bool] = {}
         # JIDs whose *already open* vCard dialog is being refreshed in place.
         self._vcard_refreshing: set[str] = set()
         self._vcard_dialogs: dict[str, object] = {}
@@ -3739,36 +3742,81 @@ class MainWindow(QtWidgets.QMainWindow):
                 return candidate
         return None
 
-    def _vcard_status(self, jid: str, card: dict) -> dict:
-        """Presence/PEP status block for the vCard info dialog."""
-        status = {
-            "jid": card.get("jid") or jid,
-            "presence": "",
-            "status_message": "",
-            "resource": "",
-            "status_updated": "",
-            "client_time": card.get("client_time", ""),
-            "vcard_updated": card.get("fetched_at", ""),
+    @staticmethod
+    def _client_block(resource: str, show, status, client, version, tzo,
+                      caps_node) -> dict:
+        from stanza_im.include.utils import local_time_from_tzo
+        return {
+            "resource": resource or "*",
+            "show": show or "",
+            "status": status or "",
+            "client": client or "",
+            "version": version or "",
+            "client_time": local_time_from_tzo(str(tzo or "")),
+            "caps_node": caps_node or "",
         }
-        if self._client:
-            bare = jid.split("/", 1)[0]
-            contact = self._client.get_contact(bare)
-            status["presence"] = getattr(contact, "show", "")
-            status["status_message"] = getattr(contact, "status", "")
-            status["resource"] = jid.split("/", 1)[1] if "/" in jid else ""
-            sub = self._client.subscription(bare)
-            if sub in ("none", "to", "from", "both"):
-                status["subscription"] = tr(f"privacy_sub_{sub}")
+
+    def _contact_clients(self, contact) -> list[dict]:
+        """Per-resource client blocks for a 1:1 contact (best priority first)."""
+        blocks: list[dict] = []
+        resources = sorted(
+            (getattr(contact, "resources", None) or {}).items(),
+            key=lambda item: (-item[1].get("priority", 0), item[0].casefold()))
+        for resource, info in resources:
+            blocks.append(self._client_block(
+                resource, info.get("show"), info.get("status"),
+                info.get("client"), info.get("client_version"),
+                info.get("client_tzo"), info.get("caps_node")))
+        return blocks
+
+    def _muc_occupant_block(self, jid: str) -> tuple[str, dict] | None:
+        """The tracked MUC occupant matching *jid* (``(nick, info)`` or None)."""
         for room, users in self._muc_users.items():
             for nick, info in users.items():
                 if (info.get("real_jid", "") == jid
                         or info.get("avatar_jid", "") == jid
                         or f"{room}/{nick}" == jid):
-                    status["presence"] = info.get("show", "")
-                    status["status_message"] = info.get("status", "")
-                    status["resource"] = nick
-                    status["status_updated"] = info.get("status_updated", "")
+                    return nick, info
+        return None
+
+    def _vcard_status(self, jid: str, card: dict) -> dict:
+        """Presence/PEP status block for the vCard info dialog."""
+        from stanza_im.include.utils import format_local_datetime
+        status = {
+            "jid": card.get("jid") or jid,
+            "presence": "",
+            "status_message": "",
+            "status_updated": "",
+            "clients": [],
+            "client_time": card.get("client_time", ""),
+            "vcard_updated": format_local_datetime(card.get("fetched_at", "")),
+        }
         bare = jid.split("/", 1)[0]
+        if self._client:
+            contact = self._client.get_contact(bare)
+            status["presence"] = getattr(contact, "show", "")
+            status["status_message"] = getattr(contact, "status", "")
+            sub = self._client.subscription(bare)
+            if sub in ("none", "to", "from", "both"):
+                status["subscription"] = tr(f"privacy_sub_{sub}")
+        # A MUC participant (opened from the room's roster) shows a single
+        # occupant block; a plain 1:1 contact shows its own resources.  The
+        # MUC lookup is gated on the caller's context so a roster contact that
+        # merely shares a JID with a room occupant never gets a room nick.
+        if self._vcard_muc_ctx.get(jid):
+            occupant = self._muc_occupant_block(jid)
+            if occupant is not None:
+                nick, info = occupant
+                status["presence"] = info.get("show", "")
+                status["status_message"] = info.get("status", "")
+                status["status_updated"] = info.get("status_updated", "")
+                status["clients"] = [self._client_block(
+                    nick, info.get("show"), info.get("status"),
+                    info.get("client"), info.get("client_version"),
+                    info.get("client_tzo"), info.get("caps_node"))]
+        elif self._client:
+            status["clients"] = self._contact_clients(
+                self._client.get_contact(bare))
         if self._client:
             summary = pep.format_summary(self._client.pep_data.get(bare, {}))
             for key in ("mood", "activity", "tune", "location"):
@@ -7557,7 +7605,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_muc_participant_profile(self, room: str, nick: str,
                                       real_jid: str):
-        self._show_profile(real_jid or f"{room}/{nick}")
+        target = real_jid or f"{room}/{nick}"
+        self._vcard_muc_ctx[target] = True
+        self._show_profile(target)
 
     def _muc_user_command(self, room: str, nick: str):
         chat = self._chat_window.get_chat(room)

@@ -217,7 +217,15 @@ arrives, `_open_vcard_info` updates the already-open window in place
 (`update_card`: header + field labels rewritten, the content widget is not
 recreated and the active tab is preserved) instead of opening a second one,
 and re-issues `probe_entity` so the Status tab (version/ping) refreshes too
-(`update_status` merges values without switching tabs). Only the Close button
+(`update_status` merges values without switching tabs). The Status tab renders
+per-resource client blocks (`_render_clients`, the roster-tooltip tree: status
+icon + resource + live local time, an indented client line and «Статус») built
+by `MainWindow._vcard_status` from `contact.resources` — or, for a MUC
+participant opened from the room (`_show_muc_participant_profile` sets
+`_vcard_muc_ctx`), from the single occupant — while a plain 1:1 contact is never
+given a room nick (the old bogus «Ресурс»). «Визитка обновлена» and «Время
+клиента» are shown as local `YYYY-MM-DD HH:MM:SS`
+(`format_local_datetime`/`local_time_from_tzo`). Only the Close button
 accepts the dialog — the `QDialogButtonBox.clicked` signal fires for every
 button, so it must not be connected wholesale (a refresh would otherwise
 close the window). `_find_open_vcard`
