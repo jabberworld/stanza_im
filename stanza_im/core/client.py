@@ -3700,10 +3700,21 @@ class JabberClient:
             info["os"] = str(version.get("os", "") or "")
         except Exception:
             logger.debug("Software version unavailable for %s", jid)
-        try:
-            info["ping"] = f"{await self.xmpp.plugin['xep_0199'].ping(jid, timeout=5):.3f}s"
-        except Exception:
-            logger.debug("Ping unavailable for %s", jid)
+        # Ping the contact's **client** (a full JID); a bare-JID ping is
+        # answered by the server and would succeed even when the client is
+        # offline.  A contact with no online resource is not pinged at all
+        # (``"-"`` keeps a stale value from a previous refresh hidden).
+        ping_target = jid
+        if "/" not in jid and jid not in self.groupchats:
+            ping_target = self.best_full_jid(jid)
+        if ping_target:
+            try:
+                info["ping"] = (
+                    f"{await self.xmpp.plugin['xep_0199'].ping(ping_target, timeout=5):.3f}s")
+            except Exception:
+                logger.debug("Ping unavailable for %s", ping_target)
+        else:
+            info["ping"] = "-"
         try:
             result = await self._get_entity_time(jid)
             utc = result.get("utc", "")
@@ -6269,6 +6280,27 @@ class JabberClient:
             path = clients_mod.client_icon_for(node, 16)
             if path:
                 return path
+        return ""
+
+    def best_full_jid(self, bare: str) -> str:
+        """Full JID of the best **online** resource of *bare* (``""`` if none).
+
+        Used to ping the contact's client (a bare-JID ping is answered by the
+        server) and to skip the request entirely when the client is offline.
+        """
+        if not bare or bare in self.groupchats:
+            return ""
+        resources = self.get_contact(bare).resources
+        candidates = sorted(
+            resources.items(),
+            key=lambda kv: (SHOW_ORDER.get(kv[1].get("show", "offline"), 99),
+                            -int(kv[1].get("priority", 0) or 0)))
+        for resource, info in candidates:
+            if not resource:
+                continue
+            if str(info.get("show") or "offline") in ("offline", "unavailable"):
+                continue
+            return f"{bare}/{resource}"
         return ""
 
     def resource_client_name(self, bare: str, resource: str) -> str:
