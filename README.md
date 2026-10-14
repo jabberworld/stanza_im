@@ -9,7 +9,7 @@
 - аудио- и видеозвонки
 - совместное рисование
 - файлообмен
-- шифрование переписки
+- шифрование переписки и файлов
 
 ...и многое другое, с чем можно ознакомиться в [FEATURES.md](FEATURES.md)
 
@@ -38,6 +38,12 @@ python main.py
 
 ```
 sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine python3-defusedxml python3-qasync python3-aiodns python3-aiortc python3-pyqt6.qtmultimedia fonts-noto-color-emoji
+```
+
+Для работы шифрования OMEMO дополнительно нужны такие пакеты:
+
+```
+sudo apt-get install python3-omemo python3-oldmemo python3-twomemo python3-omemo-dr python3-slixmpp-omemo
 ```
 
 ## Документация проекта
