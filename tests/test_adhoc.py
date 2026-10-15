@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import load as load_i18n
+from stanza_im.i18n import tr
 from stanza_im.ui.adhoc_dialog import AdhocDialog
 
 load_i18n("en")
@@ -71,6 +72,28 @@ check("Execute runs the selected command",
 check("the command list is gone after execution", dlg._commands_widget is None)
 
 dlg.close()
+
+
+# ── a form step with no <actions/> still offers a submit button ──────────────
+class _FormClient(_FakeClient):
+    async def start_command(self, jid, node):
+        return {"session": "s2",
+                "form": {"title": "Register", "instructions": [],
+                         "fields": []},
+                "actions": [], "status": "executing", "notes": []}
+
+
+dlg2 = AdhocDialog(_FormClient(), "gw@example")
+loop.run_until_complete(asyncio.sleep(0.1))
+dlg2._commands_widget.setCurrentItem(dlg2._commands_widget.topLevelItem(0))
+dlg2._run_selected()
+loop.run_until_complete(asyncio.sleep(0.1))
+labels = [dlg2._buttons.itemAt(i).widget().text()
+          for i in range(dlg2._buttons.count())
+          if dlg2._buttons.itemAt(i).widget() is not None]
+check("a form with no actions offers a Send button",
+      tr("adhoc_submit") in labels)
+dlg2.close()
 
 print()
 if FAILURES:

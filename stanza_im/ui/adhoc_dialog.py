@@ -163,6 +163,12 @@ class AdhocDialog(QtWidgets.QDialog):
                 self._add_button("adhoc_next", lambda: self._send("next"))
             if "complete" in actions:
                 self._add_button("adhoc_complete", lambda: self._send("complete"))
+            if (self._form_widget is not None
+                    and not ({"prev", "next", "complete"} & actions)):
+                # A single-step form whose server sends no <actions/>: offer a
+                # plain submit (XEP-0050 defaults the action to "complete").
+                self._add_button("adhoc_submit",
+                                 lambda: self._send("complete"))
             self._add_button("adhoc_cancel", lambda: self._send("cancel"))
         self._buttons.addStretch(1)
         close = QtWidgets.QPushButton(tr("dialog_close"))

@@ -537,6 +537,7 @@ STRINGS = {
     "adhoc_prev": "Назад",
     "adhoc_next": "Далее",
     "adhoc_complete": "Готово",
+    "adhoc_submit": "Отправить",
     "adhoc_cancel": "Отмена",
     "form_required": "Заполните обязательное поле «{label}»",
     # Context menu

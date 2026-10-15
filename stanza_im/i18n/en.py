@@ -537,6 +537,7 @@ STRINGS = {
     "adhoc_prev": "Prev",
     "adhoc_next": "Next",
     "adhoc_complete": "Complete",
+    "adhoc_submit": "Send",
     "adhoc_cancel": "Cancel",
     "form_required": "Please fill in the required field '{label}'",
     # Context menu
