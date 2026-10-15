@@ -22,7 +22,7 @@ class RegistrationDialog(QtWidgets.QDialog):
         self._legacy_widget: LegacyFormWidget | None = None
         self._registered = False
         self.setWindowTitle(tr("register_title"))
-        self.resize(420, 0)
+        self.setMinimumWidth(420)
         layout = QtWidgets.QVBoxLayout(self)
         self._status = QtWidgets.QLabel()
         self._status.setWordWrap(True)
@@ -70,10 +70,18 @@ class RegistrationDialog(QtWidgets.QDialog):
                     QtCore.QUrl(url)))
             self._form_widget.media_ready.connect(
                 lambda: fit_dialog_to_content(self))
+            # The form lives in an inner container so ``fit_dialog_to_content``
+            # measures the full content (a form added directly to the
+            # widget-resizable scroll area would report the viewport height and
+            # leave the dialog scroll-clipped).
+            inner = QtWidgets.QWidget()
+            inner_layout = QtWidgets.QVBoxLayout(inner)
+            inner_layout.setContentsMargins(0, 0, 0, 0)
+            inner_layout.addWidget(self._form_widget)
             self._form_scroll = QtWidgets.QScrollArea(self)
             self._form_scroll.setWidgetResizable(True)
             self._form_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-            self._form_scroll.setWidget(self._form_widget)
+            self._form_scroll.setWidget(inner)
             self._body.addWidget(self._form_scroll)
         elif fields:
             self._legacy_widget = LegacyFormWidget(fields)
