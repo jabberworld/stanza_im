@@ -891,6 +891,14 @@ is generated from the bundled `index.html` by
 Messages are rendered as HTML/CSS using Adium-compatible chat skins from
 `resources/chatskins/`. A `QWebChannel` bridge (`_ChatBridge`) exposes Python
 methods to JavaScript for link clicks, file transfer buttons, etc.
+`chat_view.py` defines **two** `ChatView` classes: the WebEngine one and a
+plain `QTextBrowser` fallback (used when QtWebEngine is missing **or** disabled
+via `performance.webengine_mode = off`). The fallback must mirror the
+WebEngine class's public API — `ChatWidget` calls the same methods on both
+(`add_message` with the full kwarg set incl. `reactions`/`markup`,
+`update_reactions`, `shutdown`, `set_media_thumbnail`, `prepend_messages`, …);
+`tests/test_fallback_view.py` guards this parity (it forces the web engine off
+before importing the module).
 
 **Theme engine** (`chat_themes.py`): Loads HTML templates and CSS variants from
 `resources/chatskins/minimal-mod/` or `candy/`. Templates use `%sender%`,

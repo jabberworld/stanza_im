@@ -1195,6 +1195,14 @@ list).
 
 ## 10. Chat View (`ui/chat_view.py`)
 
+The module picks one of two `ChatView` classes at import: the WebEngine view, or
+a plain `QTextBrowser` fallback when QtWebEngine is missing **or** disabled
+(`performance.webengine_mode = off`). The fallback MUST mirror the WebEngine
+class's public API (the `add_message` kwarg set incl. `reactions`/`markup`,
+`update_reactions`, `shutdown`, `set_media_thumbnail`, `prepend_messages`, …)
+because `ChatWidget` calls the same methods on both; `tests/test_fallback_view.py`
+forces the web engine off and guards the parity.
+
 ### 10.1 QWebEngineView Mode (default)
 
 - Uses `QWebEngineView` + `QWebChannel` for Python↔JS communication

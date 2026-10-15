@@ -2865,9 +2865,13 @@ else:
                         retract_reason: str = "",
                         retract_by: str = "",
                         moderatable: bool = False,
+                        reactions=None,
                         unread_marker: bool = False,
                         media: dict | None = None,
-                        encrypted: bool = False):
+                        encrypted: bool = False,
+                        markup: dict | None = None):
+            # *markup* (XEP-0394) is accepted for API parity with the WebEngine
+            # view but the plain fallback does not render it.
             marker_html = (ChatThemeFactory.render_unread_marker()
                            if unread_marker else "")
             if retracted:
@@ -2889,6 +2893,7 @@ else:
                 if retract_marker:
                     edited_suffix += " \u2715"
             hats_suffix = self._hats_text(hats)
+            reactions_suffix = self._reactions_text(reactions)
             reply_line = ""
             if reply_quote is not None:
                 ref_sender, ref_snippet = reply_quote[0], reply_quote[1]
@@ -2904,18 +2909,30 @@ else:
                 self._append_before_typing(
                     marker_html + reply_line +
                     f"<i>({timestamp}) * {sender or 'Me'} "
-                    f"{phrase}{edited_suffix}</i>")
+                    f"{phrase}{edited_suffix}{reactions_suffix}</i>")
             elif direction == "incoming":
                 self._append_before_typing(
                     marker_html + reply_line +
                     f"<b>{sender}</b>{hats_suffix} <i>({timestamp})</i>: "
-                    f"{body_html}{edited_suffix}")
+                    f"{body_html}{edited_suffix}{reactions_suffix}")
             else:
                 self._append_before_typing(
                     marker_html + reply_line +
                     f"<b style='color:#0066cc'>{sender}</b>{hats_suffix} "
                     f"<i>({timestamp})</i>: "
-                    f"{body_html}{edited_suffix}")
+                    f"{body_html}{edited_suffix}{reactions_suffix}")
+
+        @staticmethod
+        def _reactions_text(reactions) -> str:
+            """A plain ``👍 2 ❤️`` suffix for the fallback view (no chips)."""
+            parts = []
+            for chip in (reactions or []):
+                emoji = str((chip or {}).get("emoji") or "")
+                if not emoji:
+                    continue
+                count = int((chip or {}).get("count") or 0)
+                parts.append(f"{emoji} {count}" if count > 1 else emoji)
+            return " " + " ".join(parts) if parts else ""
 
         @staticmethod
         def _hats_text(hats) -> str:
@@ -2934,6 +2951,14 @@ else:
             return ""
 
         def replace_message_ref(self, ref_id: str, html_node: str) -> None:
+            return
+
+        def update_reactions(self, ref_id: str, reactions_html: str) -> None:
+            """No-op: the fallback renders reactions once, at add time."""
+            return
+
+        def shutdown(self) -> None:
+            """No-op: the QTextBrowser fallback owns no WebEngine page."""
             return
 
         def add_status(self, text: str, timestamp: str):
