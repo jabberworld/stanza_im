@@ -906,10 +906,11 @@ a long-lived fallback tab grows without bound. Its `prepend_messages` inserts
 **each message as its own block** (they used to run together on one line) and
 restores the scroll position on the next event-loop turn (never a synchronous
 `processEvents()`, which re-entered the loop from inside a coroutine). The
-bottom report (`_note_bottom`) is **suspended** during programmatic scrolls
-(render, anchor restore, prepend) exactly like the WebEngine view, so a
-transient bottom never marks the conversation read and drops the unread
-separator.
+bottom report (`_note_bottom`) and the **near-top report** (`_check_scroll` →
+`near_top`) are both **suspended** during programmatic scrolls (render, anchor
+restore, prepend) exactly like the WebEngine view — otherwise a transient
+bottom would mark the conversation read / drop the unread separator, and a MAM
+prepend would re-trigger the next page forever.
 
 **Theme engine** (`chat_themes.py`): Loads HTML templates and CSS variants from
 `resources/chatskins/minimal-mod/` or `candy/`. Templates use `%sender%`,

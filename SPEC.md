@@ -1206,9 +1206,10 @@ disabled and trims its `QTextDocument` to `_MAX_BLOCKS` (500) oldest blocks on
 append (mirroring the WebEngine DOM trim); older-history prepends are not
 trimmed (they are bounded by `_HISTORY_MAX`). `prepend_messages` inserts each
 message as its own block and restores the scroll on the next event-loop turn
-(no synchronous `processEvents()`); `_note_bottom` is suspended during
-programmatic scrolls (render/anchor/prepend) so a transient bottom never marks
-the conversation read.
+(no synchronous `processEvents()`); `_note_bottom` and the near-top report
+(`_check_scroll`) are suspended during programmatic scrolls
+(render/anchor/prepend) so a transient bottom never marks the conversation read
+and a MAM prepend never re-triggers the next page.
 
 ### 10.1 QWebEngineView Mode (default)
 

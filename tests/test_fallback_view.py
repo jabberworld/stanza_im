@@ -124,6 +124,25 @@ view.prepend_messages([
 app.processEvents()
 check("a programmatic scroll/prepend does not report the bottom", hits == [])
 
+# 7. a programmatic prepend must not report "near top" (infinite MAM paging) -
+view.clear()
+for i in range(60):
+    view.add_message("Bob", f"{i}: " + "text " * 40, "12:00", "incoming")
+app.processEvents()
+view.verticalScrollBar().setValue(view.verticalScrollBar().maximum())
+app.processEvents()
+top_hits = []
+view.near_top.connect(lambda: top_hits.append(1))
+older = [{"sender": "X", "body": f"old {i}", "timestamp": "0",
+          "direction": "incoming"} for i in range(30)]
+for _ in range(3):
+    view.prepend_messages(older, True)
+    app.processEvents()
+check("a programmatic prepend does not report near-top", top_hits == [])
+view.verticalScrollBar().setValue(0)
+app.processEvents()
+check("a user scroll to the top still reports near-top", len(top_hits) == 1)
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)

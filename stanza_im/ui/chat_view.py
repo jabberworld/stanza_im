@@ -2833,13 +2833,18 @@ else:
                 self._fraction = (vbar.value() - vbar.minimum()) / span
             else:
                 self._fraction = 1.0
-            offset = vbar.value() - vbar.minimum()
-            if offset <= vbar.pageStep():
-                if not self._near_top_hit:
-                    self._near_top_hit = True
-                    self.near_top.emit()
-            else:
-                self._near_top_hit = False
+            # A programmatic scroll (render/anchor/prepend) must not report
+            # "near top": a MAM prepend shifts the content and would otherwise
+            # re-trigger the next page forever.  ``_near_top_hit`` is left as
+            # is, so the next *user* scroll to the top still fires once.
+            if not self._scroll_suspended:
+                offset = vbar.value() - vbar.minimum()
+                if offset <= vbar.pageStep():
+                    if not self._near_top_hit:
+                        self._near_top_hit = True
+                        self.near_top.emit()
+                else:
+                    self._near_top_hit = False
             if self._fraction >= 0.999:
                 self._reset_unread_indicator()
             self._update_jump_button()
