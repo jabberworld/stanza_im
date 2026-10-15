@@ -440,9 +440,18 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _page_devices(self):
         """Audio/video device selectors and self-tests (Qt Multimedia)."""
+        page, form = self._page()
+        if str(getattr(self._config.performance, "calls_load_mode",
+                       "lazy") or "lazy") == "off":
+            # Calls are off: never import aiortc/av (via xmpp.media) just to
+            # list devices — that would defeat the memory-saving mode.
+            note = QtWidgets.QLabel(tr("prefs_devices_calls_off"))
+            note.setWordWrap(True)
+            note.setStyleSheet("color: #c0392b;")
+            form.addRow(note)
+            return page
         from stanza_im.xmpp import media
         from stanza_im.ui import device_test
-        page, form = self._page()
         devices = media.enumerate_devices()
         self._mic_tester = device_test.MicrophoneTester(self)
         self._mic_tester.level.connect(self._on_mic_level)

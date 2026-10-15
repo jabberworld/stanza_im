@@ -144,6 +144,20 @@ class _CallClient:
 check("calls are unavailable when off",
       JingleRtpManager(_CallClient()).available is False)
 
+# 6. the Devices page never pulls aiortc when calls are off ------------------
+import sys as _sys  # noqa: E402
+_sys.modules.pop("stanza_im.xmpp.media", None)
+_sys.modules.pop("stanza_im.ui.device_test", None)
+_sys.modules.pop("aiortc", None)
+cfg.performance.calls_load_mode = "off"
+dlg2 = PreferencesDialog(cfg, ChatThemeFactory())
+dlg2._ensure_all_pages()
+check("Devices page does not import xmpp.media when calls are off",
+      "stanza_im.xmpp.media" not in _sys.modules)
+check("Devices page does not import device_test when calls are off",
+      "stanza_im.ui.device_test" not in _sys.modules)
+dlg2.close()
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

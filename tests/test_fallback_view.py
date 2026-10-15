@@ -89,6 +89,18 @@ no_raise("add_status does not raise", lambda: view.add_status("subject", "12:02"
 no_raise("prepend_messages does not raise", lambda: view.prepend_messages([
     {"sender": "Carol", "body": "older", "timestamp": "2026-10-15T11:00:00Z",
      "direction": "incoming"}]))
+check("prepend keeps the older message", "older" in view.toPlainText())
+
+# 4. the document is bounded and the undo stack is off ----------------------
+check("undo/redo is disabled", view.isUndoRedoEnabled() is False)
+view.clear()
+for i in range(600):
+    view.add_message("Bob", f"message {i}", "12:00", "incoming")
+app.processEvents()
+check("the document is bounded to the cap",
+      view.document().blockCount() <= ChatView._MAX_BLOCKS + 1)
+check("the newest message is kept", "message 599" in view.toPlainText())
+check("the oldest message is trimmed", "message 0" not in view.toPlainText())
 
 print()
 if FAILURES:

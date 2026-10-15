@@ -2635,12 +2635,19 @@ else:
         note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
 
+        #: Cap on the document's blocks (≈ messages); the oldest are trimmed on
+        #: append, mirroring the WebEngine ``_MAX_DOM_MESSAGES`` DOM trim.
+        _MAX_BLOCKS = 500
+
         def __init__(self, theme: ChatThemeFactory = None, parent=None):
             super().__init__(parent)
             self._theme = theme
             self.highlight_nick = ""
             self._zoom = 1.0
             self._notes_enabled = False
+            # The view is a log, not an editor: an undo stack would keep a copy
+            # of every appended message and grow without bound.
+            self.setUndoRedoEnabled(False)
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -2845,12 +2852,36 @@ else:
                 cursor.setPosition(pos)
                 cursor.insertHtml(html)
                 cursor.insertBlock()
+            removed = self._trim_document()
             if was_at_bottom:
                 self._fraction = 1.0
                 vbar.setValue(vbar.maximum())
             else:
-                vbar.setValue(old_value)
+                vbar.setValue(max(0, old_value - removed))
             self._check_scroll()
+
+        def _trim_document(self) -> int:
+            """Drop the oldest blocks past :attr:`_MAX_BLOCKS` (append path).
+
+            Returns the removed pixel height so the caller can keep the scroll
+            position.  Older-history ``prepend_messages`` is not trimmed: it
+            adds at the top and is bounded by ``_HISTORY_MAX`` — trimming there
+            would discard the page the user just loaded.
+            """
+            doc = self.document()
+            overflow = doc.blockCount() - self._MAX_BLOCKS
+            if overflow <= 0:
+                return 0
+            cursor = QtGui.QTextCursor(doc)
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+            for _ in range(overflow):
+                if not cursor.movePosition(
+                        QtGui.QTextCursor.MoveOperation.NextBlock,
+                        QtGui.QTextCursor.MoveMode.KeepAnchor):
+                    break
+            removed = self.cursorRect(cursor).bottom()
+            cursor.removeSelectedText()
+            return removed
 
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,

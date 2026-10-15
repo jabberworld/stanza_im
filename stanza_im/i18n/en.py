@@ -1388,6 +1388,8 @@ STRINGS = {
     'call_unavailable': 'Calling is unavailable (install aiortc)',
     'call_failed': 'Call with {peer} failed: {error}',
     'prefs_devices': 'Devices',
+    'prefs_devices_calls_off': 'Calls are disabled in the settings '
+                               '(Performance → Call engine load).',
     'prefs_device_mic': 'Microphone:',
     'prefs_device_speaker': 'Speaker:',
     'prefs_device_camera': 'Camera:',

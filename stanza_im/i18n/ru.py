@@ -1389,6 +1389,8 @@ STRINGS = {
     'call_unavailable': 'Звонки недоступны (установите aiortc)',
     'call_failed': 'Сбой звонка с {peer}: {error}',
     'prefs_devices': 'Устройства',
+    'prefs_devices_calls_off': 'Звонки отключены в настройках '
+                               '(Производительность → Движок звонков).',
     'prefs_device_mic': 'Микрофон:',
     'prefs_device_speaker': 'Динамик:',
     'prefs_device_camera': 'Камера:',
