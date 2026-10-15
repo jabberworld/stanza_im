@@ -331,6 +331,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_create_opts: dict[str, dict] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
+        # Roster contacts classified as transports/gateways (disco category
+        # "gateway"); shown in their own tab, never as ordinary contacts.
+        self._transport_jids: set[str] = set()
+        self._transport_probed: set[str] = set()
+        self._transport_pending: set[str] = set()
+        self._transport_roster: RosterWidget | None = None
         # MUC private-message rows: chat key -> (room, nick).
         self._pm_roster: set[str] = set()
         self._pm_targets: dict[str, tuple[str, str]] = {}
@@ -802,6 +808,9 @@ class MainWindow(QtWidgets.QMainWindow):
                           self._build_bookmarks_tab),
             "events": (self._tab_icon("event.svg"),
                        tr("roster_tab_events"), self._build_events_tab),
+            "transports": (self._tab_icon("transports.png"),
+                           tr("roster_tab_transports"),
+                           self._build_transports_tab),
         }
         for key, (icon, tip, factory) in builtins.items():
             self._add_roster_tab(key, icon, tip, factory())
@@ -990,6 +999,223 @@ class MainWindow(QtWidgets.QMainWindow):
         self._event_blink_timer.timeout.connect(self._event_blink_step)
         self._push_system_event("", "")  # render the empty-state row
         return page
+
+    # ── Transports (gateways) ─────────────────────────────────────
+
+    def _transport_tool_button(self, icon_name: str, tooltip: str,
+                               handler) -> QtWidgets.QToolButton:
+        button = QtWidgets.QToolButton()
+        button.setIcon(self._menu_icon(icon_name))
+        button.setIconSize(QtCore.QSize(16, 16))
+        button.setAutoRaise(True)
+        button.setToolTip(tooltip)
+        button.clicked.connect(handler)
+        return button
+
+    def _build_transports_tab(self) -> QtWidgets.QWidget:
+        """The «Транспорты» tab: a roster-style transport list + toolbar."""
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._transport_roster = RosterWidget()
+        self._transport_roster.set_style(self._roster_style)
+        self._transport_roster.set_show_groups(False)
+        self._transport_roster.set_tooltip_provider(self._roster_tooltip)
+        self._transport_roster.contact_clicked.connect(self._on_transport_clicked)
+        self._transport_roster.contact_double_clicked.connect(
+            self._on_contact_open)
+        self._transport_roster.contact_context_menu.connect(
+            self._on_transport_context)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setWidget(self._transport_roster)
+        self._transport_viewport = scroll.viewport()
+        self._transport_viewport.setAutoFillBackground(True)
+        layout.addWidget(scroll, 1)
+
+        toolbar = QtWidgets.QHBoxLayout()
+        toolbar.setContentsMargins(6, 0, 6, 6)
+        self._transport_connect_btn = self._transport_tool_button(
+            "reload.png", tr("transport_connect"), self._on_transport_toggle)
+        self._transport_command_btn = self._transport_tool_button(
+            "exec.png", tr("transport_commands"), self._on_transport_command)
+        self._transport_remove_btn = self._transport_tool_button(
+            "process-stop.png", tr("transport_remove"), self._on_transport_remove)
+        for button in (self._transport_connect_btn,
+                       self._transport_command_btn,
+                       self._transport_remove_btn):
+            toolbar.addWidget(button)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+
+        self._apply_roster_font()
+        self._apply_roster_colors()
+        self._rebuild_transports()
+        self._update_transport_actions()
+        return page
+
+    def _classify_transports(self) -> None:
+        """Probe every roster contact for the gateway identity (once each)."""
+        if self._client is None:
+            return
+        for item in self._client.get_roster_snapshot():
+            bare = str(item.get("jid") or "").split("/", 1)[0]
+            if (not bare or bare == self._client.jid_str
+                    or bare in self._transport_probed
+                    or bare in self._transport_pending):
+                continue
+            self._transport_pending.add(bare)
+            self._start_task(self._probe_transport(bare))
+
+    async def _probe_transport(self, bare: str) -> None:
+        self._transport_pending.discard(bare)
+        self._transport_probed.add(bare)
+        if self._client is None:
+            return
+        try:
+            info = await self._client.discover_service_info(bare)
+        except Exception:
+            return
+        if str(info.get("category") or "").lower() != "gateway":
+            return
+        if bare in self._transport_jids:
+            return
+        self._transport_jids.add(bare)
+        # The transport must leave the ordinary roster.
+        self._roster.remove_user(bare)
+        self._roster.sort_and_update()
+        self._rebuild_transports()
+
+    def _rebuild_transports(self) -> None:
+        roster = getattr(self, "_transport_roster", None)
+        if roster is None:
+            return
+        roster.clear()
+        if self._client is not None:
+            for jid in sorted(self._transport_jids, key=str.casefold):
+                contact = self._client.get_contact(jid)
+                show = getattr(contact, "show", "offline") or "offline"
+                roster.add_user(UserItem(
+                    jid=jid,
+                    name=self._roster_name(jid) or jid,
+                    group=tr("roster_group_transports"),
+                    status=show,
+                    status_message=getattr(contact, "status", ""),
+                    icon_key=show_to_icon_key(show),
+                    avatar_path=getattr(contact, "avatar_path", None),
+                    client_icon=self._client.client_icon(jid),
+                    blocked=jid in self._blocked_jids,
+                ))
+        roster.sort_and_update()
+        self._update_transport_actions()
+
+    def _on_transport_clicked(self, jid: str) -> None:
+        self._update_transport_actions()
+
+    def _selected_transport(self) -> str:
+        roster = getattr(self, "_transport_roster", None)
+        return str(getattr(roster, "_selected_jid", "") or "") if roster else ""
+
+    def _transport_online(self, jid: str) -> bool:
+        if self._client is None or not jid:
+            return False
+        show = getattr(self._client.get_contact(jid), "show", "") or ""
+        return show not in ("", "offline")
+
+    def _update_transport_actions(self) -> None:
+        jid = self._selected_transport()
+        online = self._transport_online(jid)
+        for button in (getattr(self, "_transport_connect_btn", None),
+                       getattr(self, "_transport_command_btn", None),
+                       getattr(self, "_transport_remove_btn", None)):
+            if button is not None:
+                button.setEnabled(bool(jid))
+        button = getattr(self, "_transport_connect_btn", None)
+        if button is not None:
+            button.setToolTip(tr("transport_disconnect") if online
+                              else tr("transport_connect"))
+            button.setIcon(self._menu_icon(
+                "process-stop.png" if online else "reload.png"))
+
+    def _toggle_transport(self, jid: str) -> None:
+        """Send a directed presence to (dis)connect *jid*."""
+        if not jid or self._client is None:
+            return
+        if self._transport_online(jid):
+            self._client.send_directed_presence(
+                jid, "unavailable", tr("transport_disconnected"))
+        else:
+            self._client.send_directed_presence(jid)
+
+    def _on_transport_toggle(self) -> None:
+        self._toggle_transport(self._selected_transport())
+
+    def _on_transport_command(self) -> None:
+        jid = self._selected_transport()
+        if jid:
+            self._open_adhoc(jid)
+
+    def _on_transport_remove(self) -> None:
+        jid = self._selected_transport()
+        if jid:
+            self._remove_transport_confirmed(jid)
+
+    def _remove_transport_confirmed(self, jid: str) -> None:
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("transport_remove"),
+            tr("transport_remove_confirm", jid=jid))
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        if self._client is not None:
+            self._start_task(self._client.remove_contact(jid))
+        self._transport_jids.discard(jid)
+        self._transport_probed.discard(jid)
+        self._rebuild_transports()
+
+    def _on_transport_context(self, jid: str, pos):
+        menu = QtWidgets.QMenu(self)
+
+        def defer(callback):
+            menu.close()
+            QtCore.QTimer.singleShot(0, callback)
+
+        online = self._transport_online(jid)
+        menu.addAction(
+            self._menu_icon("process-stop.png" if online else "reload.png"),
+            tr("transport_disconnect") if online else tr("transport_connect"),
+            lambda checked=False: defer(lambda: self._toggle_transport(jid)))
+        menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
+                       lambda checked=False: defer(
+                           lambda: self._show_profile(jid)))
+        menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
+                       lambda: self._on_contact_open(jid))
+        menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
+                       lambda checked=False: defer(
+                           lambda: self._on_history_contact(jid)))
+        menu.addSeparator()
+        menu.addAction(self._menu_icon("edit.png"), tr("ctx_rename"),
+                       lambda checked=False: defer(
+                           lambda: self._rename_contact(jid)))
+        if self._client:
+            self._build_subscription_menu(menu, jid)
+            self._build_adhoc_menu(menu, jid)
+        menu.addAction(
+            self._menu_icon("add-user.png"), tr("transport_add_contact"),
+            lambda checked=False: defer(
+                lambda: self._on_add_contact_via_transport(jid)))
+        menu.addSeparator()
+        menu.addAction(self._menu_icon("process-stop.png"),
+                       tr("transport_remove"),
+                       lambda checked=False: defer(
+                           lambda: self._remove_transport_confirmed(jid)))
+        menu.exec(pos)
+
+    def _on_add_contact_via_transport(self, jid: str) -> None:
+        name = self._roster_name(jid) or jid
+        self._on_add_contact(gateways=[(name, jid)], preselect=jid)
 
     def _clear_events_placeholder(self) -> None:
         # Only the *placeholder* row may be cleared: a real event is also a
@@ -1225,6 +1451,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_task(self._load_bookmarks())
         elif key == "events":
             self._stop_event_blink()
+        elif key == "transports" and self._client:
+            self._classify_transports()
+            self._rebuild_transports()
         elif key and key.startswith("plugin:") and self._client:
             page = self._roster_tab_pages.get(key)
             reload_fn = getattr(page, "reload", None)
@@ -1470,10 +1699,6 @@ class MainWindow(QtWidgets.QMainWindow):
             bool(getattr(self._config.appearance, "roster_show_self", False)))
         show_self.toggled.connect(self._on_show_self_toggled)
         self._show_self_action = show_self
-        show_transports = view_menu.addAction(self._menu_icon("transports.png"),
-                                              tr("menu_show_transports"))
-        show_transports.setCheckable(True)
-        show_transports.setEnabled(False)
 
         help_menu = menubar.addMenu(tr("menu_help"))
         conn_info = help_menu.addAction(self._menu_icon("info.svg"),
@@ -1494,7 +1719,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── Menu actions ─────────────────────────────────────────────
 
-    def _on_add_contact(self, jid: str = ""):
+    def _on_add_contact(self, jid: str = "", gateways=None, preselect: str = ""):
         if not isinstance(jid, str):
             # ``QAction.triggered`` passes a ``checked`` bool; ignore it.
             jid = ""
@@ -1505,7 +1730,8 @@ class MainWindow(QtWidgets.QMainWindow):
                          if user.group not in _virtual_roster_groups()
                          | {tr("roster_group_ungrouped")}},
                         key=str.casefold)
-        dlg = AddContactDialog(groups, self._client, self, jid=jid)
+        dlg = AddContactDialog(groups, self._client, self, jid=jid,
+                               gateways=gateways, preselect=preselect)
         dlg.vcard_requested.connect(self._show_profile)
 
         def finished(result: int):
@@ -2877,6 +3103,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         roster.setFont(_font(roster.font()))
         roster.update()
+        transport_roster = getattr(self, "_transport_roster", None)
+        if transport_roster is not None:
+            transport_roster.setFont(_font(transport_roster.font()))
+            transport_roster.update()
         # The bookmarks/events lists share the roster font settings.
         for name in ("_bookmarks_list", "_events_list"):
             widget = getattr(self, name, None)
@@ -2936,13 +3166,17 @@ class MainWindow(QtWidgets.QMainWindow):
         roster = getattr(self, "_roster", None)
         if roster is not None:
             roster.set_style(self._roster_style)
-        viewport = getattr(self, "_roster_viewport", None)
-        if viewport is not None:
-            fill = self._roster_style.bg_color() or QtGui.QColor(
-                QtCore.Qt.GlobalColor.white)
-            pal = viewport.palette()
-            pal.setColor(QtGui.QPalette.ColorRole.Window, fill)
-            viewport.setPalette(pal)
+        transport_roster = getattr(self, "_transport_roster", None)
+        if transport_roster is not None:
+            transport_roster.set_style(self._roster_style)
+        fill = self._roster_style.bg_color() or QtGui.QColor(
+            QtCore.Qt.GlobalColor.white)
+        for viewport in (getattr(self, "_roster_viewport", None),
+                         getattr(self, "_transport_viewport", None)):
+            if viewport is not None:
+                pal = viewport.palette()
+                pal.setColor(QtGui.QPalette.ColorRole.Window, fill)
+                viewport.setPalette(pal)
 
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""
@@ -3608,6 +3842,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # The account's own JID (a self-contact returned by the server) is
             # never an ordinary roster contact: it is shown on demand by
             # _sync_self_roster as a virtual «Свой контакт» row.
+            return
+        if jid in self._transport_jids:
+            # A classified transport lives in its own tab, not in the roster.
             return
         name = item["name"] or jid.split("@")[0]
         groups = item["groups"]
