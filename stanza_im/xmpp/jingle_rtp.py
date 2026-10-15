@@ -611,10 +611,15 @@ class JingleRtpManager:
 
     def warmup(self) -> None:
         """Load the media engine now (``calls_load_mode = startup``)."""
+        if str(getattr(self.client, "calls_load_mode", "lazy")) == "off":
+            return
         self._ensure_engine()
 
     @property
     def available(self) -> bool:
+        # Turned off in the settings: never load (or offer) the call engine.
+        if str(getattr(self.client, "calls_load_mode", "lazy")) == "off":
+            return False
         if self.engine is not None:
             return self.engine.available
         # Not loaded yet: report what a lazy load would find without importing

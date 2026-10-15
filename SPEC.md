@@ -387,8 +387,9 @@ endpoint, then DNS SRV.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `performance.defer_ui_build` | `true` | Show the login window before the heavy widgets are built. `MainWindow(app, defer=True)` builds only the shell + login/splash pages; `app.run()` shows it and then calls `build_deferred()` (idempotent) on the next event-loop turn. `false` = the old synchronous build (used by tests). |
-| `performance.omemo_load_mode` | `lazy` | `lazy`: `xmpp/omemo/availability.py` uses `find_spec` (no heavy import) and the real import runs at OMEMO plugin registration (login); `startup`: the background probe imports the backends right after the window is shown. |
-| `performance.calls_load_mode` | `lazy` | `lazy`: the aiortc engine is created on the first call; `startup`: `JingleRtpManager.warmup()` loads it when the client is created. |
+| `performance.omemo_load_mode` | `lazy` | `lazy`: `xmpp/omemo/availability.py` uses `find_spec` (no heavy import) and the real import runs at OMEMO plugin registration (login); `startup`: the background probe imports the backends right after the window is shown; `off`: `availability.set_disabled(True)` (sticky) — never imported, OMEMO unavailable even when installed. |
+| `performance.calls_load_mode` | `lazy` | `lazy`: the aiortc engine is created on the first call; `startup`: `JingleRtpManager.warmup()` loads it when the client is created; `off`: `available` is false and aiortc is never imported (call menus hidden). Passed to `JabberClient` from the config. |
+| `performance.webengine_mode` | `full` | `full` = WebEngine + previews (per `chat.media_preview`); `no_preview` = WebEngine but previews forced off; `off` = `constants.set_webengine_enabled(False)` — `ui/chat_view.py` skips the WebEngine import (all chats use the `QTextBrowser` fallback, no Chromium stack). Applied before the window. |
 | `performance.webengine_memory_mode` | `moderate` | `QTWEBENGINE_CHROMIUM_FLAGS` set before `QApplication`: `off` / `moderate` (`--renderer-process-limit=1`, `--js-flags=--max-old-space-size=128` and background-service disables) / `aggressive` (+ `--disable-gpu`). A user-set env value is respected. |
 | `performance.webengine_cache_mb` | `50` | HTTP cache cap of the default `QWebEngineProfile` (`ui/url_schemes.configure_default_profile`; cookies in memory only, plugins/popups disabled); `0` = no cap. |
 

@@ -102,12 +102,17 @@ class Config:
         "performance": {
             # Show the login window before the heavy widgets are built.
             "defer_ui_build": True,
-            # OMEMO backends: "lazy" = find_spec at startup, real import on
-            # login; "startup" = eager import during startup.
+            # OMEMO backends: "off" = never load them; "lazy" = find_spec at
+            # startup, real import on login; "startup" = eager import during
+            # startup.
             "omemo_load_mode": "lazy",
-            # Call engine (aiortc/av): "lazy" = load on the first call;
-            # "startup" = load when the client is created.
+            # Call engine (aiortc/av): "off" = never load it; "lazy" = load on
+            # the first call; "startup" = load when the client is created.
             "calls_load_mode": "lazy",
+            # Web engine: "off" = no QtWebEngine at all (plain QTextBrowser
+            # chats, no media previews); "no_preview" = WebEngine but no media
+            # previews; "full" = WebEngine with previews (per chat.media_preview).
+            "webengine_mode": "full",
             # Chromium memory profile: "off" / "moderate" / "aggressive".
             "webengine_memory_mode": "moderate",
             # HTTP cache cap of the default WebEngine profile (MB, 0 = off).

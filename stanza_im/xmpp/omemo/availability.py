@@ -119,15 +119,49 @@ _apply_state({module: _has_spec(module) for module, _n, _d in _REQUIRED})
 #: True once the real import probe (:func:`verify`) has run.
 _verified = False
 
+#: Set when OMEMO is turned off in the settings (regardless of the packages).
+_disabled = False
+
+
+def disabled() -> bool:
+    """Whether OMEMO was turned off in the settings (not a missing install)."""
+    return _disabled
+
+
+def set_disabled(disabled_flag: bool) -> None:
+    """Force OMEMO off (the settings "off" mode), or restore detection.
+
+    Sticky: :func:`verify` never re-enables a disabled feature.  Call it once
+    at startup, before any consumer reads :data:`AVAILABLE`.
+    """
+    global _disabled, AVAILABLE, BACKENDS, MISSING_MODULES, MISSING
+    global MISSING_DEBIAN, WARNING, OMEMO2_CONTENT
+    _disabled = bool(disabled_flag)
+    if _disabled:
+        MISSING_MODULES = []
+        MISSING = []
+        MISSING_DEBIAN = []
+        BACKENDS = frozenset()
+        AVAILABLE = False
+        WARNING = "OMEMO disabled in the settings"
+        OMEMO2_CONTENT = False
+    else:
+        # Restore the cheap spec-based detection (a later verify() may refine
+        # it with the real import probe).
+        _apply_state({module: _has_spec(module) for module, _n, _d in _REQUIRED})
+
 
 def verify() -> bool:
     """Run the real import probe (once) and return the true availability.
 
     Called when the OMEMO plugin is about to be registered (login) and, in the
     "load at startup" mode, from the startup probe.  Idempotent: the heavy
-    import happens at most once per process.
+    import happens at most once per process.  A feature disabled in the
+    settings is never imported.
     """
     global _verified
+    if _disabled:
+        return False
     if _verified:
         return AVAILABLE
     _verified = True
@@ -152,6 +186,8 @@ def install_hint() -> str:
 
 def detail() -> str:
     """Multi-line explanation of the OMEMO availability (log/tooltip)."""
+    if _disabled:
+        return "OMEMO is disabled in the settings."
     if AVAILABLE:
         return ("OMEMO is available (backends: %s)."
                 % (", ".join(sorted(BACKENDS)) or "none"))
@@ -177,7 +213,9 @@ def log_availability() -> None:
     if _logged:
         return
     _logged = True
-    if AVAILABLE:
+    if _disabled:
+        logger.info("OMEMO disabled in the settings")
+    elif AVAILABLE:
         logger.info("OMEMO available (backends: %s)",
                     ", ".join(sorted(BACKENDS)) or "none")
     else:
@@ -190,6 +228,8 @@ def log_availability() -> None:
 
 def summary() -> str:
     """Short status line for the About dialog / preferences."""
+    if _disabled:
+        return "disabled in the settings"
     if AVAILABLE:
         return "available (" + ", ".join(sorted(BACKENDS)) + ")"
     return "unavailable (missing " + ", ".join(MISSING) + ")"

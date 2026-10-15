@@ -2770,11 +2770,25 @@ tunable via Preferences → «Stanza IM» → «Производительнос
   importing `oldmemo`/`twomemo`/`slixmpp_omemo`/`xmlschema`/`doubleratchet`);
   `availability.verify()` does the real import once, at OMEMO plugin
   registration (login) or from the startup probe in `startup` mode, and catches
-  a present-but-broken transitive dependency.
+  a present-but-broken transitive dependency. `off` never imports the stack:
+  `app.py` calls `availability.set_disabled(True)` (sticky — `verify()` stays
+  off, `detail()`/`summary()` report the settings) and the client skips
+  registration, so OMEMO is unavailable even when the packages are installed
+  (the Preferences «OMEMO» tab shows the disabled notice).
 - `calls_load_mode` (default `lazy`): `xmpp/jingle_rtp.py` no longer imports
   `xmpp.media` (aiortc/av); `JingleRtpManager.available` uses
   `find_spec("aiortc")` and the engine is created on the first call
-  (`_ensure_engine`), or eagerly in `startup` mode (`warmup`).
+  (`_ensure_engine`), or eagerly in `startup` mode (`warmup`). `off` makes
+  `available` false (and `warmup` a no-op) so aiortc is never imported and the
+  call menus are hidden. The mode is passed to `JabberClient` from the config
+  (`main_window`), which also fixes the previously dead `startup` option.
+- `webengine_mode` (`full`/`no_preview`/`off`): `app.py` calls
+  `constants.set_webengine_enabled(mode != "off")` before the window;
+  `constants.webengine_available()` gates on it. `off` makes `ui/chat_view.py`
+  skip the WebEngine import entirely (all chats use the `QTextBrowser`
+  fallback — no Chromium stack, the biggest memory consumer). `no_preview` keeps
+  WebEngine but forces media previews off (`MainWindow._media_preview_mode`);
+  `full` follows `chat.media_preview`.
 - `webengine_memory_mode` (`off`/`moderate`/`aggressive`): `app.apply_chromium_flags`
   sets `QTWEBENGINE_CHROMIUM_FLAGS` before `QApplication` (moderate =
   `--renderer-process-limit=1`, `--js-flags=--max-old-space-size=128` and the

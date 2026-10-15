@@ -8,12 +8,19 @@ from urllib.parse import quote, unquote
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-try:
-    from PyQt6 import QtWebChannel
-    from PyQt6 import QtWebEngineCore
-    from PyQt6 import QtWebEngineWidgets
-    HAS_WEBENGINE = True
-except ImportError:
+from stanza_im.include.constants import webengine_available
+
+# The settings can disable the web engine entirely (memory): importing the
+# Chromium stack is the single biggest allocation, so it must not happen then.
+if webengine_available():
+    try:
+        from PyQt6 import QtWebChannel
+        from PyQt6 import QtWebEngineCore
+        from PyQt6 import QtWebEngineWidgets
+        HAS_WEBENGINE = True
+    except ImportError:
+        HAS_WEBENGINE = False
+else:
     HAS_WEBENGINE = False
 
 

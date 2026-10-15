@@ -1146,12 +1146,13 @@ class JabberClient:
         self.send_chatstates = (self.send_typing_notifications
                                 or self.send_activity_notifications)
         self.send_software = send_software
-        self.omemo_enabled = bool(omemo_enabled)
         self.omemo_btbv = bool(omemo_btbv)
         # "lazy" defers the heavy backend import to the OMEMO plugin
         # registration below; "startup" means the startup probe already
-        # imported them.
+        # imported them; "off" disables OMEMO entirely (no import at all).
         self.omemo_load_mode = str(omemo_load_mode or "lazy")
+        self.omemo_enabled = (bool(omemo_enabled)
+                              and self.omemo_load_mode != "off")
         # "startup" loads the aiortc call engine when the client is created;
         # "lazy" loads it on the first call.
         self.calls_load_mode = str(calls_load_mode or "lazy")

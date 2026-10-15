@@ -421,7 +421,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # timer keeps it in check afterwards.
         QtCore.QTimer.singleShot(5000, self._prune_media_cache)
         self._media_service = MediaPreviewService(self._media_cache, self)
-        media_mode = self._config.chat.media_preview if webengine_available() else "none"
+        media_mode = self._media_preview_mode()
         media_size = self._config.appearance.media_preview_size
         self._theme_factory.set_media_preview(
             self._media_service, media_mode, media_size)
@@ -2565,6 +2565,19 @@ class MainWindow(QtWidgets.QMainWindow):
         for room in list(self._muc_self_nicks):
             self._apply_muc_name(room)
 
+    def _media_preview_mode(self) -> str:
+        """The effective media-preview mode (web-engine settings aware).
+
+        ``webengine_mode`` = ``off`` (no WebEngine) or ``no_preview`` disables
+        previews entirely; ``full`` follows ``chat.media_preview``.
+        """
+        if not webengine_available():
+            return "none"
+        mode = str(getattr(self._config.performance, "webengine_mode",
+                           "full") or "full")
+        return ("none" if mode == "no_preview"
+                else self._config.chat.media_preview)
+
     def _roster_tooltip(self, jid: str) -> tuple[str, str | None]:
         """Build the roster contact/conference tooltip (html, avatar path)."""
         from stanza_im.include.utils import escape_html
@@ -3082,7 +3095,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._muc_theme_factory.set_highlight_mode(highlight_mode)
             self._applied_highlight_mode = highlight_mode
             self._chat_window.rerender_messages()
-        media_mode = self._config.chat.media_preview if webengine_available() else "none"
+        media_mode = self._media_preview_mode()
         media_size = self._config.appearance.media_preview_size
         if (media_mode, media_size) != getattr(self, "_applied_media", None):
             self._theme_factory.set_media_preview(
@@ -3230,6 +3243,10 @@ class MainWindow(QtWidgets.QMainWindow):
             starttls_mode=getattr(connection, "starttls_mode", "always"),
             omemo_enabled=bool(getattr(self._config.omemo, "enabled", True)),
             omemo_btbv=bool(getattr(self._config.omemo, "blind_trust", True)),
+            omemo_load_mode=str(getattr(self._config.performance,
+                                        "omemo_load_mode", "lazy") or "lazy"),
+            calls_load_mode=str(getattr(self._config.performance,
+                                        "calls_load_mode", "lazy") or "lazy"),
         )
         self._client.stun_turn_mode = getattr(connection, "stun_turn_mode",
                                               "auto")
@@ -4900,8 +4917,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 video_handler = lambda checked=False: defer(
                     lambda: self._join_muji(jid, True))
             else:
-                can_audio = self._client.supports_calls(jid)
-                can_video = self._client.supports_calls(jid, video=True)
+                ours = bool(getattr(self._client.rtp_calls, "available", False))
+                can_audio = ours and self._client.supports_calls(jid)
+                can_video = ours and self._client.supports_calls(jid, video=True)
                 audio_handler = lambda checked=False: defer(
                     lambda: self._on_call_requested(jid, False))
                 video_handler = lambda checked=False: defer(

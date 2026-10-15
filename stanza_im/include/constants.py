@@ -151,13 +151,27 @@ def history_dir() -> str:
     return os.path.join(profile_data_dir(), "history")
 
 
-def webengine_available() -> bool:
-    """Whether QtWebEngine is installed, without importing it.
+#: Whether the embedded web engine may be used.  Set from the settings
+#: (``performance.webengine_mode``) before the window is built; Chromium is the
+#: single biggest memory consumer, so it can be turned off entirely.
+_WEBENGINE_ENABLED = True
 
-    Used to gate the media-preview mode at startup: importing
-    ``PyQt6.QtWebEngineWidgets`` is expensive, so only its presence is checked
-    (``find_spec``).  The chat view itself imports WebEngine lazily and falls
-    back to ``QTextBrowser`` if the module fails to load.
+
+def set_webengine_enabled(enabled: bool) -> None:
+    """Allow/disallow QtWebEngine (the settings "web engine" mode)."""
+    global _WEBENGINE_ENABLED
+    _WEBENGINE_ENABLED = bool(enabled)
+
+
+def webengine_available() -> bool:
+    """Whether QtWebEngine may be used, without importing it.
+
+    ``False`` when the settings disable it, otherwise only the presence of
+    ``PyQt6.QtWebEngineWidgets`` is checked (``find_spec``) — importing it is
+    expensive.  The chat view imports WebEngine lazily and falls back to
+    ``QTextBrowser`` when it is unavailable.
     """
+    if not _WEBENGINE_ENABLED:
+        return False
     import importlib.util
     return importlib.util.find_spec("PyQt6.QtWebEngineWidgets") is not None

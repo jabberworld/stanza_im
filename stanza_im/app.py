@@ -214,6 +214,13 @@ def run() -> int:
     apply_chromium_flags(getattr(perf, "webengine_memory_mode", "moderate"))
     defer_build = bool(getattr(perf, "defer_ui_build", True))
     omemo_mode = str(getattr(perf, "omemo_load_mode", "lazy") or "lazy")
+    # Turn the heavy subsystems off entirely before anything imports them.
+    webengine_mode = str(getattr(perf, "webengine_mode", "full") or "full")
+    from stanza_im.include import constants
+    constants.set_webengine_enabled(webengine_mode != "off")
+    if omemo_mode == "off":
+        from stanza_im.xmpp.omemo import availability
+        availability.set_disabled(True)
     if debug:
         logger.info("Debug logging enabled (-d)")
     if xml_dump:

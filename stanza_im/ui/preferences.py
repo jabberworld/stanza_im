@@ -405,10 +405,17 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         _select("prefs_omemo_load", "omemo_load_mode", [
             ("prefs_load_lazy", "lazy"),
-            ("prefs_load_startup", "startup")], tr("prefs_omemo_load_tip"))
+            ("prefs_load_startup", "startup"),
+            ("prefs_load_off", "off")], tr("prefs_omemo_load_tip"))
         _select("prefs_calls_load", "calls_load_mode", [
             ("prefs_load_lazy", "lazy"),
-            ("prefs_load_startup", "startup")], tr("prefs_calls_load_tip"))
+            ("prefs_load_startup", "startup"),
+            ("prefs_load_off", "off")], tr("prefs_calls_load_tip"))
+        _select("prefs_webengine_engine", "webengine_mode", [
+            ("webengine_engine_full", "full"),
+            ("webengine_engine_nopreview", "no_preview"),
+            ("webengine_engine_off", "off")],
+            tr("prefs_webengine_engine_tip"))
         _select("prefs_webengine_mode", "webengine_memory_mode", [
             ("webengine_mode_off", "off"),
             ("webengine_mode_moderate", "moderate"),
@@ -1188,6 +1195,12 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _page_omemo(self):
         from stanza_im.xmpp.omemo import availability
         page, form = self._page()
+        if availability.disabled():
+            note = QtWidgets.QLabel(tr("omemo_disabled_settings"))
+            note.setWordWrap(True)
+            note.setStyleSheet("color: #c0392b;")
+            form.addRow(note)
+            return page
         if not availability.AVAILABLE:
             # No distribution-specific install instructions (the client runs on
             # many platforms): just the reason and the missing Python modules.
@@ -1751,6 +1764,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             performance, "omemo_load_mode", "lazy")
         values["calls_load_mode"] = getattr(
             performance, "calls_load_mode", "lazy")
+        values["webengine_mode"] = getattr(
+            performance, "webengine_mode", "full") or "full"
         values["webengine_memory_mode"] = getattr(
             performance, "webengine_memory_mode", "moderate")
         values["webengine_cache_mb"] = int(
@@ -1781,6 +1796,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.performance.defer_ui_build = bool(self._value("defer_ui_build"))
         cfg.performance.omemo_load_mode = self._value("omemo_load_mode") or "lazy"
         cfg.performance.calls_load_mode = self._value("calls_load_mode") or "lazy"
+        cfg.performance.webengine_mode = self._value("webengine_mode") or "full"
         cfg.performance.webengine_memory_mode = (
             self._value("webengine_memory_mode") or "moderate")
         cfg.performance.webengine_cache_mb = int(
