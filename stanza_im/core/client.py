@@ -2702,6 +2702,30 @@ class JabberClient:
         logger.debug("Sending presence: %s", show or "available")
         p.send()
 
+    def send_directed_presence(self, to: str, ptype: str = "",
+                               status: str = "",
+                               priority: int | None = None) -> None:
+        """Send a presence directed at *to* (a transport/gateway).
+
+        ``ptype="unavailable"`` disconnects the gateway; an empty *ptype* sends
+        an available presence that (re)connects it.  *priority* defaults to the
+        effective priority for our current status.
+        """
+        if not to:
+            return
+        p = self.xmpp.Presence()
+        p["to"] = to
+        p["type"] = ptype or "available"
+        if status:
+            p["status"] = status
+        if ptype != "unavailable":
+            if priority is None:
+                priority = self._effective_priority(None)
+            if priority is not None:
+                p["priority"] = priority
+        logger.debug("Directed presence to %s: %s", to, ptype or "available")
+        p.send()
+
     def _effective_priority(self, show: str | None) -> int:
         """Resource priority for *show* (status map or the manual value)."""
         if self.priority_mode == "manual":
