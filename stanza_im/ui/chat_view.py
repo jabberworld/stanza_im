@@ -2648,6 +2648,10 @@ else:
             # The view is a log, not an editor: an undo stack would keep a copy
             # of every appended message and grow without bound.
             self.setUndoRedoEnabled(False)
+            # Suspends the "reached the bottom" report while a *programmatic*
+            # scroll runs (render, anchor restore, prepend), so it never marks
+            # a conversation read on its own — mirrors the WebEngine view.
+            self._scroll_suspended = False
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -2662,6 +2666,11 @@ else:
 
         def _note_bottom(self, *_args) -> None:
             """Edge-triggered "at the newest message" (scrollbar driven)."""
+            if self._scroll_suspended:
+                # A render/restore/prepend is in flight: the transient bottom
+                # must not be reported as the user reaching the newest message.
+                self._at_bottom_hit = False
+                return
             bar = self.verticalScrollBar()
             if bar.value() < bar.maximum() - 2:
                 self._at_bottom_hit = False
@@ -2673,6 +2682,10 @@ else:
                 return
             self._at_bottom_hit = True
             self.bottom_reached.emit()
+
+        def _release_scroll_suspend(self) -> None:
+            """Trust the scroll position again once a programmatic scroll ran."""
+            self._scroll_suspended = False
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""
@@ -2997,15 +3010,19 @@ else:
 
         def prepend_messages(self, messages: list[dict],
                              keep_position: bool = True) -> None:
-            """Insert older messages above the current document (fallback)."""
+            """Insert older messages above the current document (fallback).
+
+            Each message becomes its own block (the fallback has no
+            per-message nodes); the scroll position is restored on the next
+            event-loop turn — never synchronously, which used to re-enter the
+            event loop from inside a coroutine — with the bottom report
+            suspended meanwhile.
+            """
             if not messages:
                 return
             bar = self.verticalScrollBar()
             old_max = bar.maximum()
             old_value = bar.value()
-            cursor = self.textCursor()
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
-            self.setTextCursor(cursor)
 
             def entry_html(entry: dict) -> str:
                 body = entry.get("body", "")
@@ -3031,10 +3048,20 @@ else:
                         f"{self._hats_text(entry.get('hats'))} "
                         f"<i>({entry.get('timestamp', '')})</i>: {body}")
 
-            html = "".join(entry_html(entry) for entry in messages)
-            cursor.insertHtml(html)
-            QtCore.QCoreApplication.processEvents()
-            bar.setValue(old_value + bar.maximum() - old_max)
+            self._scroll_suspended = True
+            cursor = self.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+            self.setTextCursor(cursor)
+            for i, entry in enumerate(messages):
+                if i:
+                    cursor.insertBlock()
+                cursor.insertHtml(entry_html(entry))
+
+            def _restore():
+                if keep_position:
+                    bar.setValue(old_value + bar.maximum() - old_max)
+                self._release_scroll_suspend()
+            QtCore.QTimer.singleShot(0, _restore)
 
         def update_sender_avatar(self, sender: str, avatar_uri: str) -> None:
             pass
@@ -3069,7 +3096,9 @@ else:
         def scroll_to_bottom(self):
             self._fraction = 1.0
             vbar = self.verticalScrollBar()
+            self._scroll_suspended = True
             vbar.setValue(vbar.maximum())
+            QtCore.QTimer.singleShot(0, self._release_scroll_suspend)
             self._reset_unread_indicator()
             self._update_jump_button()
 
@@ -3079,6 +3108,8 @@ else:
         def set_scroll_fraction(self, fraction: float):
             fraction = max(0.0, min(1.0, float(fraction)))
             vbar = self.verticalScrollBar()
+            self._scroll_suspended = True
             vbar.setValue(int(vbar.minimum()
                               + fraction * (vbar.maximum() - vbar.minimum())))
+            QtCore.QTimer.singleShot(0, self._release_scroll_suspend)
             self._update_jump_button()

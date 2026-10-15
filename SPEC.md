@@ -1204,7 +1204,11 @@ because `ChatWidget` calls the same methods on both; `tests/test_fallback_view.p
 forces the web engine off and guards the parity. The fallback keeps undo/redo
 disabled and trims its `QTextDocument` to `_MAX_BLOCKS` (500) oldest blocks on
 append (mirroring the WebEngine DOM trim); older-history prepends are not
-trimmed (they are bounded by `_HISTORY_MAX`).
+trimmed (they are bounded by `_HISTORY_MAX`). `prepend_messages` inserts each
+message as its own block and restores the scroll on the next event-loop turn
+(no synchronous `processEvents()`); `_note_bottom` is suspended during
+programmatic scrolls (render/anchor/prepend) so a transient bottom never marks
+the conversation read.
 
 ### 10.1 QWebEngineView Mode (default)
 

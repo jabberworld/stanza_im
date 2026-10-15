@@ -902,7 +902,14 @@ before importing the module). The fallback keeps **undo/redo disabled** and
 trims its `QTextDocument` to `_MAX_BLOCKS` (500) oldest blocks on append
 (mirroring the WebEngine `_MAX_DOM_MESSAGES` DOM trim; older-history
 `prepend_messages` is bounded by `_HISTORY_MAX` and not trimmed) — without this
-a long-lived fallback tab grows without bound.
+a long-lived fallback tab grows without bound. Its `prepend_messages` inserts
+**each message as its own block** (they used to run together on one line) and
+restores the scroll position on the next event-loop turn (never a synchronous
+`processEvents()`, which re-entered the loop from inside a coroutine). The
+bottom report (`_note_bottom`) is **suspended** during programmatic scrolls
+(render, anchor restore, prepend) exactly like the WebEngine view, so a
+transient bottom never marks the conversation read and drops the unread
+separator.
 
 **Theme engine** (`chat_themes.py`): Loads HTML templates and CSS variants from
 `resources/chatskins/minimal-mod/` or `candy/`. Templates use `%sender%`,

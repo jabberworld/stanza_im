@@ -102,6 +102,28 @@ check("the document is bounded to the cap",
 check("the newest message is kept", "message 599" in view.toPlainText())
 check("the oldest message is trimmed", "message 0" not in view.toPlainText())
 
+# 5. prepend puts each message on its own line (no run-on) ------------------
+view.clear()
+view.prepend_messages([
+    {"sender": "X", "body": "AAA", "timestamp": "0", "direction": "incoming"},
+    {"sender": "Y", "body": "BBB", "timestamp": "0", "direction": "incoming"},
+    {"sender": "Z", "body": "CCC", "timestamp": "0", "direction": "incoming"}])
+app.processEvents()
+lines = [ln for ln in view.toPlainText().split("\n") if ln.strip()]
+check("prepend puts each message on its own line", len(lines) == 3)
+
+# 6. a programmatic scroll / prepend never reports "reached bottom" ---------
+view.clear()
+hits = []
+view.bottom_reached.connect(lambda: hits.append(1))
+view.add_message("Bob", "hi", "12:00", "incoming")
+view.set_scroll_fraction(1.0)
+app.processEvents()
+view.prepend_messages([
+    {"sender": "X", "body": "older", "timestamp": "0", "direction": "incoming"}])
+app.processEvents()
+check("a programmatic scroll/prepend does not report the bottom", hits == [])
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)
