@@ -2140,8 +2140,9 @@ Registers XEP plugins (conditionally where noted):
   `ui/popup_position.popup_position` (pure, tested): the side is chosen by the
   room, the popup is adjacent to the button and never covers it, left edges
   aligned and — when that overflows — right edges, then clamped to the screen.
-  The position is re-applied once the popup has its real size
-  (`QTimer.singleShot(0, …)`). It shows a search field, a
+  The popup re-anchors whenever it is shown or resized
+  (`EmojiPickerDialog.reposition`, set by the owner), so it stays adjacent once
+  its real size has settled. It shows a search field, a
   «Недавние» (Recent) area above the tabs and the eight
   `include/emoji_data.py` category tabs below it. Emoji are rendered with an
   auto-detected colour-emoji font (`emoji_font_family`, tried in order

@@ -79,6 +79,24 @@ class EmojiPickerDialog(QtWidgets.QDialog):
     emoji_chosen = QtCore.pyqtSignal(str)
     remove_requested = QtCore.pyqtSignal()
 
+    #: Optional callback the owner sets to re-anchor the popup.  Invoked on
+    #: every show/resize, because the dialog's real size settles only after
+    #: ``show()`` (its sizeHint differs), so a one-shot move before showing
+    #: leaves a gap to the button.
+    reposition = None
+
+    def _notify_reposition(self) -> None:
+        if callable(self.reposition):
+            self.reposition()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._notify_reposition()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._notify_reposition()
+
     def __init__(self, recent: list[str] | None = None, can_remove: bool = False,
                  parent=None):
         super().__init__(parent)

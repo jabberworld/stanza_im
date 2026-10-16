@@ -67,6 +67,20 @@ check("the factory keeps plain text when off",
 check("the unicode skin does not override the body font",
       "body {" not in factory._font_override_css())
 
+# The picker re-anchors whenever it is shown or resized, so the owner can keep
+# it adjacent to the button once its real size has settled.
+from stanza_im.ui.emoji_picker_dialog import EmojiPickerDialog
+
+dlg = EmojiPickerDialog([])
+dlg.show()
+app.processEvents()
+repositions = []
+dlg.reposition = lambda: repositions.append(1)
+dlg.resize(400, 350)
+app.processEvents()
+check("the picker re-anchors on resize", len(repositions) >= 1)
+dlg.close()
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)

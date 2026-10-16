@@ -1848,9 +1848,12 @@ anchored next to the 🙂 button through `_place_popup_above` →
 chosen by the room, the popup sits adjacent to the button and never covers it
 (the other side is used when the chosen one cannot fit), with the left edges
 aligned and, when that overflows, the right edges, then clamped to the screen.
-The position is re-applied once the popup has its real laid-out size
-(`QTimer.singleShot(0, …)`, since `sizeHint` differs from the shown size): a
-search field, a «Недавние» (Recent) area above the tabs and the
+The popup re-anchors itself whenever it is shown or resized
+(`EmojiPickerDialog.reposition`, set by the owner): the dialog's real size
+settles only after `show()` (its `sizeHint` differs), so a one-shot move would
+leave a fixed gap to the button. A `-d` `REACT[anchor]` line logs the anchor
+rect, the popup size, the computed position and its real geometry. The picker
+holds a search field, a «Недавние» (Recent) area above the tabs and the
 eight `include/emoji_data.py` category tabs below it. Emoji are drawn with an
 auto-detected colour-emoji font (`emoji_font`/`emoji_font_family` try
 Noto/Apple/Segoe/Twemoji/Symbola/…), applied to the grid buttons and to the
