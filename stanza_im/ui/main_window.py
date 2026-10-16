@@ -7329,6 +7329,49 @@ class MainWindow(QtWidgets.QMainWindow):
             geo.x(), geo.y(), geo.width(), geo.height(),
             area.x(), area.y(), area.width(), area.height())
 
+    def _log_popup_actual(self, popup, jid: str, x: int, y: int, w: int,
+                          h: int) -> None:
+        """Diagnostic: report the popup's real on-screen geometry vs the anchor.
+
+        Distinguishes "the window manager moved it" / "the position is relative
+        to the parent" / "empty space inside the dialog" when the picker still
+        looks offset from the button.
+        """
+        try:
+            tl = popup.mapToGlobal(QtCore.QPoint(0, 0))
+            geo = popup.geometry()
+            fg = popup.frameGeometry()
+            pos = popup.pos()
+            parent = popup.parentWidget()
+            pfg = parent.frameGeometry() if parent is not None else QtCore.QRect()
+            page = None
+            tabs = getattr(popup, "_tabs", None)
+            if tabs is not None:
+                page = tabs.currentWidget()
+            vp = page.viewport().size() if hasattr(page, "viewport") else QtCore.QSize()
+            inner = (page.widget().sizeHint()
+                     if hasattr(page, "widget") and page.widget() is not None
+                     else QtCore.QSize())
+            view_tl = None
+            chat_window = getattr(self, "_chat_window", None)
+            chat = (chat_window.get_chat(jid) if chat_window is not None
+                    else None)
+            view = getattr(chat, "_view", None) if chat is not None else None
+            if view is not None and hasattr(view, "mapToGlobal"):
+                vtl = view.mapToGlobal(QtCore.QPoint(0, 0))
+                view_tl = (vtl.x(), vtl.y(), view.width(), view.height())
+            logger.debug(
+                "REACT[actual] mapToGlobal=(%d,%d) geometry=(%d,%d,%d,%d) "
+                "frame=(%d,%d,%d,%d) pos=(%d,%d) parent=(%d,%d,%d,%d) "
+                "viewport=(%d,%d) innerHint=(%d,%d) view=(%s) anchor=(%d,%d,%d,%d)",
+                tl.x(), tl.y(), geo.x(), geo.y(), geo.width(), geo.height(),
+                fg.x(), fg.y(), fg.width(), fg.height(), pos.x(), pos.y(),
+                pfg.x(), pfg.y(), pfg.width(), pfg.height(),
+                vp.width(), vp.height(), inner.width(), inner.height(),
+                view_tl, x, y, w, h)
+        except RuntimeError:
+            pass
+
     def _on_chat_files_upload(self, jid: str, paths: list, method: str,
                               parent=None):
         if not self._client:
@@ -7676,6 +7719,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.adjustSize()
         self._place_popup_above(dlg, x, y, w, h)
         dlg.show()
+        QtCore.QTimer.singleShot(
+            200, lambda: self._log_popup_actual(dlg, jid, x, y, w, h))
 
     def _on_emoji_picker_requested(self, jid: str, x: int = 0, y: int = 0,
                                    w: int = 0, h: int = 0) -> None:
@@ -7691,6 +7736,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.adjustSize()
         self._place_popup_above(dlg, x, y, w, h)
         dlg.show()
+        QtCore.QTimer.singleShot(
+            200, lambda: self._log_popup_actual(dlg, jid, x, y, w, h))
 
     def _insert_chat_emoji(self, jid: str, emoji: str) -> None:
         """Insert *emoji* into the open chat of *jid* and remember it."""
