@@ -1766,7 +1766,9 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaVoiceRef || '',"
                 " window.__stanzaMentionPress ? 1 : 0,"
                 " window.__stanzaReactionPress ? 1 : 0,"
-                " window.__stanzaOmemoRef || '']",
+                " window.__stanzaOmemoRef || '',"
+                " window.innerWidth || 0,"
+                " window.devicePixelRatio || 0]",
                 self._on_scroll_position,
             )
 
@@ -1882,6 +1884,15 @@ window.__stanzaMentionRef = '';
                 point = self.mapToGlobal(QtCore.QPoint(int(x), int(y)))
             except Exception:  # noqa: BLE001
                 return
+            logger.debug(
+                "REACT[map] css=(%.1f,%.1f,%.1f,%.1f) view=(%d,%d) "
+                "inner=(%s,%s) zoom=%.3f dpr=%.3f js_dpr=%s global=(%d,%d)",
+                x, y, w, h, self.width(), self.height(),
+                value[26] if len(value) > 26 else None,
+                value[1] if len(value) > 1 else None,
+                self.zoomFactor(), self.devicePixelRatioF(),
+                value[27] if len(value) > 27 else None,
+                point.x(), point.y())
             self.reaction_anchor.emit(point.x(), point.y(), int(w), int(h))
 
         def _clear_unreact_request(self):
