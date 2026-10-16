@@ -290,8 +290,8 @@ def _signal_arity(signal):
 
 from stanza_im.ui.chat_window import ChatWindow
 
-check("ChatWidget.reaction_requested carries 4 args",
-      _signal_arity(_CW.reaction_requested) == 4)
+check("ChatWidget.reaction_requested carries 6 args (jid, ref, x, y, w, h)",
+      _signal_arity(_CW.reaction_requested) == 6)
 check("ChatWidget/ChatWindow reaction_requested arity matches",
       _signal_arity(_CW.reaction_requested)
       == _signal_arity(ChatWindow.reaction_requested))

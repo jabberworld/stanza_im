@@ -42,8 +42,10 @@ class IconCache:
         """Return the standard Jabber status icon for *show*."""
         base = STATUS_DIR_16 if size == "16x16" else STATUS_DIR_32
         key_file = {
-            "online": "jabber-online.png",
-            "chat": "jabber-chat.png",
+            # Green-bulb variants of the online/free-for-chat icons; the blue
+            # originals (jabber-online.png / jabber-chat.png) stay on disk.
+            "online": "jabber-online-green.png",
+            "chat": "jabber-chat-green.png",
             "away": "jabber-away.png",
             "xa": "jabber-xa.png",
             "dnd": "jabber-dnd.png",

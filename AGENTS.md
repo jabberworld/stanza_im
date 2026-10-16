@@ -291,11 +291,17 @@ by the **file** (one row per distinct image, `include.emoticons._file_codes`
 keeps the longest alias), so `:)` and `:-)` never duplicate a row, while
 `smile_to_html` still renders every alias. The emoticon-theme selector also
 offers the `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
-``smileys*.cfg`` set (every lookup is empty, so `smile_to_html` is a no-op) and
+``smileys*.cfg`` set (every lookup is empty) and
 `ChatWidget._open_smiley_picker` reuses the XEP-0444 reaction picker
 (`EmojiPickerDialog`, search + recent + categories) through the
 `emoji_picker_requested` signal → `MainWindow._on_emoji_picker_requested`
-(anchored above the smiley button like a reaction).
+(anchored next to the smiley button like a reaction). With
+`appearance.emoticon_unicode_replace` (default on, Preferences → Appearance →
+«Темы») `smile_to_html` substitutes the text codes with unicode emoji from
+`include.emoticons.unicode_map()` — a `{code: emoji}` map derived from the
+`default` theme's image semantics (`_UNICODE_BY_FILE`, one emoji per image, so
+`: )`/`:-)` share 🙂) — and the chat CSS appends the colour-emoji font as a
+fallback in the body font stack so the substituted emoji render in colour.
 
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
@@ -1617,7 +1623,12 @@ during `paintEvent()` and never persisted in `UserItem`.
 `apps`); the sized directories keep the rasterised/legacy art. All icon
 resolvers go through `include.constants.find_icon` (scalable first, then the
 sized dirs), and `IconCache.get_category_icon(name, size)` renders the scalable
-SVG at the requested size.
+SVG at the requested size. The online / free-for-chat status icons use the
+**green-bulb** variants `jabber-online-green`/`jabber-chat-green` (`.png` at 16
+and 32 px, plus the `.svg` used by the View-menu entry) —
+`IconCache.get_status_icon` maps `online`/`chat` to them; the original blue
+`jabber-online`/`jabber-chat` files are kept so the look can be reverted by
+changing the names back.
 
 ### 6. Lightweight i18n (`i18n/`)
 
@@ -1830,10 +1841,13 @@ skin template) whose click is kept in-page (`window.__stanzaReactRef` through th
 a navigation). The view first reports the button rectangle through
 `reaction_anchor` (JS `getBoundingClientRect` delivered by the scroll poll and
 mapped to screen coordinates), so `ChatWidget.reaction_requested(jid, ref_id,
-x, y)` carries the screen position. `MainWindow._on_reaction_requested` opens
-`ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup` anchored
-**above** the 🙂 button (`_place_popup_above`, falling back below/clamped to the
-screen): a search field, a «Недавние» (Recent) area above the tabs and the
+x, y, w, h)` carries the button's screen rect. `MainWindow._on_reaction_requested`
+opens `ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup`
+anchored next to the 🙂 button through `_place_popup_above` →
+`ui/popup_position.popup_position` (pure, tested): above the button (bottom edge
+on its top), else below its bottom edge — never covering it — with the left
+edges aligned and, when that overflows, the right edges, then clamped to the
+screen: a search field, a «Недавние» (Recent) area above the tabs and the
 eight `include/emoji_data.py` category tabs below it. Emoji are drawn with an
 auto-detected colour-emoji font (`emoji_font`/`emoji_font_family` try
 Noto/Apple/Segoe/Twemoji/Symbola/…), applied to the grid buttons and to the

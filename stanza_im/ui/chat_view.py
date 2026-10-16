@@ -595,7 +595,7 @@ if HAS_WEBENGINE:
         bookmark_requested = QtCore.pyqtSignal(str)         # xmpp: room jid
         add_contact_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
         note_requested = QtCore.pyqtSignal(str)             # selected text
-        reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
+        reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
 
         _LOAD_RETRY_LIMIT = 5
         _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
@@ -1874,14 +1874,15 @@ window.__stanzaMentionRef = '';
             if len(rect) < 4:
                 return
             try:
-                x, y = float(rect[0]), float(rect[1])
+                x, y, w, h = (float(rect[0]), float(rect[1]),
+                              float(rect[2]), float(rect[3]))
             except (TypeError, ValueError):
                 return
             try:
                 point = self.mapToGlobal(QtCore.QPoint(int(x), int(y)))
             except Exception:  # noqa: BLE001
                 return
-            self.reaction_anchor.emit(point.x(), point.y())
+            self.reaction_anchor.emit(point.x(), point.y(), int(w), int(h))
 
         def _clear_unreact_request(self):
             try:
@@ -2633,7 +2634,7 @@ else:
         bookmark_requested = QtCore.pyqtSignal(str)         # xmpp: room jid
         add_contact_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
         note_requested = QtCore.pyqtSignal(str)             # selected text
-        reaction_anchor = QtCore.pyqtSignal(int, int)       # global x, y
+        reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
 
         #: Cap on the document's blocks (≈ messages); the oldest are trimmed on
         #: append, mirroring the WebEngine ``_MAX_DOM_MESSAGES`` DOM trim.

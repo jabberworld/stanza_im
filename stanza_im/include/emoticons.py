@@ -97,6 +97,58 @@ def _load_map(skin: str) -> dict[str, str]:
     return resolved
 
 
+#: Unicode emoji for each default-set image, keyed by its file name.  Used to
+#: turn a text smiley (``:)``, ``:-D``, ``(K)`` …) into the matching emoji when
+#: the ``unicode`` skin is active.  The map is derived from the ``default``
+#: theme's semantics (one emoji per image).
+_UNICODE_BY_FILE = {
+    "devil16.png": "😈", "smile16.png": "🙂", "coolglasses16.png": "😎",
+    "wink16.png": "😉", "biggrin16.png": "😁", "unhappy16.png": "🙁",
+    "cry16.png": "😢", "frowning16.png": "😕", "blush16.png": "😊",
+    "angry16.png": "😠", "bat16.png": "🦇", "kiss16.png": "😘",
+    "stare16.png": "😐", "tongue16.png": "😛", "oh16.png": "😮",
+    "heart16.png": "❤️", "pussy16.png": "🐱", "cuffs16.png": "⛓️",
+    "moon16.png": "🌙", "lamp16.png": "💡", "music16.png": "🎵",
+    "beer16.png": "🍺", "brflower16.png": "🌷", "boy16.png": "👦",
+    "girl16.png": "👧", "mail16.png": "✉️", "thumbdown16.png": "👎",
+    "photo16.png": "📷", "thumbup16.png": "👍", "hugleft16.png": "🤗",
+    "brheart16.png": "💔", "flower16.png": "🌸", "drink16.png": "🍸",
+    "phone16.png": "📞", "coffee16.png": "☕", "hugright16.png": "🤗",
+    "star16.png": "⭐", "rainbow16.png": "🌈",
+}
+
+_UNICODE_MAP_CACHE: dict[str, str] | None = None
+
+
+def unicode_map() -> dict[str, str]:
+    """``{text code: unicode emoji}`` derived from the default theme.
+
+    Every text alias of an image maps to that image's emoji, so ``:)`` and
+    ``:-)`` both become 🙂.
+    """
+    global _UNICODE_MAP_CACHE
+    if _UNICODE_MAP_CACHE is not None:
+        return _UNICODE_MAP_CACHE
+    item = get_set("default/smileys.cfg")
+    result: dict[str, str] = {}
+    if item:
+        for code, filename in item["mapping"].items():
+            emoji = _UNICODE_BY_FILE.get(filename)
+            if emoji:
+                result.setdefault(code, emoji)
+    _UNICODE_MAP_CACHE = result
+    return result
+
+
+def _replace_with_unicode(text: str) -> str:
+    mapping = unicode_map()
+    if not mapping:
+        return text
+    pattern = re.compile("|".join(re.escape(code) for code in
+                                  sorted(mapping, key=len, reverse=True)))
+    return pattern.sub(lambda match: mapping[match.group(0)], text)
+
+
 def _file_codes(mapping: dict[str, str]) -> dict[str, str]:
     """Map each target image file to a single (longest) text code.
 
@@ -145,7 +197,11 @@ def emoticon_codes(skin: str = "default/smileys.cfg") -> list[str]:
     return sorted(_load_map(skin), key=len, reverse=True)
 
 
-def smile_to_html(text: str, skin: str = "default/smileys.cfg") -> str:
+def smile_to_html(text: str, skin: str = "default/smileys.cfg",
+                  unicode_replace: bool = False) -> str:
+    if skin == UNICODE_SKIN:
+        # No image set: optionally replace the text codes with unicode emoji.
+        return _replace_with_unicode(text) if unicode_replace else text
     mapping = _load_map(skin)
     if not mapping:
         return text

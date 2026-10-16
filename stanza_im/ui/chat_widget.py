@@ -381,11 +381,11 @@ class ChatWidget(QtWidgets.QWidget):
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
     message_edit_sent = QtCore.pyqtSignal(str, str, str)  # jid, body, edit_id
     message_retract_sent = QtCore.pyqtSignal(str, str)    # jid, ref_id (XEP-0424)
-    reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
+    reaction_requested = QtCore.pyqtSignal(str, str, int, int, int, int)  # jid, ref, x, y, w, h
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     reaction_like_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
-    emoji_picker_requested = QtCore.pyqtSignal(int, int)  # smiley btn x, y (screen)
+    emoji_picker_requested = QtCore.pyqtSignal(int, int, int, int)  # smiley btn x, y, w, h
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_sent = QtCore.pyqtSignal(str, str, str)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
@@ -663,7 +663,7 @@ class ChatWidget(QtWidgets.QWidget):
         chat_col.addWidget(self._edit_ctx)
         self._editing_id = ""
         self._editing_previous = ""
-        self._reaction_anchor = (0, 0)
+        self._reaction_anchor = (0, 0, 0, 0)
 
         # ── Input bar buttons ─────────────────────────────────────
         actions_row = QtWidgets.QHBoxLayout()
@@ -922,9 +922,9 @@ class ChatWidget(QtWidgets.QWidget):
         if url.startswith("stanza:react:"):
             ref = unquote(url[len("stanza:react:"):])
             if ref:
-                x, y = self._reaction_anchor
-                self._reaction_anchor = (0, 0)
-                self.reaction_requested.emit(self.jid, ref, x, y)
+                x, y, w, h = self._reaction_anchor
+                self._reaction_anchor = (0, 0, 0, 0)
+                self.reaction_requested.emit(self.jid, ref, x, y, w, h)
             return
         if url.startswith("stanza:unreact:"):
             # The payload is ``<sid>/<emoji>``.  Older builds encoded the whole
@@ -1027,7 +1027,9 @@ class ChatWidget(QtWidgets.QWidget):
         skin = getattr(self._theme, "emoticon_skin", "") or "default/smileys.cfg"
         if skin == UNICODE_SKIN:
             point = self._smiley_btn.mapToGlobal(QtCore.QPoint(0, 0))
-            self.emoji_picker_requested.emit(point.x(), point.y())
+            self.emoji_picker_requested.emit(
+                point.x(), point.y(),
+                self._smiley_btn.width(), self._smiley_btn.height())
             return
         from stanza_im.ui.smiley_picker import EmoticonSetSource, SmileyPicker
         picker = SmileyPicker(EmoticonSetSource(skin), self)
@@ -1526,13 +1528,14 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is not None:
             self._begin_edit(entry)
 
-    def _on_reaction_anchor(self, x: int, y: int) -> None:
-        """Remember the 🙂 button's screen position for the reaction popup.
+    def _on_reaction_anchor(self, x: int, y: int, w: int = 0,
+                            h: int = 0) -> None:
+        """Remember the 🙂 button's screen rect for the reaction popup.
 
         Emitted by the view just before the ``stanza:react:`` click, so the
-        picker can be anchored above the button.
+        picker can be anchored next to the button without covering it.
         """
-        self._reaction_anchor = (int(x), int(y))
+        self._reaction_anchor = (int(x), int(y), int(w), int(h))
 
     def _handle_delete_uri(self, url: str) -> None:
         """Retract our own message from a ``stanza:delete:<id>`` click."""

@@ -189,7 +189,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.reaction_like_requested.connect(self.reaction_like_requested)
         widget.emoji_picker_requested.connect(
-            lambda x, y, j=widget.jid: self.emoji_picker_requested.emit(j, x, y))
+            lambda x, y, w, h, j=widget.jid:
+                self.emoji_picker_requested.emit(j, x, y, w, h))
         widget.typing_changed.connect(self.typing_changed)
         widget.bottom_reached.connect(
             lambda j=widget.jid: self.bottom_reached.emit(j))
@@ -282,7 +283,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.reaction_like_requested.connect(self.reaction_like_requested)
         widget.emoji_picker_requested.connect(
-            lambda x, y, j=widget.jid: self.emoji_picker_requested.emit(j, x, y))
+            lambda x, y, w, h, j=widget.jid:
+                self.emoji_picker_requested.emit(j, x, y, w, h))
         widget.typing_changed.connect(self.typing_changed)
         widget.bottom_reached.connect(
             lambda j=widget.jid: self.bottom_reached.emit(j))
@@ -426,6 +428,13 @@ class ChatWindow(QtWidgets.QMainWindow):
     def reload_emoticons(self, skin: str):
         self._theme.set_emoticon_skin(skin)
         self._muc_theme.set_emoticon_skin(skin)
+        for widget in self._tabs.values():
+            widget.reload_theme()
+
+    def set_unicode_smiley_replace(self, enabled: bool) -> None:
+        """Toggle text-smiley → unicode-emoji substitution and re-render."""
+        self._theme.set_unicode_smiley_replace(enabled)
+        self._muc_theme.set_unicode_smiley_replace(enabled)
         for widget in self._tabs.values():
             widget.reload_theme()
 
@@ -819,8 +828,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     message_edit_to_send = QtCore.pyqtSignal(str, str, str)      # jid, body, id
     groupchat_message_edit_to_send = QtCore.pyqtSignal(str, str, str)
     message_retract_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
-    reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
-    emoji_picker_requested = QtCore.pyqtSignal(str, int, int)  # jid, x, y
+    reaction_requested = QtCore.pyqtSignal(str, str, int, int, int, int)  # jid, ref, x, y, w, h
+    emoji_picker_requested = QtCore.pyqtSignal(str, int, int, int, int)  # jid, x, y, w, h
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     reaction_like_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji

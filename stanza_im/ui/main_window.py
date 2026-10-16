@@ -1730,7 +1730,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         view_menu = menubar.addMenu(tr("menu_view"))
         sort_by_status = view_menu.addAction(
-            self._menu_icon("jabber-online.svg"),
+            self._menu_icon("jabber-online-green.svg"),
             tr("menu_sort_by_status"))
         sort_by_status.setCheckable(True)
         sort_by_status.setChecked(
@@ -3391,6 +3391,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if emoticon_skin != getattr(self, "_applied_emoticon_skin", "default/smileys.cfg"):
             self._chat_window.reload_emoticons(emoticon_skin)
             self._applied_emoticon_skin = emoticon_skin
+        unicode_replace = bool(getattr(self._config.appearance,
+                                       "emoticon_unicode_replace", True))
+        if unicode_replace != getattr(self, "_applied_unicode_replace", None):
+            self._chat_window.set_unicode_smiley_replace(unicode_replace)
+            self._applied_unicode_replace = unicode_replace
         styling = bool(self._config.chat.message_styling)
         if styling != getattr(self, "_applied_message_styling", None):
             self._theme_factory.set_message_styling(styling)
@@ -7306,26 +7311,22 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.move(geo.center() - dlg.rect().center())
 
     @staticmethod
-    def _place_popup_above(popup, x: int, y: int) -> None:
-        """Open *popup* above the (screen) point *x*, *y*, keeping it visible.
+    def _place_popup_above(popup, x: int, y: int, w: int = 0,
+                           h: int = 0) -> None:
+        """Anchor *popup* to the button whose screen rect is ``x, y, w, h``.
 
-        Used for the XEP-0444 emoji picker anchored to the 🙂 button: it grows
-        upward from *y* with its left edge at *x*; if there is not enough room
-        above, it drops below the point, and it is clamped to the screen.
+        Used for the XEP-0444 reaction picker and the unicode-smiley picker:
+        the popup sits next to the button (above it, else below its bottom
+        edge, never covering it) and stays horizontally attached to it.  See
+        :func:`stanza_im.ui.popup_position.popup_position`.
         """
+        from stanza_im.ui.popup_position import popup_position
         screen = QtWidgets.QApplication.screenAt(QtCore.QPoint(int(x), int(y)))
         if screen is None:
             screen = QtWidgets.QApplication.primaryScreen()
         area = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 0, 0)
-        size = popup.sizeHint()
-        px = int(x)
-        py = int(y) - size.height()
-        if area.isValid():
-            if py < area.top():
-                py = int(y)
-            px = max(area.left(), min(px, area.right() - size.width()))
-            py = max(area.top(), min(py, area.bottom() - size.height()))
-        popup.move(px, py)
+        anchor = QtCore.QRect(int(x), int(y), int(w), int(h))
+        popup.move(popup_position(anchor, popup.sizeHint(), area))
 
     def _on_chat_files_upload(self, jid: str, paths: list, method: str,
                               parent=None):
@@ -7652,7 +7653,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return []
 
     def _on_reaction_requested(self, jid: str, ref_id: str, x: int = 0,
-                               y: int = 0) -> None:
+                               y: int = 0, w: int = 0, h: int = 0) -> None:
         from stanza_im.ui.emoji_picker_dialog import EmojiPickerDialog
         my_keys = self._my_reaction_keys(jid)
         existing = self._reaction_state(jid, ref_id)
@@ -7669,11 +7670,11 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.remove_requested.connect(
             lambda: (dlg.reject(), self._unreact_all(jid, ref_id)))
         dlg.adjustSize()
-        self._place_popup_above(dlg, x, y)
+        self._place_popup_above(dlg, x, y, w, h)
         dlg.show()
 
-    def _on_emoji_picker_requested(self, jid: str, x: int = 0,
-                                   y: int = 0) -> None:
+    def _on_emoji_picker_requested(self, jid: str, x: int = 0, y: int = 0,
+                                   w: int = 0, h: int = 0) -> None:
         """Open the reaction-style emoji picker for a unicode-smiley chat."""
         from stanza_im.ui.emoji_picker_dialog import EmojiPickerDialog
         dlg = EmojiPickerDialog(self._recent_emoji(),
@@ -7683,7 +7684,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.emoji_chosen.connect(
             lambda emoji: self._insert_chat_emoji(jid, emoji))
         dlg.adjustSize()
-        self._place_popup_above(dlg, x, y)
+        self._place_popup_above(dlg, x, y, w, h)
         dlg.show()
 
     def _insert_chat_emoji(self, jid: str, emoji: str) -> None:

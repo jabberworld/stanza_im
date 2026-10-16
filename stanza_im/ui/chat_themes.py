@@ -10,7 +10,7 @@ from urllib.parse import quote
 from PyQt6 import QtCore, QtGui
 
 from stanza_im.include.constants import CHATSKINS_DIR
-from stanza_im.include.emoticons import smile_to_html
+from stanza_im.include.emoticons import UNICODE_SKIN, smile_to_html
 from stanza_im.include.utils import escape_html, restore_url_tokens
 from stanza_im.include import hats as hats_mod
 from stanza_im.include import media as media_mod
@@ -236,6 +236,7 @@ class ChatThemeFactory:
         self._variants: dict[str, str] = {}
         self._current_variant_css: str = ""
         self._emoticon_skin = emoticon_skin
+        self._unicode_smiley_replace = True
         self._message_styling = True
         self._highlight_mode = "both"
         self._media = None
@@ -285,6 +286,10 @@ class ChatThemeFactory:
 
     def set_emoticon_skin(self, skin: str) -> None:
         self._emoticon_skin = skin
+
+    def set_unicode_smiley_replace(self, enabled: bool) -> None:
+        """Toggle text-smiley → unicode-emoji substitution (unicode skin)."""
+        self._unicode_smiley_replace = bool(enabled)
 
     @property
     def emoticon_skin(self) -> str:
@@ -378,16 +383,31 @@ class ChatThemeFactory:
     def _font_override_css(self) -> str:
         """CSS that forces the configured family/size on the chat text."""
         css = ""
+
+        def _esc(name: str) -> str:
+            return name.replace("\\", "\\\\").replace("'", "\\'")
+
+        # With the unicode smiley skin, append the colour-emoji font as a
+        # fallback so substituted emoji render in colour (the font only covers
+        # emoji code points, so normal text is unaffected).
+        emoji_stack = ""
+        if self._emoticon_skin == UNICODE_SKIN:
+            emoji_family = _emoji_font_family()
+            if emoji_family:
+                emoji_stack = f", '{_esc(emoji_family)}'"
         if self._font_family or self._font_size_pt:
             family = self._font_family or "sans-serif"
             size = self._font_size_pt or 13
-            safe_family = family.replace("\\", "\\\\").replace("'", "\\'")
+            safe_family = _esc(family)
             css += (
-                f"body {{ font-family: '{safe_family}' !important; "
-                f"font-size: {size}pt !important; }}"
+                f"body {{ font-family: '{safe_family}'{emoji_stack}, sans-serif "
+                f"!important; font-size: {size}pt !important; }}"
                 "\n.sender, .fromstatus, .next_label, .time_initial, "
                 "#chat .stanza-action, #chat .stanza-reply "
                 "{ font-family: inherit !important; }")
+        elif emoji_stack:
+            css += (f"body {{ font-family: sans-serif{emoji_stack} "
+                    f"!important; }}")
         if self._nick_font_family or self._nick_font_size_pt:
             family = self._nick_font_family or self._font_family or "sans-serif"
             size = (self._nick_font_size_pt or self._font_size_pt or 13)
@@ -450,7 +470,9 @@ class ChatThemeFactory:
         escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
         escaped = escaped.replace("\n", "<br>")
         tokenised, anchors = self._tokenize_urls(escaped, geo_ref)
-        emotified = smile_to_html(tokenised, self._emoticon_skin)
+        emotified = smile_to_html(
+            tokenised, self._emoticon_skin,
+            unicode_replace=self._unicode_smiley_replace)
         if highlight_nick and self._highlight_mode != "none":
             emotified = self._apply_highlight(emotified, highlight_nick)
         return restore_url_tokens(emotified, anchors)

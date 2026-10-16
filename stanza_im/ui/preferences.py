@@ -1328,6 +1328,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(tr("prefs_emoticon_preview"), preview_widget)
         emoticon_theme.currentIndexChanged.connect(self._update_emoticon_preview)
         self._update_emoticon_preview()
+        misc_unicode = self._check("emoticon_unicode_replace",
+                                   tr("prefs_emoticon_unicode_replace"))
+        misc_unicode.setToolTip(tr("prefs_emoticon_unicode_replace_info"))
+        form.addRow(misc_unicode)
 
         roster, roster_form = self._page()
         roster_form.addRow(self._check("roster_show_avatars",
@@ -1460,13 +1464,6 @@ class PreferencesDialog(QtWidgets.QDialog):
                     QtCore.Qt.TransformationMode.SmoothTransformation))
                 self._emoticon_preview.addWidget(label)
         self._emoticon_preview.addStretch()
-
-    def _disabled_combo(self, key: str) -> QtWidgets.QComboBox:
-        combo = QtWidgets.QComboBox()
-        combo.addItem(tr("prefs_not_implemented"))
-        combo.setEnabled(False)
-        self._controls[key] = combo
-        return combo
 
     def _page_plugins(self):
         """Mirror of Actions → Plugins: the same enable/configure widget."""
@@ -1708,6 +1705,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "emoticon_theme": ("default/smileys.cfg"
                                if appearance.emoticon_theme == "default"
                                else appearance.emoticon_theme),
+            "emoticon_unicode_replace": getattr(
+                appearance, "emoticon_unicode_replace", True),
             "media_preview_size": appearance.media_preview_size,
             "media_cache_days": appearance.media_cache_days,
             "media_cache_mb": appearance.media_cache_mb,
@@ -1911,7 +1910,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "roster_show_avatars", "roster_show_activity",
                     "roster_show_mood", "roster_show_clients",
                     "muc_show_avatars", "muc_show_clients", "muc_show_hats",
-                    "show_unread_in_tabs"):
+                    "show_unread_in_tabs", "emoticon_unicode_replace"):
             cfg.appearance[key] = self._value(key)
         if not hasattr(cfg, "files"):
             cfg.set("files", {"auto_accept": False,
