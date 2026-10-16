@@ -1002,14 +1002,22 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── Transports (gateways) ─────────────────────────────────────
 
-    def _transport_tool_button(self, icon_name: str, tooltip: str,
-                               handler) -> QtWidgets.QToolButton:
+    @staticmethod
+    def _transport_button(icon_name: str, tooltip: str, slot,
+                          bar_height: int) -> QtWidgets.QToolButton:
+        """A wide (2:1) icon-only button for the transports toolbar."""
         button = QtWidgets.QToolButton()
-        button.setIcon(self._menu_icon(icon_name))
+        button.setIcon(QtGui.QIcon(find_icon(icon_name)))
         button.setIconSize(QtCore.QSize(16, 16))
+        button.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setAutoRaise(True)
         button.setToolTip(tooltip)
-        button.clicked.connect(handler)
+        button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                             QtWidgets.QSizePolicy.Policy.Fixed)
+        button.setFixedHeight(bar_height)
+        button.setMinimumWidth(32)
+        button.clicked.connect(slot)
         return button
 
     def _build_transports_tab(self) -> QtWidgets.QWidget:
@@ -1024,6 +1032,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._transport_roster.set_show_groups(False)
         self._transport_roster.set_tooltip_provider(self._roster_tooltip)
         self._transport_roster.contact_clicked.connect(self._on_transport_clicked)
+        self._transport_roster.selection_changed.connect(
+            self._on_transport_clicked)
         self._transport_roster.contact_double_clicked.connect(
             self._on_contact_open)
         self._transport_roster.contact_context_menu.connect(
@@ -1036,20 +1046,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self._transport_viewport.setAutoFillBackground(True)
         layout.addWidget(scroll, 1)
 
-        toolbar = QtWidgets.QHBoxLayout()
-        toolbar.setContentsMargins(6, 0, 6, 6)
-        self._transport_connect_btn = self._transport_tool_button(
-            "reload.png", tr("transport_connect"), self._on_transport_toggle)
-        self._transport_command_btn = self._transport_tool_button(
-            "exec.png", tr("transport_commands"), self._on_transport_command)
-        self._transport_remove_btn = self._transport_tool_button(
-            "process-stop.png", tr("transport_remove"), self._on_transport_remove)
+        # The toolbar matches the bookmarks tab: a fixed-height bar with wide
+        # (2:1) icon-only buttons stretching across the full width.
+        bar_height = max(24, self._status_combo.sizeHint().height())
+        bar = QtWidgets.QWidget()
+        bar.setFixedHeight(bar_height)
+        actions = QtWidgets.QHBoxLayout(bar)
+        actions.setContentsMargins(0, 0, 0, 0)
+        self._transport_connect_btn = self._transport_button(
+            "connect.svg", tr("transport_connect"),
+            self._on_transport_toggle, bar_height)
+        self._transport_command_btn = self._transport_button(
+            "exec.png", tr("transport_commands"),
+            self._on_transport_command, bar_height)
+        self._transport_remove_btn = self._transport_button(
+            "process-stop.png", tr("transport_remove"),
+            self._on_transport_remove, bar_height)
         for button in (self._transport_connect_btn,
                        self._transport_command_btn,
                        self._transport_remove_btn):
-            toolbar.addWidget(button)
-        toolbar.addStretch(1)
-        layout.addLayout(toolbar)
+            actions.addWidget(button, stretch=1)
+        layout.addWidget(bar)
 
         self._apply_roster_font()
         self._apply_roster_colors()
@@ -1058,12 +1075,18 @@ class MainWindow(QtWidgets.QMainWindow):
         return page
 
     def _classify_transports(self) -> None:
-        """Probe every roster contact for the gateway identity (once each)."""
+        """Probe the roster's server JIDs for the gateway identity (once each).
+
+        Only JIDs **without a localpart** (no ``@``) are probed — a gateway is
+        a bare server JID, while ordinary contacts (``user@host``) and
+        conferences (``room@conf``) never are.
+        """
         if self._client is None:
             return
         for item in self._client.get_roster_snapshot():
             bare = str(item.get("jid") or "").split("/", 1)[0]
-            if (not bare or bare == self._client.jid_str
+            if (not bare or "@" in bare
+                    or bare == self._client.jid_str
                     or bare in self._transport_probed
                     or bare in self._transport_pending):
                 continue
@@ -1137,8 +1160,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if button is not None:
             button.setToolTip(tr("transport_disconnect") if online
                               else tr("transport_connect"))
-            button.setIcon(self._menu_icon(
-                "process-stop.png" if online else "reload.png"))
+            button.setIcon(QtGui.QIcon(find_icon(
+                "disconnect.svg" if online else "connect.svg")))
 
     def _toggle_transport(self, jid: str) -> None:
         """Send a directed presence to (dis)connect *jid*."""
@@ -1184,7 +1207,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         online = self._transport_online(jid)
         menu.addAction(
-            self._menu_icon("process-stop.png" if online else "reload.png"),
+            QtGui.QIcon(find_icon(
+                "disconnect.svg" if online else "connect.svg")),
             tr("transport_disconnect") if online else tr("transport_connect"),
             lambda checked=False: defer(lambda: self._toggle_transport(jid)))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
@@ -3815,6 +3839,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recount_groups()
         self._roster.sort_and_update()
         self._resolve_pending_subscriptions()
+        # Classify the roster's server JIDs as transports right away, so they
+        # never linger in the Contacts tab until the Transports tab is opened.
+        self._classify_transports()
         # Prefetch bookmarks so MUC bookmark buttons are correct before the
         # Bookmarks menu is ever opened.
         self._start_task(self._load_bookmarks())
@@ -3822,6 +3849,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_roster_item_added(self, item):
         self._add_roster_item(item)
         self._classify_bookmarked_conferences()
+        self._classify_transports()
         self._roster.sort_and_update()
         self._resolve_pending_subscriptions()
 
@@ -4927,10 +4955,12 @@ class MainWindow(QtWidgets.QMainWindow):
         is_conf = (bare in self._conference_roster
                    or jid in self._muc_self_nicks
                    or bare in self._muc_self_nicks)
-        QtWidgets.QMessageBox.information(
-            self, tr("vcard_info_title"),
-            tr("vcard_room_unavailable" if is_conf
-               else "vcard_unavailable", jid=jid))
+        # Non-blocking notice: a modal QMessageBox opened synchronously from the
+        # client's vCard coroutine re-entered the event loop ("Cannot enter into
+        # task").  A tray balloon is enough for an unavailable vCard.
+        self._tray.show_message(
+            APP_NAME, tr("vcard_room_unavailable" if is_conf
+                         else "vcard_unavailable", jid=jid))
 
     def _recount_groups(self):
         """Recount online/total per group after presence changes."""
@@ -4984,6 +5014,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._roster.set_client_icon(bare_jid,
                                          self._client.client_icon(bare_jid))
+        # A transport's presence drives its row in the Transports tab and the
+        # Connect/Disconnect button (live).
+        if bare_jid in self._transport_jids and self._transport_roster is not None:
+            self._transport_roster.update_user(
+                bare_jid, status=show, status_message=status,
+                icon_key=show_to_icon_key(show))
+            if self._client:
+                self._transport_roster.set_client_icon(
+                    bare_jid, self._client.client_icon(bare_jid))
+            self._transport_roster.sort_and_update()
+            self._update_transport_actions()
         chat = self._chat_window.get_chat(bare_jid)
         if chat and self._config.chat.show_status and old_show != show:
             chat.add_status(tr("status_changed", status=tr(f"status_{show}")),

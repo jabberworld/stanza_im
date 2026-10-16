@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import load as i18n_load
+from stanza_im.i18n import tr
 from stanza_im.ui.main_window import MainWindow
 
 i18n_load("en")
@@ -49,6 +50,7 @@ class _FakeClient:
         self.shows = {GW: "online"}
         self.removed = []
         self.presences = []
+        self.probed = []
 
     def get_roster_snapshot(self):
         return [{"jid": GW, "name": "J2J", "groups": [], "subscription": "both"},
@@ -56,6 +58,7 @@ class _FakeClient:
                  "subscription": "both"}]
 
     async def discover_service_info(self, jid, node=""):
+        self.probed.append(jid)
         return {"jid": jid, "node": "", "name": "",
                 "category": "gateway" if jid == GW else "", "type": "",
                 "features": []}
@@ -103,6 +106,8 @@ win._classify_transports()
 loop.run_until_complete(asyncio.sleep(0.2))
 
 check("the gateway is classified", GW in win._transport_jids)
+check("only server JIDs (no @) are probed",
+      GW in client.probed and "bob@example.com" not in client.probed)
 check("the gateway left the contacts roster",
       all(u.jid != GW for u in win._roster._users))
 check("the plain contact stays in the roster",
@@ -122,6 +127,21 @@ client.shows[GW] = "offline"
 win._on_transport_toggle()
 check("an offline transport is connected",
       client.presences[-1] == (GW, ""))
+
+# A presence change updates the row and the button live.
+win._on_presence_changed(GW, "offline", "Disconnected")
+row = next(u for u in win._transport_roster._users if u.jid == GW)
+check("a disconnected transport turns offline", row.status == "offline")
+check("the connect button flips to Connect (live)",
+      win._transport_connect_btn.toolTip() == tr("transport_connect"))
+
+# Clearing the selection disables the toolbar buttons.
+win._transport_roster._selected_jid = None
+win._transport_roster.selection_changed.emit("")
+check("clearing the selection disables the buttons",
+      not win._transport_connect_btn.isEnabled()
+      and not win._transport_command_btn.isEnabled()
+      and not win._transport_remove_btn.isEnabled())
 
 # Remove (confirm) drops it from the tab.
 _orig_question = QtWidgets.QMessageBox.question

@@ -150,11 +150,15 @@ old menu; Ctrl+wheel font zoom and click-on-empty clears the selection) and
 events fed by `MainWindow._push_system_event`, plus a smooth tab-icon blink;
 new entries accumulate — the `events_empty` placeholder carries a `UserRole`
 marker so only it is removed on the first real event) and **Transports**
-(icon `transports.png`; the roster contacts whose `disco#info` identity is a
-gateway, classified once each into `_transport_jids` and rendered by a second
-`RosterWidget`; a toolbar Connect/Disconnect + Commands + Remove and a transport
-context menu — directed presence, vCard, chat, history, rename, subscription,
-ad-hoc, «Добавить контакт через этот транспорт», remove with confirmation).
+(icon `transports.png`; the roster's **server JIDs (no `@`)** whose `disco#info`
+identity is a gateway, classified once each into `_transport_jids` on roster load
+and tab activation and rendered by a second `RosterWidget`; a bookmarks-style
+fixed-height toolbar of wide 2:1 icon-only buttons — Connect/Disconnect
+(`connect.svg`/`disconnect.svg`), Commands, Remove — enabled only while a
+transport is selected and cleared by the `RosterWidget.selection_changed`
+signal, plus a transport context menu — directed presence, vCard, chat, history,
+rename, subscription, ad-hoc, «Добавить контакт через этот транспорт», remove
+with confirmation; `_on_presence_changed` keeps the row/button live).
 In the `separate` layout
 Ctrl+PgUp/PgDn cycles the roster tabs while the main window is active; in
 `unified` the chat owns the shortcut.

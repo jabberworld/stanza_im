@@ -26,6 +26,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
     group_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)    # group, global_pos
     contact_dropped_on_group = QtCore.pyqtSignal(str, str)  # jid, target group
     roster_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
+    selection_changed = QtCore.pyqtSignal(str)  # selected jid, or "" when cleared
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -392,7 +393,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._press_jid = None
         hit = self._item_at(int(event.position().y()))
         if hit is None:
-            self._selected_jid = None
+            if self._selected_jid is not None:
+                self._selected_jid = None
+                self.selection_changed.emit("")
             self.update()
             return
         kind, item = hit
@@ -404,7 +407,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
                 self._recalc_heights()
                 self.update()
         elif kind == "user":
-            self._selected_jid = item.jid
+            if self._selected_jid != item.jid:
+                self._selected_jid = item.jid
+                self.selection_changed.emit(item.jid)
             self._press_jid = item.jid
             self.update()
             if event.button() == QtCore.Qt.MouseButton.LeftButton:

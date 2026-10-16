@@ -212,12 +212,15 @@ A smooth tab-icon blink
 (`_start_event_blink`/`_event_blink_step`, the same cosine fade as the tray)
 stops and clears when the tab is shown. The **Transports** tab (icon
 `transports.png`) lists the roster contacts classified as gateways and manages
-them: `_classify_transports` probes every roster contact once (cached in
-`_transport_jids`/`_transport_probed`, `client.discover_service_info` identity
-`category == "gateway"`) on roster load and on tab activation; a classified
-transport is filtered out of the Contacts roster (`_add_roster_item` skips it,
-`_probe_transport` removes the row) and rendered by a **second `RosterWidget`**
-(`_transport_roster`, same renderer/tooltip/font/colors, no group header). Its
+them: `_classify_transports` probes the roster's **server JIDs (no `@`)** once
+each (cached in `_transport_jids`/`_transport_probed`,
+`client.discover_service_info` identity `category == "gateway"`) on roster load
+(`_on_roster_received`/`_on_roster_item_added`) and on tab activation — an
+ordinary `user@host` contact or `room@conf` conference is never probed; a
+classified transport is filtered out of the Contacts roster
+(`_add_roster_item` skips it, `_probe_transport` removes the row) and rendered
+by a **second `RosterWidget`** (`_transport_roster`, same
+renderer/tooltip/font/colors, no group header). Its
 context menu (`_on_transport_context`) offers Connect/Disconnect (a **directed**
 presence — `JabberClient.send_directed_presence(to, type, status, priority)`;
 `_toggle_transport` sends `unavailable` to disconnect or an available presence
@@ -225,9 +228,14 @@ to connect), vCard, chat, history, rename, the subscription submenu, the
 ad-hoc command menu, «Добавить контакт через этот транспорт»
 (`_on_add_contact_via_transport` → `AddContactDialog(preselect=…)`) and Remove
 (confirmed, `_remove_transport_confirmed` → `remove_contact`). A bottom toolbar
-mirrors Connect/Disconnect (`_on_transport_toggle`), Commands
-(`_on_transport_command` → `_open_adhoc`) and Remove, enabled only while a
-transport is selected. Ctrl+PgUp/PgDn cycles
+(in the bookmarks style: a fixed-height bar of wide 2:1 icon-only buttons)
+mirrors Connect/Disconnect (`_on_transport_toggle`; the icons are the dedicated
+`connect.svg`/`disconnect.svg` — two computers with a chain / a broken chain),
+Commands (`_on_transport_command` → `_open_adhoc`) and Remove, enabled only
+while a transport is selected (`_update_transport_actions`, driven by
+`contact_clicked` and the `RosterWidget.selection_changed` signal so an empty
+click clears them). `_on_presence_changed` updates the transport row and the
+button **live** (a disconnected transport turns offline). Ctrl+PgUp/PgDn cycles
 the roster tabs only in the `separate` layout with the main window active
 (`_cycle_roster_tab`); in `unified` the chat keeps the shortcut for its own tabs.
 The conference browser uses the names and metadata returned by the service's
@@ -2006,6 +2014,9 @@ absent) — is never rendered as a 1:1 chat message
 only as the prompt plus an OSD notification. Failed vCard fetches emit `vcard_error` on the event
 bus; `MainWindow._on_vcard_error` shows the user a notice only when the request
 was user-initiated (`_pending_profile` set), silently dropping background probes.
+The notice is a **non-blocking** tray balloon (never a modal `QMessageBox`, which
+opened from the client's vCard coroutine re-entered the event loop —
+"Cannot enter into task").
 
 HTTP File Upload (XEP-0363): a toolbar above the chat input carries flat
 icon buttons for Clear, vCard, Smiley, Whiteboard and "Send file"; in a 1:1 chat "Send file"
