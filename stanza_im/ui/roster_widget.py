@@ -317,15 +317,6 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             cy += h
         return None
 
-    def _item_index_at(self, y: int) -> int:
-        cy = 0
-        for i, (kind, item) in enumerate(self._visible_items()):
-            h = self._style.group_height() if kind == "group" else self._style.user_height(item)
-            if cy <= y < cy + h:
-                return i
-            cy += h
-        return -1
-
     def _recalc_heights(self) -> None:
         h = self._total_height()
         self.setMinimumHeight(h)

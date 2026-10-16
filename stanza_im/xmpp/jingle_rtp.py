@@ -672,9 +672,6 @@ class JingleRtpManager:
                 best, best_show = full, show
         return best
 
-    def _content_name(self, media_type: str) -> str:
-        return "voice" if media_type == "audio" else "video"
-
     # ── outgoing call ─────────────────────────────────────────────
     async def start_call(self, jid: str, video: bool = False,
                          use_message: bool = True, muji_room: str = "") -> None:

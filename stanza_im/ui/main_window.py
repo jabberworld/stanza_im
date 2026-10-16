@@ -5468,16 +5468,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.update_user(jid, name=name)
         self._remember_contact(jid, name=name)
 
-    def _move_to_group(self, jid: str):
-        if not self._client:
-            return
-        group, ok = QtWidgets.QInputDialog.getText(
-            self, tr("ctx_move_group"), tr("ctx_move_group_prompt"))
-        if not ok:
-            return
-        groups = [g.strip() for g in group.strip().split(",") if g.strip()]
-        self._client.update_contact(jid, groups=groups)
-
     def _set_contact_groups(self, jid: str, groups: list[str]):
         if self._client:
             self._client.update_contact(jid, groups=groups)
@@ -8752,10 +8742,6 @@ class MainWindow(QtWidgets.QMainWindow):
             action.setChecked(key == target)
         for name, submenu in getattr(self, "_activity_group_menus", {}).items():
             submenu.menuAction().setChecked(name == target[0])
-
-    def _rebuild_pep_menu(self) -> None:
-        if getattr(self, "_pep_btn", None) is not None:
-            self._pep_btn.setMenu(self._build_pep_menu())
 
     def _on_set_mood(self, key: str) -> None:
         self._config.status.mood = key or ""

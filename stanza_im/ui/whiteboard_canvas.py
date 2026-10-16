@@ -461,10 +461,6 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 return shape
         return None
 
-    def _select_at(self, world: QtCore.QPointF) -> None:
-        shape = self._shape_at(world)
-        self._selected = shape["id"] if shape is not None else ""
-
     # ── Selection handles (select tool) ───────────────────────────
 
     _HANDLE_SIZE = 18.0

@@ -85,11 +85,6 @@ def _proc_mem(pid: int) -> dict[str, int | None]:
     return info
 
 
-def _rss_kb() -> int | None:
-    """Resident set size of the current process in KiB."""
-    return _proc_mem(os.getpid())["rss"]
-
-
 def _classify_child(raw: bytes, comm: str = "") -> str:
     """Classify a Chromium child from its ``cmdline`` bytes and process name.
 
@@ -153,11 +148,6 @@ def _read_comm(pid: int) -> str:
     except OSError:
         pass
     return ""
-
-
-def _child_type(pid: int) -> str:
-    """Classify the process *pid* (``cmdline`` + ``comm``)."""
-    return _classify_child(_read_cmdline(pid), _read_comm(pid))
 
 
 def _descendants_from(ppid_map: dict[int, list[int]], root: int) -> list[int]:

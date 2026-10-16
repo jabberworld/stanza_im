@@ -207,12 +207,6 @@ _KAPPA = 903.2962962
 _EPSILON = 0.0088564516
 
 
-def _y_to_l(y: float) -> float:
-    if y <= _EPSILON:
-        return y / _REF_Y * _KAPPA
-    return 116.0 * (y / _REF_Y) ** (1.0 / 3.0) - 16.0
-
-
 def _l_to_y(l: float) -> float:
     if l <= 8.0:
         return _REF_Y * l / _KAPPA

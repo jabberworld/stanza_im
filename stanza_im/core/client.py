@@ -760,21 +760,6 @@ def _muc_voice_request(msg) -> dict | None:
     return {"room": room, "nick": nick, "from": frm}
 
 
-def _make_unique_id(xml) -> str:
-    """Return a stable, per-stanza unique id used as the ``origin-id``.
-
-    Prefers the message ``id`` attribute when available, otherwise derives a
-    short value from the message content (hash of the XML serialisation).
-    """
-    aid = str(xml.get("id", "") or "")
-    if aid:
-        return aid
-    try:
-        return "%04x" % (hash(ET.tostring(xml)) & 0xFFFFFFFF)
-    except Exception:
-        return aid
-
-
 def compose_reply_body(prefix: str) -> str:
     """Build a XEP-0393 quote body referencing a message, used as the
     XEP-0421 compatibility fallback when replying without a known stanza-id.

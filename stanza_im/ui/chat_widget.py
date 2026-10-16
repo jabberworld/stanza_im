@@ -72,14 +72,6 @@ _SHOW_RANK: dict[str, int] = {
 }
 
 
-def _ts_from_entry(entry: dict) -> str:
-    """Extract a displayable HH:MM:SS from a stored ``YYYY-MM-DD...`` ts."""
-    ts = entry.get("timestamp", "") or ""
-    if isinstance(ts, str) and len(ts) >= 19 and ts[10] == "T":
-        return ts[11:19]
-    return ts
-
-
 class _ParticipantRow(QtWidgets.QWidget):
     """A MUC participant row that reports hover/press so ChatWidget can show
     the rich custom tooltip (Qt tooltips are plain-text only).

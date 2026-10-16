@@ -246,16 +246,6 @@ class JingleSession:
     peer_candidate_error: bool = False
 
 
-def _safe_filename(name: str) -> str:
-    """Strip directory structure/control characters from a remote file name
-    (XEP-0234 §12)."""
-    name = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
-    name = name.replace("\x00", "").strip().strip(".")
-    cleaned = "".join(ch for ch in name
-                      if ch.isprintable() and ch not in "/\\")
-    return cleaned or "file"
-
-
 def _file_hashes(path: str) -> tuple[dict, int]:
     """Return (XEP-0300 base64 hashes, size) of *path* (sha-256 + sha-1)."""
     digests = {"sha-256": hashlib.sha256(), "sha-1": hashlib.sha1()}
@@ -666,10 +656,6 @@ class JingleFileTransferManager:
     async def _await_transport(self, session: JingleSession):
         await self._await(session.transfer_future, "no candidate connected")
         return session.transport
-
-    async def _send_candidate_error(self, session: JingleSession) -> None:
-        await self._send_transport_info(session,
-                                        _q(NS_S5B, "candidate-error"))
 
     # ── IBB (XEP-0261 / XEP-0047) ─────────────────────────────────
 
