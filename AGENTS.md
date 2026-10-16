@@ -300,8 +300,8 @@ offers the `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
 «Темы») `smile_to_html` substitutes the text codes with unicode emoji from
 `include.emoticons.unicode_map()` — a `{code: emoji}` map derived from the
 `default` theme's image semantics (`_UNICODE_BY_FILE`, one emoji per image, so
-`: )`/`:-)` share 🙂) — and the chat CSS appends the colour-emoji font as a
-fallback in the body font stack so the substituted emoji render in colour.
+`: )`/`:-)` share 🙂). The substituted emoji are drawn with the platform font
+(no chat-font override is injected).
 
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
@@ -1844,10 +1844,13 @@ mapped to screen coordinates), so `ChatWidget.reaction_requested(jid, ref_id,
 x, y, w, h)` carries the button's screen rect. `MainWindow._on_reaction_requested`
 opens `ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup`
 anchored next to the 🙂 button through `_place_popup_above` →
-`ui/popup_position.popup_position` (pure, tested): above the button (bottom edge
-on its top), else below its bottom edge — never covering it — with the left
-edges aligned and, when that overflows, the right edges, then clamped to the
-screen: a search field, a «Недавние» (Recent) area above the tabs and the
+`ui/popup_position.popup_position` (pure, tested): the side (above/below) is
+chosen by the room, the popup sits adjacent to the button and never covers it
+(the other side is used when the chosen one cannot fit), with the left edges
+aligned and, when that overflows, the right edges, then clamped to the screen.
+The position is re-applied once the popup has its real laid-out size
+(`QTimer.singleShot(0, …)`, since `sizeHint` differs from the shown size): a
+search field, a «Недавние» (Recent) area above the tabs and the
 eight `include/emoji_data.py` category tabs below it. Emoji are drawn with an
 auto-detected colour-emoji font (`emoji_font`/`emoji_font_family` try
 Noto/Apple/Segoe/Twemoji/Symbola/…), applied to the grid buttons and to the

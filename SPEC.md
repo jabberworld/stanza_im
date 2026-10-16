@@ -228,8 +228,7 @@ offers a `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
 the XEP-0444 reaction picker instead. With `appearance.emoticon_unicode_replace`
 (default on) `smile_to_html` substitutes the text codes with unicode emoji from
 `include.emoticons.unicode_map()` (derived from the `default` theme's image
-semantics), and the chat CSS adds the colour-emoji font as a fallback so the
-emoji render in colour.
+semantics); the emoji are drawn with the platform font (no chat-font override).
 The service browser uses XEP-0030 discovery, groups identities by category and
 builds the tree fully lazily with no eager discovery: a node renders its direct
 children "as is" from a single `disco#items` request (with the parent's `node`
@@ -372,7 +371,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.muc_participant_width` | `0` | Remembered MUC participant sidebar width in px (`0` = default 180); saved on splitter drag, restored for new MUC tabs. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `appearance.show_unread_in_tabs` | `true` | Psi-style unread indicator on the chat tabs and the window title (`ChatWindow.set_unread`/`set_show_unread_in_tabs`): `[N] name` with `#cc0000` for a 1:1/private chat with unread (a conference only when a message mentions us), the window title summing the open tabs. Off hides the prefix, the color and the title total. Preferences → Appearance → «Разное». |
-| `appearance.emoticon_unicode_replace` | `true` | With the `unicode` emoticon theme, replace text smileys (`:)`, `:-D`, `(K)` …) with unicode emoji from `include.emoticons.unicode_map()` (`smile_to_html(..., unicode_replace=True)`); the chat CSS adds the colour-emoji font as a fallback so they render in colour. Preferences → Appearance → «Темы». |
+| `appearance.emoticon_unicode_replace` | `true` | With the `unicode` emoticon theme, replace text smileys (`:)`, `:-D`, `(K)` …) with unicode emoji from `include.emoticons.unicode_map()` (`smile_to_html(..., unicode_replace=True)`); drawn with the platform font (no chat-font override). Preferences → Appearance → «Темы». |
 | `ui.language` | `""` | UI language code (`en`/`ru`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
@@ -2138,9 +2137,11 @@ Registers XEP plugins (conditionally where noted):
 - `MainWindow._on_reaction_requested` opens
   `ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup` anchored
   to the 🙂 button through `MainWindow._place_popup_above` →
-  `ui/popup_position.popup_position` (pure, tested): above the button, else
-  below its bottom edge (never covering it), left edges aligned and — when that
-  overflows — right edges, then clamped to the screen. It shows a search field, a
+  `ui/popup_position.popup_position` (pure, tested): the side is chosen by the
+  room, the popup is adjacent to the button and never covers it, left edges
+  aligned and — when that overflows — right edges, then clamped to the screen.
+  The position is re-applied once the popup has its real size
+  (`QTimer.singleShot(0, …)`). It shows a search field, a
   «Недавние» (Recent) area above the tabs and the eight
   `include/emoji_data.py` category tabs below it. Emoji are rendered with an
   auto-detected colour-emoji font (`emoji_font_family`, tried in order

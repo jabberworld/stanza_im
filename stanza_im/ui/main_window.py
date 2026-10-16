@@ -7316,7 +7316,15 @@ class MainWindow(QtWidgets.QMainWindow):
             screen = QtWidgets.QApplication.primaryScreen()
         area = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 0, 0)
         anchor = QtCore.QRect(int(x), int(y), int(w), int(h))
-        popup.move(popup_position(anchor, popup.sizeHint(), area))
+        # Use the popup's real size once it is shown (its sizeHint may differ
+        # from the laid-out size, which used to leave a fixed gap to the button).
+        size = popup.frameSize() if popup.isVisible() else popup.size()
+        pos = popup_position(anchor, size, area)
+        popup.move(pos)
+        logger.debug(
+            "REACT[anchor] rect=(%d,%d,%d,%d) size=(%d,%d) pos=(%d,%d) "
+            "area=(%d,%d,%d,%d)", x, y, w, h, size.width(), size.height(),
+            pos.x(), pos.y(), area.x(), area.y(), area.width(), area.height())
 
     def _on_chat_files_upload(self, jid: str, paths: list, method: str,
                               parent=None):
@@ -7662,6 +7670,10 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.adjustSize()
         self._place_popup_above(dlg, x, y, w, h)
         dlg.show()
+        # Re-place once the popup has its real (laid-out) size, so its near
+        # edge sits exactly at the button instead of leaving a fixed gap.
+        QtCore.QTimer.singleShot(
+            0, lambda: self._place_popup_above(dlg, x, y, w, h))
 
     def _on_emoji_picker_requested(self, jid: str, x: int = 0, y: int = 0,
                                    w: int = 0, h: int = 0) -> None:
@@ -7676,6 +7688,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.adjustSize()
         self._place_popup_above(dlg, x, y, w, h)
         dlg.show()
+        QtCore.QTimer.singleShot(
+            0, lambda: self._place_popup_above(dlg, x, y, w, h))
 
     def _insert_chat_emoji(self, jid: str, emoji: str) -> None:
         """Insert *emoji* into the open chat of *jid* and remember it."""

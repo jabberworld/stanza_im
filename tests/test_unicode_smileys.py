@@ -62,6 +62,11 @@ factory.set_unicode_smiley_replace(False)
 check("the factory keeps plain text when off",
       "🙂" not in factory._body_fragment("hi :)"))
 
+# The unicode skin must not touch the chat font: the emoji-font CSS fallback
+# that used to override the whole body was removed.
+check("the unicode skin does not override the body font",
+      "body {" not in factory._font_override_css())
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)
