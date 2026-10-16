@@ -26,8 +26,8 @@ class AddContactDialog(QtWidgets.QDialog):
         self._service = QtWidgets.QComboBox()
         self._service.setEditable(False)
         self._service.addItem("XMPP", "")
-        # ``gateways`` is a list of ``(name, jid)``; when omitted the dialog
-        # discovers the account domain's gateways itself.
+        # ``gateways`` is a list of ``(name, jid)`` — the transports the user
+        # actually added to the roster (never every gateway of the domain).
         for name, gateway in (gateways or []):
             self._service.addItem(name or gateway, gateway)
         service_form.addRow(tr("add_contact_service"), self._service)
@@ -93,29 +93,11 @@ class AddContactDialog(QtWidgets.QDialog):
         self._service.currentIndexChanged.connect(self._service_changed)
         if preselect:
             self._select_service(preselect)
-        if gateways is None and client is not None:
-            self._start(self._load_gateways())
 
     def _select_service(self, jid: str) -> None:
         index = self._service.findData(jid)
         if index >= 0:
             self._service.setCurrentIndex(index)
-
-    async def _load_gateways(self) -> None:
-        """Populate the service selector with the account's gateways."""
-        domain = (getattr(self._client, "jid_str", "") or "").split("@", 1)[-1]
-        if not domain:
-            return
-        try:
-            services = await self._client.discover_services(domain)
-        except Exception:
-            return
-        for service in services or []:
-            if str(service.get("category") or "").lower() != "gateway":
-                continue
-            jid = service.get("jid") or ""
-            if jid and self._service.findData(jid) < 0:
-                self._service.addItem(service.get("name") or jid, jid)
 
     @staticmethod
     def _separator():

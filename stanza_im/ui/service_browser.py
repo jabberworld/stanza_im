@@ -74,9 +74,10 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
     servers_updated = QtCore.pyqtSignal(list)
     xmpp_uri_requested = QtCore.pyqtSignal(str)
 
-    def __init__(self, client, servers: list[str], parent=None):
+    def __init__(self, client, servers: list[str], parent=None, gateways=None):
         super().__init__(parent)
         self._client = client
+        self._gateways = list(gateways or [])
         self._servers = [servers] if isinstance(servers, str) else list(servers)
         self._server_values = list(dict.fromkeys(self._servers))
         self._gen = 0
@@ -437,7 +438,8 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
                              tr("roster_group_transports"),
                              tr("roster_group_ungrouped"))
         }, key=str.casefold)
-        dlg = AddContactDialog(groups, self._client, self, jid=jid)
+        dlg = AddContactDialog(groups, self._client, self, jid=jid,
+                               gateways=self._gateways)
 
         def finished(result: int):
             if result != QtWidgets.QDialog.DialogCode.Accepted:

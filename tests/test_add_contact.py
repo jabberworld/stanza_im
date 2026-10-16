@@ -50,13 +50,17 @@ class _FakeClient:
 
 loop = asyncio.get_event_loop()
 
-# 1. the service selector lists the account's gateways ------------------------
-dlg = AddContactDialog([], _FakeClient())
+# 1. the service selector lists the transports passed in (the added ones) -----
+dlg = AddContactDialog([], _FakeClient(),
+                       gateways=[("J2J", "xmpp.example.com")])
 loop.run_until_complete(asyncio.sleep(0.1))
 data = [dlg._service.itemData(i) for i in range(dlg._service.count())]
-check("the service selector lists the gateway", "xmpp.example.com" in data)
+check("the service selector lists the added gateway",
+      "xmpp.example.com" in data)
 check("a conference is not offered as a service",
       "conf.example.com" not in data)
+check("the dialog does not discover the domain's gateways",
+      not hasattr(dlg, "_load_gateways"))
 dlg.close()
 
 # 2. a preselected gateway is chosen and its info loaded ----------------------

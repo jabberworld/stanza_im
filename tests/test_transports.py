@@ -33,6 +33,7 @@ def check(name, cond):
 
 
 GW = "xmpp.example.com"
+GW2 = "icq.example.com"
 
 
 class _Contact:
@@ -95,6 +96,23 @@ win._roster_name = lambda jid: "J2J" if jid == GW else jid
 check("the transports tab is registered", "transports" in win._roster_tab_keys)
 check("the transports roster exists", win._transport_roster is not None)
 
+# ── persisted transport cache ────────────────────────────────────
+from stanza_im.core import transports as transports_store
+
+transports_store.set_profile("me@example.com")
+transports_store.save({GW2, "old.example.com"})
+check("the transport cache round-trips",
+      transports_store.load() == {GW2, "old.example.com"})
+
+# A persisted transport is filtered out of the roster from the first render,
+# before any disco probe answers (no flash during a slow/offline login).
+win._load_transports()
+check("the persisted transports load before the roster",
+      GW2 in win._transport_jids)
+check("a persisted transport never enters the roster",
+      win._add_roster_item({"jid": GW2, "name": "ICQ", "groups": []}) is None
+      and all(u.jid != GW2 for u in win._roster._users))
+
 # Seed the ordinary roster with the gateway, then classify.
 win._add_roster_item({"jid": GW, "name": "J2J", "groups": []})
 win._add_roster_item({"jid": "bob@example.com", "name": "Bob", "groups": []})
@@ -134,6 +152,44 @@ row = next(u for u in win._transport_roster._users if u.jid == GW)
 check("a disconnected transport turns offline", row.status == "offline")
 check("the connect button flips to Connect (live)",
       win._transport_connect_btn.toolTip() == tr("transport_connect"))
+
+# The icon reflects the current state (whole chain = connected, broken middle
+# link = offline); the tooltip names the action.
+import stanza_im.ui.main_window as _mw
+_captured = []
+_orig_find = _mw.find_icon
+
+
+def _record(name, *a, **k):
+    _captured.append(name)
+    return _orig_find(name, *a, **k)
+
+
+_mw.find_icon = _record
+try:
+    client.shows[GW] = "online"
+    win._update_transport_actions()
+    check("an online transport shows the whole-chain icon",
+          _captured[-1] == "connected.svg")
+    client.shows[GW] = "offline"
+    win._update_transport_actions()
+    check("an offline transport shows the broken-chain icon",
+          _captured[-1] == "disconnected.svg")
+finally:
+    _mw.find_icon = _orig_find
+
+# The add-contact dialog lists only the transports the user actually added.
+win._transport_jids = {GW}
+check("the add-contact gateways come from the added transports",
+      win._transport_gateways() == [("J2J", GW)])
+from stanza_im.ui.add_contact_dialog import AddContactDialog
+_dlg = AddContactDialog([], client, win, gateways=win._transport_gateways())
+_service_items = [_dlg._service.itemText(i) for i in range(_dlg._service.count())]
+check("the service selector lists XMPP + the added transport only",
+      _service_items == ["XMPP", "J2J"])
+check("the dialog no longer discovers the domain's gateways",
+      not hasattr(_dlg, "_load_gateways"))
+_dlg.deleteLater()
 
 # Clearing the selection disables the toolbar buttons.
 win._transport_roster._selected_jid = None

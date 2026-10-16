@@ -162,10 +162,11 @@ Nickname fields carries a 16px icon button — `v-card.png` (tooltip `chat_vcard
 emits `vcard_requested(jid)` for the entered address (`MainWindow._on_add_contact`
 connects it to `_show_profile`), and `nick-fill.svg` (tooltip
 `add_contact_fill_nick`) fetches the vCard and fills the nickname from `nickname`,
-else `fn`, else the JID localpart. Its **service selector** lists the account
-domain's gateways (`discover_services`, `category == "gateway"`; discovered by
-the dialog itself, or passed as `gateways=[(name, jid)]` with `preselect=<jid>`)
-so a contact can be added through a transport. The conference dialog
+else `fn`, else the JID localpart. Its **service selector** lists the
+transports the user actually **added** (`gateways=[(name, jid)]` from
+`MainWindow._transport_gateways`, with `preselect=<jid>`) — never every gateway
+of the account domain — so a contact can be added through a chosen transport.
+The conference dialog
 provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
 servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
@@ -216,10 +217,15 @@ them: `_classify_transports` probes the roster's **server JIDs (no `@`)** once
 each (cached in `_transport_jids`/`_transport_probed`,
 `client.discover_service_info` identity `category == "gateway"`) on roster load
 (`_on_roster_received`/`_on_roster_item_added`) and on tab activation — an
-ordinary `user@host` contact or `room@conf` conference is never probed; a
-classified transport is filtered out of the Contacts roster
-(`_add_roster_item` skips it, `_probe_transport` removes the row) and rendered
-by a **second `RosterWidget`** (`_transport_roster`, same
+ordinary `user@host` contact or `room@conf` conference is never probed. The
+result is persisted per profile (`core/transports.py` → `transports.json`) and
+read back in `_load_transports` **before** the roster is built, so a gateway
+never flashes in the Contacts roster (nor lingers there on a slow/offline
+login); a definite non-gateway answer for a persisted JID drops it back into the
+roster and a full roster prunes JIDs the server no longer returns
+(`_prune_transports`). A classified transport is filtered out of the Contacts
+roster (`_add_roster_item` skips it, `_probe_transport` removes the row) and
+rendered by a **second `RosterWidget`** (`_transport_roster`, same
 renderer/tooltip/font/colors, no group header). Its
 context menu (`_on_transport_context`) offers Connect/Disconnect (a **directed**
 presence — `JabberClient.send_directed_presence(to, type, status, priority)`;
@@ -229,8 +235,10 @@ ad-hoc command menu, «Добавить контакт через этот тр�
 (`_on_add_contact_via_transport` → `AddContactDialog(preselect=…)`) and Remove
 (confirmed, `_remove_transport_confirmed` → `remove_contact`). A bottom toolbar
 (in the bookmarks style: a fixed-height bar of wide 2:1 icon-only buttons)
-mirrors Connect/Disconnect (`_on_transport_toggle`; the icons are the dedicated
-`connect.svg`/`disconnect.svg` — two computers with a chain / a broken chain),
+mirrors Connect/Disconnect (`_on_transport_toggle`; the icon shows the
+**current** state — the dedicated `connected.svg`/`disconnected.svg`, a
+diagonal chain with every link intact vs. with the middle link broken — while
+the tooltip names the action),
 Commands (`_on_transport_command` → `_open_adhoc`) and Remove, enabled only
 while a transport is selected (`_update_transport_actions`, driven by
 `contact_clicked` and the `RosterWidget.selection_changed` signal so an empty
@@ -747,6 +755,7 @@ Everything follows the XDG Base Directory spec:
 | Unread counters (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` (0600) |
 | OMEMO keys (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Notification priorities (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` (0600) |
+| Classified transports (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` (0600) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
 The minimal TOML writer (`Config._write_toml`) serialises scalars with
@@ -758,11 +767,12 @@ appended line-by-line as JSON, keyed by bare JID, one file per contact.
 
 **Per-profile data.** Every account (Jabber ID) keeps its own state under
 `$XDG_DATA_HOME/stanza-im/<jid>/`: `history/`, `roster/<account>.json`,
-`unread.json`, `known_contacts.json` and `notification_priorities.json`
+`unread.json`, `known_contacts.json`, `notification_priorities.json` and
+`transports.json`
 (`core/profiles.py` `set_active`).
 `include/constants.set_active_profile` selects the subdirectory; each store
 (`history`, `roster_cache`, `unread_state`, `known_contacts`,
-`notification_priorities`) exposes
+`notification_priorities`, `transports`) exposes
 `set_profile(jid)` that re-bases its module-level path and the pooled history
 connections are closed, so a contact's history from one account is never served
 to another (the pool is keyed by the *contact* JID). With no profile selected

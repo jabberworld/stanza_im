@@ -152,13 +152,16 @@ new entries accumulate — the `events_empty` placeholder carries a `UserRole`
 marker so only it is removed on the first real event) and **Transports**
 (icon `transports.png`; the roster's **server JIDs (no `@`)** whose `disco#info`
 identity is a gateway, classified once each into `_transport_jids` on roster load
-and tab activation and rendered by a second `RosterWidget`; a bookmarks-style
-fixed-height toolbar of wide 2:1 icon-only buttons — Connect/Disconnect
-(`connect.svg`/`disconnect.svg`), Commands, Remove — enabled only while a
-transport is selected and cleared by the `RosterWidget.selection_changed`
-signal, plus a transport context menu — directed presence, vCard, chat, history,
-rename, subscription, ad-hoc, «Добавить контакт через этот транспорт», remove
-with confirmation; `_on_presence_changed` keeps the row/button live).
+and tab activation, the set cached per profile in `transports.json` and loaded
+before the roster so a gateway never flashes in the Contacts roster, and rendered
+by a second `RosterWidget`; a bookmarks-style fixed-height toolbar of wide 2:1
+icon-only buttons — Connect/Disconnect (`connected.svg`/`disconnected.svg`, a
+diagonal chain intact vs. with the middle link broken, showing the current
+state), Commands, Remove — enabled only while a transport is selected and cleared
+by the `RosterWidget.selection_changed` signal, plus a transport context menu —
+directed presence, vCard, chat, history, rename, subscription, ad-hoc,
+«Добавить контакт через этот транспорт», remove with confirmation;
+`_on_presence_changed` keeps the row/button live).
 In the `separate` layout
 Ctrl+PgUp/PgDn cycles the roster tabs while the main window is active; in
 `unified` the chat owns the shortcut.
@@ -269,6 +272,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Roster cache | `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json` |
 | Known contacts | `$XDG_DATA_HOME/stanza-im/<jid>/known_contacts.json` |
 | Notification priorities | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` |
+| Classified transports | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` |
 | OMEMO keys | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Cache (shared) | `$XDG_CACHE_HOME/stanza-im/` |
 | Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
@@ -281,7 +285,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
   that TOML parsers reject.
 - History appended line-by-line as JSON, one file per bare JID
 - **Per-profile data**: every account keeps its history, roster cache, unread
-  counters and known-contacts registry under `$XDG_DATA_HOME/stanza-im/<jid>/`;
+  counters, known-contacts registry, notification priorities and classified
+  transports under `$XDG_DATA_HOME/stanza-im/<jid>/`;
   `core/profiles.set_active(jid)` re-bases those stores and closes the pooled
   history connections. The `CACHE_DIR` stores (avatars, media, tiles, discovery,
   vCard cache) are shared. With no profile selected the unscoped `DATA_DIR`
@@ -683,10 +688,11 @@ server when nothing is selected), non-modally. It has three tabs and one
   `xmpp:` links are forwarded through `ServiceBrowserDialog.xmpp_uri_requested`
   → `MainWindow._on_xmpp_uri`.
 
-Gateways (transports): the account domain's gateways are discovered via
-`discover_services` (`category == "gateway"`). `AddContactDialog` lists them in
-its service selector (and can be opened with `preselect=<jid>`) so a contact can
-be added through a transport, and the service in-band registration dialog
+Gateways (transports): the transports the user actually added are classified via
+`discover_service_info` (`category == "gateway"`) and cached in `transports.json`.
+`AddContactDialog` lists only those added transports in its service selector
+(`gateways=[(name, jid)]`, and can be opened with `preselect=<jid>`) so a contact
+can be added through a transport, and the service in-band registration dialog
 (`ui/registration_dialog.py`, XEP-0077) wraps its form in an inner container so
 `fit_dialog_to_content` sizes the window to the form (no scrollbars).
 `JabberClient.send_directed_presence(to, type, status, priority)` sends a

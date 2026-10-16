@@ -1054,7 +1054,7 @@ class MainWindow(QtWidgets.QMainWindow):
         actions = QtWidgets.QHBoxLayout(bar)
         actions.setContentsMargins(0, 0, 0, 0)
         self._transport_connect_btn = self._transport_button(
-            "connect.svg", tr("transport_connect"),
+            "disconnected.svg", tr("transport_connect"),
             self._on_transport_toggle, bar_height)
         self._transport_command_btn = self._transport_button(
             "exec.png", tr("transport_commands"),
@@ -1103,13 +1103,46 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             return
         if str(info.get("category") or "").lower() != "gateway":
+            # A persisted transport whose identity changed is no longer one:
+            # drop it from the cache and put it back into the ordinary roster.
+            if bare in self._transport_jids and self._client is not None:
+                self._transport_jids.discard(bare)
+                self._save_transports()
+                self._rebuild_transports()
+                for item in self._client.get_roster_snapshot():
+                    if str(item.get("jid") or "") == bare:
+                        self._add_roster_item(item)
+                        break
+                self._roster.sort_and_update()
             return
         if bare in self._transport_jids:
             return
         self._transport_jids.add(bare)
+        self._save_transports()
         # The transport must leave the ordinary roster.
         self._roster.remove_user(bare)
         self._roster.sort_and_update()
+        self._rebuild_transports()
+
+    def _save_transports(self) -> None:
+        """Persist the classified transport JIDs for the next login."""
+        from stanza_im.core import transports
+        try:
+            transports.save(self._transport_jids)
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+
+    def _prune_transports(self, roster_jids: set[str]) -> None:
+        """Drop persisted transports no longer present in the roster.
+
+        Called after a **full** roster so a transport removed on the server
+        stops being filtered (and no longer appears in the Transports tab).
+        """
+        stale = self._transport_jids - {str(j) for j in roster_jids}
+        if not stale:
+            return
+        self._transport_jids -= stale
+        self._save_transports()
         self._rebuild_transports()
 
     def _rebuild_transports(self) -> None:
@@ -1158,10 +1191,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 button.setEnabled(bool(jid))
         button = getattr(self, "_transport_connect_btn", None)
         if button is not None:
+            # The icon shows the **current** state (whole chain = connected,
+            # broken middle link = offline); the tooltip names the action.
             button.setToolTip(tr("transport_disconnect") if online
                               else tr("transport_connect"))
             button.setIcon(QtGui.QIcon(find_icon(
-                "disconnect.svg" if online else "connect.svg")))
+                "connected.svg" if online else "disconnected.svg")))
 
     def _toggle_transport(self, jid: str) -> None:
         """Send a directed presence to (dis)connect *jid*."""
@@ -1196,6 +1231,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_task(self._client.remove_contact(jid))
         self._transport_jids.discard(jid)
         self._transport_probed.discard(jid)
+        self._save_transports()
         self._rebuild_transports()
 
     def _on_transport_context(self, jid: str, pos):
@@ -1208,7 +1244,7 @@ class MainWindow(QtWidgets.QMainWindow):
         online = self._transport_online(jid)
         menu.addAction(
             QtGui.QIcon(find_icon(
-                "disconnect.svg" if online else "connect.svg")),
+                "connected.svg" if online else "disconnected.svg")),
             tr("transport_disconnect") if online else tr("transport_connect"),
             lambda checked=False: defer(lambda: self._toggle_transport(jid)))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
@@ -1240,6 +1276,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_add_contact_via_transport(self, jid: str) -> None:
         name = self._roster_name(jid) or jid
         self._on_add_contact(gateways=[(name, jid)], preselect=jid)
+
+    def _transport_gateways(self) -> list:
+        """The added transports as ``(name, jid)`` for the add-contact dialog."""
+        return [(self._roster_name(jid) or jid, jid)
+                for jid in sorted(self._transport_jids, key=str.casefold)]
 
     def _clear_events_placeholder(self) -> None:
         # Only the *placeholder* row may be cleared: a real event is also a
@@ -1754,6 +1795,8 @@ class MainWindow(QtWidgets.QMainWindow):
                          if user.group not in _virtual_roster_groups()
                          | {tr("roster_group_ungrouped")}},
                         key=str.casefold)
+        if gateways is None:
+            gateways = self._transport_gateways()
         dlg = AddContactDialog(groups, self._client, self, jid=jid,
                                gateways=gateways, preselect=preselect)
         dlg.vcard_requested.connect(self._show_profile)
@@ -1776,7 +1819,8 @@ class MainWindow(QtWidgets.QMainWindow):
         domain = self._client.jid_str.split("@", 1)[-1]
         if domain not in servers:
             servers.insert(0, domain)
-        dlg = ServiceBrowserDialog(self._client, servers, self)
+        dlg = ServiceBrowserDialog(self._client, servers, self,
+                                   gateways=self._transport_gateways())
         dlg.conference_requested.connect(self._on_service_conference)
         dlg.vcard_requested.connect(self._show_profile)
         dlg.servers_updated.connect(self._on_service_servers)
@@ -3839,8 +3883,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recount_groups()
         self._roster.sort_and_update()
         self._resolve_pending_subscriptions()
-        # Classify the roster's server JIDs as transports right away, so they
-        # never linger in the Contacts tab until the Transports tab is opened.
+        # Drop persisted transports the server no longer returns, then classify
+        # the roster's server JIDs right away, so they never linger in the
+        # Contacts tab until the Transports tab is opened.
+        self._prune_transports({
+            str(i.get("jid") or "").split("/", 1)[0] for i in items})
         self._classify_transports()
         # Prefetch bookmarks so MUC bookmark buttons are correct before the
         # Bookmarks menu is ever opened.
@@ -5707,7 +5754,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_chats = unread_state.load_chats(jid)
         self._load_known_conferences()
         self._load_notification_priorities()
+        self._load_transports()
         self._recount_unread()
+
+    def _load_transports(self) -> None:
+        """Seed the classified-transport set from the persisted cache.
+
+        Done **before** the roster arrives so a gateway never flashes in the
+        Contacts roster (and stays correctly placed on a slow/offline login).
+        """
+        from stanza_im.core import transports
+        try:
+            self._transport_jids = transports.load()
+        except Exception:  # noqa: BLE001 - best effort
+            self._transport_jids = set()
 
     def _load_notification_priorities(self) -> None:
         """Load the persisted per-contact notification priorities."""
