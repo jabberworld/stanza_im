@@ -1839,8 +1839,10 @@ message button is a smiley (`a.action-react`, inserted before Reply in every
 skin template) whose click is kept in-page (`window.__stanzaReactRef` through the
 `_ACTION_JS` handler + the always-running scroll poll, `stanza:react:<id>`, never
 a navigation). The view first reports the button rectangle through
-`reaction_anchor` (JS `getBoundingClientRect` delivered by the scroll poll and
-mapped to screen coordinates), so `ChatWidget.reaction_requested(jid, ref_id,
+`reaction_anchor` (JS `getBoundingClientRect` delivered by the scroll poll,
+scaled from CSS to the view's logical pixels by `view.width()/innerWidth`
+— one CSS px maps to `zoom` logical px on a zoomed chat page — and mapped to
+screen coordinates), so `ChatWidget.reaction_requested(jid, ref_id,
 x, y, w, h)` carries the button's screen rect. `MainWindow._on_reaction_requested`
 opens `ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup`
 anchored next to the 🙂 button through `_place_popup_above` →

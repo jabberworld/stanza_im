@@ -1867,8 +1867,11 @@ window.__stanzaMentionRef = '';
         def _emit_reaction_anchor(self, value) -> None:
             """Emit the clicked 🙂 button's global top-left (XEP-0444 popup).
 
-            The JS rect is in CSS/viewport coordinates; map it to the screen so
-            the picker can be anchored next to the button.
+            The JS rect is in CSS pixels; on a zoomed chat page (the chat text
+            scale) one CSS pixel maps to ``zoom`` logical pixels, so the rect is
+            scaled to the view's logical coordinates before ``mapToGlobal``
+            (which expects them).  ``view/innerWidth`` is that ratio (it also
+            covers a device pixel ratio); ``zoomFactor`` is the fallback.
             """
             if len(value) <= 17 or not isinstance(value[17], list):
                 return
@@ -1880,20 +1883,31 @@ window.__stanzaMentionRef = '';
                               float(rect[2]), float(rect[3]))
             except (TypeError, ValueError):
                 return
+            inner_w = value[26] if len(value) > 26 else 0
+            inner_h = value[1] if len(value) > 1 else 0
             try:
-                point = self.mapToGlobal(QtCore.QPoint(int(x), int(y)))
+                sx = self.width() / float(inner_w) if inner_w else self.zoomFactor()
+                sy = (self.height() / float(inner_h) if inner_h
+                      else self.zoomFactor())
+            except (TypeError, ValueError, ZeroDivisionError):
+                sx = sy = self.zoomFactor()
+            try:
+                point = self.mapToGlobal(
+                    QtCore.QPoint(int(x * sx), int(y * sy)))
             except Exception:  # noqa: BLE001
                 return
             logger.debug(
                 "REACT[map] css=(%.1f,%.1f,%.1f,%.1f) view=(%d,%d) "
-                "inner=(%s,%s) zoom=%.3f dpr=%.3f js_dpr=%s global=(%d,%d)",
+                "inner=(%s,%s) zoom=%.3f scale=(%.3f,%.3f) dpr=%.3f js_dpr=%s "
+                "global=(%d,%d)",
                 x, y, w, h, self.width(), self.height(),
                 value[26] if len(value) > 26 else None,
                 value[1] if len(value) > 1 else None,
-                self.zoomFactor(), self.devicePixelRatioF(),
+                self.zoomFactor(), sx, sy, self.devicePixelRatioF(),
                 value[27] if len(value) > 27 else None,
                 point.x(), point.y())
-            self.reaction_anchor.emit(point.x(), point.y(), int(w), int(h))
+            self.reaction_anchor.emit(point.x(), point.y(),
+                                      int(w * sx), int(h * sy))
 
         def _clear_unreact_request(self):
             try:

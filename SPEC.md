@@ -2132,8 +2132,9 @@ Registers XEP plugins (conditionally where noted):
   always-running scroll poll, `stanza:react:<id>`), so the chat document is
   never reset.
 - The view reports the button rectangle (`getBoundingClientRect` → the
-  `reaction_anchor` signal, mapped to screen coordinates), so
-  `ChatWidget.reaction_requested(jid, ref_id, x, y, w, h)` carries the rect.
+  `reaction_anchor` signal), scaled from CSS to the view's logical pixels
+  (`view.width()/innerWidth` = the chat zoom) and mapped to screen coordinates,
+  so `ChatWidget.reaction_requested(jid, ref_id, x, y, w, h)` carries the rect.
 - `MainWindow._on_reaction_requested` opens
   `ui/emoji_picker_dialog.EmojiPickerDialog` as a frameless `Qt.Popup` anchored
   to the 🙂 button through `MainWindow._place_popup_above` →
