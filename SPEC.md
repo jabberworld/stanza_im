@@ -149,7 +149,13 @@ old menu; Ctrl+wheel font zoom and click-on-empty clears the selection) and
 **Events** (icon `event`; a search field and a list of system/subscription
 events fed by `MainWindow._push_system_event`, plus a smooth tab-icon blink;
 new entries accumulate — the `events_empty` placeholder carries a `UserRole`
-marker so only it is removed on the first real event). In the `separate` layout
+marker so only it is removed on the first real event) and **Transports**
+(icon `transports.png`; the roster contacts whose `disco#info` identity is a
+gateway, classified once each into `_transport_jids` and rendered by a second
+`RosterWidget`; a toolbar Connect/Disconnect + Commands + Remove and a transport
+context menu — directed presence, vCard, chat, history, rename, subscription,
+ad-hoc, «Добавить контакт через этот транспорт», remove with confirmation).
+In the `separate` layout
 Ctrl+PgUp/PgDn cycles the roster tabs while the main window is active; in
 `unified` the chat owns the shortcut.
 Bookmarks are stored with **XEP-0402 PEP Native Bookmarks**
@@ -672,6 +678,16 @@ server when nothing is selected), non-modally. It has three tabs and one
 - «Контакты» — the XEP-0157 contact addresses (like the server info dialog);
   `xmpp:` links are forwarded through `ServiceBrowserDialog.xmpp_uri_requested`
   → `MainWindow._on_xmpp_uri`.
+
+Gateways (transports): the account domain's gateways are discovered via
+`discover_services` (`category == "gateway"`). `AddContactDialog` lists them in
+its service selector (and can be opened with `preselect=<jid>`) so a contact can
+be added through a transport, and the service in-band registration dialog
+(`ui/registration_dialog.py`, XEP-0077) wraps its form in an inner container so
+`fit_dialog_to_content` sizes the window to the form (no scrollbars).
+`JabberClient.send_directed_presence(to, type, status, priority)` sends a
+directed available/unavailable presence to connect/disconnect a transport (used
+by the Transports tab).
 
 ## 6. Login Form (`ui/login_widget.py`)
 
@@ -2738,7 +2754,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - `AdhocDialog(client, jid)` browses a service's XEP-0050 command list, executes
   one and walks its data form. The command list carries an «Выполнить» button
   (`adhoc_execute`) enabled only while a command is selected
-  (`itemSelectionChanged`); double-click still works.
+  (`itemSelectionChanged`); double-click still works. A form step whose server
+  sends no `<actions/>` gets an «Отправить» button (`adhoc_submit`) that
+  submits the XEP-0050 default action `complete`.
 - The roster contact context menu offers «Выполнить команду» right after
   «Приоритет уведомлений» (`MainWindow._build_adhoc_menu`): one entry per known
   resource (`bare/resource`), or a single «пусто» entry targeting the bare JID

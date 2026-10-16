@@ -162,7 +162,10 @@ Nickname fields carries a 16px icon button — `v-card.png` (tooltip `chat_vcard
 emits `vcard_requested(jid)` for the entered address (`MainWindow._on_add_contact`
 connects it to `_show_profile`), and `nick-fill.svg` (tooltip
 `add_contact_fill_nick`) fetches the vCard and fills the nickname from `nickname`,
-else `fn`, else the JID localpart. The conference dialog
+else `fn`, else the JID localpart. Its **service selector** lists the account
+domain's gateways (`discover_services`, `category == "gateway"`; discovered by
+the dialog itself, or passed as `gateways=[(name, jid)]` with `preselect=<jid>`)
+so a contact can be added through a transport. The conference dialog
 provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
 servers are persisted in `connection.conference_servers`; XEP-0048 bookmark
@@ -175,8 +178,9 @@ the legacy XEP-0048 storage is kept in sync too; `+notify` updates refresh the
 tab and auto-join/leave rooms (`_handle_bookmarks2_event`).
 
 The roster window is a **tabbed host** (`MainWindow._build_roster_tabs`): an
-icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` with three tabs —
-**Contacts** (the whole existing roster content), **Bookmarks** and **Events**.
+icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` with four tabs —
+**Contacts** (the whole existing roster content), **Bookmarks**, **Events** and
+**Transports**.
 The Contacts tab (icon `system-users.png`) is active at startup and is the
 `self._roster_page` placed in the stack/`QSplitter` (the `unified` layout wraps
 only this left part). The Bookmarks tab (icon `bookmarks.svg`)
@@ -206,7 +210,24 @@ only it — is removed on the first real entry; an earlier check keyed on "a
 single widget-less item" wrongly wiped the first event on the second push).
 A smooth tab-icon blink
 (`_start_event_blink`/`_event_blink_step`, the same cosine fade as the tray)
-stops and clears when the tab is shown. Ctrl+PgUp/PgDn cycles
+stops and clears when the tab is shown. The **Transports** tab (icon
+`transports.png`) lists the roster contacts classified as gateways and manages
+them: `_classify_transports` probes every roster contact once (cached in
+`_transport_jids`/`_transport_probed`, `client.discover_service_info` identity
+`category == "gateway"`) on roster load and on tab activation; a classified
+transport is filtered out of the Contacts roster (`_add_roster_item` skips it,
+`_probe_transport` removes the row) and rendered by a **second `RosterWidget`**
+(`_transport_roster`, same renderer/tooltip/font/colors, no group header). Its
+context menu (`_on_transport_context`) offers Connect/Disconnect (a **directed**
+presence — `JabberClient.send_directed_presence(to, type, status, priority)`;
+`_toggle_transport` sends `unavailable` to disconnect or an available presence
+to connect), vCard, chat, history, rename, the subscription submenu, the
+ad-hoc command menu, «Добавить контакт через этот транспорт»
+(`_on_add_contact_via_transport` → `AddContactDialog(preselect=…)`) and Remove
+(confirmed, `_remove_transport_confirmed` → `remove_contact`). A bottom toolbar
+mirrors Connect/Disconnect (`_on_transport_toggle`), Commands
+(`_on_transport_command` → `_open_adhoc`) and Remove, enabled only while a
+transport is selected. Ctrl+PgUp/PgDn cycles
 the roster tabs only in the `separate` layout with the main window active
 (`_cycle_roster_tab`); in `unified` the chat keeps the shortcut for its own tabs.
 The conference browser uses the names and metadata returned by the service's
@@ -424,12 +445,20 @@ and runs the full join flow (server persistence, bookmark support).
 `MainWindow._join_muc(..., server=…)` accepts the room localpart and server
 separately and assembles `room@server` when the room carries no `@` — both
 dialog callers pass `data["server"]`, so a join never sends a bare localpart
-or a `remote-server-not-found` disco to the room name alone.
+or a `remote-server-not-found` disco to the room name alone. The service
+in-band registration dialog (`ui/registration_dialog.py`, XEP-0077) wraps its
+`DataFormWidget` in an inner container inside the `QScrollArea` so
+`fit_dialog_to_content` sizes the window to the form (no scrollbars) — a form
+added directly to a widget-resizable scroll area reported the viewport height
+and left the dialog clipped.
 An XEP-0050 ad-hoc command dialog (`ui/adhoc_dialog.AdhocDialog`) browses a
 service's command list, executes one and walks its data form; the command list
 carries an «Выполнить» button enabled only while a command is selected
 (double-click still works), and the dialog is opened **non-modally** from the
-service browser and the roster contact menu. [`tests/test_adhoc.py`]
+service browser and the roster contact menu. A form step whose server sends no
+`<actions/>` (a single-step command) gets a «Отправить» button that submits the
+XEP-0050 default action `complete` — without it only Cancel/Close were shown.
+[`tests/test_adhoc.py`]
 The Actions menu's first item «Создать конференцию»
 (`ui/create_conference_dialog.py`, `conference-add.svg`) collects the room
 **address** (required, the part before «@», with an info glyph), an optional
