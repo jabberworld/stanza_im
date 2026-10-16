@@ -385,6 +385,7 @@ class ChatWidget(QtWidgets.QWidget):
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     reaction_like_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
+    emoji_picker_requested = QtCore.pyqtSignal(int, int)  # smiley btn x, y (screen)
     #   room, ref_id, reason  (XEP-0425 moderator retraction)
     message_moderate_sent = QtCore.pyqtSignal(str, str, str)
     typing_changed = QtCore.pyqtSignal(str, bool)  # jid, is_typing
@@ -1016,11 +1017,21 @@ class ChatWidget(QtWidgets.QWidget):
         self._input.setFocus()
 
     def _open_smiley_picker(self) -> None:
-        """Open the smiley picker (current emoticon set) above the button."""
-        from stanza_im.ui.smiley_picker import EmoticonSetSource, SmileyPicker
+        """Open the smiley picker above the button.
+
+        The active emoticon set uses the image grid; the unicode-emoji skin
+        reuses the XEP-0444 reaction picker (search + recent + categories),
+        opened by the main window with the same placement as reactions.
+        """
+        from stanza_im.include.emoticons import UNICODE_SKIN
         skin = getattr(self._theme, "emoticon_skin", "") or "default/smileys.cfg"
+        if skin == UNICODE_SKIN:
+            point = self._smiley_btn.mapToGlobal(QtCore.QPoint(0, 0))
+            self.emoji_picker_requested.emit(point.x(), point.y())
+            return
+        from stanza_im.ui.smiley_picker import EmoticonSetSource, SmileyPicker
         picker = SmileyPicker(EmoticonSetSource(skin), self)
-        picker.smiley_chosen.connect(self._insert_smiley)
+        picker.smiley_chosen.connect(self.insert_smiley)
         pos = self._smiley_btn.mapToGlobal(
             QtCore.QPoint(0, -picker.height()))
         screen = (QtWidgets.QApplication.screenAt(
@@ -1034,7 +1045,7 @@ class ChatWidget(QtWidgets.QWidget):
         picker.move(pos)
         picker.show()
 
-    def _insert_smiley(self, token: str) -> None:
+    def insert_smiley(self, token: str) -> None:
         """Insert a picked smiley's text code at the cursor."""
         if not token:
             return

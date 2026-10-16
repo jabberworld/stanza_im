@@ -251,6 +251,30 @@ def run() -> int:
         # Build the heavy widgets only after the login window is on screen.
         QtCore.QTimer.singleShot(0, window.build_deferred)
 
+    # Ctrl+C: run the same graceful shutdown as the tray/menu Quit (flush the
+    # unread/roster state, disconnect, cancel tasks, quit) instead of letting
+    # KeyboardInterrupt escape the Qt/qasync loop (which printed a traceback in
+    # eventFilter and aborted Qt).  add_signal_handler is available because
+    # qasync.QEventLoop subclasses the Unix selector loop.
+    import signal
+
+    def _on_sigint():
+        if getattr(window, "_shutting_down", False):
+            # A second Ctrl+C during a slow shutdown forces an immediate exit.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            os._exit(130)
+        window._quit()
+
+    try:
+        loop.add_signal_handler(signal.SIGINT, _on_sigint)
+    except (NotImplementedError, RuntimeError, ValueError):
+        # Fallback: a plain handler plus a keep-alive timer, so Python gets a
+        # chance to run it while the Qt loop is otherwise idle.
+        signal.signal(signal.SIGINT, lambda *_: _on_sigint())
+        _sigint_timer = QtCore.QTimer()
+        _sigint_timer.timeout.connect(lambda: None)
+        _sigint_timer.start(200)
+
     def _probe_omemo():
         # Importing the OMEMO backends pulls in xmlschema/oldmemo/twomemo
         # (hundreds of ms up to a few seconds cold).  Run it after the window

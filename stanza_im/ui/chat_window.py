@@ -63,6 +63,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._active_jid: str | None = None
         self._remote_activity: dict[str, str] = {}
         self._tab_status: dict[str, str] = {}   # jid -> latest show
+        self._tab_unread: dict[str, tuple[int, int]] = {}  # jid -> (unread, mentions)
+        self._show_unread_in_tabs = True
         self._chat_options = {}
         self._participant_font = ("", 0)
         self._input_font = ("", 0)
@@ -186,6 +188,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.unreaction_requested.connect(self.unreaction_requested)
         widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.reaction_like_requested.connect(self.reaction_like_requested)
+        widget.emoji_picker_requested.connect(
+            lambda x, y, j=widget.jid: self.emoji_picker_requested.emit(j, x, y))
         widget.typing_changed.connect(self.typing_changed)
         widget.bottom_reached.connect(
             lambda j=widget.jid: self.bottom_reached.emit(j))
@@ -226,12 +230,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.attention_ping_requested.connect(self.attention_ping_requested)
         widget.omemo_mode_requested.connect(self.omemo_mode_requested)
         widget.omemo_devices_requested.connect(self.omemo_devices_requested)
-        idx = self._tab_widget.addTab(widget, display_name)
+        idx = self._tab_widget.addTab(widget, self._tab_caption(widget))
         self._tab_widget.setTabToolTip(idx, jid)
         self._tabs[jid] = widget
         widget.set_notes_enabled(self._notes_enabled)
         self._tab_order.append(jid)
         self._apply_tab_icon(jid)
+        self._apply_tab_unread(jid)
         if focus:
             self._tab_widget.setCurrentIndex(idx)
             if self._embedded:
@@ -276,6 +281,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.unreaction_requested.connect(self.unreaction_requested)
         widget.reactions_list_requested.connect(self.reactions_list_requested)
         widget.reaction_like_requested.connect(self.reaction_like_requested)
+        widget.emoji_picker_requested.connect(
+            lambda x, y, j=widget.jid: self.emoji_picker_requested.emit(j, x, y))
         widget.typing_changed.connect(self.typing_changed)
         widget.bottom_reached.connect(
             lambda j=widget.jid: self.bottom_reached.emit(j))
@@ -339,6 +346,7 @@ class ChatWindow(QtWidgets.QMainWindow):
 
     def close_chat(self, jid: str) -> None:
         self._remote_activity.pop(jid, None)
+        self._tab_unread.pop(jid, None)
         if jid in self._tabs:
             widget = self._tabs[jid]
             widget.detach()
@@ -684,12 +692,57 @@ class ChatWindow(QtWidgets.QMainWindow):
             icon = QtGui.QIcon()
         self._tab_widget.setTabIcon(index, icon)
 
+    def set_unread(self, jid: str, unread: int, mentions: int = 0) -> None:
+        """Show the conversation's unread count on its tab (Psi style).
+
+        The tab text becomes ``[N] name`` and turns red for a 1:1/private chat
+        with unread messages (a conference only when a message mentions us).
+        The window title sums the open tabs' counters, so a conversation with
+        no open tab is ignored.
+        """
+        if jid not in self._tabs:
+            return
+        unread = max(0, int(unread or 0))
+        mentions = max(0, int(mentions or 0))
+        self._tab_unread[jid] = (unread, mentions)
+        self._apply_tab_unread(jid)
+        self._update_title()
+
+    def set_show_unread_in_tabs(self, show: bool) -> None:
+        """Toggle the unread indicator on the tabs and the window title."""
+        self._show_unread_in_tabs = bool(show)
+        for jid in list(self._tabs):
+            self._apply_tab_unread(jid)
+        self._update_title()
+
+    def _apply_tab_unread(self, jid: str) -> None:
+        widget = self._tabs.get(jid)
+        if widget is None:
+            return
+        index = self._tab_widget.indexOf(widget)
+        if index < 0:
+            return
+        self._tab_widget.setTabText(index, self._tab_caption(widget))
+        unread, mentions = self._tab_unread.get(jid, (0, 0))
+        color = QtGui.QColor()
+        if (self._show_unread_in_tabs and unread > 0
+                and (not widget.is_muc or mentions > 0)):
+            color = QtGui.QColor(0xcc, 0x00, 0x00)
+        self._tab_widget.tabBar().setTabTextColor(index, color)
+
+    def _unread_total(self) -> int:
+        return sum(unread for unread, _mentions in self._tab_unread.values())
+
     def _tab_caption(self, widget: ChatWidget) -> str:
         title = widget.display_name
-        available = max(1, self._tab_title_length)
+        unread = self._tab_unread.get(widget.jid, (0, 0))[0]
+        prefix = ""
+        if self._show_unread_in_tabs and unread > 0:
+            prefix = f"[{unread}] "
+        available = max(1, self._tab_title_length - len(prefix))
         if len(title) > available:
             title = title[:max(1, available - 1)] + "…"
-        return title
+        return prefix + title
 
     def tab_count(self) -> int:
         return len(self._tabs)
@@ -713,16 +766,30 @@ class ChatWindow(QtWidgets.QMainWindow):
         return None
 
     def _update_title(self):
-        """Title reflects the currently active chat."""
-        if self._embedded:
-            return
+        """Title reflects the active chat and the open tabs' unread total.
+
+        With unread messages anywhere in the open tabs the title reads
+        ``[<total>] <active chat name>`` regardless of which tab is active.
+        In embedded mode the title belongs to the main window, so it is emitted
+        through :attr:`window_title_changed` instead.
+        """
         w = self._tab_widget.currentWidget()
+        name = ""
         if isinstance(w, ChatWidget) and w.display_name:
             state = "" if w.is_muc else self._remote_activity.get(w.jid, "")
             suffix = "" if not state else f" ({state})"
-            self.setWindowTitle(w.display_name + suffix)
+            name = w.display_name + suffix
+        total = self._unread_total()
+        if not name:
+            text = APP_NAME
+        elif self._show_unread_in_tabs and total:
+            text = f"[{total}] {name}"
         else:
-            self.setWindowTitle(APP_NAME)
+            text = name
+        if self._embedded:
+            self.window_title_changed.emit(text)
+        else:
+            self.setWindowTitle(text)
 
     def set_remote_activity(self, jid: str, state: str):
         widget = self._tabs.get(jid)
@@ -753,6 +820,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     groupchat_message_edit_to_send = QtCore.pyqtSignal(str, str, str)
     message_retract_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     reaction_requested = QtCore.pyqtSignal(str, str, int, int)  # jid, ref_id, x, y
+    emoji_picker_requested = QtCore.pyqtSignal(str, int, int)  # jid, x, y
     unreaction_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
     reactions_list_requested = QtCore.pyqtSignal(str, str)  # jid, ref_id
     reaction_like_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref_id, emoji
@@ -804,6 +872,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     geo_message_corrected = QtCore.pyqtSignal(str, str, str)    # chat, ref, new_body
     window_closed = QtCore.pyqtSignal()                        # window closed
     attention_requested = QtCore.pyqtSignal(str)               # embedded: focus
+    window_title_changed = QtCore.pyqtSignal(str)  # embedded: MainWindow title
 
     # ── Internal ──────────────────────────────────────────────────
 

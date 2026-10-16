@@ -17,7 +17,10 @@ python -m stanza_im      # as module
 ```
 
 Entry point: `main.py` → `stanza_im.app.run()` → creates QApplication + qasync
-event loop (`qasync.QEventLoop`), creates MainWindow, enters loop.
+event loop (`qasync.QEventLoop`), creates MainWindow, enters loop. `Ctrl+C` is
+handled with `loop.add_signal_handler(SIGINT, …)` → `MainWindow._quit` (graceful
+shutdown; a second Ctrl+C forces `os._exit(130)`), so no `KeyboardInterrupt`
+escapes the Qt loop.
 
 **Startup stays light**: the OMEMO availability probe runs in a background
 daemon thread (`app.py`); `plugins.attention` avoids importing `core.client`
@@ -211,15 +214,18 @@ fires for every button, so Refresh/Edit must not close the window).
 Appearance settings support independent ordinary-chat and conference theme
 variants, arranged in the «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and
 «Разное» tabs («Разное» holds the media-preview size, the preview cache
-TTL/limit and the MUC mention highlight mode; «Ростер» toggles
-avatars/activity/mood/client in the roster; «Конференции» toggles the MUC
-participant avatars/client icons).
+TTL/limit, the MUC mention highlight mode and the unread-indicator toggle;
+«Ростер» toggles avatars/activity/mood/client in the roster; «Конференции»
+toggles the MUC participant avatars/client icons).
 Emoticon sets are discovered from cfg files under
 `resources/emoticons`, and the settings dialog previews up to ten images from
 the selected set. Because one image usually has several text aliases (`:)` and
 `:-)`), the preview list and the chat smiley picker are keyed by the **file**
 (one row per distinct image; `include.emoticons._file_codes` keeps the longest
-alias), while message rendering still replaces every alias.
+alias), while message rendering still replaces every alias. The selector also
+offers a `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
+``smileys*.cfg`` set (every lookup is empty, so `smile_to_html` is a no-op) and
+the chat smiley button reuses the XEP-0444 reaction picker instead.
 The service browser uses XEP-0030 discovery, groups identities by category and
 builds the tree fully lazily with no eager discovery: a node renders its direct
 children "as is" from a single `disco#items` request (with the parent's `node`
@@ -361,6 +367,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.muc_show_hats` | `true` | Show/hide XEP-0317 hat chips under messages in a MUC chat (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_hats_visible`). Off keeps the hats in the participant tooltip. |
 | `appearance.muc_participant_width` | `0` | Remembered MUC participant sidebar width in px (`0` = default 180); saved on splitter drag, restored for new MUC tabs. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
+| `appearance.show_unread_in_tabs` | `true` | Psi-style unread indicator on the chat tabs and the window title (`ChatWindow.set_unread`/`set_show_unread_in_tabs`): `[N] name` with `#cc0000` for a 1:1/private chat with unread (a conference only when a message mentions us), the window title summing the open tabs. Off hides the prefix, the color and the title total. Preferences → Appearance → «Разное». |
 | `ui.language` | `""` | UI language code (`en`/`ru`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
@@ -1673,6 +1680,12 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   record store; `_unread_counts`/`_unread_mentions`/`_unread_displayed` are
   derived views, applied in `_add_roster_item`/`_sync_conference_roster`,
   saved with a 1 s debounce and on quit).
+- The same counter drives a Psi-style indicator on the chat tabs and the window
+  title (`_push_unread_to_chat` → `ChatWindow.set_unread`): `[N] name`, painted
+  `#cc0000` for a 1:1/private chat with unread (a conference only when a message
+  mentions us), while the title reads `[<sum over the open tabs>] <active chat
+  name>` (through `window_title_changed` in `unified` mode). Toggled by
+  `appearance.show_unread_in_tabs` (default on).
 - Every conversation kind counts unread: 1:1 (`_on_message_received`), a
   conference (`_on_groupchat_message`, with `mention=True` when the body names
   our nickname per `mentions_nick`) and a MUC private message
@@ -2332,8 +2345,7 @@ Registers XEP plugins (conditionally where noted):
   tabs alike — via `ChatWidget.history_requested`), vCard, Smiley
   (`smiley.svg`, opens `ui/smiley_picker.py` — a frameless `Qt.Popup` grid of
   the current emoticon set whose chosen code is inserted as plain text into the
-  input; source-agnostic `SmileySource`/`EmoticonSetSource` so a unicode-emoji
-  source can be added to the smiley-theme selector later), and
+  input; source-agnostic `SmileySource`/`EmoticonSetSource`), and
   Send file (a menu with "P2P" and "HTTP Upload" for 1:1 chats; in a conference
   a plain button, HTTP Upload only). The Send control is a vertical icon-only
   button (an Enter-style arrow) whose height tracks the input field. The input

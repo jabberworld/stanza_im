@@ -2,9 +2,9 @@
 
 The picker is source-agnostic: a :class:`SmileySource` returns ``(token, icon)``
 pairs and the chosen token is inserted into the message input as plain text.
-Two sources are planned — the current ``smileys*.cfg`` emoticon set (token is
-the text code, e.g. ``:-)``) and, later, a unicode-emoji catalogue wired into
-the smiley-theme selector.
+It serves the ``smileys*.cfg`` emoticon set (token is the text code, e.g.
+``:-)``); the unicode-emoji smiley-theme option reuses the reaction picker
+(:class:`~stanza_im.ui.emoji_picker_dialog.EmojiPickerDialog`) instead.
 """
 from __future__ import annotations
 
@@ -41,17 +41,6 @@ class EmoticonSetSource(SmileySource):
             if not icon.isNull():
                 out.append((code, icon))
         return out
-
-
-class UnicodeEmojiSource(SmileySource):
-    """Unicode-emoji catalogue (placeholder for the future theme option).
-
-    Not wired yet: it will return ``(emoji, glyph icon)`` pairs from the
-    XEP-0444 catalogue once the smiley-theme selector offers the emoji variant.
-    """
-
-    def entries(self) -> list[tuple[str, QtGui.QIcon]]:
-        return []
 
 
 class SmileyPicker(QtWidgets.QFrame):

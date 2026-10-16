@@ -1317,6 +1317,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         emoticon_theme = QtWidgets.QComboBox()
         for item in emoticons.discover_sets():
             emoticon_theme.addItem(item["name"], item["id"])
+        emoticon_theme.addItem(tr("prefs_emoticon_unicode"),
+                               emoticons.UNICODE_SKIN)
         emoticon_theme.setFixedWidth(COMBO_WIDTH)
         self._controls["emoticon_theme"] = emoticon_theme
         form.addRow(tr("prefs_emoticon_theme"), emoticon_theme)
@@ -1426,6 +1428,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                              ("prefs_interface_separate", "separate"),
                              ("prefs_interface_unified", "unified"),
                          ]))
+        misc_form.addRow(self._check("show_unread_in_tabs",
+                                     tr("prefs_show_unread_in_tabs")))
 
         return self._tabs([(tr("prefs_appearance_themes"), themes),
                            (tr("prefs_appearance_roster"), roster),
@@ -1440,13 +1444,21 @@ class PreferencesDialog(QtWidgets.QDialog):
             if item.widget():
                 item.widget().deleteLater()
         skin = self._controls["emoticon_theme"].currentData()
-        for code, path in emoticons.preview_items(skin, 10):
-            label = QtWidgets.QLabel()
-            label.setToolTip(code)
-            label.setPixmap(QtGui.QPixmap(path).scaled(
-                24, 24, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation))
-            self._emoticon_preview.addWidget(label)
+        if skin == emoticons.UNICODE_SKIN:
+            from stanza_im.include import emoji_data
+            from stanza_im.ui.emoji_picker_dialog import emoji_font
+            for glyph in emoji_data.all_emoji()[:10]:
+                label = QtWidgets.QLabel(glyph)
+                label.setFont(emoji_font(18))
+                self._emoticon_preview.addWidget(label)
+        else:
+            for code, path in emoticons.preview_items(skin, 10):
+                label = QtWidgets.QLabel()
+                label.setToolTip(code)
+                label.setPixmap(QtGui.QPixmap(path).scaled(
+                    24, 24, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation))
+                self._emoticon_preview.addWidget(label)
         self._emoticon_preview.addStretch()
 
     def _disabled_combo(self, key: str) -> QtWidgets.QComboBox:
@@ -1753,6 +1765,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "muc_show_avatars": getattr(appearance, "muc_show_avatars", True),
             "muc_show_clients": getattr(appearance, "muc_show_clients", True),
             "muc_show_hats": getattr(appearance, "muc_show_hats", True),
+            "show_unread_in_tabs": getattr(
+                appearance, "show_unread_in_tabs", True),
             "file_auto_accept": bool(getattr(files, "auto_accept", False)),
             "file_download_notifications": bool(
                 getattr(files, "download_notifications", True)),
@@ -1896,7 +1910,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "muc_highlight_color", "colored_muc_nicks",
                     "roster_show_avatars", "roster_show_activity",
                     "roster_show_mood", "roster_show_clients",
-                    "muc_show_avatars", "muc_show_clients", "muc_show_hats"):
+                    "muc_show_avatars", "muc_show_clients", "muc_show_hats",
+                    "show_unread_in_tabs"):
             cfg.appearance[key] = self._value(key)
         if not hasattr(cfg, "files"):
             cfg.set("files", {"auto_accept": False,

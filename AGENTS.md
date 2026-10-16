@@ -78,7 +78,7 @@ stanza_im/                      # Python package
 │   ├── whiteboard_canvas.py     # QPainter whiteboard canvas + SVG export
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
 │   ├── emoji_picker_dialog.py   # XEP-0444 reaction picker (search/categories/recent)
-│   ├── smiley_picker.py         # Emoticon-set smiley picker (Qt.Popup grid)
+│   ├── smiley_picker.py         # Emoticon-set smiley picker (Qt.Popup grid; unicode reuses the emoji picker)
 │   ├── omemo_devices_dialog.py  # XEP-0384 device/trust manager
 │   ├── omemo_popup.py           # Chat shield: quick device trust/rename popup
 │   ├── qr_dialog.py             # QR code dialog (OMEMO fingerprint)
@@ -289,7 +289,13 @@ show a live preview of the selected emoticon set. A set's `smileys*.cfg` maps
 many text aliases to the same image; the picker and the preview list are keyed
 by the **file** (one row per distinct image, `include.emoticons._file_codes`
 keeps the longest alias), so `:)` and `:-)` never duplicate a row, while
-`smile_to_html` still renders every alias.
+`smile_to_html` still renders every alias. The emoticon-theme selector also
+offers the `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
+``smileys*.cfg`` set (every lookup is empty, so `smile_to_html` is a no-op) and
+`ChatWidget._open_smiley_picker` reuses the XEP-0444 reaction picker
+(`EmojiPickerDialog`, search + recent + categories) through the
+`emoji_picker_requested` signal → `MainWindow._on_emoji_picker_requested`
+(anchored above the smiley button like a reaction).
 
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
@@ -1250,7 +1256,15 @@ Unread counters are persisted per contact (`core/unread_state.py` →
 `MainWindow` keeps one record per chat key in `_unread_chats` and derives the
 `unread`/`mentions`/`read_sid` views from it (`_unread_counts`,
 `_unread_mentions`, `_unread_displayed` are properties), so the badge, the tray
-and the XEP-0490 seed can never drift apart; `_recount_unread` recomputes the
+and the XEP-0490 seed can never drift apart. The same counter is mirrored on the
+chat tabs and the window title (Psi style): `_push_unread_to_chat` →
+`ChatWindow.set_unread(jid, unread, mentions)` renders `[N] name` on the tab and
+paints it `#cc0000` for a 1:1/private chat with unread (a conference only when a
+message mentions us), while the title shows `[<sum over the open tabs>] <active
+chat name>` (in `unified` mode through the `window_title_changed` signal, since
+the title belongs to the main window); `appearance.show_unread_in_tabs` (default
+on, Preferences → Appearance → «Разное») turns it off.
+`_recount_unread` recomputes the
 aggregates (restored counters blink the tray again after a re-login,
 `_on_session_started`). It loads them at startup, applies them when building
 roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
@@ -2035,9 +2049,10 @@ HTTP Upload and gets a plain button (no menu). The Smiley button
 (`smiley.svg`, `ChatWidget._open_smiley_picker`) opens
 `ui/smiley_picker.py::SmileyPicker` — a frameless `Qt.Popup` grid of the current
 emoticon set (`EmoticonSetSource` over `include.emoticons.set_items`); the chosen
-code is inserted as plain text (`ChatWidget._insert_smiley`). The source is
-abstracted (`SmileySource`), so a unicode-emoji source can be added to the
-smiley-theme selector later. The Whiteboard button (`whiteboard.svg`,
+code is inserted as plain text (`ChatWidget.insert_smiley`). With the `unicode`
+emoticon-theme option the button instead emits `emoji_picker_requested` and
+`MainWindow._on_emoji_picker_requested` opens the reaction picker
+(`EmojiPickerDialog`) anchored above it. The Whiteboard button (`whiteboard.svg`,
 `ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
 _on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
 (non-modal, singleton per conversation): a custom `QPainter` canvas
@@ -2465,7 +2480,9 @@ tray paragraph). The Appearance page is split
 into «Темы», «Ростер», «Конференции», «Шрифты», «Цвет» and «Разное» («Ростер»
 toggles the roster avatars/activity/mood/client, see §3; «Конференции» toggles
 the MUC participant avatars/client icons; «Разное» holds the media-preview size,
-the preview cache TTL/limit and the MUC mention highlight mode). `Apply` applies
+the preview cache TTL/limit, the MUC mention highlight mode and the
+`appearance.show_unread_in_tabs` toggle — the Psi-style unread indicator on the
+chat tabs and the window title, default on). `Apply` applies
 settings without closing the dialog. Chat shortcuts include Enter/Ctrl+Enter, Esc,
 Up (empty input) to reply to the last incoming message, Down to cancel an
 untouched reply, Ctrl+Up to edit the last own message, Ctrl+PgUp/Ctrl+PgDown,
@@ -2803,6 +2820,13 @@ text is kept. Returning activity (`eventFilter`) resumes
 python main.py              # Direct
 python -m stanza_im         # Module
 ```
+
+`Ctrl+C` runs the same graceful shutdown as the Quit action: `app.py` installs
+`loop.add_signal_handler(SIGINT, …)` (qasync's loop subclasses the Unix selector
+loop), so the SIGINT never raises `KeyboardInterrupt` inside the Qt loop (which
+used to print a traceback in `eventFilter` and abort Qt) — the handler calls
+`MainWindow._quit` (flush state, disconnect ≤3 s, cancel tasks, quit); a second
+Ctrl+C forces `os._exit(130)`.
 
 Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
 SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`

@@ -11,6 +11,11 @@ _LINE_RE = re.compile(r"'(.+)'='(.+)'\s*$")
 _SETS: dict[str, dict] | None = None
 _MAP_CACHE: dict[str, dict[str, str]] = {}
 
+#: Pseudo-skin selecting the unicode-emoji picker instead of a ``smileys*.cfg``
+#: set.  It must never fall back to the default set (that would replace text
+#: codes with images), so every lookup treats it as an empty mapping.
+UNICODE_SKIN = "unicode"
+
 
 def _data_uri(path: str) -> str | None:
     try:
@@ -67,6 +72,8 @@ def discover_sets() -> list[dict]:
 
 
 def get_set(skin: str) -> dict | None:
+    if skin == UNICODE_SKIN:
+        return None
     sets = {item["id"]: item for item in discover_sets()}
     if skin in sets:
         return sets[skin]
@@ -76,6 +83,9 @@ def get_set(skin: str) -> dict | None:
 def _load_map(skin: str) -> dict[str, str]:
     if skin in _MAP_CACHE:
         return _MAP_CACHE[skin]
+    if skin == UNICODE_SKIN:
+        _MAP_CACHE[skin] = {}
+        return {}
     item = get_set(skin)
     resolved = {}
     if item:

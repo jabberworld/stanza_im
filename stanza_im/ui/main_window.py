@@ -530,6 +530,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_reactions_list_requested)
         self._chat_window.reaction_like_requested.connect(
             self._on_reaction_like_requested)
+        self._chat_window.emoji_picker_requested.connect(
+            self._on_emoji_picker_requested)
         self._chat_window.vcard_requested.connect(self._on_chat_vcard)
         self._chat_window.files_upload_requested.connect(
             lambda jid, paths, method: self._on_chat_files_upload(
@@ -555,6 +557,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.text_scale_changed.connect(
             self._on_text_scale_changed)
         self._chat_window.window_closed.connect(self._on_chat_window_closed)
+        self._chat_window.window_title_changed.connect(self.setWindowTitle)
         self._chat_window.media_view_requested.connect(
             self._on_media_view_requested)
         self._chat_window.media_save_requested.connect(
@@ -3287,6 +3290,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_muc_names()
         self._apply_roster_font()
         self._apply_avatar_radius()
+        self._chat_window.set_show_unread_in_tabs(bool(
+            getattr(self._config.appearance, "show_unread_in_tabs", True)))
         roster_opts = (
             bool(getattr(self._config.appearance, "roster_show_avatars", True)),
             bool(getattr(self._config.appearance, "roster_show_activity", True)),
@@ -5816,14 +5821,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         chat_window = getattr(self, "_chat_window", None)
         chat = chat_window.get_chat(jid) if chat_window is not None else None
-        if chat is None:
-            logger.debug("UNREAD[push] jid=%s no-chat", jid)
-            return
         entry = self._unread_chats.get(jid)
         count = int(entry["unread"]) if entry else 0
         mentions = int(entry["mentions"]) if entry else 0
         logger.debug("UNREAD[push] jid=%s count=%d mentions=%d",
                      jid, count, mentions)
+        if chat_window is not None:
+            # Psi-style tab/title indicator (red for 1:1, mentions for MUC).
+            chat_window.set_unread(jid, count, mentions)
+        if chat is None:
+            return
         try:
             chat.set_unread_count(count)
             chat.set_mention_count(mentions)
@@ -7664,6 +7671,30 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.adjustSize()
         self._place_popup_above(dlg, x, y)
         dlg.show()
+
+    def _on_emoji_picker_requested(self, jid: str, x: int = 0,
+                                   y: int = 0) -> None:
+        """Open the reaction-style emoji picker for a unicode-smiley chat."""
+        from stanza_im.ui.emoji_picker_dialog import EmojiPickerDialog
+        dlg = EmojiPickerDialog(self._recent_emoji(),
+                                parent=self._chat_dialog_parent())
+        dlg.setWindowFlags(
+            QtCore.Qt.WindowType.Popup | QtCore.Qt.WindowType.FramelessWindowHint)
+        dlg.emoji_chosen.connect(
+            lambda emoji: self._insert_chat_emoji(jid, emoji))
+        dlg.adjustSize()
+        self._place_popup_above(dlg, x, y)
+        dlg.show()
+
+    def _insert_chat_emoji(self, jid: str, emoji: str) -> None:
+        """Insert *emoji* into the open chat of *jid* and remember it."""
+        if not emoji:
+            return
+        self._remember_emoji(emoji)
+        chat_window = getattr(self, "_chat_window", None)
+        chat = chat_window.get_chat(jid) if chat_window is not None else None
+        if chat is not None:
+            chat.insert_smiley(emoji)
 
     def _apply_reaction(self, jid: str, ref_id: str, emoji: str) -> None:
         """Add *emoji* to our reaction set of the message *ref_id*."""
