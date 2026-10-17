@@ -2785,6 +2785,14 @@ class JabberClient:
 
     # ── XEP-0237 roster versioning cache ─────────────────────────
 
+    def seed_roster_cache(self) -> None:
+        """Preload the cached roster (public wrapper).
+
+        Used by the UI to render the last known roster immediately at login,
+        while the connection is still being established.
+        """
+        self._seed_roster_cache()
+
     def _seed_roster_cache(self) -> None:
         """Preload the cached roster so the server can answer "no changes"."""
         try:

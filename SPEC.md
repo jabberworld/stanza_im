@@ -510,11 +510,18 @@ Roster → («Действия» → «Завершить сеанс») → Logi
 ```
 
 The Splash is a **determinate progress report** (`MainWindow._set_splash(text,
-percent)`): «Подключение…» (10 %) → «Аутентификация…» (35 %, before
-`connect_async`) → «Соединение установлено» (60 %) → «Получение списка
-контактов…» (80 %, on `session_started`) → «Готово» (100 %, on
-`roster_received`, then the roster page is shown after a short delay). The
-roster page is switched on the actual `roster_received`, not a fixed timer.
+percent)`): «Подключение…» (10 %) → «Аутентификация…» (20 %) → «Соединение
+установлено» (60 %) → «Получение списка контактов…» (80 %, on `session_started`)
+→ «Готово» (100 %, on `roster_received`, then the roster page is shown after a
+short delay). The roster page is switched on the actual `roster_received`, not a
+fixed timer. `_on_login` first seeds and shows the **cached** roster
+(`client.seed_roster_cache()`) with a thin progress bar above the status combo,
+so the UI is usable while connecting in the background; the splash is kept only
+for a first login without a cache. `_connect_async` waits for the session to
+actually start (a `_session_ready` future, `_SESSION_TIMEOUT_S` = 30 s), since
+`connect_async()` resolves even when every attempt failed; a failure goes to the
+offline state on the roster (`_on_connect_failed`) and the tray stays offline
+until a real session.
 
 The Actions menu carries «Завершить сеанс» (above «Выход», same
 `gtk-quit.png` icon) → `MainWindow._logout`: flush unread/roster cache,
@@ -2641,12 +2648,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   own reconnect loop: `connect_async` retried with a 1/2/5/15/30 s backoff
   (capped, no attempt limit) until connected, emitting
   `reconnecting`/`reconnect_failed`/`reconnected`; a resume cancels it and
-  `disconnect()`/logout stops it. `manual_reconnect()` backs the status-bar
-  "Reconnect" button. MainWindow surfaces the state in the window status bar
-  for problem states only (`_set_busy_status`/`_set_offline_status`/
-  `_clear_status`): «Переподключение (попытка N)…» / «Отключено» plus a
-  «Переподключиться» button shown only while offline; the bar is hidden
-  otherwise.
+  `disconnect()`/logout stops it. `manual_reconnect()` backs the "Reconnect"
+  button. MainWindow surfaces the state **above the status combo** (never in a
+  window status bar): a thin `_conn_progress` bar and a flat `_reconnect_btn`
+  whose text is the countdown «Переподключение N с» (`login_reconnect_countdown`,
+  a 1 s `_reconnect_timer`) or «Переподключиться» (`_set_offline_status`); it is
+  hidden once a session is live (`_clear_status`).
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow recomputes activity from `QApplication.applicationState()` via an

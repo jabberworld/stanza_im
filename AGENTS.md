@@ -588,7 +588,17 @@ The login splash (`MainWindow._set_splash(text, percent)`, a determinate
 «Аутентификация…» (35 %) → «Соединение установлено» (60 %) → «Получение списка
 контактов…» (80 %, on `session_started`) → «Готово» (100 %, on
 `roster_received`, which then switches to the roster page instead of a fixed
-timer).
+timer). `_on_login` first seeds the **cached** roster (`client.
+seed_roster_cache()` → `get_roster_snapshot()`) and shows the roster page right
+away (with a thin `_conn_progress` bar above the status combo, `_set_conn_
+progress`), so the UI is usable while the connection is established in the
+background; the splash is kept only for a first login **without** a cache.
+`_connect_async` waits for the session to actually start (a `_session_ready`
+future resolved by `_on_session_started`, `_SESSION_TIMEOUT_S` = 30 s) —
+`connect_async()` resolves even when every attempt failed (slixmpp reschedules
+internally) — and a failure goes to `_on_connect_failed` (offline state on the
+roster + the reconnect button, never a false "connected"); the tray stays
+offline until a real session.
 A plugin that offers settings sets `PLUGIN_HAS_SETTINGS = True` and defines
 `open_settings(config, parent)` (opening its own dialog); its settings are
 persisted in the shared config under `[plugin_settings.<id>]`
@@ -632,7 +642,9 @@ into it (a note can be added from the message menu without the Notes tab ever
 having been opened), and every notes operation is serialised by an
 `asyncio.Lock`; success is reported via the `note_added(bool)` signal. The tab
 re-fetches on activation (`on_client_ready` preloads it too); a server without
-XEP-0049 shows a warning and an empty list. The plugin sets
+XEP-0049 shows a warning and an empty list, and an **offline** client skips the
+fetch entirely (no 15 s IQ timeout and no traceback — `IqTimeout`/`IqError` are
+logged as a one-line debug). The plugin sets
 `MainWindow._notes_feature` while active; the message menu's **«В заметки»**
 entry (after «Переслать», `chat_view.py`, gated by `window.__stanzaNotesEnabled`
 via `ChatWindow.set_notes_enabled`/`ChatWidget.set_notes_enabled`) sends the
@@ -2800,13 +2812,17 @@ text is kept. Returning activity (`eventFilter`) resumes
   a successful session re-runs the normal `_on_session_start`
   (roster/presence/PEP/autojoin). A `session_resumed` cancels any scheduled
   attempt. `disconnect()`/logout stops the loop; `manual_reconnect()` resets the
-  backoff for the status-bar "Reconnect" button. Messages sent while offline are
+  backoff for the "Reconnect" button. Messages sent while offline are
   not hard-blocked (a future offline outbox will flush them on reconnect,
   `_offline_outbox` is the placeholder). MainWindow shows the connection state
-  only in problem states via the window status bar (`_set_busy_status`/
-  `_set_offline_status`/`_clear_status`): reconnecting/attempt/offline plus a
-  «Переподключиться» button visible only while offline (`_on_reconnect_clicked`
-  → `manual_reconnect`). The bar is hidden otherwise.
+  **above the status combo** in the roster's bottom panel (never in a window
+  status bar, so the combo's area does not jump): a thin `_conn_progress` bar
+  (`_set_conn_progress`, determinate for the login stages, indeterminate while
+  reconnecting via `_set_busy_status`) and a flat `_reconnect_btn` whose text is
+  the **countdown** «Переподключение N с» (`login_reconnect_countdown`, a 1 s
+  `_reconnect_timer` from the `reconnecting` delay) or «Переподключиться»
+  (`_set_offline_status`); clicking it runs `manual_reconnect`
+  (`_on_reconnect_clicked`). `_clear_status` hides it once a session is live.
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow derives activity from

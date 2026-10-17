@@ -88,6 +88,10 @@ _MUC_JOIN_GRACE_S = 2.0
 # After login the server replays every contact's presence; suppress the
 # "X came online" OSD for this long so the initial sync is silent.
 _PRESENCE_OSD_GRACE_S = 5.0
+# How long to wait for the XMPP session to actually start after a connect
+# attempt before treating it as failed (connect_async() resolves even when
+# every attempt failed, since slixmpp reschedules internally).
+_SESSION_TIMEOUT_S = 30.0
 # While the replay is still arriving every new contact pushes the silence
 # window out by this much, so a slow/large roster is silent until the burst
 # really stops (instead of a fixed window that can expire mid-replay).
@@ -665,15 +669,7 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
 
         # Status bar (problem states only) + a "Reconnect" button shown offline.
-        self._status_bar = QtWidgets.QStatusBar()
-        self._status_label = QtWidgets.QLabel("")
-        self._status_bar.addWidget(self._status_label, 1)
-        self._reconnect_btn = QtWidgets.QPushButton(tr("reconnect_now"))
-        self._reconnect_btn.setVisible(False)
-        self._reconnect_btn.clicked.connect(self._on_reconnect_clicked)
-        self._status_bar.addPermanentWidget(self._reconnect_btn)
-        self._status_bar.setVisible(False)
-        self.setStatusBar(self._status_bar)
+
 
         self._stack = QtWidgets.QStackedWidget()
         main_layout.addWidget(self._stack)
@@ -776,6 +772,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_msg_btn.setToolTip(tr("status_message_title"))
         self._status_msg_btn.clicked.connect(self._on_edit_status_message)
         status_bar.addWidget(self._status_msg_btn)
+
+        # Connection state (progress + reconnect) sits ABOVE the status combo,
+        # so the combo's area never jumps while reconnecting.  The reconnect
+        # button doubles as the countdown label (compact at narrow widths).
+        conn_row = QtWidgets.QHBoxLayout()
+        conn_row.setContentsMargins(0, 0, 0, 0)
+        self._conn_progress = QtWidgets.QProgressBar()
+        self._conn_progress.setRange(0, 100)
+        self._conn_progress.setTextVisible(False)
+        self._conn_progress.setFixedHeight(6)
+        self._conn_progress.setVisible(False)
+        conn_row.addWidget(self._conn_progress, 1)
+        self._reconnect_btn = QtWidgets.QPushButton(tr("reconnect_now"))
+        self._reconnect_btn.setFlat(True)
+        self._reconnect_btn.setVisible(False)
+        self._reconnect_btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._reconnect_btn.clicked.connect(self._on_reconnect_clicked)
+        conn_row.addWidget(self._reconnect_btn)
+        self._reconnect_timer = QtCore.QTimer(self)
+        self._reconnect_timer.setInterval(1000)
+        self._reconnect_timer.timeout.connect(self._tick_reconnect)
+        self._reconnect_remaining = 0
+        roster_layout.addLayout(conn_row)
 
         roster_layout.addLayout(status_bar)
 
@@ -3562,6 +3581,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # password is only remembered when the user asked to save it).
         if jid:
             profiles.upsert(profiles.from_config(self._config))
+        self._connecting = True
         self._stack.setCurrentIndex(_PAGE_SPLASH)
         self._set_splash(tr("login_connecting"), 10)
 
@@ -3621,6 +3641,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_plugins()
         self._connect_client_signals()
 
+        # Show the last known roster right away and keep the UI usable while
+        # the connection is established in the background; a first login
+        # without a cache falls back to the splash.
+        self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
+        self._client.seed_roster_cache()
+        cached = self._client.get_roster_snapshot()
+        if cached:
+            self._rebuild_roster(cached)
+            self._sync_all_conference_roster()
+            self._sync_all_pm_roster()
+            self._sync_self_roster()
+            self._recount_groups()
+            self._roster.sort_and_update()
+            self._stack.setCurrentIndex(_PAGE_ROSTER)
+            self._set_conn_progress(5)
+        else:
+            self._stack.setCurrentIndex(_PAGE_SPLASH)
+            self._set_splash(tr("login_connecting"), 10)
         self._start_task(self._connect_async(jid, show))
 
     def _start_task(self, coro):
@@ -3635,27 +3673,56 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_login(jid, pw, show)
 
     async def _connect_async(self, jid: str, show: str):
+        from stanza_im.core.client import TLSOnlyUnavailable
+        loop = asyncio.get_event_loop()
+        self._session_ready = loop.create_future()
         try:
-            self._set_splash(tr("login_authenticating"), 35)
+            self._set_connect_progress(tr("login_authenticating"), 20)
             await self._client.connect_async()
+            # ``connect_async()`` resolves even when every attempt failed (the
+            # slixmpp connect loop reschedules internally), so wait for the
+            # session to really start before reporting success.
+            await asyncio.wait_for(asyncio.shield(self._session_ready),
+                                   timeout=_SESSION_TIMEOUT_S)
             self._client.send_presence(
                 show=show,
                 status=getattr(self._config.status, "message", "") or "")
-            # The roster is requested next; the splash switches to the roster
-            # page when the roster actually arrives (see _on_roster_received).
-            self._set_splash(tr("login_connected"), 60)
-        except Exception as e:
-            from stanza_im.core.client import TLSOnlyUnavailable
-            if isinstance(e, TLSOnlyUnavailable):
-                message = tr("login_tls_only_unavailable", domain=e.domain)
-                logger.error("TLS-only mode: no _xmpps-client SRV for %s",
-                             e.domain)
-            else:
-                logger.exception("Connection failed")
-                message = tr("login_connection_error", error=str(e))
+            # The roster is requested next; the progress finishes when it
+            # actually arrives (see _on_roster_received).
+            self._set_connect_progress(tr("login_connected"), 60)
+        except asyncio.TimeoutError:
+            logger.warning("Session did not start within %.0fs",
+                           _SESSION_TIMEOUT_S)
+            self._on_connect_failed(tr("login_connection_error_short"))
+        except TLSOnlyUnavailable as e:
+            message = tr("login_tls_only_unavailable", domain=e.domain)
+            logger.error("TLS-only mode: no _xmpps-client SRV for %s", e.domain)
             self._login.set_error(message)
             self._tray.show_message(APP_NAME, message)
             self._stack.setCurrentIndex(_PAGE_LOGIN)
+        except Exception as e:
+            logger.exception("Connection failed")
+            self._on_connect_failed(tr("login_connection_error", error=str(e)))
+
+    def _on_connect_failed(self, message: str) -> None:
+        """A connection attempt failed: stay usable on the roster, offline."""
+        self._connecting = False
+        self._set_offline_status()
+        self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
+        if self._stack.currentIndex() == _PAGE_SPLASH:
+            # A first login without a cache: fall back to the (empty) roster
+            # with the reconnect button rather than a dead splash.
+            self._stack.setCurrentIndex(_PAGE_ROSTER)
+        self._tray.show_message(APP_NAME, message)
+
+    def _set_connect_progress(self, text: str, percent: int) -> None:
+        """Update the splash and the roster connection progress together."""
+        self._set_splash(text, percent)
+        self._set_conn_progress(percent)
+
+    def _finish_connect_progress(self) -> None:
+        """The connection is up and the roster arrived: hide the bar."""
+        self._conn_progress.setVisible(False)
 
     def _on_connect_cancel(self):
         if self._client:
@@ -3774,11 +3841,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_session_started(self):
         logger.info("Session started, roster arriving...")
-        if self._stack.currentIndex() == _PAGE_SPLASH:
-            self._set_splash(tr("login_roster"), 80)
+        ready = getattr(self, "_session_ready", None)
+        if ready is not None and not ready.done():
+            ready.set_result(True)
+        # A live session: drop the reconnect affordance but keep the progress
+        # bar until the roster arrives (see _on_roster_received).
+        self._hide_reconnect()
+        self._set_connect_progress(tr("login_roster"), 80)
         # A successful login clears any stale "connection lost" status left by
         # a previous session (e.g. during a profile switch).
-        self._clear_status()
         self._presence_sound_seen.clear()
         self._osd_status_seen.clear()
         self._presence_osd_grace_until = time.monotonic() + _PRESENCE_OSD_GRACE_S
@@ -3832,15 +3903,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
 
     def _on_reconnecting(self, attempt: int, delay: float):
-        self._set_busy_status(
-            tr("login_reconnect_attempt", attempt=attempt))
+        """Show the reconnect state; the button carries the countdown."""
+        self._conn_progress.setRange(0, 0)   # indeterminate while retrying
+        self._conn_progress.setVisible(True)
         self._reconnect_btn.setVisible(True)
+        self._reconnect_remaining = max(0, int(round(delay)))
+        self._update_reconnect_text()
+        if self._reconnect_remaining > 0:
+            self._reconnect_timer.start()
         if self._visible:
             self._tray.show_message(APP_NAME, tr("login_reconnecting"))
 
+    def _tick_reconnect(self) -> None:
+        if self._reconnect_remaining <= 0:
+            self._reconnect_timer.stop()
+            return
+        self._reconnect_remaining -= 1
+        self._update_reconnect_text()
+        if self._reconnect_remaining <= 0:
+            self._reconnect_timer.stop()
+
+    def _update_reconnect_text(self) -> None:
+        if self._reconnect_remaining > 0:
+            self._reconnect_btn.setText(tr(
+                "login_reconnect_countdown", seconds=self._reconnect_remaining))
+        else:
+            self._reconnect_btn.setText(tr("login_reconnecting"))
+
     def _on_reconnect_failed(self, attempt: int):
-        self._set_offline_status(tr("login_disconnected"))
-        self._reconnect_btn.setVisible(True)
+        self._set_offline_status()
 
     def _on_reconnected(self):
         self._clear_status()
@@ -3853,19 +3944,35 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client is not None and self._reconnect_btn.isVisible():
             self._start_task(self._client.manual_reconnect())
 
-    def _set_busy_status(self, text: str) -> None:
-        self._status_label.setText(text)
-        self._status_bar.setVisible(True)
+    def _set_conn_progress(self, percent: int) -> None:
+        """Show the connection progress bar at *percent* (determinate)."""
+        self._conn_progress.setRange(0, 100)
+        self._conn_progress.setValue(max(0, min(100, int(percent))))
+        self._conn_progress.setVisible(True)
 
-    def _set_offline_status(self, text: str) -> None:
-        self._status_label.setText(text)
+    def _set_busy_status(self, text: str = "") -> None:
+        """Connecting/reconnecting: show the bar + the countdown button."""
+        self._conn_progress.setRange(0, 0)
+        self._conn_progress.setVisible(True)
         self._reconnect_btn.setVisible(True)
-        self._status_bar.setVisible(True)
+
+    def _set_offline_status(self, text: str = "") -> None:
+        """Offline: hide the bar and offer a manual reconnect."""
+        self._reconnect_timer.stop()
+        self._reconnect_remaining = 0
+        self._conn_progress.setVisible(False)
+        self._reconnect_btn.setText(tr("reconnect_now"))
+        self._reconnect_btn.setVisible(True)
+
+    def _hide_reconnect(self) -> None:
+        """Drop the reconnect affordance (a live session)."""
+        self._reconnect_timer.stop()
+        self._reconnect_remaining = 0
+        self._reconnect_btn.setVisible(False)
 
     def _clear_status(self) -> None:
-        self._status_label.setText("")
-        self._reconnect_btn.setVisible(False)
-        self._status_bar.setVisible(False)
+        self._hide_reconnect()
+        self._conn_progress.setVisible(False)
 
     def _on_stream_resumed(self):
         logger.info("Connection restored (stream resumed)")
@@ -3925,8 +4032,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_roster_received(self, items):
         """Full roster arrived (initial load or server refresh)."""
+        if getattr(self, "_connecting", False):
+            self._connecting = False
+            self._set_connect_progress(tr("login_ready"), 100)
+            QtCore.QTimer.singleShot(300, self._finish_connect_progress)
         if self._stack.currentIndex() == _PAGE_SPLASH:
-            self._set_splash(tr("login_ready"), 100)
             QtCore.QTimer.singleShot(
                 300, lambda: self._stack.setCurrentIndex(_PAGE_ROSTER))
         self._rebuild_roster(items)

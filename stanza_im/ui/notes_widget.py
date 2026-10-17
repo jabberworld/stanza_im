@@ -12,6 +12,7 @@ import asyncio
 import logging
 
 from PyQt6 import QtCore, QtGui, QtWidgets
+from slixmpp.exceptions import IqError, IqTimeout
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
@@ -123,8 +124,21 @@ class NotesWidget(QtWidgets.QWidget):
             if client is None:
                 self._loading = False
                 return
+            xmpp = getattr(client, "xmpp", None)
+            if xmpp is not None and not xmpp.is_connected():
+                # Offline: private storage is unreachable, do not wait for the
+                # IQ timeout (and do not log a traceback for it).
+                logger.debug("Notes fetch skipped: not connected")
+                self._notes = []
+                self._loading = False
+                self._rebuild()
+                self._show_status(tr("notes_no_private_storage"))
+                return
             try:
                 notes = await client.get_notes()
+            except (IqTimeout, IqError) as exc:
+                logger.debug("Notes fetch did not complete: %s", exc)
+                notes = None
             except Exception:  # noqa: BLE001
                 logger.debug("Could not fetch notes", exc_info=True)
                 notes = None
