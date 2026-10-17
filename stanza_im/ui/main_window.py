@@ -3844,10 +3844,14 @@ class MainWindow(QtWidgets.QMainWindow):
         ready = getattr(self, "_session_ready", None)
         if ready is not None and not ready.done():
             ready.set_result(True)
-        # A live session: drop the reconnect affordance but keep the progress
-        # bar until the roster arrives (see _on_roster_received).
+        # A live session: drop the reconnect affordance.  Keep the progress bar
+        # only for the initial connect (it finishes on roster_received); a
+        # reconnected/resumed session just hides it.
         self._hide_reconnect()
-        self._set_connect_progress(tr("login_roster"), 80)
+        if getattr(self, "_connecting", False):
+            self._set_connect_progress(tr("login_roster"), 80)
+        else:
+            self._conn_progress.setVisible(False)
         # A successful login clears any stale "connection lost" status left by
         # a previous session (e.g. during a profile switch).
         self._presence_sound_seen.clear()
