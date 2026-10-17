@@ -64,6 +64,40 @@ check("the day's messages are rendered",
       "hi" in dlg._messages.toPlainText()
       and "yo" in dlg._messages.toPlainText())
 
+# 1b. Global (all-contacts) search: only matching contacts stay in the tree.
+history.store_message("carol@example.com", "incoming", "hello world",
+                      sender="carol", timestamp="2026-02-03T09:00:00",
+                      message_id="c1", origin_id="c1")
+catalog2: list[dict] = [
+    {"jid": "bob@example.com", "name": "Bob", "groups": ["G"],
+     "is_conference": False},
+    {"jid": "carol@example.com", "name": "Carol", "groups": ["G"],
+     "is_conference": False},
+]
+
+
+async def _global():
+    d = HistoryManagerDialog(lambda: catalog2)
+    await asyncio.sleep(0.2)
+    d._btn_all_contacts.setChecked(True)
+    d._search.setText("hello")
+    d._on_search_run()
+    await asyncio.sleep(0.4)
+    return d
+
+
+gd = asyncio.get_event_loop().run_until_complete(_global())
+check("global search keeps only matching contacts",
+      gd._catalog_filter == {"carol@example.com"})
+check("global search filters the left tree",
+      gd._tree.topLevelItemCount() == 1
+      and gd._tree.topLevelItem(0).childCount() == 1
+      and gd._tree.topLevelItem(0).child(0).text(0) == "Carol")
+check("global search lists the matching day",
+      gd._results.count() == 1
+      and "Carol" in gd._results.item(0).text()
+      and "2026-02-03" in gd._results.item(0).text())
+
 # 2. Chat toolbar history button.
 cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
 seen = []

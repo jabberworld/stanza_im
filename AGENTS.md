@@ -454,7 +454,12 @@ localpart; `from_vcard` resolves bookmark name → vCard `fn` → vCard `nicknam
 and `_apply_muc_name` refreshes the tab title and roster row; the setting and
 bookmark changes apply live (`_refresh_muc_names`). [`tests/test_muc_name.py`]
 `ServiceBrowserDialog` groups XEP-0030 items into conferences, gateways,
-services and uncategorized items. It discovers the account domain on open and
+services, **management** and uncategorized items — an `item` carrying a `node`
+attribute (the server's administration nodes: config, users, s2s, …) goes to
+the «Управление» section (icon `gtk-preferences.png`, the same as Actions →
+Settings), its double click just expands it (the lazy `disco#items` with that
+`node` browses nested nodes) and selecting it shows its `disco#info` with the
+action buttons (including «Команды»/ad-hoc). It discovers the account domain on open and
 builds the tree fully lazily with no eager discovery: a node renders its
 direct children "as is" from one `disco#items` request, every service item
 shows a tentative expand arrow, and expanding or clicking a node issues its
@@ -525,8 +530,12 @@ history_requested` right after the clear button, icon `history.png`) groups
 contacts with history by their roster groups or the
 `core/known_contacts.py` registry (persisted JID → name/groups/conference flag
 so removed contacts keep their names), shows per-day bold dates in a
-`QCalendarWidget`, and supports day-scoped and all-time substring search
-(`core/history.dates/load_day/search_dates`). An export button
+`QCalendarWidget`, and supports day-scoped, all-time and **all-contacts**
+substring search (`core/history.dates/load_day/search_dates`). The «Все
+контакты» toggle (`_btn_all_contacts`) searches every JID with a local store
+(`history.list_history_jids`) in a worker thread, filters the left tree to the
+contacts with matches (`_catalog_filter` → `_rebuild_tree`) and lists
+`contact · date · count` rows; picking one selects that contact's day. An export button
 (`document-save.png`, `_on_export`) writes the **whole** conversation with the
 selected contact to a `.txt` file in a worker thread (`history.dates` +
 `load_day`), one `[YYYY-MM-DD HH:MM:SS] sender: body` line per message (own
@@ -708,9 +717,12 @@ The roster contact context menu also offers **«Выполнить команд�
 «Приоритет уведомлений»): `MainWindow._build_adhoc_menu` lists the contact's
 resources (`client.get_contact(bare).resources`), one entry per `bare/resource`
 (or a single «пусто» entry targeting the bare JID when the contact has no known
-resource); picking one opens `ui/adhoc_dialog.AdhocDialog` for that target
-**non-modally** (`_open_adhoc`, kept referenced in `_adhoc_dialogs` and dropped
-on `finished`). [`tests/test_adhoc.py`]
+resource). A **server JID** (a transport, no `@`) always targets the bare JID
+(its commands live there) and its empty resource — a bare presence gives
+`resources[""]` — is filtered out, so a blank entry / a `bare/` (unparseable)
+target can never appear; picking one opens `ui/adhoc_dialog.AdhocDialog` for
+that target **non-modally** (`_open_adhoc`, kept referenced in `_adhoc_dialogs`
+and dropped on `finished`). [`tests/test_adhoc.py`]
 
 A contact can be **dragged onto a group** (header or row): `RosterWidget`
 starts a `QDrag` (`application/x-stanza-roster-jid`) and emits
@@ -1538,7 +1550,9 @@ value is an `http(s)` URL) renders as a clickable link **only** — no editable
 input, link text is the field label (falling back to the short
 `captcha_open_oob`), the URL is the tooltip and the value is submitted
 unchanged (`DataFormWidget._link_label`/`_link_fields`); a `fixed` field with
-no label spans the full row so its text is not wrapped into a narrow column.
+no label spans the full row so its text is not wrapped into a narrow column;
+a `text-multi` field renders as a multi-line `QPlainTextEdit` whose value is
+the list of lines (one XEP-0004 `<value>` each).
 The dialog is sized to the form (`fit_dialog_to_content`, deferred after the
 form is built and re-run on the `media_ready` signal; it measures the live
 inner widget because `QScrollArea` caches its size hint, and clamps to the

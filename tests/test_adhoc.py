@@ -95,6 +95,57 @@ check("a form with no actions offers a Send button",
       tr("adhoc_submit") in labels)
 dlg2.close()
 
+# 9. The contact/transport menu's «Execute command» targets a valid JID: a
+#    server JID (a transport) uses the bare JID (its empty resource must not
+#    become a "bare/" target), a normal contact uses its resource.
+from PyQt6 import QtGui
+
+from stanza_im.ui.main_window import MainWindow
+
+
+class _MenuContact:
+    def __init__(self, resources):
+        self.resources = resources
+
+
+class _MenuClient:
+    def __init__(self):
+        self.contacts = {"xmpp.example.com": _MenuContact({"": {}}),
+                         "bob@example.com": _MenuContact({"res": {}})}
+
+    def get_contact(self, jid):
+        return self.contacts.get(jid) or _MenuContact({})
+
+
+win = MainWindow(app)
+win._idle_timer.stop()
+win._suspend_timer.stop()
+win._memory_timer.stop()
+win._client = _MenuClient()
+win._menu_icon = lambda name: QtGui.QIcon()
+captured: list[str] = []
+win._open_adhoc = lambda target: captured.append(target)
+
+menu = QtWidgets.QMenu()
+win._build_adhoc_menu(menu, "xmpp.example.com")
+sub = menu.actions()[0].menu()
+check("a transport command submenu has a label",
+      sub is not None and len(sub.actions()) == 1
+      and sub.actions()[0].text() == tr("adhoc_no_resource"))
+sub.actions()[0].trigger()
+check("a transport command targets the bare JID",
+      captured == ["xmpp.example.com"])
+
+captured.clear()
+menu2 = QtWidgets.QMenu()
+win._build_adhoc_menu(menu2, "bob@example.com")
+sub2 = menu2.actions()[0].menu()
+check("a contact command submenu lists its resource",
+      [a.text() for a in sub2.actions()] == ["res"])
+sub2.actions()[0].trigger()
+check("a contact command targets the full JID",
+      captured == ["bob@example.com/res"])
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

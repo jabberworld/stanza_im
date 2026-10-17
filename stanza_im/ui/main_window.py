@@ -8507,7 +8507,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         bare = jid.split("/", 1)[0]
         contact = self._client.get_contact(bare)
-        resources = sorted(getattr(contact, "resources", {}) or {})
+        # A server JID (a gateway/transport, no localpart) runs its commands on
+        # the bare JID; a resource-keyed command is never valid there.  An empty
+        # resource (a bare presence) must not become a "bare/" target either.
+        resources = []
+        if "@" in bare:
+            resources = sorted(r for r in (getattr(contact, "resources", {})
+                                           or {}) if r)
         submenu = parent_menu.addMenu(self._menu_icon("exec.png"),
                                       tr("ctx_adhoc_command"))
         if resources:

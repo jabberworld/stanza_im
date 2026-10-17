@@ -236,6 +236,17 @@ class DataFormWidget(QtWidgets.QWidget):
             return True
 
         if ftype in _TEXT_TYPES or ftype in ("", "text-single"):
+            if ftype == "text-multi":
+                # XEP-0004 text-multi is a list of lines (one <value> each).
+                edit = QtWidgets.QPlainTextEdit()
+                edit.setMinimumHeight(80)
+                if isinstance(value, (list, tuple)):
+                    edit.setPlainText("\n".join(str(v) for v in value))
+                else:
+                    edit.setPlainText(str(value or ""))
+                self._fields[var] = edit
+                layout.addRow(label, edit)
+                return True
             initial = value if isinstance(value, str) else (
                 value[0] if isinstance(value, list) and value else "")
             media = _field_media(field)
@@ -252,8 +263,6 @@ class DataFormWidget(QtWidgets.QWidget):
             if ftype == "text-private":
                 edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
             edit.setText(initial)
-            if ftype == "text-multi":
-                edit.setPlaceholderText("line1\\nline2")
             self._fields[var] = edit
             if media is not None:
                 layout.addRow(label, self._media_row(media, edit))
@@ -412,6 +421,9 @@ class DataFormWidget(QtWidgets.QWidget):
             if isinstance(widget, QtWidgets.QLineEdit):
                 if widget.text().strip():
                     continue
+            elif isinstance(widget, QtWidgets.QPlainTextEdit):
+                if widget.toPlainText().strip():
+                    continue
             elif isinstance(widget, QtWidgets.QCheckBox):
                 continue
             elif isinstance(widget, QtWidgets.QComboBox):
@@ -434,6 +446,9 @@ class DataFormWidget(QtWidgets.QWidget):
         widget = self._fields.get(var)
         if widget is None:
             return field["value"]
+        if isinstance(widget, QtWidgets.QPlainTextEdit):
+            text = widget.toPlainText()
+            return text.split("\n") if text else []
         if isinstance(widget, QtWidgets.QLineEdit):
             return widget.text()
         if isinstance(widget, QtWidgets.QCheckBox):

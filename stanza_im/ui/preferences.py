@@ -346,12 +346,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._controls[key] = widget
         return widget
 
-    def _combo(self, key: str,
-               options: list[tuple[str, str]]) -> QtWidgets.QComboBox:
+    def _combo(self, key: str, options: list[tuple[str, str]],
+               fixed_width: bool = True) -> QtWidgets.QComboBox:
         widget = QtWidgets.QComboBox()
         for label_key, data in options:
             widget.addItem(tr(label_key), data)
-        widget.setFixedWidth(COMBO_WIDTH)
+        if fixed_width:
+            widget.setFixedWidth(COMBO_WIDTH)
         self._controls[key] = widget
         return widget
 
@@ -1138,7 +1139,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                                 ("media_preview_images", "images"),
                                 ("media_preview_images_audio", "images_audio"),
                                 ("media_preview_all", "all"),
-                            ]))
+                            ], fixed_width=False))
         general_form.addRow(tr("prefs_idle_unload_minutes"),
                             self._spin("idle_unload_minutes", 0, 240))
         general_form.addRow(tr("prefs_history_limit"),

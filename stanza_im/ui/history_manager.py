@@ -67,6 +67,10 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._match_index = -1
         self._all_days: list[str] = []
         self._message_blocks: list[int] = []
+        #: ``{jid: [(date, count)]}`` of the last global (all-contacts) search.
+        self._global_days: dict[str, list[tuple[str, int]]] = {}
+        #: When set, the left tree shows only these JIDs (global search).
+        self._catalog_filter: set[str] | None = None
         self._released = False
 
         self.setWindowTitle(tr("history_manager"))
@@ -159,6 +163,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             QtCore.Qt.FocusPolicy.NoFocus)
         self._btn_all_time.toggled.connect(self._on_mode_toggled)
         search_row.addWidget(self._btn_all_time)
+        self._btn_all_contacts = QtWidgets.QPushButton(
+            tr("history_all_contacts"))
+        self._btn_all_contacts.setCheckable(True)
+        self._btn_all_contacts.setAutoDefault(False)
+        self._btn_all_contacts.setDefault(False)
+        self._btn_all_contacts.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._btn_all_contacts.setToolTip(tr("history_all_contacts_tip"))
+        self._btn_all_contacts.toggled.connect(self._on_all_contacts_toggled)
+        search_row.addWidget(self._btn_all_contacts)
         right_layout.addLayout(search_row)
 
         self._results = QtWidgets.QListWidget()
@@ -253,8 +266,11 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._tree.blockSignals(True)
         self._tree.clear()
         app_icon = _icon("stanza-im.png")
+        catalog = self._catalog
+        if self._catalog_filter is not None:
+            catalog = [c for c in catalog if c["jid"] in self._catalog_filter]
         groups: dict[str, list[dict]] = {}
-        for contact in self._catalog:
+        for contact in catalog:
             for group in contact["groups"]:
                 groups.setdefault(group, []).append(contact)
         for group in sorted(groups, key=str.casefold):
@@ -273,7 +289,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 header.addChild(item)
             self._tree.addTopLevelItem(header)
         self._tree.blockSignals(False)
-        has_contacts = bool(self._catalog)
+        has_contacts = bool(catalog)
         self._tree.setVisible(has_contacts)
         self._empty_label.setVisible(not has_contacts)
         self._calendar.setEnabled(has_contacts)
@@ -419,7 +435,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if self._released or date != self._date:
             return
         self._update_nav_state()
-        if not self._btn_all_time.isChecked():
+        if not self._multi_mode():
             self._results.hide()
 
     def _show_empty_day(self, value: str) -> None:
@@ -429,7 +445,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._message_blocks = []
         self._messages.clear()
         self._status.setText(tr("history_no_messages"))
-        if not self._btn_all_time.isChecked():
+        if not self._multi_mode():
             self._results.hide()
 
     def _jump_day(self, delta: int = 0, first: bool = False,
@@ -586,13 +602,66 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _on_search_run(self) -> None:
         self._query = self._search.text().strip()
-        if not self._query or not self._jid:
+        if not self._query:
+            self._clear_search_state()
+            return
+        if self._btn_all_contacts.isChecked():
+            self._run_global_search()
+            return
+        if not self._jid:
             self._clear_search_state()
             return
         if self._btn_all_time.isChecked():
             self._run_all_time_search()
         else:
             self._run_day_search()
+
+    def _run_global_search(self) -> None:
+        self._start_task(self._run_global_search_async())
+
+    async def _run_global_search_async(self) -> None:
+        """Search every contact's history for *query* (all-contacts mode)."""
+        if self._released:
+            return
+        query = self._query
+        names = {c["jid"]: c["name"] for c in self._catalog}
+
+        def _collect() -> dict[str, list[tuple[str, int]]]:
+            found: dict[str, list[tuple[str, int]]] = {}
+            for jid in history.list_history_jids():
+                result = history.search_dates(jid, query)
+                if result:
+                    found[jid] = result
+            return found
+
+        try:
+            found = await asyncio.to_thread(_collect)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Global history search failed: %s", exc)
+            found = {}
+        if self._released or query != self._search.text().strip():
+            return
+        self._global_days = found
+        # The left tree keeps only the contacts that matched.
+        self._catalog_filter = set(found)
+        self._rebuild_tree()
+        rows = [(date, jid, count)
+                for jid, days in found.items() for date, count in days]
+        rows.sort(key=lambda row: row[0], reverse=True)
+        self._results.clear()
+        for date, jid, count in rows:
+            item = QtWidgets.QListWidgetItem(
+                tr("history_global_result",
+                   name=names.get(jid, jid), date=date, count=count))
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, (jid, date))
+            self._results.addItem(item)
+        self._update_match_buttons()
+        if not rows:
+            self._results.hide()
+            self._status.setText(tr("history_no_results"))
+        else:
+            self._results.show()
+        self._search.setFocus()
 
     def _run_day_search(self) -> None:
         self._start_task(self._run_day_search_async())
@@ -642,14 +711,49 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._search.setFocus()
 
     def _on_result_picked(self, item: QtWidgets.QListWidgetItem) -> None:
-        date = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        data = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if isinstance(data, tuple):
+            jid, date = data
+            self._start_task(self._open_global_result(jid, date))
+            return
+        date = data
         if date in self._all_days:
             self._go_to_day(self._all_days.index(date))
         if self._btn_all_time.isChecked():
             self._results.show()
         self._search.setFocus()
 
+    async def _open_global_result(self, jid: str, date: str) -> None:
+        """Open a matched contact's day from a global-search result."""
+        query = self._search.text().strip()
+        contact = next((c for c in self._catalog if c["jid"] == jid), None)
+        name = contact["name"] if contact else jid
+        await self._select_jid_async(jid, name)
+        if self._released or self._jid != jid:
+            return
+        await self._select_date_async(date)
+        if self._released or self._date != date:
+            return
+        # Selecting a contact/day clears the search box; restore the query.
+        self._search.setText(query)
+        self._query = query
+        self._find_day_matches()
+        self._match_index = 0 if self._matches else -1
+        self._update_match_buttons()
+        if self._matches:
+            self._jump_to_match(0)
+        self._results.show()
+        self._search.setFocus()
+
+    def _multi_mode(self) -> bool:
+        """True when the results list drives the navigation."""
+        return (self._btn_all_time.isChecked()
+                or self._btn_all_contacts.isChecked())
+
     def _on_match_prev(self) -> None:
+        if self._btn_all_contacts.isChecked():
+            self._step_results(-1)
+            return
         if self._btn_all_time.isChecked():
             self._step_all_time(-1)
             return
@@ -659,6 +763,9 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._jump_to_match(self._match_index)
 
     def _on_match_next(self) -> None:
+        if self._btn_all_contacts.isChecked():
+            self._step_results(1)
+            return
         if self._btn_all_time.isChecked():
             self._step_all_time(1)
             return
@@ -666,6 +773,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             return
         self._match_index = (self._match_index + 1) % len(self._matches)
         self._jump_to_match(self._match_index)
+
+    def _step_results(self, delta: int) -> None:
+        """Step the global-search result list and open the selected row."""
+        count = self._results.count()
+        if count == 0:
+            return
+        row = (self._results.currentRow() + delta) % count
+        self._results.setCurrentRow(row)
+        self._on_result_picked(self._results.item(row))
 
     def _step_all_time(self, delta: int) -> None:
         if not self._all_days:
@@ -709,13 +825,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._match_index = len(self._matches) - 1 if last_match else 0
         self._update_match_buttons()
         self._results.setCurrentRow(pos)
-        if not self._btn_all_time.isChecked():
+        if not self._multi_mode():
             self._results.hide()
         if self._matches:
             self._jump_to_match(self._match_index)
 
     def _update_match_buttons(self) -> None:
-        if self._btn_all_time.isChecked():
+        if self._multi_mode():
             enabled = self._results.count() > 0
         else:
             enabled = len(self._matches) >= 2
@@ -761,3 +877,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._clear_search_state()
         self._all_days = []
         self._results.hide()
+
+    def _on_all_contacts_toggled(self, checked: bool) -> None:
+        """Switch between the per-contact and the all-contacts search."""
+        self._clear_search_state()
+        self._global_days = {}
+        self._all_days = []
+        self._results.hide()
+        self._catalog_filter = None
+        self._rebuild_tree()

@@ -237,7 +237,10 @@ service item shows a tentative expand arrow immediately, and expanding or
 clicking a node issues its own `disco#items` before the branch contents are
 drawn — nodes that return no children lose their arrow. Deep items inherit the
 parent's icon; only the top level is classified via `disco#info` to drive the
-category grouping. Items that repeat their own parent (`jid`+`node`) are
+category grouping. An item carrying a `node` attribute (the server's
+administration nodes) is grouped into the «Управление» section (icon
+`gtk-preferences.png`) and expands into its nested `disco#items(node)` children
+on a double click. Items that repeat their own parent (`jid`+`node`) are
 dropped to avoid self-referencing loops.
 `Автообзор` recursively browses the whole tree with a bounded depth. Used
 servers are stored in `connection.service_servers`. Double-clicking a
@@ -1529,7 +1532,8 @@ affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
 - «Шапки» — XEP-0317 hats, see §11.7.1 (always shown; owner/admin only).
 - «Настройки» — enabled for the owner only; fetches the `muc#owner` room form
   (`client.muc_get_config`) into a `DataFormWidget`, whose `list-single`
-  selectors are all sized to the widest one (`_align_selectors`).
+  selectors are all sized to the widest one (`_align_selectors`); a `text-multi`
+  field is a multi-line `QPlainTextEdit` whose value is the list of lines.
 
 Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
 `client.muc_set_config`); «Отмена» discards them. Only what changed is sent:
@@ -2671,6 +2675,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   calendar day that is not among them re-reads `history.dates_async` first
   (`_recheck_date_async`), so days added by a MAM backfill after the dialog
   opened are highlighted and load their messages.
+- The «Все контакты» toggle (`_btn_all_contacts`) searches every JID with a
+  local store (`history.list_history_jids`, in a worker thread), filters the
+  left tree to the contacts with matches (`_catalog_filter`) and lists
+  `contact · date · count` rows; picking one selects that contact's day.
 
 ### 14.8.2 Notes (Notes plugin, `stanza_im/plugins/notes/`)
 
@@ -2793,8 +2801,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - The roster contact context menu offers «Выполнить команду» right after
   «Приоритет уведомлений» (`MainWindow._build_adhoc_menu`): one entry per known
   resource (`bare/resource`), or a single «пусто» entry targeting the bare JID
-  when the contact has no resource. Picking one opens `AdhocDialog` for that
-  target.
+  when the contact has no resource. A server JID (a transport, no `@`) always
+  targets the bare JID and its empty `resources[""]` (bare presence) is filtered
+  out, so a blank entry / a `bare/` (unparseable) target never appears. Picking
+  one opens `AdhocDialog` for that target.
 - The dialog is opened **non-modally** (`setModal(False)` + `show()`, the
   reference kept in `_adhoc_dialogs` and dropped on `finished`) from both the
   service browser and the roster contact menu. Other dialogs are still modal

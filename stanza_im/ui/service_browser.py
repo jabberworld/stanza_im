@@ -45,8 +45,11 @@ _ROOT_KEYS = (
     ("service_conferences", "muc.png"),
     ("service_transports", "transports.png"),
     ("service_services", "system-users.png"),
+    ("service_management", "gtk-preferences.png"),
     ("service_other", "event.png"),
 )
+#: Icon for the admin ``item node`` entries (same as Actions → Settings).
+_MANAGEMENT_ICON = "gtk-preferences.png"
 _ACTION_SPECS = (
     ("service_register", "register.png"),
     ("service_unregister", "register.png"),
@@ -315,8 +318,14 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
             if key in self._seen:
                 continue
             self._seen.add(key)
-            roots[self._category_root_key(item.get("category", ""))].addChild(
-                self._make_node(item))
+            if item.get("node"):
+                # A node-scoped item (server administration: config, users,
+                # s2s, …) goes to its own «Управление» section.
+                roots["service_management"].addChild(
+                    self._make_node(item, _MANAGEMENT_ICON))
+            else:
+                roots[self._category_root_key(item.get("category", ""))].addChild(
+                    self._make_node(item))
         self._record_server(server)
         if self._auto.isChecked():
             for root in roots.values():
@@ -419,6 +428,10 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
                       _column: int) -> None:
         data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         if not data or not data.get("jid"):
+            return
+        if data.get("node"):
+            # A management node: browse its (possibly nested) children.
+            item.setExpanded(not item.isExpanded())
             return
         if data.get("category") == "conference":
             if item.isExpanded():

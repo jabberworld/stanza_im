@@ -306,6 +306,17 @@ check("rss gateways keep the rss icon",
           None, {"category": "gateway", "type": "rss"})
       == "rss-online.png")
 
+# Node-scoped items (server administration) get their own «Управление» section.
+check("a management section is registered",
+      "service_management" in browser and "gtk-preferences.png" in browser)
+check("management nodes are routed by the node attribute",
+      '_MANAGEMENT_ICON' in browser
+      and 'if item.get("node"):' in browser
+      and 'roots["service_management"].addChild(' in browser)
+check("a management node expands on double click",
+      'if data.get("node"):' in browser
+      and "item.setExpanded(not item.isExpanded())" in browser)
+
 mw = _read("stanza_im", "ui", "main_window.py")
 check("the main window routes the browser's xmpp: links",
       "dlg.xmpp_uri_requested.connect(self._on_xmpp_uri)" in mw)
