@@ -151,6 +151,11 @@ class _LazyControls(dict):
             self._owner._ensure_all_pages()
         return super().__contains__(key)
 
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if self._owner is not None:
+            self._owner._record_control_page(key)
+
 
 class PreferencesDialog(QtWidgets.QDialog):
     """Edit application settings grouped like the original Jabbim dialog."""
@@ -172,6 +177,11 @@ class PreferencesDialog(QtWidgets.QDialog):
                               else SoundPlayer())
         self.setWindowTitle(tr("prefs_title"))
         self.setMinimumSize(760, 540)
+        # Which page each control belongs to (for the «Reset to defaults»
+        # button); ``_building_page`` is set by ``_page()`` while a page is
+        # being constructed.
+        self._control_pages: dict[str, QtWidgets.QWidget] = {}
+        self._building_page: QtWidgets.QWidget | None = None
         # Pages are built lazily, so a direct ``controls[key]`` lookup for a
         # not-yet-built page forces every page to build (used by tests/tools);
         # the UI itself only touches built controls.
@@ -222,7 +232,20 @@ class PreferencesDialog(QtWidgets.QDialog):
         buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Apply).clicked.connect(
             self._apply_settings)
         buttons.rejected.connect(self.reject)
-        outer.addWidget(buttons)
+        # The «Reset to defaults» button sits away from Ok/Apply/Cancel.
+        bottom = QtWidgets.QHBoxLayout()
+        self._btn_reset = QtWidgets.QToolButton()
+        icon = QtGui.QIcon(find_icon("reset-defaults.svg"))
+        if not icon.isNull():
+            self._btn_reset.setIcon(icon)
+        self._btn_reset.setIconSize(QtCore.QSize(16, 16))
+        self._btn_reset.setAutoRaise(True)
+        self._btn_reset.setToolTip(tr("prefs_reset_defaults_tip"))
+        self._btn_reset.clicked.connect(self._reset_current_page)
+        bottom.addWidget(self._btn_reset)
+        bottom.addStretch(1)
+        bottom.addWidget(buttons)
+        outer.addLayout(bottom)
 
         sections = (
             ("prefs_application", "stanza-im", self._page_application),
@@ -303,13 +326,19 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._defer_timer.timeout.connect(self._build_pages_deferred)
         self._defer_timer.start(0)
 
-    @staticmethod
-    def _page() -> tuple[QtWidgets.QWidget, QtWidgets.QFormLayout]:
+    def _page(self) -> tuple[QtWidgets.QWidget, QtWidgets.QFormLayout]:
         page = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(page)
         form.setFieldGrowthPolicy(
             QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        # Controls created from now on belong to this page (until the next
+        # ``_page()`` call).
+        self._building_page = page
         return page, form
+
+    def _record_control_page(self, key: str) -> None:
+        if self._building_page is not None:
+            self._control_pages[key] = self._building_page
 
     @staticmethod
     def _default_app_font() -> tuple[str, float]:
@@ -649,6 +678,20 @@ class PreferencesDialog(QtWidgets.QDialog):
         button.setAutoRaise(True)
         button.setToolTip(tr("prefs_sound_preview_tip"))
         button.clicked.connect(lambda: self._play_sound(event))
+        return button
+
+    def _sound_file_button(self, rel: str) -> QtWidgets.QToolButton:
+        """A note glyph that previews a loose effect file (e.g. the ringtone)."""
+        button = QtWidgets.QToolButton()
+        icon = QtGui.QIcon(find_icon("sound.svg"))
+        if not icon.isNull():
+            button.setIcon(icon)
+        button.setIconSize(QtCore.QSize(16, 16))
+        button.setAutoRaise(True)
+        button.setToolTip(tr("prefs_sound_preview_tip"))
+        button.clicked.connect(
+            lambda: self._sound_player.play_file(
+                sounds_mod.effect_path(rel)))
         return button
 
     def _play_sound(self, event: str) -> None:
@@ -1372,6 +1415,13 @@ class PreferencesDialog(QtWidgets.QDialog):
                                         default_size))
         font_form.addRow(tr("prefs_font_osd"),
                          self._font_row("osd_font", default_family, default_size))
+        font_form.addRow(tr("prefs_font_menu"),
+                         self._font_row("menu_font", default_family, default_size))
+        font_form.addRow(tr("prefs_font_tab"),
+                         self._font_row("tab_font", default_family, default_size))
+        font_form.addRow(tr("prefs_font_selector"),
+                         self._font_row("selector_font", default_family,
+                                        default_size))
 
         # The nickname and input "default" follow the chat font (a real value
         # picks the chat family/size; an empty one falls through to the system
@@ -1496,6 +1546,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                 ("sound_contact_offline", "contact_offline")):
             sound_form.addRow(self._row(self._sound_button(event),
                                         self._check(key, tr(f"prefs_{key}"))))
+        sound_form.addRow(self._row(
+            self._sound_file_button("effects/ringtone.wav"),
+            self._check("sound_call_incoming",
+                        tr("prefs_sound_call_incoming"))))
 
         osd, osd_form = self._page()
         osd_form.addRow(self._check("osd_enabled", tr("prefs_osd_enabled")))
@@ -1635,8 +1689,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             if key in self._controls.keys() and (keys is None or key in keys):
                 self._set(key, value)
 
-    def _values_dict(self):
-        cfg = self._config
+    def _values_dict(self, cfg=None):
+        cfg = cfg if cfg is not None else self._config
         connection = cfg.connection
         chat = cfg.chat
         privacy = cfg.privacy
@@ -1747,6 +1801,12 @@ class PreferencesDialog(QtWidgets.QDialog):
                 appearance, "muc_subject_font_size", 0),
             "input_font": getattr(appearance, "input_font", ""),
             "input_font_size": getattr(appearance, "input_font_size", 0),
+            "menu_font": getattr(appearance, "menu_font", ""),
+            "menu_font_size": getattr(appearance, "menu_font_size", 0),
+            "tab_font": getattr(appearance, "tab_font", ""),
+            "tab_font_size": getattr(appearance, "tab_font_size", 0),
+            "selector_font": getattr(appearance, "selector_font", ""),
+            "selector_font_size": getattr(appearance, "selector_font_size", 0),
             "avatar_radius": getattr(appearance, "avatar_radius", 20),
             "tooltip_avatar_size": getattr(
                 appearance, "tooltip_avatar_size", 64) or 64,
@@ -1798,9 +1858,26 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("sound_first_message", "sound_any_message",
                     "sound_muc_mention", "sound_on_send", "sound_ft_start",
                     "sound_ft_finish", "sound_contact_online",
-                    "sound_contact_offline"):
+                    "sound_contact_offline", "sound_call_incoming"):
             values[key] = bool(getattr(notifications, key, False))
         return values
+
+    def _reset_current_page(self) -> None:
+        """Reset the current tab's (or page's) controls to first-run defaults.
+
+        Only the widgets are written; the values are persisted on
+        «Ок»/«Применить» like any other edit.
+        """
+        page = self._stack.currentWidget()
+        if isinstance(page, QtWidgets.QTabWidget):
+            page = page.currentWidget()
+        if page is None:
+            return
+        keys = [key for key, owner in self._control_pages.items()
+                if owner is page]
+        if not keys:
+            return
+        self._apply_values(self._values_dict(Config.defaults()), keys=keys)
 
     def _on_ok(self):
         self._apply_settings()
@@ -1893,7 +1970,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("sound_first_message", "sound_any_message",
                     "sound_muc_mention", "sound_on_send", "sound_ft_start",
                     "sound_ft_finish", "sound_contact_online",
-                    "sound_contact_offline"):
+                    "sound_contact_offline", "sound_call_incoming"):
             cfg.notifications[key] = self._value(key)
         for key in ("auto_away", "away_minutes", "auto_xa", "xa_minutes"):
             cfg.status[key] = self._value(key)
@@ -1905,6 +1982,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "participant_font", "participant_font_size",
                     "muc_subject_font", "muc_subject_font_size",
                     "input_font", "input_font_size", "tooltip_avatar_size",
+                    "menu_font", "menu_font_size", "tab_font", "tab_font_size",
+                    "selector_font", "selector_font_size",
                     "osd_bg_color", "osd_font_color", "osd_opacity",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",

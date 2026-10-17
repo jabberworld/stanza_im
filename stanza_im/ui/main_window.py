@@ -30,6 +30,7 @@ from stanza_im.include.constants import (APP_NAME, VERSION,
                                       webengine_available)
 from stanza_im.include import pep
 from stanza_im.include import clients as clients_mod
+from stanza_im.include import sounds as sounds_mod
 from stanza_im.core.storage import Config
 from stanza_im.core import profiles, unread_state
 from stanza_im.ui.icons import init_icons
@@ -256,6 +257,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._call_windows: dict[str, object] = {}      # sid -> CallWindow
         self._incoming_calls: dict[str, object] = {}    # sid -> IncomingCallDialog
         self._call_targets: dict[str, str] = {}         # sid -> peer jid
+        #: Looping call-sound paths (empty when not playing): the incoming
+        #: ringtone and the outgoing ringback.
+        self._ringing_path = ""
+        self._ringback_path = ""
         self._muji_windows: dict[str, object] = {}      # room -> MujiCallWindow
         self._muji_preview_sids: dict[str, str] = {}    # room -> self-preview sid
         self._roster_style = RosterStyle()
@@ -3156,6 +3161,43 @@ class MainWindow(QtWidgets.QMainWindow):
             # No saved password: stay on the login form, ready to type it.
             self._login._pw_edit.setFocus()
 
+    def _apply_widget_fonts(self) -> None:
+        """Apply the menu / tab-bar / selector fonts app-wide (via QSS).
+
+        These widgets are created dynamically all over the app (context menus,
+        tab bars, dialog selectors), so an application stylesheet with type
+        selectors is the only practical way to reach them all.
+        """
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return
+        appearance = self._config.appearance
+        rules = []
+        for selectors, family, size in (
+                ("QMenuBar, QMenu",
+                 getattr(appearance, "menu_font", ""),
+                 getattr(appearance, "menu_font_size", 0)),
+                ("QTabBar",
+                 getattr(appearance, "tab_font", ""),
+                 getattr(appearance, "tab_font_size", 0)),
+                ("QComboBox",
+                 getattr(appearance, "selector_font", ""),
+                 getattr(appearance, "selector_font_size", 0))):
+            decls = []
+            family = str(family or "")
+            if family:
+                safe = family.replace("\\", "\\\\").replace("'", "\\'")
+                decls.append(f"font-family: '{safe}';")
+            try:
+                size = int(size or 0)
+            except (TypeError, ValueError):
+                size = 0
+            if size:
+                decls.append(f"font-size: {size}pt;")
+            if decls:
+                rules.append(f"{selectors} {{ {' '.join(decls)} }}")
+        app.setStyleSheet("\n".join(rules))
+
     def _apply_roster_font(self) -> None:
         """Apply the configured roster font (empty family = application font)."""
         roster = getattr(self, "_roster", None)
@@ -3289,6 +3331,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_interface_mode()
         self._refresh_muc_names()
         self._apply_roster_font()
+        self._apply_widget_fonts()
         self._apply_avatar_radius()
         self._chat_window.set_show_unread_in_tabs(bool(
             getattr(self._config.appearance, "show_unread_in_tabs", True)))
@@ -4520,11 +4563,18 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.decision.connect(
             lambda accept, video: self._client.answer_call(sid, accept, video))
         self._incoming_calls[sid] = dlg
-        dlg.finished.connect(lambda _r, s=sid: self._incoming_calls.pop(s, None))
+        dlg.finished.connect(
+            lambda _r, s=sid: self._on_incoming_dialog_closed(s))
         self._place_dialog_over(dlg, self)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+        self._start_call_ring()
+
+    def _on_incoming_dialog_closed(self, sid: str) -> None:
+        """An incoming-call prompt closed: drop it and stop the ringtone."""
+        self._incoming_calls.pop(sid, None)
+        self._stop_call_ring()
 
     def _on_call_proposed(self, sid: str, peer: str, kind: str) -> None:
         """An incoming XEP-0353 proposal (ring) before the Jingle session."""
@@ -4541,13 +4591,16 @@ class MainWindow(QtWidgets.QMainWindow):
             lambda accept, video: self._client.answer_proposal(
                 sid, accept, video))
         self._incoming_calls[sid] = dlg
-        dlg.finished.connect(lambda _r, s=sid: self._incoming_calls.pop(s, None))
+        dlg.finished.connect(
+            lambda _r, s=sid: self._on_incoming_dialog_closed(s))
         self._place_dialog_over(dlg, self)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+        self._start_call_ring()
 
     def _on_call_proposal_ended(self, sid: str, reason: str) -> None:
+        self._stop_call_ring()
         dlg = self._incoming_calls.pop(sid, None)
         if dlg is not None:
             dlg.close()
@@ -4586,9 +4639,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if state == "ringing":
             self._open_call_window(sid, peer,
                                    bool(getattr(session, "video", False)))
+            self._start_call_ringback()
             return
         window = self._call_windows.get(sid)
         if state == "active":
+            self._stop_call_ringback()
             if window is None:
                 window = self._open_call_window(
                     sid, peer, bool(getattr(session, "video", False)))
@@ -4630,6 +4685,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_call_ended(self, sid: str, peer: str, reason: str) -> None:
         logger.info("CALL ended %s (%s)", sid, reason)
+        was_calling = bool(self._ringback_path)
+        self._stop_call_ring()
+        self._stop_call_ringback()
+        # The peer rejected a call we placed: play the fast-busy tone.
+        if was_calling and str(reason).lower() in ("decline", "busy", "reject"):
+            self._play_call_busy()
         window = self._call_windows.pop(sid, None)
         if window is not None:
             window.set_state(tr("call_ended"))
@@ -4637,6 +4698,43 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg = self._incoming_calls.pop(sid, None)
         if dlg is not None:
             dlg.close()
+
+    # ── Call sounds (ringtone / ringback / busy) ─────────────────
+
+    def _start_call_ring(self) -> None:
+        """Loop the ringtone for an incoming 1:1 call."""
+        if not bool(getattr(self._config.notifications,
+                            "sound_call_incoming", True)):
+            return
+        path = sounds_mod.effect_path("effects/ringtone.wav")
+        if not path or not os.path.isfile(path):
+            return
+        self._ringing_path = path
+        self._sounds.play_file(path, loop=True)
+
+    def _stop_call_ring(self) -> None:
+        if self._ringing_path:
+            self._sounds.stop_file(self._ringing_path)
+            self._ringing_path = ""
+
+    def _start_call_ringback(self) -> None:
+        """Loop the ringback tone while an outgoing call is ringing."""
+        path = sounds_mod.call_tone_path("ringback")
+        if not path:
+            return
+        self._ringback_path = path
+        self._sounds.play_file(path, loop=True)
+
+    def _stop_call_ringback(self) -> None:
+        if self._ringback_path:
+            self._sounds.stop_file(self._ringback_path)
+            self._ringback_path = ""
+
+    def _play_call_busy(self) -> None:
+        """Play the fast-busy tone (a rejected outgoing call)."""
+        path = sounds_mod.call_tone_path("busy")
+        if path:
+            self._sounds.play_file(path)
 
     def _on_call_failed(self, peer: str, error: str) -> None:
         logger.warning("CALL failed for %s: %s", peer, error)

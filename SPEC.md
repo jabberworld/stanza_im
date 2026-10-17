@@ -217,7 +217,10 @@ variants, arranged in the «Темы», «Ростер», «Конференци
 «Разное» tabs («Разное» holds the media-preview size, the preview cache
 TTL/limit, the MUC mention highlight mode and the unread-indicator toggle;
 «Ростер» toggles avatars/activity/mood/client in the roster; «Конференции»
-toggles the MUC participant avatars/client icons).
+toggles the MUC participant avatars/client icons). The Preferences dialog also
+has a **«Reset to defaults»** gear button (`reset-defaults.svg`) to the left of
+Ok/Apply/Cancel that resets the current tab's controls to the first-run values
+(`Config.defaults()`), applied on Ok/Apply like any edit.
 Emoticon sets are discovered from cfg files under
 `resources/emoticons`, and the settings dialog previews up to ten images from
 the selected set. Because one image usually has several text aliases (`:)` and
@@ -354,6 +357,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.participant_font` / `participant_font_size` | `""` / `0` | MUC participant sidebar font applied to `ChatWidget._users_list` by `ChatWidget.set_participant_font`; remembered per `ChatWindow` for new MUC tabs. Ctrl+wheel over the list changes only the size. |
 | `appearance.input_font` / `input_font_size` | `""` / `0` | Message input font (`ChatWidget.set_input_font`, remembered per `ChatWindow`); defaults to the chat font. Ctrl+wheel over the input changes only the size. |
 | `appearance.muc_subject_font` / `muc_subject_font_size` | `""` / `0` | MUC subject header font — the «Тема:» button and the topic text, not the room name (`ChatWidget.set_subject_font`, remembered per `ChatWindow` as `_subject_font`; Ctrl+wheel over the header changes only the size). |
+| `appearance.menu_font` / `menu_font_size` | `""` / `0` | Menu bar + dropdown/context menu font, applied app-wide by `MainWindow._apply_widget_fonts` via a `QApplication` stylesheet (`QMenuBar, QMenu { … }`). |
+| `appearance.tab_font` / `tab_font_size` | `""` / `0` | Tab-title font (chat, roster and preferences tab bars) via `QTabBar { … }`. |
+| `appearance.selector_font` / `selector_font_size` | `""` / `0` | Combo-box (selector) font via `QComboBox { … }`. |
 | `appearance.avatar_radius` | `20` | Avatar corner rounding in %, 0 = square … 100 = circle (`include.avatars.rounded_avatar`); applied live to the roster (`RosterStyle.set_avatar_radius`), the MUC participant list (`ChatWindow.set_avatar_radius`) and the Muji window (`MujiCallWindow.set_avatar_radius`). Preferences → Appearance → «Разное». |
 | `appearance.tooltip_avatar_size` | `64` | Avatar size (px, 32–256) in the shared rich-text tooltip (`ui/tooltip.set_avatar_size`); used by the roster and MUC participant tooltips. |
 | `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
@@ -467,6 +473,7 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 | `notifications.sound_ft_finish` | `false` | Play `ft_finish` when a transfer finishes |
 | `notifications.sound_contact_online` | `false` | Play `contact_online` on an offline→online transition |
 | `notifications.sound_contact_offline` | `false` | Play `contact_offline` on an online→offline transition |
+| `notifications.sound_call_incoming` | `true` | Loop `resources/sounds/effects/ringtone.wav` while an incoming 1:1 call prompt is open (`_start_call_ring`/`_stop_call_ring`). |
 | `plugins` | `{}` | Plugin registry: plugin id → enabled flag (see §5.4). Written by `PluginManagerDialog` («Ок»); read by `MainWindow._apply_plugins` at startup and live. |
 | `plugin_settings` | `{}` | Per-plugin settings: plugin id → `{key: value}` (`plugins.settings_section`). Kept apart from the boolean enable flag; a settings-capable plugin writes its own values when its «Настроить» dialog is accepted. |
 | `omemo.enabled` | `true` | Enable OMEMO (XEP-0384) when the stack is installed. |
@@ -1922,6 +1929,14 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   presence transition, the first presence per JID after login being recorded
   silently (`_presence_sound_seen`, cleared on
   `session_started`/`disconnected`).
+- **Call sounds** reuse the same player: `SoundPlayer.play_file(path, loop=True)`
+  / `stop_file` loop a loose effect — the incoming 1:1 ringtone
+  (`resources/sounds/effects/ringtone.wav`, while an `IncomingCallDialog` is
+  open; gated by `notifications.sound_call_incoming`, default on) — and
+  `include.sounds.call_tone_path("ringback"|"busy")` **generates** a
+  call-progress tone WAV (`generate_tone_wav`): the ringback loops while an
+  outgoing call is `ringing`, the fast-busy tone plays on a rejection
+  (`decline`/`busy`/`reject`); both are stopped in `_on_call_ended`.
 
 ## 13. Icon Cache (`ui/icons.py`)
 

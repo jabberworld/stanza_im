@@ -16,7 +16,11 @@ from __future__ import annotations
 
 import configparser
 import logging
+import math
 import os
+import struct
+import tempfile
+import wave
 
 from stanza_im.include.constants import SOUNDS_DIR
 
@@ -78,6 +82,54 @@ def discover_themes() -> list[dict]:
         themes.append({"id": entry.name, "name": theme_name(entry.name)})
     themes.sort(key=lambda item: (item["id"] != DEFAULT_THEME, item["id"]))
     return themes
+
+
+def effect_path(rel: str) -> str:
+    """Absolute path of a loose effect file (e.g. ``effects/ringtone.wav``)."""
+    return os.path.join(SOUNDS_DIR, rel)
+
+
+#: Call-progress tones: (frequency Hz, tone ms, silence ms, cycles).
+_CALL_TONES = {
+    "ringback": (425.0, 1000, 3000, 1),   # long beeps while the peer is alerted
+    "busy": (425.0, 300, 300, 6),         # fast beeps on a rejected call
+}
+
+
+def generate_tone_wav(path: str, frequency: float, on_ms: int, off_ms: int,
+                      cycles: int, sample_rate: int = 8000) -> bool:
+    """Write a mono 16-bit WAV with *cycles* of (tone *on_ms* / silence *off_ms*)."""
+    try:
+        on_n = max(1, int(sample_rate * on_ms / 1000))
+        off_n = max(0, int(sample_rate * off_ms / 1000))
+        step = 2.0 * math.pi * frequency / sample_rate
+        frames = bytearray()
+        for _ in range(max(1, cycles)):
+            for i in range(on_n):
+                frames += struct.pack(
+                    "<h", int(0.5 * 32767 * math.sin(step * i)))
+            frames += b"\x00\x00" * off_n
+        with wave.open(path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            wav.writeframes(bytes(frames))
+        return True
+    except (OSError, wave.Error) as exc:
+        logger.warning("Could not write call tone %s: %s", path, exc)
+        return False
+
+
+def call_tone_path(kind: str) -> str:
+    """Generate (once) and return the ringback/busy tone WAV path (or "")."""
+    spec = _CALL_TONES.get(kind)
+    if spec is None:
+        return ""
+    uid = getattr(os, "getuid", lambda: 0)()
+    path = os.path.join(tempfile.gettempdir(), f"stanza-im-{kind}-{uid}.wav")
+    if not os.path.isfile(path) and not generate_tone_wav(path, *spec):
+        return ""
+    return path
 
 
 def theme_sounds(theme_id: str) -> dict[str, str]:

@@ -1270,8 +1270,17 @@ play `message_send`; `_on_file_transfer_progress` plays `ft_start` on an
 incoming `start` and `ft_finish` on `done`; `_on_presence_changed` plays
 `contact_online`/`contact_offline` on a real transition, the first presence per
 JID after login being recorded silently (`_presence_sound_seen`, cleared on
-`session_started`/`disconnected`). The Preferences → Notifications → Sounds tab
-has a «Звуковая тема» selector, eight per-event checkboxes (label without the
+`session_started`/`disconnected`). **Call sounds** use the same player:
+`SoundPlayer.play_file(path, loop=True)`/`stop_file` loop a loose effect (the
+incoming 1:1 ringtone `resources/sounds/effects/ringtone.wav`, while an
+`IncomingCallDialog` is open — `_start_call_ring`/`_stop_call_ring`, gated by
+`notifications.sound_call_incoming`, default on), and
+`include.sounds.call_tone_path("ringback"|"busy")` **generates** a call-progress
+tone WAV (`generate_tone_wav`) played on an outgoing call (`_start_call_ringback`
+while `call_state == "ringing"`, `_play_call_busy` on a rejection
+`decline`/`busy`/`reject`; both stopped in `_on_call_ended`).
+The Preferences → Notifications → Sounds tab
+has a «Звуковая тема» selector, nine per-event checkboxes (label without the
 old leading «Звук») and a note-icon preview button before each
 (`prefs_sound_preview_tip`). [`tests/test_sounds.py`]
 
@@ -2507,7 +2516,12 @@ first (visible) section is built when the dialog opens, the rest on first
 selection and, after `showEvent`, one per event-loop turn
 (`_build_pages_deferred`); `_ensure_all_pages` runs before Apply/OK (and
 `_LazyControls` builds every page on a direct `controls[key]` lookup) so no
-setting is lost — this keeps opening the dialog fast.
+setting is lost — this keeps opening the dialog fast. A **«Reset to
+defaults»** gear button (`reset-defaults.svg`) sits to the left of
+Ok/Apply/Cancel: it resets the **current tab's** (or page's) controls to the
+first-run values (`Config.defaults()` → `_values_dict(cfg)`, scoped by
+`_control_pages`, which `_page()` fills while building); the widgets are only
+re-filled — the values persist on Ok/Apply like any edit.
 «Длина заголовка вкладки» lives only on the Chat tab (with an info glyph) and
 sets `application.tab_title_length` + `chat.tab_title_length` together. The
 «Stanza IM» → «Общие» page carries the «Язык приложения» selector
@@ -2560,9 +2574,14 @@ range) is bidirectionally synced with the live factor via
 that snaps user drags/clicks/keys to the 10 % grid without touching
 programmatic `setValue` (zoom sync from the wheel stays exact).
 
-**Widget fonts** (`appearance.{roster,chat,osd,nick,participant,input}_font` +
-`{...}_font_size`, pt; `""`/`0` = Qt default; the input font defaults to the
-chat font): applied live from Preferences.
+**Widget fonts** (`appearance.{roster,chat,osd,nick,participant,input,menu,tab,
+selector}_font` + `{...}_font_size`, pt; `""`/`0` = Qt default; the input font
+defaults to the chat font): applied live from Preferences.
+The menu, tab-title and selector fonts (`menu_font`/`tab_font`/`selector_font`)
+are applied **app-wide** by `MainWindow._apply_widget_fonts` via a
+`QApplication` stylesheet with type selectors (`QMenuBar, QMenu` / `QTabBar` /
+`QComboBox { font-family; font-size }`) — the only practical way to reach the
+dynamically created menus, tab bars and dialog selectors.
 Roster rendering uses the QSS typeface via `MainWindow._apply_roster_font`
 (same raster pass); chat text sets `ChatThemeFactory.set_chat_font(family,
 size)`, which injects a `body { font-family: … !important; font-size: …pt

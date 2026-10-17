@@ -97,9 +97,12 @@ check("the saved theme is preselected", theme.currentData() == "future")
 
 sound_keys = ("sound_first_message", "sound_any_message", "sound_muc_mention",
               "sound_on_send", "sound_ft_start", "sound_ft_finish",
-              "sound_contact_online", "sound_contact_offline")
-check("all eight sound options exist and are enabled",
+              "sound_contact_online", "sound_contact_offline",
+              "sound_call_incoming")
+check("all nine sound options exist and are enabled",
       all(k in controls and controls[k].isEnabled() for k in sound_keys))
+check("the incoming-call ringtone option is on by default",
+      controls["sound_call_incoming"].isChecked())
 check("no option label starts with the old leading word",
       all("Звук" not in controls[k].text()
           and not controls[k].text().startswith("Play sound")

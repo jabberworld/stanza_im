@@ -936,6 +936,17 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._messages.setExtraSelections([selection])
         self._messages.setTextCursor(found)
         self._messages.ensureCursorVisible()
+        # ``setHtml`` defers the layout, so a match near the end of the day
+        # cannot be scrolled to until the next event-loop turn (when the scroll
+        # range is final) — re-reveal it then.
+        QtCore.QTimer.singleShot(0, lambda c=found: self._reveal_cursor(c))
+
+    def _reveal_cursor(self, cursor) -> None:
+        try:
+            self._messages.setTextCursor(cursor)
+            self._messages.ensureCursorVisible()
+        except RuntimeError:  # pragma: no cover - the widget was destroyed
+            pass
 
     def _on_mode_toggled(self, checked: bool) -> None:
         self._clear_search_state()

@@ -80,8 +80,11 @@ class SoundPlayer:
             self._effects[path] = effect
         effect.play()
 
-    def play_file(self, path: str) -> None:
-        """Play an arbitrary WAV *path* (one-shots outside the theme packs)."""
+    def play_file(self, path: str, loop: bool = False) -> None:
+        """Play an arbitrary WAV *path* (one-shots outside the theme packs).
+
+        With *loop* the sound repeats until :meth:`stop_file`.
+        """
         if not path or not _load_qtmm():
             return
         effect = self._effects.get(path)
@@ -94,7 +97,21 @@ class SoundPlayer:
                 logger.debug("Could not prepare sound %s", path, exc_info=True)
                 return
             self._effects[path] = effect
+        try:
+            effect.setLoopCount(
+                getattr(_QSoundEffect, "Infinite", -2) if loop else 1)
+        except Exception:  # pragma: no cover - defensive
+            pass
         effect.play()
+
+    def stop_file(self, path: str) -> None:
+        """Stop a sound started with :meth:`play_file` (if any)."""
+        effect = self._effects.get(path)
+        if effect is not None:
+            try:
+                effect.stop()
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     def stop(self) -> None:
         for effect in self._effects.values():

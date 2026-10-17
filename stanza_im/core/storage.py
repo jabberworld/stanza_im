@@ -179,6 +179,9 @@ class Config:
                         "participant_font": "", "participant_font_size": 0,
                         "muc_subject_font": "", "muc_subject_font_size": 0,
                         "input_font": "", "input_font_size": 0,
+                        "menu_font": "", "menu_font_size": 0,
+                        "tab_font": "", "tab_font_size": 0,
+                        "selector_font": "", "selector_font_size": 0,
                         "avatar_radius": 20,
                         "tooltip_avatar_size": 64},
         "notifications": {"tray_blink": True, "popups": "system",
@@ -191,6 +194,7 @@ class Config:
                            "sound_ft_finish": False,
                            "sound_contact_online": False,
                            "sound_contact_offline": False,
+                           "sound_call_incoming": True,
                            "osd_enabled": False, "osd_message": True,
                            "osd_file": True, "osd_typing": False,
                            "osd_status": "available",
@@ -213,6 +217,18 @@ class Config:
         self._data: dict = {k: AttrDict(v)._wrap() if isinstance(v, dict) else v
                             for k, v in self.DEFAULTS.items()}
         self.load()
+
+    @classmethod
+    def defaults(cls) -> "Config":
+        """A ``Config`` carrying only the built-in defaults (no file read).
+
+        Used by the Preferences «Reset to defaults» button to get the
+        first-run values for the current page.
+        """
+        cfg = cls.__new__(cls)
+        cfg._data = {k: (AttrDict(v)._wrap() if isinstance(v, dict) else v)
+                     for k, v in cls.DEFAULTS.items()}
+        return cfg
 
     # ── Loading / saving ─────────────────────────────────────────
 
