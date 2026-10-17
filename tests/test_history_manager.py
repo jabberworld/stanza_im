@@ -68,6 +68,10 @@ check("the day's messages are rendered",
 history.store_message("carol@example.com", "incoming", "hello world",
                       sender="carol", timestamp="2026-02-03T09:00:00",
                       message_id="c1", origin_id="c1")
+# A later, non-matching day so the "newest" differs from the matched one.
+history.store_message("carol@example.com", "outgoing", "later note",
+                      sender="Me", timestamp="2026-03-01T08:00:00",
+                      message_id="c2", origin_id="c2")
 catalog2: list[dict] = [
     {"jid": "bob@example.com", "name": "Bob", "groups": ["G"],
      "is_conference": False},
@@ -97,6 +101,24 @@ check("global search lists the matching day",
       gd._results.count() == 1
       and "Carol" in gd._results.item(0).text()
       and "2026-02-03" in gd._results.item(0).text())
+check("the tree is expanded in the global search",
+      gd._tree.topLevelItem(0).isExpanded())
+
+# 1c. Opening a result lands on the matched day (not the newest) and
+#     highlights the match; the results field is resizable.
+asyncio.get_event_loop().run_until_complete(
+    gd._open_global_result("carol@example.com", "2026-02-03"))
+check("a global result opens the matched day, not the newest",
+      gd._date == "2026-02-03")
+check("a global result highlights the match", len(gd._matches) >= 1)
+
+gd._set_results_height(220)
+check("the results field is resizable",
+      gd._results_height == 220 and gd._results.minimumHeight() == 220)
+gd._set_results_height(9999)
+check("the results height is clamped", gd._results_height == 400)
+check("the results resize handle follows visibility",
+      gd._results_handle.isVisible() == gd._results.isVisible())
 
 # 2. Chat toolbar history button.
 cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())

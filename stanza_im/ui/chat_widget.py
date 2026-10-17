@@ -30,6 +30,7 @@ from stanza_im.include.avatars import (
 from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
 from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
+from stanza_im.ui.resize_handle import VerticalResizeHandle as _InputHandle
 from stanza_im.ui import tooltip as tooltip_mod
 
 logger = logging.getLogger(__name__)
@@ -219,53 +220,6 @@ class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
             self.clearSelection()
             self.setCurrentItem(None)
         super().mousePressEvent(event)
-
-
-class _InputHandle(QtWidgets.QFrame):
-    """Thin draggable bar above the chat input that resizes it vertically.
-
-    The bar sits on the input's top edge, right below the button toolbar;
-    dragging up grows the field, dragging down shrinks it.
-    """
-
-    height_changed = QtCore.pyqtSignal(int)
-
-    def __init__(self, parent=None, get_height=None):
-        super().__init__(parent)
-        self.setFixedHeight(6)
-        self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
-        self.setStyleSheet("_InputHandle { background: rgba(0, 0, 0, 0.05); }")
-        self._get_height = get_height or (lambda: 60)
-        self._press_y: float | None = None
-        self._press_h = 60
-        self.setMouseTracking(True)
-
-    def _resized_height(self, dy: float) -> int:
-        """New input height for a vertical drag delta *dy*.
-
-        The handle moves the input's top edge, so a downward drag shifts the
-        edge down and shrinks the field (negative delta grows it).
-        """
-        return int(self._press_h - dy)
-
-    def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            self._press_y = float(event.globalPosition().y())
-            self._press_h = int(self._get_height())
-            self.grabMouse()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if self._press_y is None:
-            return
-        dy = float(event.globalPosition().y()) - self._press_y
-        self.height_changed.emit(self._resized_height(dy))
-        event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if self._press_y is not None:
-            self.releaseMouse()
-        self._press_y = None
 
 
 class _SubjectEdit(FontZoomMixin, QtWidgets.QLineEdit):

@@ -326,6 +326,9 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
             else:
                 roots[self._category_root_key(item.get("category", ""))].addChild(
                     self._make_node(item))
+        # A category with no items is hidden entirely.
+        for root in roots.values():
+            root.setHidden(root.childCount() == 0)
         self._record_server(server)
         if self._auto.isChecked():
             for root in roots.values():

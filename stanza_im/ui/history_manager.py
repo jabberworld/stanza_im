@@ -18,6 +18,7 @@ from stanza_im.include.constants import ACTIONS_DIR_16, APP_ICON_16, \
     CATEGORIES_DIR_16, STATUS_DIR_32, find_icon
 from stanza_im.include.utils import escape_html
 from stanza_im.i18n import tr
+from stanza_im.ui.resize_handle import VerticalResizeHandle
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._global_days: dict[str, list[tuple[str, int]]] = {}
         #: When set, the left tree shows only these JIDs (global search).
         self._catalog_filter: set[str] | None = None
+        #: A day to select once the contact's dates have loaded (global result).
+        self._pending_date = ""
+        #: Guards a programmatic calendar update from re-entering its handler.
+        self._syncing_calendar = False
+        #: Guards a programmatic tree update from re-entering its handler.
+        self._syncing_tree = False
+        #: The running "load this contact's dates" task (awaited by a global
+        #: result open so the pinned day is applied deterministically).
+        self._dates_task = None
         self._released = False
 
         self.setWindowTitle(tr("history_manager"))
@@ -103,6 +113,18 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         # out immediately (empty dates and no messages).
         self._released = False
         super().showEvent(event)
+
+    def _set_results_height(self, height: int) -> None:
+        """Resize the search-results list (the messages take the rest)."""
+        height = max(40, min(400, int(height)))
+        if height != self._results_height:
+            self._results_height = height
+            self._results.setFixedHeight(height)
+
+    def _set_results_visible(self, visible: bool) -> None:
+        """Show/hide the results list together with its resize handle."""
+        self._results.setVisible(visible)
+        self._results_handle.setVisible(visible)
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QHBoxLayout(self)
@@ -175,10 +197,18 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         right_layout.addLayout(search_row)
 
         self._results = QtWidgets.QListWidget()
-        self._results.setMaximumHeight(140)
+        self._results_height = 140
+        self._results.setFixedHeight(self._results_height)
         self._results.itemActivated.connect(self._on_result_picked)
-        self._results.hide()
         right_layout.addWidget(self._results)
+
+        # A thin bar under the results resizes them (and the messages below);
+        # session-only, like the chat input's own handle.
+        self._results_handle = VerticalResizeHandle(
+            get_height=lambda: self._results_height, invert=True)
+        self._results_handle.height_changed.connect(self._set_results_height)
+        right_layout.addWidget(self._results_handle)
+        self._set_results_visible(False)
 
         self._status = QtWidgets.QLabel()
         self._status.setWordWrap(True)
@@ -264,6 +294,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _rebuild_tree(self) -> None:
         self._tree.blockSignals(True)
+        self._syncing_tree = True
         self._tree.clear()
         app_icon = _icon("stanza-im.png")
         catalog = self._catalog
@@ -273,13 +304,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         for contact in catalog:
             for group in contact["groups"]:
                 groups.setdefault(group, []).append(contact)
+        # In the global (all-contacts) search the whole tree is expanded so the
+        # matching contacts are visible at a glance; otherwise only the working
+        # contact matters and the groups stay collapsed.
+        expand = self._catalog_filter is not None
         for group in sorted(groups, key=str.casefold):
             contacts = sorted(groups[group],
                               key=lambda c: c["name"].casefold())
             header = QtWidgets.QTreeWidgetItem(
                 [f"{group} ({len(contacts)})"])
             header.setData(0, QtCore.Qt.ItemDataRole.UserRole, None)
-            header.setExpanded(True)
             for contact in contacts:
                 item = QtWidgets.QTreeWidgetItem([contact["name"]])
                 item.setIcon(0, app_icon)
@@ -288,13 +322,18 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 item.setToolTip(0, contact["jid"])
                 header.addChild(item)
             self._tree.addTopLevelItem(header)
+            if expand:
+                header.setExpanded(True)
         self._tree.blockSignals(False)
+        self._syncing_tree = False
         has_contacts = bool(catalog)
         self._tree.setVisible(has_contacts)
         self._empty_label.setVisible(not has_contacts)
         self._calendar.setEnabled(has_contacts)
 
     def _on_tree_selection_changed(self) -> None:
+        if self._syncing_tree:
+            return
         items = self._tree.selectedItems()
         if not items:
             return
@@ -325,6 +364,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _sync_tree_selection(self, jid: str) -> None:
         self._tree.blockSignals(True)
+        self._syncing_tree = True
         found = None
         for i in range(self._tree.topLevelItemCount()):
             header = self._tree.topLevelItem(i)
@@ -338,6 +378,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if found is not None:
             self._tree.setCurrentItem(found)
         self._tree.blockSignals(False)
+        self._syncing_tree = False
 
     def _set_contact(self, jid: str, name: str) -> None:
         self._jid = jid
@@ -346,14 +387,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._search.setText("")
         self._all_days = []
         self._clear_search_state()
-        self._results.hide()
+        self._set_results_visible(False)
         if not jid:
             self._dates = []
             self._show_empty_day("")
             return
         if history.has_history(jid):
-            self._start_task(self._set_contact_dates(jid))
+            self._dates_task = self._start_task(self._set_contact_dates(jid))
         else:
+            self._dates_task = None
             self._dates = []
             self._show_empty_day("")
 
@@ -365,8 +407,11 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             return
         self._mark_calendar_dates()
         self._date = ""
-        if self._dates:
-            self._select_date(self._dates[-1])
+        # A global-search result pins the day to open (not the newest one).
+        target = self._pending_date or (self._dates[-1] if self._dates else "")
+        self._pending_date = ""
+        if target:
+            await self._select_date_async(target)
         else:
             self._show_empty_day("")
 
@@ -390,6 +435,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 QtCore.QDate(y, m, d), bold)
 
     def _on_calendar_clicked(self) -> None:
+        if self._syncing_calendar:
+            return
         value = self._calendar.selectedDate().toString("yyyy-MM-dd")
         if value in self._dates:
             self._select_date(value)
@@ -428,7 +475,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if date:
             try:
                 y, m, d = (int(p) for p in date.split("-"))
-                self._calendar.setSelectedDate(QtCore.QDate(y, m, d))
+                # Set the calendar without re-entering _on_calendar_clicked
+                # (which would re-check/reload the day and could loop).
+                self._syncing_calendar = True
+                try:
+                    self._calendar.setSelectedDate(QtCore.QDate(y, m, d))
+                finally:
+                    self._syncing_calendar = False
             except ValueError:
                 pass
         await self._load_date_async(date)
@@ -436,7 +489,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             return
         self._update_nav_state()
         if not self._multi_mode():
-            self._results.hide()
+            self._set_results_visible(False)
 
     def _show_empty_day(self, value: str) -> None:
         self._date = value
@@ -446,7 +499,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._messages.clear()
         self._status.setText(tr("history_no_messages"))
         if not self._multi_mode():
-            self._results.hide()
+            self._set_results_visible(False)
 
     def _jump_day(self, delta: int = 0, first: bool = False,
                   last: bool = False) -> None:
@@ -657,10 +710,10 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._results.addItem(item)
         self._update_match_buttons()
         if not rows:
-            self._results.hide()
+            self._set_results_visible(False)
             self._status.setText(tr("history_no_results"))
         else:
-            self._results.show()
+            self._set_results_visible(True)
         self._search.setFocus()
 
     def _run_day_search(self) -> None:
@@ -674,7 +727,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             if self._released:
                 return
         self._find_day_matches()
-        self._results.hide()
+        self._set_results_visible(False)
         self._match_index = 0 if self._matches else -1
         self._update_match_buttons()
         if self._matches:
@@ -701,11 +754,11 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._results.addItem(item)
         self._update_match_buttons()
         if not self._all_days:
-            self._results.hide()
+            self._set_results_visible(False)
             self._status.setText(tr("history_no_results"))
             self._search.setFocus()
             return
-        self._results.show()
+        self._set_results_visible(True)
         self._results.setCurrentRow(0)
         self._go_to_day(0)
         self._search.setFocus()
@@ -720,7 +773,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if date in self._all_days:
             self._go_to_day(self._all_days.index(date))
         if self._btn_all_time.isChecked():
-            self._results.show()
+            self._set_results_visible(True)
         self._search.setFocus()
 
     async def _open_global_result(self, jid: str, date: str) -> None:
@@ -728,10 +781,21 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         query = self._search.text().strip()
         contact = next((c for c in self._catalog if c["jid"] == jid), None)
         name = contact["name"] if contact else jid
+        # Pin the day so the contact's date-load opens it (not the newest one):
+        # awaiting that task makes the selection deterministic.
+        self._pending_date = date
         await self._select_jid_async(jid, name)
+        task = self._dates_task
+        if task is not None:
+            try:
+                await task
+            except Exception:  # noqa: BLE001 - defensive
+                pass
         if self._released or self._jid != jid:
+            self._pending_date = ""
             return
-        await self._select_date_async(date)
+        if self._date != date:
+            await self._select_date_async(date)
         if self._released or self._date != date:
             return
         # Selecting a contact/day clears the search box; restore the query.
@@ -742,7 +806,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._update_match_buttons()
         if self._matches:
             self._jump_to_match(0)
-        self._results.show()
+        self._set_results_visible(True)
         self._search.setFocus()
 
     def _multi_mode(self) -> bool:
@@ -826,7 +890,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._update_match_buttons()
         self._results.setCurrentRow(pos)
         if not self._multi_mode():
-            self._results.hide()
+            self._set_results_visible(False)
         if self._matches:
             self._jump_to_match(self._match_index)
 
@@ -876,13 +940,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _on_mode_toggled(self, checked: bool) -> None:
         self._clear_search_state()
         self._all_days = []
-        self._results.hide()
+        self._set_results_visible(False)
 
     def _on_all_contacts_toggled(self, checked: bool) -> None:
         """Switch between the per-contact and the all-contacts search."""
         self._clear_search_state()
         self._global_days = {}
         self._all_days = []
-        self._results.hide()
+        self._set_results_visible(False)
         self._catalog_filter = None
         self._rebuild_tree()

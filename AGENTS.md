@@ -70,6 +70,7 @@ stanza_im/                      # Python package
 │   ├── chat_themes.py           # Adium-style theme HTML generator
 │   ├── nick_colors.py           # Session MUC nickname → color allocation
 │   ├── font_zoom.py             # Ctrl+wheel font-size helper (input/roster/MUC)
+│   ├── resize_handle.py         # Thin draggable bar resizing a field (input/results)
 │   ├── zoom_list.py             # List with Ctrl+wheel zoom + empty-click deselect
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
 │   ├── media_preview.py         # Inline image/audio/video previews
@@ -459,7 +460,8 @@ attribute (the server's administration nodes: config, users, s2s, …) goes to
 the «Управление» section (icon `gtk-preferences.png`, the same as Actions →
 Settings), its double click just expands it (the lazy `disco#items` with that
 `node` browses nested nodes) and selecting it shows its `disco#info` with the
-action buttons (including «Команды»/ad-hoc). It discovers the account domain on open and
+action buttons (including «Команды»/ad-hoc). A category with no items is
+**hidden** entirely (`root.setHidden(root.childCount() == 0)`). It discovers the account domain on open and
 builds the tree fully lazily with no eager discovery: a node renders its
 direct children "as is" from one `disco#items` request, every service item
 shows a tentative expand arrow, and expanding or clicking a node issues its
@@ -534,8 +536,12 @@ so removed contacts keep their names), shows per-day bold dates in a
 substring search (`core/history.dates/load_day/search_dates`). The «Все
 контакты» toggle (`_btn_all_contacts`) searches every JID with a local store
 (`history.list_history_jids`) in a worker thread, filters the left tree to the
-contacts with matches (`_catalog_filter` → `_rebuild_tree`) and lists
-`contact · date · count` rows; picking one selects that contact's day. An export button
+contacts with matches (`_catalog_filter` → `_rebuild_tree`, whose groups are
+expanded **only** in this mode) and lists `contact · date · count` rows; picking
+one selects that contact's matched day (not the newest — `_pending_date` is
+applied by the contact's date-load) and highlights the match. The results list
+has a thin draggable handle under it (`ui/resize_handle.VerticalResizeHandle`,
+shared with the chat input) that resizes it (session-only, 40–400 px). An export button
 (`document-save.png`, `_on_export`) writes the **whole** conversation with the
 selected contact to a `.txt` file in a worker thread (`history.dates` +
 `load_day`), one `[YYYY-MM-DD HH:MM:SS] sender: body` line per message (own

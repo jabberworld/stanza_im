@@ -316,6 +316,8 @@ check("management nodes are routed by the node attribute",
 check("a management node expands on double click",
       'if data.get("node"):' in browser
       and "item.setExpanded(not item.isExpanded())" in browser)
+check("an empty category branch is hidden",
+      "root.setHidden(root.childCount() == 0)" in browser)
 
 mw = _read("stanza_im", "ui", "main_window.py")
 check("the main window routes the browser's xmpp: links",

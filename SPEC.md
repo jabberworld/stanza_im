@@ -64,6 +64,7 @@ stanza_im/
 │   ├── chat_themes.py  — Adium-style HTML generator
 │   ├── nick_colors.py  — Session MUC nickname → color allocation
 │   ├── font_zoom.py    — Ctrl+wheel font-size helper (input/roster/MUC list)
+│   ├── resize_handle.py — thin draggable bar resizing a field (input/results)
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs, lazily built pages)
 │   ├── media_preview.py — Inline image/audio/video previews
 │   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom, floating Download/Copy/Share overlay)
@@ -240,8 +241,9 @@ parent's icon; only the top level is classified via `disco#info` to drive the
 category grouping. An item carrying a `node` attribute (the server's
 administration nodes) is grouped into the «Управление» section (icon
 `gtk-preferences.png`) and expands into its nested `disco#items(node)` children
-on a double click. Items that repeat their own parent (`jid`+`node`) are
-dropped to avoid self-referencing loops.
+on a double click; a category with no items is hidden entirely. Items that
+repeat their own parent (`jid`+`node`) are dropped to avoid self-referencing
+loops.
 `Автообзор` recursively browses the whole tree with a bounded depth. Used
 servers are stored in `connection.service_servers`. Double-clicking a
 conference pre-fills both room and server in the join dialog, which completes
@@ -2677,8 +2679,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   opened are highlighted and load their messages.
 - The «Все контакты» toggle (`_btn_all_contacts`) searches every JID with a
   local store (`history.list_history_jids`, in a worker thread), filters the
-  left tree to the contacts with matches (`_catalog_filter`) and lists
-  `contact · date · count` rows; picking one selects that contact's day.
+  left tree to the contacts with matches (`_catalog_filter`, groups expanded
+  only here) and lists `contact · date · count` rows; picking one opens that
+  contact's matched day (via `_pending_date`) and highlights the match. A
+  draggable `ui/resize_handle.VerticalResizeHandle` under the results resizes
+  them (session-only, 40–400 px).
 
 ### 14.8.2 Notes (Notes plugin, `stanza_im/plugins/notes/`)
 
