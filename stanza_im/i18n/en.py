@@ -240,6 +240,8 @@ STRINGS = {
     "whiteboard_order_forward": "Bring forward",
     "whiteboard_order_backward": "Send backward",
     "whiteboard_order_back": "Send to back",
+    "whiteboard_group": "Group",
+    "whiteboard_ungroup": "Ungroup",
     "whiteboard_text_title": "Text",
     "whiteboard_text_prompt": "Text to place on the board (multiline):",
     "whiteboard_fill_toggle": "Fill new shapes",

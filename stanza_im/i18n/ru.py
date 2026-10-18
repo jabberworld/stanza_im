@@ -240,6 +240,8 @@ STRINGS = {
     "whiteboard_order_forward": "Вперёд",
     "whiteboard_order_backward": "Назад",
     "whiteboard_order_back": "На задний план",
+    "whiteboard_group": "Сгруппировать",
+    "whiteboard_ungroup": "Разгруппировать",
     "whiteboard_text_title": "Текст",
     "whiteboard_text_prompt": "Текст для размещения на доске (многострочный):",
     "whiteboard_fill_toggle": "Заливать новые фигуры",

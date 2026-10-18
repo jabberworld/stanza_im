@@ -106,6 +106,16 @@ class WhiteboardDialog(QtWidgets.QDialog):
                     QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
                 self._order_btn.setMenu(self._order_menu)
                 toolbar.addWidget(self._order_btn)
+                self._group_btn = self._tool_button("wb-group.svg",
+                                                    tr("whiteboard_group"))
+                self._group_btn.clicked.connect(self._group_selection)
+                self._group_btn.setEnabled(False)
+                toolbar.addWidget(self._group_btn)
+                self._ungroup_btn = self._tool_button("wb-ungroup.svg",
+                                                      tr("whiteboard_ungroup"))
+                self._ungroup_btn.clicked.connect(self._ungroup_selection)
+                self._ungroup_btn.setEnabled(False)
+                toolbar.addWidget(self._ungroup_btn)
                 toolbar.addWidget(self._separator())
             button = self._tool_button(icon, tr(tip_key), checkable=True)
             button.clicked.connect(
@@ -200,6 +210,8 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._canvas.shape_added.connect(self._on_shape_added)
         self._canvas.shape_updated.connect(self._on_shape_updated)
         self._canvas.shape_removed.connect(self._on_shape_removed)
+        self._canvas.group_updated.connect(self._on_group_updated)
+        self._canvas.selection_changed.connect(self._update_group_actions)
 
     # ── Collaboration ─────────────────────────────────────────────
 
@@ -407,6 +419,36 @@ class WhiteboardDialog(QtWidgets.QDialog):
             self._client.whiteboard.reorder(self._sid, rid, op)
         else:
             self._canvas.reorder_local(shape_id, op)
+
+    def _update_group_actions(self) -> None:
+        """Gate the group/ungroup buttons on the current selection."""
+        self._group_btn.setEnabled(len(self._canvas.selection()) >= 2)
+        self._ungroup_btn.setEnabled(bool(self._canvas.selected_group()))
+
+    def _group_selection(self) -> None:
+        """Group the selected shapes (Ctrl+click to select several)."""
+        rids = [r for r in self._canvas.selected_rids() if r]
+        if len(rids) < 2:
+            return
+        if self._client and self._sid:
+            self._client.whiteboard.group_shapes(self._sid, rids)
+        else:
+            self._canvas.group_local()
+
+    def _ungroup_selection(self) -> None:
+        group = self._canvas.selected_group()
+        if not group:
+            return
+        if self._client and self._sid:
+            self._client.whiteboard.ungroup(self._sid, group)
+        else:
+            self._canvas.ungroup_local(group)
+
+    def _on_group_updated(self, group_rid: str) -> None:
+        if self._client and self._sid:
+            self._client.whiteboard.set_group_transform(
+                self._sid, group_rid,
+                self._canvas.group_transform_str(group_rid))
 
     def _resize_canvas(self) -> None:
         """Resize the canvas (the shared document's ``viewBox``)."""

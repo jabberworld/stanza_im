@@ -697,6 +697,52 @@ check("a shared reorder calls the manager",
       od2._client.whiteboard.calls == [("s1", "R1", "front")])
 od2.close()
 
+# 25. canvas grouping + multi-select -----------------------------------------
+def _ctrl_click(widget, x, y):
+    QtWidgets.QApplication.sendEvent(widget, QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonPress, QtCore.QPointF(x, y),
+        QtCore.QPointF(x, y), QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.ControlModifier))
+
+
+gc = WhiteboardCanvas()
+gc.resize(1280, 720)
+gc.set_tool("rect")
+drag(gc, 10, 10, 40, 40)
+gc.set_tool("rect")
+drag(gc, 60, 10, 90, 40)
+gc.set_tool("select")
+QtWidgets.QApplication.sendEvent(gc, _event(
+    QtCore.QEvent.Type.MouseButtonPress, 75, 25))
+check("a plain click selects one shape", len(gc.selection()) == 1)
+_ctrl_click(gc, 25, 25)
+check("Ctrl+click adds to the selection", len(gc.selection()) == 2)
+_grp = gc.group_local()
+check("group_local groups the selection", bool(_grp))
+check("the members carry the group",
+      all(s.get("group") == _grp for s in gc.shapes()))
+check("selected_group reports the common group", gc.selected_group() == _grp)
+
+_before = gc._group_transforms[_grp].dx()
+gc.set_tool("move")
+drag(gc, 25, 25, 45, 25, steps=2)
+check("dragging a grouped shape moves the group transform",
+      gc._group_transforms[_grp].dx() != _before)
+check("ungroup_local dissolves the group",
+      gc.ungroup_local(_grp)
+      and all(not s.get("group") for s in gc.shapes()))
+
+# 26. the dialog exposes the group controls ----------------------------------
+gd = WhiteboardDialog("bob@example.com")
+check("the dialog has group/ungroup buttons",
+      hasattr(gd, "_group_btn") and hasattr(gd, "_ungroup_btn"))
+check("the group actions start disabled",
+      not gd._group_btn.isEnabled() and not gd._ungroup_btn.isEnabled())
+check("the group icons exist",
+      bool(find_icon("wb-group.svg")) and bool(find_icon("wb-ungroup.svg")))
+gd.close()
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

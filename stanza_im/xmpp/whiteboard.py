@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
+from stanza_im.include import svg_transform
 from stanza_im.include.constants import WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import sxe
@@ -125,16 +126,32 @@ class WhiteboardManager:
             return []
         doc = session.doc
         out: list[dict] = []
-        for child in doc.children(doc.root_rid):
+        self._collect_shapes(doc, doc.root_rid, out, "", "")
+        return out
+
+    def _collect_shapes(self, doc: SxeDocument, parent_rid: str,
+                        out: list[dict], group: str, group_tf: str) -> None:
+        """Flatten the drawables under *parent_rid* into *out*.
+
+        A ``<g/>``'s children are flattened and carry the group's record id and
+        transform (the profile §8.5); nesting is one level deep.
+        """
+        for child in doc.children(parent_rid):
             record = doc.records.get(child)
-            if record is None or record.type != "element" \
-                    or record.name not in ("path", "image"):
+            if record is None or record.type != "element":
                 continue
             attrs = {doc.records[a].name: doc.records[a].chdata
                      for a in doc.children(child)
                      if doc.records[a].type == "attr"}
+            if record.name == "g":
+                self._collect_shapes(doc, child, out, child,
+                                     attrs.get("transform", ""))
+                continue
+            if record.name not in ("path", "image"):
+                continue
             item = {"rid": child, "id": attrs.get("id", ""),
-                    "tag": record.name,
+                    "tag": record.name, "group": group,
+                    "group-transform": group_tf,
                     "stroke": attrs.get("stroke", "#1a1a1a"),
                     "stroke-width": attrs.get("stroke-width", "2"),
                     "fill": attrs.get("fill", ""),
@@ -148,7 +165,6 @@ class WhiteboardManager:
             else:
                 item["d"] = attrs.get("d", "")
             out.append(item)
-        return out
 
     def view_box(self, sid: str) -> tuple[int, int]:
         """The canvas size from the document's ``viewBox``.
@@ -498,6 +514,141 @@ class WhiteboardManager:
             self._send_edits(session, removes=removes)
             self._record(sid, {"new": [], "set": [], "remove": removes},
                          {"new": captured, "set": [], "remove": []})
+
+    # ── Grouping (the profile §8.5) ───────────────────────────────
+
+    def group_shapes(self, sid: str, rids: list[str]) -> str:
+        """Group drawables under a new ``<g/>``; returns the group record id."""
+        session = self.sessions.get(sid)
+        if session is None:
+            return ""
+        doc = session.doc
+        rids = [r for r in rids if r in doc.records]
+        if len(rids) < 2:
+            return ""
+        group_rid = doc.add_element(doc.root_rid, "g")
+        doc.add_attr(group_rid, "id", self._next_id())
+        new = doc.new_elements_for(group_rid)
+        sets: list[ET.Element] = []
+        inverse: list[ET.Element] = []
+        for rid in rids:
+            record = doc.records[rid]
+            old_parent = record.parent
+            parent_set = self._parent_set(rid, group_rid, record.version)
+            sets.append(parent_set)
+            inverse.append(self._parent_set(rid, old_parent, record.version))
+            doc.apply_set(parent_set)
+        self._send_edits(session, new=new, sets=sets)
+        # Undo: reparent the children back and drop the group.
+        self._record(sid, {"new": new, "set": sets, "remove": []},
+                     {"new": [], "set": inverse,
+                      "remove": [self._remove_element(group_rid)]})
+        self.client.emit("whiteboard_state", sid)
+        return group_rid
+
+    def ungroup(self, sid: str, group_rid: str) -> bool:
+        """Dissolve a ``<g/>``.
+
+        The group's transform is composed into each child and the children are
+        reparented to the group's parent, then the group is removed (the profile
+        §8.5).
+        """
+        session = self.sessions.get(sid)
+        if session is None:
+            return False
+        doc = session.doc
+        group = doc.records.get(group_rid)
+        if group is None or group.name != "g":
+            return False
+        g_attr = doc.find_attr(group_rid, "transform")
+        g_matrix = svg_transform.parse_matrix(
+            doc.records[g_attr].chdata if g_attr else "")
+        parent = group.parent or doc.root_rid
+        members = [c for c in doc.children(group_rid)
+                   if doc.records[c].type == "element"]
+        if not members:
+            return False
+        new: list[ET.Element] = []
+        sets: list[ET.Element] = []
+        inverse_new: list[ET.Element] = [group.new_element()]
+        inverse_sets: list[ET.Element] = []
+        inverse_removes: list[ET.Element] = []
+        for child in doc.children(group_rid):   # recreate the group for undo
+            if doc.records[child].type == "attr":
+                inverse_new.append(doc.records[child].new_element())
+        compose = not svg_transform.is_identity(g_matrix)
+        for rid in members:
+            record = doc.records[rid]
+            parent_set = self._parent_set(rid, parent, record.version)
+            sets.append(parent_set)
+            inverse_sets.append(
+                self._parent_set(rid, group_rid, record.version))
+            doc.apply_set(parent_set)
+            if not compose:
+                continue
+            existing = doc.find_attr(rid, "transform")
+            old = doc.records[existing] if existing else None
+            old_value = old.chdata if old is not None else ""
+            old_version = old.version if old is not None else 0
+            child_matrix = svg_transform.parse_matrix(old_value)
+            composed = (svg_transform.compose(g_matrix, child_matrix)
+                        if child_matrix is not None else g_matrix)
+            attr_rid = doc.set_attr(rid, "transform",
+                                    svg_transform.to_str(composed))
+            new.extend(doc.new_elements_for(attr_rid))
+            if old is not None:
+                inverse_sets.append(
+                    self._set_element_values(attr_rid, old_value, old_version))
+            else:
+                inverse_removes.append(self._remove_element(attr_rid))
+        removes = [self._remove_element(group_rid)]
+        doc.remove(group_rid)
+        self._send_edits(session, new=new, sets=sets, removes=removes)
+        self._record(sid, {"new": new, "set": sets, "remove": removes},
+                     {"new": inverse_new, "set": inverse_sets,
+                      "remove": inverse_removes})
+        self.client.emit("whiteboard_state", sid)
+        return True
+
+    def set_group_transform(self, sid: str, group_rid: str,
+                            transform: str) -> bool:
+        """Set a ``<g/>``'s transform (its children move with it)."""
+        session = self.sessions.get(sid)
+        if session is None or not transform:
+            return False
+        doc = session.doc
+        if doc.records.get(group_rid) is None:
+            return False
+        existing = doc.find_attr(group_rid, "transform")
+        old = doc.records[existing] if existing else None
+        old_value = old.chdata if old is not None else ""
+        old_version = old.version if old is not None else 0
+        attr_rid = doc.set_attr(group_rid, "transform", transform)
+        if old is None:
+            new = doc.new_elements_for(attr_rid)
+            sets: list[ET.Element] = []
+            inverse = {"new": [], "set": [],
+                       "remove": [self._remove_element(attr_rid)]}
+        else:
+            new = []
+            sets = [self._set_element(attr_rid, doc)]
+            inverse = {"new": [],
+                       "set": [self._set_element_values(attr_rid, old_value,
+                                                        old_version)],
+                       "remove": []}
+        self._send_edits(session, new=new, sets=sets)
+        self._record(sid, {"new": new, "set": sets, "remove": []}, inverse)
+        self.client.emit("whiteboard_state", sid)
+        return True
+
+    @staticmethod
+    def _parent_set(rid: str, parent: str, version: int) -> ET.Element:
+        """A ``<set>`` reparenting a record (the grouping edit)."""
+        el = ET.Element(_q(NS_SXE, "set"))
+        el.set("target", rid)
+        el.set("version", str(version))
+        el.set("parent", parent)
+        return el
 
     #: Stacking-order operations (the profile §8.6, via ``primary-weight``).
     _REORDER = ("front", "back", "forward", "backward")

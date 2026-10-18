@@ -132,6 +132,7 @@ stanza_im/                      # Python package
 │   ├── clients.py               # XEP-0115 caps node → client name/icon mapping
 │   ├── sounds.py                # Sound-theme discovery/parsing (resources/sounds)
 │   ├── svg_path.py              # SVG path-data parser/builder (QPainterPath)
+│   ├── svg_transform.py         # SVG transform (matrix) parse/compose (no Qt)
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
@@ -2140,7 +2141,14 @@ colour and a «Заливка» toggle (whether newly drawn closed shapes are fi
 a **stacking-order** menu (`wb-order.svg`, next to undo/redo: «На передний
 план»/«Вперёд»/«Назад»/«На задний план» → `WhiteboardManager.reorder`, which
 renumbers the drawable siblings' `primary-weight`; a local board reorders the
-canvas list directly); then the board
+canvas list directly) and a **group/ungroup** pair
+(`wb-group.svg`/`wb-ungroup.svg`, enabled when 2+ shapes / a grouped shape are
+selected — Ctrl+click adds to the selection) → `WhiteboardManager.group_shapes`
+(a `<g/>` + reparenting) / `ungroup` (composes the group's `transform` into the
+children via `include/svg_transform.py`, reparents them back and removes the
+group); a grouped shape is selected as a whole and its drag moves the group's
+`transform` (`set_group_transform`), a local board grouping the canvas list
+directly; then the board
 operations «Очистить» (removes the drawable children, the document metadata
 stays), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
 (`wb-resize.svg` → `WhiteboardManager.set_view_box`, the `viewBox` op) and
@@ -2231,7 +2239,8 @@ Local canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become
 rebuilds the canvas (`WhiteboardCanvas.load_shapes`); an incoming
 `session-initiate` (`whiteboard_invite`) asks the user to join.
 [`tests/test_whiteboard.py`, `tests/test_whiteboard_sync.py`,
-`tests/test_jingle_error_router.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`]
+`tests/test_jingle_error_router.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`,
+`tests/test_svg_transform.py`]
 The "Send" control is a vertical
 icon-only button (an Enter-style arrow) whose height follows the input field.
 The input is vertically

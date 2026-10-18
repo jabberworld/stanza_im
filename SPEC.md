@@ -2518,7 +2518,14 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   drawn closed shapes are filled; off → `fill=""` → `fill="none"`); a
   **stacking-order** menu (`wb-order.svg`, next to undo/redo) with
   front/forward/backward/back → `WhiteboardManager.reorder` (renumbers the
-  drawable siblings' `primary-weight`; a local board reorders the canvas list);
+  drawable siblings' `primary-weight`; a local board reorders the canvas list)
+  and a **group/ungroup** pair (`wb-group.svg`/`wb-ungroup.svg`, enabled when 2+
+  shapes / a grouped shape are selected — Ctrl+click adds to the selection) →
+  `WhiteboardManager.group_shapes` (a `<g/>` + reparenting) / `ungroup`
+  (composes the group's `transform` into the children via
+  `include/svg_transform.py`, reparents them back, removes the group); a grouped
+  shape is selected as a whole and its drag moves the group's `transform`
+  (`set_group_transform`); a local board groups the canvas list directly;
   then the board operations «Очистить» (drawable children only, metadata
   preserved), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
   (`wb-resize.svg` → `WhiteboardManager.set_view_box`, the `viewBox` op) and

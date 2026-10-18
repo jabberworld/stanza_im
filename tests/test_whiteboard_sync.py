@@ -569,6 +569,42 @@ m.undo(sid)
 check("undo restores the overwritten path data",
       [s for s in m.shapes(sid) if s["rid"] == r3][0]["d"] == "M 0 0 L 9 9")
 
+# 24. grouping / ungrouping --------------------------------------------------
+c = _FakeClient()
+c._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid = m.start_session("bob@example.com", is_muc=False)
+ra = m.add_shape(sid, {"id": "a", "d": "M 0 0 L 1 1"})
+rb = m.add_shape(sid, {"id": "b", "d": "M 0 0 L 2 2"})
+g = m.group_shapes(sid, [ra, rb])
+check("group_shapes creates a <g>",
+      bool(g) and m.document(sid).records[g].name == "g")
+check("the grouped shapes carry the group rid",
+      len([s for s in m.shapes(sid) if s.get("group") == g]) == 2)
+check("the group is broadcast in a <new> edit",
+      _state_of(c).find(_q(NS_SXE, "new")) is not None)
+check("grouping is undoable", m.can_undo(sid))
+m.undo(sid)
+check("undo dissolves the group",
+      all(not s.get("group") for s in m.shapes(sid)))
+
+# ungroup composes a non-identity group transform into the children
+g2 = m.group_shapes(sid, [ra, rb])
+check("the group can be recreated", bool(g2) and g2 != g)
+m.set_group_transform(sid, g2, "matrix(1 0 0 1 5 7)")
+_g = [s for s in m.shapes(sid) if s.get("group") == g2]
+check("the group transform is reported",
+      _g and _g[0]["group-transform"] == "matrix(1 0 0 1 5 7)")
+m.ungroup(sid, g2)
+check("ungroup removes the <g>", g2 not in m.document(sid).records)
+_children = {s["rid"]: s for s in m.shapes(sid)}
+check("ungroup composes the group transform into a child",
+      _children[ra]["transform"] == "matrix(1 0 0 1 5 7)"
+      or _children[rb]["transform"] == "matrix(1 0 0 1 5 7)")
+check("ungroup is undoable", m.can_undo(sid))
+m.undo(sid)
+check("undo restores the group", g2 in m.document(sid).records)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

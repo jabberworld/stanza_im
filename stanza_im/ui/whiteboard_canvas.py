@@ -14,7 +14,7 @@ import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from stanza_im.include import svg_path
+from stanza_im.include import svg_path, svg_transform
 from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH,
                                          find_icon)
 from stanza_im.include.utils import escape_html
@@ -66,23 +66,12 @@ def image_data_uri(path: str) -> str:
         raise ValueError(tr("whiteboard_image_too_large", size=limit_text))
     return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
 
-_MATRIX_RE = __import__("re").compile(
-    r"matrix\(\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+"
-    r"([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)\s*\)")
-
-
 def _parse_transform(value) -> QtGui.QTransform:
     """Parse an SVG ``transform`` attribute (``matrix(...)``) into a transform."""
-    if not value:
+    matrix = svg_transform.parse_matrix(value)
+    if matrix is None:
         return QtGui.QTransform()
-    match = _MATRIX_RE.search(str(value))
-    if not match:
-        return QtGui.QTransform()
-    try:
-        a, b, c, d, e, f = (float(g) for g in match.groups())
-    except (TypeError, ValueError):
-        return QtGui.QTransform()
-    return QtGui.QTransform(a, b, c, d, e, f)
+    return QtGui.QTransform(*matrix)
 
 
 def transform_str(transform: QtGui.QTransform) -> str:
@@ -102,16 +91,24 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     shape_added = QtCore.pyqtSignal(dict)
     shape_updated = QtCore.pyqtSignal(dict)
     shape_removed = QtCore.pyqtSignal(dict)
+    #: A group's transform changed (the group record id).
+    group_updated = QtCore.pyqtSignal(str)
+    #: The selection changed (so the toolbar can gate the group actions).
+    selection_changed = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._shapes: list[dict] = []
         # Decoded image pixmaps, keyed by their source URI (bounded).
         self._image_cache: dict[str, QtGui.QPixmap] = {}
+        # The current selection (the last entry is the primary shape).
+        self._selection: list[str] = []
+        # Group record id -> transform (a ``<g>`` transform applies to its
+        # children; see the profile §8.5).
+        self._group_transforms: dict[str, QtGui.QTransform] = {}
         # Logical canvas size (the SVG ``viewBox``); the host's may override it.
         self._view_w = VIEW_W
         self._view_h = VIEW_H
-        self._selected: str = ""
         self._tool = "pencil"
         self._stroke = "#1a1a1a"
         self._fill = "#e53935"
@@ -164,6 +161,19 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def shapes(self) -> list[dict]:
         return self._shapes
 
+    @property
+    def _selected(self) -> str:
+        """The primary selected shape id (the last clicked); "" when none."""
+        return self._selection[-1] if self._selection else ""
+
+    @_selected.setter
+    def _selected(self, value: str) -> None:
+        self._selection = [value] if value else []
+
+    def selection(self) -> list[str]:
+        """The selected shape ids (the last one is the primary)."""
+        return list(self._selection)
+
     def view_box(self) -> tuple[int, int]:
         """The logical canvas size (the SVG ``viewBox``)."""
         return self._view_w, self._view_h
@@ -181,6 +191,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         """The document record id of the selected shape ("" when unshared)."""
         shape = self._shape_by_id(self._selected)
         return str(shape.get("rid") or "") if shape is not None else ""
+
+    def selected_rids(self) -> list[str]:
+        """The document record ids of the whole selection."""
+        return [str((self._shape_by_id(i) or {}).get("rid") or "")
+                for i in self._selection]
+
+    def group_transform_str(self, group_rid: str) -> str:
+        """The serialised transform of *group_rid* ("" when identity)."""
+        return transform_str(
+            self._group_transforms.get(group_rid, QtGui.QTransform()))
 
     def reorder_local(self, shape_id: str, op: str) -> bool:
         """Reorder a local (unshared) board's paint order."""
@@ -204,16 +224,95 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.changed.emit()
         return True
 
+    # ── Selection & grouping ──────────────────────────────────────
+
+    def _group_members(self, group: str) -> list[str]:
+        return [s["id"] for s in self._shapes
+                if (s.get("group") or "") == group]
+
+    def select_shape(self, shape_id: str, additive: bool = False) -> None:
+        """Select *shape_id* (expanding to its group); Ctrl toggles membership."""
+        shape = self._shape_by_id(shape_id)
+        if shape is None:
+            if not additive:
+                self._selection = []
+                self.selection_changed.emit()
+            return
+        group = shape.get("group") or ""
+        ids = self._group_members(group) if group else [shape_id]
+        if additive:
+            present = all(i in self._selection for i in ids)
+            for member in ids:
+                if present and member in self._selection:
+                    self._selection.remove(member)
+                elif not present and member not in self._selection:
+                    self._selection.append(member)
+        else:
+            self._selection = list(ids)
+        if shape_id in self._selection:  # the clicked shape is the primary
+            self._selection.remove(shape_id)
+            self._selection.append(shape_id)
+        self.update()
+        self.selection_changed.emit()
+
+    def selected_group(self) -> str:
+        """The common group rid of the selection ("" when mixed or ungrouped)."""
+        groups = {(self._shape_by_id(i) or {}).get("group") or ""
+                  for i in self._selection}
+        return groups.pop() if len(groups) == 1 else ""
+
+    def _shape_matrix(self, shape: dict) -> QtGui.QTransform:
+        """The shape's world matrix: the group transform times its own."""
+        group = shape.get("group") or ""
+        if group:
+            return (self._group_transforms.get(group, QtGui.QTransform())
+                    * shape["transform"])
+        return shape["transform"]
+
+    def group_local(self, group_rid: str = "") -> str:
+        """Group the current selection on a local board; returns the group rid."""
+        ids = [i for i in self._selection
+               if not (self._shape_by_id(i) or {}).get("group")]
+        if len(ids) < 2:
+            return ""
+        group_rid = group_rid or uuid.uuid4().hex
+        for shape in self._shapes:
+            if shape["id"] in ids:
+                shape["group"] = group_rid
+        self._group_transforms.setdefault(group_rid, QtGui.QTransform())
+        self.update()
+        self.changed.emit()
+        return group_rid
+
+    def ungroup_local(self, group_rid: str) -> bool:
+        """Ungroup on a local board (compose the group transform into members)."""
+        if not group_rid:
+            return False
+        group_tf = self._group_transforms.get(group_rid, QtGui.QTransform())
+        members = [s for s in self._shapes
+                   if (s.get("group") or "") == group_rid]
+        if not members:
+            return False
+        for shape in members:
+            shape["transform"] = group_tf * shape["transform"]
+            shape["group"] = ""
+        self._group_transforms.pop(group_rid, None)
+        self.update()
+        self.changed.emit()
+        return True
+
     # ── Actions ───────────────────────────────────────────────────
 
     def clear(self) -> None:
         for shape in self._shapes:
             self.shape_removed.emit(shape)
         self._shapes = []
-        self._selected = ""
+        self._selection = []
+        self._group_transforms.clear()
         self._active = None
         self.update()
         self.changed.emit()
+        self.selection_changed.emit()
 
     def delete_selected(self) -> None:
         if not self._selected:
@@ -225,10 +324,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def delete_shape(self, shape: dict) -> None:
         """Remove *shape* and notify (used by delete/eraser)."""
         self._shapes = [s for s in self._shapes if s["id"] != shape["id"]]
-        if self._selected == shape["id"]:
-            self._selected = ""
+        self._selection = [i for i in self._selection if i != shape["id"]]
         self.update()
         self.changed.emit()
+        self.selection_changed.emit()
         self.shape_removed.emit(shape)
 
     def erase_at(self, world: QtCore.QPointF) -> bool:
@@ -240,9 +339,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         return True
 
     def deselect(self) -> None:
-        if self._selected:
-            self._selected = ""
+        if self._selection:
+            self._selection = []
             self.update()
+            self.selection_changed.emit()
 
     def set_rid(self, shape_id: str, rid: str) -> None:
         """Record the SXE record id the collaborative session assigned."""
@@ -380,9 +480,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             path.addEllipse(QtCore.QPointF(cx, cy), rx, ry)
         return path
 
-    @staticmethod
-    def _world_path(shape: dict) -> QtGui.QPainterPath:
-        return shape["transform"].map(WhiteboardCanvas._local_path(shape))
+    def _world_path(self, shape: dict) -> QtGui.QPainterPath:
+        return self._shape_matrix(shape).map(self._local_path(shape))
 
     @staticmethod
     def _filled(shape: dict) -> bool:
@@ -436,33 +535,39 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         Each descriptor carries ``rid``, ``d`` and the presentation attributes.
         """
         loaded: list[dict] = []
+        groups: dict[str, QtGui.QTransform] = {}
         for item in shapes:
+            group = str(item.get("group") or "")
+            if group and group not in groups:
+                groups[group] = _parse_transform(item.get("group-transform"))
             if str(item.get("tag") or "path") == "image":
-                loaded.append(self._image_shape(item))
-                continue
-            fill = str(item.get("fill") or "")
-            if fill.lower() == "none":
-                fill = ""
-            shape = {
-                "id": str(item.get("id") or uuid.uuid4().hex),
-                "rid": str(item.get("rid") or ""),
-                "kind": "remote",
-                "d": str(item.get("d") or ""),
-                "stroke": str(item.get("stroke") or "#1a1a1a"),
-                "stroke_width": int(item.get("stroke-width") or 2),
-                "fill": fill,
-                "transform": _parse_transform(item.get("transform")),
-            }
+                shape = self._image_shape(item)
+            else:
+                fill = str(item.get("fill") or "")
+                if fill.lower() == "none":
+                    fill = ""
+                shape = {
+                    "id": str(item.get("id") or uuid.uuid4().hex),
+                    "rid": str(item.get("rid") or ""),
+                    "kind": "remote",
+                    "d": str(item.get("d") or ""),
+                    "stroke": str(item.get("stroke") or "#1a1a1a"),
+                    "stroke_width": int(item.get("stroke-width") or 2),
+                    "fill": fill,
+                    "transform": _parse_transform(item.get("transform")),
+                }
+            shape["group"] = group
             loaded.append(shape)
         self._shapes = loaded
+        self._group_transforms = groups
         # Keep the current selection when it survived the rebuild (a reorder or
         # a remote edit keeps the ``id``), so a re-order does not drop it.
-        if self._selected and not any(s["id"] == self._selected
-                                      for s in loaded):
-            self._selected = ""
+        loaded_ids = {s["id"] for s in loaded}
+        self._selection = [i for i in self._selection if i in loaded_ids]
         self._active = None
         self.update()
         self.changed.emit()
+        self.selection_changed.emit()
 
     @staticmethod
     def _image_shape(item: dict) -> dict:
@@ -490,6 +595,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def _new_shape(self, kind: str, **extra) -> dict:
         shape = {"id": uuid.uuid4().hex, "rid": "", "kind": kind,
+                 "group": "",
                  "stroke": self._stroke, "stroke_width": self._width,
                  "fill": (self._fill if self._fill_enabled else ""),
                  "transform": QtGui.QTransform()}
@@ -649,12 +755,25 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         br = self._to_screen(rect.bottomRight())
         return QtCore.QRectF(tl, br).normalized()
 
+    def _selection_widget_bbox(self) -> QtCore.QRectF:
+        """The union of the selected shapes' bounding boxes (widget coords)."""
+        rects = [self._widget_bbox(s) for s in self._shapes
+                 if s["id"] in self._selection]
+        rects = [r for r in rects if not r.isNull()]
+        if not rects:
+            return QtCore.QRectF()
+        out = rects[0]
+        for rect in rects[1:]:
+            out = out.united(rect)
+        return out
+
     def _selection_handles(self) -> dict[str, QtCore.QRectF]:
-        """The rotate/resize handles of the selected shape (widget coords)."""
-        shape = self._shape_by_id(self._selected)
-        if shape is None:
+        """The rotate/resize handles of the selection (widget coords)."""
+        if not self._selection:
             return {}
-        r = self._widget_bbox(shape)
+        r = self._selection_widget_bbox()
+        if r.isNull():
+            return {}
         size = self._HANDLE_SIZE
         return {
             "rotate": QtCore.QRectF(r.center().x() - size / 2,
@@ -691,18 +810,19 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             self._draw_shape(painter, shape)
         if self._active is not None:
             self._draw_shape(painter, self._active)
-        if self._selected:
-            shape = self._shape_by_id(self._selected)
-            if shape is not None:
-                rect = self._world_path(shape).boundingRect()
-                pen = QtGui.QPen(QtGui.QColor("#1a73e8"),
-                                 max(1.0, 1.0 / max(s, 1e-6)))
-                pen.setStyle(QtCore.Qt.PenStyle.DashLine)
-                painter.setPen(pen)
-                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-                painter.drawRect(rect)
+        for selected in self._selection:
+            shape = self._shape_by_id(selected)
+            if shape is None:
+                continue
+            rect = self._world_path(shape).boundingRect()
+            pen = QtGui.QPen(QtGui.QColor("#1a73e8"),
+                             max(1.0, 1.0 / max(s, 1e-6)))
+            pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect)
         painter.restore()
-        if self._selected and self._tool == "select":
+        if self._selection and self._tool == "select":
             self._draw_handles(painter)
 
     def _draw_handles(self, painter: QtGui.QPainter) -> None:
@@ -728,7 +848,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             pixmap = self._pixmap_for(shape.get("href") or "")
             if not pixmap.isNull():
                 painter.save()
-                painter.setTransform(shape["transform"], True)
+                painter.setTransform(self._shape_matrix(shape), True)
                 painter.drawPixmap(QtCore.QRectF(*shape["image"]), pixmap)
                 painter.restore()
             return
@@ -759,6 +879,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         world = self._to_world(event.position())
         tool = self._tool
         if tool == "select":
+            additive = bool(event.modifiers()
+                            & QtCore.Qt.KeyboardModifier.ControlModifier)
             handle = self._handle_at(event.position())
             if handle:
                 self._manip = handle
@@ -767,14 +889,15 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 return
             shape = self._shape_at(world)
             if shape is not None:
-                self._selected = shape["id"]
+                self.select_shape(shape["id"], additive)
                 self._manip = "move"
                 self._manip_id = shape["id"]
                 self._last = world
                 self.update()
                 return
-            # Empty space: deselect and pan the view.
-            self._selected = ""
+            # Empty space: deselect (unless additive) and pan the view.
+            if not additive:
+                self._selection = []
             self._pan_origin = event.position()
             self._pan_start = QtCore.QPointF(self._view_pan)
             self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
@@ -874,7 +997,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             sid = self._manip_id or self._selected
             shape = self._shape_by_id(sid) if sid else None
             if shape is not None:
-                self.shape_updated.emit(shape)
+                group = shape.get("group") or ""
+                if group:
+                    self.group_updated.emit(group)
+                else:
+                    self.shape_updated.emit(shape)
         self._transformed = False
         self._manip = ""
         self._manip_id = ""
@@ -918,30 +1045,61 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 abs(end.y() - start.y()) / 2.0)
 
     @staticmethod
-    def _transform(shape: dict, tool: str, last, world) -> None:
+    def _op_matrix(tool: str, last, world,
+                   center: QtCore.QPointF) -> QtGui.QTransform | None:
+        """The move/rotate/scale matrix about *center* (``None`` = no change)."""
         if tool == "move":
             op = QtGui.QTransform()
             op.translate(world.x() - last.x(), world.y() - last.y())
-        else:
-            center = WhiteboardCanvas._world_path(shape).boundingRect().center()
-            if tool == "rotate":
-                a0 = math.atan2(last.y() - center.y(), last.x() - center.x())
-                a1 = math.atan2(world.y() - center.y(), world.x() - center.x())
-                degrees = math.degrees(a1 - a0)
-                op = QtGui.QTransform()
-                op.translate(center.x(), center.y())
-                op.rotate(degrees)
-                op.translate(-center.x(), -center.y())
-            else:  # scale
-                d0 = math.hypot(last.x() - center.x(), last.y() - center.y())
-                d1 = math.hypot(world.x() - center.x(), world.y() - center.y())
-                if d0 < 1.0:
-                    return
-                factor = max(0.05, d1 / d0)
-                op = QtGui.QTransform()
-                op.translate(center.x(), center.y())
-                op.scale(factor, factor)
-                op.translate(-center.x(), -center.y())
+            return op
+        if tool == "rotate":
+            a0 = math.atan2(last.y() - center.y(), last.x() - center.x())
+            a1 = math.atan2(world.y() - center.y(), world.x() - center.x())
+            op = QtGui.QTransform()
+            op.translate(center.x(), center.y())
+            op.rotate(math.degrees(a1 - a0))
+            op.translate(-center.x(), -center.y())
+            return op
+        # scale
+        d0 = math.hypot(last.x() - center.x(), last.y() - center.y())
+        d1 = math.hypot(world.x() - center.x(), world.y() - center.y())
+        if d0 < 1.0:
+            return None
+        factor = max(0.05, d1 / d0)
+        op = QtGui.QTransform()
+        op.translate(center.x(), center.y())
+        op.scale(factor, factor)
+        op.translate(-center.x(), -center.y())
+        return op
+
+    def _group_world_center(self, group: str) -> QtCore.QPointF:
+        rects = [self._world_path(s).boundingRect() for s in self._shapes
+                 if (s.get("group") or "") == group]
+        if not rects:
+            return QtCore.QPointF(0.0, 0.0)
+        out = rects[0]
+        for rect in rects[1:]:
+            out = out.united(rect)
+        return out.center()
+
+    def _transform(self, shape: dict, tool: str, last, world) -> None:
+        group = shape.get("group") or ""
+        if group:
+            # A grouped shape transforms the whole group about the group's box.
+            current = self._group_transforms.get(group, QtGui.QTransform())
+            center = self._group_world_center(group)
+            inverted, ok = current.inverted()
+            if ok:
+                center = inverted.map(center)
+            op = self._op_matrix(tool, last, world, center)
+            if op is None:
+                return
+            self._group_transforms[group] = current * op
+            return
+        center = self._world_path(shape).boundingRect().center()
+        op = self._op_matrix(tool, last, world, center)
+        if op is None:
+            return
         shape["transform"] = shape["transform"] * op
 
     # ── SVG export ────────────────────────────────────────────────
