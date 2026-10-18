@@ -2119,8 +2119,9 @@ emoticon-theme option the button instead emits `emoji_picker_requested` and
 `ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
 _on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
 (non-modal, singleton per conversation): a custom `QPainter` canvas
-(`ui/whiteboard_canvas.py::WhiteboardCanvas`, logical board `1280×720` from
-`include.constants.WHITEBOARD_WIDTH/HEIGHT`) with an icon-only tool palette
+(`ui/whiteboard_canvas.py::WhiteboardCanvas`; the logical board is `1280×720`
+from `include.constants.WHITEBOARD_WIDTH/HEIGHT`, overridden by the shared
+document's `viewBox` via `set_view_box`) with an icon-only tool palette
 grouped by `QFrame` separators: the manipulation tools (select / move / rotate /
 scale and «Удалить», an object operation) then, after a separator, the drawing
 tools (pencil / line / **arrow** / rectangle / ellipse / polygon, a **bucket**
@@ -2129,7 +2130,11 @@ under the cursor, and an **eraser** that removes the shape under the cursor on a
 click and while dragging, plus a **text** tool: a click opens a multiline input
 (`QInputDialog.getMultiLineText`) and the text is converted to vector glyph
 outlines (`QPainterPath.addText` → `svg_path.path_to_d`) and stored as a plain
-`<path d="…"/>` shape so it syncs/renders like any other); then the line width
+`<path d="…"/>` shape so it syncs/renders like any other, plus an **insert
+image** button (`wb-image.svg`) that reads a PNG/JPEG/GIF/BMP/WebP file, embeds
+it as a `data:` URI (`image_data_uri`, a 2 MB/format limit) and places an
+`<image>` shape at the view centre — rendered locally, exported as
+`<image xlink:href="data:…"/>` and synced like any other object); then the line width
 (a menu whose actions are checkable, the active width ticked), line colour, fill
 colour and a «Заливка» toggle (whether newly drawn closed shapes are filled);
 then the board
@@ -2140,10 +2145,12 @@ XEP-0385 media dict, and shares the link **with SIMS metadata** through the
 normal `ShareDialog`); then «Поделиться доской» and «Завершить сеанс». An arrow is serialised as one
 path — a shaft plus an **open (V) head** (`WhiteboardCanvas._arrow_d`), so it
 renders identically locally and for a remote peer. The document is a list of
-shape records (`id`, `rid`, `kind`, geometry, `stroke`/`stroke-width`/`fill` and
-a `QTransform`); every shape is exported as a `<path d="…"/>`
-(`include/svg_path.py`) and `to_svg()`/`save_svg()`/`render_image()`/`save_png()`
-serialise it (the PNG is a 1× board render, shapes only on white). In the
+shape records (`id`, `rid`, `kind` — `path` or `image` — geometry,
+`stroke`/`stroke-width`/`fill` and a `QTransform`); a vector shape is exported as
+a `<path d="…"/>` (`include/svg_path.py`), an image as
+`<image x/y/width/height/xlink:href/>`; `to_svg()`/`save_svg()`/`render_image()`/
+`save_png()` serialise the document (the PNG is a board render, shapes only on
+white). In the
 **select** tool a click selects a shape and shows rotate/resize handles
 (dragging the shape body moves it; the handles rotate/scale it about the centre
 — the move/rotate/scale tools remain as an alternative); `Delete`/`Backspace`

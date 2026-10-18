@@ -15,7 +15,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
-from stanza_im.ui.whiteboard_canvas import WhiteboardCanvas
+from stanza_im.ui.whiteboard_canvas import WhiteboardCanvas, image_data_uri
 
 _TOOLS = (
     ("select", "wb-select.svg", "whiteboard_tool_select"),
@@ -100,6 +100,11 @@ class WhiteboardDialog(QtWidgets.QDialog):
             self._tool_buttons[tool] = button
             toolbar.addWidget(button)
         self._tool_buttons["pencil"].setChecked(True)
+
+        self._image_btn = self._tool_button("wb-image.svg",
+                                            tr("whiteboard_insert_image"))
+        self._image_btn.clicked.connect(self._insert_image)
+        toolbar.addWidget(self._image_btn)
 
         toolbar.addWidget(self._separator())
         self._width_btn = self._tool_button("wb-line-width.svg",
@@ -315,6 +320,21 @@ class WhiteboardDialog(QtWidgets.QDialog):
             self, tr("whiteboard_clear"), tr("whiteboard_clear_confirm"))
         if answer == QtWidgets.QMessageBox.StandardButton.Yes:
             self._canvas.clear()
+
+    def _insert_image(self) -> None:
+        """Pick an image file and embed it (as a ``data:`` URI) on the board."""
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self, tr("whiteboard_insert_image"), "",
+            "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp)")
+        if not path:
+            return
+        try:
+            href = image_data_uri(path)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(
+                self, tr("whiteboard_insert_image"), str(exc))
+            return
+        self._canvas.add_image(self._canvas.view_center_world(), href)
 
     def _save_svg(self) -> None:
         path, _filter = QtWidgets.QFileDialog.getSaveFileName(

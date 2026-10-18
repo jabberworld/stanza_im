@@ -2507,10 +2507,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   / polygon, a **bucket** «Заливка» that fills — or on a second click unfills —
   only the closed shape under the cursor, the empty background is never flooded,
   an **eraser** that removes the shape under the cursor on a click and while
-  dragging, and a **text** tool — a click opens a multiline input
+  dragging, a **text** tool — a click opens a multiline input
   (`QInputDialog.getMultiLineText`) and the text becomes a vector glyph-outline
   path (`QPainterPath.addText` → `svg_path.path_to_d`) stored as a plain
-  `<path d="…"/>`); then the line width (a menu whose actions are checkable, the active
+  `<path d="…"/>`, and an **insert-image** button (`wb-image.svg`) that reads a
+  PNG/JPEG/GIF/BMP/WebP file, embeds it as a `data:` URI (`image_data_uri`, a
+  2 MB/format limit) and places an `<image>` shape at the view centre); then the
+  line width (a menu whose actions are checkable, the active
   width ticked), line colour, fill colour and a «Заливка» toggle (whether newly
   drawn closed shapes are filled; off → `fill=""` → `fill="none"`); then the
   board operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
@@ -2521,14 +2524,16 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   bucket-plus-check icon (`wb-fill-toggle.svg`). An arrow is one path — a shaft
   plus an open (V) head (`WhiteboardCanvas._arrow_d`) — so it renders identically
   locally and remotely.
-- The document is a list of shape records (`id`, `kind`, geometry, `stroke`,
-  `stroke-width`, `fill`, `QTransform`); `to_svg()`/`save_svg()` and
-  `render_image()`/`save_png()` serialise it (the SVG viewBox and the PNG are
-  `1280x720`, the board size from `include.constants.WHITEBOARD_WIDTH/HEIGHT`,
-  shared with the seeded SXE `viewBox`; the PNG is a 1× shapes-only render on
-  white). Every shape is exported as a `<path d="…"/>` (`include/svg_path.py`
-  builds the `d` strings; the canvas parses `d` back for remote shapes via
-  `svg_path.parse_path`).
+- The document is a list of shape records (`id`, `rid`, `kind` — `path` or
+  `image` — geometry, `stroke`, `stroke-width`, `fill`, `QTransform`);
+  `to_svg()`/`save_svg()` and `render_image()`/`save_png()` serialise it (the SVG
+  viewBox and the PNG are the board size from `include.constants.
+  WHITEBOARD_WIDTH/HEIGHT`, overridable by the shared document's `viewBox` via
+  `set_view_box`; the PNG is a shapes-only render on white). A vector shape is
+  exported as a `<path d="…"/>` (`include/svg_path.py` builds the `d` strings;
+  the canvas parses `d` back for remote shapes via `svg_path.parse_path`), an
+  image as `<image x/y/width/height/xlink:href="data:…"/>` (decoded from the
+  `data:` URI and cached; an external `http(s)` source is not fetched).
 - In the **select** tool a click selects a shape and draws rotate/resize
   handles (constant screen size, hit-tested in widget coordinates); dragging
   the shape body moves it and the handles rotate/scale it about the bounding-box

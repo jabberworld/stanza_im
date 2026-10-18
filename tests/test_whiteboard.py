@@ -485,6 +485,9 @@ from stanza_im.include.constants import find_icon  # noqa: E402
 check("the fill-toggle icon exists", bool(find_icon("wb-fill-toggle.svg")))
 check("the fill toggle carries an icon",
       not wdlg._fill_on_btn.icon().isNull())
+check("the insert-image icon exists", bool(find_icon("wb-image.svg")))
+check("the insert-image button carries an icon",
+      not wdlg._image_btn.icon().isNull())
 
 # 19. media metadata lookup for a shared URL ---------------------------------
 cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
@@ -582,6 +585,60 @@ check("the fit scale follows the viewBox", abs(vb._scale() - 1.0) < 1e-9)
 check("the SVG export uses the viewBox", 'viewBox="0 0 600 400"' in vb.to_svg())
 check("render_image follows the viewBox",
       (vb.render_image().width(), vb.render_image().height()) == (600, 400))
+
+# 22. embedded (data:) images ------------------------------------------------
+from stanza_im.ui.whiteboard_canvas import IMAGE_MAX_BYTES, image_data_uri  # noqa: E402
+
+_img_path = os.path.join(_SCRATCH, "pic.png")
+_pm = QtGui.QPixmap(2, 3)
+_pm.fill(QtGui.QColor("#3366cc"))
+check("a test PNG is written", _pm.save(_img_path, "PNG"))
+_uri = image_data_uri(_img_path)
+check("image_data_uri builds a data: URI",
+      _uri.startswith("data:image/png;base64,"))
+
+_bad = os.path.join(_SCRATCH, "pic.tiff")
+with open(_bad, "wb") as _fh:
+    _fh.write(b"x")
+try:
+    image_data_uri(_bad)
+    check("an unsupported image format is rejected", False)
+except ValueError:
+    check("an unsupported image format is rejected", True)
+
+_big = os.path.join(_SCRATCH, "big.png")
+with open(_big, "wb") as _fh:
+    _fh.write(b"\x00" * (IMAGE_MAX_BYTES + 10))
+try:
+    image_data_uri(_big)
+    check("an oversized image is rejected", False)
+except ValueError:
+    check("an oversized image is rejected", True)
+
+ic = WhiteboardCanvas()
+ic.resize(1280, 720)
+ish = ic.add_image(QtCore.QPointF(100, 100), _uri)
+check("add_image creates an image shape",
+      ish is not None and ish["kind"] == "image")
+check("an image keeps its natural size",
+      ish["image"][2] == 2 and ish["image"][3] == 3)
+check("an image renders from its data: URI",
+      not ic._pixmap_for(_uri).isNull())
+check("an image is hit-testable by its interior",
+      ic._shape_at(QtCore.QPointF(100.5, 100.5)) is ish)
+check("shape_attrs marks an image",
+      WhiteboardCanvas.shape_attrs(ish)["tag"] == "image")
+check("an image exports as <image xlink:href>",
+      "<image" in ic.to_svg() and "xlink:href" in ic.to_svg())
+
+rc2 = WhiteboardCanvas()
+rc2.load_shapes([{"rid": "i1", "id": "i1", "tag": "image",
+                  "x": "10", "y": "20", "width": "2", "height": "3",
+                  "href": _uri, "transform": ""}])
+check("a remote image loads",
+      len(rc2.shapes()) == 1 and rc2.shapes()[0]["kind"] == "image")
+check("a remote image renders",
+      rc2._world_path(rc2.shapes()[0]).boundingRect().width() == 2)
 
 print()
 if FAILURES:

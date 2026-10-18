@@ -29,6 +29,7 @@ logger = logging.getLogger("stanza_im.whiteboard")
 NS_WHITEBOARD = "urn:xmpp:jingle:apps:svg-whiteboard:0"
 NS_JINGLE = "urn:xmpp:jingle:1"
 NS_SVG = "http://www.w3.org/2000/svg"
+NS_XLINK = "http://www.w3.org/1999/xlink"
 
 #: Fixed root record id of the shared SVG document.  Every participant uses the
 #: same value (``"0"``, the value the specification's examples use), so an
@@ -114,7 +115,11 @@ class WhiteboardManager:
         return session.doc if session else None
 
     def shapes(self, sid: str) -> list[dict]:
-        """The current shapes of the session document (for the canvas)."""
+        """The current drawable objects of the session document (for the canvas).
+
+        Both ``<path/>`` and ``<image/>`` children are returned; each carries its
+        element ``tag`` so the canvas can render it.
+        """
         session = self.sessions.get(sid)
         if session is None:
             return []
@@ -123,17 +128,26 @@ class WhiteboardManager:
         for child in doc.children(doc.root_rid):
             record = doc.records.get(child)
             if record is None or record.type != "element" \
-                    or record.name != "path":
+                    or record.name not in ("path", "image"):
                 continue
             attrs = {doc.records[a].name: doc.records[a].chdata
                      for a in doc.children(child)
                      if doc.records[a].type == "attr"}
-            out.append({"rid": child, "id": attrs.get("id", ""),
-                        "d": attrs.get("d", ""),
-                        "stroke": attrs.get("stroke", "#1a1a1a"),
-                        "stroke-width": attrs.get("stroke-width", "2"),
-                        "fill": attrs.get("fill", ""),
-                        "transform": attrs.get("transform", "")})
+            item = {"rid": child, "id": attrs.get("id", ""),
+                    "tag": record.name,
+                    "stroke": attrs.get("stroke", "#1a1a1a"),
+                    "stroke-width": attrs.get("stroke-width", "2"),
+                    "fill": attrs.get("fill", ""),
+                    "transform": attrs.get("transform", "")}
+            if record.name == "image":
+                item.update({
+                    "x": attrs.get("x", "0"), "y": attrs.get("y", "0"),
+                    "width": attrs.get("width", "0"),
+                    "height": attrs.get("height", "0"),
+                    "href": attrs.get("xlink:href", "")})
+            else:
+                item["d"] = attrs.get("d", "")
+            out.append(item)
         return out
 
     def view_box(self, sid: str) -> tuple[int, int]:
@@ -407,16 +421,32 @@ class WhiteboardManager:
     # ── Local edits ───────────────────────────────────────────────
 
     def add_shape(self, sid: str, attrs: dict) -> str:
-        """Add a shape to the document and broadcast the ``<new>`` edits."""
+        """Add a drawable object (``path`` or ``image``) and broadcast ``<new>``."""
         session = self.sessions.get(sid)
         if session is None:
             return ""
         doc = session.doc
-        rid = doc.add_element(doc.root_rid, "path")
-        for key in ("id", "d", "stroke", "stroke-width", "fill", "transform"):
+        tag = str(attrs.get("tag") or "path")
+        if tag not in ("path", "image"):
+            tag = "path"
+        rid = doc.add_element(doc.root_rid, tag)
+        for key in ("id", "stroke", "stroke-width", "fill", "transform"):
             value = attrs.get(key)
             if value:
                 doc.add_attr(rid, key, str(value))
+        if tag == "image":
+            for key in ("x", "y", "width", "height"):
+                value = attrs.get(key)
+                if value is not None and value != "":
+                    doc.add_attr(rid, key, str(value))
+            href = attrs.get("href")
+            if href:
+                # The embedded source lives in xlink:href (the profile §8.7).
+                doc.add_attr(rid, "xlink:href", str(href), ns=NS_XLINK)
+        else:
+            value = attrs.get("d")
+            if value:
+                doc.add_attr(rid, "d", str(value))
         new = doc.new_elements_for(rid)
         self._send_edits(session, new=new)
         self._record(sid, {"new": new, "set": [], "remove": []},
@@ -434,7 +464,8 @@ class WhiteboardManager:
         sets: list[ET.Element] = []
         inv_sets: list[ET.Element] = []
         inv_removes: list[ET.Element] = []
-        for key in ("d", "stroke", "stroke-width", "fill", "transform"):
+        for key in ("d", "stroke", "stroke-width", "fill", "transform",
+                    "x", "y", "width", "height"):
             if key not in attrs:
                 continue
             existing = doc.find_attr(rid, key)

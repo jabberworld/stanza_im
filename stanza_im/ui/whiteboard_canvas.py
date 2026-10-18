@@ -7,7 +7,9 @@ document to SVG.
 """
 from __future__ import annotations
 
+import base64
 import math
+import os
 import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -15,6 +17,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.include import svg_path
 from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH,
                                          find_icon)
+from stanza_im.include.utils import escape_html
 from stanza_im.i18n import tr
 
 #: Default logical canvas size (the SVG ``viewBox``).  A collaborative session
@@ -30,6 +33,38 @@ CLOSED_KINDS = ("rect", "ellipse", "polygon")
 #: View (zoom) limits.
 MIN_VIEW_ZOOM = 0.25
 MAX_VIEW_ZOOM = 8.0
+
+#: Embedded (``data:``) image limits — the profile's Security Considerations ask
+#: implementations to enforce size and format limits.
+IMAGE_MAX_BYTES = 2 * 1024 * 1024
+IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
+}
+#: The XLink namespace (the profile embeds the image source in ``xlink:href``).
+XLINK_NS = "http://www.w3.org/1999/xlink"
+
+
+def image_data_uri(path: str) -> str:
+    """Read an image file and return a ``data:`` URI.
+
+    Raises :class:`ValueError` (with a user-facing message) for an unsupported
+    format or a file over :data:`IMAGE_MAX_BYTES`.
+    """
+    mime = IMAGE_MIME.get(os.path.splitext(path)[1].lower())
+    if not mime:
+        raise ValueError(tr("whiteboard_image_unsupported"))
+    limit_text = "%d MB" % (IMAGE_MAX_BYTES // (1024 * 1024))
+    try:
+        if os.path.getsize(path) > IMAGE_MAX_BYTES:
+            raise ValueError(tr("whiteboard_image_too_large", size=limit_text))
+        with open(path, "rb") as fh:
+            raw = fh.read(IMAGE_MAX_BYTES + 1)
+    except OSError as exc:
+        raise ValueError(tr("whiteboard_image_failed")) from exc
+    if len(raw) > IMAGE_MAX_BYTES:
+        raise ValueError(tr("whiteboard_image_too_large", size=limit_text))
+    return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
 
 _MATRIX_RE = __import__("re").compile(
     r"matrix\(\s*([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+([-\d.eE+]+)[\s,]+"
@@ -71,6 +106,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._shapes: list[dict] = []
+        # Decoded image pixmaps, keyed by their source URI (bounded).
+        self._image_cache: dict[str, QtGui.QPixmap] = {}
         # Logical canvas size (the SVG ``viewBox``); the host's may override it.
         self._view_w = VIEW_W
         self._view_h = VIEW_H
@@ -189,7 +226,18 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     @staticmethod
     def shape_attrs(shape: dict) -> dict:
         """The SVG attributes of *shape* (for a collaborative edit)."""
+        if shape.get("kind") == "image":
+            x, y, w, h = shape["image"]
+            return {
+                "tag": "image",
+                "id": shape["id"],
+                "x": "%g" % x, "y": "%g" % y,
+                "width": "%g" % w, "height": "%g" % h,
+                "href": shape.get("href", ""),
+                "transform": transform_str(shape["transform"]),
+            }
         return {
+            "tag": "path",
             "id": shape["id"],
             "d": WhiteboardCanvas.shape_d(shape),
             "stroke": shape["stroke"],
@@ -281,6 +329,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def _local_path(shape: dict) -> QtGui.QPainterPath:
         if shape.get("kind") in ("remote", "text"):
             return svg_path.parse_path(shape.get("d") or "")
+        if shape.get("kind") == "image":
+            path = QtGui.QPainterPath()
+            path.addRect(QtCore.QRectF(*shape["image"]))
+            return path
         if shape.get("kind") == "arrow":
             return svg_path.parse_path(WhiteboardCanvas._arrow_d(shape))
         path = QtGui.QPainterPath()
@@ -358,6 +410,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         """
         loaded: list[dict] = []
         for item in shapes:
+            if str(item.get("tag") or "path") == "image":
+                loaded.append(self._image_shape(item))
+                continue
             fill = str(item.get("fill") or "")
             if fill.lower() == "none":
                 fill = ""
@@ -377,6 +432,27 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._active = None
         self.update()
         self.changed.emit()
+
+    @staticmethod
+    def _image_shape(item: dict) -> dict:
+        def _num(key: str, default: float = 0.0) -> float:
+            try:
+                return float(item.get(key))
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "id": str(item.get("id") or uuid.uuid4().hex),
+            "rid": str(item.get("rid") or ""),
+            "kind": "image",
+            "image": (_num("x"), _num("y"),
+                      _num("width", 120.0), _num("height", 120.0)),
+            "href": str(item.get("href") or ""),
+            "stroke": "#1a1a1a",
+            "stroke_width": 2,
+            "fill": "",
+            "transform": _parse_transform(item.get("transform")),
+        }
 
     def _shape_by_id(self, shape_id: str) -> dict | None:
         return next((s for s in self._shapes if s["id"] == shape_id), None)
@@ -461,6 +537,62 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.shape_added.emit(shape)
         return shape
 
+    # ── Images ────────────────────────────────────────────────────
+
+    def view_center_world(self) -> QtCore.QPointF:
+        """The world point at the centre of the visible area (drop position)."""
+        return self._to_world(QtCore.QPointF(self.width() / 2.0,
+                                             self.height() / 2.0))
+
+    def _pixmap_for(self, href: str) -> QtGui.QPixmap:
+        """Decode (and cache) the pixmap of an embedded image.
+
+        Only ``data:`` sources are decoded — the profile forbids fetching
+        external resources, so a remote ``http(s)`` reference stays unrendered
+        (it is still a selectable object).
+        """
+        cached = self._image_cache.get(href)
+        if cached is not None:
+            return cached
+        pixmap = QtGui.QPixmap()
+        if href.startswith("data:"):
+            try:
+                _header, _sep, payload = href.partition(",")
+                raw = base64.b64decode(payload, validate=False)
+                if len(raw) <= IMAGE_MAX_BYTES:
+                    pixmap.loadFromData(raw)
+            except (ValueError, TypeError):
+                pixmap = QtGui.QPixmap()
+        if len(self._image_cache) >= 32:
+            self._image_cache.clear()
+        self._image_cache[href] = pixmap
+        return pixmap
+
+    def add_image(self, world: QtCore.QPointF, href: str,
+                  width: float | None = None,
+                  height: float | None = None) -> dict | None:
+        """Place an embedded (``data:``) image with its top-left at *world*."""
+        if not href:
+            return None
+        if width is None or height is None:
+            pixmap = self._pixmap_for(href)
+            if not pixmap.isNull() and pixmap.width() and pixmap.height():
+                width, height = float(pixmap.width()), float(pixmap.height())
+            else:
+                width = height = 120.0
+        # Clamp so a large photo still fits on the canvas.
+        w = min(float(width), float(self._view_w))
+        h = min(float(height), float(self._view_h))
+        shape = self._new_shape("image")
+        shape["image"] = (world.x(), world.y(), w, h)
+        shape["href"] = href
+        self._shapes.append(shape)
+        self._selected = shape["id"]
+        self.update()
+        self.changed.emit()
+        self.shape_added.emit(shape)
+        return shape
+
     def _shape_at(self, world: QtCore.QPointF) -> dict | None:
         """The topmost shape under *world* (hit-test), or ``None``."""
         for shape in reversed(self._shapes):
@@ -469,9 +601,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             stroker.setWidth(max(8.0, shape["stroke_width"] + 4.0))
             if stroker.createStroke(path).contains(world):
                 return shape
-            # A closed shape is selectable by its interior even when unfilled.
-            if (self._filled(shape) or self._is_closed(shape)) \
-                    and path.contains(world):
+            # A closed shape (or an image) is selectable by its interior even
+            # when unfilled.
+            if (self._filled(shape) or self._is_closed(shape)
+                    or shape.get("kind") == "image") and path.contains(world):
                 return shape
         return None
 
@@ -560,6 +693,14 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         painter.restore()
 
     def _draw_shape(self, painter: QtGui.QPainter, shape: dict) -> None:
+        if shape.get("kind") == "image":
+            pixmap = self._pixmap_for(shape.get("href") or "")
+            if not pixmap.isNull():
+                painter.save()
+                painter.setTransform(shape["transform"], True)
+                painter.drawPixmap(QtCore.QRectF(*shape["image"]), pixmap)
+                painter.restore()
+            return
         path = self._world_path(shape)
         pen = QtGui.QPen(QtGui.QColor(shape["stroke"]),
                          float(shape["stroke_width"]))
@@ -807,6 +948,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     @staticmethod
     def _shape_svg(shape: dict) -> str:
+        if shape.get("kind") == "image":
+            x, y, w, h = shape["image"]
+            attrs = [f'id="{shape["id"]}"', f'x="{x:g}"', f'y="{y:g}"',
+                     f'width="{w:g}"', f'height="{h:g}"',
+                     'xlink:href="%s"' % escape_html(shape.get("href") or "")]
+            transform = transform_str(shape["transform"])
+            if transform:
+                attrs.append(f'transform="{transform}"')
+            return ('  <image xmlns:xlink="%s" %s/>'
+                    % (XLINK_NS, " ".join(attrs)))
         d = WhiteboardCanvas.shape_d(shape)
         if not d:
             return ""

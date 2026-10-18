@@ -505,6 +505,28 @@ check("the refusal is a session-terminate with unsupported-applications",
       and _reason.find(_q(wb_mod.NS_JINGLE, "unsupported-applications"))
       is not None)
 
+# 20. an embedded (data:) image round-trips through the document -------------
+c = _FakeClient()
+c._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid = m.start_session("bob@example.com", is_muc=False)
+_uri = "data:image/png;base64,iVBORw0KGgo="
+_img_rid = m.add_shape(sid, {"tag": "image", "id": "img1", "x": "10",
+                             "y": "20", "width": "64", "height": "64",
+                             "href": _uri})
+check("add_shape creates an <image> element",
+      m.document(sid).records[_img_rid].name == "image")
+_imgs = [s for s in m.shapes(sid) if s.get("tag") == "image"]
+check("the image is listed with its source and size",
+      len(_imgs) == 1 and _imgs[0]["href"] == _uri
+      and _imgs[0]["width"] == "64" and _imgs[0]["height"] == "64")
+_href_rid = m.document(sid).find_attr(_img_rid, "xlink:href")
+check("the image source lives in an xlink:href attribute",
+      _href_rid is not None
+      and m.document(sid).records[_href_rid].ns == wb_mod.NS_XLINK)
+check("the image source is broadcast in a <new> edit",
+      _state_of(c).find(_q(NS_SXE, "new")) is not None)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
