@@ -2529,8 +2529,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `WhiteboardManager.group_shapes` (a `<g/>` + reparenting) / `ungroup`
   (composes the group's `transform` into the children via
   `include/svg_transform.py`, reparents them back, removes the group); a grouped
-  shape is selected as a whole and its drag moves the group's `transform`
-  (`set_group_transform`); a local board groups the canvas list directly;
+  shape is selected as a whole (outlined in green, `_group_world_bbox`) and its
+  drag moves the group's `transform` (`set_group_transform`); a local board
+  groups the canvas list directly;
   then the board operations «Очистить» (drawable children only, metadata
   preserved), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
   (`wb-resize.svg` → a preset picker (`_canvas_size_items`, 600×400 … 1920×1080,

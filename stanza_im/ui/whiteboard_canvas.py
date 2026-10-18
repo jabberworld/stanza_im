@@ -317,6 +317,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._group_transforms.setdefault(group_rid, QtGui.QTransform())
         self.update()
         self.changed.emit()
+        self.selection_changed.emit()
         return group_rid
 
     def ungroup_local(self, group_rid: str) -> bool:
@@ -334,6 +335,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._group_transforms.pop(group_rid, None)
         self.update()
         self.changed.emit()
+        self.selection_changed.emit()
         return True
 
     # ── Actions ───────────────────────────────────────────────────
@@ -871,6 +873,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             painter.setPen(pen)
             painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
             painter.drawRect(rect)
+        group = self.selected_group()
+        if group:
+            # A distinct outline marks the selection as one group.
+            group_rect = self._group_world_bbox(group)
+            if not group_rect.isNull():
+                pen = QtGui.QPen(QtGui.QColor("#2e7d32"),
+                                 max(1.5, 1.5 / max(s, 1e-6)))
+                painter.setPen(pen)
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                painter.drawRect(group_rect.adjusted(-3, -3, 3, 3))
         painter.restore()
         if self._selection and self._tool == "select":
             self._draw_handles(painter)
@@ -1123,15 +1135,19 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         op.translate(-center.x(), -center.y())
         return op
 
-    def _group_world_center(self, group: str) -> QtCore.QPointF:
+    def _group_world_bbox(self, group: str) -> QtCore.QRectF:
+        """The union bounding box of a group's members (world coords)."""
         rects = [self._world_path(s).boundingRect() for s in self._shapes
                  if (s.get("group") or "") == group]
         if not rects:
-            return QtCore.QPointF(0.0, 0.0)
+            return QtCore.QRectF()
         out = rects[0]
         for rect in rects[1:]:
             out = out.united(rect)
-        return out.center()
+        return out
+
+    def _group_world_center(self, group: str) -> QtCore.QPointF:
+        return self._group_world_bbox(group).center()
 
     def _transform(self, shape: dict, tool: str, last, world) -> None:
         group = shape.get("group") or ""

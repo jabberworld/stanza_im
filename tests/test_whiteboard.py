@@ -738,6 +738,56 @@ check("ungroup_local dissolves the group",
       gc.ungroup_local(_grp)
       and all(not s.get("group") for s in gc.shapes()))
 
+# 25b. the dialog groups a local (unshared) selection ------------------------
+lg = WhiteboardDialog("bob@example.com")
+lg._canvas.resize(1280, 720)
+lg._canvas.set_tool("rect")
+drag(lg._canvas, 10, 10, 40, 40)
+lg._canvas.set_tool("rect")
+drag(lg._canvas, 60, 10, 90, 40)
+lg._canvas.set_tool("select")
+QtWidgets.QApplication.sendEvent(lg._canvas, _event(
+    QtCore.QEvent.Type.MouseButtonPress, 75, 25))
+_ctrl_click(lg._canvas, 25, 25)
+lg._group_selection()
+check("the dialog groups a local selection",
+      len(lg._canvas.selection()) == 2
+      and all(s.get("group") for s in lg._canvas.shapes()))
+check("the group is reported on the local board",
+      bool(lg._canvas.selected_group()))
+check("the group has a bounding box for its outline",
+      not lg._canvas._group_world_bbox(
+          lg._canvas.selected_group()).isNull())
+lg._ungroup_selection()
+check("the dialog ungroups a local selection",
+      all(not s.get("group") for s in lg._canvas.shapes()))
+lg.close()
+
+
+class _WbGroup:
+    def __init__(self):
+        self.calls = []
+
+    def group_shapes(self, sid, rids):
+        self.calls.append((sid, tuple(rids)))
+        return "G1"
+
+
+class _ClientGroup:
+    def __init__(self):
+        self.whiteboard = _WbGroup()
+
+
+sg = WhiteboardDialog("bob@example.com", client=_ClientGroup())
+sg._sid = "s1"
+sg._canvas.load_shapes([{"rid": "R1", "id": "I1", "d": "M 0 0 L 1 1"},
+                        {"rid": "R2", "id": "I2", "d": "M 0 0 L 2 2"}])
+sg._canvas._selection = ["I1", "I2"]
+sg._group_selection()
+check("a shared selection is grouped through the manager",
+      sg._client.whiteboard.calls == [("s1", ("R1", "R2"))])
+sg.close()
+
 # 26. the dialog exposes the group controls ----------------------------------
 gd = WhiteboardDialog("bob@example.com")
 check("the dialog has group/ungroup buttons",

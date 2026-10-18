@@ -485,13 +485,15 @@ class WhiteboardDialog(QtWidgets.QDialog):
 
     def _group_selection(self) -> None:
         """Group the selected shapes (Ctrl+click to select several)."""
-        rids = [r for r in self._canvas.selected_rids() if r]
-        if len(rids) < 2:
+        if len(self._canvas.selection()) < 2:
             return
         if self._client and self._sid:
-            self._client.whiteboard.group_shapes(self._sid, rids)
-        else:
-            self._canvas.group_local()
+            rids = [r for r in self._canvas.selected_rids() if r]
+            if len(rids) >= 2:
+                self._client.whiteboard.group_shapes(self._sid, rids)
+                return
+        # A local (unshared) board, or shapes without a document record.
+        self._canvas.group_local()
 
     def _ungroup_selection(self) -> None:
         group = self._canvas.selected_group()
