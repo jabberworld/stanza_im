@@ -3813,6 +3813,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muji_invite", self._on_muji_invite)
         c.on("muc_invite_received", self._on_muc_invite_received)
         c.on("whiteboard_invite", self._on_whiteboard_invite)
+        c.on("whiteboard_proposed", self._on_whiteboard_proposed)
         c.on("whiteboard_ready", self._on_whiteboard_ready)
         c.on("whiteboard_state", self._on_whiteboard_state)
         c.on("whiteboard_ended", self._on_whiteboard_ended)
@@ -7388,6 +7389,23 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _on_whiteboard_proposed(self, sid: str, peer: str, full: str) -> None:
+        """An XEP-0353 whiteboard proposal arrived (the extended profile)."""
+        if self._client is None:
+            return
+        QtCore.QTimer.singleShot(
+            0, lambda: self._prompt_whiteboard_proposal(sid, peer))
+
+    def _prompt_whiteboard_proposal(self, sid: str, peer: str) -> None:
+        if self._client is None:
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("whiteboard_invite_title"),
+            tr("whiteboard_invite_text", jid=peer))
+        self._client.answer_proposal(
+            sid, answer == QtWidgets.QMessageBox.StandardButton.Yes,
+            kind="whiteboard")
 
     def _on_whiteboard_ready(self, sid: str) -> None:
         """A session became usable: attach it to its conversation dialog."""

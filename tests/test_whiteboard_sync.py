@@ -605,6 +605,102 @@ check("ungroup is undoable", m.can_undo(sid))
 m.undo(sid)
 check("undo restores the group", g2 in m.document(sid).records)
 
+# 25. XEP-0353 JMI (whiteboard proposal) -------------------------------------
+from stanza_im.xmpp import jmi  # noqa: E402
+
+
+class _MsgStub:
+    def __init__(self, frm):
+        self.xml = ET.Element("{jabber:client}message")
+        self._frm = frm
+
+    def __getitem__(self, key):
+        return self._frm if key == "from" else None
+
+
+_prop = ET.Element(_q(jmi.NS_JINGLE_MSG, "propose"))
+_prop.set("id", "p1")
+ET.SubElement(_prop, _q(wb_mod.NS_WHITEBOARD, "description"))
+_pmsg = _MsgStub("bob@example.com/pc")
+_pmsg.xml.append(_prop)
+check("jmi.action_of reads the action", jmi.action_of(_pmsg) == "propose")
+check("jmi.description_ns reads the application type",
+      jmi.description_ns(_pmsg) == wb_mod.NS_WHITEBOARD)
+
+c = _FakeClient()
+m = WhiteboardManager(c)
+m.handle_jingle_message(_pmsg)
+check("an incoming propose is recorded", "p1" in m._proposals)
+check("an incoming propose emits whiteboard_proposed",
+      ("whiteboard_proposed", "p1", "bob@example.com", "bob@example.com/pc")
+      in c.events)
+check("owns_jmi knows the proposal", m.owns_jmi("p1"))
+m.answer_proposal("p1", True)
+_ans = c.xmpp.sent[-1]
+check("answering with proceed sends <proceed>",
+      _ans.xml.find(_q(jmi.NS_JINGLE_MSG, "proceed")) is not None)
+check("the proceed targets the proposer's full JID",
+      _ans.fields.get("to") == "bob@example.com/pc")
+check("the accepted proposal is remembered", "p1" in m._proceeded)
+
+
+async def _reject_case():
+    cc = _FakeClient()
+    mm = WhiteboardManager(cc)
+    future = asyncio.get_event_loop().create_future()
+    mm._proceed_futures["s9"] = future
+    reject = ET.Element(_q(jmi.NS_JINGLE_MSG, "reject"))
+    reject.set("id", "s9")
+    msg = _MsgStub("bob@example.com/pc")
+    msg.xml.append(reject)
+    mm.handle_jingle_message(msg)
+    return future.done() and future.result() is False
+
+
+check("a reject resolves the pending proceed future with False",
+      asyncio.run(_reject_case()))
+
+
+class _JmiClient(_FakeClient):
+    def supports_feature(self, bare, feature):
+        return feature == jmi.NS_JINGLE_MSG
+
+    def _start_task(self, coro):
+        self.started = getattr(self, "started", [])
+        self.started.append(coro)
+        coro.close()
+        return None
+
+
+jc = _JmiClient()
+jc._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+jm = WhiteboardManager(jc)
+jm.start_session("bob@example.com", is_muc=False)
+check("a JMI-capable peer is proposed to",
+      bool(getattr(jc, "started", None)))
+check("no session-initiate is sent before a proceed",
+      not any(s.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "jingle")) is not None
+              for s in jc.xmpp.sent))
+
+
+class _BuildClient:
+    class _Xmpp:
+        def Message(self):
+            return _FakeStanza("message", [])
+
+    def __init__(self):
+        self.xmpp = _BuildClient._Xmpp()
+
+
+_built = jmi.build(_BuildClient(), "propose", "bob@x", "s1",
+                   [(wb_mod.NS_WHITEBOARD, {})])
+check("jmi.build writes the action and the description",
+      _built.xml.find(_q(jmi.NS_JINGLE_MSG, "propose")) is not None
+      and _built.xml.find(".//%s" % _q(wb_mod.NS_WHITEBOARD, "description"))
+      is not None)
+check("jmi.build adds the XEP-0334 store hint",
+      _built.xml.find("{urn:xmpp:hints}store") is not None)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

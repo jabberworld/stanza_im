@@ -12,6 +12,7 @@ incoming edits are applied to the document and the UI is told to rebuild.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import logging
@@ -22,6 +23,7 @@ from xml.etree import ElementTree as ET
 from stanza_im.include import svg_transform
 from stanza_im.include.constants import WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH
 from stanza_im.include.enumerators import SHOW_ORDER
+from stanza_im.xmpp import jmi
 from stanza_im.xmpp import sxe
 from stanza_im.xmpp.sxe import NS_SXE, NS_SXE_TRANSPORT, SxeDocument
 
@@ -91,6 +93,12 @@ class WhiteboardManager:
         # shared board can undo the last operation whatever its author.
         self._undo: dict[str, list[dict]] = {}
         self._redo: dict[str, list[dict]] = {}
+        # XEP-0353 JMI: incoming proposals (sid -> proposer full JID), pending
+        # proceed futures for our own proposals, and sids we accepted as a
+        # joiner (so the following session-initiate auto-joins).
+        self._proposals: dict[str, str] = {}
+        self._proceed_futures: dict[str, asyncio.Future] = {}
+        self._proceeded: set[str] = set()
 
     @property
     def available(self) -> bool:
@@ -275,8 +283,17 @@ class WhiteboardManager:
                 session.failure = "unavailable"
                 return sid
             session.full_peer = full
-            logger.info("Whiteboard: invite %s -> %s (sid=%s)", peer, full, sid)
-            self._send_jingle(session, "session-initiate")
+            if self._peer_supports_jmi(peer) \
+                    and getattr(self.client, "_start_task", None):
+                # XEP-0353: propose first, initiate the Jingle session once the
+                # peer proceeds (a reject/retract fails the share).
+                logger.info("Whiteboard: propose %s -> %s (sid=%s)", peer, full,
+                            sid)
+                self.client._start_task(self._propose_and_initiate(session))
+            else:
+                logger.info("Whiteboard: invite %s -> %s (sid=%s)", peer, full,
+                            sid)
+                self._send_jingle(session, "session-initiate")
             self._announce_active(peer)
         return sid
 
@@ -328,6 +345,92 @@ class WhiteboardManager:
                 logger.debug("Whiteboard: could not refuse session",
                              exc_info=True)
         self.client.emit("whiteboard_ended", sid)
+
+    # ── XEP-0353 Jingle Message Initiation ────────────────────────
+
+    def owns_jmi(self, sid: str) -> bool:
+        """True when *sid* belongs to a whiteboard JMI exchange."""
+        return (sid in self.sessions or sid in self._proposals
+                or sid in self._proceeded)
+
+    def _peer_supports_jmi(self, bare: str) -> bool:
+        try:
+            return bool(self.client.supports_feature(
+                bare.split("/", 1)[0], jmi.NS_JINGLE_MSG))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _send_jmi(self, action: str, to_jid: str, sid: str,
+                  descriptions=()) -> None:
+        try:
+            jmi.build(self.client, action, to_jid, sid, descriptions).send()
+        except Exception:  # noqa: BLE001
+            logger.debug("Whiteboard: could not send jingle-message %s", action,
+                         exc_info=True)
+
+    async def _propose_and_initiate(self, session: WhiteboardSession) -> None:
+        """Propose the session (XEP-0353) and initiate it on proceed."""
+        try:
+            future = asyncio.get_event_loop().create_future()
+        except RuntimeError:
+            self._send_jingle(session, "session-initiate")
+            return
+        self._proceed_futures[session.sid] = future
+        self._send_jmi("propose", session.peer, session.sid,
+                       [(NS_WHITEBOARD, {})])
+        accepted = True
+        try:
+            accepted = bool(await asyncio.wait_for(future, timeout=30))
+        except asyncio.TimeoutError:
+            logger.info("Whiteboard: no proceed for %s, continuing",
+                        session.sid)
+        except Exception:  # noqa: BLE001
+            accepted = False
+        self._proceed_futures.pop(session.sid, None)
+        if not accepted:
+            self.sessions.pop(session.sid, None)
+            if self._by_peer.get(session.peer) == session.sid:
+                self._by_peer.pop(session.peer, None)
+            self._announce_inactive(session.peer)
+            self.client.emit("whiteboard_failed", session.sid, "rejected")
+            return
+        if session.failure or session.ready or session.local_only:
+            return
+        self._send_jingle(session, "session-initiate")
+
+    def handle_jingle_message(self, msg) -> None:
+        """Route an incoming whiteboard JMI message (propose/proceed/reject)."""
+        action = jmi.action_of(msg)
+        element = jmi.action_element(msg)
+        if not action or element is None:
+            return
+        sid = str(element.get("id") or "")
+        if not sid:
+            return
+        if action == "propose":
+            frm = str(msg["from"] or "")
+            self._proposals[sid] = frm
+            self.client.emit("whiteboard_proposed", sid, frm.split("/", 1)[0],
+                             frm)
+            return
+        future = self._proceed_futures.get(sid)
+        if action in ("proceed", "accept"):
+            if future is not None and not future.done():
+                future.set_result(True)
+        elif action in ("reject", "retract"):
+            if future is not None and not future.done():
+                future.set_result(False)
+
+    def answer_proposal(self, sid: str, accept: bool) -> None:
+        """Answer a whiteboard proposal (sends proceed/reject to the proposer)."""
+        full = self._proposals.pop(sid, "")
+        if not full:
+            return
+        if accept:
+            self._proceeded.add(sid)
+            self._send_jmi("proceed", full, sid)
+        else:
+            self._send_jmi("reject", full, sid)
 
     def end_session(self, sid: str) -> None:
         session = self.sessions.pop(sid, None)
@@ -745,7 +848,13 @@ class WhiteboardManager:
             self.sessions[sid] = session
             self._by_peer[peer] = sid
             self._announce_active(peer)
-            self.client.emit("whiteboard_invite", sid, peer, False)
+            if sid in self._proceeded:
+                # We already accepted the XEP-0353 proposal: join silently.
+                self._proceeded.discard(sid)
+                self.join_session(peer, sid, False)
+                self.client.emit("whiteboard_ready", sid)
+            else:
+                self.client.emit("whiteboard_invite", sid, peer, False)
         elif action == "session-accept":
             session = self.sessions.get(sid)
             if session is not None:

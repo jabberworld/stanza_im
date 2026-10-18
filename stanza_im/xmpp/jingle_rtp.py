@@ -20,6 +20,8 @@ import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
+from stanza_im.xmpp import jmi
+
 logger = logging.getLogger("stanza_im.call.rtp")
 
 #: The media engine (``stanza_im.xmpp.media`` → aiortc/av) is heavy (~34 MB),
@@ -52,7 +54,7 @@ NS_RTP_VIDEO = "urn:xmpp:jingle:apps:rtp:video"
 NS_RTP_SSMA = "urn:xmpp:jingle:apps:rtp:ssma:0"
 NS_DTLS = "urn:xmpp:jingle:apps:dtls:0"
 NS_ICE = "urn:xmpp:jingle:transports:ice-udp:1"
-NS_JINGLE_MSG = "urn:xmpp:jingle-message:0"
+NS_JINGLE_MSG = jmi.NS_JINGLE_MSG
 NS_MUJI = "urn:xmpp:jingle:muji:0"
 NS_RTP_FB = "urn:xmpp:jingle:apps:rtp:rtcp-fb:0"
 NS_RTP_HDREXT = "urn:xmpp:jingle:apps:rtp:rtp-hdrext:0"
@@ -745,30 +747,27 @@ class JingleRtpManager:
 
     async def _send_message_action(self, action: str, to_jid: str, sid: str,
                                    video: bool = False,
-                                   extra: ET.Element | None = None) -> None:
+                                   extra: ET.Element | None = None,
+                                   descriptions=None) -> None:
         """Send a XEP-0353 ``<propose|proceed|reject|retract|accept>`` message.
 
         Per XEP-0353 ``propose`` goes to the bare JID while the responses
         (``ringing``/``proceed``/``reject``/``retract``/``finish``) MUST go to
-        the full JID of the other party.
+        the full JID of the other party.  The application ``<description/>``
+        elements default to the RTP ones (XEP-0353 §4.2, which Conversations
+        expects); a caller may pass its own (see :mod:`stanza_im.xmpp.jmi`).
         """
-        msg = self.client.xmpp.Message()
-        msg["to"] = to_jid
-        msg["type"] = "chat"
-        el = ET.SubElement(msg.xml, _q(NS_JINGLE_MSG, action))
-        el.set("id", sid)
-        if action == "propose":
-            # Conversations expects the same RTP descriptions as the upcoming
-            # session-initiate (XEP-0353 §4.2), not the Jingle core namespace.
-            desc = ET.SubElement(el, _q(NS_RTP, "description"))
-            desc.set("media", "audio")
-            if video:
-                desc_v = ET.SubElement(el, _q(NS_RTP, "description"))
-                desc_v.set("media", "video")
+        if descriptions is None:
+            descriptions = []
+            if action == "propose":
+                descriptions.append((NS_RTP, {"media": "audio"}))
+                if video:
+                    descriptions.append((NS_RTP, {"media": "video"}))
+        msg = jmi.build(self.client, action, to_jid, sid, descriptions)
         if extra is not None:
-            el.append(extra)
-        # XEP-0353 §3 mandates the XEP-0334 <store/> hint on every JMI message.
-        ET.SubElement(msg.xml, "{urn:xmpp:hints}store")
+            element = jmi.action_element(msg)
+            if element is not None:
+                element.append(extra)
         msg.send()
         logger.info("CALL sent jingle-message %s to %s (sid=%s)", action,
                     to_jid, sid)

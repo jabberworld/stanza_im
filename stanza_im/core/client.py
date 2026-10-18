@@ -33,6 +33,7 @@ from stanza_im.include.constants import APP_NAME, VERSION
 from stanza_im.i18n import current_language as _current_language
 from stanza_im.xmpp import jingle as jingle_mod
 from stanza_im.xmpp import jingle_rtp
+from stanza_im.xmpp import jmi
 from stanza_im.xmpp.jingle import JingleFileTransferManager
 from stanza_im.xmpp.jingle_rtp import JingleRtpManager
 from stanza_im.xmpp import muji as muji_mod
@@ -1782,7 +1783,15 @@ class JabberClient:
 
     async def _on_jingle_message_stanza(self, msg) -> None:
         try:
-            self.rtp_calls.handle_message(msg)
+            element = jmi.action_element(msg)
+            sid = str(element.get("id") or "") if element is not None else ""
+            # A whiteboard proposal carries the whiteboard <description/>; a
+            # later proceed/reject has none, so fall back to the sid.
+            if (jmi.description_ns(msg) == whiteboard_mod.NS_WHITEBOARD
+                    or self.whiteboard.owns_jmi(sid)):
+                self.whiteboard.handle_jingle_message(msg)
+            else:
+                self.rtp_calls.handle_message(msg)
         except Exception:
             logger.exception("CALL jingle-message handling failed")
 
@@ -6451,9 +6460,16 @@ class JabberClient:
         self._start_task(self.rtp_calls.answer_call(sid, accept, video))
 
     def answer_proposal(self, sid: str, accept: bool,
-                        video: bool = False) -> None:
-        """Accept/reject a XEP-0353 proposal (sends proceed/reject)."""
-        self.rtp_calls.answer_proposal(sid, accept, video)
+                        video: bool = False, kind: str = "rtp") -> None:
+        """Accept/reject a XEP-0353 proposal (sends proceed/reject).
+
+        *kind* selects the application: ``"rtp"`` (a call, the default) or
+        ``"whiteboard"``.
+        """
+        if kind == "whiteboard":
+            self.whiteboard.answer_proposal(sid, accept)
+        else:
+            self.rtp_calls.answer_proposal(sid, accept, video)
 
     def end_call(self, sid: str) -> None:
         self._start_task(self.rtp_calls.end_call(sid))

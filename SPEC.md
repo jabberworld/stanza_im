@@ -110,6 +110,7 @@ stanza_im/
 │                          message_markup.py = XEP-0394 parser/renderer,
 │                          jingle.py = XEP-0234/0260/0261 file transfer,
 │                          jingle_rtp.py = XEP-0167/0176 A/V calls,
+│                          jmi.py = XEP-0353 Jingle Message Initiation,
 │                          muji.py = XEP-0272 conferences,
 │                          media.py = aiortc media engine,
 │                          bytestream.py = SOCKS5 bytestream transport,
@@ -2620,7 +2621,15 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `WhiteboardManager.handle_error` → `whiteboard_failed(sid, condition)`, and
   `WhiteboardManager.dispatch` only acts on `type='set'`. Sharing a board in a
   chat whose JID is our **own** (`start_session`) is kept local-only — no invite
-  is ever sent to ourselves.
+  is ever sent to ourselves. When the peer advertises `urn:xmpp:jingle-message:0`
+  the share is announced with XEP-0353 propose/proceed before the
+  `session-initiate` (the shared `xmpp/jmi.py` helper; `_propose_and_initiate`
+  waits up to 30 s for a proceed, a reject/retract emits
+  `whiteboard_failed(sid, "rejected")`); `JabberClient._on_jingle_message_stanza`
+  routes a whiteboard proposal by its `<description/>` namespace (or a response
+  by `WhiteboardManager.owns_jmi(sid)`), surfacing `whiteboard_proposed` and
+  answering via `client.answer_proposal(..., kind="whiteboard")` (a proceed makes
+  the following `session-initiate` auto-join).
 - The dialog's «Поделиться» button starts a session (`share_requested` →
   `MainWindow._on_whiteboard_share` → `WhiteboardManager.start_session`); local
   canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become

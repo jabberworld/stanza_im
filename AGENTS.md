@@ -114,6 +114,7 @@ stanza_im/                      # Python package
 │   ├── message_markup.py        # XEP-0394 Message Markup parser/renderer
 │   ├── jingle.py                # XEP-0234/0260/0261 Jingle FT + IBB
 │   ├── jingle_rtp.py            # XEP-0167/0176 Jingle RTP calls + SDP bridge
+│   ├── jmi.py                   # XEP-0353 Jingle Message Initiation (shared)
 │   ├── muji.py                  # XEP-0272 multiparty Jingle coordination
 │   ├── media.py                 # aiortc media engine (capture/playback)
 │   ├── bytestream.py            # SOCKS5 bytestream client + direct listener
@@ -2232,7 +2233,15 @@ a bare-JID Jingle IQ is rejected by the server (`service-unavailable`), so with
 no known resource the share fails fast and `whiteboard_failed(sid, "unavailable")`
 is emitted (the dialog and an OSD report it; `MainWindow._on_whiteboard_share`
 also warns — without blocking — when the peer's caps do not announce the
-feature). `_dispatch_jingle_iq` **ignores error replies** (an error echoes the
+feature). When the peer advertises `urn:xmpp:jingle-message:0` the share is
+announced with XEP-0353 propose/proceed before the `session-initiate` (the
+shared `xmpp/jmi.py` helper; `_propose_and_initiate` waits for a proceed, a
+reject/retract emits `whiteboard_failed(sid, "rejected")`); an incoming
+whiteboard proposal is routed by `JabberClient._on_jingle_message_stanza` (by the
+`<description/>` namespace, or by `WhiteboardManager.owns_jmi(sid)` for a
+response) and surfaced as `whiteboard_proposed`, answered via
+`client.answer_proposal(..., kind="whiteboard")` (a proceed makes the following
+`session-initiate` auto-join). `_dispatch_jingle_iq` **ignores error replies** (an error echoes the
 original `<jingle action>` and must never be routed as an incoming action — that
 produced a bogus invite) but routes an error for a known session to
 `WhiteboardManager.handle_error` → `whiteboard_failed(sid, condition)`; sharing a
