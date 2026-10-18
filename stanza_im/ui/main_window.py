@@ -4815,6 +4815,7 @@ class MainWindow(QtWidgets.QMainWindow):
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.camera_toggled.connect(self._on_call_camera_toggled)
+        window.receive_toggled.connect(self._on_call_receive_toggled)
         self._place_window_near_main(window)
         window.show()
         window.raise_()
@@ -4951,6 +4952,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_call_camera_toggled(self, sid: str, enabled: bool) -> None:
         if self._client:
             self._client.set_call_video(sid, enabled)
+
+    def _on_call_receive_toggled(self, sid: str, enabled: bool) -> None:
+        """Mute/unmute the *remote* audio of a 1:1 call (playback)."""
+        if self._client:
+            self._client.rtp_calls.set_call_audio_receive(sid, enabled)
 
     # ── Muji conference ──────────────────────────────────────────
 

@@ -2499,7 +2499,9 @@ the **outgoing** capture — the muted
 microphone sends silence and the switched-off camera sends black frames
 (`set_audio_enabled`/`set_video_enabled`, no renegotiation, tracks stay
 attached), while received audio/video keeps playing and the remote view is
-never hidden. Preferences
+never hidden. A `speaker`/`speaker-off` button mutes the **remote** audio
+(`receive_toggled` → `rtp_calls.set_call_audio_receive`, the same knob Muji uses
+per participant). Preferences
 gains a **Devices** page
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
 Multimedia). The page also hosts **self-tests** (`ui/device_test.py`): a live

@@ -1415,6 +1415,8 @@ STRINGS = {
     'call_hangup': 'Hang up',
     'call_mute': 'Mute',
     'call_unmute': 'Unmute',
+    'call_mute_peer': 'Mute the contact',
+    'call_unmute_peer': 'Unmute the contact',
     'call_camera': 'Camera',
     'call_camera_off': 'Camera off',
     'call_connecting': 'Connecting…',

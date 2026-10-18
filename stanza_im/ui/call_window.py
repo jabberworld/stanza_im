@@ -164,6 +164,7 @@ class CallWindow(QtWidgets.QWidget):
     hangup = QtCore.pyqtSignal(str)          # sid
     audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
     camera_toggled = QtCore.pyqtSignal(str, bool)   # outgoing video enabled
+    receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None):
         super().__init__(parent)
@@ -199,6 +200,15 @@ class CallWindow(QtWidgets.QWidget):
         self._mute_btn.toggled.connect(self._on_mute)
         controls.addWidget(self._mute_btn)
 
+        # Mute the *remote* audio (the contact's voice), not our microphone.
+        self._hear_btn = QtWidgets.QToolButton(self)
+        self._hear_btn.setIcon(_icon("speaker"))
+        self._hear_btn.setIconSize(QtCore.QSize(20, 20))
+        self._hear_btn.setToolTip(tr("call_mute_peer"))
+        self._hear_btn.setCheckable(True)
+        self._hear_btn.toggled.connect(self._on_hear)
+        controls.addWidget(self._hear_btn)
+
         self._cam_btn = QtWidgets.QToolButton(self)
         self._cam_btn.setIcon(_icon("camera"))
         self._cam_btn.setIconSize(QtCore.QSize(20, 20))
@@ -230,6 +240,12 @@ class CallWindow(QtWidgets.QWidget):
         self._mute_btn.setToolTip(
             tr("call_unmute") if checked else tr("call_mute"))
         self.audio_toggled.emit(self.sid, not checked)
+
+    def _on_hear(self, checked):
+        self._hear_btn.setIcon(_icon("speaker-off" if checked else "speaker"))
+        self._hear_btn.setToolTip(
+            tr("call_unmute_peer") if checked else tr("call_mute_peer"))
+        self.receive_toggled.emit(self.sid, not checked)
 
     def _on_camera(self, checked):
         self._camera_on = checked

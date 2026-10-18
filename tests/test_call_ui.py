@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets  # noqa: E402
 
 from stanza_im.i18n import load as i18n_load  # noqa: E402
-from stanza_im.ui.call_window import IncomingCallDialog  # noqa: E402
+from stanza_im.ui.call_window import CallWindow, IncomingCallDialog  # noqa: E402
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
 i18n_load("en")
@@ -63,6 +63,19 @@ check("an unnamed roster contact falls back to its JID",
       mw._call_display_name("bob@example.com") == "Bob")
 check("an unknown call peer falls back to the bare JID",
       mw._call_display_name("x@y/res") == "x@y")
+
+# 3. the active call window has a mute-the-peer (speaker) button -------------
+cw = CallWindow("s1", "Bob", video=False)
+check("the call window has a mute-peer button", hasattr(cw, "_hear_btn"))
+heard = []
+cw.receive_toggled.connect(lambda sid, enabled: heard.append((sid, enabled)))
+cw._hear_btn.setChecked(True)
+check("muting the peer emits receive_toggled(False)",
+      heard == [("s1", False)])
+cw._hear_btn.setChecked(False)
+check("unmuting the peer emits receive_toggled(True)",
+      heard[-1] == ("s1", True))
+cw.close()
 
 print()
 if FAILURES:

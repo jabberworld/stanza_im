@@ -1416,6 +1416,8 @@ STRINGS = {
     'call_hangup': 'Завершить',
     'call_mute': 'Без звука',
     'call_unmute': 'Со звуком',
+    'call_mute_peer': 'Приглушить собеседника',
+    'call_unmute_peer': 'Включить звук собеседника',
     'call_camera': 'Камера',
     'call_camera_off': 'Камера выкл.',
     'call_connecting': 'Соединение…',
