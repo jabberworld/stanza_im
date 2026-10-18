@@ -3052,7 +3052,10 @@ client.leave_muji(room)
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
   both label the peer with its **roster name** (`MainWindow._call_display_name`,
   the bare JID when unknown — `call_incoming`/`call_proposed` carry the full
-  JID); the incoming prompt puts Reject at the left edge and Accept at the right.
+  JID); the incoming prompt puts Reject at the left edge and Accept at the right,
+  and the incoming prompt and an **audio** call window show the peer's avatar
+  (or the default placeholder, `MainWindow._call_avatar`) centered, with the name
+  and the call message below it (a video call shows the video surface instead).
   Remote video frames are painted by `VideoView` with a translucent nickname
   caption over the image, and every control is **icon-only** (tooltips, no
   labels) using `resources/images/16x16/actions/` via `call_window._icon`:

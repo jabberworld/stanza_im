@@ -2488,7 +2488,10 @@ over the roster); both label the peer with its **roster name**
 (`MainWindow._call_display_name`, the bare JID when unknown — the client's
 `call_incoming`/`call_proposed` events carry the full JID with the resource).
 The incoming prompt puts Reject at the left edge and Accept at the right, a
-stretch between them.
+stretch between them. The incoming prompt and an **audio** call window show the
+peer's avatar (or the default placeholder, `MainWindow._call_avatar`) centered,
+with the name and the call message below it (a video call shows the video
+surface instead).
 Remote video frames are painted by `VideoView`, which draws a
 translucent nickname caption over the image. Every call control is **icon-only**
 (tooltips instead of labels) using the 16px glyphs in

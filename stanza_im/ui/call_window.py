@@ -120,14 +120,29 @@ class IncomingCallDialog(QtWidgets.QDialog):
 
     decision = QtCore.pyqtSignal(bool, bool)   # accept, video
 
-    def __init__(self, caller: str, media_kind: str = "audio", parent=None):
+    def __init__(self, caller: str, media_kind: str = "audio", parent=None,
+                 avatar_path: str | None = None, avatar_radius: int = 100):
         super().__init__(parent)
         self.setWindowTitle(tr("call_incoming_title"))
         self._video = media_kind == "video"
         layout = QtWidgets.QVBoxLayout(self)
+        # The contact's avatar, centered, with the name and the call message
+        # below it.
+        avatar = QtWidgets.QLabel(self)
+        avatar.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        pix = _rounded_avatar(avatar_path or default_avatar(), 96,
+                              radius_pct=avatar_radius)
+        if not pix.isNull():
+            avatar.setPixmap(pix)
+        layout.addWidget(avatar)
+        name = QtWidgets.QLabel(caller, self)
+        name.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        name.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(name)
         label = QtWidgets.QLabel(
-            tr("call_incoming_text", caller=caller,
+            tr("call_incoming_kind",
                kind=tr("call_video" if self._video else "call_audio")), self)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
         layout.addWidget(label)
 
@@ -166,7 +181,8 @@ class CallWindow(QtWidgets.QWidget):
     camera_toggled = QtCore.pyqtSignal(str, bool)   # outgoing video enabled
     receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
 
-    def __init__(self, sid: str, peer: str, video: bool = False, parent=None):
+    def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
+                 avatar_path: str | None = None, avatar_radius: int = 100):
         super().__init__(parent)
         self.sid = sid
         self.peer = peer
@@ -177,7 +193,18 @@ class CallWindow(QtWidgets.QWidget):
         self._camera_on = video
 
         layout = QtWidgets.QVBoxLayout(self)
+        if not video:
+            # An audio call has no video surface — show the contact's avatar
+            # (or the placeholder) above the name.
+            avatar = QtWidgets.QLabel(self)
+            avatar.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            pix = _rounded_avatar(avatar_path or default_avatar(), 96,
+                                  radius_pct=avatar_radius)
+            if not pix.isNull():
+                avatar.setPixmap(pix)
+            layout.addWidget(avatar)
         self._title = QtWidgets.QLabel(peer, self)
+        self._title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(self._title)
 

@@ -35,7 +35,13 @@ def check(name, cond):
 
 # 1. the incoming dialog: accept on the right, reject on the left ------------
 dlg = IncomingCallDialog("Bob", "audio")
-row = dlg.layout().itemAt(1).layout()
+row = None
+for _i in range(dlg.layout().count()):
+    _item = dlg.layout().itemAt(_i)
+    if _item.layout() is not None and _item.layout().indexOf(dlg._reject) >= 0:
+        row = _item.layout()
+        break
+check("the incoming dialog has a button row", row is not None)
 check("the reject button is at the left edge",
       row.itemAt(0).widget() is dlg._reject)
 check("a stretch separates the buttons",
@@ -76,6 +82,23 @@ cw._hear_btn.setChecked(False)
 check("unmuting the peer emits receive_toggled(True)",
       heard[-1] == ("s1", True))
 cw.close()
+
+
+# 4. the call dialogs show an avatar (or the placeholder) --------------------
+def _has_avatar_label(widget):
+    return any(not lbl.pixmap().isNull()
+               for lbl in widget.findChildren(QtWidgets.QLabel))
+
+
+ad = IncomingCallDialog("Bob", "audio")
+check("the incoming dialog shows an avatar", _has_avatar_label(ad))
+ad.close()
+acw = CallWindow("s2", "Bob", video=False)
+check("the audio call window shows an avatar", _has_avatar_label(acw))
+acw.close()
+vcw = CallWindow("s3", "Bob", video=True)
+check("a video call window has no avatar", not _has_avatar_label(vcw))
+vcw.close()
 
 print()
 if FAILURES:

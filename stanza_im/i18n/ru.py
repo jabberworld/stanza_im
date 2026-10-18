@@ -1426,6 +1426,7 @@ STRINGS = {
     'call_no_video': 'нет видео',
     'call_incoming_title': 'Входящий звонок',
     'call_incoming_text': '{caller} звонит ({kind})',
+    'call_incoming_kind': 'Входящий звонок ({kind})',
     'call_window_title': 'Звонок с {peer}',
     'call_unavailable': 'Звонки недоступны (установите aiortc)',
     'call_failed': 'Сбой звонка с {peer}: {error}',

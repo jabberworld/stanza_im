@@ -4758,7 +4758,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.answer_call(sid, True, kind == "video")
             return
         from stanza_im.ui.call_window import IncomingCallDialog
-        dlg = IncomingCallDialog(self._call_display_name(peer), kind, self)
+        dlg = IncomingCallDialog(self._call_display_name(peer), kind, self,
+                                 avatar_path=self._call_avatar(peer),
+                                 avatar_radius=self._call_avatar_radius())
         dlg.decision.connect(
             lambda accept, video: self._client.answer_call(sid, accept, video))
         self._incoming_calls[sid] = dlg
@@ -4785,7 +4787,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.answer_proposal(sid, True, kind == "video")
             return
         from stanza_im.ui.call_window import IncomingCallDialog
-        dlg = IncomingCallDialog(self._call_display_name(peer), kind, self)
+        dlg = IncomingCallDialog(self._call_display_name(peer), kind, self,
+                                 avatar_path=self._call_avatar(peer),
+                                 avatar_radius=self._call_avatar_radius())
         dlg.decision.connect(
             lambda accept, video: self._client.answer_proposal(
                 sid, accept, video))
@@ -4811,7 +4815,9 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.call_window import CallWindow
         # A separate top-level window (never a child of the main window, which
         # would embed it over the roster).
-        window = CallWindow(sid, self._call_display_name(peer), video)
+        window = CallWindow(sid, self._call_display_name(peer), video,
+                            avatar_path=self._call_avatar(peer),
+                            avatar_radius=self._call_avatar_radius())
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.camera_toggled.connect(self._on_call_camera_toggled)
@@ -5411,6 +5417,14 @@ class MainWindow(QtWidgets.QMainWindow):
         """The roster name for a call peer (the bare JID when unknown)."""
         bare = (peer or "").split("/", 1)[0]
         return self._roster_name(bare) or bare
+
+    def _call_avatar(self, peer: str) -> str:
+        """The avatar cache path for a call peer ("" when none — the default)."""
+        bare = (peer or "").split("/", 1)[0]
+        return avatar_path(bare) if has_avatar(bare) else ""
+
+    def _call_avatar_radius(self) -> int:
+        return int(getattr(self._config.appearance, "avatar_radius", 100) or 100)
 
     def _seed_muc_chat(self, room: str, chat, *, title: str = "",
                        is_new: bool = False, anchor: dict | None = None) -> None:

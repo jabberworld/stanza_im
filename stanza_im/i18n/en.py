@@ -1425,6 +1425,7 @@ STRINGS = {
     'call_no_video': 'no video',
     'call_incoming_title': 'Incoming call',
     'call_incoming_text': '{caller} is calling ({kind})',
+    'call_incoming_kind': 'Incoming call ({kind})',
     'call_window_title': 'Call with {peer}',
     'call_unavailable': 'Calling is unavailable (install aiortc)',
     'call_failed': 'Call with {peer} failed: {error}',
