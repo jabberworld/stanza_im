@@ -2143,7 +2143,9 @@ image** button (`wb-image.svg`) that reads a PNG/JPEG/GIF/BMP/WebP file and
 places an `<image>` shape at the view centre — in a shared session whose peer
 advertises `urn:xmpp:http:upload:0` the image is uploaded (XEP-0363,
 `client.upload_http_media`) and referenced by URL, otherwise it is embedded as a
-`data:` URI (`image_data_uri`, a 2 MB/format limit); an uploaded URL is fetched
+`data:` URI (`image_data_uri`, a 2 MB/format limit); `chat.whiteboard_image_upload`
+(`auto`/`embed`, Preferences → Chat → «Конференции») forces the inline form for
+compatibility with the minimal profile; an uploaded URL is fetched
 off the UI thread by `WhiteboardCanvas._ImageFetcher` (bounded, cached) and the
 bytes we just uploaded seed the cache so our own copy renders at once; the shape
 exports as `<image xlink:href="…"/>` and syncs like any other object); then the line width

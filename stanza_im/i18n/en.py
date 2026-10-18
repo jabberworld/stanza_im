@@ -1036,6 +1036,9 @@ STRINGS = {
     "prefs_confirm_retraction": "Confirm before deleting a message",
     "prefs_show_status": "Show statuses",
     "prefs_whiteboard_show_status": "Show whiteboard session start/end",
+    "prefs_whiteboard_image_upload": "Whiteboard images:",
+    "prefs_wb_image_auto": "Upload when the contact supports it",
+    "prefs_wb_image_embed": "Always embed (compatible with basic clients)",
     "prefs_show_receipts": "Show delivery notifications",
 
     "prefs_muc_show_presence": "Show user joins and leaves",

@@ -60,11 +60,13 @@ class WhiteboardDialog(QtWidgets.QDialog):
     share_requested = QtCore.pyqtSignal(str, bool)   # jid, is_muc
     share_png_requested = QtCore.pyqtSignal(str)     # temp PNG path
 
-    def __init__(self, jid: str, parent=None, client=None, is_muc: bool = False):
+    def __init__(self, jid: str, parent=None, client=None, is_muc: bool = False,
+                 config=None):
         super().__init__(parent)
         self._jid = jid
         self._client = client
         self._is_muc = is_muc
+        self._config = config
         self._sid = ""
         self.setWindowTitle(tr("whiteboard_title"))
         self.setModal(False)
@@ -391,10 +393,18 @@ class WhiteboardDialog(QtWidgets.QDialog):
         if not path:
             return
         world = self._canvas.view_center_world()
-        if self._peer_supports_upload():
-            self._client._start_task(self._upload_image_async(path, world))
+        # ``embed`` forces the inline data: URI (compatible with the minimal
+        # profile); ``auto`` uploads only when the peer advertises the feature.
+        if self._image_upload_mode() == "embed" \
+                or not self._peer_supports_upload():
+            self._add_embedded_image(path, world)
             return
-        self._add_embedded_image(path, world)
+        self._client._start_task(self._upload_image_async(path, world))
+
+    def _image_upload_mode(self) -> str:
+        """``auto`` (upload when the peer supports it) or ``embed`` (always data:)."""
+        chat = getattr(self._config, "chat", None)
+        return str(getattr(chat, "whiteboard_image_upload", "auto") or "auto")
 
     def _peer_supports_upload(self) -> bool:
         """True when the peer advertises HTTP File Upload (the §12.5 rule)."""

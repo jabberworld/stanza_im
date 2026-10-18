@@ -7356,7 +7356,7 @@ class MainWindow(QtWidgets.QMainWindow):
             is_muc = jid in self._muc_self_nicks
             parent = self._chat_dialog_parent() if is_muc else None
             dialog = WhiteboardDialog(jid, parent=parent, client=self._client,
-                                      is_muc=is_muc)
+                                      is_muc=is_muc, config=self._config)
             dialog.share_requested.connect(self._on_whiteboard_share)
             dialog.share_png_requested.connect(
                 lambda path, d=dialog: self._on_whiteboard_share_png(path, d))

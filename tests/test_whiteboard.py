@@ -915,6 +915,19 @@ check("the dialog's local redo button restores it",
       len(ud3._canvas.shapes()) == 1)
 ud3.close()
 
+# 30. the whiteboard image-upload mode ---------------------------------------
+def _wb_mode_dialog(mode):
+    cfg = SimpleNamespace(chat=SimpleNamespace(whiteboard_image_upload=mode))
+    return WhiteboardDialog("bob@example.com", config=cfg)
+
+
+check("the auto image mode is reported",
+      _wb_mode_dialog("auto")._image_upload_mode() == "auto")
+check("the embed image mode is reported",
+      _wb_mode_dialog("embed")._image_upload_mode() == "embed")
+check("a missing image mode falls back to auto",
+      WhiteboardDialog("bob@example.com")._image_upload_mode() == "auto")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

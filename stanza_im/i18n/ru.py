@@ -1036,6 +1036,9 @@ STRINGS = {
     "prefs_confirm_retraction": "Подтверждать удаление сообщений",
     "prefs_show_status": "Показывать статусы",
     "prefs_whiteboard_show_status": "Показывать начало/конец сессии рисования",
+    "prefs_whiteboard_image_upload": "Изображения на доске:",
+    "prefs_wb_image_auto": "Загружать на сервер, если контакт поддерживает",
+    "prefs_wb_image_embed": "Всегда встраивать (совместимо с базовыми клиентами)",
     "prefs_show_receipts": "Показывать уведомление о доставке",
 
     "prefs_muc_show_presence": "Показывать входы и выходы пользователей",

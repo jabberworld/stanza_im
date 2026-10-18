@@ -1192,6 +1192,12 @@ class PreferencesDialog(QtWidgets.QDialog):
         chat_form.addRow(self._check("show_status", tr("prefs_show_status")))
         chat_form.addRow(self._check("whiteboard_show_status",
                                      tr("prefs_whiteboard_show_status")))
+        chat_form.addRow(
+            tr("prefs_whiteboard_image_upload"),
+            self._combo("whiteboard_image_upload", [
+                ("prefs_wb_image_auto", "auto"),
+                ("prefs_wb_image_embed", "embed"),
+            ], fixed_width=False))
         chat_form.addRow(self._check("show_receipts", tr("prefs_show_receipts")))
         chat_form.addRow(self._check("show_avatars", tr("prefs_show_avatars")))
         chat_form.addRow(self._check("message_styling",
@@ -1730,6 +1736,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
             "whiteboard_show_status": getattr(
                 chat, "whiteboard_show_status", True),
+            "whiteboard_image_upload": getattr(
+                chat, "whiteboard_image_upload", "auto"),
             "message_displayed_sync": chat.message_displayed_sync,
             "mds_displayed_throttle": chat.mds_displayed_throttle,
             "allow_incoming_edits": chat.allow_incoming_edits,
@@ -1926,7 +1934,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)
         for key in ("send_ctrl_enter", "show_status", "show_receipts",
-                    "whiteboard_show_status",
+                    "whiteboard_show_status", "whiteboard_image_upload",
                     "show_avatars", "message_styling",
                     "muc_show_presence",
                     "muc_show_status", "muc_show_status_text",

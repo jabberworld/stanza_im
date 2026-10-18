@@ -76,6 +76,7 @@ class Config:
                  "show_status": True, "show_receipts": True,
                  "muc_show_presence": True, "muc_show_status": True,
                  "muc_show_status_text": True, "whiteboard_show_status": True,
+                 "whiteboard_image_upload": "auto",
                  "muc_auto_nick": True, "muc_confirm_leave": True,
                  "muc_minimize_startup": True, "message_styling": True,
                  "message_displayed_sync": True,
