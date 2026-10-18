@@ -88,6 +88,23 @@ win._set_conn_progress(60)
 check("a late progress write cannot resurrect the bar",
       not shown(win._conn_progress))
 
+# The thin bar is clickable and opens a wide state panel; it carries a tooltip.
+check("the progress bar is clickable",
+      hasattr(win._conn_progress, "clicked")
+      and hasattr(win, "_conn_panel"))
+win._conn_stage_text = tr("login_connecting")
+win._update_conn_hint()
+check("the bar carries a connection-state tooltip",
+      tr("login_connecting") in win._conn_progress.toolTip())
+win._toggle_conn_panel()
+check("clicking the bar opens the state panel",
+      win._conn_panel_shown and shown(win._conn_panel))
+check("the state panel shows the current stage",
+      tr("login_connecting") in win._conn_panel.text())
+win._toggle_conn_panel()
+check("clicking again closes the state panel",
+      not win._conn_panel_shown and not shown(win._conn_panel))
+
 # Offline private storage (notes) must not wait for the IQ timeout.
 import asyncio
 

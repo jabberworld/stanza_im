@@ -227,6 +227,19 @@ class _VoiceRequestRow(QtWidgets.QWidget):
                              else tr("event_voice_denied"))
 
 
+class _ClickableProgressBar(QtWidgets.QProgressBar):
+    """A progress bar that reports a left click (opens the connection panel)."""
+
+    clicked = QtCore.pyqtSignal()
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     """Top-level window that owns the roster, chat window, tray and XMPP client."""
 
@@ -778,11 +791,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # button doubles as the countdown label (compact at narrow widths).
         conn_row = QtWidgets.QHBoxLayout()
         conn_row.setContentsMargins(0, 0, 0, 0)
-        self._conn_progress = QtWidgets.QProgressBar()
+        self._conn_progress = _ClickableProgressBar()
         self._conn_progress.setRange(0, 100)
         self._conn_progress.setTextVisible(False)
         self._conn_progress.setFixedHeight(6)
         self._conn_progress.setVisible(False)
+        self._conn_progress.clicked.connect(self._toggle_conn_panel)
         conn_row.addWidget(self._conn_progress, 1)
         self._reconnect_btn = QtWidgets.QPushButton(tr("reconnect_now"))
         self._reconnect_btn.setFlat(True)
@@ -794,7 +808,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reconnect_timer.setInterval(1000)
         self._reconnect_timer.timeout.connect(self._tick_reconnect)
         self._reconnect_remaining = 0
+        self._conn_stage_text = ""
+        self._conn_panel_shown = False
         roster_layout.addLayout(conn_row)
+
+        # A wide, click-to-open panel with the current connection state (the
+        # progress bar itself is only a thin strip).
+        self._conn_panel = QtWidgets.QLabel()
+        self._conn_panel.setWordWrap(True)
+        self._conn_panel.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        self._conn_panel.setContentsMargins(6, 4, 6, 4)
+        self._conn_panel.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._conn_panel.setVisible(False)
+        roster_layout.addWidget(self._conn_panel)
 
         roster_layout.addLayout(status_bar)
 
@@ -3570,6 +3597,8 @@ class MainWindow(QtWidgets.QMainWindow):
         """Update the login splash text and the determinate progress bar."""
         self._splash_label.setText(text)
         self._splash_progress.setValue(max(0, min(100, int(percent))))
+        self._conn_stage_text = text
+        self._update_conn_hint()
 
     def _on_login(self, jid: str, password: str, show: str):
         """Handle login form submission."""
@@ -3971,12 +4000,46 @@ class MainWindow(QtWidgets.QMainWindow):
         self._conn_progress.setRange(0, 100)
         self._conn_progress.setValue(percent)
         self._conn_progress.setVisible(True)
+        self._update_conn_hint()
+
+    def _toggle_conn_panel(self) -> None:
+        """Show/hide the wide connection-state panel (a click on the bar)."""
+        self._conn_panel_shown = not getattr(self, "_conn_panel_shown", False)
+        self._conn_panel.setVisible(self._conn_panel_shown)
+        if self._conn_panel_shown:
+            self._update_conn_hint()
+
+    def _conn_state_summary(self) -> str:
+        """The current connection state as a short multi-line summary."""
+        lines: list[str] = []
+        stage = getattr(self, "_conn_stage_text", "")
+        if stage:
+            lines.append(stage)
+        if self._client is not None:
+            from stanza_im.ui.connection_info_dialog import \
+                connection_info_lines
+            lines.extend(connection_info_lines(self._client.connection_info()))
+        elif not lines:
+            lines.append(tr("conn_info_not_connected"))
+        return "\n".join(lines)
+
+    def _update_conn_hint(self) -> None:
+        """Refresh the bar/button tooltip and the open state panel."""
+        if not hasattr(self, "_conn_progress"):
+            return
+        summary = self._conn_state_summary()
+        self._conn_progress.setToolTip(summary)
+        self._reconnect_btn.setToolTip(summary)
+        if getattr(self, "_conn_panel_shown", False):
+            self._conn_panel.setText(summary)
 
     def _set_busy_status(self, text: str = "") -> None:
         """Connecting/reconnecting: show the bar + the countdown button."""
         self._conn_progress.setRange(0, 0)
         self._conn_progress.setVisible(True)
         self._reconnect_btn.setVisible(True)
+        self._conn_stage_text = text or tr("login_reconnecting")
+        self._update_conn_hint()
 
     def _set_offline_status(self, text: str = "") -> None:
         """Offline: hide the bar and offer a manual reconnect."""
@@ -3985,6 +4048,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._conn_progress.setVisible(False)
         self._reconnect_btn.setText(tr("reconnect_now"))
         self._reconnect_btn.setVisible(True)
+        self._conn_stage_text = text or tr("conn_info_not_connected")
+        self._update_conn_hint()
 
     def _hide_reconnect(self) -> None:
         """Drop the reconnect affordance (a live session)."""
@@ -3995,6 +4060,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _clear_status(self) -> None:
         self._hide_reconnect()
         self._conn_progress.setVisible(False)
+        self._conn_stage_text = ""
+        self._update_conn_hint()
 
     def _on_stream_resumed(self):
         logger.info("Connection restored (stream resumed)")

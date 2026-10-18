@@ -2705,7 +2705,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   window status bar): a thin `_conn_progress` bar and a flat `_reconnect_btn`
   whose text is the countdown «Переподключение N с» (`login_reconnect_countdown`,
   a 1 s `_reconnect_timer`) or «Переподключиться» (`_set_offline_status`); it is
-  hidden once a session is live (`_clear_status`).
+  hidden once a session is live (`_clear_status`). The bar
+  (`_ClickableProgressBar`) has a tooltip with the current state and a click
+  toggles a wide inline panel (`_conn_panel`) with the stage +
+  `connection_info_lines` (`_conn_state_summary`/`_update_conn_hint`).
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow recomputes activity from `QApplication.applicationState()` via an

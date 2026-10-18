@@ -2875,6 +2875,11 @@ text is kept. Returning activity (`eventFilter`) resumes
   `_reconnect_timer` from the `reconnecting` delay) or «Переподключиться»
   (`_set_offline_status`); clicking it runs `manual_reconnect`
   (`_on_reconnect_clicked`). `_clear_status` hides it once a session is live.
+  The bar (`_ClickableProgressBar`) carries a **tooltip** with the current
+  connection state and a **click** toggles a wide inline panel
+  (`_conn_panel`) with the stage + `connection_info_lines`
+  (`_conn_state_summary`/`_update_conn_hint`, refreshed from every status
+  update).
 - `connection.csi` (default on) registers `xep_0352`:
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow derives activity from
