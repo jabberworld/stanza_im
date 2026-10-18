@@ -224,8 +224,12 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def refresh_from_session(self) -> None:
         if not (self._client and self._sid):
             return
-        shapes = self._client.whiteboard.shapes(self._sid)
-        self._canvas.load_shapes(shapes)
+        wb = self._client.whiteboard
+        # The host's viewBox is authoritative, so adopt it before loading the
+        # shapes (a peer may use a different canvas size than our default).
+        width, height = wb.view_box(self._sid)
+        self._canvas.set_view_box(width, height)
+        self._canvas.load_shapes(wb.shapes(self._sid))
 
     def _end_session(self) -> None:
         if self._client and self._sid:

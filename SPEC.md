@@ -2548,15 +2548,23 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `xmpp/sxe.py::SxeDocument` (XEP-0284 record model). For a 1:1 session the
   initiator is the host (`session-initiate` → `session-accept`); for a MUC
   session the room JID is the host and the payloads travel as `groupchat`
-  messages. The document root uses a **fixed record id**
-  (`whiteboard.WHITEBOARD_ROOT_RID`, `"svg-root"`), so an incremental
-  `<new parent="…"/>` refers to a record every peer already has; a MUC session
+  messages. The document root uses a **fixed default record id**
+  (`whiteboard.WHITEBOARD_ROOT_RID`, `"0"`), so an incremental
+  `<new parent="…"/>` refers to a record every peer already has; a foreign
+  host's root RID is **adopted** from the snapshot (`SxeDocument._adopt_root`,
+  XEP-0284 §10.3, re-parenting the local top-level records). The canvas
+  `viewBox` is read from the document (`WhiteboardManager.view_box` →
+  `WhiteboardCanvas.set_view_box`), the host's being authoritative;
+  `document-begin`'s `prolog` carries the XML prolog plus the SVG DOCTYPE
+  (`whiteboard.DOC_PROLOG`); the client advertises the `collaboration`/`sxe`
+  disco identity; a refused invite (`WhiteboardManager.refuse_session`) is a
+  `session-terminate` with the `<unsupported-applications/>` reason. A MUC session
   id is **derived from the room JID** (`WhiteboardManager._muc_sid`) so all
   participants converge on one shared document, and `start_session` reuses an
   existing room session. The SXE messages are `connect` (host answers with a
   `state-offer`), `state-offer`/`accept-state`/`refuse-state` and `state`
   (`document-begin` → `new`/`set`/`remove` → `document-end`); a `document-begin`
-  snapshot is **merged** (`_apply_state` skips the root `<new>` and unions the
+  snapshot is **merged** (`_apply_state` adopts the root RID and unions the
   drawable records) so a late joiner gains the existing shapes without the
   active peers losing theirs. The session lifecycle is a chat status line
   («Начата сессия рисования» / «Сессия рисования завершена») gated by

@@ -7378,6 +7378,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self, tr("whiteboard_invite_title"),
             tr("whiteboard_invite_text", jid=peer))
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            # Tell the initiator we will not take part (a bare silence would
+            # leave their Jingle session pending).
+            self._client.whiteboard.refuse_session(sid)
             return
         self._client.whiteboard.join_session(peer, sid, is_muc)
         dialog = self._whiteboard_dialog(peer)

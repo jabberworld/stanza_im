@@ -31,9 +31,18 @@ NS_JINGLE = "urn:xmpp:jingle:1"
 NS_SVG = "http://www.w3.org/2000/svg"
 
 #: Fixed root record id of the shared SVG document.  Every participant uses the
-#: same value, so an incremental ``<new parent="…"/>`` edit refers to a record
-#: that exists locally without needing a full snapshot first.
-WHITEBOARD_ROOT_RID = "svg-root"
+#: same value (``"0"``, the value the specification's examples use), so an
+#: incremental ``<new parent="…"/>`` edit refers to a record that exists locally
+#: without needing a full snapshot first.  A foreign host's own root RID is
+#: adopted from the snapshot (XEP-0284 §10.3), so interop does not depend on it.
+WHITEBOARD_ROOT_RID = "0"
+
+#: The ``prolog`` attribute of a ``<document-begin/>``: the XML prolog including
+#: the SVG DOCTYPE, carried as a ``data:`` URI (XEP-0284 §7.3).
+DOC_PROLOG = ("data:text/xml,%3C%3Fxml%20version%3D%271.0%27%3F%3E%0A"
+              "%3C%21DOCTYPE%20svg%20PUBLIC%20%27-%2F%2FW3C%2F%2FDTD%20SVG%20"
+              "1.1%2F%2FEN%27%20%27http%3A%2F%2Fwww.w3.org%2FGraphics%2FSVG%2F"
+              "1.1%2FDTS%2Fsvg11.dtd%27%3E")
 
 
 def _q(ns: str, tag: str) -> str:
@@ -126,6 +135,29 @@ class WhiteboardManager:
                         "fill": attrs.get("fill", ""),
                         "transform": attrs.get("transform", "")})
         return out
+
+    def view_box(self, sid: str) -> tuple[int, int]:
+        """The canvas size from the document's ``viewBox``.
+
+        The host's ``viewBox`` is authoritative (the spec's Section 10), so a
+        joiner renders the shared document at the host's size.  Falls back to our
+        default when the document carries no usable ``viewBox``.
+        """
+        session = self.sessions.get(sid)
+        if session is None:
+            return WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT
+        doc = session.doc
+        rid = doc.find_attr(doc.root_rid, "viewBox")
+        if rid:
+            parts = str(doc.records[rid].chdata or "").replace(",", " ").split()
+            if len(parts) == 4:
+                try:
+                    w, h = float(parts[2]), float(parts[3])
+                except (TypeError, ValueError):
+                    w = h = 0.0
+                if w > 0 and h > 0:
+                    return int(round(w)), int(round(h))
+        return WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT
 
     # ── Session lifecycle ─────────────────────────────────────────
 
@@ -244,6 +276,28 @@ class WhiteboardManager:
         if not is_muc:
             self._send_jingle(session, "session-accept")
         self._send(session, self._sxe(session, "connect"))
+
+    def refuse_session(self, sid: str,
+                       reason: str = "unsupported-applications") -> None:
+        """Refuse an incoming session and drop it (XEP-0166 §6.2.4.4).
+
+        A responder that will not take part answers the ``session-initiate`` with
+        a ``session-terminate``; the specification's example uses the
+        ``unsupported-applications`` reason (the default here).
+        """
+        session = self.sessions.pop(sid, None)
+        if session is None:
+            return
+        if self._by_peer.get(session.peer) == sid:
+            self._by_peer.pop(session.peer, None)
+        self._announce_inactive(session.peer)
+        if not session.is_muc:
+            try:
+                self._send_jingle(session, "session-terminate", reason=reason)
+            except Exception:  # noqa: BLE001
+                logger.debug("Whiteboard: could not refuse session",
+                             exc_info=True)
+        self.client.emit("whiteboard_ended", sid)
 
     def end_session(self, sid: str) -> None:
         session = self.sessions.pop(sid, None)
@@ -443,7 +497,8 @@ class WhiteboardManager:
         else:
             logger.debug("Whiteboard: unhandled Jingle action %s", action)
 
-    def _send_jingle(self, session: WhiteboardSession, action: str) -> None:
+    def _send_jingle(self, session: WhiteboardSession, action: str,
+                     reason: str = "") -> None:
         iq = self.client.xmpp.Iq()
         iq["type"] = "set"
         iq["to"] = session.full_peer or session.peer
@@ -462,8 +517,8 @@ class WhiteboardManager:
             host = ET.SubElement(transport, _q(NS_SXE_TRANSPORT, "host"))
             host.text = session.peer if session.is_muc else self.client.jid_str
         else:
-            reason = ET.SubElement(jingle, _q(NS_JINGLE, "reason"))
-            ET.SubElement(reason, _q(NS_JINGLE, "success"))
+            reason_el = ET.SubElement(jingle, _q(NS_JINGLE, "reason"))
+            ET.SubElement(reason_el, _q(NS_JINGLE, reason or "success"))
         iq.send()
 
     # ── SXE messages ──────────────────────────────────────────────
@@ -560,18 +615,21 @@ class WhiteboardManager:
     def _apply_state(self, session: WhiteboardSession, state: ET.Element) -> None:
         doc = session.doc
         # A snapshot (document-begin … document-end) is **merged**, not applied
-        # as a replace: every peer shares the fixed WHITEBOARD_ROOT_RID (so the
-        # root <new> is skipped) and the drawable records are unioned — a peer
-        # that joined later gains the existing shapes without the active peers
-        # losing theirs.  A snapshot is a join, not an action, so it is not
-        # recorded for undo; an incremental edit is.
+        # as a replace: the host's root RID is adopted (our own default is "0",
+        # but a foreign host may use another GUID) and the drawable records are
+        # unioned — a peer that joined later gains the existing shapes without
+        # the active peers losing theirs.  A snapshot is a join, not an action,
+        # so it is not recorded for undo; an incremental edit is.
         is_snapshot = state.find(_q(NS_SXE, "document-begin")) is not None
         forward = self._batch()
         inverse = self._batch()
         for child in state:
             if child.tag == _q(NS_SXE, "new"):
                 if not (child.get("parent") or ""):
-                    continue  # the root element already exists locally
+                    # The snapshot's root element: adopt the host's root RID
+                    # (XEP-0284 §10.3).  Never an undoable edit.
+                    doc.apply_new(child)
+                    continue
                 rid = str(child.get("rid") or "")
                 if rid and rid in doc.records:
                     inverse["new"].append(
@@ -637,8 +695,7 @@ class WhiteboardManager:
         el = self._sxe(session)
         state = ET.SubElement(el, _q(NS_SXE, "state"))
         begin = ET.SubElement(state, _q(NS_SXE, "document-begin"))
-        begin.set("prolog",
-                  "data:text/xml,%3C%3Fxml%20version%3D%271.0%27%3F%3E")
+        begin.set("prolog", DOC_PROLOG)
         for new in session.doc.all_new_elements():
             state.append(new)
         end = ET.SubElement(state, _q(NS_SXE, "document-end"))

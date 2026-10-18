@@ -17,7 +17,8 @@ from stanza_im.include.constants import (WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH,
                                          find_icon)
 from stanza_im.i18n import tr
 
-#: Logical canvas size (the SVG ``viewBox``).
+#: Default logical canvas size (the SVG ``viewBox``).  A collaborative session
+#: may override it with the host's ``viewBox`` (see :meth:`set_view_box`).
 VIEW_W = WHITEBOARD_WIDTH
 VIEW_H = WHITEBOARD_HEIGHT
 
@@ -70,6 +71,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._shapes: list[dict] = []
+        # Logical canvas size (the SVG ``viewBox``); the host's may override it.
+        self._view_w = VIEW_W
+        self._view_h = VIEW_H
         self._selected: str = ""
         self._tool = "pencil"
         self._stroke = "#1a1a1a"
@@ -122,6 +126,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def shapes(self) -> list[dict]:
         return self._shapes
+
+    def view_box(self) -> tuple[int, int]:
+        """The logical canvas size (the SVG ``viewBox``)."""
+        return self._view_w, self._view_h
+
+    def set_view_box(self, width: int, height: int) -> None:
+        """Adopt the shared document's ``viewBox`` (the host's is authoritative)."""
+        self._view_w = max(1, int(width))
+        self._view_h = max(1, int(height))
+        self.update()
 
     def selected_id(self) -> str:
         return self._selected
@@ -191,7 +205,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         """The board-to-widget scale at zoom 1 (fits the whole board)."""
         if self.width() <= 0 or self.height() <= 0:
             return 1.0
-        return min(self.width() / VIEW_W, self.height() / VIEW_H)
+        return min(self.width() / self._view_w, self.height() / self._view_h)
 
     def _scale(self) -> float:
         """The current view scale (fit scale times the view zoom)."""
@@ -199,8 +213,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def _offset(self) -> tuple[float, float]:
         s = self._scale()
-        return ((self.width() - VIEW_W * s) / 2.0 + self._view_pan.x(),
-                (self.height() - VIEW_H * s) / 2.0 + self._view_pan.y())
+        return ((self.width() - self._view_w * s) / 2.0 + self._view_pan.x(),
+                (self.height() - self._view_h * s) / 2.0 + self._view_pan.y())
 
     def _to_world(self, pos: QtCore.QPointF) -> QtCore.QPointF:
         s = self._scale()
@@ -227,8 +241,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._view_zoom = zoom
         if world is not None:
             s = self._scale()
-            cx = (self.width() - VIEW_W * s) / 2.0
-            cy = (self.height() - VIEW_H * s) / 2.0
+            cx = (self.width() - self._view_w * s) / 2.0
+            cy = (self.height() - self._view_h * s) / 2.0
             self._view_pan = QtCore.QPointF(
                 anchor.x() - cx - world.x() * s,
                 anchor.y() - cy - world.y() * s)
@@ -505,10 +519,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         # A light grid helps the empty canvas.
         grid = QtGui.QPen(QtGui.QColor("#eef1f4"), 1.0)
         painter.setPen(grid)
-        for gx in range(0, VIEW_W + 1, 100):
-            painter.drawLine(gx, 0, gx, VIEW_H)
-        for gy in range(0, VIEW_H + 1, 100):
-            painter.drawLine(0, gy, VIEW_W, gy)
+        for gx in range(0, self._view_w + 1, 100):
+            painter.drawLine(gx, 0, gx, self._view_h)
+        for gy in range(0, self._view_h + 1, 100):
+            painter.drawLine(0, gy, self._view_w, gy)
         for shape in self._shapes:
             self._draw_shape(painter, shape)
         if self._active is not None:
@@ -764,7 +778,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         """Serialise the document to an SVG string."""
         parts = [
             '<svg xmlns="http://www.w3.org/2000/svg" version="1.2" '
-            'baseProfile="tiny" viewBox="0 0 %d %d">' % (VIEW_W, VIEW_H)]
+            'baseProfile="tiny" viewBox="0 0 %d %d">'
+            % (self._view_w, self._view_h)]
         for shape in self._shapes:
             parts.append(self._shape_svg(shape))
         parts.append("</svg>")
@@ -776,7 +791,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def render_image(self) -> QtGui.QImage:
         """Render the board (shapes only, white background) to a 1x image."""
-        image = QtGui.QImage(VIEW_W, VIEW_H, QtGui.QImage.Format.Format_ARGB32)
+        image = QtGui.QImage(self._view_w, self._view_h,
+                             QtGui.QImage.Format.Format_ARGB32)
         image.fill(QtGui.QColor("#ffffff"))
         painter = QtGui.QPainter(image)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)

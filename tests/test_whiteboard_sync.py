@@ -161,6 +161,8 @@ mgr2._apply_state(sess2, extra)
 check("an empty snapshot keeps the local shapes",
       len(mgr2.shapes("remote")) == 1)
 
+# A snapshot from a foreign host (its own root RID) is merged: the host's root
+# RID is adopted (XEP-0284 §10.3) and the local shapes are re-parented under it.
 snap = ET.Element(_q(NS_SXE, "state"))
 ET.SubElement(snap, _q(NS_SXE, "document-begin"))
 root_new = ET.SubElement(snap, _q(NS_SXE, "new"))
@@ -171,7 +173,7 @@ root_new.set("primary-weight", "0")
 shape_new = ET.SubElement(snap, _q(NS_SXE, "new"))
 shape_new.set("rid", "shape2")
 shape_new.set("type", "element")
-shape_new.set("parent", "svg-root")
+shape_new.set("parent", "other-root")
 shape_new.set("name", "path")
 shape_new.set("primary-weight", "1")
 d_attr = ET.SubElement(snap, _q(NS_SXE, "new"))
@@ -183,8 +185,11 @@ d_attr.set("chdata", "M 5 5 L 9 9")
 ET.SubElement(snap, _q(NS_SXE, "document-end"))
 mgr2._apply_state(sess2, snap)
 remote = mgr2.shapes("remote")
-check("a snapshot merges a new shape (root skipped)",
-      len(remote) == 2 and any(s["d"] == "M 5 5 L 9 9" for s in remote))
+check("a foreign snapshot's root RID is adopted",
+      mgr2.document("remote").root_rid == "other-root")
+check("a snapshot merges a new shape without losing the local one",
+      len(remote) == 2 and any(s["d"] == "M 5 5 L 9 9" for s in remote)
+      and any(s["d"] == "M 0 0 L 20 20" for s in remote))
 
 # 6. remove ------------------------------------------------------------------
 mgr.remove_shape(sid, rid)
@@ -314,7 +319,7 @@ sid_a = a.start_session("room@conference.example", is_muc=True)
 sid_b = b.start_session("room@conference.example", is_muc=True)
 check("both peers of a room get the same session id", sid_a == sid_b)
 check("the shared document uses the fixed root rid",
-      a.document(sid_a).root_rid == "svg-root")
+      a.document(sid_a).root_rid == "0")
 
 a.add_shape(sid_a, {"id": "s1", "d": "M 0 0 L 10 10"})
 _edit = _state_of(a.client)
@@ -429,7 +434,7 @@ _state = ET.SubElement(_sxe, _q(NS_SXE, "state"))
 _n = ET.SubElement(_state, _q(NS_SXE, "new"))
 _n.set("rid", "remote-1")
 _n.set("type", "element")
-_n.set("parent", "svg-root")
+_n.set("parent", "0")
 _n.set("name", "path")
 _n.set("primary-weight", "1")
 _d = ET.SubElement(_state, _q(NS_SXE, "new"))
@@ -442,6 +447,63 @@ asyncio.run(m5.handle_sxe(_in))
 check("a remote edit is applied", len(m5.shapes(sid5)) == 1)
 m5.undo(sid5)
 check("undo reverts a remote edit", m5.shapes(sid5) == [])
+
+# 17. the snapshot prolog carries the XML declaration and the SVG DOCTYPE ----
+c = _FakeClient()
+c._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid = m.start_session("bob@example.com", is_muc=False)
+m._send_state(m.session(sid), "bob@example.com")
+_begin = _state_of(c).find(_q(NS_SXE, "document-begin"))
+check("the document-begin prolog carries the XML prolog and DOCTYPE",
+      _begin is not None and "%3C%21DOCTYPE" in (_begin.get("prolog") or ""))
+
+# 18. the canvas viewBox comes from the document (the host's is authoritative)
+m2 = WhiteboardManager(_FakeClient())
+sid2 = m2.start_session("room@conference.example", is_muc=True)
+check("the default viewBox is our canvas size", m2.view_box(sid2) == (1280, 720))
+_doc2 = m2.document(sid2)
+_vb_set = ET.Element(_q(NS_SXE, "state"))
+_set = ET.SubElement(_vb_set, _q(NS_SXE, "set"))
+_set.set("target", _doc2.find_attr(_doc2.root_rid, "viewBox"))
+_set.set("chdata", "0 0 600 400")
+_in = _FakeIncoming("room@conference.example/alice",
+                    ET.Element("{jabber:client}message"))
+_sxe = ET.SubElement(_in.xml, _q(NS_SXE, "sxe"))
+_sxe.set("session", sid2)
+_sxe.append(_vb_set)
+asyncio.run(m2.handle_sxe(_in))
+check("a peer's viewBox change updates the canvas size",
+      m2.view_box(sid2) == (600, 400))
+
+# 19. refusing an incoming session sends session-terminate (unsupported) -----
+class _IqStub:
+    def __init__(self, frm):
+        self._d = {"from": frm, "type": "set"}
+
+    def __getitem__(self, key):
+        return self._d.get(key)
+
+
+c = _FakeClient()
+m = WhiteboardManager(c)
+_j = ET.Element(_q(wb_mod.NS_JINGLE, "jingle"))
+_j.set("action", "session-initiate")
+_j.set("sid", "inv-1")
+_content = ET.SubElement(_j, _q(wb_mod.NS_JINGLE, "content"))
+ET.SubElement(_content, _q(wb_mod.NS_WHITEBOARD, "description"))
+asyncio.run(m.dispatch("session-initiate", _j, _IqStub("bob@example.com/pc")))
+check("an incoming session-initiate is tracked", "inv-1" in m.sessions)
+m.refuse_session("inv-1")
+check("refusing drops the session", "inv-1" not in m.sessions)
+_term = c.xmpp.sent[-1]
+_jingle_out = _term.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "jingle"))
+_reason = _term.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "reason"))
+check("the refusal is a session-terminate with unsupported-applications",
+      _jingle_out is not None and _jingle_out.get("action") == "session-terminate"
+      and _reason is not None
+      and _reason.find(_q(wb_mod.NS_JINGLE, "unsupported-applications"))
+      is not None)
 
 print()
 if FAILURES:

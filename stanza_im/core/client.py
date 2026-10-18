@@ -1320,6 +1320,10 @@ class JabberClient:
         # instead of slixmpp's ``http://slixmpp.com/ver/…``.
         self.xmpp["xep_0030"].add_identity(
             category="client", itype="pc", name=APP_NAME)
+        # XEP-0284 shared-editing identity (the whiteboard's profile SHOULD
+        # expose it: identity type "sxe" in the "collaboration" category).
+        self.xmpp["xep_0030"].add_identity(
+            category="collaboration", itype="sxe", name=APP_NAME)
         _caps = self.xmpp.plugin.get("xep_0115", None)
         if _caps is not None:
             _caps.caps_node = f"{APP_NAME} {VERSION}"

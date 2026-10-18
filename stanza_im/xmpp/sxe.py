@@ -195,13 +195,7 @@ class SxeDocument:
         if not record.rid:
             return
         if record.type == "element" and not record.parent:
-            # A state snapshot carries its own root element; adopt it so the
-            # received document is rendered from that root.
-            old_root = self.root_rid
-            self.root_rid = record.rid
-            self.records[record.rid] = record
-            if old_root != record.rid:
-                self.records.pop(old_root, None)
+            self._adopt_root(record)
             return
         self.records[record.rid] = record
         parent = self.records.get(record.parent)
@@ -209,6 +203,29 @@ class SxeDocument:
             parent.children.append(record.rid)
         self._next_weight[record.parent] = max(
             self._next_weight.get(record.parent, 0.0), record.primary_weight)
+
+    def _adopt_root(self, record: Record) -> None:
+        """Adopt the root element of a received state snapshot (XEP-0284 §10.3).
+
+        A snapshot's root record carries no ``parent``; the host's root RID is
+        authoritative, so it replaces ours.  When the RID differs (a foreign
+        host) the local top-level records are re-parented under the adopted root
+        instead of being dropped, so a merge never loses the local drawables.
+        """
+        if record.rid == self.root_rid:
+            # Same root id: keep our record and its children; the snapshot's
+            # root attributes arrive as separate attr records and are applied
+            # there, so nothing needs replacing.
+            return
+        old = self.records.pop(self.root_rid, None)
+        if old is not None:
+            record.children = list(old.children)
+            for child in record.children:
+                child_record = self.records.get(child)
+                if child_record is not None:
+                    child_record.parent = record.rid
+        self.root_rid = record.rid
+        self.records[record.rid] = record
 
     def apply_set(self, el: ET.Element) -> None:
         target = str(el.get("target") or "")

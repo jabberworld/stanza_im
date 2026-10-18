@@ -2163,14 +2163,23 @@ application type `urn:xmpp:jingle:apps:svg-whiteboard:0` over the SXE transport
 (`urn:xmpp:jingle:transports:sxe`) sharing an `xmpp/sxe.py::SxeDocument`
 (XEP-0284 record model). For 1:1 the initiator is the host; for MUC the room JID
 is the host and the SXE payloads are `groupchat` messages. Every document uses a
-**fixed root record id** (`whiteboard.WHITEBOARD_ROOT_RID`, `"svg-root"`), so an
-incremental `<new parent="…"/>` edit refers to a record every peer already has —
-no snapshot is needed first. A MUC session id is **derived from the room JID**
+**fixed default root record id** (`whiteboard.WHITEBOARD_ROOT_RID`, `"0"` — the
+value the specification's examples use), so an incremental
+`<new parent="…"/>` edit refers to a record every peer already has — no snapshot
+is needed first; a foreign host's own root RID is **adopted** from the snapshot
+(`SxeDocument._adopt_root`, XEP-0284 §10.3, re-parenting the local top-level
+records), so interop does not depend on the id. The canvas `viewBox` is read from
+the document (`WhiteboardManager.view_box` → `WhiteboardCanvas.set_view_box`), the
+host's being authoritative; `document-begin`'s `prolog` carries the XML prolog
+plus the SVG DOCTYPE (`whiteboard.DOC_PROLOG`); the client advertises the
+`collaboration`/`sxe` disco identity, and a refused invite
+(`WhiteboardManager.refuse_session`) is a `session-terminate` with the
+`<unsupported-applications/>` reason. A MUC session id is **derived from the room JID**
 (`WhiteboardManager._muc_sid`), so all participants converge on one shared
 document (a random per-participant sid gave each its own session and nothing
 synced); `start_session` reuses an existing room session. A `document-begin`
-snapshot is **merged**, not applied as a replace (`_apply_state` skips the root
-`<new>` and unions the drawable records), so a late joiner gains the existing
+snapshot is **merged**, not applied as a replace (`_apply_state` adopts the root
+RID and unions the drawable records), so a late joiner gains the existing
 shapes without the active peers losing theirs. The session lifecycle is surfaced
 as a **chat status line** («Начата сессия рисования» / «Сессия рисования
 завершена») gated by `chat.whiteboard_show_status` (default on): the manager

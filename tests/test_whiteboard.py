@@ -572,6 +572,17 @@ res3 = mw._resolve_share_media(
 check("share media extracts the URL from a composed forward",
       bool(res3) and res3.get("url") == "https://h/a.png")
 
+# 21. the canvas viewBox is configurable (the host's is authoritative) --------
+vb = WhiteboardCanvas()
+vb.resize(600, 400)   # 1:1 with a 600x400 viewBox
+check("the default viewBox is our canvas size", vb.view_box() == (1280, 720))
+vb.set_view_box(600, 400)
+check("set_view_box is reported", vb.view_box() == (600, 400))
+check("the fit scale follows the viewBox", abs(vb._scale() - 1.0) < 1e-9)
+check("the SVG export uses the viewBox", 'viewBox="0 0 600 400"' in vb.to_svg())
+check("render_image follows the viewBox",
+      (vb.render_image().width(), vb.render_image().height()) == (600, 400))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
