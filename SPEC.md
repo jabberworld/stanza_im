@@ -2639,6 +2639,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `add_shape`/`update_shape`/`remove_shape` SXE edits, and remote state
   (`whiteboard_state`) rebuilds the canvas (`WhiteboardCanvas.load_shapes`).
   An incoming `session-initiate` (`whiteboard_invite`) asks the user to join.
+- **Not implemented (possible future work):** the extended profile's optional
+  attachment transfer over Jingle File Transfer (XEP-0234, §12.3). Large images
+  are handled by embedding a `data:` URI or uploading via HTTP File Upload
+  (XEP-0363) and referencing the URL, so the shared document always carries a
+  resolvable reference; a future version may send very large content out of band
+  with XEP-0234 and reference the received bytes instead.
 
 ### 14.6 Connection Security & Transport
 
