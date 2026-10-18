@@ -48,7 +48,19 @@ combo = dlg._controls["roster_font"]
 check("the font-family combo expands with the dialog",
       combo.sizePolicy().horizontalPolicy()
       == QtWidgets.QSizePolicy.Policy.Expanding)
+check("the tooltip font row exists", "tooltip_font" in dlg._controls)
 dlg.close()
+
+# 1b. the tooltip popup follows the tooltip font setting ---------------------
+from stanza_im.ui import tooltip as tooltip_mod  # noqa: E402
+
+tooltip_mod.set_font("Monospace", 14)
+tw = tooltip_mod._window()
+tw.set_content("<b>x</b>", None)
+check("the tooltip popup uses the configured font",
+      tw._label.font().family() == "Monospace"
+      and tw._label.font().pointSize() == 14)
+tooltip_mod.set_font("", 0)
 
 # 2. Ctrl+wheel over a tab bar / the menu bar zooms that font ----------------
 mw = MainWindow.__new__(MainWindow)

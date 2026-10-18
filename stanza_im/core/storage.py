@@ -183,6 +183,7 @@ class Config:
                         "menu_font": "", "menu_font_size": 0,
                         "tab_font": "", "tab_font_size": 0,
                         "selector_font": "", "selector_font_size": 0,
+                        "tooltip_font": "", "tooltip_font_size": 0,
                         "avatar_radius": 20,
                         "tooltip_avatar_size": 64},
         "notifications": {"tray_blink": True, "popups": "system",

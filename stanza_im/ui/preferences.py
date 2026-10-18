@@ -1446,6 +1446,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         font_form.addRow(tr("prefs_font_selector"),
                          self._font_row("selector_font", default_family,
                                         default_size))
+        font_form.addRow(tr("prefs_font_tooltip"),
+                         self._font_row("tooltip_font", default_family,
+                                        default_size))
 
         # The nickname and input "default" follow the chat font (a real value
         # picks the chat family/size; an empty one falls through to the system
@@ -1833,6 +1836,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "tab_font_size": getattr(appearance, "tab_font_size", 0),
             "selector_font": getattr(appearance, "selector_font", ""),
             "selector_font_size": getattr(appearance, "selector_font_size", 0),
+            "tooltip_font": getattr(appearance, "tooltip_font", ""),
+            "tooltip_font_size": getattr(appearance, "tooltip_font_size", 0),
             "avatar_radius": getattr(appearance, "avatar_radius", 20),
             "tooltip_avatar_size": getattr(
                 appearance, "tooltip_avatar_size", 64) or 64,
@@ -2010,6 +2015,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "input_font", "input_font_size", "tooltip_avatar_size",
                     "menu_font", "menu_font_size", "tab_font", "tab_font_size",
                     "selector_font", "selector_font_size",
+                    "tooltip_font", "tooltip_font_size",
                     "osd_bg_color", "osd_font_color", "osd_opacity",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",

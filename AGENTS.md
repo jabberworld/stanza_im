@@ -775,7 +775,10 @@ The shared rich-text tooltip (`ui/tooltip.py`) is a frameless popup used by the
 roster and the MUC participant list; its avatar is scaled to
 `notifications`-independent `appearance.tooltip_avatar_size`
 (`tooltip.set_avatar_size`, Preferences → Appearance → «Разное», 32–256 px,
-default 64). The MUC participant tooltip names the occupant's client the way the
+default 64). Its text font follows `appearance.tooltip_font`/`tooltip_font_size`
+(`tooltip.set_font`, Preferences → Appearance → «Шрифты»); the same setting also
+reaches the native Qt tooltips through a `QToolTip { … }` rule in
+`MainWindow._apply_widget_fonts`. The MUC participant tooltip names the occupant's client the way the
 roster does: the XEP-0092 `client` if known, otherwise the XEP-0115 caps mapping
 (`clients.find_client(caps_node)`), with the caps icon before the nick.
 

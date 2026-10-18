@@ -1132,6 +1132,7 @@ STRINGS = {
     "prefs_font_menu": "Шрифт меню:",
     "prefs_font_tab": "Шрифт заголовков вкладок:",
     "prefs_font_selector": "Шрифт селекторов:",
+    "prefs_font_tooltip": "Шрифт подсказок:",
     "prefs_font_default": "По умолчанию — {family}",
     "prefs_font_size_default": "{size} pt (по умолчанию)",
     "prefs_font_pt": " pt",

@@ -1131,6 +1131,7 @@ STRINGS = {
     "prefs_font_menu": "Menus font:",
     "prefs_font_tab": "Tab titles font:",
     "prefs_font_selector": "Selectors font:",
+    "prefs_font_tooltip": "Tooltip font:",
     "prefs_font_default": "Default — {family}",
     "prefs_font_size_default": "{size} pt (default)",
     "prefs_font_pt": " pt",

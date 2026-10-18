@@ -3228,7 +3228,10 @@ class MainWindow(QtWidgets.QMainWindow):
                  getattr(appearance, "tab_font_size", 0)),
                 ("QComboBox",
                  getattr(appearance, "selector_font", ""),
-                 getattr(appearance, "selector_font_size", 0))):
+                 getattr(appearance, "selector_font_size", 0)),
+                ("QToolTip",
+                 getattr(appearance, "tooltip_font", ""),
+                 getattr(appearance, "tooltip_font_size", 0))):
             decls = []
             family = str(family or "")
             if family:
@@ -3454,6 +3457,13 @@ class MainWindow(QtWidgets.QMainWindow):
             from stanza_im.ui import tooltip as tooltip_mod
             tooltip_mod.set_avatar_size(tooltip_avatar)
             self._applied_tooltip_avatar = tooltip_avatar
+        tooltip_font = (
+            getattr(self._config.appearance, "tooltip_font", "") or "",
+            int(getattr(self._config.appearance, "tooltip_font_size", 0) or 0))
+        if tooltip_font != getattr(self, "_applied_tooltip_font", ("", 0)):
+            from stanza_im.ui import tooltip as tooltip_mod
+            tooltip_mod.set_font(*tooltip_font)
+            self._applied_tooltip_font = tooltip_font
         osd_font = (getattr(self._config.appearance, "osd_font", "") or "",
                     int(getattr(self._config.appearance, "osd_font_size", 0) or 0))
         if osd_font != getattr(self, "_applied_osd_font", ("", 0)):

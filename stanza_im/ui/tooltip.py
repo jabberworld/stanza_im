@@ -14,11 +14,19 @@ _MARGIN = 8
 # Avatar size in logical px (configurable via ``set_avatar_size``).
 _AVATAR_SIZE = [64]
 
+# Popup text font (configurable via ``set_font``; ""/0 = the system default).
+_FONT = [("", 0)]
+
 
 def set_avatar_size(size: int) -> None:
     """Set the avatar size (px) used by the shared tooltip popup."""
     value = int(size or 0)
     _AVATAR_SIZE[0] = value if value >= 16 else 64
+
+
+def set_font(family: str, size: int) -> None:
+    """Set the popup's font family/point size ("" / 0 = the system default)."""
+    _FONT[0] = (str(family or ""), int(size or 0))
 
 
 class _ToolTipWindow(QtWidgets.QWidget):
@@ -52,6 +60,14 @@ class _ToolTipWindow(QtWidgets.QWidget):
         self.setStyleSheet(
             f"QWidget {{ background-color: {base.name()}; "
             f"color: {text.name()}; border: none; }}")
+        family, size = _FONT[0]
+        font = QtGui.QFont()
+        if family:
+            font.setFamily(family)
+        if size:
+            font.setPointSize(int(size))
+        self._label.setFont(font)
+        self._avatar.setFont(font)
 
     def set_content(self, html: str, avatar_path: str | None) -> None:
         self._apply_style()
