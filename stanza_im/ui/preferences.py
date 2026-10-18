@@ -762,14 +762,32 @@ class PreferencesDialog(QtWidgets.QDialog):
         Qt would use instead — ``default_family``/``default_size``.
         """
         combo = self._font_family_combo(key, default_family)
-        combo.setMinimumWidth(220)
+        combo.setMinimumWidth(160)
         size = self._spin(key + "_size", 0, 48)
+        size.setMinimumWidth(SPIN_WIDTH)
+        size.setMaximumWidth(16777215)
         size.setValue(0)
         size.setSuffix(tr("prefs_font_pt"))
+        # Read the "default" special text from its start (a narrow box would
+        # otherwise show only the tail of the phrase).
+        size.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         if default_size > 0:
             size.setSpecialValueText(
                 tr("prefs_font_size_default", size=f"{default_size:g}"))
-        return self._row(combo, size)
+        # Both controls grow with the dialog (the form uses
+        # ExpandingFieldsGrow); the family takes the larger share.
+        for widget in (combo, size):
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                 QtWidgets.QSizePolicy.Policy.Fixed)
+        box = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(combo, 3)
+        layout.addWidget(size, 1)
+        box.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                          QtWidgets.QSizePolicy.Policy.Fixed)
+        return box
 
     def _color_button(self, key: str, default: str = "#000000",
                       tooltip: str = "") -> _ColorButton:

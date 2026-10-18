@@ -9248,7 +9248,39 @@ class MainWindow(QtWidgets.QMainWindow):
                               QtCore.QEvent.Type.WindowActivate,
                               QtCore.QEvent.Type.WindowDeactivate):
             self._update_csi()
+        # Ctrl+wheel over the menu bar or a tab bar resizes that font (the same
+        # gesture as the roster / chat / MUC widgets).
+        if event.type() == QtCore.QEvent.Type.Wheel \
+                and self._handle_widget_font_wheel(obj, event):
+            return True
         return super().eventFilter(obj, event)
+
+    def _handle_widget_font_wheel(self, obj, event) -> bool:
+        """Handle a Ctrl+wheel font zoom over a menu bar / tab bar."""
+        if isinstance(obj, QtWidgets.QTabBar):
+            key = "tab_font"
+        elif isinstance(obj, QtWidgets.QMenuBar):
+            key = "menu_font"
+        else:
+            return False
+        from stanza_im.ui.font_zoom import wheel_font_size
+        size = wheel_font_size(obj.font(), event)
+        if size is None:
+            return False
+        self._set_widget_font_size(key, size)
+        return True
+
+    def _set_widget_font_size(self, key: str, size: int) -> None:
+        """Persist and apply a menu / tab font size changed by Ctrl+wheel."""
+        appearance = self._config.appearance
+        if int(getattr(appearance, key + "_size", 0) or 0) == int(size):
+            return
+        setattr(appearance, key + "_size", int(size))
+        self._config.save()
+        self._apply_widget_fonts()
+        dlg = getattr(self, "_prefs_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.sync_font_size(key, int(size))
 
     def _check_auto_status(self):
         if not self._client:

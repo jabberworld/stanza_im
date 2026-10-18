@@ -1422,7 +1422,13 @@ painter so the nick actually resizes with the list font.
 «По умолчанию — <family>» and the size spin shows «<size> pt (по умолчанию)»
 via `setSpecialValueText`, both resolved by
 `PreferencesDialog._default_app_font` from `QApplication.font()`; the stored
-value stays `""`/`0`.
+value stays `""`/`0`. The size spin is **left-aligned** (`setAlignment(AlignLeft)`)
+so a narrow box still reads the phrase from its start, and each font row's family
+combo + size spin **expand with the dialog** (`ExpandingFieldsGrow` + an
+`Expanding` policy and a 3:1 stretch in `_font_row`). **Ctrl+wheel** over the
+**menu bar** or a **tab bar** changes `appearance.menu_font_size`/`tab_font_size`
+(`MainWindow._handle_widget_font_wheel`, in the app event filter; the event is
+consumed so the tabs do not switch).
 
 ### 11.5 Message Replies (XEP-0461)
 

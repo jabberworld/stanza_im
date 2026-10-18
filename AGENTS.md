@@ -2693,6 +2693,10 @@ entry reads «По умолчанию — <family>» (for nicknames following th
 font live) and the size spin shows «<size> pt (по умолчанию)» via
 `setSpecialValueText`, both resolved from `QApplication.font()` by
 `PreferencesDialog._default_app_font` while the stored value stays `""`/`0`.
+The size spin is **left-aligned** (`setAlignment(AlignLeft)`) so a narrow box
+still reads the phrase from its start, and each font row's family combo + size
+spin **expand with the dialog** (the form's `ExpandingFieldsGrow` + an
+`Expanding` policy and a 3:1 stretch in `_font_row`).
 The message input gets `ChatWidget.set_input_font` (hosted by
 `ChatWindow.set_input_font`, remembered as `_input_font`). **Ctrl+wheel** over
 the input, the roster or the MUC participant list (including over a participant
@@ -2702,7 +2706,10 @@ family unchanged); the widget emits `*_font_zoom_requested(size)`, MainWindow
 persists it (`appearance.*_font_size`), calls the matching
 `ChatWindow.set_*_font`/`_apply_roster_font` so **every** open tab and every
 new one picks it up, and pushes it back into the open Preferences dialog via
-`PreferencesDialog.sync_font_size(key, size)`. `MainWindow.__init__` ends with
+`PreferencesDialog.sync_font_size(key, size)`. **Ctrl+wheel** over the **menu
+bar** or a **tab bar** changes `appearance.menu_font_size`/`tab_font_size`
+(`MainWindow._handle_widget_font_wheel`, in the app event filter; the event is
+consumed so the tabs do not switch). `MainWindow.__init__` ends with
 `_on_settings_applied()`, so all saved settings (fonts, colors, themes,
 interface mode) are in effect from the first frame. The MUC participant nick is
 drawn by `_FadeLabel.paintEvent`, which sets its own font on the pixmap painter
