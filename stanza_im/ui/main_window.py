@@ -3451,6 +3451,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if input_font != getattr(self, "_applied_input_font", ("", 0)):
             self._chat_window.set_input_font(*input_font)
             self._applied_input_font = input_font
+        logger.debug("FONT[apply] input=%r subject=%r participant=%r",
+                     input_font, subject_font, participant_font)
         tooltip_avatar = int(getattr(
             self._config.appearance, "tooltip_avatar_size", 64) or 64)
         if tooltip_avatar != getattr(self, "_applied_tooltip_avatar", 0):
