@@ -2475,7 +2475,10 @@ cleared when the room record drops) and the kind-aware texts read «Начата
 `ui/call_window.CallWindow` shows the active call and
 `IncomingCallDialog` prompts for incoming offers; both are **separate
 top-level windows** (never children of the main window, which would embed them
-over the roster); remote video frames are painted by `VideoView`, which draws a
+over the roster); both label the peer with its **roster name**
+(`MainWindow._call_display_name`, the bare JID when unknown — the client's
+`call_incoming`/`call_proposed` events carry the full JID with the resource).
+Remote video frames are painted by `VideoView`, which draws a
 translucent nickname caption over the image. Every call control is **icon-only**
 (tooltips instead of labels) using the 16px glyphs in
 `resources/images/16x16/actions/` via `call_window._icon`: `mic`/`mic-off`,

@@ -3042,7 +3042,9 @@ client.leave_muji(room)
 - STUN/TURN: `client.ice_servers()` merges XEP-0215 `urn:xmpp:extdisco:2`
   services (with credentials) with `connection.stun_turn_*` and SRV discovery.
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
-  remote video frames are painted by `VideoView` with a translucent nickname
+  both label the peer with its **roster name** (`MainWindow._call_display_name`,
+  the bare JID when unknown — `call_incoming`/`call_proposed` carry the full
+  JID). Remote video frames are painted by `VideoView` with a translucent nickname
   caption over the image, and every control is **icon-only** (tooltips, no
   labels) using `resources/images/16x16/actions/` via `call_window._icon`:
   `mic`/`mic-off`, `camera`/`camera-off` (webcam glyph), `speaker`/`speaker-off`,
