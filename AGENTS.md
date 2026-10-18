@@ -2178,9 +2178,11 @@ a `<path d="…"/>` (`include/svg_path.py`), an image as
 `<image x/y/width/height/xlink:href/>`; `to_svg()`/`save_svg()`/`render_image()`/
 `save_png()` serialise the document (the PNG is a board render, shapes only on
 white). In the
-**select** tool a click selects a shape and shows rotate/resize handles
-(dragging the shape body moves it; the handles rotate/scale it about the centre
-— the move/rotate/scale tools remain as an alternative); `Delete`/`Backspace`
+**select** tool a click selects a shape and shows rotate/resize handles plus a
+**move** marker below the box (`wb-move.svg`) so even a tiny shape is easy to
+drag (dragging the shape body or the move marker moves it; the handles
+rotate/scale it about the centre — the move/rotate/scale tools remain as an
+alternative); `Delete`/`Backspace`
 removes the selection; `Ctrl+wheel` zooms the view anchored at the cursor,
 `Ctrl+0` and a double click on empty space reset it, and the view pans by
 dragging empty space in the select tool **or** by dragging with the middle mouse

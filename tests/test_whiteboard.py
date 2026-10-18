@@ -277,12 +277,14 @@ sid = hc.selected_id()
 check("drawing selects the new shape", bool(sid))
 hc.set_tool("select")
 handles = hc._selection_handles()
-check("the selected shape has rotate and resize handles",
-      set(handles) == {"rotate", "resize"})
+check("the selected shape has rotate/resize/move handles",
+      set(handles) == {"rotate", "resize", "move"})
 check("the resize handle is hit-testable",
       hc._handle_at(handles["resize"].center()) == "resize")
 check("the rotate handle is hit-testable",
       hc._handle_at(handles["rotate"].center()) == "rotate")
+check("the move handle is hit-testable",
+      hc._handle_at(handles["move"].center()) == "move")
 
 updates = []
 hc.shape_updated.connect(updates.append)
@@ -304,6 +306,12 @@ drag(hc, rotate_pt.x(), rotate_pt.y(),
      rotate_pt.x() + 30, rotate_pt.y() + 10, steps=3)
 check("dragging the rotate handle rotates the shape",
       abs(hc._shape_by_id(sid)["transform"].m12() - before_rot) > 1e-3)
+
+before_move = hc._shape_by_id(sid)["transform"].dx()
+move_pt = hc._selection_handles()["move"].center()
+drag(hc, move_pt.x(), move_pt.y(), move_pt.x() + 30, move_pt.y(), steps=3)
+check("dragging the move handle moves the shape",
+      hc._shape_by_id(sid)["transform"].dx() > before_move)
 
 # 12. arrow tool -------------------------------------------------------------
 ac = WhiteboardCanvas()

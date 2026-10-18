@@ -2559,10 +2559,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   image as `<image x/y/width/height/xlink:href="…"/>` (a `data:` URI is decoded
   inline; an uploaded `http(s)` URL is fetched off the UI thread, bounded and
   cached).
-- In the **select** tool a click selects a shape and draws rotate/resize
-  handles (constant screen size, hit-tested in widget coordinates); dragging
-  the shape body moves it and the handles rotate/scale it about the bounding-box
-  centre (the move/rotate/scale tools remain as an alternative). `Delete` /
+- In the **select** tool a click selects a shape and draws rotate/resize handles
+  plus a **move** marker below the box (`wb-move.svg`, constant screen size,
+  hit-tested in widget coordinates) so even a tiny shape is easy to drag;
+  dragging the shape body or the move marker moves it and the handles
+  rotate/scale it about the bounding-box centre (the move/rotate/scale tools
+  remain as an alternative). `Delete` /
   `Backspace` removes the selection. `Ctrl+wheel` zooms the view anchored at the
   cursor (0.25–8×), `Ctrl+0` and a double click on empty space reset it, and the
   view pans by dragging empty space in the select tool or by dragging with the

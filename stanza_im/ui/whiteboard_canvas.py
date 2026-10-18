@@ -900,6 +900,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                                     r.top() - size - 8, size, size),
             "resize": QtCore.QRectF(r.right() - size / 2,
                                     r.bottom() - size / 2, size, size),
+            # A drag marker below the box, so even a tiny shape is easy to move.
+            "move": QtCore.QRectF(r.center().x() - size / 2,
+                                  r.bottom() + 8, size, size),
         }
 
     def _handle_at(self, pos: QtCore.QPointF) -> str:
@@ -965,8 +968,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             painter.setPen(QtGui.QPen(QtGui.QColor("#1a73e8"), 1.5))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("#ffffff")))
             painter.drawEllipse(rect)
-            icon_name = ("wb-rotate.svg" if name == "rotate"
-                         else "wb-scale.svg")
+            icon_name = {"rotate": "wb-rotate.svg",
+                         "move": "wb-move.svg"}.get(name, "wb-scale.svg")
             path = find_icon(icon_name)
             if path:
                 QtGui.QIcon(path).paint(
