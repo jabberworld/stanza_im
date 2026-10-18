@@ -96,6 +96,23 @@ _loop.run_until_complete(c2.disconnect())
 check("nothing sent when already offline", sent2 == []
       and c2.xmpp.closed is False)
 
+# 3. a stale (call-less) caps entry is verified with a live disco#info -------
+cc = JabberClient("me@example.com/r", "pw")
+_checked = []
+cc._start_task = lambda coro: (_checked.append(coro), coro.close())
+cc.presences = {"bob@example.com/pc": {"type": "available"},
+                "carol@example.com/pc": {"type": "available"}}
+cc.contact_features["bob@example.com/pc"] = {
+    "http://jabber.org/protocol/disco#info"}
+cc.ensure_caps("bob@example.com")
+check("a call-less caps entry is verified live", len(_checked) == 1)
+cc.ensure_caps("bob@example.com")
+check("the live verification runs once per resource", len(_checked) == 1)
+cc.contact_features["carol@example.com/pc"] = {
+    "http://jabber.org/protocol/disco#info", "urn:xmpp:jingle:apps:rtp:audio"}
+cc.ensure_caps("carol@example.com")
+check("a call-capable caps entry needs no verification", len(_checked) == 1)
+
 _loop.close()
 
 print()

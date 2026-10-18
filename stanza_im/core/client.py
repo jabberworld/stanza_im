@@ -1337,6 +1337,18 @@ class JabberClient:
             _version.os = (f"Python {platform.python_version()}"
                            if send_software else "")
 
+        # XEP-0115 caps are computed from whatever features are registered when
+        # ``update_caps`` runs; recompute them once the client is fully set up so
+        # the advertised verification string (and the cached disco#info other
+        # instances inherit) reflects the whole disco — the calls, the
+        # whiteboard, … — not a partial early snapshot.
+        try:
+            _caps_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _caps_loop = None
+        if _caps is not None and _caps_loop is not None:
+            _caps_loop.create_task(_caps.update_caps(broadcast=False))
+
         if (self.proxy_mode == "socks5" and self.proxy_host
                 and self.proxy_port):
             self._install_socks_proxy(self.proxy_host, self.proxy_port)
@@ -1369,6 +1381,9 @@ class JabberClient:
         # XEP-0115 features per full JID (for call-capability gating)
         self.contact_features: dict[str, set] = {}
         self._caps_inflight: set[str] = set()
+        # Full JIDs whose (possibly stale) caps were verified with a live
+        # disco#info, so the extra request happens once per resource.
+        self._caps_verified: set[str] = set()
         self._muc_subjects: dict[str, list[tuple[str, str]]] = {}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
         self._mam_cursors: dict[str, str] = {}
@@ -6286,6 +6301,15 @@ class JabberClient:
             bare = full_jid.split("/")[0]
             logger.debug("CAPS %s: %d features", full_jid, len(features))
             self.emit("contact_caps", bare)
+            # Entity capabilities can be stale: slixmpp caches by the
+            # verification string alone, so a peer that shares our caps node (a
+            # second instance of this client) inherits our own cached feature
+            # set.  When a capability we care about (calls) is missing, verify
+            # the resource with a live disco#info once.
+            if "urn:xmpp:jingle:apps:rtp:audio" not in features \
+                    and full_jid not in self._caps_verified:
+                self._caps_verified.add(full_jid)
+                self._start_task(self._load_caps_from_disco(full_jid))
         finally:
             self._caps_inflight.discard(full_jid)
 
@@ -6372,8 +6396,12 @@ class JabberClient:
         self._start_task(self._load_caps(full_jid))
 
     def ensure_caps(self, bare: str) -> None:
-        """Fallback: query a resource's disco#info if caps are still unknown."""
-        if any(jid.split("/")[0] == bare for jid in self.contact_features):
+        """Fallback: query a resource's disco#info if caps are unknown/stale."""
+        known: set = set()
+        for jid, features in self.contact_features.items():
+            if jid.split("/")[0] == bare:
+                known |= features
+        if known and "urn:xmpp:jingle:apps:rtp:audio" in known:
             return
         best = ""
         for candidate, info in (self.presences or {}).items():
@@ -6381,7 +6409,8 @@ class JabberClient:
                     and info.get("type") == "available"):
                 best = candidate
                 break
-        if best:
+        if best and best not in self._caps_verified:
+            self._caps_verified.add(best)
             self._start_task(self._load_caps_from_disco(best))
 
     async def _load_caps_from_disco(self, full_jid: str) -> None:
@@ -6396,7 +6425,10 @@ class JabberClient:
             features = {el.get("var") or "" for el in xml.iter(
                 "{%s}feature" % NS_DISCO_INFO)}
         if features:
-            self.contact_features[full_jid] = features
+            # Union with the caps features so a stale entry cannot hide a real
+            # capability (a live disco#info is authoritative).
+            existing = self.contact_features.get(full_jid, set())
+            self.contact_features[full_jid] = set(existing) | features
             logger.debug("CAPS(disco) %s: %d features", full_jid, len(features))
             self.emit("contact_caps", full_jid.split("/")[0])
 

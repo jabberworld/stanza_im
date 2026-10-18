@@ -2444,7 +2444,13 @@ elements (video wins; nested or not), and the session-initiate that follows a
 `proceed` is auto-accepted.
 `client.supports_calls(bare, video)` gates the UI on the peer's XEP-0115 caps
 (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 + rtp:audio [+ rtp:video]`, fetched
-per presence via `_load_caps`). STUN/TURN come from `client.ice_servers()`
+per presence via `_load_caps`). Because slixmpp caches caps by the verification
+string alone, a peer that shares our caps node (a second instance of this
+client) can inherit our own cached feature set; when the resolved features lack
+a call feature the resource is verified with a **live `disco#info`**
+(`_load_caps_from_disco`, unioned in, once per resource via `_caps_verified`,
+also reachable from `ensure_caps`). `JabberClient.__init__` also recomputes our
+own caps (`update_caps`) after the full disco is registered. STUN/TURN come from `client.ice_servers()`
 (XEP-0215 `urn:xmpp:extdisco:2` → the connection settings' STUN/TURN endpoint →
 SRV discovery). The «Звонок» call menu is a submenu in the roster contact
 context menu and an icon-only button in the chat toolbar (both enabled only for

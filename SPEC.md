@@ -1018,7 +1018,13 @@ Context menu differs for conferences (items in `_conference_roster` /
 «Скопировать адрес конференции» (`conference_copy_join`) directly below
 «История переписки», and its «Звонок» submenu starts a Muji conference call
 (`_join_muji`) instead of the 1:1 Jingle call, enabled only when aiortc is
-available (`client.rtp_calls.available`). For a non-conference contact the menu
+available (`client.rtp_calls.available`). The 1:1 «Звонок» is gated on the
+peer's XEP-0115 caps (`supports_calls`); a caps entry lacking a call feature is
+verified with a live `disco#info` (`_load_caps_from_disco`, unioned in, once per
+resource via `_caps_verified`), because slixmpp caches caps by the verification
+string alone and a peer sharing our caps node can inherit our own cached set;
+`JabberClient.__init__` also recomputes our own caps (`update_caps`) after the
+full disco is registered. For a non-conference contact the menu
 carries «Пригласить в» (`ctx_invite_to`) — a submenu of the conferences we are
 currently in (XEP-0249): picking one calls
 `client.send_muc_invite(target, room, reason, password)` (the room password is
