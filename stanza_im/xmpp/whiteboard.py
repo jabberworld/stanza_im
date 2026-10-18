@@ -470,11 +470,14 @@ class WhiteboardManager:
                 continue
             existing = doc.find_attr(rid, key)
             old = doc.records[existing] if existing else None
+            # Capture the old values before set_attr mutates the record in place.
+            old_chdata = old.chdata if old is not None else ""
+            old_version = old.version if old is not None else 0
             attr_rid = doc.set_attr(rid, key, str(attrs[key] or ""))
             sets.append(self._set_element(attr_rid, doc))
             if old is not None:
                 inv_sets.append(self._set_element_values(
-                    attr_rid, old.chdata, old.version))
+                    attr_rid, old_chdata, old_version))
             else:
                 inv_removes.append(self._remove_element(attr_rid))
         if sets:
@@ -495,6 +498,84 @@ class WhiteboardManager:
             self._send_edits(session, removes=removes)
             self._record(sid, {"new": [], "set": [], "remove": removes},
                          {"new": captured, "set": [], "remove": []})
+
+    #: Stacking-order operations (the profile §8.6, via ``primary-weight``).
+    _REORDER = ("front", "back", "forward", "backward")
+
+    def reorder(self, sid: str, rid: str, op: str) -> bool:
+        """Change a drawable's stacking order and broadcast the ``<set>`` edits.
+
+        Sibling order is the document's ``primary-weight`` (XEP-0284), so a
+        reorder renumbers the changed siblings to their new position.
+        """
+        session = self.sessions.get(sid)
+        if session is None or op not in self._REORDER:
+            return False
+        doc = session.doc
+        children = doc.children(doc.root_rid)
+        drawables = [r for r in children
+                     if doc.records[r].type == "element"
+                     and doc.records[r].name in ("path", "image")]
+        if rid not in drawables or len(drawables) < 2:
+            return False
+        index = drawables.index(rid)
+        if op == "front":
+            drawables.append(drawables.pop(index))
+        elif op == "back":
+            drawables.insert(0, drawables.pop(index))
+        elif op == "forward":
+            if index >= len(drawables) - 1:
+                return False
+            drawables[index], drawables[index + 1] = (
+                drawables[index + 1], drawables[index])
+        else:  # backward
+            if index <= 0:
+                return False
+            drawables[index], drawables[index - 1] = (
+                drawables[index - 1], drawables[index])
+        # Renumber only the drawables, keeping them above the metadata records.
+        base = max((doc.records[r].primary_weight for r in children
+                    if r not in drawables), default=0.0)
+        sets: list[ET.Element] = []
+        inverse: list[ET.Element] = []
+        for pos, record_rid in enumerate(drawables):
+            record = doc.records[record_rid]
+            weight = base + pos + 1
+            if abs(record.primary_weight - weight) < 1e-9:
+                continue
+            sets.append(self._weight_set(record_rid, weight, record.version))
+            inverse.append(self._weight_set(record_rid, record.primary_weight,
+                                            record.version))
+            doc.apply_set(sets[-1])
+        if not sets:
+            return False
+        self._send_edits(session, sets=sets)
+        self._record(sid, {"new": [], "set": sets, "remove": []},
+                     {"new": [], "set": inverse, "remove": []})
+        # A reorder has no canvas-level signal, so refresh from the document.
+        self.client.emit("whiteboard_state", sid)
+        return True
+
+    def set_view_box(self, sid: str, width: int, height: int) -> bool:
+        """Resize the canvas by updating the document's ``viewBox`` (the §8.8 op)."""
+        session = self.sessions.get(sid)
+        if session is None:
+            return False
+        doc = session.doc
+        value = "0 0 %d %d" % (max(1, int(width)), max(1, int(height)))
+        existing = doc.find_attr(doc.root_rid, "viewBox")
+        old = doc.records[existing] if existing else None
+        # Capture the old values before set_attr mutates the record in place.
+        old_chdata = old.chdata if old is not None else ""
+        old_version = old.version if old is not None else 0
+        attr_rid = doc.set_attr(doc.root_rid, "viewBox", value)
+        sets = [self._set_element(attr_rid, doc)]
+        inverse = ([self._set_element_values(attr_rid, old_chdata, old_version)]
+                   if old is not None else [self._remove_element(attr_rid)])
+        self._send_edits(session, sets=sets)
+        self._record(sid, {"new": [], "set": sets, "remove": []},
+                     {"new": [], "set": inverse, "remove": []})
+        return True
 
     # ── Jingle ────────────────────────────────────────────────────
 
@@ -756,6 +837,15 @@ class WhiteboardManager:
         el.set("target", rid)
         el.set("version", str(record.version))
         el.set("chdata", record.chdata)
+        return el
+
+    @staticmethod
+    def _weight_set(rid: str, weight: float, version: int) -> ET.Element:
+        """A ``<set>`` changing a record's ``primary-weight`` (sibling order)."""
+        el = ET.Element(_q(NS_SXE, "set"))
+        el.set("target", rid)
+        el.set("version", str(version))
+        el.set("primary-weight", "%g" % weight)
         return el
 
     @staticmethod

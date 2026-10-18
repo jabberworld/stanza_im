@@ -2515,8 +2515,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   2 MB/format limit) and places an `<image>` shape at the view centre); then the
   line width (a menu whose actions are checkable, the active
   width ticked), line colour, fill colour and a «Заливка» toggle (whether newly
-  drawn closed shapes are filled; off → `fill=""` → `fill="none"`); then the
-  board operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
+  drawn closed shapes are filled; off → `fill=""` → `fill="none"`); a
+  **stacking-order** menu (`wb-order.svg`, next to undo/redo) with
+  front/forward/backward/back → `WhiteboardManager.reorder` (renumbers the
+  drawable siblings' `primary-weight`; a local board reorders the canvas list);
+  then the board operations «Очистить» (drawable children only, metadata
+  preserved), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
+  (`wb-resize.svg` → `WhiteboardManager.set_view_box`, the `viewBox` op) and
   «Поделиться снимком» (a temp PNG → `JabberClient.upload_http_media` (HTTP
   Upload/XEP-0363), which returns the full XEP-0385 media dict → the link is
   sent **with SIMS metadata** through the normal `ShareDialog`); then

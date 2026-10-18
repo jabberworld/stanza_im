@@ -527,6 +527,48 @@ check("the image source lives in an xlink:href attribute",
 check("the image source is broadcast in a <new> edit",
       _state_of(c).find(_q(NS_SXE, "new")) is not None)
 
+# 21. stacking order (primary-weight) ----------------------------------------
+c = _FakeClient()
+c._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid = m.start_session("bob@example.com", is_muc=False)
+r1 = m.add_shape(sid, {"id": "a", "d": "M 0 0 L 1 1"})
+r2 = m.add_shape(sid, {"id": "b", "d": "M 0 0 L 2 2"})
+check("shapes are ordered by insertion",
+      [s["rid"] for s in m.shapes(sid)] == [r1, r2])
+m.reorder(sid, r1, "front")
+check("bring-to-front moves the shape last",
+      [s["rid"] for s in m.shapes(sid)] == [r2, r1])
+m.reorder(sid, r1, "back")
+check("send-to-back moves the shape first",
+      [s["rid"] for s in m.shapes(sid)] == [r1, r2])
+m.reorder(sid, r1, "forward")
+check("bring-forward swaps with the next sibling",
+      [s["rid"] for s in m.shapes(sid)] == [r2, r1])
+check("reorder broadcasts a <set>",
+      _state_of(c).find(_q(NS_SXE, "set")) is not None)
+check("reorder is undoable", m.can_undo(sid))
+m.undo(sid)
+check("undo restores the previous order",
+      [s["rid"] for s in m.shapes(sid)] == [r1, r2])
+
+# 22. canvas resize (viewBox) ------------------------------------------------
+m.set_view_box(sid, 800, 600)
+check("set_view_box updates the document viewBox", m.view_box(sid) == (800, 600))
+check("set_view_box broadcasts a <set>",
+      _state_of(c).find(_q(NS_SXE, "set")) is not None)
+m.undo(sid)
+check("undo restores the previous viewBox", m.view_box(sid) == (1280, 720))
+
+# 23. undo restores an overwritten attribute value ---------------------------
+r3 = m.add_shape(sid, {"id": "c", "d": "M 0 0 L 9 9"})
+m.update_shape(sid, r3, {"d": "M 1 1 L 8 8"})
+check("update_shape changes the path data",
+      [s for s in m.shapes(sid) if s["rid"] == r3][0]["d"] == "M 1 1 L 8 8")
+m.undo(sid)
+check("undo restores the overwritten path data",
+      [s for s in m.shapes(sid) if s["rid"] == r3][0]["d"] == "M 0 0 L 9 9")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -2137,8 +2137,13 @@ it as a `data:` URI (`image_data_uri`, a 2 MB/format limit) and places an
 `<image xlink:href="data:…"/>` and synced like any other object); then the line width
 (a menu whose actions are checkable, the active width ticked), line colour, fill
 colour and a «Заливка» toggle (whether newly drawn closed shapes are filled);
-then the board
-operations «Очистить», «Сохранить как SVG», «Сохранить как PNG» and
+a **stacking-order** menu (`wb-order.svg`, next to undo/redo: «На передний
+план»/«Вперёд»/«Назад»/«На задний план» → `WhiteboardManager.reorder`, which
+renumbers the drawable siblings' `primary-weight`; a local board reorders the
+canvas list directly); then the board
+operations «Очистить» (removes the drawable children, the document metadata
+stays), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
+(`wb-resize.svg` → `WhiteboardManager.set_view_box`, the `viewBox` op) and
 «Поделиться снимком» (renders the board to a temp PNG, uploads it via
 `JabberClient.upload_http_media` — HTTP Upload/XEP-0363 — which returns the full
 XEP-0385 media dict, and shares the link **with SIMS metadata** through the

@@ -92,6 +92,20 @@ class WhiteboardDialog(QtWidgets.QDialog):
                                                    tr("whiteboard_redo"))
                 self._redo_btn.clicked.connect(self._on_redo)
                 toolbar.addWidget(self._redo_btn)
+                self._order_btn = self._tool_button("wb-order.svg",
+                                                    tr("whiteboard_order"))
+                self._order_menu = QtWidgets.QMenu(self)
+                for _op, _key in (("front", "whiteboard_order_front"),
+                                  ("forward", "whiteboard_order_forward"),
+                                  ("backward", "whiteboard_order_backward"),
+                                  ("back", "whiteboard_order_back")):
+                    _act = self._order_menu.addAction(tr(_key))
+                    _act.triggered.connect(
+                        lambda _checked=False, o=_op: self._reorder(o))
+                self._order_btn.setPopupMode(
+                    QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+                self._order_btn.setMenu(self._order_menu)
+                toolbar.addWidget(self._order_btn)
                 toolbar.addWidget(self._separator())
             button = self._tool_button(icon, tr(tip_key), checkable=True)
             button.clicked.connect(
@@ -156,6 +170,11 @@ class WhiteboardDialog(QtWidgets.QDialog):
                                                 tr("whiteboard_share_png"))
         self._share_png_btn.clicked.connect(self._on_share_png)
         toolbar.addWidget(self._share_png_btn)
+
+        self._size_btn = self._tool_button("wb-resize.svg",
+                                           tr("whiteboard_canvas_size"))
+        self._size_btn.clicked.connect(self._resize_canvas)
+        toolbar.addWidget(self._size_btn)
 
         toolbar.addWidget(self._separator())
         self._share_btn = self._tool_button("system-users.png",
@@ -377,6 +396,34 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def _on_redo(self) -> None:
         if self._client and self._sid:
             self._client.whiteboard.redo(self._sid)
+
+    def _reorder(self, op: str) -> None:
+        """Change the selected shape's stacking order (front/back/±1)."""
+        shape_id = self._canvas.selected_id()
+        if not shape_id:
+            return
+        rid = self._canvas.selected_rid()
+        if self._client and self._sid and rid:
+            self._client.whiteboard.reorder(self._sid, rid, op)
+        else:
+            self._canvas.reorder_local(shape_id, op)
+
+    def _resize_canvas(self) -> None:
+        """Resize the canvas (the shared document's ``viewBox``)."""
+        width, height = self._canvas.view_box()
+        new_w, ok = QtWidgets.QInputDialog.getInt(
+            self, tr("whiteboard_canvas_size"), tr("whiteboard_canvas_width"),
+            width, 100, 8000)
+        if not ok:
+            return
+        new_h, ok = QtWidgets.QInputDialog.getInt(
+            self, tr("whiteboard_canvas_size"), tr("whiteboard_canvas_height"),
+            height, 100, 8000)
+        if not ok:
+            return
+        self._canvas.set_view_box(new_w, new_h)
+        if self._client and self._sid:
+            self._client.whiteboard.set_view_box(self._sid, new_w, new_h)
 
     def _confirm_finish(self) -> None:
         answer = QtWidgets.QMessageBox.question(

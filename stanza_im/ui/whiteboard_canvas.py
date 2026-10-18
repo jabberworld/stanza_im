@@ -177,6 +177,33 @@ class WhiteboardCanvas(QtWidgets.QWidget):
     def selected_id(self) -> str:
         return self._selected
 
+    def selected_rid(self) -> str:
+        """The document record id of the selected shape ("" when unshared)."""
+        shape = self._shape_by_id(self._selected)
+        return str(shape.get("rid") or "") if shape is not None else ""
+
+    def reorder_local(self, shape_id: str, op: str) -> bool:
+        """Reorder a local (unshared) board's paint order."""
+        ids = [s["id"] for s in self._shapes]
+        if shape_id not in ids or len(ids) < 2:
+            return False
+        index = ids.index(shape_id)
+        if op == "front":
+            self._shapes.append(self._shapes.pop(index))
+        elif op == "back":
+            self._shapes.insert(0, self._shapes.pop(index))
+        elif op == "forward" and index < len(self._shapes) - 1:
+            self._shapes[index], self._shapes[index + 1] = (
+                self._shapes[index + 1], self._shapes[index])
+        elif op == "backward" and index > 0:
+            self._shapes[index], self._shapes[index - 1] = (
+                self._shapes[index - 1], self._shapes[index])
+        else:
+            return False
+        self.update()
+        self.changed.emit()
+        return True
+
     # ── Actions ───────────────────────────────────────────────────
 
     def clear(self) -> None:
@@ -428,7 +455,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             }
             loaded.append(shape)
         self._shapes = loaded
-        self._selected = ""
+        # Keep the current selection when it survived the rebuild (a reorder or
+        # a remote edit keeps the ``id``), so a re-order does not drop it.
+        if self._selected and not any(s["id"] == self._selected
+                                      for s in loaded):
+            self._selected = ""
         self._active = None
         self.update()
         self.changed.emit()

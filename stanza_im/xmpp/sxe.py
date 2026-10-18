@@ -240,6 +240,11 @@ class SxeDocument:
         if el.get("primary-weight") is not None:
             try:
                 record.primary_weight = float(el.get("primary-weight"))
+                # Keep the auto-weight ahead of a bumped sibling so a later
+                # ``add_element`` still lands on top.
+                self._next_weight[record.parent] = max(
+                    self._next_weight.get(record.parent, 0.0),
+                    record.primary_weight)
             except (TypeError, ValueError):
                 pass
         if el.get("parent") is not None:

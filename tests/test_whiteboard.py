@@ -640,6 +640,63 @@ check("a remote image loads",
 check("a remote image renders",
       rc2._world_path(rc2.shapes()[0]).boundingRect().width() == 2)
 
+# 23. stacking order (local) + selection preservation ------------------------
+oc = WhiteboardCanvas()
+oc.resize(1280, 720)
+oc.set_tool("rect")
+drag(oc, 10, 10, 40, 40)
+oc.set_tool("rect")
+drag(oc, 60, 10, 90, 40)
+_oc_ids = [s["id"] for s in oc.shapes()]
+check("two rects are drawn", len(_oc_ids) == 2)
+oc.reorder_local(_oc_ids[0], "front")
+check("reorder_local brings a shape to the front",
+      oc.shapes()[-1]["id"] == _oc_ids[0])
+oc.reorder_local(_oc_ids[0], "back")
+check("reorder_local sends a shape to the back",
+      oc.shapes()[0]["id"] == _oc_ids[0])
+oc.reorder_local(_oc_ids[0], "forward")
+check("reorder_local moves a shape forward",
+      oc.shapes()[1]["id"] == _oc_ids[0])
+oc._selected = _oc_ids[0]
+oc.load_shapes([{"rid": "r1", "id": _oc_ids[0], "d": "M 0 0 L 5 5"}])
+check("load_shapes keeps a surviving selection",
+      oc.selected_id() == _oc_ids[0])
+
+# 24. the dialog exposes the order + canvas-size controls --------------------
+od = WhiteboardDialog("bob@example.com")
+check("the dialog has an order button", hasattr(od, "_order_btn"))
+check("the order menu has four entries", len(od._order_menu.actions()) == 4)
+check("the order icon exists", bool(find_icon("wb-order.svg")))
+check("the dialog has a canvas-size button", hasattr(od, "_size_btn"))
+check("the resize icon exists", bool(find_icon("wb-resize.svg")))
+od.close()
+
+
+class _WbOrder:
+    def __init__(self):
+        self.calls = []
+
+    def reorder(self, sid, rid, op):
+        self.calls.append((sid, rid, op))
+
+
+class _ClientOrder:
+    def __init__(self):
+        self.whiteboard = _WbOrder()
+
+
+od2 = WhiteboardDialog("bob@example.com", client=_ClientOrder())
+od2._sid = "s1"
+od2._canvas.load_shapes([{"rid": "R1", "id": "I1", "d": "M 0 0 L 5 5"}])
+od2._canvas._selected = "I1"
+check("selected_rid reports the document record",
+      od2._canvas.selected_rid() == "R1")
+od2._reorder("front")
+check("a shared reorder calls the manager",
+      od2._client.whiteboard.calls == [("s1", "R1", "front")])
+od2.close()
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
