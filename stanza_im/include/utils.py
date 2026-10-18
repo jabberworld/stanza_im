@@ -81,6 +81,16 @@ def format_time_short(timestamp: float | None = None) -> str:
     return f"{h:02d}:{m:02d}"
 
 
+def format_duration(seconds: int) -> str:
+    """A call duration as *MM:SS* (or *HH:MM:SS* past an hour)."""
+    total = max(0, int(seconds or 0))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def ts_to_time(ts: str | None) -> str:
     """Format an ISO timestamp, including the date when older than one day."""
     if ts is None:

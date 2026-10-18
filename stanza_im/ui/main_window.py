@@ -4854,6 +4854,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 window = self._open_call_window(
                     sid, peer, bool(getattr(session, "video", False)))
             window.set_state(tr("call_active"))
+            window.start_duration()
 
     def _on_call_video_frame(self, sid: str, image) -> None:
         window = self._call_windows.get(sid)
@@ -4899,6 +4900,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._play_call_busy()
         window = self._call_windows.pop(sid, None)
         if window is not None:
+            window.stop_duration()
             window.set_state(tr("call_ended"))
             window.close()
         dlg = self._incoming_calls.pop(sid, None)
@@ -4998,6 +5000,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._on_muji_participant_camera)
             self._place_window_near_main(window)
             window.show()
+            window.start_duration()
             self._muji_windows[room] = window
         self._on_muji_updated(room)
 
@@ -5012,6 +5015,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muji_ended(self, room: str, video: bool) -> None:
         """The last conference participant left — the room conference ended."""
+        window = self._muji_windows.get(room)
+        if window is not None:
+            window.stop_duration()
         if self._config.chat.muc_show_status:
             chat = self._chat_window.get_chat(room)
             if chat is not None:
@@ -5175,6 +5181,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.set_call_local_preview(sid, False)
         window = self._muji_windows.pop(room, None)
         if window is not None:
+            window.stop_duration()
             window.close()
         self._sync_muji_indicator(room)
 

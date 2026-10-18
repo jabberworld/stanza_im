@@ -2504,7 +2504,9 @@ microphone sends silence and the switched-off camera sends black frames
 attached), while received audio/video keeps playing and the remote view is
 never hidden. A `speaker`/`speaker-off` button mutes the **remote** audio
 (`receive_toggled` → `rtp_calls.set_call_audio_receive`, the same knob Muji uses
-per participant). Preferences
+per participant). A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS`
+past an hour) runs from the call becoming active (`CallWindow.start_duration`,
+stopped on the end) and from the Muji join (`MujiCallWindow.start_duration`). Preferences
 gains a **Devices** page
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
 Multimedia). The page also hosts **self-tests** (`ui/device_test.py`): a live

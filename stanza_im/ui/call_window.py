@@ -10,12 +10,14 @@ from __future__ import annotations
 import logging
 import math
 import os
+import time
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.avatars import default_avatar
 from stanza_im.include.constants import find_icon
+from stanza_im.include.utils import format_duration
 
 logger = logging.getLogger("stanza_im.call.ui")
 
@@ -212,6 +214,16 @@ class CallWindow(QtWidgets.QWidget):
         self._state.setStyleSheet("color: gray;")
         layout.addWidget(self._state)
 
+        self._duration_label = QtWidgets.QLabel("", self)
+        self._duration_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._duration_label.setStyleSheet("color: gray;")
+        self._duration_label.setVisible(False)
+        layout.addWidget(self._duration_label)
+        self._duration_timer = QtCore.QTimer(self)
+        self._duration_timer.setInterval(1000)
+        self._duration_timer.timeout.connect(self._tick_duration)
+        self._duration_start = 0.0
+
         self._video_view = VideoView(self)
         self._video_view.set_caption(peer)
         layout.addWidget(self._video_view, stretch=1)
@@ -257,6 +269,23 @@ class CallWindow(QtWidgets.QWidget):
 
     def set_state(self, text: str):
         self._state.setText(text)
+
+    def start_duration(self) -> None:
+        """Start (or restart) the call-duration counter."""
+        self._duration_start = time.monotonic()
+        self._duration_label.setVisible(True)
+        self._tick_duration()
+        self._duration_timer.start()
+
+    def stop_duration(self) -> None:
+        self._duration_timer.stop()
+        self._duration_start = 0.0
+
+    def _tick_duration(self) -> None:
+        if not self._duration_start:
+            return
+        self._duration_label.setText(
+            format_duration(time.monotonic() - self._duration_start))
 
     def set_frame(self, image):
         self._video_view.set_frame(image)
@@ -347,6 +376,15 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._state.setStyleSheet("color: gray;")
         left_layout.addWidget(self._state)
 
+        self._duration_label = QtWidgets.QLabel("", left)
+        self._duration_label.setStyleSheet("color: gray;")
+        self._duration_label.setVisible(False)
+        left_layout.addWidget(self._duration_label)
+        self._duration_timer = QtCore.QTimer(self)
+        self._duration_timer.setInterval(1000)
+        self._duration_timer.timeout.connect(self._tick_duration)
+        self._duration_start = 0.0
+
         right = QtWidgets.QWidget(splitter)
         right_layout = QtWidgets.QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -387,6 +425,23 @@ class MujiCallWindow(QtWidgets.QWidget):
     def set_video(self, enabled: bool) -> None:
         self._video.setVisible(enabled)
         self._all_cam_btn.setVisible(enabled)
+
+    def start_duration(self) -> None:
+        """Start (or restart) the conference-duration counter."""
+        self._duration_start = time.monotonic()
+        self._duration_label.setVisible(True)
+        self._tick_duration()
+        self._duration_timer.start()
+
+    def stop_duration(self) -> None:
+        self._duration_timer.stop()
+        self._duration_start = 0.0
+
+    def _tick_duration(self) -> None:
+        if not self._duration_start:
+            return
+        self._duration_label.setText(
+            format_duration(time.monotonic() - self._duration_start))
 
     def set_self_nick(self, nick: str) -> None:
         """Update our own conference nick (labels the mirrored self tile)."""

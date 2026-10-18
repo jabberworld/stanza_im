@@ -100,6 +100,23 @@ vcw = CallWindow("s3", "Bob", video=True)
 check("a video call window has no avatar", not _has_avatar_label(vcw))
 vcw.close()
 
+# 5. the call duration (MM:SS, HH:MM:SS past an hour) ------------------------
+from stanza_im.include.utils import format_duration  # noqa: E402
+
+check("a short duration is MM:SS", format_duration(65) == "01:05")
+check("a long duration is HH:MM:SS", format_duration(3725) == "1:02:05")
+check("a negative duration is clamped", format_duration(-5) == "00:00")
+
+dcw = CallWindow("s4", "Bob", video=False)
+dcw.start_duration()
+check("starting the duration shows the counter",
+      not dcw._duration_label.isHidden()
+      and dcw._duration_label.text() == "00:00")
+dcw.stop_duration()
+check("stopping the duration halts the timer",
+      not dcw._duration_timer.isActive())
+dcw.close()
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

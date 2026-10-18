@@ -3065,7 +3065,9 @@ client.leave_muji(room)
   `set_audio_enabled`/`set_video_enabled`, no SDP renegotiation) and never
   affect the received stream — the remote view stays visible. A
   `speaker`/`speaker-off` button mutes the **remote** audio (`receive_toggled` →
-  `rtp_calls.set_call_audio_receive`, the same knob Muji uses per participant). Preferences →
+  `rtp_calls.set_call_audio_receive`, the same knob Muji uses per participant).
+  A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS` past an hour) runs
+  from the call becoming active (`start_duration`) and from the Muji join. Preferences →
   Devices selects
   the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
   speaker/camera self-tests (icon-only buttons on the same row as the device
