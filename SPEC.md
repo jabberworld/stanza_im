@@ -2511,9 +2511,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (`QInputDialog.getMultiLineText`) and the text becomes a vector glyph-outline
   path (`QPainterPath.addText` → `svg_path.path_to_d`) stored as a plain
   `<path d="…"/>`, and an **insert-image** button (`wb-image.svg`) that reads a
-  PNG/JPEG/GIF/BMP/WebP file, embeds it as a `data:` URI (`image_data_uri`, a
-  2 MB/format limit) and places an `<image>` shape at the view centre); then the
-  line width (a menu whose actions are checkable, the active
+  PNG/JPEG/GIF/BMP/WebP file and places an `<image>` shape at the view centre —
+  in a shared session whose peer advertises `urn:xmpp:http:upload:0` the image is
+  uploaded (`client.upload_http_media`, XEP-0363) and referenced by URL, else
+  embedded as a `data:` URI (`image_data_uri`, a 2 MB/format limit; a failed
+  upload falls back to the embedded form); an uploaded URL is fetched off the UI
+  thread by `WhiteboardCanvas._ImageFetcher` (bounded, cached, our own bytes
+  seeded); then the line width (a menu whose actions are checkable, the active
   width ticked), line colour, fill colour and a «Заливка» toggle (whether newly
   drawn closed shapes are filled; off → `fill=""` → `fill="none"`); a
   **stacking-order** menu (`wb-order.svg`, next to undo/redo) with
@@ -2544,8 +2548,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `set_view_box`; the PNG is a shapes-only render on white). A vector shape is
   exported as a `<path d="…"/>` (`include/svg_path.py` builds the `d` strings;
   the canvas parses `d` back for remote shapes via `svg_path.parse_path`), an
-  image as `<image x/y/width/height/xlink:href="data:…"/>` (decoded from the
-  `data:` URI and cached; an external `http(s)` source is not fetched).
+  image as `<image x/y/width/height/xlink:href="…"/>` (a `data:` URI is decoded
+  inline; an uploaded `http(s)` URL is fetched off the UI thread, bounded and
+  cached).
 - In the **select** tool a click selects a shape and draws rotate/resize
   handles (constant screen size, hit-tested in widget coordinates); dragging
   the shape body moves it and the handles rotate/scale it about the bounding-box

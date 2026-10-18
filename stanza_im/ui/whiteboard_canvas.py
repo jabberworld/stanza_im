@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import math
 import os
+import threading
 import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -66,6 +67,38 @@ def image_data_uri(path: str) -> str:
         raise ValueError(tr("whiteboard_image_too_large", size=limit_text))
     return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
 
+
+class _ImageFetcher(QtCore.QObject):
+    """Download an ``http(s)`` image off the UI thread.
+
+    The extended profile may reference an image uploaded via HTTP File Upload
+    (XEP-0363); its bytes are fetched (size-limited) and delivered on the UI
+    thread so the canvas can cache and render them.
+    """
+
+    ready = QtCore.pyqtSignal(str, bytes)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._busy: set[str] = set()
+
+    def fetch(self, url: str) -> None:
+        if url in self._busy:
+            return
+        self._busy.add(url)
+        threading.Thread(target=self._run, args=(url,), daemon=True).start()
+
+    def _run(self, url: str) -> None:
+        data = b""
+        try:
+            import urllib.request
+            request = urllib.request.Request(url, headers={"User-Agent": "StanzaIM"})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = response.read(IMAGE_MAX_BYTES + 1)
+        except Exception:  # noqa: BLE001 - an unreachable image stays unrendered
+            data = b""
+        self.ready.emit(url, data)
+
 def _parse_transform(value) -> QtGui.QTransform:
     """Parse an SVG ``transform`` attribute (``matrix(...)``) into a transform."""
     matrix = svg_transform.parse_matrix(value)
@@ -101,6 +134,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._shapes: list[dict] = []
         # Decoded image pixmaps, keyed by their source URI (bounded).
         self._image_cache: dict[str, QtGui.QPixmap] = {}
+        self._image_fetcher = _ImageFetcher(self)
+        self._image_fetcher.ready.connect(self._on_image_loaded)
         # The current selection (the last entry is the primary shape).
         self._selection: list[str] = []
         # Group record id -> transform (a ``<g>`` transform applies to its
@@ -682,11 +717,12 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                                              self.height() / 2.0))
 
     def _pixmap_for(self, href: str) -> QtGui.QPixmap:
-        """Decode (and cache) the pixmap of an embedded image.
+        """Decode (and cache) the pixmap of an image source.
 
-        Only ``data:`` sources are decoded — the profile forbids fetching
-        external resources, so a remote ``http(s)`` reference stays unrendered
-        (it is still a selectable object).
+        A ``data:`` URI is decoded inline; an ``http(s)`` URL (an image uploaded
+        via HTTP File Upload, the profile §12.2) is fetched off the UI thread and
+        the board is repainted once it arrives.  The empty pixmap returned in the
+        meantime keeps the shape selectable.
         """
         cached = self._image_cache.get(href)
         if cached is not None:
@@ -700,10 +736,24 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                     pixmap.loadFromData(raw)
             except (ValueError, TypeError):
                 pixmap = QtGui.QPixmap()
+        elif href.startswith(("http://", "https://")):
+            self._image_fetcher.fetch(href)
         if len(self._image_cache) >= 32:
             self._image_cache.clear()
         self._image_cache[href] = pixmap
         return pixmap
+
+    def cache_image(self, href: str, data: bytes) -> None:
+        """Seed the image cache (e.g. with the bytes we just uploaded)."""
+        self._on_image_loaded(href, data)
+
+    def _on_image_loaded(self, href: str, data: bytes) -> None:
+        """An ``http(s)`` image arrived: decode, cache and repaint."""
+        pixmap = QtGui.QPixmap()
+        if data and len(data) <= IMAGE_MAX_BYTES:
+            pixmap.loadFromData(data)
+        self._image_cache[href] = pixmap
+        self.update()
 
     def add_image(self, world: QtCore.QPointF, href: str,
                   width: float | None = None,

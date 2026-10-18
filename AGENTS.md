@@ -2132,10 +2132,14 @@ click and while dragging, plus a **text** tool: a click opens a multiline input
 (`QInputDialog.getMultiLineText`) and the text is converted to vector glyph
 outlines (`QPainterPath.addText` → `svg_path.path_to_d`) and stored as a plain
 `<path d="…"/>` shape so it syncs/renders like any other, plus an **insert
-image** button (`wb-image.svg`) that reads a PNG/JPEG/GIF/BMP/WebP file, embeds
-it as a `data:` URI (`image_data_uri`, a 2 MB/format limit) and places an
-`<image>` shape at the view centre — rendered locally, exported as
-`<image xlink:href="data:…"/>` and synced like any other object); then the line width
+image** button (`wb-image.svg`) that reads a PNG/JPEG/GIF/BMP/WebP file and
+places an `<image>` shape at the view centre — in a shared session whose peer
+advertises `urn:xmpp:http:upload:0` the image is uploaded (XEP-0363,
+`client.upload_http_media`) and referenced by URL, otherwise it is embedded as a
+`data:` URI (`image_data_uri`, a 2 MB/format limit); an uploaded URL is fetched
+off the UI thread by `WhiteboardCanvas._ImageFetcher` (bounded, cached) and the
+bytes we just uploaded seed the cache so our own copy renders at once; the shape
+exports as `<image xlink:href="…"/>` and syncs like any other object); then the line width
 (a menu whose actions are checkable, the active width ticked), line colour, fill
 colour and a «Заливка» toggle (whether newly drawn closed shapes are filled);
 a **stacking-order** menu (`wb-order.svg`, next to undo/redo: «На передний

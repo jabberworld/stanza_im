@@ -743,6 +743,59 @@ check("the group icons exist",
       bool(find_icon("wb-group.svg")) and bool(find_icon("wb-ungroup.svg")))
 gd.close()
 
+# 27. HTTP-uploaded images: fetch + cache ------------------------------------
+class _StubFetcher:
+    def __init__(self):
+        self.urls = []
+
+    def fetch(self, url):
+        self.urls.append(url)
+
+
+fc2 = WhiteboardCanvas()
+fc2._image_fetcher = _StubFetcher()
+fc2.resize(1280, 720)
+_url = "https://upload.example/pic.png"
+check("an http image source triggers a fetch",
+      fc2._pixmap_for(_url).isNull() and fc2._image_fetcher.urls == [_url])
+_img = QtGui.QPixmap(4, 5)
+_img.fill(QtGui.QColor("#123456"))
+_buf = QtCore.QBuffer()
+_buf.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+_img.save(_buf, "PNG")
+fc2._on_image_loaded(_url, bytes(_buf.data()))
+check("a fetched image is cached and rendered",
+      not fc2._pixmap_for(_url).isNull()
+      and fc2._pixmap_for(_url).width() == 4)
+fc2.cache_image("https://upload.example/x.png", bytes(_buf.data()))
+check("cache_image seeds the cache",
+      not fc2._pixmap_for("https://upload.example/x.png").isNull())
+
+
+class _UploadClient:
+    def __init__(self, feature):
+        self._feature = feature
+
+    def supports_feature(self, bare, feature):
+        return feature == self._feature
+
+
+uc = WhiteboardDialog("bob@example.com",
+                      client=_UploadClient("urn:xmpp:http:upload:0"))
+uc._sid = "s1"
+check("the peer's upload support is detected", uc._peer_supports_upload())
+uc.close()
+uc2 = WhiteboardDialog("bob@example.com", client=_UploadClient("other"))
+uc2._sid = "s1"
+check("a peer without upload falls back to data:",
+      not uc2._peer_supports_upload())
+uc2.close()
+vd = WhiteboardDialog("bob@example.com")
+check("a valid image is embedded",
+      vd._add_embedded_image(_img_path, QtCore.QPointF(50, 50))
+      and len(vd._canvas.shapes()) == 1)
+vd.close()
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -15,7 +15,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
-from stanza_im.ui.whiteboard_canvas import WhiteboardCanvas, image_data_uri
+from stanza_im.ui.whiteboard_canvas import (IMAGE_MAX_BYTES, WhiteboardCanvas,
+                                            image_data_uri)
 
 _TOOLS = (
     ("select", "wb-select.svg", "whiteboard_tool_select"),
@@ -353,19 +354,59 @@ class WhiteboardDialog(QtWidgets.QDialog):
             self._canvas.clear()
 
     def _insert_image(self) -> None:
-        """Pick an image file and embed it (as a ``data:`` URI) on the board."""
+        """Pick an image and place it on the board.
+
+        In a shared session whose peer supports HTTP File Upload the image is
+        uploaded and referenced by URL (the profile §12.2); otherwise it is
+        embedded as a ``data:`` URI.
+        """
         path, _filter = QtWidgets.QFileDialog.getOpenFileName(
             self, tr("whiteboard_insert_image"), "",
             "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp)")
         if not path:
             return
+        world = self._canvas.view_center_world()
+        if self._peer_supports_upload():
+            self._client._start_task(self._upload_image_async(path, world))
+            return
+        self._add_embedded_image(path, world)
+
+    def _peer_supports_upload(self) -> bool:
+        """True when the peer advertises HTTP File Upload (the §12.5 rule)."""
+        if not (self._client and self._sid):
+            return False
+        try:
+            return bool(self._client.supports_feature(
+                self._jid.split("/", 1)[0], "urn:xmpp:http:upload:0"))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _add_embedded_image(self, path: str, world) -> bool:
         try:
             href = image_data_uri(path)
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(
                 self, tr("whiteboard_insert_image"), str(exc))
+            return False
+        self._canvas.add_image(world, href)
+        return True
+
+    async def _upload_image_async(self, path: str, world) -> None:
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(IMAGE_MAX_BYTES + 1)
+        except OSError:
+            raw = b""
+        try:
+            media = await self._client.upload_http_media(path)
+        except Exception:  # noqa: BLE001 - fall back to the embedded image
+            media = None
+        if media and media.get("url"):
+            # Render our own copy from the bytes we just uploaded.
+            self._canvas.cache_image(media["url"], raw)
+            self._canvas.add_image(world, media["url"])
             return
-        self._canvas.add_image(self._canvas.view_center_world(), href)
+        self._add_embedded_image(path, world)
 
     def _save_svg(self) -> None:
         path, _filter = QtWidgets.QFileDialog.getSaveFileName(
