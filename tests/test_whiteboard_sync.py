@@ -701,6 +701,28 @@ check("jmi.build writes the action and the description",
 check("jmi.build adds the XEP-0334 store hint",
       _built.xml.find("{urn:xmpp:hints}store") is not None)
 
+# 26. a move announces the (newly created) transform attribute --------------
+c = _FakeClient()
+c._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+m = WhiteboardManager(c)
+sid = m.start_session("bob@example.com", is_muc=False)
+r = m.add_shape(sid, {"id": "s1", "d": "M 0 0 L 1 1"})
+m._send_state(m.session(sid), "bob@example.com")
+snapshot = _state_of(c)
+peer = WhiteboardManager(_FakeClient())
+psess = WhiteboardSession(sid="remote", peer="bob@example.com")
+peer.sessions["remote"] = psess
+peer._apply_state(psess, snapshot)
+check("the peer has the shape", len(peer.shapes("remote")) == 1)
+m.update_shape(sid, r, {"transform": "matrix(1 0 0 1 5 7)"})
+state = _state_of(c)
+check("a move announces the transform attribute with a <new>",
+      any(el.get("name") == "transform"
+          for el in state.findall(_q(NS_SXE, "new"))))
+peer._apply_state(psess, state)
+check("the peer applies the move",
+      peer.shapes("remote")[0]["transform"] == "matrix(1 0 0 1 5 7)")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

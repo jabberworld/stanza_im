@@ -573,13 +573,14 @@ class WhiteboardManager:
         return rid
 
     def update_shape(self, sid: str, rid: str, attrs: dict) -> None:
-        """Change an existing shape's attributes and broadcast ``<set>``."""
+        """Change an existing shape's attributes and broadcast the edits."""
         session = self.sessions.get(sid)
         if session is None:
             return
         doc = session.doc
         if rid not in doc.records:
             return
+        new: list[ET.Element] = []
         sets: list[ET.Element] = []
         inv_sets: list[ET.Element] = []
         inv_removes: list[ET.Element] = []
@@ -593,15 +594,20 @@ class WhiteboardManager:
             old_chdata = old.chdata if old is not None else ""
             old_version = old.version if old is not None else 0
             attr_rid = doc.set_attr(rid, key, str(attrs[key] or ""))
-            sets.append(self._set_element(attr_rid, doc))
             if old is not None:
+                sets.append(self._set_element(attr_rid, doc))
                 inv_sets.append(self._set_element_values(
                     attr_rid, old_chdata, old_version))
             else:
+                # A brand-new attribute record (e.g. the ``transform`` created by
+                # the first move): the peer must learn its RID first — a
+                # ``<set>`` for an unknown target is silently ignored, so the
+                # move/transform would never reach it.
+                new.extend(doc.new_elements_for(attr_rid))
                 inv_removes.append(self._remove_element(attr_rid))
-        if sets:
-            self._send_edits(session, sets=sets)
-            self._record(sid, {"new": [], "set": sets, "remove": []},
+        if new or sets:
+            self._send_edits(session, new=new, sets=sets)
+            self._record(sid, {"new": new, "set": sets, "remove": []},
                          {"new": [], "set": inv_sets, "remove": inv_removes})
 
     def remove_shape(self, sid: str, rid: str) -> None:
