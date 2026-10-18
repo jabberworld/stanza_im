@@ -2478,6 +2478,8 @@ top-level windows** (never children of the main window, which would embed them
 over the roster); both label the peer with its **roster name**
 (`MainWindow._call_display_name`, the bare JID when unknown — the client's
 `call_incoming`/`call_proposed` events carry the full JID with the resource).
+The incoming prompt puts Reject at the left edge and Accept at the right, a
+stretch between them.
 Remote video frames are painted by `VideoView`, which draws a
 translucent nickname caption over the image. Every call control is **icon-only**
 (tooltips instead of labels) using the 16px glyphs in

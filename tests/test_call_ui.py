@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets  # noqa: E402
 
 from stanza_im.i18n import load as i18n_load  # noqa: E402
+from stanza_im.ui.call_window import IncomingCallDialog  # noqa: E402
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
 i18n_load("en")
@@ -32,7 +33,18 @@ def check(name, cond):
         FAILURES.append(name)
 
 
-# 1. a call peer resolves to its roster name (bare JID when unknown) ---------
+# 1. the incoming dialog: accept on the right, reject on the left ------------
+dlg = IncomingCallDialog("Bob", "audio")
+row = dlg.layout().itemAt(1).layout()
+check("the reject button is at the left edge",
+      row.itemAt(0).widget() is dlg._reject)
+check("a stretch separates the buttons",
+      row.itemAt(1).spacerItem() is not None)
+check("the accept button is at the right edge",
+      row.itemAt(2).widget() is dlg._accept)
+dlg.close()
+
+# 2. a call peer resolves to its roster name (bare JID when unknown) ---------
 class _User:
     def __init__(self, jid, name):
         self.jid = jid

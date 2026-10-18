@@ -132,7 +132,6 @@ class IncomingCallDialog(QtWidgets.QDialog):
         layout.addWidget(label)
 
         buttons = QtWidgets.QHBoxLayout()
-        buttons.addStretch(1)
         self._accept = QtWidgets.QPushButton(self)
         self._accept.setIcon(_icon("call-accept"))
         self._accept.setIconSize(QtCore.QSize(22, 22))
@@ -142,8 +141,10 @@ class IncomingCallDialog(QtWidgets.QDialog):
         self._reject.setIcon(_icon("call-hangup"))
         self._reject.setIconSize(QtCore.QSize(22, 22))
         self._reject.setToolTip(tr("call_reject"))
-        buttons.addWidget(self._accept)
+        # Reject on the left, accept on the right, one at each edge.
         buttons.addWidget(self._reject)
+        buttons.addStretch(1)
+        buttons.addWidget(self._accept)
         layout.addLayout(buttons)
         self._accept.clicked.connect(self._on_accept)
         self._reject.clicked.connect(self._on_reject)

@@ -3044,7 +3044,8 @@ client.leave_muji(room)
 - `ui/call_window.CallWindow` / `IncomingCallDialog` provide the call UI;
   both label the peer with its **roster name** (`MainWindow._call_display_name`,
   the bare JID when unknown — `call_incoming`/`call_proposed` carry the full
-  JID). Remote video frames are painted by `VideoView` with a translucent nickname
+  JID); the incoming prompt puts Reject at the left edge and Accept at the right.
+  Remote video frames are painted by `VideoView` with a translucent nickname
   caption over the image, and every control is **icon-only** (tooltips, no
   labels) using `resources/images/16x16/actions/` via `call_window._icon`:
   `mic`/`mic-off`, `camera`/`camera-off` (webcam glyph), `speaker`/`speaker-off`,
