@@ -928,6 +928,19 @@ check("the embed image mode is reported",
 check("a missing image mode falls back to auto",
       WhiteboardDialog("bob@example.com")._image_upload_mode() == "auto")
 
+# 31. the roster contact menu offers "Open whiteboard" ------------------------
+from stanza_im.i18n import tr  # noqa: E402
+
+check("ctx_open_whiteboard is translated",
+      tr("ctx_open_whiteboard") != "ctx_open_whiteboard")
+
+_mw_src = open(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 "stanza_im/ui/main_window.py"), encoding="utf-8").read()
+check("the contact menu offers Open Whiteboard after the call submenu",
+      'tr("ctx_open_whiteboard")' in _mw_src
+      and "self._on_whiteboard_requested(jid)" in _mw_src)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

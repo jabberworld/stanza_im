@@ -568,6 +568,7 @@ STRINGS = {
     # Context menu
     "ctx_open_chat": "Открыть чат",
     "ctx_view_profile": "Просмотр визитки",
+    "ctx_open_whiteboard": "Открыть доску",
     "ctx_rename": "Переименовать",
     "ctx_send_contact": "Отправить контакт…",
     "ctx_rename_prompt": "Новое имя:",

@@ -2517,9 +2517,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 
 - Phase 1 (local): the chat/конференция toolbar button `whiteboard.svg`
   (`ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
-  _on_whiteboard_requested`, a singleton dialog per conversation) opens
-  `WhiteboardDialog` — an icon-only tool palette over a custom `QPainter`
-  canvas (`WhiteboardCanvas`).
+  _on_whiteboard_requested`, a singleton dialog per conversation; also reachable
+  from the roster contact/conference context menu's «Открыть доску» right after
+  the «Звонок» submenu) opens `WhiteboardDialog` — an icon-only tool palette over
+  a custom `QPainter` canvas (`WhiteboardCanvas`).
 - Tools (grouped by `QFrame` separators): the manipulation tools (select /
   move / rotate / scale and «Удалить», an object operation) then, after a
   separator, the drawing tools (pencil / line / **arrow** / rectangle / ellipse
@@ -2555,9 +2556,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (`wb-resize.svg` → a preset picker (`_canvas_size_items`, 600×400 … 1920×1080,
   the current size preselected) → `WhiteboardManager.set_view_box`, the `viewBox`
   op) and
-  «Поделиться снимком» (a temp PNG → `JabberClient.upload_http_media` (HTTP
-  Upload/XEP-0363), which returns the full XEP-0385 media dict → the link is
-  sent **with SIMS metadata** through the normal `ShareDialog`); then
+  «Поделиться снимком» (a temp PNG → the `ShareDialog` with the source
+  conversation preselected → only on «Отправить» `JabberClient.upload_http_media`
+  (HTTP Upload/XEP-0363), which returns the full XEP-0385 media dict → the link
+  is sent **with SIMS metadata** to the chosen targets; cancelling removes the
+  temp file); then
   «Поделиться доской» and «Завершить сеанс». The «Заливка» toggle has its own
   bucket-plus-check icon (`wb-fill-toggle.svg`). An arrow is one path — a shaft
   plus an open (V) head (`WhiteboardCanvas._arrow_d`) — so it renders identically

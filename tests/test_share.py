@@ -75,6 +75,15 @@ dlg._search.setText("ann")
 check("search filters non-matches", dlg._contacts_root.child(0).isHidden())
 dlg.close()
 
+# 3b. ShareDialog preselect -------------------------------------------------
+dlg2 = ShareDialog([("bob@example.com", "Bob")],
+                   [("room@conf.example", "Room")], "shot.png",
+                   preselect="room@conf.example")
+check("share dialog preselects the source conference",
+      dlg2.selected_targets() == [("room@conf.example", True)])
+check("send is enabled by the preselect", dlg2._send.isEnabled())
+dlg2.close()
+
 
 # 4. MainWindow share routing ----------------------------------------------
 class _FakeClient:
@@ -229,6 +238,70 @@ _jd.close()
 _vc.deleteLater()
 _jd.deleteLater()
 QtWidgets.QApplication.processEvents()
+
+# 9. whiteboard snapshot share picks recipients before uploading ------------
+import asyncio  # noqa: E402
+
+from stanza_im.ui import share_dialog as share_mod  # noqa: E402
+
+
+class _ShotClient:
+    jid_str = "me@example.com/desk"
+
+    def __init__(self):
+        self.sent = []
+        self.muc = []
+        self.uploads = []
+
+    def send_message(self, jid, body, *a, **k):
+        self.sent.append((jid, body))
+        return "mid-1"
+
+    def send_muc_message(self, room, body, *a, **k):
+        self.muc.append((room, body))
+
+    async def upload_http_media(self, path, width, height):
+        self.uploads.append((path, width, height))
+        return {"url": "https://upload.example/shot.png", "name": "shot.png"}
+
+
+win._client = _ShotClient()
+_orig_share = share_mod.ShareDialog
+opened = []
+
+
+class _CapturedShare(_orig_share):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        opened.append(self)
+
+
+share_mod.ShareDialog = _CapturedShare
+
+_shot = os.path.join(tempfile.gettempdir(), "wb-shot-test.png")
+with open(_shot, "wb") as fh:
+    fh.write(b"\x89PNG\r\n\x1a\n")
+_parent = QtWidgets.QWidget()
+_parent._jid = "room@conf.example"
+
+win._on_whiteboard_share_png(_shot, _parent)
+check("the snapshot opens the share dialog before uploading",
+      len(opened) == 1 and win._client.uploads == [])
+check("the share dialog preselects the source conference",
+      ("room@conf.example", True) in opened[0].selected_targets())
+
+_tasks = []
+win._start_task = _tasks.append
+opened[0].accept()
+check("accepting the snapshot schedules the upload", len(_tasks) == 1)
+asyncio.new_event_loop().run_until_complete(_tasks[0])
+check("the snapshot was uploaded", len(win._client.uploads) == 1)
+check("the uploaded link was shared to the conference",
+      win._client.muc and win._client.muc[-1][0] == "room@conf.example"
+      and "shot.png" in win._client.muc[-1][1])
+check("the temp snapshot is removed after the upload",
+      not os.path.exists(_shot))
+share_mod.ShareDialog = _orig_share
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

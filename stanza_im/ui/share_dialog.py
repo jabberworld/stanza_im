@@ -14,7 +14,7 @@ class ShareDialog(QtWidgets.QDialog):
     """
 
     def __init__(self, contacts: list, conferences: list, content: str,
-                 parent=None):
+                 parent=None, preselect: str = ""):
         super().__init__(parent)
         self.setWindowTitle(tr("share_dialog_title"))
         self.resize(460, 520)
@@ -35,9 +35,9 @@ class ShareDialog(QtWidgets.QDialog):
         layout.addWidget(self._tree, stretch=1)
 
         self._contacts_root = self._make_root(tr("share_contacts"), contacts,
-                                              False)
+                                              False, preselect)
         self._conf_root = self._make_root(tr("share_conferences"),
-                                          conferences, True)
+                                          conferences, True, preselect)
         self._tree.expandAll()
         self._tree.itemChanged.connect(lambda *_: self._sync_send())
 
@@ -53,14 +53,17 @@ class ShareDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
         self._sync_send()
 
-    def _make_root(self, title: str, entries: list,
-                   is_conference: bool) -> QtWidgets.QTreeWidgetItem:
+    def _make_root(self, title: str, entries: list, is_conference: bool,
+                   preselect: str = "") -> QtWidgets.QTreeWidgetItem:
         root = QtWidgets.QTreeWidgetItem(self._tree, [title])
         root.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled)
+        want = (preselect or "").split("/", 1)[0]
         for jid, name in entries:
             item = QtWidgets.QTreeWidgetItem(root, [name or jid])
             item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
+            checked = bool(want) and jid.split("/", 1)[0] == want
+            item.setCheckState(0, QtCore.Qt.CheckState.Checked if checked
+                               else QtCore.Qt.CheckState.Unchecked)
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole,
                          (jid, is_conference))
             item.setToolTip(0, jid)

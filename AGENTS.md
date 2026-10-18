@@ -2128,7 +2128,9 @@ emoticon-theme option the button instead emits `emoji_picker_requested` and
 `MainWindow._on_emoji_picker_requested` opens the reaction picker
 (`EmojiPickerDialog`) anchored above it. The Whiteboard button (`whiteboard.svg`,
 `ChatWidget.whiteboard_requested` → `ChatWindow` → `MainWindow.
-_on_whiteboard_requested`) opens `ui/whiteboard_dialog.py::WhiteboardDialog`
+_on_whiteboard_requested`, also reachable from the roster contact/conference
+context menu's «Открыть доску» right after the «Звонок» submenu) opens
+`ui/whiteboard_dialog.py::WhiteboardDialog`
 (non-modal, singleton per conversation): a custom `QPainter` canvas
 (`ui/whiteboard_canvas.py::WhiteboardCanvas`; the logical board is `1280×720`
 from `include.constants.WHITEBOARD_WIDTH/HEIGHT`, overridden by the shared
@@ -2171,10 +2173,12 @@ stays), «Сохранить как SVG», «Сохранить как PNG», «
 (`wb-resize.svg` → a preset picker (`_canvas_size_items`, 600×400 … 1920×1080,
 the current size preselected) → `WhiteboardManager.set_view_box`, the `viewBox`
 op) and
-«Поделиться снимком» (renders the board to a temp PNG, uploads it via
-`JabberClient.upload_http_media` — HTTP Upload/XEP-0363 — which returns the full
-XEP-0385 media dict, and shares the link **with SIMS metadata** through the
-normal `ShareDialog`); then «Поделиться доской» and «Завершить сеанс». An arrow is serialised as one
+«Поделиться снимком» (renders the board to a temp PNG, then opens the
+`ShareDialog` — with the source conversation preselected — and only on
+«Отправить» uploads it via `JabberClient.upload_http_media` — HTTP
+Upload/XEP-0363 — which returns the full XEP-0385 media dict, and shares the
+link **with SIMS metadata** to the chosen targets; cancelling removes the temp
+file); then «Поделиться доской» and «Завершить сеанс». An arrow is serialised as one
 path — a shaft plus an **open (V) head** (`WhiteboardCanvas._arrow_d`), so it
 renders identically locally and for a remote peer. The document is a list of
 shape records (`id`, `rid`, `kind` — `path` or `image` — geometry,

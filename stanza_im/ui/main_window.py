@@ -5607,6 +5607,10 @@ class MainWindow(QtWidgets.QMainWindow):
             call_menu.setEnabled(can_audio or can_video)
             audio_action.triggered.connect(audio_handler)
             video_action.triggered.connect(video_handler)
+            menu.addAction(
+                self._menu_icon("whiteboard.svg"), tr("ctx_open_whiteboard"),
+                lambda checked=False: defer(
+                    lambda: self._on_whiteboard_requested(jid)))
         menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
                        lambda checked=False: defer(lambda: self._on_history_contact(jid)))
         if is_conf:
@@ -7433,12 +7437,38 @@ class MainWindow(QtWidgets.QMainWindow):
                                tr("whiteboard_peer_maybe_unsupported"))
 
     def _on_whiteboard_share_png(self, path: str, parent=None) -> None:
-        """Upload a board snapshot and share its link with chosen contacts."""
+        """Pick the recipients first, then upload the snapshot and share it."""
         if self._client is None or not path:
+            self._remove_temp_file(path)
             return
-        self._start_task(self._whiteboard_share_png_async(path, parent))
+        from stanza_im.ui.share_dialog import ShareDialog
+        contacts = self._share_contacts()
+        conferences = self._share_conferences()
+        if not contacts and not conferences:
+            self._remove_temp_file(path)
+            return
+        preselect = getattr(parent, "_jid", "") if parent is not None else ""
+        dlg = ShareDialog(contacts, conferences, os.path.basename(path),
+                          parent or self, preselect=preselect)
 
-    async def _whiteboard_share_png_async(self, path: str, parent=None) -> None:
+        def finished(result: int):
+            if result != QtWidgets.QDialog.DialogCode.Accepted:
+                self._remove_temp_file(path)
+                return
+            self._start_task(
+                self._whiteboard_share_png_async(path, dlg.selected_targets()))
+        dlg.finished.connect(finished)
+        dlg.open()
+
+    @staticmethod
+    def _remove_temp_file(path: str) -> None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    async def _whiteboard_share_png_async(self, path: str,
+                                          targets: list) -> None:
         from stanza_im.include.constants import (WHITEBOARD_HEIGHT,
                                                  WHITEBOARD_WIDTH)
         media = None
@@ -7453,12 +7483,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                tr("whiteboard_share_png_failed"))
             return
         finally:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+            self._remove_temp_file(path)
         if media:
-            self._on_share_requested(media["url"], media=media, parent=parent)
+            self._send_share(media["url"], targets, media=media)
 
     def _whiteboard_peer_supports(self, bare: str) -> bool:
         """True when *bare* advertises the whiteboard or SXE feature."""

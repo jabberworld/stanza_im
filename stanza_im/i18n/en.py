@@ -568,6 +568,7 @@ STRINGS = {
     # Context menu
     "ctx_open_chat": "Open Chat",
     "ctx_view_profile": "View vCard",
+    "ctx_open_whiteboard": "Open Whiteboard",
     "ctx_rename": "Rename",
     "ctx_send_contact": "Send contact…",
     "ctx_rename_prompt": "New nickname:",
