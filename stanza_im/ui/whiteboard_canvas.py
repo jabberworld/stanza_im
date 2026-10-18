@@ -899,7 +899,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             if not pixmap.isNull():
                 painter.save()
                 painter.setTransform(self._shape_matrix(shape), True)
-                painter.drawPixmap(QtCore.QRectF(*shape["image"]), pixmap)
+                painter.drawPixmap(QtCore.QRectF(*shape["image"]), pixmap,
+                                   QtCore.QRectF(pixmap.rect()))
                 painter.restore()
             return
         path = self._world_path(shape)

@@ -639,6 +639,11 @@ check("a remote image loads",
       len(rc2.shapes()) == 1 and rc2.shapes()[0]["kind"] == "image")
 check("a remote image renders",
       rc2._world_path(rc2.shapes()[0]).boundingRect().width() == 2)
+# Drawing an image must not raise (the drawPixmap overload regression).
+check("render_image draws an image without error",
+      ic.render_image().width() == 1280)
+check("painting a canvas with an image does not raise",
+      not ic.grab().isNull())
 
 # 23. stacking order (local) + selection preservation ------------------------
 oc = WhiteboardCanvas()
