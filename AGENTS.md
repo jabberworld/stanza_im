@@ -2156,7 +2156,9 @@ group); a grouped shape is selected as a whole and its drag moves the group's
 directly; then the board
 operations «Очистить» (removes the drawable children, the document metadata
 stays), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
-(`wb-resize.svg` → `WhiteboardManager.set_view_box`, the `viewBox` op) and
+(`wb-resize.svg` → a preset picker (`_canvas_size_items`, 600×400 … 1920×1080,
+the current size preselected) → `WhiteboardManager.set_view_box`, the `viewBox`
+op) and
 «Поделиться снимком» (renders the board to a temp PNG, uploads it via
 `JabberClient.upload_http_media` — HTTP Upload/XEP-0363 — which returns the full
 XEP-0385 media dict, and shares the link **with SIMS metadata** through the

@@ -801,6 +801,21 @@ check("a valid image is embedded",
       and len(vd._canvas.shapes()) == 1)
 vd.close()
 
+# 28. canvas-size presets ----------------------------------------------------
+from stanza_im.ui.whiteboard_dialog import _canvas_size_items  # noqa: E402
+
+_labels, _idx = _canvas_size_items(1280, 720)
+check("the canvas-size presets start with the profile default",
+      _labels[0] == "600×400")
+check("the current size is preselected", _labels[_idx] == "1280×720")
+_custom_labels, _custom_idx = _canvas_size_items(1111, 777)
+check("a custom size is appended and preselected",
+      _custom_labels[-1] == "1111×777" and _custom_idx == len(_custom_labels) - 1)
+check("the presets are in increasing order",
+      _labels == sorted(_labels,
+                        key=lambda s: (int(s.split("×")[0]),
+                                       int(s.split("×")[1]))))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

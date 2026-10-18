@@ -36,6 +36,23 @@ _TOOLS = (
 
 _WIDTHS = (1, 2, 3, 5, 8)
 
+#: Canvas-size presets, in increasing order (600×400 is the profile's default).
+_CANVAS_PRESETS = ((600, 400), (640, 480), (800, 600), (1024, 768), (1280, 720),
+                   (1280, 1024), (1440, 900), (1600, 1200), (1920, 1080))
+
+
+def _canvas_size_items(width: int, height: int) -> tuple[list[str], int]:
+    """Preset labels for the canvas-size picker and the current size's index.
+
+    The current size is always present (appended when it is not a preset) and is
+    the default selection.
+    """
+    current = (int(width), int(height))
+    sizes = list(_CANVAS_PRESETS)
+    if current not in sizes:
+        sizes.append(current)
+    return ["%d×%d" % (w, h) for w, h in sizes], sizes.index(current)
+
 
 class WhiteboardDialog(QtWidgets.QDialog):
     """A non-modal whiteboard window (one per conversation)."""
@@ -494,15 +511,16 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def _resize_canvas(self) -> None:
         """Resize the canvas (the shared document's ``viewBox``)."""
         width, height = self._canvas.view_box()
-        new_w, ok = QtWidgets.QInputDialog.getInt(
-            self, tr("whiteboard_canvas_size"), tr("whiteboard_canvas_width"),
-            width, 100, 8000)
+        labels, current = _canvas_size_items(width, height)
+        choice, ok = QtWidgets.QInputDialog.getItem(
+            self, tr("whiteboard_canvas_size"), tr("whiteboard_canvas_preset"),
+            labels, current, False)
         if not ok:
             return
-        new_h, ok = QtWidgets.QInputDialog.getInt(
-            self, tr("whiteboard_canvas_size"), tr("whiteboard_canvas_height"),
-            height, 100, 8000)
-        if not ok:
+        try:
+            new_w, new_h = (int(part) for part in
+                            choice.replace(" ", "").split("×"))
+        except (ValueError, TypeError):
             return
         self._canvas.set_view_box(new_w, new_h)
         if self._client and self._sid:

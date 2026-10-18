@@ -2533,7 +2533,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (`set_group_transform`); a local board groups the canvas list directly;
   then the board operations «Очистить» (drawable children only, metadata
   preserved), «Сохранить как SVG», «Сохранить как PNG», «Размер холста»
-  (`wb-resize.svg` → `WhiteboardManager.set_view_box`, the `viewBox` op) and
+  (`wb-resize.svg` → a preset picker (`_canvas_size_items`, 600×400 … 1920×1080,
+  the current size preselected) → `WhiteboardManager.set_view_box`, the `viewBox`
+  op) and
   «Поделиться снимком» (a temp PNG → `JabberClient.upload_http_media` (HTTP
   Upload/XEP-0363), which returns the full XEP-0385 media dict → the link is
   sent **with SIMS metadata** through the normal `ShareDialog`); then
