@@ -445,6 +445,12 @@ class _WbStub:
     def redo(self, sid):
         self.calls.append(("redo", sid))
 
+    def can_undo(self, sid):
+        return True
+
+    def can_redo(self, sid):
+        return True
+
 
 class _ClientStub:
     def __init__(self):
@@ -865,6 +871,41 @@ check("the presets are in increasing order",
       _labels == sorted(_labels,
                         key=lambda s: (int(s.split("×")[0]),
                                        int(s.split("×")[1]))))
+
+# 29. local (unshared) undo / redo -------------------------------------------
+uc3 = WhiteboardCanvas()
+uc3.resize(1280, 720)
+uc3.set_tool("rect")
+drag(uc3, 10, 10, 40, 40)
+check("a local board records an edit", uc3.can_undo())
+uc3.undo_local()
+check("undo_local removes the drawn shape", uc3.shapes() == [])
+check("undo_local enables redo", uc3.can_redo())
+uc3.redo_local()
+check("redo_local restores the shape", len(uc3.shapes()) == 1)
+
+uc3.set_tool("select")
+QtWidgets.QApplication.sendEvent(uc3, _event(
+    QtCore.QEvent.Type.MouseButtonPress, 25, 25))
+uc3.set_tool("move")
+_before_dx = uc3.shapes()[0]["transform"].dx()
+drag(uc3, 25, 25, 55, 25, steps=2)
+check("a local move changes the shape",
+      uc3.shapes()[0]["transform"].dx() != _before_dx)
+uc3.undo_local()
+check("undo_local reverts a move",
+      uc3.shapes()[0]["transform"].dx() == _before_dx)
+
+ud3 = WhiteboardDialog("bob@example.com")
+ud3._canvas.set_tool("rect")
+drag(ud3._canvas, 10, 10, 40, 40)
+ud3._on_undo()
+check("the dialog's local undo button reverts the board",
+      ud3._canvas.shapes() == [])
+ud3._on_redo()
+check("the dialog's local redo button restores it",
+      len(ud3._canvas.shapes()) == 1)
+ud3.close()
 
 print()
 if FAILURES:

@@ -8,6 +8,7 @@ document to SVG.
 from __future__ import annotations
 
 import base64
+import copy
 import math
 import os
 import threading
@@ -141,6 +142,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         # Group record id -> transform (a ``<g>`` transform applies to its
         # children; see the profile §8.5).
         self._group_transforms: dict[str, QtGui.QTransform] = {}
+        # Local (unshared) undo/redo: snapshots of the shape list.
+        self._undo_stack: list[list[dict]] = []
+        self._redo_stack: list[list[dict]] = []
+        self._history_pushed = False
         # Logical canvas size (the SVG ``viewBox``); the host's may override it.
         self._view_w = VIEW_W
         self._view_h = VIEW_H
@@ -243,18 +248,19 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if shape_id not in ids or len(ids) < 2:
             return False
         index = ids.index(shape_id)
+        shapes = list(self._shapes)
         if op == "front":
-            self._shapes.append(self._shapes.pop(index))
+            shapes.append(shapes.pop(index))
         elif op == "back":
-            self._shapes.insert(0, self._shapes.pop(index))
-        elif op == "forward" and index < len(self._shapes) - 1:
-            self._shapes[index], self._shapes[index + 1] = (
-                self._shapes[index + 1], self._shapes[index])
+            shapes.insert(0, shapes.pop(index))
+        elif op == "forward" and index < len(shapes) - 1:
+            shapes[index], shapes[index + 1] = shapes[index + 1], shapes[index]
         elif op == "backward" and index > 0:
-            self._shapes[index], self._shapes[index - 1] = (
-                self._shapes[index - 1], self._shapes[index])
+            shapes[index], shapes[index - 1] = shapes[index - 1], shapes[index]
         else:
             return False
+        self.push_history()
+        self._shapes = shapes
         self.update()
         self.changed.emit()
         return True
@@ -310,6 +316,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                if not (self._shape_by_id(i) or {}).get("group")]
         if len(ids) < 2:
             return ""
+        self.push_history()
         group_rid = group_rid or uuid.uuid4().hex
         for shape in self._shapes:
             if shape["id"] in ids:
@@ -329,6 +336,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                    if (s.get("group") or "") == group_rid]
         if not members:
             return False
+        self.push_history()
         for shape in members:
             shape["transform"] = group_tf * shape["transform"]
             shape["group"] = ""
@@ -338,9 +346,65 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.selection_changed.emit()
         return True
 
+    # ── Local (unshared) undo / redo ──────────────────────────────
+
+    _HISTORY_MAX = 50
+
+    def _snapshot(self) -> tuple:
+        """The undoable board state: the shapes + the group transforms."""
+        return (copy.deepcopy(self._shapes),
+                {rid: QtGui.QTransform(tf)
+                 for rid, tf in self._group_transforms.items()})
+
+    def _restore(self, snapshot: tuple) -> None:
+        self._shapes, self._group_transforms = snapshot
+        self._prune_selection()
+        self.update()
+        self.changed.emit()
+        self.selection_changed.emit()
+
+    def push_history(self) -> None:
+        """Snapshot the board before a local edit (for undo/redo)."""
+        self._undo_stack.append(self._snapshot())
+        if len(self._undo_stack) > self._HISTORY_MAX:
+            del self._undo_stack[0]
+        self._redo_stack.clear()
+
+    def clear_history(self) -> None:
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
+
+    def undo_local(self) -> bool:
+        """Restore the previous local snapshot."""
+        if not self._undo_stack:
+            return False
+        self._redo_stack.append(self._snapshot())
+        self._restore(self._undo_stack.pop())
+        return True
+
+    def redo_local(self) -> bool:
+        """Re-apply the last undone local edit."""
+        if not self._redo_stack:
+            return False
+        self._undo_stack.append(self._snapshot())
+        self._restore(self._redo_stack.pop())
+        return True
+
+    def _prune_selection(self) -> None:
+        ids = {s["id"] for s in self._shapes}
+        self._selection = [i for i in self._selection if i in ids]
+
     # ── Actions ───────────────────────────────────────────────────
 
     def clear(self) -> None:
+        if self._shapes:
+            self.push_history()
         for shape in self._shapes:
             self.shape_removed.emit(shape)
         self._shapes = []
@@ -360,6 +424,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def delete_shape(self, shape: dict) -> None:
         """Remove *shape* and notify (used by delete/eraser)."""
+        self.push_history()
         self._shapes = [s for s in self._shapes if s["id"] != shape["id"]]
         self._selection = [i for i in self._selection if i != shape["id"]]
         self.update()
@@ -665,6 +730,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         shape = self._closed_shape_at(world)
         if shape is None:
             return False
+        self.push_history()
         shape["fill"] = "" if self._filled(shape) else self._fill
         self.update()
         self.changed.emit()
@@ -700,6 +766,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             path.addText(0.0, y + metrics.ascent(), font, line)
             y += metrics.lineSpacing()
         path.translate(world.x(), world.y())
+        self.push_history()
         shape = self._new_shape("text")
         shape["d"] = svg_path.path_to_d(path)
         shape["points"] = [(world.x(), world.y())]
@@ -772,6 +839,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         # Clamp so a large photo still fits on the canvas.
         w = min(float(width), float(self._view_w))
         h = min(float(height), float(self._view_h))
+        self.push_history()
         shape = self._new_shape("image")
         shape["image"] = (world.x(), world.y(), w, h)
         shape["href"] = href
@@ -939,6 +1007,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             return
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return
+        self._history_pushed = False
         world = self._to_world(event.position())
         tool = self._tool
         if tool == "select":
@@ -1090,6 +1159,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if shape["kind"] in ("pencil", "polygon") \
                 and len(shape.get("points") or []) < 2:
             return
+        self.push_history()
         self._shapes.append(shape)
         self._selected = shape["id"]
         self.changed.emit()
@@ -1161,13 +1231,21 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             op = self._op_matrix(tool, last, world, center)
             if op is None:
                 return
+            self._push_transform_history()
             self._group_transforms[group] = current * op
             return
         center = self._world_path(shape).boundingRect().center()
         op = self._op_matrix(tool, last, world, center)
         if op is None:
             return
+        self._push_transform_history()
         shape["transform"] = shape["transform"] * op
+
+    def _push_transform_history(self) -> None:
+        """Snapshot once per drag (the first actual transform move)."""
+        if not self._history_pushed:
+            self.push_history()
+            self._history_pushed = True
 
     # ── SVG export ────────────────────────────────────────────────
 

@@ -230,6 +230,9 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._canvas.shape_removed.connect(self._on_shape_removed)
         self._canvas.group_updated.connect(self._on_group_updated)
         self._canvas.selection_changed.connect(self._update_group_actions)
+        self._canvas.changed.connect(self._update_undo_actions)
+        self._canvas.selection_changed.connect(self._update_undo_actions)
+        self._update_undo_actions()
 
     # ── Collaboration ─────────────────────────────────────────────
 
@@ -249,12 +252,17 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sid = sid
         self._share_btn.setChecked(True)
         self._sync_label.setText(tr("whiteboard_shared"))
+        # The shared session has its own (shared) undo/redo history.
+        self._canvas.clear_history()
+        self._update_undo_actions()
         self.refresh_from_session()
 
     def detach_session(self) -> None:
         self._sid = ""
         self._share_btn.setChecked(False)
         self._sync_label.setText(tr("whiteboard_not_shared"))
+        self._canvas.clear_history()
+        self._update_undo_actions()
 
     def set_local_only(self) -> None:
         """Mark the board as local (a session with our own JID is pointless)."""
@@ -462,10 +470,29 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def _on_undo(self) -> None:
         if self._client and self._sid:
             self._client.whiteboard.undo(self._sid)
+        else:
+            self._canvas.undo_local()
+        self._update_undo_actions()
 
     def _on_redo(self) -> None:
         if self._client and self._sid:
             self._client.whiteboard.redo(self._sid)
+        else:
+            self._canvas.redo_local()
+        self._update_undo_actions()
+
+    def _update_undo_actions(self) -> None:
+        """Gate the undo/redo buttons on the available history."""
+        manager = (getattr(self._client, "whiteboard", None)
+                   if (self._client and self._sid) else None)
+        if manager is not None and hasattr(manager, "can_undo"):
+            can_undo = manager.can_undo(self._sid)
+            can_redo = manager.can_redo(self._sid)
+        else:
+            can_undo = self._canvas.can_undo()
+            can_redo = self._canvas.can_redo()
+        self._undo_btn.setEnabled(bool(can_undo))
+        self._redo_btn.setEnabled(bool(can_redo))
 
     def _reorder(self, op: str) -> None:
         """Change the selected shape's stacking order (front/back/±1)."""
@@ -540,6 +567,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
             self._client.whiteboard.end_session(self._sid)
         self.detach_session()
         self._canvas.clear()
+        self._canvas.clear_history()
         self._canvas.reset_view()
         self.hide()
 

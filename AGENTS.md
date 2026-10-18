@@ -2232,7 +2232,12 @@ patch of forward + inverse `<new>`/`<set>`/`<remove>` edits onto a per-session
 stack (`WhiteboardManager._undo`/`_redo`, capped at 100); `undo`/`redo` apply the
 inverse/forward to the document, **broadcast** it and emit `whiteboard_state`, so
 the last move/rotate/scale/fill/add/delete is reverted for everyone; a new
-operation clears the redo stack. Bodyless `<sxe>`
+operation clears the redo stack. A **local (unshared)** board has its own
+undo/redo in `WhiteboardCanvas` (`_undo_stack`/`_redo_stack`, snapshots of the
+shapes + group transforms via `push_history`, capped at 50; the dialog routes to
+it when there is no session and clears it on attach/detach), so the undo/redo
+buttons work on a plain board too; a drag pushes one snapshot
+(`_push_transform_history`). Bodyless `<sxe>`
 messages are routed by `JabberClient._on_sxe_stanza` (a dedicated `MatchXPath`
 handler), Jingle IQs by `_dispatch_jingle_iq` (`is_whiteboard_jingle`), and the
 features are advertised in disco. A 1:1 `session-initiate` is addressed to the
