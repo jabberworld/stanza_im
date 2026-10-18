@@ -70,10 +70,23 @@ check("offline offers a manual reconnect",
       and win._reconnect_btn.text() == tr("reconnect_now"))
 
 # The connect progress is determinate (0-100) for the login stages.
+win._connect_progress_active = True
+win._conn_progress_value = 0
 win._set_conn_progress(80)
 check("the connect progress is determinate",
       win._conn_progress.minimum() == 0 and win._conn_progress.maximum() == 100
       and win._conn_progress.value() == 80)
+
+# The initial connect is terminal and monotonic: the post-session stage in
+# _connect_async (which runs after _on_session_started) must not resurrect it.
+win._set_conn_progress(60)
+check("the connect progress never steps backwards",
+      win._conn_progress.value() == 80)
+win._finish_connect_progress()
+check("finishing the connect hides the bar", not shown(win._conn_progress))
+win._set_conn_progress(60)
+check("a late progress write cannot resurrect the bar",
+      not shown(win._conn_progress))
 
 # Offline private storage (notes) must not wait for the IQ timeout.
 import asyncio

@@ -522,7 +522,11 @@ for a first login without a cache. `_connect_async` waits for the session to
 actually start (a `_session_ready` future, `_SESSION_TIMEOUT_S` = 30 s), since
 `connect_async()` resolves even when every attempt failed; a failure goes to the
 offline state on the roster (`_on_connect_failed`) and the tray stays offline
-until a real session.
+until a real session. The initial connect is **terminal and monotonic**
+(`_connect_progress_active`/`_conn_progress_value`): the roster often arrives
+before `_on_session_started`, so the post-session 60 % write in `_connect_async`
+runs after the finish — `_set_conn_progress` is a no-op once the connect finished
+and never steps the value backwards, so the bar cannot resurrect at 60 %.
 
 The Actions menu carries «Завершить сеанс» (above «Выход», same
 `gtk-quit.png` icon) → `MainWindow._logout`: flush unread/roster cache,

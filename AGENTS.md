@@ -587,10 +587,16 @@ re-runs `_apply_plugins()` before wiring the client, so a profile switch (or a
 plain re-login) brings the plugin tabs/features back without a restart.
 The login splash (`MainWindow._set_splash(text, percent)`, a determinate
 `QProgressBar`) reports the connection stages: «Подключение…» (10 %) →
-«Аутентификация…» (35 %) → «Соединение установлено» (60 %) → «Получение списка
-контактов…» (80 %, on `session_started`) → «Готово» (100 %, on
-`roster_received`, which then switches to the roster page instead of a fixed
-timer). `_on_login` first seeds the **cached** roster (`client.
+«Аутентификация…» (20 %) → «Соединение установлено» (60 %, after
+`connect_async` returns) → «Получение списка контактов…» (80 %, on
+`session_started`) → «Готово» (100 %, on `roster_received`, which then switches
+to the roster page instead of a fixed timer). The initial connect is
+**terminal and monotonic** (`_connect_progress_active`/`_conn_progress_value`):
+the roster often arrives *before* `_on_session_started` (the client requests it
+in `_on_session_start` and awaits the carbons enable before emitting
+`session_started`), so the post-session 60 % write in `_connect_async` runs
+after the finish — `_set_conn_progress` is a no-op once the connect finished and
+never steps the value backwards, so the bar cannot resurrect at 60 %. `_on_login` first seeds the **cached** roster (`client.
 seed_roster_cache()` → `get_roster_snapshot()`) and shows the roster page right
 away (with a thin `_conn_progress` bar above the status combo, `_set_conn_
 progress`), so the UI is usable while the connection is established in the

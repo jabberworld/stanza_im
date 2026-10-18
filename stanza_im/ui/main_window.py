@@ -3582,6 +3582,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if jid:
             profiles.upsert(profiles.from_config(self._config))
         self._connecting = True
+        self._connect_progress_active = True
+        self._conn_progress_value = 0
         self._stack.setCurrentIndex(_PAGE_SPLASH)
         self._set_splash(tr("login_connecting"), 10)
 
@@ -3679,17 +3681,18 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             self._set_connect_progress(tr("login_authenticating"), 20)
             await self._client.connect_async()
-            # ``connect_async()`` resolves even when every attempt failed (the
-            # slixmpp connect loop reschedules internally), so wait for the
-            # session to really start before reporting success.
+            # The stream is up.  ``connect_async()`` resolves even when every
+            # attempt failed (the slixmpp connect loop reschedules internally),
+            # so the session wait below is the real check.
+            self._set_connect_progress(tr("login_connected"), 60)
             await asyncio.wait_for(asyncio.shield(self._session_ready),
                                    timeout=_SESSION_TIMEOUT_S)
             self._client.send_presence(
                 show=show,
                 status=getattr(self._config.status, "message", "") or "")
-            # The roster is requested next; the progress finishes when it
-            # actually arrives (see _on_roster_received).
-            self._set_connect_progress(tr("login_connected"), 60)
+            # The roster is requested at session start; the progress advances to
+            # 80 in _on_session_started and finishes when the roster arrives
+            # (see _on_roster_received).
         except asyncio.TimeoutError:
             logger.warning("Session did not start within %.0fs",
                            _SESSION_TIMEOUT_S)
@@ -3707,6 +3710,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_connect_failed(self, message: str) -> None:
         """A connection attempt failed: stay usable on the roster, offline."""
         self._connecting = False
+        self._connect_progress_active = False
         self._set_offline_status()
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
         if self._stack.currentIndex() == _PAGE_SPLASH:
@@ -3722,6 +3726,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _finish_connect_progress(self) -> None:
         """The connection is up and the roster arrived: hide the bar."""
+        self._connect_progress_active = False
         self._conn_progress.setVisible(False)
 
     def _on_connect_cancel(self):
@@ -3852,6 +3857,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if getattr(self, "_connecting", False):
             self._set_connect_progress(tr("login_roster"), 80)
         else:
+            self._connect_progress_active = False
             self._conn_progress.setVisible(False)
         # A successful login clears any stale "connection lost" status left by
         # a previous session (e.g. during a profile switch).
@@ -3950,9 +3956,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_task(self._client.manual_reconnect())
 
     def _set_conn_progress(self, percent: int) -> None:
-        """Show the connection progress bar at *percent* (determinate)."""
+        """Show the connection progress bar at *percent* (determinate).
+
+        The initial connect is terminal: once it finished (or failed) a late
+        write — e.g. the post-session stage in ``_connect_async``, which runs
+        after ``_on_session_started`` resolved the session future — must not
+        resurrect the bar.  Within a connect the value never steps backwards.
+        """
+        percent = max(0, min(100, int(percent)))
+        if not getattr(self, "_connect_progress_active", False) \
+                or percent < self._conn_progress_value:
+            return
+        self._conn_progress_value = percent
         self._conn_progress.setRange(0, 100)
-        self._conn_progress.setValue(max(0, min(100, int(percent))))
+        self._conn_progress.setValue(percent)
         self._conn_progress.setVisible(True)
 
     def _set_busy_status(self, text: str = "") -> None:
