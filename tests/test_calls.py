@@ -1081,25 +1081,23 @@ from stanza_im.i18n import tr
 
 def _call_window_toggle_result():
     win = CallWindow("s1", "peer", video=True)
-    seen_a, seen_c = [], []
+    seen_a, seen_v = [], []
     win.audio_toggled.connect(lambda sid, en: seen_a.append((sid, en)))
-    win.camera_toggled.connect(lambda sid, en: seen_c.append((sid, en)))
+    win.video_mode_requested.connect(
+        lambda sid, mode: seen_v.append((sid, mode)))
     win._on_mute(True)
-    win._on_camera(False)
-    off_text = win._cam_btn.toolTip()
+    win._request_mode("off")
     win._on_mute(False)
-    win._on_camera(True)
-    return (seen_a, seen_c,
-            win._video_view.isVisibleTo(win), off_text)
+    win._request_mode("camera")
+    return seen_a, seen_v, win._video_view.isVisibleTo(win)
 
 
-_aw, _cw, _view_visible, _cam_text = _call_window_toggle_result()
+_aw, _vw, _view_visible = _call_window_toggle_result()
 check("mute emits audio_toggled for both ways",
       _aw == [("s1", False), ("s1", True)])
-check("camera emits camera_toggled for both ways",
-      _cw == [("s1", False), ("s1", True)])
-check("turning the camera off keeps the remote video visible", _view_visible)
-check("camera off relabels the button", _cam_text == tr("call_camera_off"))
+check("the video combo emits the chosen mode",
+      _vw == [("s1", "off"), ("s1", "camera")])
+check("switching the video mode keeps the remote video visible", _view_visible)
 
 
 def _video_view_frame_guard_result():
@@ -1147,10 +1145,10 @@ check("standalone local preview drops unconvertible frames", _lp_skipped)
 
 _vw = CallWindow("s1", "peer", video=True)
 _aw = CallWindow("s1", "peer", video=False)
-check("video-call window shows the camera and remote video",
-      _vw._cam_btn.isVisibleTo(_vw) and _vw._video_view.isVisibleTo(_vw))
-check("audio-call window hides the camera and remote video",
-      not _aw._cam_btn.isVisibleTo(_aw)
+check("video-call window shows the video mode combo and remote video",
+      _vw._video_btn.isVisibleTo(_vw) and _vw._video_view.isVisibleTo(_vw))
+check("audio-call window hides the video mode combo and remote video",
+      not _aw._video_btn.isVisibleTo(_aw)
       and not _aw._video_view.isVisibleTo(_aw))
 _vw.close()
 _aw.close()
@@ -2055,16 +2053,17 @@ def _muji_global_controls_result():
     w._all_recv_btn.setChecked(False)
     recv_all = sent_recv[-2:] == [("room@conf", "alice", False),
                                  ("room@conf", "bob", False)]
-    w._all_cam_btn.setChecked(False)
+    w._on_video_mode("off")
     cam_all = sent_cam[-2:] == [("room@conf", "alice", False),
                                 ("room@conf", "bob", False)]
+    w._on_video_mode("camera")
 
-    # The camera toggle only appears for video conferences.
+    # The video mode combo only appears for video conferences.
     audio_only = MujiCallWindow("room@conf", self_nick="me")
     audio_only.set_participants(["alice"])
-    cam_hidden_audio = not audio_only._all_cam_btn.isVisibleTo(audio_only)
+    cam_hidden_audio = not audio_only._video_btn.isVisibleTo(audio_only)
     audio_only.close()
-    cam_shown_video = w._all_cam_btn.isVisibleTo(w)
+    cam_shown_video = w._video_btn.isVisibleTo(w)
     w.close()
     return muted_all, per_kept, layered, recv_all, cam_all, \
         cam_hidden_audio, cam_shown_video

@@ -3108,12 +3108,16 @@ client.leave_muji(room)
   affect the received stream — the remote view stays visible. A
   `speaker`/`speaker-off` button mutes the **remote** audio (`receive_toggled` →
   `rtp_calls.set_call_audio_receive`, the same knob Muji uses per participant).
-  A **screen-share** button (monitor glyph) offers «Текущий монитор» /
-  «Выделить область…» / «Вернуть камеру» (`screen_share_requested` →
-  `rtp_calls.set_screen_share(key, mode, region)`; *key* is the call sid or the
-  Muji room — every session of the room is switched). The region picker
-  (`ui/screen_region_dialog.py`) is a frameless virtual-desktop overlay: drag a
-  rectangle (`Esc` cancels), clamped to the monitor under its top-left corner.
+  One **video-mode combo** button (icon = the active source) offers «Без видео» /
+  «Камера» / «Область экрана» / «Весь экран» (`video_mode_requested` →
+  `rtp_calls.set_screen_share(key, "screen", region)`; *key* is the call sid or
+  the Muji room — every session of the room is switched). «Без видео» disables
+  the track, «Камера» restores it; in Muji the combo gates the whole room
+  (`_all_cam`) while the per-party toggles stay. The region picker
+  (`ui/screen_region_dialog.py`) is an **opaque** virtual-desktop overlay that
+  paints a screen snapshot (dimmed outside the selection, bright inside) so it
+  works without a compositor; drag a rectangle (`Esc`/right click cancels),
+  clamped to the monitor under its top-left corner.
   `media._VideoCaptureTrack.set_source("screen", region)` switches the source
   live with no renegotiation (the camera opens lazily); the screen is grabbed
   with `QScreen.grabWindow` on the GUI thread, throttled to

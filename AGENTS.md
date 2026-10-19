@@ -2535,14 +2535,19 @@ microphone sends silence and the switched-off camera sends black frames
 attached), while received audio/video keeps playing and the remote view is
 never hidden. A `speaker`/`speaker-off` button mutes the **remote** audio
 (`receive_toggled` → `rtp_calls.set_call_audio_receive`, the same knob Muji uses
-per participant). A **screen-share** button (a monitor glyph, next to the camera
-in a 1:1 window and in the Muji controls row) offers «Текущий монитор» /
-«Выделить область…» / «Вернуть камеру» (`screen_share_requested(sid_or_room,
-mode)` → `MainWindow._on_screen_share_requested` → `rtp_calls.set_screen_share`).
-The region picker (`ui/screen_region_dialog.py::ScreenRegionDialog`) is a
-frameless overlay spanning the virtual desktop: drag a rectangle (`Esc`
-cancels), clamped to the monitor under its top-left corner; «Текущий монитор»
-uses the screen under the cursor. `media._VideoCaptureTrack` switches its source
+per participant). One **video-mode combo** button (its icon reflects the active
+source) offers «Без видео» / «Камера» / «Область экрана» / «Весь экран»
+(`video_mode_requested(sid_or_room, mode)` →
+`MainWindow._on_video_mode_requested`): «Без видео» disables the track (black
+frames), «Камера» restores the camera, the two screen modes call
+`rtp_calls.set_screen_share(key, "screen", region)` («Весь экран» = the monitor
+under the cursor). In Muji the combo gates the whole room (`_all_cam`); the
+per-party camera toggles remain a second layer. A region is picked in
+`ui/screen_region_dialog.py::ScreenRegionDialog` — an **opaque** full-virtual-
+desktop overlay that paints a snapshot of the screen (dimmed outside the
+selection, bright inside) so it stays visible without a compositor; drag a
+rectangle, `Esc`/right click cancels, clamped to the monitor under its top-left
+corner. `media._VideoCaptureTrack` switches its source
 live (`set_source("screen", region)`) — the camera opens lazily, the screen is
 grabbed with `QScreen.grabWindow` on the GUI thread, throttled to
 `devices.screen_share_fps` (default 5) and scaled to

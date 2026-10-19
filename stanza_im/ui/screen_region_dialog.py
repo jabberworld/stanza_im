@@ -1,16 +1,23 @@
 """Full-screen overlay to pick a screen-capture rectangle.
 
-The dialog spans the whole virtual desktop with a dimmed, translucent
-background; the user drags a rectangle (the dimming is cleared inside it) and
-``Esc`` cancels.  :meth:`region` returns the ``(x, y, w, h)`` rectangle in
-global screen coordinates, clamped to the monitor that holds its top-left
-corner (a region grab is relative to one screen).
+The overlay spans the whole virtual desktop and paints a **snapshot** of the
+screen as its background (dimmed outside the selection, bright inside), so it
+stays visible with or without a compositing manager — a translucent frameless
+window on a non-composited desktop can end up invisible while its modal loop
+still blocks the UI.  The user drags a rectangle (``Esc`` or a right click
+cancels); :meth:`region` returns the ``(x, y, w, h)`` rectangle in global
+screen coordinates, clamped to the monitor that holds its top-left corner (a
+region grab is relative to one screen).
 """
 from __future__ import annotations
+
+import logging
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+
+logger = logging.getLogger(__name__)
 
 _MIN_SIDE = 8
 
@@ -21,36 +28,71 @@ class ScreenRegionDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(
-            QtCore.Qt.WindowType.FramelessWindowHint
-            | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.Tool)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
+            QtCore.Qt.WindowType.Window
+            | QtCore.Qt.WindowType.FramelessWindowHint
+            | QtCore.Qt.WindowType.WindowStaysOnTopHint)
         self.setCursor(QtCore.Qt.CursorShape.CrossCursor)
         self.setWindowTitle(tr("screen_region_title"))
         self._origin = None
         self._rect = QtCore.QRect()
+        self._backdrop = None
         geometry = QtCore.QRect()
         for screen in QtWidgets.QApplication.screens():
             geometry = geometry.united(screen.geometry())
         if not geometry.isNull():
             self.setGeometry(geometry)
 
+    # ── backdrop ──────────────────────────────────────────────────
+    def _grab_backdrop(self) -> QtGui.QPixmap:
+        """Compose a snapshot of the whole virtual desktop."""
+        from stanza_im.include import screen as screen_mod
+        geometry = self.geometry()
+        backdrop = QtGui.QPixmap(geometry.size())
+        backdrop.fill(QtGui.QColor(20, 20, 20))
+        painter = QtGui.QPainter(backdrop)
+        for screen in QtWidgets.QApplication.screens():
+            shot = screen_mod.grab_screen(screen)
+            if shot is None or shot.isNull():
+                continue
+            geo = screen.geometry()
+            target = QtCore.QRect(geo.topLeft() - geometry.topLeft(),
+                                  geo.size())
+            painter.drawPixmap(target, shot)
+        painter.end()
+        return backdrop
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        if self._backdrop is None:
+            self._backdrop = self._grab_backdrop()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+        logger.debug("SCREEN region picker: geom=%s visible=%s backdrop=%s",
+                     self.geometry(), self.isVisible(),
+                     "none" if self._backdrop is None
+                     else "%dx%d" % (self._backdrop.width(),
+                                     self._backdrop.height()))
+
     # ── interaction ───────────────────────────────────────────────
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.MouseButton.RightButton:
+            self.reject()
+            return
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self._origin = event.position().toPoint()
             self._rect = QtCore.QRect(self._origin, QtCore.QSize())
             self.update()
-        else:
-            super().mousePressEvent(event)
+            return
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if self._origin is not None:
             self._rect = QtCore.QRect(
                 self._origin, event.position().toPoint()).normalized()
             self.update()
-        else:
-            super().mouseMoveEvent(event)
+            return
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         if (self._origin is not None
@@ -64,8 +106,8 @@ class ScreenRegionDialog(QtWidgets.QDialog):
             self._origin = None
             self._rect = QtCore.QRect()
             self.update()
-        else:
-            super().mouseReleaseEvent(event)
+            return
+        super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() == QtCore.Qt.Key.Key_Escape:
@@ -94,13 +136,16 @@ class ScreenRegionDialog(QtWidgets.QDialog):
     # ── painting ──────────────────────────────────────────────────
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         painter = QtGui.QPainter(self)
-        painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 120))
+        backdrop = self._backdrop
+        if backdrop is not None and not backdrop.isNull():
+            painter.drawPixmap(0, 0, backdrop)
+            painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 120))
+            if not self._rect.isNull():
+                # Show the selection undimmed (the snapshot, bright).
+                painter.drawPixmap(self._rect, backdrop, self._rect)
+        else:
+            painter.fillRect(self.rect(), QtGui.QColor(20, 20, 20, 230))
         if not self._rect.isNull():
-            painter.setCompositionMode(
-                QtGui.QPainter.CompositionMode.CompositionMode_Clear)
-            painter.fillRect(self._rect, QtCore.Qt.GlobalColor.transparent)
-            painter.setCompositionMode(
-                QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
             painter.setPen(QtGui.QPen(QtGui.QColor(60, 170, 255), 2))
             painter.drawRect(self._rect.adjusted(1, 1, -1, -1))
         painter.setPen(QtGui.QColor(255, 255, 255))
@@ -109,3 +154,4 @@ class ScreenRegionDialog(QtWidgets.QDialog):
         painter.setFont(font)
         painter.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter,
                          tr("screen_region_hint"))
+        painter.end()

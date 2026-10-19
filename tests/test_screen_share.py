@@ -129,6 +129,9 @@ check("a share emits call_screen_share",
 # 4. the region dialog -------------------------------------------------------
 _dlg = ScreenRegionDialog()
 check("the overlay spans the screen", not _dlg.geometry().isNull())
+check("the overlay is opaque (no compositor needed)",
+      not _dlg.testAttribute(
+          QtCore.Qt.WidgetAttribute.WA_TranslucentBackground))
 check("no region before a drag", _dlg.region() is None)
 _origin = _dlg.geometry().topLeft()
 _dlg._origin = QtCore.QPoint(20, 30)
@@ -140,20 +143,29 @@ check("the region starts at the global position",
       _region[0] == _origin.x() + 20 and _region[1] == _origin.y() + 30)
 
 
-# 5. the call windows emit screen_share_requested ----------------------------
+# 5. the call windows emit video_mode_requested -----------------------------
 _cw = CallWindow("sid1", "Bob", video=True)
 _seen = []
-_cw.screen_share_requested.connect(lambda sid, mode: _seen.append((sid, mode)))
-_cw._request_share("region")
+_cw.video_mode_requested.connect(lambda sid, mode: _seen.append((sid, mode)))
+_cw._request_mode("region")
 check("a 1:1 call emits its sid + mode", _seen == [("sid1", "region")])
-_cw.set_screen_sharing(True)
-check("the share button reflects the active state", _cw._sharing is True)
+_cw.set_video_mode("screen")
+check("the combo reflects the screen mode",
+      _cw._video_mode == "screen"
+      and _cw._video_actions["screen"].isChecked()
+      and not _cw._video_actions["camera"].isChecked())
+_cw.set_video_mode("off")
+check("the combo reflects the off mode", _cw._video_mode == "off")
+check("the combo offers all four modes",
+      set(_cw._video_actions) == {"off", "camera", "region", "screen"})
 _mw = MujiCallWindow("room@conf", self_nick="me")
 _seen2 = []
-_mw.screen_share_requested.connect(lambda room, mode: _seen2.append((room, mode)))
-_mw._request_share("monitor")
+_mw.video_mode_requested.connect(lambda room, mode: _seen2.append((room, mode)))
+_mw._on_video_mode("screen")
 check("a Muji window emits its room + mode",
-      _seen2 == [("room@conf", "monitor")])
+      _seen2 == [("room@conf", "screen")])
+_mw._on_video_mode("off")
+check("a Muji 'off' disables the global camera", _mw._all_cam is False)
 
 print()
 if FAILURES:

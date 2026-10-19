@@ -4842,9 +4842,8 @@ class MainWindow(QtWidgets.QMainWindow):
                             avatar_radius=self._call_avatar_radius())
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
-        window.camera_toggled.connect(self._on_call_camera_toggled)
+        window.video_mode_requested.connect(self._on_video_mode_requested)
         window.receive_toggled.connect(self._on_call_receive_toggled)
-        window.screen_share_requested.connect(self._on_screen_share_requested)
         self._place_window_near_main(window)
         window.show()
         window.raise_()
@@ -4980,21 +4979,35 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.set_call_audio(sid, enabled)
 
-    def _on_call_camera_toggled(self, sid: str, enabled: bool) -> None:
-        if self._client:
-            self._client.set_call_video(sid, enabled)
-
     def _on_call_receive_toggled(self, sid: str, enabled: bool) -> None:
         """Mute/unmute the *remote* audio of a 1:1 call (playback)."""
         if self._client:
             self._client.rtp_calls.set_call_audio_receive(sid, enabled)
 
-    def _on_screen_share_requested(self, key: str, mode: str) -> None:
-        """Start/stop screen sharing for a 1:1 call (sid) or a Muji room."""
+    def _on_video_mode_requested(self, key: str, mode: str) -> None:
+        """Switch the outgoing video: off / camera / screen region / screen.
+
+        *key* is a 1:1 call sid or a Muji room JID (the window already applies
+        the global camera gate; the screen source is switched here).
+        """
         if not self._client:
             return
-        if mode == "stop":
+        is_muji = key in self._muji_windows
+        window = (self._muji_windows.get(key) if is_muji
+                  else self._call_windows.get(key))
+        if mode == "off":
+            if not is_muji:
+                self._client.set_call_video(key, False)
             self._client.rtp_calls.set_screen_share(key, "camera")
+            if window is not None:
+                window.set_video_mode("off")
+            return
+        if not is_muji:
+            self._client.set_call_video(key, True)
+        if mode == "camera":
+            self._client.rtp_calls.set_screen_share(key, "camera")
+            if window is not None:
+                window.set_video_mode("camera")
             return
         from stanza_im.include import screen as screen_mod
         if screen_mod.wayland():
@@ -5009,7 +5022,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if region is None:
                 return
         else:
-            # The monitor under the cursor when the action was invoked.
+            # The monitor under the cursor when the mode was chosen.
             screen = (QtWidgets.QApplication.screenAt(QtGui.QCursor.pos())
                       or QtWidgets.QApplication.primaryScreen())
             if screen is not None:
@@ -5020,10 +5033,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_call_screen_share(self, key: str, mode: str,
                               has_region: bool) -> None:
-        """Reflect an active screen share on the call/conference button."""
+        """Reflect the active video source on the call/conference button."""
         window = self._call_windows.get(key) or self._muji_windows.get(key)
-        if window is not None and hasattr(window, "set_screen_sharing"):
-            window.set_screen_sharing(mode == "screen")
+        if window is None:
+            return
+        if mode == "camera":
+            window.set_video_mode("camera")
+        else:
+            window.set_video_mode("region" if has_region else "screen")
 
     # ── Muji conference ──────────────────────────────────────────
 
@@ -5057,8 +5074,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._on_muji_participant_receive)
             window.participant_camera.connect(
                 self._on_muji_participant_camera)
-            window.screen_share_requested.connect(
-                self._on_screen_share_requested)
+            window.video_mode_requested.connect(
+                self._on_video_mode_requested)
             self._place_window_near_main(window)
             window.show()
             window.start_duration()
