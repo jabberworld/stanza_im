@@ -11,6 +11,8 @@ import logging
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.screen import (grab_region as _grab_region,
+                                      region_matches as _region_matches)
 
 logger = logging.getLogger(__name__)
 
@@ -62,88 +64,6 @@ def compositing_available() -> bool:
     if platform.startswith("wayland") or not platform.startswith("xcb"):
         return True
     return _x11_compositor_running()
-
-
-_REGION_GRAB_OK: bool | None = None
-
-
-def _region_matches(region, crop) -> bool:
-    """True when a region grab equals the same area cropped from a full grab."""
-    try:
-        ri = region.toImage()
-        ci = crop.toImage()
-    except Exception:
-        return False
-    if ri.isNull() or ci.isNull() or ri.size() != ci.size():
-        return False
-    width, height = ri.width(), ri.height()
-    samples = [(1, 1), (width // 2, height // 2), (width - 2, height - 2)]
-    for x, y in samples:
-        if 0 <= x < width and 0 <= y < height and ri.pixel(x, y) != ci.pixel(x, y):
-            return False
-    return True
-
-
-def _grab_region(pos: QtCore.QPoint, size: QtCore.QSize):
-    """Snapshot the screen area at *pos* (logical coords); None on failure.
-
-    Tries a region grab first; some platforms ignore ``x``/``y`` for
-    ``window == 0`` (returning the top-left), so on the first capture the
-    region is compared against the same area cropped from a full grab and the
-    region path is disabled permanently if they differ.
-    """
-    global _REGION_GRAB_OK
-    app = QtWidgets.QApplication.instance()
-    if app is None:
-        return None
-    screen = app.screenAt(pos) or app.primaryScreen()
-    if screen is None or size.width() <= 0 or size.height() <= 0:
-        return None
-    origin = screen.geometry().topLeft()
-    lx = pos.x() - origin.x()
-    ly = pos.y() - origin.y()
-    lw = size.width()
-    lh = size.height()
-    if lx < 0 or ly < 0:
-        return None
-
-    region = None
-    if _REGION_GRAB_OK is not False:
-        try:
-            candidate = screen.grabWindow(0, lx, ly, lw, lh)
-        except Exception:
-            candidate = None
-        if candidate is not None and not candidate.isNull():
-            dpr = candidate.devicePixelRatio() or 1.0
-            for scale in (1.0, dpr):
-                if (abs(candidate.width() - lw * scale) <= 2
-                        and abs(candidate.height() - lh * scale) <= 2):
-                    region = candidate
-                    break
-
-    crop = None
-    if region is None or _REGION_GRAB_OK is None:
-        try:
-            shot = screen.grabWindow(0)
-        except Exception:
-            shot = None
-        if shot is not None and not shot.isNull():
-            dpr = shot.devicePixelRatio() or 1.0
-            x = int(lx * dpr)
-            y = int(ly * dpr)
-            w = int(lw * dpr)
-            h = int(lh * dpr)
-            if (x >= 0 and y >= 0 and x + w <= shot.width()
-                    and y + h <= shot.height()):
-                crop = shot.copy(QtCore.QRect(x, y, w, h))
-
-    if _REGION_GRAB_OK is None and region is not None and crop is not None:
-        _REGION_GRAB_OK = _region_matches(region, crop)
-        if not _REGION_GRAB_OK:
-            logger.info("OSD region grab ignores position; using full-screen crop")
-    if _REGION_GRAB_OK is not False and region is not None:
-        return region
-    return crop
 
 
 def stack_position(index: int, base_y: int, heights,
