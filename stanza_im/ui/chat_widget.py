@@ -191,7 +191,42 @@ class _FadeLabel(QtWidgets.QWidget):
 
 
 class _ChatInput(FontZoomMixin, QtWidgets.QPlainTextEdit):
-    """The message input; Ctrl+wheel changes its font size."""
+    """The message input; Ctrl+wheel changes its font size.
+
+    The placeholder is drawn by :meth:`paintEvent` with the widget's own font.
+    Qt's built-in one is painted with the style-resolved font, which a
+    non-empty application stylesheet resets to the application default — the
+    typed text keeps the document font, so the hint stayed unscaled.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._placeholder = ""
+
+    def set_placeholder(self, text: str) -> None:
+        """Set the placeholder text (drawn with the widget font)."""
+        text = text or ""
+        if text != self._placeholder:
+            self._placeholder = text
+            self.viewport().update()
+
+    def placeholderText(self) -> str:
+        return self._placeholder
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._placeholder or self.toPlainText():
+            return
+        painter = QtGui.QPainter(self.viewport())
+        painter.setFont(self.font())
+        painter.setPen(self.palette().color(
+            QtGui.QPalette.ColorRole.PlaceholderText))
+        margin = int(self.document().documentMargin())
+        rect = self.viewport().rect().adjusted(margin, margin, 0, 0)
+        painter.drawText(rect,
+                         QtCore.Qt.AlignmentFlag.AlignTop
+                         | QtCore.Qt.TextFlag.TextWordWrap,
+                         self._placeholder)
 
 
 class _SubjectButton(FontZoomMixin, QtWidgets.QToolButton):
@@ -791,7 +826,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._input.setMinimumHeight(40)
         self._input.setMaximumHeight(240)
         self._input.setFixedHeight(self._input_height)
-        self._input.setPlaceholderText(tr("chat_send"))
+        self._input.set_placeholder(tr("chat_send"))
         self._input.installEventFilter(self)
         self._input.textChanged.connect(self._on_input_changed)
         self._input.font_zoom_requested.connect(self._on_input_font_zoom)

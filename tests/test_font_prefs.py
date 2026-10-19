@@ -91,6 +91,35 @@ check("the menu font size is persisted",
 check("a Ctrl+wheel over a plain widget is ignored",
       not mw._handle_widget_font_wheel(QtWidgets.QLabel(), _wheel()))
 
+# 3. the input placeholder is drawn with the widget font ----------------------
+from stanza_im.ui.chat_widget import _ChatInput  # noqa: E402
+
+app.setStyleSheet("QMenuBar, QMenu { font-size: 12pt; }")   # non-empty app QSS
+
+
+def _hint_height(px: int) -> int:
+    widget = _ChatInput()
+    widget.resize(400, 120)
+    widget.set_placeholder("Send")
+    font = QtGui.QFont(QtWidgets.QApplication.font())
+    font.setPointSize(px)
+    widget.setFont(font)
+    image = QtGui.QImage(widget.size(), QtGui.QImage.Format.Format_RGB32)
+    widget.render(image)
+    ys = [y for y in range(6, image.height() - 6)
+          for x in range(6, image.width() - 6)
+          if image.pixelColor(x, y).red() < 210]
+    return (max(ys) - min(ys) + 1) if ys else 0
+
+
+_small, _big = _hint_height(9), _hint_height(24)
+check("the input placeholder scales with the widget font",
+      _small > 0 and _big > _small * 2)
+_hint = _ChatInput()
+_hint.set_placeholder("Send")
+check("the input placeholder text is exposed", _hint.placeholderText() == "Send")
+app.setStyleSheet("")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

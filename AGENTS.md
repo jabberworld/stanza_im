@@ -2725,7 +2725,12 @@ value stays `""`/`0`. The size spin is **left-aligned**
 spin **expand with the dialog** (the form's `ExpandingFieldsGrow` + an
 `Expanding` policy and a 3:1 stretch in `_font_row`).
 The message input gets `ChatWidget.set_input_font` (hosted by
-`ChatWindow.set_input_font`, remembered as `_input_font`). **Ctrl+wheel** over
+`ChatWindow.set_input_font`, remembered as `_input_font`); its placeholder
+(«Отправить») is drawn by `_ChatInput.paintEvent` with the widget's own font
+(`set_placeholder`), because Qt's built-in placeholder is painted with the
+style-resolved font — a non-empty application stylesheet resets that to the
+application default while the typed text keeps the document font.
+**Ctrl+wheel** over
 the input, the roster or the MUC participant list (including over a participant
 **row**, whose child labels forward wheel events) changes only that widget's
 **font size** (`ui/font_zoom.py` `FontZoomMixin`/`wheel_font_size`, 6–48 pt,

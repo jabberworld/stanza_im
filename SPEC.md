@@ -1416,7 +1416,11 @@ section headers pick up the family too. Ctrl+wheel changes only the size
 **Message input font**: `ChatWidget.set_input_font(family, size)` (from
 `appearance.input_font` / `input_font_size`, defaulting to the chat font) sets
 the input's font; `ChatWindow.set_input_font` remembers it in `_input_font` and
-applies it to new tabs. Ctrl+wheel changes only the size
+applies it to new tabs. Its placeholder («Отправить») is drawn by
+`_ChatInput.paintEvent` with the widget's own font (`set_placeholder`), because
+Qt's built-in placeholder uses the style-resolved font, which a non-empty
+application stylesheet resets to the application default. Ctrl+wheel changes
+only the size
 (`_ChatInput.wheelEvent` → `input_font_zoom_requested`). All three widgets use
 `ui/font_zoom.py` (`FontZoomMixin`, 6–48 pt); MainWindow persists the size,
 calls `ChatWindow.set_input_font`/`set_participant_font`/`_apply_roster_font`
