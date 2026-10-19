@@ -3854,6 +3854,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("call_video_frame", self._on_call_video_frame)
         c.on("call_local_video_frame", self._on_call_local_video_frame)
         c.on("muji_local_video_frame", self._on_muji_local_video_frame)
+        c.on("call_screen_share", self._on_call_screen_share)
         c.on("call_ended", self._on_call_ended)
         c.on("call_failed", self._on_call_failed)
         c.on("muji_joined", self._on_muji_joined)
@@ -4591,6 +4592,9 @@ class MainWindow(QtWidgets.QMainWindow):
             "audio_input": getattr(dev, "audio_input", "") or "",
             "audio_output": getattr(dev, "audio_output", "") or "",
             "video_input": getattr(dev, "video_input", "") or "",
+            "screen_fps": int(getattr(dev, "screen_share_fps", 5) or 5),
+            "screen_max_width": int(
+                getattr(dev, "screen_share_max_width", 1920) or 0),
         }
 
     def _on_call_requested(self, jid: str, video: bool = False) -> None:
@@ -4840,6 +4844,7 @@ class MainWindow(QtWidgets.QMainWindow):
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.camera_toggled.connect(self._on_call_camera_toggled)
         window.receive_toggled.connect(self._on_call_receive_toggled)
+        window.screen_share_requested.connect(self._on_screen_share_requested)
         self._place_window_near_main(window)
         window.show()
         window.raise_()
@@ -4984,6 +4989,42 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.rtp_calls.set_call_audio_receive(sid, enabled)
 
+    def _on_screen_share_requested(self, key: str, mode: str) -> None:
+        """Start/stop screen sharing for a 1:1 call (sid) or a Muji room."""
+        if not self._client:
+            return
+        if mode == "stop":
+            self._client.rtp_calls.set_screen_share(key, "camera")
+            return
+        from stanza_im.include import screen as screen_mod
+        if screen_mod.wayland():
+            self._tray.show_message(APP_NAME, tr("call_screen_wayland"))
+        region = None
+        if mode == "region":
+            from stanza_im.ui.screen_region_dialog import ScreenRegionDialog
+            dialog = ScreenRegionDialog(self)
+            if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                return
+            region = dialog.region()
+            if region is None:
+                return
+        else:
+            # The monitor under the cursor when the action was invoked.
+            screen = (QtWidgets.QApplication.screenAt(QtGui.QCursor.pos())
+                      or QtWidgets.QApplication.primaryScreen())
+            if screen is not None:
+                geo = screen.geometry()
+                region = (geo.x(), geo.y(), geo.width(), geo.height())
+        self._client.rtp_calls.set_screen_share(key, "screen", region)
+        logger.info("CALL screen share %s for %s region=%s", mode, key, region)
+
+    def _on_call_screen_share(self, key: str, mode: str,
+                              has_region: bool) -> None:
+        """Reflect an active screen share on the call/conference button."""
+        window = self._call_windows.get(key) or self._muji_windows.get(key)
+        if window is not None and hasattr(window, "set_screen_sharing"):
+            window.set_screen_sharing(mode == "screen")
+
     # ── Muji conference ──────────────────────────────────────────
 
     def _on_muji_call_requested(self, room: str, video: bool = False) -> None:
@@ -5016,6 +5057,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._on_muji_participant_receive)
             window.participant_camera.connect(
                 self._on_muji_participant_camera)
+            window.screen_share_requested.connect(
+                self._on_screen_share_requested)
             self._place_window_near_main(window)
             window.show()
             window.start_duration()

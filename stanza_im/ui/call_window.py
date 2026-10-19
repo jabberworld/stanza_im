@@ -182,6 +182,7 @@ class CallWindow(QtWidgets.QWidget):
     audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
     camera_toggled = QtCore.pyqtSignal(str, bool)   # outgoing video enabled
     receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
+    screen_share_requested = QtCore.pyqtSignal(str, str)  # sid, mode
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
                  avatar_path: str | None = None, avatar_radius: int = 100):
@@ -257,6 +258,23 @@ class CallWindow(QtWidgets.QWidget):
         self._cam_btn.setVisible(video)
         self._cam_btn.toggled.connect(self._on_camera)
         controls.addWidget(self._cam_btn)
+
+        self._share_btn = QtWidgets.QToolButton(self)
+        self._share_btn.setIcon(_icon("screen-share"))
+        self._share_btn.setIconSize(QtCore.QSize(20, 20))
+        self._share_btn.setToolTip(tr("call_screen_share"))
+        self._share_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        share_menu = QtWidgets.QMenu(self._share_btn)
+        share_menu.addAction(_icon("screen-share"), tr("call_screen_monitor"),
+                             lambda: self._request_share("monitor"))
+        share_menu.addAction(_icon("wb-select"), tr("call_screen_region"),
+                             lambda: self._request_share("region"))
+        share_menu.addAction(_icon("camera"), tr("call_screen_camera"),
+                             lambda: self._request_share("stop"))
+        self._share_btn.setMenu(share_menu)
+        self._share_btn.setVisible(video)
+        controls.addWidget(self._share_btn)
         controls.addStretch(1)
 
         self._hangup_btn = QtWidgets.QToolButton(self)
@@ -310,6 +328,16 @@ class CallWindow(QtWidgets.QWidget):
             tr("call_camera") if checked else tr("call_camera_off"))
         self.camera_toggled.emit(self.sid, checked)
 
+    def _request_share(self, mode: str) -> None:
+        self.screen_share_requested.emit(self.sid, mode)
+
+    def set_screen_sharing(self, active: bool) -> None:
+        """Mark the screen-share button while a share is active."""
+        self._sharing = active
+        self._share_btn.setToolTip(
+            tr("call_screen_stop") if active else tr("call_screen_share"))
+        self._share_btn.setIcon(_icon("camera" if active else "screen-share"))
+
     def closeEvent(self, event):
         # Closing the window also ends the call.
         self.hangup.emit(self.sid)
@@ -335,6 +363,7 @@ class MujiCallWindow(QtWidgets.QWidget):
     participant_audio = QtCore.pyqtSignal(str, str, bool)    # room, nick, send-enabled
     participant_receive = QtCore.pyqtSignal(str, str, bool)  # room, nick, receive-enabled
     participant_camera = QtCore.pyqtSignal(str, str, bool)   # room, nick, video-enabled
+    screen_share_requested = QtCore.pyqtSignal(str, str)     # room, mode
 
     def __init__(self, room: str, self_nick: str = "", parent=None):
         super().__init__(parent)
@@ -408,9 +437,25 @@ class MujiCallWindow(QtWidgets.QWidget):
             right, "camera", "camera-off", True, tr("muji_all_cam_tip"),
             self._on_all_cam)
         self._all_cam_btn.setVisible(False)
+        self._share_btn = QtWidgets.QToolButton(right)
+        self._share_btn.setIcon(_icon("screen-share"))
+        self._share_btn.setIconSize(QtCore.QSize(20, 20))
+        self._share_btn.setToolTip(tr("call_screen_share"))
+        self._share_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        share_menu = QtWidgets.QMenu(self._share_btn)
+        share_menu.addAction(_icon("screen-share"), tr("call_screen_monitor"),
+                             lambda: self._request_share("monitor"))
+        share_menu.addAction(_icon("wb-select"), tr("call_screen_region"),
+                             lambda: self._request_share("region"))
+        share_menu.addAction(_icon("camera"), tr("call_screen_camera"),
+                             lambda: self._request_share("stop"))
+        self._share_btn.setMenu(share_menu)
+        self._share_btn.setVisible(False)
         controls.addWidget(self._all_mic_btn)
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._all_cam_btn)
+        controls.addWidget(self._share_btn)
         controls.addStretch(1)
         controls.addWidget(self._leave_btn)
         right_layout.addLayout(controls)
@@ -425,6 +470,17 @@ class MujiCallWindow(QtWidgets.QWidget):
     def set_video(self, enabled: bool) -> None:
         self._video.setVisible(enabled)
         self._all_cam_btn.setVisible(enabled)
+        self._share_btn.setVisible(enabled)
+
+    def _request_share(self, mode: str) -> None:
+        self.screen_share_requested.emit(self.room, mode)
+
+    def set_screen_sharing(self, active: bool) -> None:
+        """Mark the screen-share button while a share is active."""
+        self._sharing = active
+        self._share_btn.setToolTip(
+            tr("call_screen_stop") if active else tr("call_screen_share"))
+        self._share_btn.setIcon(_icon("camera" if active else "screen-share"))
 
     def start_duration(self) -> None:
         """Start (or restart) the conference-duration counter."""

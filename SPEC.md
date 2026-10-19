@@ -3108,6 +3108,19 @@ client.leave_muji(room)
   affect the received stream — the remote view stays visible. A
   `speaker`/`speaker-off` button mutes the **remote** audio (`receive_toggled` →
   `rtp_calls.set_call_audio_receive`, the same knob Muji uses per participant).
+  A **screen-share** button (monitor glyph) offers «Текущий монитор» /
+  «Выделить область…» / «Вернуть камеру» (`screen_share_requested` →
+  `rtp_calls.set_screen_share(key, mode, region)`; *key* is the call sid or the
+  Muji room — every session of the room is switched). The region picker
+  (`ui/screen_region_dialog.py`) is a frameless virtual-desktop overlay: drag a
+  rectangle (`Esc` cancels), clamped to the monitor under its top-left corner.
+  `media._VideoCaptureTrack.set_source("screen", region)` switches the source
+  live with no renegotiation (the camera opens lazily); the screen is grabbed
+  with `QScreen.grabWindow` on the GUI thread, throttled to
+  `devices.screen_share_fps` (default 5) and scaled to
+  `devices.screen_share_max_width` (default 1920, `0` = unlimited). The shared
+  `include/screen.py` (`grab_region`/`grab_screen`, also used by the OSD) handles
+  the DPR and the "region grab ignores the position" fallback. Wayland warns.
   A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS` past an hour) runs
   from the call becoming active (`start_duration`) and from the Muji join. Preferences →
   Devices selects

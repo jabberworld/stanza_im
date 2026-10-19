@@ -1275,6 +1275,33 @@ class JingleRtpManager:
         """Turn the local camera on/off (black frames, no renegotiation)."""
         self._set_track_enabled(sid, "set_video_enabled", enabled)
 
+    def set_screen_share(self, key: str, mode: str = "screen",
+                         region=None) -> None:
+        """Send the screen (or a region) instead of the camera, live.
+
+        *key* is a call ``sid`` for a 1:1 call, or the MUC room JID for a Muji
+        conference (every session of that room is switched).  *mode* is
+        ``"screen"`` or ``"camera"``; *region* is an ``(x, y, w, h)`` rectangle
+        in logical screen coordinates (``None`` = the primary monitor).
+        """
+        targets = [s for s in self.sessions.values()
+                   if s.sid == key
+                   or (s.muji_room and s.muji_room == key)]
+        for session in targets:
+            call = getattr(session, "call", None)
+            fn = getattr(call, "set_video_source", None)
+            if not callable(fn):
+                continue
+            try:
+                fn(mode, region)
+            except Exception:
+                logger.exception("CALL set_screen_share failed for sid=%s",
+                                 session.sid)
+        if targets:
+            logger.info("CALL screen share %s region=%s for %d session(s)",
+                        mode, region, len(targets))
+            self.client.emit("call_screen_share", key, mode, bool(region))
+
     def _set_track_enabled(self, sid: str, method: str,
                            enabled: bool) -> None:
         session = self.sessions.get(sid)

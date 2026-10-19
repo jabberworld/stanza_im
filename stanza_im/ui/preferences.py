@@ -534,6 +534,12 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self._camera_test_button = button
                 controls.append(button)
             form.addRow(tr(label_key), self._row(*controls))
+        form.addRow(
+            tr("prefs_screen_share_fps"),
+            self._combo("devices_screen_share_fps", [
+                ("2", 2), ("5", 5), ("10", 10), ("15", 15)]))
+        width = self._spin("devices_screen_share_max_width", 0, 3840)
+        form.addRow(tr("prefs_screen_share_max_width"), width)
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
@@ -1878,6 +1884,11 @@ class PreferencesDialog(QtWidgets.QDialog):
                 getattr(cfg, "devices", None), "audio_output", "") or "",
             "devices_video_input": getattr(
                 getattr(cfg, "devices", None), "video_input", "") or "",
+            "devices_screen_share_fps": int(getattr(
+                getattr(cfg, "devices", None), "screen_share_fps", 5) or 5),
+            "devices_screen_share_max_width": int(getattr(
+                getattr(cfg, "devices", None), "screen_share_max_width",
+                1920) or 0),
         }
         performance = getattr(cfg, "performance", None)
         values["defer_ui_build"] = bool(getattr(
@@ -2046,6 +2057,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                                 "video_input": ""})
         for key in ("audio_input", "audio_output", "video_input"):
             cfg.devices[key] = self._value("devices_" + key) or ""
+        cfg.devices.screen_share_fps = int(
+            self._value("devices_screen_share_fps") or 5)
+        cfg.devices.screen_share_max_width = int(
+            self._value("devices_screen_share_max_width") or 0)
         # Apply the plugin manager page (mirror of Actions → Plugins) and let
         # the main window (de)activate the affected plugins live.
         plugin_ids = None

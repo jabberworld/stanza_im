@@ -17,6 +17,7 @@ import asyncio
 import importlib
 import logging
 import math
+import time
 from fractions import Fraction
 
 logger = logging.getLogger("stanza_im.call.media")
@@ -460,9 +461,15 @@ if HAS_AIORTC:
                 pass
 
     class _VideoCaptureTrack(VideoStreamTrack):
-        """Camera capture via PyAV (v4l2/avfoundation/dshow)."""
+        """Local video source: the camera (PyAV) or a screen region.
 
-        def __init__(self, device_id: str = "", on_frame=None):
+        The source can be switched live (camera <-> screen) without
+        renegotiation; the camera is opened lazily so a screen-only call never
+        touches ``/dev/video0``.
+        """
+
+        def __init__(self, device_id: str = "", on_frame=None,
+                     screen_fps: int = 5, screen_max_width: int = 1920):
             super().__init__()
             self.kind = "video"
             self._container = None
@@ -471,7 +478,13 @@ if HAS_AIORTC:
             self._enabled = True
             self._device_id = device_id or ""
             self._on_frame = on_frame
-            self._start()
+            self._source = "camera"
+            self._region = None
+            self._screen_fps = max(1, int(screen_fps or 5))
+            self._screen_max_width = max(0, int(screen_max_width or 0))
+            self._last_grab = 0.0
+            self._last_image = None
+            self._open_camera()
 
         def _device_path(self) -> str:
             dev = self._device_id
@@ -483,8 +496,8 @@ if HAS_AIORTC:
                 return "/dev/video%s" % dev
             return dev
 
-        def _start(self):
-            if av is None:
+        def _open_camera(self):
+            if self._container is not None or av is None:
                 return
             path = self._device_path()
             try:
@@ -499,19 +512,44 @@ if HAS_AIORTC:
         def set_enabled(self, enabled: bool) -> None:
             self._enabled = enabled
 
+        def set_source(self, mode: str, region=None) -> None:
+            """Switch the outgoing video between the camera and a screen area.
+
+            *region* is an ``(x, y, w, h)`` rectangle in logical screen
+            coordinates; ``None`` means the primary monitor.
+            """
+            self._source = "screen" if mode == "screen" else "camera"
+            self._region = tuple(region) if region else None
+            self._last_image = None
+            self._last_grab = 0.0
+            if self._source == "camera":
+                self._open_camera()
+            logger.info("CALL video source -> %s%s", self._source,
+                        " %s" % (self._region,) if self._region else "")
+
         async def recv(self):
             # aiortc >= 1.10: next_timestamp() is async and returns
             # (pts, time_base) in the video clock rate.
             pts, time_base = await self.next_timestamp()
 
-            def _black():
-                frame = _black_frame()
+            def _stamp(frame):
                 frame.pts = pts
                 frame.time_base = time_base
                 return frame
 
-            if (self._stopped or not self._enabled
-                or self._container is None or self._stream is None):
+            def _black():
+                return _stamp(_black_frame())
+
+            if self._stopped or not self._enabled:
+                await asyncio.sleep(0.05)
+                return _black()
+            if self._source == "screen":
+                frame = self._screen_frame()
+                if frame is None:
+                    return _black()
+                self._emit_local(frame)
+                return _stamp(frame)
+            if self._container is None or self._stream is None:
                 await asyncio.sleep(0.05)
                 return _black()
             loop = asyncio.get_event_loop()
@@ -526,9 +564,23 @@ if HAS_AIORTC:
                 # Surface the real camera frame for the local self-preview
                 # (black frames are not mirrored to the UI).
                 self._emit_local(frame)
-            frame.pts = pts
-            frame.time_base = time_base
-            return frame
+            return _stamp(frame)
+
+        def _screen_frame(self):
+            """Grab the screen region at most ``screen_fps`` times a second.
+
+            ``grabWindow`` must run on the GUI thread (``recv`` is a coroutine
+            on the same loop), and repeated grabs of a large screen are costly,
+            so the same frame is reused between grabs.
+            """
+            now = time.monotonic()
+            if (self._last_image is None
+                    or now - self._last_grab >= 1.0 / self._screen_fps):
+                self._last_grab = now
+                self._last_image = _grab_screen_image(self._region)
+            if self._last_image is None:
+                return None
+            return _qimage_to_frame(self._last_image, self._screen_max_width)
 
         def _emit_local(self, frame) -> None:
             if self._on_frame is None:
@@ -568,6 +620,82 @@ def _black_frame():
     for plane in frame.planes:
         plane.update(b"\x00" * plane.buffer_size)
     return frame
+
+
+def _frame_to_qimage(frame):
+    """Convert a decoded PyAV video frame to a ``QImage``; None on failure."""
+    if QtGui is None:
+        return None
+    try:
+        rgb = frame.reformat(width=frame.width, height=frame.height,
+                             format="rgb24")
+        data = bytes(rgb.planes[0])
+        image = QtGui.QImage(data, rgb.width, rgb.height,
+                             rgb.planes[0].line_size,
+                             QtGui.QImage.Format.Format_RGB888)
+        return image.copy()
+    except Exception:
+        logger.debug("CALL frame conversion failed", exc_info=True)
+        return None
+
+
+def _qimage_to_frame(image, max_width: int = 0):
+    """Convert a ``QImage`` to a yuv420p ``av.VideoFrame``; None on failure.
+
+    *max_width* scales the image down (keeping the aspect ratio) so a large
+    screen capture does not flood the encoder.  PyQt6 is imported locally
+    because screen capture does not need Qt Multimedia.
+    """
+    if av is None or image is None or image.isNull():
+        return None
+    from PyQt6 import QtCore, QtGui
+    try:
+        if max_width and image.width() > max_width:
+            image = image.scaledToWidth(
+                int(max_width),
+                QtCore.Qt.TransformationMode.SmoothTransformation)
+        if image.format() != QtGui.QImage.Format.Format_RGB888:
+            image = image.convertToFormat(QtGui.QImage.Format.Format_RGB888)
+        width, height = image.width(), image.height()
+        stride = image.bytesPerLine()
+        row = width * 3
+        raw = image.constBits().asstring(image.sizeInBytes())
+        if stride != row:
+            raw = b"".join(raw[y * stride:y * stride + row]
+                           for y in range(height))
+        frame = av.VideoFrame(width, height, "rgb24")
+        plane = frame.planes[0]
+        # PyAV pads a plane row to ``line_size`` (e.g. 208 px for a 200 px
+        # rgb24 image), so pad each row before the bulk update.
+        if plane.line_size == row:
+            plane.update(raw)
+        else:
+            padded = b"".join(raw[y * row:(y + 1) * row].ljust(
+                plane.line_size, b"\x00") for y in range(height))
+            plane.update(padded)
+        return frame.reformat(format="yuv420p")
+    except Exception:
+        logger.debug("CALL screen frame conversion failed", exc_info=True)
+        return None
+
+
+def _grab_screen_image(region=None):
+    """QImage of *region* (x, y, w, h) or the primary monitor; None on failure."""
+    try:
+        from PyQt6 import QtCore
+        from stanza_im.include import screen as screen_mod
+        if region:
+            x, y, w, h = region
+            pixmap = screen_mod.grab_region(QtCore.QPoint(int(x), int(y)),
+                                            QtCore.QSize(int(w), int(h)))
+        else:
+            pixmap = screen_mod.grab_screen()
+    except Exception:
+        logger.debug("CALL screen grab failed", exc_info=True)
+        return None
+    if pixmap is None or pixmap.isNull():
+        return None
+    return pixmap.toImage()
 
 
 def _valid_ice_servers(ice_servers):
@@ -848,7 +976,10 @@ if HAS_AIORTC:
         def add_video(self):
             self._local_video = _VideoCaptureTrack(
                 self.devices.get("video_input", ""),
-                on_frame=self._forward_local_frame)
+                on_frame=self._forward_local_frame,
+                screen_fps=int(self.devices.get("screen_fps", 5) or 5),
+                screen_max_width=int(
+                    self.devices.get("screen_max_width", 1920) or 0))
             self.pc.addTrack(self._local_video)
             logger.info("CALL added local video track")
 
@@ -881,6 +1012,11 @@ if HAS_AIORTC:
         def set_video_enabled(self, enabled: bool) -> None:
             if self._local_video is not None:
                 self._local_video.set_enabled(enabled)
+
+        def set_video_source(self, mode: str, region=None) -> None:
+            """Switch the outgoing video between the camera and a screen area."""
+            if self._local_video is not None:
+                self._local_video.set_source(mode, region)
 
         # ── SDP ───────────────────────────────────────────────────
         async def create_offer(self) -> str:
@@ -1038,22 +1174,6 @@ if HAS_AIORTC:
                 asyncio.ensure_future(self.pc.close())
             except Exception:
                 pass
-
-
-    def _frame_to_qimage(frame):
-        if QtGui is None:
-            return None
-        try:
-            rgb = frame.reformat(width=frame.width, height=frame.height,
-                                 format="rgb24")
-            data = bytes(rgb.planes[0])
-            image = QtGui.QImage(data, rgb.width, rgb.height,
-                                 rgb.planes[0].line_size,
-                                 QtGui.QImage.Format.Format_RGB888)
-            return image.copy()
-        except Exception:
-            logger.debug("CALL frame conversion failed", exc_info=True)
-            return None
 
 
     class _LocalPreviewCapture:
