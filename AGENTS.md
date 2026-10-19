@@ -12,6 +12,12 @@ asked again.
 Code, identifiers, code comments, commit messages and the documentation files
 (`AGENTS.md`, `SPEC.md`, `XEPs.md`) stay in English as before.
 
+## Response conventions
+
+When a reply lists several items or asks several questions, keep them in
+**ascending order** matching the order of the referenced task items (1 → N).
+Do not reorder between "items" and "questions": item 1 first, then 2, 3, ….
+
 ## Overview
 
 Stanza IM is a lightweight XMPP/Jabber desktop client for Linux, inspired by the
