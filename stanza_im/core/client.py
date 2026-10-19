@@ -1237,12 +1237,6 @@ class JabberClient:
                     "btbv": self.omemo_btbv,
                 })
                 self.omemo = OmemoManager(self)
-                # Advertise both protocol versions (XEP-0115 picks these up).
-                for _ns in (availability.LEGACY_NAMESPACE,
-                            availability.OMEMO2_NAMESPACE):
-                    self.xmpp["xep_0030"].add_feature(_ns)
-                self.xmpp["xep_0030"].add_feature(
-                    availability.OMEMO2_NAMESPACE + ":devices+notify")
             except ImportError as exc:
                 # A partial install (e.g. a missing transitive dependency):
                 # report it briefly, without a traceback.
@@ -1253,39 +1247,9 @@ class JabberClient:
                 logger.warning("Could not initialise OMEMO", exc_info=True)
                 self.omemo = NullOmemo(self)
 
-        # XEP-0393 Message Styling (urn:xmpp:styling:0) — advertised in disco.
-        self.xmpp["xep_0030"].add_feature("urn:xmpp:styling:0")
-        # XEP-0461 Message Replies (urn:xmpp:reply:0) — advertised in disco.
-        self.xmpp["xep_0030"].add_feature(NS_REPLY)
-        # XEP-0424 Message Retraction (urn:xmpp:message-retract:1).
-        self.xmpp["xep_0030"].add_feature(NS_RETRACT)
-        # XEP-0490 Displayed Synchronization — advertise PEP notification support.
-        self.xmpp["xep_0030"].add_feature(NS_MDS + "+notify")
-        # XEP-0402 PEP Native Bookmarks — receive updates from other resources.
-        self.xmpp["xep_0030"].add_feature(NS_BOOKMARKS2 + "+notify")
-        # XEP-0144 Roster Item Exchange.
-        self.xmpp["xep_0030"].add_feature(NS_ROSTERX)
-        # XEP-0444 Message Reactions.
-        self.xmpp["xep_0030"].add_feature(NS_REACTIONS)
-        # Media sharing: XEP-0385 SIMS, XEP-0372 References, XEP-0300 hashes,
-        # XEP-0066 OOB and XEP-0428 fallback, plus XEP-0333 chat markers.
-        for _feature in (NS_SIMS, NS_REFERENCE, NS_HASHES, NS_OOB,
-                         NS_FALLBACK, NS_CHAT_MARKERS):
-            self.xmpp["xep_0030"].add_feature(_feature)
         # XEP-0191 blocklist pushes (XEP-0191 §5 carries the full list).
         self.xmpp.add_event_handler("blocked", self._on_blocked_push)
         self.xmpp.add_event_handler("unblocked", self._on_unblocked_push)
-        # Jingle file transfer (XEP-0166/0234) with SOCKS5 (XEP-0260) and
-        # In-Band (XEP-0261) transports — advertise support in disco.
-        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_JINGLE)
-        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_FT)
-        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_S5B)
-        self.xmpp["xep_0030"].add_feature(jingle_mod.NS_IBB)
-
-        # Extended presence PEP nodes (XEP-0080/0107/0108/0118) — advertise the
-        # "+notify" variants so the server pushes contact updates.
-        for _node in (pep.NS_MOOD, pep.NS_ACTIVITY, pep.NS_TUNE, pep.NS_GEOLOC):
-            self.xmpp["xep_0030"].add_feature(_node + "+notify")
 
         # Jingle FT manager + incoming stanza handlers.
         self.file_transfer = JingleFileTransferManager(self)
@@ -1304,27 +1268,10 @@ class JabberClient:
         self.call_auto_accept = False
         self._register_jingle_handlers()
 
-        # Advertise our calling capabilities in disco (XEP-0115 picks these up).
-        for _feature in (
-                jingle_rtp.NS_RTP, jingle_rtp.NS_RTP_AUDIO,
-                jingle_rtp.NS_RTP_VIDEO, jingle_rtp.NS_DTLS,
-                jingle_rtp.NS_ICE, jingle_rtp.NS_JINGLE_MSG,
-                jingle_rtp.NS_MUJI, "urn:xmpp:extdisco:2",
-                whiteboard_mod.NS_WHITEBOARD, whiteboard_mod.NS_SXE,
-                whiteboard_mod.NS_SXE_TRANSPORT):
-            self.xmpp["xep_0030"].add_feature(_feature)
-
-        # Client identity + caps branding (XEP-0030/0115).  Without a named
-        # identity slixmpp advertises a nameless ``client/bot``; and clients
-        # that keep a node→name table (Psi+, Gajim, Conversations) display the
-        # caps node verbatim for unknown clients, so make it human-readable
-        # instead of slixmpp's ``http://slixmpp.com/ver/…``.
-        self.xmpp["xep_0030"].add_identity(
-            category="client", itype="pc", name=APP_NAME)
-        # XEP-0284 shared-editing identity (the whiteboard's profile SHOULD
-        # expose it: identity type "sxe" in the "collaboration" category).
-        self.xmpp["xep_0030"].add_identity(
-            category="collaboration", itype="sxe", name=APP_NAME)
+        # Disco identities/features; re-applied after the bind (see
+        # ``_register_disco``) because slixmpp stores them under the JID bound
+        # at call time, which the server only assigns during the bind.
+        self._register_disco()
         _caps = self.xmpp.plugin.get("xep_0115", None)
         if _caps is not None:
             _caps.caps_node = f"{APP_NAME} {VERSION_DISPLAY}"
@@ -1455,6 +1402,63 @@ class JabberClient:
             self.xmpp.add_event_handler("csi_enabled", self._on_csi_enabled)
 
     # ── Public API ────────────────────────────────────────────────
+
+    def _register_disco(self) -> None:
+        """Register our XEP-0030 identities/features for the bound JID.
+
+        slixmpp's ``add_feature``/``add_identity`` without a JID store under the
+        JID bound at call time; the server only assigns the real resource during
+        the bind, so the calls made in ``__init__`` are invisible to the
+        post-bind disco.  Re-run this on session start so our caps (calls, the
+        whiteboard, …) land under the real JID.
+        """
+        disco = self.xmpp["xep_0030"]
+        if getattr(getattr(self, "omemo", None), "available", False):
+            from stanza_im.xmpp.omemo import availability
+            for _ns in (availability.LEGACY_NAMESPACE,
+                        availability.OMEMO2_NAMESPACE):
+                disco.add_feature(_ns)
+            disco.add_feature(
+                availability.OMEMO2_NAMESPACE + ":devices+notify")
+        # XEP-0393 Message Styling (urn:xmpp:styling:0).
+        disco.add_feature("urn:xmpp:styling:0")
+        # XEP-0461 Message Replies (urn:xmpp:reply:0).
+        disco.add_feature(NS_REPLY)
+        # XEP-0424 Message Retraction (urn:xmpp:message-retract:1).
+        disco.add_feature(NS_RETRACT)
+        # XEP-0490 Displayed Synchronization (PEP notifications).
+        disco.add_feature(NS_MDS + "+notify")
+        # XEP-0402 PEP Native Bookmarks.
+        disco.add_feature(NS_BOOKMARKS2 + "+notify")
+        # XEP-0144 Roster Item Exchange.
+        disco.add_feature(NS_ROSTERX)
+        # XEP-0444 Message Reactions.
+        disco.add_feature(NS_REACTIONS)
+        # Media sharing: SIMS/references/hashes/OOB/fallback + chat markers.
+        for _feature in (NS_SIMS, NS_REFERENCE, NS_HASHES, NS_OOB,
+                         NS_FALLBACK, NS_CHAT_MARKERS):
+            disco.add_feature(_feature)
+        # Jingle file transfer (XEP-0166/0234) + SOCKS5/IBB transports.
+        for _feature in (jingle_mod.NS_JINGLE, jingle_mod.NS_FT,
+                         jingle_mod.NS_S5B, jingle_mod.NS_IBB):
+            disco.add_feature(_feature)
+        # Extended presence PEP nodes (XEP-0080/0107/0108/0118).
+        for _node in (pep.NS_MOOD, pep.NS_ACTIVITY, pep.NS_TUNE, pep.NS_GEOLOC):
+            disco.add_feature(_node + "+notify")
+        # Jingle RTP calls (XEP-0167/0176), Muji and the whiteboard.
+        for _feature in (
+                jingle_rtp.NS_RTP, jingle_rtp.NS_RTP_AUDIO,
+                jingle_rtp.NS_RTP_VIDEO, jingle_rtp.NS_DTLS,
+                jingle_rtp.NS_ICE, jingle_rtp.NS_JINGLE_MSG,
+                jingle_rtp.NS_MUJI, "urn:xmpp:extdisco:2",
+                whiteboard_mod.NS_WHITEBOARD, whiteboard_mod.NS_SXE,
+                whiteboard_mod.NS_SXE_TRANSPORT):
+            disco.add_feature(_feature)
+        # A named client identity (slixmpp's default is a nameless client/bot,
+        # which clients with a node→name table show verbatim) and the XEP-0284
+        # shared-editing identity the whiteboard profile should expose.
+        disco.add_identity(category="client", itype="pc", name=APP_NAME)
+        disco.add_identity(category="collaboration", itype="sxe", name=APP_NAME)
 
     def _register_jingle_handlers(self) -> None:
         """Register the Jingle / IBB stanza handlers (XEP-0234/0261)."""
@@ -5165,6 +5169,16 @@ class JabberClient:
 
     async def _on_session_start(self, event) -> None:
         logger.info("Session started, requesting roster...")
+        # Re-register our disco features under the freshly bound JID (see
+        # _register_disco) and recompute caps before the first presence so the
+        # advertised verification string reflects our real features.
+        self._register_disco()
+        _caps = self.xmpp.plugin.get("xep_0115", None)
+        if _caps is not None:
+            try:
+                await _caps.update_caps(broadcast=False)
+            except Exception:  # noqa: BLE001
+                logger.debug("update_caps failed", exc_info=True)
         self._seed_roster_cache()
         self.request_roster()
         self.send_presence()

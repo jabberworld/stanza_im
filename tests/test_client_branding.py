@@ -62,6 +62,30 @@ check("named client identity advertised",
 check("no nameless bot identity",
       not any(t[:2] == ("client", "bot") for t in named))
 
+# 2b. the disco features survive the server-assigned bind ----------------------
+from slixmpp import JID  # noqa: E402
+
+c2 = JabberClient("me@example.com/r", "pw")
+
+
+async def _after_bind():
+    c2.xmpp.boundjid = JID("me@example.com/walkbook")
+    pre = await c2.xmpp["xep_0030"].get_info(
+        c2.xmpp.boundjid.full, None, local=True)
+    c2._register_disco()
+    post = await c2.xmpp["xep_0030"].get_info(
+        c2.xmpp.boundjid.full, None, local=True)
+    return set(pre["features"]), set(post["features"]), list(post["identities"])
+
+
+_pre_feats, _post_feats, _post_ids = _loop.run_until_complete(_after_bind())
+check("a fresh bind drops the __init__ disco features",
+      "urn:xmpp:jingle:1" not in _pre_feats)
+check("re-registering after the bind restores the call features",
+      "urn:xmpp:jingle:apps:rtp:audio" in _post_feats)
+check("re-registering restores the named identity",
+      any(tuple(i)[:2] == ("client", "pc") for i in _post_ids))
+
 
 # 3. graceful disconnect: unavailable + awaited stream close ------------------
 class _FakeXmpp:

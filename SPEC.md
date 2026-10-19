@@ -2714,7 +2714,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   version is `constants.VERSION_DISPLAY`: the plain `VERSION` outside a git
   checkout, with the short HEAD commit appended (`0.1.0 (00dc38b)`) when running
   from one (`constants._git_commit`); it feeds the caps node, XEP-0092, the About
-  dialog and the startup log.
+  dialog and the startup log. The disco identities/features are registered by
+  `JabberClient._register_disco()`, re-run in `_on_session_start` before the
+  first presence (then `xep_0115.update_caps`): a jid-less `add_feature`/
+  `add_identity` is stored under the JID bound at call time, and the real
+  resource is only assigned during the bind, so the `__init__` calls alone would
+  be invisible to the post-bind disco.
 
 ### 14.7 Stream Management & Client State (XEP-0198/0352)
 

@@ -2890,7 +2890,14 @@ text is kept. Returning activity (`eventFilter`) resumes
   outside a git checkout, with the short HEAD commit appended (`0.1.0 (00dc38b)`)
   when running from one (`constants._git_commit`, `PROJECT_ROOT/.git`) — used in
   the caps node, XEP-0092, the About dialog and the startup log, so a stale build
-  is visible at a glance. [`tests/test_client_branding.py`]
+  is visible at a glance. The disco identities/features are registered by
+  `JabberClient._register_disco()`, called both in `__init__` and again in
+  `_on_session_start` before the first presence (followed by
+  `xep_0115.update_caps`): slixmpp stores a jid-less `add_feature`/`add_identity`
+  under the JID bound at call time, and the server assigns the real resource only
+  during the bind, so the `__init__` calls alone would be invisible to the
+  post-bind disco (calls, the whiteboard, … would be missing from our caps).
+  [`tests/test_client_branding.py`]
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
 
