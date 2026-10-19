@@ -137,6 +137,8 @@ CACHE_DIR = _xdg_dir("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.toml")
 APP_LOG_FILE = os.path.join(_PROJECT_ROOT, "stanza-im.log")
+# The previous session's log (rotated to on startup with ``-l``).
+APP_LOG_FILE_1 = os.path.join(_PROJECT_ROOT, "stanza-im.1.log")
 
 HISTORY_DIR = os.path.join(DATA_DIR, "history")
 AVATARS_DIR = os.path.join(CACHE_DIR, "avatars")

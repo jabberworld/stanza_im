@@ -8,7 +8,7 @@ import os
 from PyQt6 import QtWidgets
 
 from stanza_im.include.constants import (APP_NAME, APP_LOG_FILE,
-                                         VERSION_DISPLAY)
+                                         APP_LOG_FILE_1, VERSION_DISPLAY)
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +118,16 @@ class _ConsoleFilter(logging.Filter):
 
 
 class _SlixmppNoiseFilter(logging.Filter):
-    """Downgrade slixmpp's "Unknown stanza interface" notices to DEBUG.
+    """Trim slixmpp's noisy records.
 
-    slixmpp logs them through the root logger when an IQ matcher is tested
-    against a stanza with no ``from``/``id`` interface (e.g. the
-    stream-management ``<r/>``/``<a/>``), which floods the log at login.  The
-    information stays available with ``-d``/``-l`` without the warning noise.
+    * "Unknown stanza interface" notices are downgraded to DEBUG — slixmpp logs
+      them through the root logger when an IQ matcher is tested against a stanza
+      with no ``from``/``id`` interface (e.g. the stream-management ``<r/>``/
+      ``<a/>``), which floods the log at login.  The information stays available
+      with ``-d``/``-l`` without the warning noise.
+    * "Malformed device list" warnings keep their one line but lose the
+      ``xmlschema`` traceback: a peer's broken OMEMO device list is already
+      handled ("treating as empty"), so the traceback is pure noise.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -134,6 +138,9 @@ class _SlixmppNoiseFilter(logging.Filter):
         if message.startswith("Unknown stanza interface"):
             record.levelno = logging.DEBUG
             record.levelname = "DEBUG"
+        elif message.startswith("Malformed device list"):
+            record.exc_info = None
+            record.exc_text = None
         return True
 
 
@@ -163,8 +170,10 @@ def configure_logging(debug: bool, xml_dump: bool, file_log: bool = False) -> No
     handlers.append(console)
 
     if file_log:
+        # Keep the previous session's log (rotated to stanza-im.1.log) so two
+        # sessions can be compared side by side.
         try:
-            os.unlink(APP_LOG_FILE)
+            os.replace(APP_LOG_FILE, APP_LOG_FILE_1)
         except FileNotFoundError:
             pass
         handlers.append(logging.FileHandler(APP_LOG_FILE, encoding="utf-8"))

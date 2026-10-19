@@ -81,6 +81,7 @@ def run_case(debug, xml, flog):
     fresh_logging()
     log_path = tempfile.mktemp(prefix="stanza_log_", suffix=".log")
     app.APP_LOG_FILE = log_path
+    app.APP_LOG_FILE_1 = log_path + ".1"
 
     console = io.StringIO()
     real_stderr = sys.stderr
@@ -161,6 +162,43 @@ try:
           qt_argv == ["stanza-im"])
 finally:
     sys.argv = old_argv
+
+# ── -l rotates the previous log to stanza-im.1.log ─────────────────
+fresh_logging()
+_dir = tempfile.mkdtemp(prefix="stanza_rot_")
+_log = os.path.join(_dir, "stanza-im.log")
+_log1 = os.path.join(_dir, "stanza-im.1.log")
+app.APP_LOG_FILE = _log
+app.APP_LOG_FILE_1 = _log1
+with open(_log, "w", encoding="utf-8") as fh:
+    fh.write("PREVIOUS SESSION\n")
+app.configure_logging(False, False, True)
+logging.getLogger("stanza_rot").info("NEW SESSION")
+for _h in list(logging.getLogger().handlers):
+    _h.flush()
+with open(_log1, encoding="utf-8") as fh:
+    _old = fh.read()
+with open(_log, encoding="utf-8") as fh:
+    _new = fh.read()
+check("the previous log is rotated to stanza-im.1.log",
+      "PREVIOUS SESSION" in _old and "NEW SESSION" not in _old)
+check("the new session goes to stanza-im.log",
+      "NEW SESSION" in _new and "PREVIOUS SESSION" not in _new)
+
+# ── the noise filter trims slixmpp records ─────────────────────────
+_nf = app._SlixmppNoiseFilter()
+_rec = logging.LogRecord(
+    "slixmpp_omemo.xep_0384", logging.WARNING, __file__, 1,
+    "Malformed device list for x@y under namespace n, treating as empty",
+    None, (ValueError, ValueError("x"), None))
+_nf.filter(_rec)
+check("the OMEMO device-list traceback is dropped", _rec.exc_info is None)
+_unknown = logging.LogRecord(
+    "root", logging.WARNING, __file__, 1, "Unknown stanza interface: from",
+    None, None)
+_nf.filter(_unknown)
+check("the unknown-interface notice is downgraded",
+      _unknown.levelno == logging.DEBUG)
 
 print("\nAll tests passed ✓" if not FAILURES
       else f"\n{len(FAILURES)} failures")
