@@ -2715,13 +2715,13 @@ remembered as `_subject_font`; `_SubjectButton`/`_SubjectEdit` use
 `subject_font_zoom_requested` → `MainWindow._on_subject_font_zoom` persists and
 applies it). In the preferences «Шрифты» tab, empty/zero
 values show the *real* font Qt would use instead: the family combo's first
-entry reads «По умолчанию — <family>» (for nicknames following the chat
-font live) and the size spin shows a compact `(*)` at the default, the full
-phrase («<size> pt (по умолчанию)») living in its tooltip (the family tooltip
-names the default family too) — both resolved from `QApplication.font()` by
-`PreferencesDialog._default_app_font` while the stored value stays `""`/`0`.
-The size spin is **left-aligned** (`setAlignment(AlignLeft)`), and each font
-row's family combo + size
+entry is the plain default family name (for nicknames following the chat font
+live) and the size spin shows the real size marked with a compact
+«<size> pt (*)»; the full phrases («По умолчанию — <family>» / «<size> pt
+(по умолчанию)») live in the two tooltips — both resolved from
+`QApplication.font()` by `PreferencesDialog._default_app_font` while the stored
+value stays `""`/`0`. The size spin is **left-aligned**
+(`setAlignment(AlignLeft)`), and each font row's family combo + size
 spin **expand with the dialog** (the form's `ExpandingFieldsGrow` + an
 `Expanding` policy and a 3:1 stretch in `_font_row`).
 The message input gets `ChatWidget.set_input_font` (hosted by

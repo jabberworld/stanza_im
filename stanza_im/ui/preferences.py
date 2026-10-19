@@ -748,7 +748,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                            default_family: str) -> QtWidgets.QComboBox:
         """Combo of installed font families with a "default" first entry."""
         combo = QtWidgets.QComboBox()
-        combo.addItem(tr("prefs_font_default", family=default_family), "")
+        combo.addItem(default_family, "")
         for family in QtGui.QFontDatabase.families():
             combo.addItem(family, family)
         self._controls[key] = combo
@@ -770,11 +770,12 @@ class PreferencesDialog(QtWidgets.QDialog):
         size.setMaximumWidth(16777215)
         size.setValue(0)
         size.setSuffix(tr("prefs_font_pt"))
-        # The default shows as a compact "(*)" (always fits the narrow box);
+        # The default keeps the real size and marks it with a compact "(*)";
         # the full phrase lives in the tooltip.
-        size.setSpecialValueText("(*)")
         size.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         if default_size > 0:
+            size.setSpecialValueText(
+                tr("prefs_font_size_default_short", size=f"{default_size:g}"))
             size.setToolTip(
                 tr("prefs_font_size_default", size=f"{default_size:g}"))
         # Both controls grow with the dialog (the form uses
@@ -1462,9 +1463,12 @@ class PreferencesDialog(QtWidgets.QDialog):
                     or default_size)
             for key in ("nick_font", "input_font"):
                 default_label = tr("prefs_font_default", family=family)
-                self._controls[key].setItemText(0, default_label)
+                self._controls[key].setItemText(0, family)
                 self._controls[key].setToolTip(default_label)
-                self._controls[key + "_size"].setToolTip(
+                size_widget = self._controls[key + "_size"]
+                size_widget.setSpecialValueText(
+                    tr("prefs_font_size_default_short", size=f"{size:g}"))
+                size_widget.setToolTip(
                     tr("prefs_font_size_default", size=f"{size:g}"))
 
         self._controls["chat_font"].currentIndexChanged.connect(

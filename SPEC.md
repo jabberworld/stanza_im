@@ -1433,10 +1433,10 @@ these fonts, so `ChatWindow.reapply_fonts` runs right after
 (`ChatWidget.reapply_fonts`).
 
 **Preferences defaults**: on the «Шрифты» tab, empty/zero values display the
-*real* font that would be used: the family combo's first entry reads
-«По умолчанию — <family>» and the size spin shows a compact `(*)` at the
-default, with the full phrase («<size> pt (по умолчанию)») in its tooltip (the
-family tooltip names the default family too), both resolved by
+*real* font that would be used: the family combo's first entry is the plain
+default family name and the size spin shows the real size marked with a compact
+«<size> pt (*)», the full phrases («По умолчанию — <family>» / «<size> pt
+(по умолчанию)») living in the two tooltips, both resolved by
 `PreferencesDialog._default_app_font` from `QApplication.font()`; the stored
 value stays `""`/`0`. The size spin is **left-aligned** (`setAlignment(AlignLeft)`),
 and each font row's family

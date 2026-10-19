@@ -1135,6 +1135,7 @@ STRINGS = {
     "prefs_font_tooltip": "Tooltip font:",
     "prefs_font_default": "Default — {family}",
     "prefs_font_size_default": "{size} pt (default)",
+    "prefs_font_size_default_short": "{size} pt (*)",
     "prefs_font_pt": " pt",
     "dialog_ok": "OK",
     "dialog_cancel": "Cancel",

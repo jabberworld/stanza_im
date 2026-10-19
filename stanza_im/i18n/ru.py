@@ -1136,6 +1136,7 @@ STRINGS = {
     "prefs_font_tooltip": "Шрифт подсказок:",
     "prefs_font_default": "По умолчанию — {family}",
     "prefs_font_size_default": "{size} pt (по умолчанию)",
+    "prefs_font_size_default_short": "{size} pt (*)",
     "prefs_font_pt": " pt",
     "dialog_ok": "Ок",
     "dialog_cancel": "Отмена",

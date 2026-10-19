@@ -214,14 +214,14 @@ check("participant font size applied", pf.pointSize() == 13)
 prefs = PreferencesDialog(Config(), chat_themes.ChatThemeFactory())
 nick_combo = prefs._controls["nick_font"]
 nick_size = prefs._controls["nick_font_size"]
-check("default family label shows a real face",
-      "Default" in nick_combo.itemText(0)
-      and nick_combo.itemText(0) != "Default")
-check("default size shows a compact placeholder",
-      nick_size.specialValueText() == "(*)")
+app_family = QtWidgets.QApplication.font().family()
+check("default family label shows the real face",
+      nick_combo.itemText(0) == app_family)
+check("default size shows the real pt size and a compact marker",
+      "pt" in nick_size.specialValueText()
+      and nick_size.specialValueText().endswith("(*)"))
 check("the size tooltip names the real pt default",
       "pt" in nick_size.toolTip())
-app_family = QtWidgets.QApplication.font().family()
 check("default label names the real system font", app_family in nick_combo.itemText(0))
 check("the family tooltip names the real default",
       app_family in nick_combo.toolTip())
