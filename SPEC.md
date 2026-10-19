@@ -1600,7 +1600,9 @@ It sends a bodyless `<message>` (**no `type`**) with a `muc#request` data form
 (`FORM_TYPE` + `muc#role=participant`); `from` is never set
 (`JabberClient.request_voice`). Incoming requests are matched by a dedicated
 `MatchXPath` on `message/{jabber:x:data}x` (a legacy `<x muc#user><item
-affiliation='member'/></x>` is also accepted). Moderators (`_can_moderate_room`)
+affiliation='member'/></x>` from an occupant JID, with no `jid` on the item, is
+also accepted; an affiliation-change notification is not). Moderators
+(`_can_moderate_room`)
 see the request as an Events row (`_VoiceRequestRow`: «Пользователь … просит
 право голоса») with «Предоставить» (`client.grant_voice(room, nick, jid)` →
 `muc#admin` `<item role='participant'/>`, XEP-0045 §8.3) / «Отклонить» (marks the

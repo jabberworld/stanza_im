@@ -751,12 +751,19 @@ def _muc_voice_request(msg) -> dict | None:
                 # ``to`` is our own address, not the room.
                 return {"room": room, "nick": nick, "from": frm}
 
-    # Legacy muc#user shape.
+    # Legacy muc#user shape.  A real request comes from the visitor's occupant
+    # JID (``room/nick``) and its ``<item>`` carries only the affiliation; an
+    # affiliation-change notification (e.g. after a member was added) comes from
+    # the bare room and/or names the target in ``jid`` — never a voice request.
+    if not nick:
+        return None
     user = xml.find("{%s}x" % NS_MUC_USER)
     if user is None or user.find("{%s}invite" % NS_MUC_USER) is not None:
         return None
     item = user.find("{%s}item" % NS_MUC_USER)
     if item is None or (item.get("affiliation") or "") != "member":
+        return None
+    if item.get("jid"):
         return None
     return {"room": room, "nick": nick, "from": frm}
 

@@ -335,7 +335,10 @@ broadcast and is rejected with `forbidden`) carrying a `muc#request` data form
 `JabberClient.request_voice` builds it and never sets `from`. The stanza is
 matched by its own `MatchPath` on `message/{jabber:x:data}x`
 (`_on_bodyless_voice_stanza`) — a legacy `<x xmlns='…muc#user'><item
-affiliation='member'/></x>` shape is still recognised by `_muc_voice_request` —
+affiliation='member'/></x>` from an occupant JID (`room/nick`, with no `jid` on
+the item) is still recognised by `_muc_voice_request`, while an
+affiliation-change notification (from the bare room and/or naming a `jid`) is
+not —
 and emitted as `muc_voice_requested(room, jid, nick)`. A rejected request (the
 server throttles repeats with `<error type='wait'><resource-constraint/>`) is
 matched on the same bodyless path; the sent message's `id` is tracked in

@@ -70,6 +70,17 @@ other = _msg("room@conf.example/guest",
              f"<x xmlns='{MUC_USER}'><item role='participant'/></x>")
 check("a non-member item is not a voice request",
       _muc_voice_request(other) is None)
+# An affiliation-change notification (e.g. a member was just added) is not a
+# request: it comes from the bare room and/or names the target in ``jid``.
+room_level = _msg("room@conf.example",
+                  f"<x xmlns='{MUC_USER}'><item affiliation='member'/></x>")
+check("a room-level member change is not a voice request",
+      _muc_voice_request(room_level) is None)
+with_jid = _msg("room@conf.example/guest",
+                f"<x xmlns='{MUC_USER}'>"
+                "<item affiliation='member' jid='guest@x/y'/></x>")
+check("a member change naming a jid is not a voice request",
+      _muc_voice_request(with_jid) is None)
 
 
 # 2. Sending a request -------------------------------------------------------
