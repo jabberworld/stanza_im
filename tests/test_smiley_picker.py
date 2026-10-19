@@ -17,8 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.include import emoticons
-from stanza_im.ui.smiley_picker import (
-    EmoticonSetSource, SmileyPicker, UnicodeEmojiSource)
+from stanza_im.ui.smiley_picker import EmoticonSetSource, SmileyPicker
 
 FAILURES = []
 
@@ -70,10 +69,6 @@ check("EmoticonSetSource yields entries", bool(entries))
 check("entry tokens are the plain-text codes",
       all(isinstance(tok, str) and tok for tok, _ic in entries))
 check("entry icons are non-null", all(not ic.isNull() for _t, ic in entries))
-
-# 3. the placeholder unicode source is safe ------------------------------------
-check("UnicodeEmojiSource is a no-op for now",
-      UnicodeEmojiSource().entries() == [])
 
 # 4. the picker builds a button per entry and emits the chosen token -----------
 picker = SmileyPicker(source, None)
