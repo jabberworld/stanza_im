@@ -205,6 +205,32 @@ _start_cfg.appearance.participant_font_size = 0
 _start_cfg.save()
 _swin._chat_window.close_all()
 
+# 3b. a non-empty application stylesheet must not drop the chat fonts --------
+_qss_win = MainWindow(app)
+_qss_win._idle_timer.stop()
+_qss_win._suspend_timer.stop()
+_qss_win._memory_timer.stop()
+_qss_win._config.appearance.menu_font_size = 12   # forces an app stylesheet
+_qss_win._apply_widget_fonts()
+_qcw = _qss_win._chat_window
+_qcw.set_input_font("", 22)
+_qcw.set_subject_font("", 15)
+_qcw.set_participant_font("", 20)
+_qmuc = _qcw.open_groupchat("room@conf.example", "me", "Room")
+app.processEvents()
+check("the input font survives the app-stylesheet re-polish",
+      _qmuc._input.font().pointSize() == 22)
+check("the MUC subject button font survives the re-polish",
+      _qmuc._subject_btn.font().pointSize() == 15)
+check("the participant font survives the re-polish",
+      _qmuc._users_list.font().pointSize() == 20)
+_qss_win._apply_widget_fonts()   # a later Ctrl+wheel over the menu/tab bar
+check("the input font survives a later re-polish",
+      _qmuc._input.font().pointSize() == 22)
+check("the participant font survives a later re-polish",
+      _qmuc._users_list.font().pointSize() == 20)
+_qcw.close_all()
+
 
 # 4. logout returns to the login page -----------------------------------------
 win = MainWindow(app)

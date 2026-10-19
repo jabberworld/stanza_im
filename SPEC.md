@@ -1422,7 +1422,12 @@ so every open tab and every new tab picks it up, and calls
 `MainWindow.__init__` ends with `_on_settings_applied()`, so the saved fonts
 (and every other setting) are active from the first frame. The participant nick
 is drawn by `_FadeLabel.paintEvent`, which sets `self.font()` on the pixmap
-painter so the nick actually resizes with the list font.
+painter so the nick actually resizes with the list font. A non-empty application
+stylesheet (`MainWindow._apply_widget_fonts`, from the menu/tab/selector/tooltip
+fonts) makes Qt re-polish the widgets without a stylesheet of their own and drop
+these fonts, so `ChatWindow.reapply_fonts` runs right after
+`_apply_widget_fonts` and `ChatWidget.showEvent` re-applies them on tab show
+(`ChatWidget.reapply_fonts`).
 
 **Preferences defaults**: on the «Шрифты» tab, empty/zero values display the
 *real* font that would be used: the family combo's first entry reads

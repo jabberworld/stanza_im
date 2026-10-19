@@ -190,31 +190,12 @@ class _FadeLabel(QtWidgets.QWidget):
         target.drawPixmap(0, 0, pixmap)
 
 
-class _FontLogMixin:
-    """Diagnostic: log every font change of the chat input / MUC subject.
-
-    Helps pinpoint what resets the configured font: the value that reaches the
-    widget and any later change.  Debug-only (``-d``).
-    """
-    _font_log_name = "widget"
-
-    def changeEvent(self, event) -> None:
-        super().changeEvent(event)
-        if event.type() == QtCore.QEvent.Type.FontChange:
-            logger.debug("FONT[event] %s -> %d pt",
-                         self._font_log_name, self.font().pointSize())
-
-
-class _ChatInput(_FontLogMixin, FontZoomMixin, QtWidgets.QPlainTextEdit):
+class _ChatInput(FontZoomMixin, QtWidgets.QPlainTextEdit):
     """The message input; Ctrl+wheel changes its font size."""
 
-    _font_log_name = "input"
 
-
-class _SubjectButton(_FontLogMixin, FontZoomMixin, QtWidgets.QToolButton):
+class _SubjectButton(FontZoomMixin, QtWidgets.QToolButton):
     """The MUC "Subject:" button; Ctrl+wheel changes the subject font size."""
-
-    _font_log_name = "subject-button"
 
 
 class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
@@ -241,15 +222,13 @@ class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
         super().mousePressEvent(event)
 
 
-class _SubjectEdit(_FontLogMixin, FontZoomMixin, QtWidgets.QLineEdit):
+class _SubjectEdit(FontZoomMixin, QtWidgets.QLineEdit):
     """Read-only MUC subject field with the app's rich tooltip.
 
     The native QToolTip renders as a black block over the WebEngine surface,
     so hover/leave are forwarded to the custom tooltip popup instead.
     Ctrl+wheel changes the subject-header font size.
     """
-
-    _font_log_name = "subject-edit"
 
     def __init__(self, text, parent=None, on_hover=None, on_leave=None):
         super().__init__(text, parent)
@@ -3266,8 +3245,6 @@ class ChatWidget(QtWidgets.QWidget):
             self._subject_btn.setFont(base)
         if getattr(self, "_subject_edit", None) is not None:
             self._subject_edit.setFont(base)
-        logger.debug("FONT[set] subject family=%r size=%r -> %d pt",
-                     family, size, base.pointSize())
 
     def _on_subject_font_zoom(self, size: int) -> None:
         """Ctrl+wheel over the subject header: change only the size."""
@@ -3286,8 +3263,6 @@ class ChatWidget(QtWidgets.QWidget):
         if size > 0:
             base.setPointSize(int(size))
         self._input.setFont(base)
-        logger.debug("FONT[set] input family=%r size=%r -> %d pt",
-                     family, size, base.pointSize())
 
     def _on_input_font_zoom(self, size: int) -> None:
         """Ctrl+wheel over the input: change only the size."""
@@ -3296,6 +3271,29 @@ class ChatWidget(QtWidgets.QWidget):
             return
         self.set_input_font(family, int(size))
         self.input_font_zoom_requested.emit(int(size))
+
+    def reapply_fonts(self) -> None:
+        """Re-apply the configured chat fonts after a stylesheet re-polish.
+
+        A non-empty application stylesheet (the menu/tab/selector/tooltip fonts
+        in ``MainWindow._apply_widget_fonts``) makes Qt re-resolve the font of
+        widgets without their own stylesheet when they are shown or
+        re-polished, resetting the input, MUC subject and participant fonts to
+        the application default.  Re-applying restores the configured values.
+        """
+        self.set_input_font(*self._input_font)
+        if getattr(self, "_subject_btn", None) is not None:
+            self.set_subject_font(*self._subject_font)
+        users = getattr(self, "_users_list", None)
+        if users is not None:
+            family, size = self._participant_font
+            if size <= 0 or users.font().pointSize() != int(size):
+                self.set_participant_font(family, size)
+
+    def showEvent(self, event) -> None:
+        """Re-apply the fonts once the tab becomes visible (see reapply_fonts)."""
+        super().showEvent(event)
+        self.reapply_fonts()
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self.is_muc:

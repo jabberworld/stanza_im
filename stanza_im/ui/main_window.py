@@ -3246,6 +3246,12 @@ class MainWindow(QtWidgets.QMainWindow):
             if decls:
                 rules.append(f"{selectors} {{ {' '.join(decls)} }}")
         app.setStyleSheet("\n".join(rules))
+        # A non-empty stylesheet makes Qt re-polish every widget, dropping the
+        # font of the chat widgets that carry no stylesheet of their own; put
+        # the configured chat fonts back.
+        chat_window = getattr(self, "_chat_window", None)
+        if chat_window is not None:
+            chat_window.reapply_fonts()
 
     def _apply_roster_font(self) -> None:
         """Apply the configured roster font (empty family = application font)."""
@@ -3451,8 +3457,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if input_font != getattr(self, "_applied_input_font", ("", 0)):
             self._chat_window.set_input_font(*input_font)
             self._applied_input_font = input_font
-        logger.debug("FONT[apply] input=%r subject=%r participant=%r",
-                     input_font, subject_font, participant_font)
         tooltip_avatar = int(getattr(
             self._config.appearance, "tooltip_avatar_size", 64) or 64)
         if tooltip_avatar != getattr(self, "_applied_tooltip_avatar", 0):

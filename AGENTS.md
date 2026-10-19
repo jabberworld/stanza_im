@@ -2680,6 +2680,13 @@ are applied **app-wide** by `MainWindow._apply_widget_fonts` via a
 `QApplication` stylesheet with type selectors (`QMenuBar, QMenu` / `QTabBar` /
 `QComboBox { font-family; font-size }`) — the only practical way to reach the
 dynamically created menus, tab bars and dialog selectors.
+A non-empty application stylesheet makes Qt re-polish every widget and
+re-resolve the font of those without a stylesheet of their own, resetting the
+chat input / MUC subject / participant fonts to the application default — so
+`MainWindow._apply_widget_fonts` calls `ChatWindow.reapply_fonts()` right after
+setting it, and `ChatWidget.showEvent` re-applies them (`ChatWidget.
+reapply_fonts`) when a tab is shown; `_SubjectEdit` carries a local stylesheet
+and is immune either way.
 Roster rendering uses the QSS typeface via `MainWindow._apply_roster_font`
 (same raster pass); chat text sets `ChatThemeFactory.set_chat_font(family,
 size)`, which injects a `body { font-family: … !important; font-size: …pt

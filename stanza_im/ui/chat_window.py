@@ -6,8 +6,6 @@ Supports two modes:
 """
 from __future__ import annotations
 
-import logging
-
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import APP_NAME
@@ -15,8 +13,6 @@ from stanza_im.include.enumerators import show_to_icon_key
 from stanza_im.i18n import tr
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.chat_themes import ChatThemeFactory
-
-logger = logging.getLogger(__name__)
 
 
 class _TabBar(QtWidgets.QTabBar):
@@ -181,7 +177,6 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
-        logger.debug("FONT[open] chat %s input=%r", jid, self._input_font)
         widget.set_input_font(*self._input_font)
         widget.set_mds_throttle(self._mds_throttle)
         widget.message_sent.connect(self._on_message_sent)
@@ -266,8 +261,6 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
-        logger.debug("FONT[open] groupchat %s input=%r subject=%r",
-                     room, self._input_font, self._subject_font)
         widget.set_input_font(*self._input_font)
         widget.set_mds_throttle(self._mds_throttle)
         widget.set_participant_font(*self._participant_font)
@@ -502,6 +495,15 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             if widget.is_muc:
                 widget.set_subject_font(*self._subject_font)
+
+    def reapply_fonts(self) -> None:
+        """Re-apply the remembered fonts to every open tab.
+
+        Called after the application stylesheet is (re)set, which makes Qt
+        re-polish the chat widgets and drop their configured fonts.
+        """
+        for widget in self._tabs.values():
+            widget.reapply_fonts()
 
     def set_muc_participant_width(self, width: int) -> None:
         """Remember and apply the MUC participant sidebar width (0 = auto)."""
