@@ -91,6 +91,68 @@ check("probe_resource_versions hits every named resource",
 check("probe_resource_versions tolerates an empty bare",
       asyncio.run(JabberClient.probe_resource_versions(vc, "")) is None)
 
+
+# ── ensure_contact_version re-looks up resources missing client/time ───────
+class _VerClient2:
+    groupchats: dict = {}
+
+    def __init__(self, resources):
+        self._contact = _Contact(resources)
+        self.calls = []
+
+    def get_contact(self, bare):
+        return self._contact
+
+    def _prefetch_version(self, full_jid):   # eager: _start_task is a no-op
+        self.calls.append(full_jid)
+
+    def _start_task(self, coro):
+        return None
+
+
+vc2 = _VerClient2({"laptop": {"client": "Gajim", "client_tzo": "+03:00"},
+                   "phone": {}, "": {}})
+JabberClient.ensure_contact_version(vc2, "bob@example.com")
+check("ensure_contact_version skips resources with client+time",
+      "bob@example.com/laptop" not in vc2.calls)
+check("ensure_contact_version looks up a resource missing client/time",
+      vc2.calls == ["bob@example.com/phone"])
+vc2.calls.clear()
+JabberClient.ensure_contact_version(vc2, "")
+check("ensure_contact_version ignores an empty bare", vc2.calls == [])
+
+
+# ── a failed lookup clears the once-per-session guard ──────────────────────
+class _PrefetchClient:
+    groupchats: dict = {}
+
+    def __init__(self):
+        self.presences = {}
+        self._version_inflight = set()
+        self._version_probed = {"bob@example.com/phone"}
+        self._contact = _Contact({"phone": {}})
+        self.emitted = []
+
+    def get_contact(self, bare):
+        return self._contact
+
+    async def get_entity_version(self, jid):
+        return {}
+
+    async def _entity_tzo(self, jid):
+        return ""
+
+    def emit(self, name, *args):
+        self.emitted.append((name, args))
+
+
+pc = _PrefetchClient()
+asyncio.run(JabberClient._prefetch_version(pc, "bob@example.com/phone"))
+check("a failed version lookup clears the guard so a later presence retries",
+      "bob@example.com/phone" not in pc._version_probed)
+check("a failed lookup still notifies the vCard",
+      ("contact_client_updated", ("bob@example.com",)) in pc.emitted)
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)

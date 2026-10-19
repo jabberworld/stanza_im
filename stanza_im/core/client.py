@@ -1348,6 +1348,7 @@ class JabberClient:
         # ids of sent XEP-0045 §7.13 voice requests awaiting a server reply
         self._voice_requests: set[str] = set()
         self._version_probed: set[str] = set()        # full JIDs (XEP-0092)
+        self._version_inflight: set[str] = set()      # lookups in progress
         self._muc_version_probed: set[tuple[str, str]] = set()
         # bare JID -> SHA-1 of the currently applied avatar (XEP-0084/0153/0398)
         self._avatar_ids: dict[str, str] = {}
@@ -6237,37 +6238,70 @@ class JabberClient:
 
     async def _prefetch_version(self, full_jid: str) -> None:
         """Best-effort XEP-0092/0202 lookup for a contact resource (tooltips)."""
+        if not full_jid or full_jid in self._version_inflight:
+            return
+        self._version_inflight.add(full_jid)
         try:
-            info = await asyncio.wait_for(
-                self.get_entity_version(full_jid), timeout=_ENTITY_TIMEOUT)
-        except Exception:
             info = {}
-        software = info.get("software") or ""
-        version = info.get("version") or ""
-        os_name = info.get("os") or ""
-        tzo = await self._entity_tzo(full_jid)
-        bare, _, resource = full_jid.partition("/")
-        pres = self.presences.get(full_jid)
-        if pres is not None:
-            pres["client"] = software
-            if version:
-                pres["client_version"] = version
-            if os_name:
-                pres["client_os"] = os_name
-            if tzo:
-                pres["client_tzo"] = tzo
-        contact = self.get_contact(bare)
-        if resource and resource in contact.resources:
-            entry = contact.resources[resource]
-            entry["client"] = software
-            if version:
-                entry["client_version"] = version
-            if os_name:
-                entry["client_os"] = os_name
-            if tzo:
-                entry["client_tzo"] = tzo
-        # Let an open vCard re-render its client tree as each answer arrives.
-        self.emit("contact_client_updated", bare)
+            for attempt in range(2):
+                if attempt:
+                    await asyncio.sleep(1.5)
+                try:
+                    info = await asyncio.wait_for(
+                        self.get_entity_version(full_jid),
+                        timeout=_ENTITY_TIMEOUT)
+                except Exception:
+                    info = {}
+                if info.get("software") or info.get("version"):
+                    break
+            software = info.get("software") or ""
+            version = info.get("version") or ""
+            os_name = info.get("os") or ""
+            tzo = await self._entity_tzo(full_jid)
+            bare, _, resource = full_jid.partition("/")
+            pres = self.presences.get(full_jid)
+            if pres is not None:
+                pres["client"] = software
+                if version:
+                    pres["client_version"] = version
+                if os_name:
+                    pres["client_os"] = os_name
+                if tzo:
+                    pres["client_tzo"] = tzo
+            contact = self.get_contact(bare)
+            if resource and resource in contact.resources:
+                entry = contact.resources[resource]
+                entry["client"] = software
+                if version:
+                    entry["client_version"] = version
+                if os_name:
+                    entry["client_os"] = os_name
+                if tzo:
+                    entry["client_tzo"] = tzo
+            # A lookup that resolved nothing must not block a retry: the next
+            # presence (or a tooltip hover) may succeed.
+            if not software and not tzo:
+                self._version_probed.discard(full_jid)
+            # Let an open vCard re-render its client tree as each answer arrives.
+            self.emit("contact_client_updated", bare)
+        finally:
+            self._version_inflight.discard(full_jid)
+
+    def ensure_contact_version(self, bare: str) -> None:
+        """(Re)look up XEP-0092/0202 for resources that still lack it.
+
+        Called when a tooltip is built for a resource without client/time, so
+        the data appears shortly after even when the peer stays online and never
+        re-sends its presence.
+        """
+        if not bare or bare in self.groupchats:
+            return
+        for res, info in list(self.get_contact(bare).resources.items()):
+            if not res:
+                continue
+            if info.get("client") and info.get("client_tzo"):
+                continue
+            self._start_task(self._prefetch_version(f"{bare}/{res}"))
 
     async def probe_resource_versions(self, bare: str) -> None:
         """Force a fresh XEP-0092/0202 lookup for every resource of *bare*.

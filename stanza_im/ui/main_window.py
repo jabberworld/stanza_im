@@ -2989,6 +2989,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "caps_node": info.get("caps_node"),
         } for resource, info in resources]
         if blocks:
+            if any(not b["client"] or not b["tzo"] for b in blocks):
+                self._client.ensure_contact_version(jid)
             lines.append(resource_tree_html(blocks))
         elif contact.status:
             lines.append(tr("tooltip_status") + ": "

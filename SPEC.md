@@ -206,8 +206,11 @@ the tree, per resource); `ping` is the single entity row. The dialog opens with
 headroom (700×550 clamped) and every tab page is wrapped in a `QScrollArea` so
 long wrapped text is never clipped; the tree fills in as each resource answers
 (`contact_client_updated`), and the "Refresh" button re-requests the versions
-(`probe_resource_versions`). «Визитка обновлена» is formatted as local
-`YYYY-MM-DD HH:MM:SS`.
+(`probe_resource_versions`); a lookup that resolves nothing drops its JID from
+the once-per-session guard so a later presence retries, and
+`JabberClient.ensure_contact_version` re-requests the resources still missing
+client/time when a roster tooltip is built. «Визитка обновлена» is formatted as
+local `YYYY-MM-DD HH:MM:SS`.
 `_refresh_vcard` registers the JID in `_vcard_refreshing` (not the
 "open a new dialog" `_pending_profile`) so the result updates the visible
 window; `_find_open_vcard` matches by bare JID to tolerate a bare/full-JID key

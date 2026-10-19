@@ -949,6 +949,12 @@ into the contact's live local time; its `asyncio.wait_for` uses a generous
 `contact_client_updated(bare)` so an open vCard re-renders as each answer
 arrives. `JabberClient.probe_resource_versions(bare)` re-runs it for every
 resource (the vCard "Refresh" bypasses the once-per-session `_version_probed`).
+A lookup that resolves nothing (no software and no tzo) drops its JID from
+`_version_probed` so a later presence retries, and makes up to two attempts
+itself; `JabberClient.ensure_contact_version(bare)` re-requests the resources
+still missing client/time when a roster tooltip is built for them, so the data
+appears without opening the vCard even for a peer that never re-sends its
+presence. Concurrent lookups per JID are deduped by `_version_inflight`.
 `JabberClient.best_full_jid(bare)` returns the full
 JID of the best **online** resource; `probe_entity` probes **it** for the
 software version, local time and ping (not the bare JID, which the server
