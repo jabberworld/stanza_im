@@ -15,6 +15,34 @@ WHITEBOARD_HEIGHT = 720
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # .../stanza_im
 _PROJECT_ROOT = os.path.dirname(_PKG_DIR)                                        # .../ (source checkout)
 PROJECT_ROOT = _PROJECT_ROOT
+
+
+def _git_commit() -> str:
+    """Short HEAD commit of the running checkout (``""`` outside a git repo).
+
+    Appended to the advertised version so builds of the same version can be
+    told apart while developing (two machines sharing one working directory, a
+    stale process, …).
+    """
+    if not os.path.isdir(os.path.join(PROJECT_ROOT, ".git")):
+        return ""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "-C", PROJECT_ROOT, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2)
+    except Exception:  # noqa: BLE001 - git missing, timeout, permission, …
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+GIT_COMMIT = _git_commit()
+# Version shown to users and to other clients: the plain version outside a git
+# checkout, with the short commit appended when running from one.
+VERSION_DISPLAY = f"{VERSION} ({GIT_COMMIT})" if GIT_COMMIT else VERSION
+
 _SIBLING_RESOURCES = os.path.join(_PROJECT_ROOT, "resources")
 _PKG_RESOURCES = os.path.join(_PKG_DIR, "resources")
 RESOURCES_DIR = (_PKG_RESOURCES if os.path.isdir(_PKG_RESOURCES)

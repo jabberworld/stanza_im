@@ -29,7 +29,7 @@ from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as 
 from stanza_im.core.vcard_cache import VCardCache
 from stanza_im.core import privacy, roster_cache
 from stanza_im.include import constants
-from stanza_im.include.constants import APP_NAME, VERSION
+from stanza_im.include.constants import APP_NAME, VERSION, VERSION_DISPLAY
 from stanza_im.i18n import current_language as _current_language
 from stanza_im.xmpp import jingle as jingle_mod
 from stanza_im.xmpp import jingle_rtp
@@ -1184,7 +1184,7 @@ class JabberClient:
         self.xmpp.register_plugin("xep_0030")  # Service Discovery
         self.xmpp.register_plugin("xep_0092", {
             "name": APP_NAME if send_software else "",
-            "version": VERSION,
+            "version": VERSION_DISPLAY,
             "os": f"Python {platform.python_version()}" if send_software else "",
         })
         self.xmpp.register_plugin("xep_0199")  # Ping
@@ -1327,13 +1327,13 @@ class JabberClient:
             category="collaboration", itype="sxe", name=APP_NAME)
         _caps = self.xmpp.plugin.get("xep_0115", None)
         if _caps is not None:
-            _caps.caps_node = f"{APP_NAME} {VERSION}"
+            _caps.caps_node = f"{APP_NAME} {VERSION_DISPLAY}"
         _version = self.xmpp.plugin.get("xep_0092", None)
         if _version is not None:
             # slixmpp's plugin_init only honours the "name" config key; set
             # the version/os explicitly so XEP-0092 reports ours.
             _version.software_name = APP_NAME if send_software else ""
-            _version.version = VERSION if send_software else ""
+            _version.version = VERSION_DISPLAY if send_software else ""
             _version.os = (f"Python {platform.python_version()}"
                            if send_software else "")
 

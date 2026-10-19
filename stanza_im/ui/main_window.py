@@ -3548,9 +3548,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 plugin.software_name = (APP_NAME if self._config.privacy.send_software
                                         else "")
                 if self._config.privacy.send_software:
-                    from stanza_im.include.constants import VERSION
+                    from stanza_im.include.constants import VERSION_DISPLAY
                     import platform
-                    plugin.version = VERSION
+                    plugin.version = VERSION_DISPLAY
                     plugin.os = f"Python {platform.python_version()}"
                 else:
                     plugin.version = ""

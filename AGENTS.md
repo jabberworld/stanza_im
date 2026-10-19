@@ -2885,7 +2885,11 @@ text is kept. Returning activity (`eventFilter`) resumes
   the caps node verbatim for unknown clients). The XEP-0092
   `software_name`/`version`/`os` are set explicitly (slixmpp's `plugin_init`
   only honours the `name` config key), so version queries report Stanza IM.
-  [`tests/test_client_branding.py`]
+  The advertised version is `constants.VERSION_DISPLAY` — the plain `VERSION`
+  outside a git checkout, with the short HEAD commit appended (`0.1.0 (00dc38b)`)
+  when running from one (`constants._git_commit`, `PROJECT_ROOT/.git`) — used in
+  the caps node, XEP-0092, the About dialog and the startup log, so a stale build
+  is visible at a glance. [`tests/test_client_branding.py`]
 
 ### 9. Thrifty traffic — Stream Management & CSI (XEP-0198/0352)
 

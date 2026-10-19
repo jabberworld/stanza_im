@@ -6,7 +6,8 @@ import platform
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from stanza_im.include.constants import APP_NAME, LOGO_PNG, PROJECT_ROOT, VERSION
+from stanza_im.include.constants import (APP_NAME, LOGO_PNG, PROJECT_ROOT,
+                                         VERSION_DISPLAY)
 from stanza_im.i18n import tr
 
 
@@ -29,7 +30,7 @@ class AboutDialog(QtWidgets.QDialog):
                 72, 72, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                 QtCore.Qt.TransformationMode.SmoothTransformation))
         header.addWidget(logo)
-        title = QtWidgets.QLabel(f"<b>{APP_NAME}</b><br><span style='font-size: 16pt'>{VERSION}</span>")
+        title = QtWidgets.QLabel(f"<b>{APP_NAME}</b><br><span style='font-size: 16pt'>{VERSION_DISPLAY}</span>")
         title.setTextFormat(QtCore.Qt.TextFormat.RichText)
         header.addWidget(title)
         header.addStretch()
@@ -59,7 +60,7 @@ class AboutDialog(QtWidgets.QDialog):
             slixmpp_version = "unknown"
         from stanza_im.xmpp.omemo import availability
         values = (
-            ("about_component_app", f"{APP_NAME} {VERSION}"),
+            ("about_component_app", f"{APP_NAME} {VERSION_DISPLAY}"),
             ("about_component_pyqt", QtCore.PYQT_VERSION_STR),
             ("about_component_qt", QtCore.QT_VERSION_STR),
             ("about_component_python", platform.python_version()),

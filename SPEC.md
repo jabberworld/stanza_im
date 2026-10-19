@@ -2709,7 +2709,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   `client/bot` and the `http://slixmpp.com/ver/…` node; clients that map caps
   nodes to names display the node verbatim for unknown clients). The XEP-0092
   `software_name`/`version`/`os` attributes are set explicitly because
-  slixmpp's `plugin_init` only honours the `name` config key.
+  slixmpp's `plugin_init` only honours the `name` config key. The advertised
+  version is `constants.VERSION_DISPLAY`: the plain `VERSION` outside a git
+  checkout, with the short HEAD commit appended (`0.1.0 (00dc38b)`) when running
+  from one (`constants._git_commit`); it feeds the caps node, XEP-0092, the About
+  dialog and the startup log.
 
 ### 14.7 Stream Management & Client State (XEP-0198/0352)
 

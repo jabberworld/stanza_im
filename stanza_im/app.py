@@ -7,7 +7,8 @@ import os
 
 from PyQt6 import QtWidgets
 
-from stanza_im.include.constants import APP_NAME, VERSION, APP_LOG_FILE
+from stanza_im.include.constants import (APP_NAME, APP_LOG_FILE,
+                                         VERSION_DISPLAY)
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,8 @@ def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
     prog = os.path.basename((argv or sys.argv)[0] or "stanza-im")
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="%s %s — XMPP/Jabber desktop client" % (APP_NAME, VERSION))
+        description="%s %s — XMPP/Jabber desktop client" % (
+            APP_NAME, VERSION_DISPLAY))
     parser.add_argument("-d", "--debug", action="store_true",
                         help="show debug messages in the console")
     parser.add_argument("-x", "--xml", action="store_true",
@@ -234,7 +236,7 @@ def run() -> int:
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setApplicationVersion(VERSION)
+    app.setApplicationVersion(VERSION_DISPLAY)
     app.setQuitOnLastWindowClosed(False)
 
     import qasync
@@ -296,7 +298,7 @@ def run() -> int:
         timer.timeout.connect(lambda: memstats.report(logger))
         timer.start(60_000)
 
-    logger.info("%s %s started", APP_NAME, VERSION)
+    logger.info("%s %s started", APP_NAME, VERSION_DISPLAY)
 
     with loop:
         exit_code = loop.run_forever()

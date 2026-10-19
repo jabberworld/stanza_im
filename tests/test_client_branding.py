@@ -17,7 +17,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stanza_im.core.client import JabberClient
-from stanza_im.include.constants import APP_NAME, VERSION
+from stanza_im.include.constants import (APP_NAME, GIT_COMMIT, VERSION,
+                                         VERSION_DISPLAY)
 
 FAILURES = []
 
@@ -33,13 +34,16 @@ c = JabberClient("me@example.com/r", "pw")
 # 1. caps node + software version branding ------------------------------------
 caps = c.xmpp.plugin["xep_0115"]
 check("caps node is branded",
-      caps.caps_node == f"{APP_NAME} {VERSION}")
+      caps.caps_node == f"{APP_NAME} {VERSION_DISPLAY}")
+check("the version carries the git commit in a checkout",
+      (VERSION_DISPLAY == f"{VERSION} ({GIT_COMMIT})" if GIT_COMMIT
+       else VERSION_DISPLAY == VERSION))
 check("caps node is not slixmpp's",
       "slixmpp" not in (caps.caps_node or ""))
 
 plugin = c.xmpp.plugin["xep_0092"]
 check("xep_0092 name is Stanza IM", plugin.software_name == APP_NAME)
-check("xep_0092 version is ours", plugin.version == VERSION)
+check("xep_0092 version is ours", plugin.version == VERSION_DISPLAY)
 check("xep_0092 os is set", bool(plugin.os))
 
 # 2. the advertised disco identity carries the name ---------------------------
