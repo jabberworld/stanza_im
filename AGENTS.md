@@ -310,7 +310,10 @@ offers the `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
 `include.emoticons.unicode_map()` — a `{code: emoji}` map derived from the
 `default` theme's image semantics (`_UNICODE_BY_FILE`, one emoji per image, so
 `: )`/`:-)` share 🙂). The substituted emoji are drawn with the platform font
-(no chat-font override is injected).
+(no chat-font override is injected). A code is converted only when it is not
+adjacent to a letter or digit (any script): `200:/bla` and `Привет:)` stay
+intact while `:):):)` and `:).` convert; the same boundary guards the image
+substitution in `smile_to_html` (`_boundary_ok`/`_sub_guarded`).
 
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs

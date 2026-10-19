@@ -237,6 +237,8 @@ the XEP-0444 reaction picker instead. With `appearance.emoticon_unicode_replace`
 (default on) `smile_to_html` substitutes the text codes with unicode emoji from
 `include.emoticons.unicode_map()` (derived from the `default` theme's image
 semantics); the emoji are drawn with the platform font (no chat-font override).
+A code converts only when not adjacent to a letter/digit (any script), in both
+the unicode and the image substitution (`_boundary_ok`/`_sub_guarded`).
 The service browser uses XEP-0030 discovery, groups identities by category and
 builds the tree fully lazily with no eager discovery: a node renders its direct
 children "as is" from a single `disco#items` request (with the parent's `node`

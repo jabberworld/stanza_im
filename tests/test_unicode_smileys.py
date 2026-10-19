@@ -52,6 +52,23 @@ check("unicode skin substitutes when the option is on",
 check("a theme skin still renders images",
       "<img" in emoticons.smile_to_html("hi :)", "default/smileys.cfg"))
 
+# A smiley glued to a letter/digit is left alone (both substitutions).
+check("a digit before the code blocks the unicode substitution",
+      emoticons.smile_to_html("200:/bla", emoticons.UNICODE_SKIN,
+                              unicode_replace=True) == "200:/bla")
+check("a Cyrillic letter before the code blocks the substitution",
+      emoticons.smile_to_html("Привет:)", emoticons.UNICODE_SKIN,
+                              unicode_replace=True) == "Привет:)")
+check("adjacent smileys still convert",
+      emoticons.smile_to_html(":):):)", emoticons.UNICODE_SKIN,
+                              unicode_replace=True) == "🙂🙂🙂")
+check("a smiley followed by punctuation still converts",
+      emoticons.smile_to_html(":).", emoticons.UNICODE_SKIN,
+                              unicode_replace=True) == "🙂.")
+check("a digit-glued code is not turned into an image",
+      "<img" not in emoticons.smile_to_html("200:/bla",
+                                            "default/smileys.cfg"))
+
 # The theme factory wires the option through to the message body.
 factory = ChatThemeFactory()
 factory.set_emoticon_skin(emoticons.UNICODE_SKIN)

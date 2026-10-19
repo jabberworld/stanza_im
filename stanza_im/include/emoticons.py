@@ -140,13 +140,37 @@ def unicode_map() -> dict[str, str]:
     return result
 
 
+def _code_pattern(mapping: dict[str, str]) -> "re.Pattern[str]":
+    """A regex matching any text code of *mapping* (longest codes first)."""
+    return re.compile("|".join(re.escape(code)
+                               for code in sorted(mapping, key=len, reverse=True)))
+
+
+def _boundary_ok(text: str, start: int, end: int) -> bool:
+    """True when the code at ``text[start:end]`` is not glued to a word.
+
+    A smiley is only converted when it is not directly adjacent to a letter or
+    digit (any script), so ``200:/bla`` and ``Привет:)`` stay intact while
+    ``:):):)`` and ``:).`` convert.
+    """
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    return not (before.isalnum() or after.isalnum())
+
+
+def _sub_guarded(pattern: "re.Pattern[str]", render, text: str) -> str:
+    """Replace every match that is *not* adjacent to a letter/digit."""
+    return pattern.sub(
+        lambda match: (render(match.group(0))
+                       if _boundary_ok(text, match.start(), match.end())
+                       else match.group(0)), text)
+
+
 def _replace_with_unicode(text: str) -> str:
     mapping = unicode_map()
     if not mapping:
         return text
-    pattern = re.compile("|".join(re.escape(code) for code in
-                                  sorted(mapping, key=len, reverse=True)))
-    return pattern.sub(lambda match: mapping[match.group(0)], text)
+    return _sub_guarded(_code_pattern(mapping), mapping.__getitem__, text)
 
 
 def _file_codes(mapping: dict[str, str]) -> dict[str, str]:
@@ -205,11 +229,11 @@ def smile_to_html(text: str, skin: str = "default/smileys.cfg",
     mapping = _load_map(skin)
     if not mapping:
         return text
-    pattern = re.compile("|".join(re.escape(code)
-                                  for code in sorted(mapping, key=len, reverse=True)))
-    return pattern.sub(lambda match: (
-        f'<img src="{mapping[match.group(0)]}" alt="{match.group(0)}" '
-        'style="vertical-align:middle" width="16" height="16">'), text)
+    return _sub_guarded(
+        _code_pattern(mapping),
+        lambda code: (f'<img src="{mapping[code]}" alt="{code}" '
+                      'style="vertical-align:middle" width="16" height="16">'),
+        text)
 
 
 def clear_cache() -> None:
