@@ -43,7 +43,7 @@ sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine pyt
 Для работы шифрования OMEMO дополнительно нужны такие пакеты:
 
 ```
-sudo apt-get install python3-omemo python3-oldmemo python3-twomemo python3-omemo-dr python3-slixmpp-omemo
+sudo apt-get install python3-omemo python3-oldmemo python3-twomemo python3-omemo-dr python3-slixmpp-omemo python3-xmlschema
 ```
 
 ## Документация проекта
