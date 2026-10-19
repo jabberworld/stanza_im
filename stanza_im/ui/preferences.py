@@ -763,16 +763,19 @@ class PreferencesDialog(QtWidgets.QDialog):
         """
         combo = self._font_family_combo(key, default_family)
         combo.setMinimumWidth(160)
+        if default_family:
+            combo.setToolTip(tr("prefs_font_default", family=default_family))
         size = self._spin(key + "_size", 0, 48)
         size.setMinimumWidth(SPIN_WIDTH)
         size.setMaximumWidth(16777215)
         size.setValue(0)
         size.setSuffix(tr("prefs_font_pt"))
-        # Read the "default" special text from its start (a narrow box would
-        # otherwise show only the tail of the phrase).
+        # The default shows as a compact "(*)" (always fits the narrow box);
+        # the full phrase lives in the tooltip.
+        size.setSpecialValueText("(*)")
         size.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         if default_size > 0:
-            size.setSpecialValueText(
+            size.setToolTip(
                 tr("prefs_font_size_default", size=f"{default_size:g}"))
         # Both controls grow with the dialog (the form uses
         # ExpandingFieldsGrow); the family takes the larger share.
@@ -1458,9 +1461,10 @@ class PreferencesDialog(QtWidgets.QDialog):
             size = (self._controls["chat_font_size"].value()
                     or default_size)
             for key in ("nick_font", "input_font"):
-                self._controls[key].setItemText(
-                    0, tr("prefs_font_default", family=family))
-                self._controls[key + "_size"].setSpecialValueText(
+                default_label = tr("prefs_font_default", family=family)
+                self._controls[key].setItemText(0, default_label)
+                self._controls[key].setToolTip(default_label)
+                self._controls[key + "_size"].setToolTip(
                     tr("prefs_font_size_default", size=f"{size:g}"))
 
         self._controls["chat_font"].currentIndexChanged.connect(

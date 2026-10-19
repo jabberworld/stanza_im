@@ -217,10 +217,14 @@ nick_size = prefs._controls["nick_font_size"]
 check("default family label shows a real face",
       "Default" in nick_combo.itemText(0)
       and nick_combo.itemText(0) != "Default")
-check("default size label is a real pt default",
-      "pt" in nick_size.specialValueText())
+check("default size shows a compact placeholder",
+      nick_size.specialValueText() == "(*)")
+check("the size tooltip names the real pt default",
+      "pt" in nick_size.toolTip())
 app_family = QtWidgets.QApplication.font().family()
 check("default label names the real system font", app_family in nick_combo.itemText(0))
+check("the family tooltip names the real default",
+      app_family in nick_combo.toolTip())
 chat_combo = prefs._controls["chat_font"]
 target_idx = chat_combo.findData(app_family)
 if target_idx > 0:
