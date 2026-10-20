@@ -77,6 +77,7 @@ class WhiteboardSession:
     offered: bool = False       # we sent a state offer
     accepted: bool = False      # our offer was accepted
     host: str = ""              # the session host (the initiator in a 1:1)
+    senders: str = "both"       # Jingle senders: who may edit the document
     synced: bool = False        # the host's state has been received
     pending: list = field(default_factory=list)  # edits waiting for the state
     state_buffering: bool = False
@@ -126,6 +127,19 @@ class WhiteboardManager:
 
     def session(self, sid: str) -> WhiteboardSession | None:
         return self.sessions.get(sid)
+
+    #: Jingle ``senders`` values (XEP-0166) and the role they name.
+    _SENDERS = ("none", "initiator", "responder", "both")
+
+    def may_edit(self, sid: str) -> bool:
+        """True when the session's ``senders`` include us (or it is local)."""
+        session = self.sessions.get(sid)
+        return True if session is None else self._may_edit(session)
+
+    @staticmethod
+    def _may_edit(session: WhiteboardSession) -> bool:
+        role = "initiator" if session.is_host else "responder"
+        return session.senders in ("both", role)
 
     def document(self, sid: str) -> SxeDocument | None:
         session = self.sessions.get(sid)
@@ -613,7 +627,7 @@ class WhiteboardManager:
 
     def _apply_patch(self, sid: str, batch: dict) -> None:
         session = self.sessions.get(sid)
-        if session is None:
+        if session is None or not self._may_edit(session):
             return
         doc = session.doc
         for el in batch.get("new", []):
@@ -637,7 +651,7 @@ class WhiteboardManager:
     def add_shape(self, sid: str, attrs: dict) -> str:
         """Add a drawable object (``path`` or ``image``) and broadcast ``<new>``."""
         session = self.sessions.get(sid)
-        if session is None:
+        if session is None or not self._may_edit(session):
             return ""
         doc = session.doc
         tag = str(attrs.get("tag") or "path")
@@ -672,7 +686,7 @@ class WhiteboardManager:
     def update_shape(self, sid: str, rid: str, attrs: dict) -> None:
         """Change an existing shape's attributes and broadcast the edits."""
         session = self.sessions.get(sid)
-        if session is None:
+        if session is None or not self._may_edit(session):
             return
         doc = session.doc
         if rid not in doc.records:
@@ -711,7 +725,7 @@ class WhiteboardManager:
     def remove_shape(self, sid: str, rid: str) -> None:
         """Remove a shape and broadcast the ``<remove>`` edits (children first)."""
         session = self.sessions.get(sid)
-        if session is None:
+        if session is None or not self._may_edit(session):
             return
         doc = session.doc
         captured = doc.new_elements_for(rid) if rid in doc.records else []
@@ -727,7 +741,7 @@ class WhiteboardManager:
     def group_shapes(self, sid: str, rids: list[str]) -> str:
         """Group drawables under a new ``<g/>``; returns the group record id."""
         session = self.sessions.get(sid)
-        if session is None:
+        if session is None or not self._may_edit(session):
             return ""
         doc = session.doc
         rids = [r for r in rids if r in doc.records]
@@ -761,7 +775,7 @@ class WhiteboardManager:
         §8.5).
         """
         session = self.sessions.get(sid)
-        if session is None:
+        if session is None or not self._may_edit(session):
             return False
         doc = session.doc
         group = doc.records.get(group_rid)
@@ -867,7 +881,8 @@ class WhiteboardManager:
         reorder renumbers the changed siblings to their new position.
         """
         session = self.sessions.get(sid)
-        if session is None or op not in self._REORDER:
+        if (session is None or not self._may_edit(session)
+                or op not in self._REORDER):
             return False
         doc = session.doc
         children = doc.children(doc.root_rid)
@@ -951,6 +966,7 @@ class WhiteboardManager:
             # The offered transport names the host: in a 1:1 session it is the
             # initiator (XEP-0284 §4.1) and the accept echoes it (§4.2).
             session.host = self._offer_host(jingle, frm)
+            session.senders = self._offer_senders(jingle)
             self._seed_document(session.doc)
             self.sessions[sid] = session
             self._by_peer[peer] = sid
@@ -968,6 +984,10 @@ class WhiteboardManager:
                 session.peer = peer
                 session.full_peer = frm
                 self._by_peer[peer] = sid
+        elif action == "content-modify":
+            session = self.sessions.get(sid)
+            if session is not None:
+                self._apply_content_modify(session, jingle)
         elif action == "session-terminate":
             session = self.sessions.pop(sid, None)
             if session is not None:
@@ -988,6 +1008,28 @@ class WhiteboardManager:
         initiator = (jingle.get("initiator") or "").strip()
         return initiator or fallback
 
+    def _offer_senders(self, jingle: ET.Element) -> str:
+        """The ``senders`` of the offered content (who may edit)."""
+        content = jingle.find(_q(NS_JINGLE, "content"))
+        value = ((content.get("senders") if content is not None else "")
+                 or "both").strip()
+        return value if value in self._SENDERS else "both"
+
+    def _apply_content_modify(self, session: WhiteboardSession,
+                              jingle: ET.Element) -> None:
+        """Apply a Jingle ``content-modify`` (a board switched off/on)."""
+        content = jingle.find(_q(NS_JINGLE, "content"))
+        if content is None:
+            return
+        value = (content.get("senders") or "").strip()
+        if value not in self._SENDERS or value == session.senders:
+            return
+        session.senders = value
+        editable = self._may_edit(session)
+        logger.info("Whiteboard: senders of %s are now %s (editable=%s)",
+                    session.sid[:8], value, editable)
+        self.client.emit("whiteboard_senders", session.sid, editable)
+
     def _send_jingle(self, session: WhiteboardSession, action: str,
                      reason: str = "", on_result=None) -> None:
         iq = self.client.xmpp.Iq()
@@ -1005,6 +1047,9 @@ class WhiteboardManager:
             content = ET.SubElement(jingle, _q(NS_JINGLE, "content"))
             content.set("creator", "initiator")
             content.set("name", "whiteboard")
+            if action == "session-accept":
+                # Accept the offered edit rights as-is (XEP-0166 `senders`).
+                content.set("senders", session.senders)
             ET.SubElement(content, _q(NS_WHITEBOARD, "description"))
             transport = ET.SubElement(content,
                                       _q(NS_SXE_TRANSPORT, "transport"))
@@ -1254,6 +1299,12 @@ class WhiteboardManager:
                     new: list | None = None, sets: list | None = None,
                     removes: list | None = None) -> None:
         if not (new or sets or removes):
+            return
+        if not self._may_edit(session):
+            # Jingle senders exclude us: the host ignores our edits (a board
+            # switched off is frozen for both sides).
+            logger.debug("Whiteboard: edit ignored, not a sender in %s",
+                         session.sid[:8])
             return
         if not session.is_host and not session.synced:
             # A joiner may edit only after it received the initial state

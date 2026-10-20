@@ -2706,6 +2706,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   host drops a request that comes before its payload channel is ready. Edits
   made before the snapshot are buffered and flushed once `<document-end>` has
   been applied (a host ignores edits from an unsynchronized peer).
+- **Edit rights** follow the Jingle `senders` of the content: `none` (a board
+  switched off) freezes it for both sides, the accept echoes the offered value
+  and a `content-modify` updates it, making the open board read-only until
+  editing is enabled again.
 - **Not implemented (possible future work):** the extended profile's optional
   attachment transfer over Jingle File Transfer (XEP-0234, §12.3). Large images
   are handled by embedding a `data:` URI or uploading via HTTP File Upload

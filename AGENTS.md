@@ -2326,7 +2326,14 @@ starts accepted contents on the next event-loop turn), so
 joiner buffers its own edits (`WhiteboardSession.pending`, flushed in order once
 `synced`) — a host ignores edits from an unsynchronized peer. The SXE lifecycle
 (`connect`/`state-offer`/`accept-state`/`state`) is logged as
-`Whiteboard: SXE …` for diagnosis.
+`Whiteboard: SXE …` for diagnosis. The Jingle `senders` of the content are
+honoured: `<content senders="none"/>` (a board switched off in Psi) freezes it,
+so `WhiteboardManager.may_edit` gates every local edit and `_send_edits` drops
+them; the accept echoes the offered value and a later `content-modify`
+(`_apply_content_modify`) emits `whiteboard_senders(sid, editable)`, which
+`MainWindow` forwards to `WhiteboardDialog.set_editable` (drawing tools and
+object operations disabled, `WhiteboardCanvas.set_editable` ignores mouse/key
+edits while pan/zoom keep working).
 [`tests/test_whiteboard.py`, `tests/test_whiteboard_sync.py`,
 `tests/test_jingle_error_router.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`,
 `tests/test_svg_transform.py`]

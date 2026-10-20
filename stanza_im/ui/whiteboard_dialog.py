@@ -68,6 +68,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._is_muc = is_muc
         self._config = config
         self._sid = ""
+        self._editable = True
         self.setWindowTitle(tr("whiteboard_title"))
         self.setModal(False)
         self.resize(1040, 680)
@@ -186,9 +187,10 @@ class WhiteboardDialog(QtWidgets.QDialog):
         toolbar.addWidget(self._fill_on_btn)
 
         toolbar.addWidget(self._separator())
-        clear = self._tool_button("clear.png", tr("whiteboard_clear"))
-        clear.clicked.connect(self._confirm_clear)
-        toolbar.addWidget(clear)
+        self._clear_btn = self._tool_button("clear.png",
+                                            tr("whiteboard_clear"))
+        self._clear_btn.clicked.connect(self._confirm_clear)
+        toolbar.addWidget(self._clear_btn)
         save = self._tool_button("wb-save.svg", tr("whiteboard_save_svg"))
         save.clicked.connect(self._save_svg)
         toolbar.addWidget(save)
@@ -254,6 +256,8 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sid = sid
         self._share_btn.setChecked(True)
         self._sync_label.setText(tr("whiteboard_shared"))
+        if self._client is not None:
+            self.set_editable(self._client.whiteboard.may_edit(sid))
         # The shared session has its own (shared) undo/redo history.
         self._canvas.clear_history()
         self._update_undo_actions()
@@ -263,12 +267,31 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sid = ""
         self._share_btn.setChecked(False)
         self._sync_label.setText(tr("whiteboard_not_shared"))
+        self.set_editable(True)
         self._canvas.clear_history()
+        self._update_undo_actions()
+
+    def set_editable(self, editable: bool) -> None:
+        """Reflect the session's Jingle ``senders``: may we edit the document?"""
+        self._editable = bool(editable)
+        self._canvas.set_editable(self._editable)
+        for tool, button in self._tool_buttons.items():
+            button.setEnabled(self._editable or tool == "select")
+        for button in (self._delete_btn, self._undo_btn, self._redo_btn,
+                       self._order_btn, self._group_btn, self._ungroup_btn,
+                       self._image_btn, self._fill_on_btn, self._width_btn,
+                       self._stroke_btn, self._fill_btn, self._size_btn,
+                       self._clear_btn):
+            button.setEnabled(self._editable)
+        if not self._editable:
+            self._tool_buttons["select"].setChecked(True)
+        self._update_group_actions()
         self._update_undo_actions()
 
     def set_local_only(self) -> None:
         """Mark the board as local (a session with our own JID is pointless)."""
         self._share_btn.setChecked(False)
+        self.set_editable(True)
         self._sync_label.setText(tr("whiteboard_local_only"))
 
     def show_warning(self, text: str) -> None:
@@ -279,6 +302,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
         """Report a failed share and reset the dialog to the local board."""
         self._sid = ""
         self._share_btn.setChecked(False)
+        self.set_editable(True)
         if reason == "unavailable":
             self._sync_label.setText(tr("whiteboard_failed_offline"))
         else:
@@ -478,6 +502,8 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self.share_png_requested.emit(path)
 
     def _on_undo(self) -> None:
+        if not self._editable:
+            return
         if self._client and self._sid:
             self._client.whiteboard.undo(self._sid)
         else:
@@ -485,6 +511,8 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._update_undo_actions()
 
     def _on_redo(self) -> None:
+        if not self._editable:
+            return
         if self._client and self._sid:
             self._client.whiteboard.redo(self._sid)
         else:
@@ -501,8 +529,8 @@ class WhiteboardDialog(QtWidgets.QDialog):
         else:
             can_undo = self._canvas.can_undo()
             can_redo = self._canvas.can_redo()
-        self._undo_btn.setEnabled(bool(can_undo))
-        self._redo_btn.setEnabled(bool(can_redo))
+        self._undo_btn.setEnabled(self._editable and bool(can_undo))
+        self._redo_btn.setEnabled(self._editable and bool(can_redo))
 
     def _reorder(self, op: str) -> None:
         """Change the selected shape's stacking order (front/back/±1)."""
@@ -517,8 +545,10 @@ class WhiteboardDialog(QtWidgets.QDialog):
 
     def _update_group_actions(self) -> None:
         """Gate the group/ungroup buttons on the current selection."""
-        self._group_btn.setEnabled(len(self._canvas.selection()) >= 2)
-        self._ungroup_btn.setEnabled(bool(self._canvas.selected_group()))
+        self._group_btn.setEnabled(
+            self._editable and len(self._canvas.selection()) >= 2)
+        self._ungroup_btn.setEnabled(
+            self._editable and bool(self._canvas.selected_group()))
 
     def _group_selection(self) -> None:
         """Group the selected shapes (Ctrl+click to select several)."""

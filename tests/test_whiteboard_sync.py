@@ -864,6 +864,68 @@ check("the host snapshot marks the session synchronized", _synced)
 check("the buffered edit is flushed after the snapshot", _flushed > 0)
 check("both drawings are merged in the document", "mine" in _shapes)
 
+# 28. Jingle senders: a board switched off is read-only for both -------------
+async def _senders_case():
+    client = _FakeClient()
+    manager = WhiteboardManager(client)
+    manager._connect_retry_delays = ()
+    offer = _host_offer("host-4")
+    content = offer.find(_q(wb_mod.NS_JINGLE, "content"))
+    content.set("senders", "none")
+    await manager.dispatch("session-initiate", offer,
+                           _IqStub("bob@example.com/pc"))
+    manager.join_session("bob@example.com", "host-4")
+    accept = _accept_stanza(client)
+    echoed = accept.xml.find(".//%s" % _q(wb_mod.NS_JINGLE, "content"))
+    # The host sends its (empty) snapshot: become synchronized, then toggle.
+    snap = ET.Element(_q(NS_SXE, "sxe"))
+    snap.set("session", "host-4")
+    st = ET.SubElement(snap, _q(NS_SXE, "state"))
+    begin = ET.SubElement(st, _q(NS_SXE, "document-begin"))
+    begin.set("prolog", wb_mod.DOC_PROLOG)
+    end = ET.SubElement(st, _q(NS_SXE, "document-end"))
+    end.set("last-sender", "")
+    end.set("last-id", "")
+    snap_msg = _MsgStub("bob@example.com/pc")
+    snap_msg.xml.append(snap)
+    await manager.handle_sxe(snap_msg)
+    blocked = not manager.may_edit("host-4")
+    rid_blocked = manager.add_shape("host-4", {"id": "nope", "d": "M 0 0 L 1 1"})
+    sent_blocked = any(
+        s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None
+        for s in client.xmpp.sent)
+
+    modify = ET.Element(_q(wb_mod.NS_JINGLE, "jingle"))
+    modify.set("sid", "host-4")
+    mod_content = ET.SubElement(modify, _q(wb_mod.NS_JINGLE, "content"))
+    mod_content.set("name", "whiteboard")
+    mod_content.set("creator", "initiator")
+    mod_content.set("senders", "both")
+    await manager.dispatch("content-modify", modify,
+                           _IqStub("bob@example.com/pc"))
+    editable = manager.may_edit("host-4")
+    events = [e for e in client.events if e[0] == "whiteboard_senders"]
+    rid_after = manager.add_shape("host-4", {"id": "yes", "d": "M 0 0 L 2 2"})
+    sent_after = any(
+        s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None
+        for s in client.xmpp.sent)
+    manager.end_session("host-4")
+    return (echoed.get("senders"), blocked, rid_blocked, sent_blocked,
+            editable, events, rid_after, sent_after)
+
+
+(_echoed, _blocked, _rid_blocked, _sent_blocked, _editable, _events,
+ _rid_after, _sent_after) = asyncio.run(_senders_case())
+check("the accept echoes the offered senders", _echoed == "none")
+check("senders=none makes the board read-only for us", _blocked)
+check("edits are refused while we may not edit",
+      _rid_blocked == "" and not _sent_blocked)
+check("content-modify both restores editing", _editable)
+check("the senders change is announced",
+      bool(_events) and _events[-1][1:] == ("host-4", True))
+check("editing works again after content-modify",
+      bool(_rid_after) and _sent_after)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

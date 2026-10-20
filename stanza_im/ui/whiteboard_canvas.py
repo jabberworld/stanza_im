@@ -190,6 +190,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self._view_w = VIEW_W
         self._view_h = VIEW_H
         self._tool = "pencil"
+        self._editable = True
         self._stroke = "#1a1a1a"
         self._fill = "#e53935"
         self._fill_enabled = False
@@ -211,6 +212,18 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
     # ── Options ───────────────────────────────────────────────────
+
+    def set_editable(self, editable: bool) -> None:
+        """Allow or forbid editing (a read-only board still pans and zooms)."""
+        self._editable = bool(editable)
+        if not self._editable:
+            self._tool = "select"
+            self._selection = []
+            self.selection_changed.emit()
+        self._apply_tool_cursor()
+
+    def is_editable(self) -> bool:
+        return self._editable
 
     def set_tool(self, tool: str) -> None:
         self._tool = tool
@@ -284,6 +297,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def reorder_local(self, shape_id: str, op: str) -> bool:
         """Reorder a local (unshared) board's paint order."""
+        if not self._editable:
+            return False
         ids = [s["id"] for s in self._shapes]
         if shape_id not in ids or len(ids) < 2:
             return False
@@ -352,6 +367,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def group_local(self, group_rid: str = "") -> str:
         """Group the current selection on a local board; returns the group rid."""
+        if not self._editable:
+            return ""
         ids = [i for i in self._selection
                if not (self._shape_by_id(i) or {}).get("group")]
         if len(ids) < 2:
@@ -369,7 +386,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def ungroup_local(self, group_rid: str) -> bool:
         """Ungroup on a local board (compose the group transform into members)."""
-        if not group_rid:
+        if not self._editable or not group_rid:
             return False
         group_tf = self._group_transforms.get(group_rid, QtGui.QTransform())
         members = [s for s in self._shapes
@@ -456,7 +473,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.selection_changed.emit()
 
     def delete_selected(self) -> None:
-        if not self._selected:
+        if not self._editable or not self._selected:
             return
         shape = self._shape_by_id(self._selected)
         if shape is not None:
@@ -464,6 +481,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
 
     def delete_shape(self, shape: dict) -> None:
         """Remove *shape* and notify (used by delete/eraser)."""
+        if not self._editable:
+            return
         self.push_history()
         self._shapes = [s for s in self._shapes if s["id"] != shape["id"]]
         self._selection = [i for i in self._selection if i != shape["id"]]
@@ -580,8 +599,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         self.update()
 
     def keyPressEvent(self, event):  # noqa: N802
-        if event.key() in (QtCore.Qt.Key.Key_Delete,
-                           QtCore.Qt.Key.Key_Backspace):
+        if (self._editable
+                and event.key() in (QtCore.Qt.Key.Key_Delete,
+                                    QtCore.Qt.Key.Key_Backspace)):
             self.delete_selected()
             event.accept()
             return
@@ -1078,6 +1098,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             event.accept()
             return
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
+            return
+        if not self._editable:
+            # Read-only board: wheel zoom and middle-drag pan still work, but
+            # the document is never changed.
             return
         self._history_pushed = False
         world = self._to_world(event.position())

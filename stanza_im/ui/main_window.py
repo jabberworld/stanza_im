@@ -3873,6 +3873,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("whiteboard_proposed", self._on_whiteboard_proposed)
         c.on("whiteboard_ready", self._on_whiteboard_ready)
         c.on("whiteboard_state", self._on_whiteboard_state)
+        c.on("whiteboard_senders", self._on_whiteboard_senders)
         c.on("whiteboard_ended", self._on_whiteboard_ended)
         c.on("whiteboard_failed", self._on_whiteboard_failed)
         c.on("whiteboard_activity", self._on_whiteboard_activity)
@@ -7680,6 +7681,17 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = self._whiteboards.get(session.peer)
         if dialog is not None:
             dialog.refresh_from_session()
+
+    def _on_whiteboard_senders(self, sid: str, editable: bool) -> None:
+        """The peer switched the board's edit rights (Jingle senders)."""
+        if self._client is None:
+            return
+        session = self._client.whiteboard.session(sid)
+        if session is None:
+            return
+        dialog = self._whiteboards.get(session.peer)
+        if dialog is not None:
+            dialog.set_editable(editable)
 
     def _on_whiteboard_ended(self, sid: str) -> None:
         for dialog in self._whiteboards.values():
