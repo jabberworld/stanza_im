@@ -989,6 +989,46 @@ check("the SVG export carries the attributes",
       and 'stroke-linejoin="bevel"' in _sc_svg
       and 'fill-rule="nonzero"' in _sc_svg)
 
+# 32. the local drawing survives a share and a session end -------------------
+ld = WhiteboardDialog("bob@example.com")
+ld._canvas.load_shapes([{"rid": "r1", "id": "s1", "d": "M 0 0 L 1 1",
+                         "stroke": "#1a1a1a", "stroke-width": "2",
+                         "fill": "none"}])
+check("a shared board offers no local shapes", ld.board_shapes() == [])
+ld._canvas.clear_rids()
+check("ending a session makes the drawing local again",
+      [s["id"] for s in ld.board_shapes()] == ["s1"])
+check("the board size is the canvas size", ld.board_size() == (1280, 720))
+
+
+class _WbRoMgr:
+    def may_edit(self, sid):
+        return False
+
+    def view_box(self, sid):
+        return (1280, 720)
+
+    def shapes(self, sid):
+        return []
+
+
+class _WbRoClient:
+    def __init__(self):
+        self.whiteboard = _WbRoMgr()
+
+
+rod = WhiteboardDialog("bob@example.com", client=_WbRoClient())
+rod.attach_session("s1")
+check("a read-only session disables the drawing tools",
+      not rod._tool_buttons["pencil"].isEnabled()
+      and rod._tool_buttons["select"].isEnabled())
+check("the canvas is read-only when we may not edit",
+      not rod._canvas.is_editable())
+rod.set_editable(True)
+check("editing can be restored",
+      rod._canvas.is_editable() and rod._tool_buttons["pencil"].isEnabled())
+
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -243,6 +243,16 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def session_id(self) -> str:
         return self._sid
 
+    def board_shapes(self) -> list[dict]:
+        """The board's local (not yet shared) shapes as document attributes."""
+        return [WhiteboardCanvas.shape_attrs(shape)
+                for shape in self._canvas.shapes()
+                if not shape.get("rid")]
+
+    def board_size(self) -> tuple[int, int]:
+        """The board's canvas size (the ``viewBox`` of a new session)."""
+        return self._canvas.view_box()
+
     def _on_share(self, checked: bool) -> None:
         if not self._client:
             return
@@ -256,8 +266,10 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sid = sid
         self._share_btn.setChecked(True)
         self._sync_label.setText(tr("whiteboard_shared"))
-        if self._client is not None:
-            self.set_editable(self._client.whiteboard.may_edit(sid))
+        manager = (getattr(self._client, "whiteboard", None)
+                   if self._client is not None else None)
+        if manager is not None and hasattr(manager, "may_edit"):
+            self.set_editable(manager.may_edit(sid))
         # The shared session has its own (shared) undo/redo history.
         self._canvas.clear_history()
         self._update_undo_actions()
@@ -269,6 +281,9 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sync_label.setText(tr("whiteboard_not_shared"))
         self.set_editable(True)
         self._canvas.clear_history()
+        # The drawing stays on the board as a local one: a later share seeds a
+        # new session from it instead of starting with an empty document.
+        self._canvas.clear_rids()
         self._update_undo_actions()
 
     def set_editable(self, editable: bool) -> None:

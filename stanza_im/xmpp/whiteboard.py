@@ -268,15 +268,22 @@ class WhiteboardManager:
             ("urn:xmpp:sxe:0:" + bare).encode("utf-8")).hexdigest()
 
     def start_session(self, peer: str, is_muc: bool = False,
-                      name: str = "") -> str:
-        """Create (or, for a MUC, reuse) a session hosted by us and announce it."""
+                      name: str = "", shapes: list[dict] | None = None,
+                      view_box: tuple[int, int] | None = None) -> str:
+        """Create (or, for a MUC, reuse) a session hosted by us and announce it.
+
+        *shapes* carries a local (unshared) drawing: its records go into the
+        document before it is announced, so a joining peer receives them with
+        the state snapshot instead of an empty board.
+        """
         if is_muc:
             sid = self._muc_sid(peer)
             session = self.sessions.get(sid)
             if session is None:
                 session = WhiteboardSession(sid=sid, peer=peer, is_muc=True,
                                             is_host=True, name=name)
-                self._seed_document(session.doc)
+                self._seed_document(session.doc, view_box)
+                self._seed_shapes(session, shapes)
                 self.sessions[sid] = session
             self._by_peer[peer] = sid
             session.ready = True
@@ -289,7 +296,8 @@ class WhiteboardManager:
         sid = uuid.uuid4().hex
         session = WhiteboardSession(sid=sid, peer=peer, is_muc=False,
                                     is_host=True, name=name)
-        self._seed_document(session.doc)
+        self._seed_document(session.doc, view_box)
+        self._seed_shapes(session, shapes)
         session.synced = True
         self.sessions[sid] = session
         self._by_peer[peer] = sid
@@ -574,11 +582,42 @@ class WhiteboardManager:
                          exc_info=True)
 
     @staticmethod
-    def _seed_document(doc: SxeDocument) -> None:
+    def _seed_document(doc: SxeDocument,
+                       view_box: tuple[int, int] | None = None) -> None:
+        width, height = view_box or (WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT)
         doc.set_attr(doc.root_rid, "version", "1.2")
         doc.set_attr(doc.root_rid, "baseProfile", "tiny")
-        doc.set_attr(doc.root_rid, "viewBox",
-                     "0 0 %d %d" % (WHITEBOARD_WIDTH, WHITEBOARD_HEIGHT))
+        doc.set_attr(doc.root_rid, "viewBox", "0 0 %d %d" % (width, height))
+
+    def _seed_shapes(self, session: WhiteboardSession,
+                     shapes: list[dict] | None) -> None:
+        """Put a local drawing into a host's document (the snapshot ships it)."""
+        for attrs in shapes or ():
+            self._append_shape(session, attrs)
+
+    def seed_local_shapes(self, sid: str, shapes: list[dict] | None) -> None:
+        """Merge a local (unshared) drawing into the session document.
+
+        A joiner cannot send anything before it has the host's state, so the
+        converted records are buffered and flushed once the snapshot has been
+        applied; a host's document reaches its peers with the snapshot.
+        """
+        session = self.sessions.get(sid)
+        if session is None or not shapes:
+            return
+        added: list[ET.Element] = []
+        for attrs in shapes:
+            rid = self._append_shape(session, attrs)
+            added.extend(session.doc.new_elements_for(rid))
+        if not added:
+            return
+        if session.synced:
+            self._send_edits(session, new=added)
+        else:
+            session.pending.extend(added)
+        logger.info("Whiteboard: merged %d local shape(s) into %s",
+                    len(shapes), sid[:8])
+        self.client.emit("whiteboard_state", sid)
 
     # ── Undo / redo ───────────────────────────────────────────────
 
@@ -648,11 +687,8 @@ class WhiteboardManager:
 
     # ── Local edits ───────────────────────────────────────────────
 
-    def add_shape(self, sid: str, attrs: dict) -> str:
-        """Add a drawable object (``path`` or ``image``) and broadcast ``<new>``."""
-        session = self.sessions.get(sid)
-        if session is None or not self._may_edit(session):
-            return ""
+    def _append_shape(self, session: WhiteboardSession, attrs: dict) -> str:
+        """Create a drawable record in the session document (no broadcast)."""
         doc = session.doc
         tag = str(attrs.get("tag") or "path")
         if tag not in ("path", "image"):
@@ -677,7 +713,15 @@ class WhiteboardManager:
             value = attrs.get("d")
             if value:
                 doc.add_attr(rid, "d", str(value))
-        new = doc.new_elements_for(rid)
+        return rid
+
+    def add_shape(self, sid: str, attrs: dict) -> str:
+        """Add a drawable object (``path`` or ``image``) and broadcast ``<new>``."""
+        session = self.sessions.get(sid)
+        if session is None or not self._may_edit(session):
+            return ""
+        rid = self._append_shape(session, attrs)
+        new = session.doc.new_elements_for(rid)
         self._send_edits(session, new=new)
         self._record(sid, {"new": new, "set": [], "remove": []},
                      {"new": [], "set": [], "remove": [self._remove_element(rid)]})
@@ -1204,6 +1248,8 @@ class WhiteboardManager:
         # the active peers losing theirs.  A snapshot is a join, not an action,
         # so it is not recorded for undo; an incremental edit is.
         is_snapshot = state.find(_q(NS_SXE, "document-begin")) is not None
+        if is_snapshot:
+            self._adopt_snapshot_root_attrs(doc, state)
         forward = self._batch()
         inverse = self._batch()
         for child in state:
@@ -1245,6 +1291,35 @@ class WhiteboardManager:
                 logger.info("Whiteboard: state received for %s", session.sid[:8])
                 self._flush_pending(session)
         self.client.emit("whiteboard_state", session.sid)
+
+    @staticmethod
+    def _adopt_snapshot_root_attrs(doc: SxeDocument,
+                                   state: ET.Element) -> None:
+        """Let the host's root attributes replace ours (XEP-0284 §10.3).
+
+        A merge would otherwise keep two records per attribute — our seeded
+        ``viewBox``/``version`` and the host's — and ``find_attr`` could resolve
+        to ours, so the joiner stayed at its own canvas size.  The host's
+        records are about to be applied; dropping our namesakes keeps one each.
+        """
+        root_rid = ""
+        for child in state:
+            if (child.tag == _q(NS_SXE, "new")
+                    and not (child.get("parent") or "")):
+                root_rid = str(child.get("rid") or "")
+                break
+        if not root_rid:
+            return
+        names = {str(child.get("name") or "") for child in state
+                 if (child.tag == _q(NS_SXE, "new")
+                     and str(child.get("parent") or "") == root_rid
+                     and child.get("type") == "attr")}
+        for name in names:
+            if not name:
+                continue
+            rid = doc.find_attr(doc.root_rid, name)
+            if rid is not None:
+                doc.remove(rid)
 
     # ── Sending ───────────────────────────────────────────────────
 

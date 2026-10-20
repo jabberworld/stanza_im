@@ -7512,9 +7512,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """Start a collaborative whiteboard session for *jid*."""
         if self._client is None or not jid:
             return
-        sid = self._client.whiteboard.start_session(jid, is_muc)
-        session = self._client.whiteboard.session(sid)
         dialog = self._whiteboard_dialog(jid)
+        # A local drawing becomes the shared document: the joiner receives it
+        # with the state snapshot, so pressing share never loses it.
+        sid = self._client.whiteboard.start_session(
+            jid, is_muc, shapes=dialog.board_shapes(),
+            view_box=dialog.board_size())
+        session = self._client.whiteboard.session(sid)
         if session is not None and session.failure:
             dialog.show_failed(session.failure)
             self._notify_whiteboard_failed(session.failure)
@@ -7661,6 +7665,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if session is None:
             return
         dialog = self._whiteboard_dialog(session.peer)
+        # A board drawn locally before joining is merged into the host's
+        # document (read before attach_session reloads the canvas).
+        local = dialog.board_shapes()
+        if local and not session.is_host:
+            self._client.whiteboard.seed_local_shapes(sid, local)
         dialog.attach_session(sid)
         if session.local_only:
             dialog.set_local_only()

@@ -926,6 +926,94 @@ check("the senders change is announced",
 check("editing works again after content-modify",
       bool(_rid_after) and _sent_after)
 
+# 29. a local drawing becomes the shared document ---------------------------
+async def _seed_host_case():
+    client = _FakeClient()
+    client._add_resource("bob@example.com/pc", features=(wb_mod.NS_WHITEBOARD,))
+    manager = WhiteboardManager(client)
+    attrs = [{"tag": "path", "id": "s1", "d": "M 0 0 L 10 10",
+              "stroke": "#1a1a1a", "stroke-width": "2", "fill": "none",
+              "stroke-linecap": "round", "stroke-linejoin": "round",
+              "fill-rule": "evenodd", "transform": ""}]
+    sid = manager.start_session("bob@example.com", is_muc=False,
+                                shapes=attrs, view_box=(800, 600))
+    shapes = manager.shapes(sid)
+    box = manager.view_box(sid)
+    broadcast = any(
+        s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None
+        for s in client.xmpp.sent)
+    manager._send_state(manager.session(sid), "bob@example.com/pc")
+    snapshot = _state_of(client)
+    in_snapshot = any(el.get("type") == "attr" and el.get("name") == "id"
+                      and el.get("chdata") == "s1"
+                      for el in snapshot.findall(_q(NS_SXE, "new")))
+    return shapes, box, broadcast, in_snapshot
+
+
+(_seed_shapes, _seed_box, _seed_broadcast, _in_snapshot) = asyncio.run(
+    _seed_host_case())
+check("a local drawing is put into the shared document",
+      len(_seed_shapes) == 1 and _seed_shapes[0]["id"] == "s1")
+check("the shared session adopts the board size", _seed_box == (800, 600))
+check("nothing is broadcast before a peer joins", not _seed_broadcast)
+check("the snapshot carries the local drawing", _in_snapshot)
+
+
+# 30. a locally drawn board merges into a host's session --------------------
+async def _seed_join_case():
+    client = _FakeClient()
+    manager = WhiteboardManager(client)
+    manager._connect_retry_delays = ()
+    await manager.dispatch("session-initiate", _host_offer("host-5"),
+                           _IqStub("bob@example.com/pc"))
+    manager.join_session("bob@example.com", "host-5")
+    _accept_stanza(client).callback(_ResultStub("result"))
+    manager.seed_local_shapes("host-5", [{
+        "tag": "path", "id": "local1", "d": "M 0 0 L 20 20",
+        "stroke": "#1a1a1a", "stroke-width": "2", "fill": "none"}])
+    session = manager.session("host-5")
+    buffered = len(session.pending)
+    sent_before = any(
+        s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None
+        for s in client.xmpp.sent)
+    state = ET.Element(_q(NS_SXE, "sxe"))
+    state.set("session", "host-5")
+    st = ET.SubElement(state, _q(NS_SXE, "state"))
+    begin = ET.SubElement(st, _q(NS_SXE, "document-begin"))
+    begin.set("prolog", wb_mod.DOC_PROLOG)
+    root = ET.SubElement(st, _q(NS_SXE, "new"))
+    for key, value in (("rid", "host-root"), ("type", "element"),
+                       ("name", "svg"), ("primary-weight", "0")):
+        root.set(key, value)
+    view = ET.SubElement(st, _q(NS_SXE, "new"))
+    for key, value in (("rid", "host-view"), ("type", "attr"),
+                       ("parent", "host-root"), ("name", "viewBox"),
+                       ("chdata", "0 0 600 400"), ("primary-weight", "3")):
+        view.set(key, value)
+    end = ET.SubElement(st, _q(NS_SXE, "document-end"))
+    end.set("last-sender", "")
+    end.set("last-id", "")
+    msg = _MsgStub("bob@example.com/pc")
+    msg.xml.append(state)
+    await manager.handle_sxe(msg)
+    flushed = any(
+        s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None
+        for s in client.xmpp.sent)
+    box = manager.view_box("host-5")
+    ids = {s.get("id") for s in manager.shapes("host-5")}
+    manager.end_session("host-5")
+    return buffered, sent_before, flushed, box, ids
+
+
+(_buf, _sent_before, _flushed, _join_box, _join_ids) = asyncio.run(
+    _seed_join_case())
+check("a local drawing is buffered until the snapshot", _buf > 0)
+check("the local drawing is not sent before the state", not _sent_before)
+check("the buffered drawing reaches the host after the snapshot", _flushed)
+check("the host's viewBox wins after the merge", _join_box == (600, 400))
+check("the merged document keeps the local shape", "local1" in _join_ids)
+
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

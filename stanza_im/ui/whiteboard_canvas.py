@@ -511,6 +511,12 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         if shape is not None:
             shape["rid"] = str(rid or "")
 
+    def clear_rids(self) -> None:
+        """Make the loaded shapes local again (a session ended)."""
+        for shape in self._shapes:
+            shape["rid"] = ""
+        self.changed.emit()
+
     @staticmethod
     def shape_attrs(shape: dict) -> dict:
         """The SVG attributes of *shape* (for a collaborative edit)."""

@@ -2706,6 +2706,12 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   host drops a request that comes before its payload channel is ready. Edits
   made before the snapshot are buffered and flushed once `<document-end>` has
   been applied (a host ignores edits from an unsynchronized peer).
+- A board drawn locally is not lost when it is shared: the dialog's local
+  shapes (no document record id yet) and its canvas size seed the new session
+  (`start_session(shapes=…, view_box=…)`), and joining a peer's board merges
+  them (`seed_local_shapes`, sent after the snapshot). Ending the session turns
+  the same drawing back into a local board; a merged snapshot adopts the host's
+  root attributes, so its `viewBox` is authoritative.
 - **Edit rights** follow the Jingle `senders` of the content: `none` (a board
   switched off) freezes it for both sides, the accept echoes the offered value
   and a `content-modify` updates it, making the open board read-only until

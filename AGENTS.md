@@ -2324,7 +2324,17 @@ starts accepted contents on the next event-loop turn), so
 `WhiteboardManager._retry_connect` re-sends the request at 2/5/10 s until a
 `state-offer` arrives. Until the snapshot (`<document-end>`) is applied the
 joiner buffers its own edits (`WhiteboardSession.pending`, flushed in order once
-`synced`) — a host ignores edits from an unsynchronized peer. The SXE lifecycle
+`synced`) — a host ignores edits from an unsynchronized peer. A board drawn
+**before** it is shared is not lost: `MainWindow._on_whiteboard_share` passes the
+dialog's local shapes (canvas shapes without a document `rid`) and its size to
+`start_session(shapes=…, view_box=…)`, so the host's document — and the snapshot
+a joiner receives — already contains them; joining a peer's board merges them
+instead (`WhiteboardManager.seed_local_shapes`, buffered until the snapshot,
+then sent to the host). Ending a session clears the shapes' rids
+(`WhiteboardCanvas.clear_rids`), so the same drawing becomes an ordinary local
+board again and can be shared anew. A merged snapshot's root attributes replace
+ours (`_adopt_snapshot_root_attrs`), so the host's `viewBox` is authoritative.
+The SXE lifecycle
 (`connect`/`state-offer`/`accept-state`/`state`) is logged as
 `Whiteboard: SXE …` for diagnosis. The Jingle `senders` of the content are
 honoured: `<content senders="none"/>` (a board switched off in Psi) freezes it,
