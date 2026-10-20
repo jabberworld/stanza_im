@@ -65,6 +65,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_status: dict[str, str] = {}   # jid -> latest show
         self._tab_unread: dict[str, tuple[int, int]] = {}  # jid -> (unread, mentions)
         self._show_unread_in_tabs = True
+        self._own_jid = ""
         self._chat_options = {}
         self._participant_font = ("", 0)
         self._input_font = ("", 0)
@@ -177,6 +178,7 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
+        widget.set_own_jid(self._own_jid)
         widget.set_input_font(*self._input_font)
         widget.set_mds_throttle(self._mds_throttle)
         widget.message_sent.connect(self._on_message_sent)
@@ -261,6 +263,7 @@ class ChatWindow(QtWidgets.QMainWindow):
 
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
+        widget.set_own_jid(self._own_jid)
         widget.set_input_font(*self._input_font)
         widget.set_mds_throttle(self._mds_throttle)
         widget.set_participant_font(*self._participant_font)
@@ -441,6 +444,17 @@ class ChatWindow(QtWidgets.QMainWindow):
     def set_show_avatars(self, show: bool):
         for widget in self._tabs.values():
             widget.set_show_avatars(show)
+
+    def set_own_jid(self, jid: str) -> None:
+        """Remember our own JID for the outgoing message avatars."""
+        self._own_jid = str(jid or "").split("/", 1)[0]
+        for widget in self._tabs.values():
+            widget.set_own_jid(self._own_jid)
+
+    def refresh_avatars(self) -> None:
+        """Refresh every open tab's avatars (a contact's or our own changed)."""
+        for widget in self._tabs.values():
+            widget.refresh_avatars()
 
     def set_participant_font(self, family: str = "", size: int = 0):
         """Apply and remember the MUC participant sidebar font."""

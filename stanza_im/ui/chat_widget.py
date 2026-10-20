@@ -421,6 +421,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_muc_clients = True
         self._show_muc_hats = True
         self._avatar_radius = 20
+        self._own_jid = ""
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
         self._subject_font: tuple[str, int] = ("", 0)
@@ -1919,6 +1920,8 @@ class ChatWidget(QtWidgets.QWidget):
         if not self._show_avatars:
             return ""
         if direction == "outgoing":
+            if self._own_jid:
+                return avatar_data_uri(self._own_jid) or default_avatar_uri()
             return default_avatar_uri()
         if self.is_muc:
             if not sender_jid and sender:
@@ -3456,21 +3459,35 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.update_sender_avatar(
                 sender, self._user_icon("incoming", sender_jid, sender))
 
-    def refresh_avatars(self):
-        """Update avatar images in place after a participant avatar cached.
+    def set_own_jid(self, jid: str) -> None:
+        """Remember our own JID (used for the outgoing message avatar)."""
+        # The avatar cache is keyed by the bare JID.
+        self._own_jid = str(jid or "").split("/", 1)[0]
 
-        Drives the WebEngine ``img.avatar`` elements directly instead of
-        clearing and reloading the whole chat document (which would wedge
-        live rendering if the reload fails).
+    def refresh_avatars(self):
+        """Update avatar images in place after an avatar cached.
+
+        Covers incoming senders and our own (outgoing) avatar — the account's
+        vCard/PEP avatar may arrive after the tabs were rendered.  Drives the
+        WebEngine ``img.avatar`` elements directly instead of clearing and
+        reloading the whole chat document (which would wedge live rendering if
+        the reload fails).
         """
+        seen: set[tuple[str, str]] = set()
         for entry in self._history + self._messages:
             sender = entry.get("sender", "")
-            if entry.get("direction") != "incoming" or not sender:
+            direction = entry.get("direction", "")
+            if not sender or (sender, direction) in seen:
                 continue
-            self._view.update_sender_avatar(
-                sender,
-                self._user_icon("incoming", entry.get("sender_jid", ""),
-                                sender))
+            seen.add((sender, direction))
+            if direction == "outgoing":
+                self._view.update_sender_avatar(
+                    sender, self._user_icon("outgoing"))
+            else:
+                self._view.update_sender_avatar(
+                    sender,
+                    self._user_icon("incoming", entry.get("sender_jid", ""),
+                                    sender))
 
     def set_bookmarked(self, bookmarked: bool):
         self._bookmarked = bool(bookmarked)

@@ -1354,6 +1354,7 @@ class JabberClient:
         self._muc_self_ping_busy: set[str] = set()
         # ids of sent XEP-0045 §7.13 voice requests awaiting a server reply
         self._voice_requests: set[str] = set()
+        self._upload_results: dict[tuple[str, str], tuple] = {}
         self._version_probed: set[str] = set()        # full JIDs (XEP-0092)
         self._version_inflight: set[str] = set()      # lookups in progress
         self._muc_version_probed: set[tuple[str, str]] = set()
@@ -4721,7 +4722,10 @@ class JabberClient:
         if card.get("photo"):
             try:
                 from stanza_im.include.avatars import save_avatar
-                card["avatar_path"] = save_avatar(self.jid_str, card["photo"])
+                # Cache under the bare JID so avatar_data_uri(bare) finds it
+                # (the roster used contact.avatar_path and thus hid the bug).
+                card["avatar_path"] = save_avatar(
+                    self.jid_str.split("/", 1)[0], card["photo"])
                 # XEP-0398: keep the PEP avatar and the XEP-0153 presence hash
                 # in sync with the vCard PHOTO.
                 self._avatar_ids[self.jid_str] = hashlib.sha1(
@@ -4843,6 +4847,15 @@ class JabberClient:
 
     # ── XEP-0363 HTTP File Upload ────────────────────────────────
 
+    def take_upload_result(self, jid: str, path: str):
+        """The ``(message_id, media)`` of a finished HTTP upload.
+
+        Consumed once by the UI's ``file_upload_progress`` "done" handler so
+        the local echo shares the sent stanza id (XEP-0184 receipts) and the
+        XEP-0385 metadata (the media card) with the real message.
+        """
+        return self._upload_results.pop((str(jid), str(path)), ("", None))
+
     def upload_http(self, jid: str, path: str, caption: str = ""):
         """Upload *path* via HTTP Upload and share the URL in *jid*'s chat.
 
@@ -4922,7 +4935,11 @@ class JabberClient:
             if self.groupchats.get(target):
                 self.send_muc_message(target, get_url, media=media)
             else:
-                self.send_message(target, get_url, media=media)
+                message_id = self.send_message(target, get_url, media=media)
+                # The UI's local echo must reuse the sent stanza id (and the
+                # media dict) so an XEP-0184 receipt matches it.
+                self._upload_results[(str(jid), str(path))] = (
+                    message_id, media)
             self.emit("file_upload_progress", jid, "done", get_url, str(path))
         except Exception as exc:  # noqa: BLE001 - surfaced as a status line
             logger.warning("HTTP Upload failed for %s: %s", jid, exc)

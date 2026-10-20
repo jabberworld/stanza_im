@@ -1521,6 +1521,12 @@ tracking) and are evicted by `appearance.media_cache_days` (TTL) and
 after startup (never blocking startup). The ready PNG data-URIs are held in a bounded
 in-memory LRU (`MediaPreviewService._thumb_uris`, 16 MB budget), so a long
 session with many images cannot grow the thumbnail cache without limit.
+The thumbnail is scaled to fit `media_preview_size` in **both** dimensions
+(KeepAspectRatio), so `set_media_thumbnail` drops the placeholder's forced
+`width` once the image loads — a portrait picture then shows at its real
+(bounded) height instead of being stretched into a tall preview. The message
+grows, so the view scrolls back to the end when it was already there (the same
+`stick` rule as `update_reactions`).
 `thumbnail_ready` is pushed into every open
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
@@ -2305,7 +2311,10 @@ sends an invite).
 Local canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become
 `add_shape`/`update_shape`/`remove_shape`; remote state (`whiteboard_state`)
 rebuilds the canvas (`WhiteboardCanvas.load_shapes`); an incoming
-`session-initiate` (`whiteboard_invite`) asks the user to join.
+`session-initiate` (`whiteboard_invite`) asks the user to join. An accepted
+invitation reaches the session through the XEP-0353 propose/proceed path (the
+`session-initiate` auto-joins), so `MainWindow._on_whiteboard_ready` opens the
+board (`show`/`raise_`/`activateWindow`) instead of leaving the user to open it.
 [`tests/test_whiteboard.py`, `tests/test_whiteboard_sync.py`,
 `tests/test_jingle_error_router.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`,
 `tests/test_svg_transform.py`]
@@ -2331,7 +2340,9 @@ window that issued the request (`_place_dialog_over` centers it over the chat
 window or the roster), and the caption is sent once — as a separate message —
 after the batch finishes (`_send_caption_after`). File URLs and the caption are
 rendered as real outgoing messages with clickable links: in 1:1 the client
-displays them locally via `_display_local_outgoing` (no carbons echo reaches
+displays them locally via `_display_local_outgoing` with the **sent** stanza id
+and the media dict (`JabberClient.take_upload_result`), so an XEP-0184 receipt
+matches the local row and the media card is rendered like any other media (no carbons echo reaches
 the sending resource), in MUC the room echo renders them.
 `client.upload_http(jid, path)` discovers the `urn:xmpp:http:upload:0` service
 (cached), requests a `<slot>` and PUTs the bytes streamed in 64 KiB chunks via
@@ -2384,7 +2395,13 @@ XEP-0398 bridges the two: both paths funnel into `_apply_avatar(jid, raw)`,
 keyed by the SHA-1 of the image (unchanged avatars are skipped), which saves it
 and emits `avatar_updated(jid, path)`; `MainWindow._on_avatar_updated` reuses
 `_refresh_avatar` (the avatar-only part of `_on_vcard_received`) for the roster,
-contacts and MUC occupants — no new UI. A PEP event is attributed to the XEP-0033
+contacts and MUC occupants. The chat threads render the sender avatar via
+`ChatWidget._user_icon`: incoming from the sender's cached avatar, outgoing from
+**our own** — `ChatWindow.set_own_jid` (the bare JID, set by `MainWindow` after
+login) feeds `avatar_data_uri(own)`, and our own vCard avatar is cached under the
+bare JID (not the full one); `ChatWindow.refresh_avatars` updates both incoming
+and outgoing `<img class="avatar">` elements in place when an avatar arrives. A
+PEP event is attributed to the XEP-0033
 `<addresses><address type='replyto'/>` JID when present (`_replyto_address`), so
 a server that relays it from a service JID still resolves the real sender; an
 expected fetch failure (`IqError`/timeout, e.g. `item-not-found` for a stale

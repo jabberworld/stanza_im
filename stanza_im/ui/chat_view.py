@@ -703,17 +703,31 @@ if HAS_WEBENGINE:
             self.setZoomFactor(self._zoom)
 
         def set_media_thumbnail(self, url: str, data_uri: str) -> None:
-            """Swap a loading placeholder for the ready thumbnail data-URI."""
+            """Swap a loading placeholder for the ready thumbnail data-URI.
+
+            The thumbnail is already scaled to fit ``media_preview_size`` in
+            both dimensions, so dropping the forced ``width`` lets a portrait
+            image show at its real (bounded) size instead of being stretched
+            into a tall preview.  The message grows, so scroll back to the end
+            when the view was already there.
+            """
             if not self._ready or not url:
                 return
             safe_url = json.dumps(url)
             safe_uri = json.dumps(data_uri or "")
+            stick = 1 if self._fraction >= 0.999 else 0
             self.page().runJavaScript(f"""
             (function() {{
                 var target = {safe_url};
                 document.querySelectorAll('img.stanza-media-thumb').forEach(
                     function (img) {{
                         if (img.getAttribute('data-media-url') !== target) return;
+                        img.onload = function () {{
+                            img.removeAttribute('width');
+                            if ({stick}) {{
+                                window.scrollTo(0, document.body.scrollHeight);
+                            }}
+                        }};
                         img.src = {safe_uri};
                         var parent = img.parentNode;
                         if (parent && parent.classList) {{

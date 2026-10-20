@@ -2456,9 +2456,11 @@ Registers XEP plugins (conditionally where noted):
   (`_place_dialog_over`). A caption typed in the dialog is sent once as a
   separate message after the batch finishes (`_send_caption_after`). For 1:1
   uploads the `get` URL and the caption are rendered as real outgoing
-  messages with clickable links via `_display_local_outgoing` (the sending
-  resource never sees its own carbons echo); in MUC the room echo renders
-  both.
+  messages with clickable links via `_display_local_outgoing` with the **sent**
+  stanza id and the media dict (`JabberClient.take_upload_result`), so an
+  XEP-0184 receipt matches the local row and the media card renders like every
+  other media message (the sending resource never sees its own carbons echo);
+  in MUC the room echo renders both.
 - "P2P" routes to the Jingle file transfer (§14.5.1); the roster context menu
   also gains "Send file → P2P / P2P IBB / HTTP Upload" for contacts (and
   conferences).
@@ -2694,7 +2696,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   canvas edits (`shape_added`/`shape_updated`/`shape_removed`) become
   `add_shape`/`update_shape`/`remove_shape` SXE edits, and remote state
   (`whiteboard_state`) rebuilds the canvas (`WhiteboardCanvas.load_shapes`).
-  An incoming `session-initiate` (`whiteboard_invite`) asks the user to join.
+  An incoming `session-initiate` (`whiteboard_invite`) asks the user to join; an
+  accepted invitation reaches the session through the XEP-0353 propose/proceed
+  path and `MainWindow._on_whiteboard_ready` opens the board.
 - **Not implemented (possible future work):** the extended profile's optional
   attachment transfer over Jingle File Transfer (XEP-0234, §12.3). Large images
   are handled by embedding a `data:` URI or uploading via HTTP File Upload
@@ -3264,7 +3268,10 @@ client.leave_muji(room)
   `include/avatars.save_avatar` and emits `avatar_updated(jid, path)`.
   `MainWindow._on_avatar_updated` reuses `_refresh_avatar` (the avatar-only
   part of `_on_vcard_received`) to update the roster row, contacts and MUC
-  occupant avatars — no new UI.
+  occupant avatars. The chat renders the sender avatar via
+  `ChatWidget._user_icon`: incoming from the sender's cache, outgoing from our
+  own (`ChatWindow.set_own_jid`, the bare JID; the own vCard avatar is cached
+  under the bare JID), and `ChatWindow.refresh_avatars` updates both in place.
 - `_ensure_pep_subscription` also requests the `urn:xmpp:avatar:metadata`
   node as a fallback for servers that need an explicit PEP subscription.
 

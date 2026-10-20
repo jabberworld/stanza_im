@@ -3689,6 +3689,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # (inside `_connect_client_signals`) can bind them to the new client.
         self._apply_plugins()
         self._connect_client_signals()
+        # The chat renders our own avatar on outgoing messages from this JID.
+        self._chat_window.set_own_jid(self._client.jid_str)
 
         # Show the last known roster right away and keep the UI usable while
         # the connection is established in the background; a first login
@@ -4286,6 +4288,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:
                     muji.set_avatars({nick: path for nick, _ in changed_nicks})
+        if room_jid:
+            return
+        own = (self._client.jid_str.split("/", 1)[0]
+               if self._client else "")
+        if bare_jid and bare_jid == own:
+            # Our own avatar: every open chat shows it on outgoing messages.
+            self._chat_window.refresh_avatars()
+        else:
+            chat = self._chat_window.get_chat(bare_jid)
+            if chat is not None:
+                chat.refresh_avatars()
 
     def _on_avatar_updated(self, jid: str, path: str):
         """A contact's avatar changed via PEP (XEP-0084)."""
@@ -7639,6 +7652,12 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.attach_session(sid)
         if session.local_only:
             dialog.set_local_only()
+        # An accepted invitation reaches the session via the XEP-0353
+        # propose/proceed path (the session-initiate auto-joins), so open the
+        # board here — otherwise the user must open it manually.
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _on_whiteboard_state(self, sid: str) -> None:
         """Remote edits arrived: refresh the open board."""
@@ -7887,7 +7906,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._check_uploads_finished(jid)
 
     def _display_local_outgoing(self, jid: str, body: str, message_id: str,
-                                encrypted: bool = False):
+                                encrypted: bool = False,
+                                media: dict | None = None):
         """Show our own 1:1 message locally (no carbons echo reaches the
         sending resource, so the client renders the stanza itself)."""
         chat = self._chat_window.get_chat(jid)
@@ -7897,13 +7917,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 timestamp=_current_timestamp(), direction="outgoing",
                 message_id=message_id,
                 reply_able_id=message_id, reply_author=jid,
-                encrypted=encrypted)
+                encrypted=encrypted, media=media)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             jid, "outgoing", body,
             timestamp=_current_timestamp(), sender="Me",
             origin_id=message_id, message_id=message_id,
-            encrypted=encrypted, encryption="omemo" if encrypted else ""))
+            encrypted=encrypted, encryption="omemo" if encrypted else "",
+            media=media))
         self._remember_contact(jid)
 
     async def _send_caption_after(self, jid: str, caption: str, tasks):
@@ -7952,9 +7973,14 @@ class MainWindow(QtWidgets.QMainWindow):
             # already renders it, so only do this for 1:1.
             target = jid.split("/")[0] if "/" in jid else jid
             if not (self._client and self._client.groupchats.get(target)):
+                message_id, media = ("", None)
+                if self._client is not None:
+                    message_id, media = self._client.take_upload_result(
+                        jid, path)
                 self._display_local_outgoing(
-                    target, detail, uuid.uuid4().hex,
-                    encrypted=str(detail).startswith("aesgcm://"))
+                    target, detail, message_id or uuid.uuid4().hex,
+                    encrypted=str(detail).startswith("aesgcm://"),
+                    media=media)
         elif phase == "error":
             if dlg is not None:
                 dlg.set_row_failed(index, detail or "")
@@ -9501,6 +9527,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _reset_account_ui(self) -> None:
         """Drop per-account UI state (roster, tabs, MUC maps, unread, tray)."""
+        self._chat_window.set_own_jid("")
         # Unread counters remain on disk; clear only the live totals/blink.
         self._unread_total = 0
         self._unread_jids = set()
