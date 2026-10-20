@@ -159,6 +159,36 @@ check("OMEMO 2 decryption reports the sender device",
       res["omemo2_device"] > 0)
 check("legacy OMEMO 0.3 body round-trips", res["legacy_body"] == b"legacy hi")
 
+# ── JET-OMEMO key transport (XEP-0391/0396) --------------------------------
+async def _jet_key():
+    from stanza_im.xmpp import jet
+    alice = await _make("alice@example.com", MemStorage())
+    bob = await _make("bob@example.com", MemStorage())
+    await alice.refresh_device_lists("bob@example.com")
+    made = await jet.encrypt_key_transport(
+        alice, "alice@example.com", "bob@example.com",
+        oldmemo.oldmemo.NAMESPACE)
+    if made is None:
+        return None
+    secret, element = made
+    has_payload = element.find(
+        "{eu.siacs.conversations.axolotl}payload") is not None
+    back = await jet.decrypt_key_transport(
+        bob, "bob@example.com", element, "alice@example.com")
+    return secret, has_payload, back
+
+
+_jet = asyncio.run(_jet_key())
+check("JET key transport produces an envelope", _jet is not None)
+if _jet is not None:
+    _secret, _has_payload, _back = _jet
+    check("the transport key is 16 bytes and the IV 12 bytes",
+          len(_secret.key) == 16 and len(_secret.iv) == 12)
+    check("the envelope carries no payload", not _has_payload)
+    check("the peer recovers the same key and IV",
+          _back is not None and _back[0] == _secret)
+
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

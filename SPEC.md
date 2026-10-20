@@ -109,6 +109,7 @@ stanza_im/
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
 │                          message_markup.py = XEP-0394 parser/renderer,
 │                          jingle.py = XEP-0234/0260/0261 file transfer,
+│                          jet.py = XEP-0391/0396 encrypted transports,
 │                          jingle_rtp.py = XEP-0167/0176 A/V calls,
 │                          jmi.py = XEP-0353 Jingle Message Initiation,
 │                          muji.py = XEP-0272 conferences,

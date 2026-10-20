@@ -639,6 +639,47 @@ class OmemoManager:
 
         return decrypted, device_information
 
+    # ── JET key transport (XEP-0391/0396) ──────────────────────
+
+    async def encrypt_transport_key(self, peer: str):
+        """A JET transport secret in a legacy OMEMO KeyTransportMessage.
+
+        Returns ``(key, iv, <encrypted/>)`` or ``None`` when the peer has no
+        device that speaks the legacy profile (the only profile Conversations
+        and Dino understand for JET).
+        """
+        from stanza_im.xmpp import jet
+
+        legacy_ns, _omemo2_ns = _namespaces()
+        bare = str(peer).split("/", 1)[0]
+        await self.refresh_device_lists({bare})
+        sm = await self.session_manager()
+        made = await jet.encrypt_key_transport(sm, self._own_bare, bare,
+                                               legacy_ns)
+        if made is None:
+            return None
+        secret, encrypted = made
+        return secret.key, secret.iv, encrypted
+
+    async def decrypt_transport_key(self, encrypted, sender_bare: str):
+        """Recover ``(key, iv)`` from a peer's JET-OMEMO envelope."""
+        from stanza_im.xmpp import jet
+
+        legacy_ns, _omemo2_ns = _namespaces()
+        sm = await self.session_manager()
+        if self._plugin is not None:
+            await self.refresh_device_lists({str(sender_bare)})
+        try:
+            made = await jet.decrypt_key_transport(
+                sm, self._own_bare, encrypted, str(sender_bare))
+        except Exception as exc:  # noqa: BLE001 - reported by the caller
+            logger.info("OMEMO: cannot decrypt a JET key: %s", exc)
+            return None
+        if made is None:
+            return None
+        secret, _device = made
+        return secret.key, secret.iv
+
     def _verify_affixes(self, envelope, sender_bare: str, stanza) -> None:
         from_elt = sce.affix(envelope, "from")
         if from_elt is not None and from_elt.get("jid") != sender_bare:

@@ -119,6 +119,7 @@ stanza_im/                      # Python package
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
 │   ├── message_markup.py        # XEP-0394 Message Markup parser/renderer
 │   ├── jingle.py                # XEP-0234/0260/0261 Jingle FT + IBB
+│   ├── jet.py                   # XEP-0391/0396 Jingle Encrypted Transports (OMEMO key)
 │   ├── jingle_rtp.py            # XEP-0167/0176 Jingle RTP calls + SDP bridge
 │   ├── jmi.py                   # XEP-0353 Jingle Message Initiation (shared)
 │   ├── muji.py                  # XEP-0272 multiparty Jingle coordination
