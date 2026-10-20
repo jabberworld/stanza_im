@@ -69,6 +69,8 @@ check("EmoticonSetSource yields entries", bool(entries))
 check("entry tokens are the plain-text codes",
       all(isinstance(tok, str) and tok for tok, _ic in entries))
 check("entry icons are non-null", all(not ic.isNull() for _t, ic in entries))
+check("the off pseudo-skin yields no picker entries",
+      EmoticonSetSource(emoticons.NO_SKIN).entries() == [])
 
 # 4. the picker builds a button per entry and emits the chosen token -----------
 picker = SmileyPicker(source, None)

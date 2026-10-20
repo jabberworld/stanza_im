@@ -52,6 +52,19 @@ check("unicode skin substitutes when the option is on",
 check("a theme skin still renders images",
       "<img" in emoticons.smile_to_html("hi :)", "default/smileys.cfg"))
 
+# The "off" pseudo-skin never renders (no images, no unicode, no fallback).
+check("the off skin leaves the text untouched",
+      emoticons.smile_to_html("hi :) :-D", emoticons.NO_SKIN) == "hi :) :-D")
+check("the off skin never falls back to the default set",
+      emoticons.get_set(emoticons.NO_SKIN) is None)
+check("the off skin has no preview items",
+      emoticons.preview_items(emoticons.NO_SKIN) == [])
+check("a legacy none/ set id normalizes to the off skin",
+      emoticons.normalize_skin("none/smileys.cfg") == emoticons.NO_SKIN)
+check("the off skin is not discovered as a theme",
+      all(item["id"] != emoticons.NO_SKIN
+          for item in emoticons.discover_sets()))
+
 # A smiley glued to a letter/digit is left alone (both substitutions).
 check("a digit before the code blocks the unicode substitution",
       emoticons.smile_to_html("200:/bla", emoticons.UNICODE_SKIN,

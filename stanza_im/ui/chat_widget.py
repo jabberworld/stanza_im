@@ -1004,8 +1004,10 @@ class ChatWidget(QtWidgets.QWidget):
         reuses the XEP-0444 reaction picker (search + recent + categories),
         opened by the main window with the same placement as reactions.
         """
-        from stanza_im.include.emoticons import UNICODE_SKIN
+        from stanza_im.include.emoticons import NO_SKIN, UNICODE_SKIN
         skin = getattr(self._theme, "emoticon_skin", "") or "default/smileys.cfg"
+        if skin == NO_SKIN:
+            return
         if skin == UNICODE_SKIN:
             point = self._smiley_btn.mapToGlobal(QtCore.QPoint(0, 0))
             self.emoji_picker_requested.emit(

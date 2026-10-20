@@ -1068,6 +1068,8 @@ STRINGS = {
     "prefs_muc_theme": "Тема конференций",
     "prefs_emoticon_theme": "Тема смайликов",
     "prefs_emoticon_unicode": "Юникодные эмодзи",
+    "prefs_emoticon_none": "Без смайликов",
+    "prefs_emoticon_none_preview": "Смайлики отключены",
     "prefs_emoticon_unicode_replace": "Заменять текстовые смайлики на юникодные (в теме «Юникодные эмодзи»)",
     "prefs_emoticon_unicode_replace_info": "В теме «Юникодные эмодзи» текстовые смайлики вида :) или :-D отображаются как юникодные эмодзи.",
     "prefs_emoticon_preview": "Примеры",

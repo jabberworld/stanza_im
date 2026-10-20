@@ -16,6 +16,22 @@ _MAP_CACHE: dict[str, dict[str, str]] = {}
 #: codes with images), so every lookup treats it as an empty mapping.
 UNICODE_SKIN = "unicode"
 
+#: Pseudo-skin turning smiley rendering off entirely (no images and no unicode
+#: replacement).  Like :data:`UNICODE_SKIN` it must never fall back to the
+#: default set, so every lookup treats it as an empty mapping.
+NO_SKIN = "none"
+
+#: Prefix of the removed ``resources/emoticons/none`` set; old configs stored
+#: ``none/smileys.cfg`` for "off", which now maps to :data:`NO_SKIN`.
+_LEGACY_OFF_PREFIX = "none/"
+
+
+def normalize_skin(skin: str) -> str:
+    """Map the legacy ``none/…`` set ids to :data:`NO_SKIN`."""
+    if skin == NO_SKIN or skin.startswith(_LEGACY_OFF_PREFIX):
+        return NO_SKIN
+    return skin
+
 
 def _data_uri(path: str) -> str | None:
     try:
@@ -67,12 +83,15 @@ def discover_sets() -> list[dict]:
                 if filename.startswith("smileys") and filename.endswith(".cfg"):
                     skin = os.path.relpath(root, EMOTICONS_DIR)
                     item = _parse_cfg(os.path.join(root, filename), skin)
+                    if normalize_skin(item["id"]) == NO_SKIN:
+                        continue
                     _SETS[item["id"]] = item
     return list(_SETS.values())
 
 
 def get_set(skin: str) -> dict | None:
-    if skin == UNICODE_SKIN:
+    skin = normalize_skin(skin)
+    if skin in (UNICODE_SKIN, NO_SKIN):
         return None
     sets = {item["id"]: item for item in discover_sets()}
     if skin in sets:
@@ -81,9 +100,10 @@ def get_set(skin: str) -> dict | None:
 
 
 def _load_map(skin: str) -> dict[str, str]:
+    skin = normalize_skin(skin)
     if skin in _MAP_CACHE:
         return _MAP_CACHE[skin]
-    if skin == UNICODE_SKIN:
+    if skin in (UNICODE_SKIN, NO_SKIN):
         _MAP_CACHE[skin] = {}
         return {}
     item = get_set(skin)
@@ -223,6 +243,9 @@ def emoticon_codes(skin: str = "default/smileys.cfg") -> list[str]:
 
 def smile_to_html(text: str, skin: str = "default/smileys.cfg",
                   unicode_replace: bool = False) -> str:
+    skin = normalize_skin(skin)
+    if skin == NO_SKIN:
+        return text
     if skin == UNICODE_SKIN:
         # No image set: optionally replace the text codes with unicode emoji.
         return _replace_with_unicode(text) if unicode_replace else text

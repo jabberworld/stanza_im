@@ -304,7 +304,13 @@ offers the `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
 `ChatWidget._open_smiley_picker` reuses the XEP-0444 reaction picker
 (`EmojiPickerDialog`, search + recent + categories) through the
 `emoji_picker_requested` signal → `MainWindow._on_emoji_picker_requested`
-(anchored next to the smiley button like a reaction). With
+(anchored next to the smiley button like a reaction). The selector's last entry
+is **«Без смайликов»** (`include.emoticons.NO_SKIN = "none"`): smiley rendering
+is off entirely (no images, no unicode; the chat smiley button is a no-op). It
+is a pseudo-skin too, so its label is localized. The legacy `none/smileys.cfg`
+set id (the removed `resources/emoticons/none` directory) is normalized to
+`NO_SKIN` by `include.emoticons.normalize_skin`, and `get_set` never falls back
+to the default set for it. With
 `appearance.emoticon_unicode_replace` (default on, Preferences → Appearance →
 «Темы») `smile_to_html` substitutes the text codes with unicode emoji from
 `include.emoticons.unicode_map()` — a `{code: emoji}` map derived from the

@@ -1067,6 +1067,8 @@ STRINGS = {
     "prefs_muc_theme": "Conference theme",
     "prefs_emoticon_theme": "Emoticon theme",
     "prefs_emoticon_unicode": "Unicode emoji",
+    "prefs_emoticon_none": "No smileys",
+    "prefs_emoticon_none_preview": "Smileys are off",
     "prefs_emoticon_unicode_replace": "Replace text smileys with unicode emoji (unicode theme)",
     "prefs_emoticon_unicode_replace_info": "With the unicode emoticon theme, text smileys like :) or :-D are shown as unicode emoji.",
     "prefs_emoticon_preview": "Preview",

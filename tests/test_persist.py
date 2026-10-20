@@ -23,6 +23,7 @@ from stanza_im.ui.chat_view import clamp_zoom
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.chat_window import ChatWindow
 from stanza_im.ui.preferences import PreferencesDialog, _SnapSlider
+from stanza_im.include import emoticons
 from stanza_im.core.storage import Config
 
 i18n_load("en")
@@ -225,6 +226,16 @@ check("the size tooltip names the real pt default",
 check("default label names the real system font", app_family in nick_combo.itemText(0))
 check("the family tooltip names the real default",
       app_family in nick_combo.toolTip())
+check("the emoticon selector offers 'no smileys' last",
+      prefs._controls["emoticon_theme"].itemData(
+          prefs._controls["emoticon_theme"].count() - 1)
+      == emoticons.NO_SKIN)
+_off_cfg = Config()
+_off_cfg.appearance.emoticon_theme = "none/smileys.cfg"
+check("a legacy none/ emoticon theme selects the off entry",
+      PreferencesDialog(
+          _off_cfg, chat_themes.ChatThemeFactory())._values_dict()
+      ["emoticon_theme"] == emoticons.NO_SKIN)
 chat_combo = prefs._controls["chat_font"]
 target_idx = chat_combo.findData(app_family)
 if target_idx > 0:

@@ -233,7 +233,12 @@ the selected set. Because one image usually has several text aliases (`:)` and
 alias), while message rendering still replaces every alias. The selector also
 offers a `unicode` pseudo-skin (`include.emoticons.UNICODE_SKIN`): it has no
 ``smileys*.cfg`` set (every lookup is empty) and the chat smiley button reuses
-the XEP-0444 reaction picker instead. With `appearance.emoticon_unicode_replace`
+the XEP-0444 reaction picker instead. Its last entry is «Без смайликов»
+(`include.emoticons.NO_SKIN = "none"`), a localized pseudo-skin that turns
+smiley rendering off entirely (no images, no unicode; the smiley button is a
+no-op); the legacy `none/smileys.cfg` id is normalized to it by
+`normalize_skin`, and `get_set` never falls back to the default set for it.
+With `appearance.emoticon_unicode_replace`
 (default on) `smile_to_html` substitutes the text codes with unicode emoji from
 `include.emoticons.unicode_map()` (derived from the `default` theme's image
 semantics); the emoji are drawn with the platform font (no chat-font override).

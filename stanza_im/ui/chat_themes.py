@@ -10,7 +10,7 @@ from urllib.parse import quote
 from PyQt6 import QtCore, QtGui
 
 from stanza_im.include.constants import CHATSKINS_DIR
-from stanza_im.include.emoticons import smile_to_html
+from stanza_im.include.emoticons import normalize_skin, smile_to_html
 from stanza_im.include.utils import escape_html, restore_url_tokens
 from stanza_im.include import hats as hats_mod
 from stanza_im.include import media as media_mod
@@ -285,7 +285,7 @@ class ChatThemeFactory:
         self._current_variant_css = self._variants.get(name, "")
 
     def set_emoticon_skin(self, skin: str) -> None:
-        self._emoticon_skin = skin
+        self._emoticon_skin = normalize_skin(skin)
 
     def set_unicode_smiley_replace(self, enabled: bool) -> None:
         """Toggle text-smiley → unicode-emoji substitution (unicode skin)."""

@@ -1397,6 +1397,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             emoticon_theme.addItem(item["name"], item["id"])
         emoticon_theme.addItem(tr("prefs_emoticon_unicode"),
                                emoticons.UNICODE_SKIN)
+        emoticon_theme.addItem(tr("prefs_emoticon_none"), emoticons.NO_SKIN)
         emoticon_theme.setFixedWidth(COMBO_WIDTH)
         self._controls["emoticon_theme"] = emoticon_theme
         form.addRow(tr("prefs_emoticon_theme"), emoticon_theme)
@@ -1540,7 +1541,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             if item.widget():
                 item.widget().deleteLater()
         skin = self._controls["emoticon_theme"].currentData()
-        if skin == emoticons.UNICODE_SKIN:
+        if skin == emoticons.NO_SKIN:
+            note = QtWidgets.QLabel(tr("prefs_emoticon_none_preview"))
+            note.setStyleSheet("color: gray;")
+            self._emoticon_preview.addWidget(note)
+        elif skin == emoticons.UNICODE_SKIN:
             from stanza_im.include import emoji_data
             from stanza_im.ui.emoji_picker_dialog import emoji_font
             for glyph in emoji_data.all_emoji()[:10]:
@@ -1802,7 +1807,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "muc_theme": appearance.muc_theme,
             "emoticon_theme": ("default/smileys.cfg"
                                if appearance.emoticon_theme == "default"
-                               else appearance.emoticon_theme),
+                               else emoticons.normalize_skin(
+                                   appearance.emoticon_theme)),
             "emoticon_unicode_replace": getattr(
                 appearance, "emoticon_unicode_replace", True),
             "media_preview_size": appearance.media_preview_size,
