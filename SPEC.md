@@ -2350,7 +2350,13 @@ Registers XEP plugins (conditionally where noted):
   `stanza:omemo:<jid>` control link to the device manager (relayed in-page like
   every `stanza:` link); an own device (`device.bare_jid` == our JID) gets a
   distinct text. `aesgcm://` URLs are linkified (`include/utils._URL_RE`) so the
-  media preview embeds OMEMO-encrypted images/audio/video.
+  media preview embeds OMEMO-encrypted images/audio/video; the preview
+  service decrypts them (`MediaPreviewService._download_aesgcm`, used by the
+  viewer and audio playback too), and a file sent from an OMEMO chat over
+  HTTP Upload is encrypted the same way (`JabberClient.send_omemo_file`: the
+  ciphertext is uploaded and the `aesgcm://…#iv+key` URL travels inside the
+  OMEMO message; 1:1 only — a room or a non-OMEMO chat uploads it plainly,
+  and P2P transfers are not covered).
 - An incoming encrypted message automatically switches its chat to OMEMO mode
   (so the reply is encrypted too) when `omemo.auto_enable` is on (default),
   with an «OMEMO enabled.» status line.

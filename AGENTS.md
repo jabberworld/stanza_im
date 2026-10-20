@@ -2067,7 +2067,16 @@ id, JID and a **short** fingerprint (first three groups + `…`) with a
 `stanza:omemo:<jid>` control link to the manager (relayed in-page like every
 `stanza:` link); an own device (`device.bare_jid` == our JID) gets a distinct
 text. `aesgcm://` URLs are linkified (`include/utils._URL_RE`) so the media
-preview embeds OMEMO-encrypted images/audio/video.
+preview embeds OMEMO-encrypted images/audio/video, and the preview
+service downloads and decrypts them (`MediaPreviewService._download_aesgcm`
+→ `slixmpp.plugins.xep_0454.XEP_0454.decrypt`; the media viewer and audio
+playback use the same helper). Sending follows XEP-0454 too: a file sent
+from an OMEMO chat over HTTP Upload is AES-256-GCM encrypted in memory
+(`JabberClient.send_omemo_file` → `XEP_0454.encrypt`), only the ciphertext
+is uploaded, and the `aesgcm://…#iv+key` URL is sent inside the OMEMO
+message (`MainWindow._launch_file_uploads` picks this path for a 1:1 chat
+whose OMEMO mode is on; a conference or a non-OMEMO chat uploads the file
+unencrypted, and P2P transfers are not covered).
 [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
