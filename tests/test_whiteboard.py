@@ -941,6 +941,26 @@ check("the contact menu offers Open Whiteboard after the call submenu",
       'tr("ctx_open_whiteboard")' in _mw_src
       and "self._on_whiteboard_requested(jid)" in _mw_src)
 
+# 32. fill-opacity: a Psi+ outline is not a filled shape ---------------------
+_fc = WhiteboardCanvas()
+_fc.load_shapes([
+    {"rid": "r1", "fill": "#000000", "fill-opacity": "0",
+     "d": "M 0 0 L 10 10"},
+    {"rid": "r2", "fill": "#000000", "d": "M 0 0 L 10 10"},
+    {"rid": "r3", "fill": "#ff0000", "fill-opacity": "0.5",
+     "d": "M 0 0 L 10 10"},
+])
+_s1, _s2, _s3 = _fc.shapes()
+check("a Psi+ outline (fill-opacity=0) is not filled",
+      WhiteboardCanvas._filled(_s1) is False)
+check("a plain filled shape is still filled",
+      WhiteboardCanvas._filled(_s2) is True)
+check("fill-opacity is parsed",
+      _s1["fill_opacity"] == 0.0 and _s2["fill_opacity"] == 1.0)
+check("a partially transparent fill stays filled",
+      WhiteboardCanvas._filled(_s3) is True
+      and _s3["fill_opacity"] == 0.5)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

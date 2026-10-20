@@ -2206,7 +2206,9 @@ file); then «Поделиться доской» and «Завершить се�
 path — a shaft plus an **open (V) head** (`WhiteboardCanvas._arrow_d`), so it
 renders identically locally and for a remote peer. The document is a list of
 shape records (`id`, `rid`, `kind` — `path` or `image` — geometry,
-`stroke`/`stroke-width`/`fill` and a `QTransform`); a vector shape is exported as
+`stroke`/`stroke-width`/`fill`/`fill-opacity` and a `QTransform`; a fill with
+`fill-opacity="0"` is no fill — Psi+ sends a transparent fill for an outline);
+a vector shape is exported as
 a `<path d="…"/>` (`include/svg_path.py`), an image as
 `<image x/y/width/height/xlink:href/>`; `to_svg()`/`save_svg()`/`render_image()`/
 `save_png()` serialise the document (the PNG is a board render, shapes only on

@@ -2588,7 +2588,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   plus an open (V) head (`WhiteboardCanvas._arrow_d`) — so it renders identically
   locally and remotely.
 - The document is a list of shape records (`id`, `rid`, `kind` — `path` or
-  `image` — geometry, `stroke`, `stroke-width`, `fill`, `QTransform`);
+  `image` — geometry, `stroke`, `stroke-width`, `fill`, `fill-opacity`,
+  `QTransform`); a fill with `fill-opacity="0"` (Psi+ sends a transparent fill
+  for an outline) is rendered and exported as no fill;
   `to_svg()`/`save_svg()` and `render_image()`/`save_png()` serialise it (the SVG
   viewBox and the PNG are the board size from `include.constants.
   WHITEBOARD_WIDTH/HEIGHT`, overridable by the shared document's `viewBox` via

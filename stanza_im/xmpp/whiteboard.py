@@ -163,6 +163,7 @@ class WhiteboardManager:
                     "stroke": attrs.get("stroke", "#1a1a1a"),
                     "stroke-width": attrs.get("stroke-width", "2"),
                     "fill": attrs.get("fill", ""),
+                    "fill-opacity": attrs.get("fill-opacity", ""),
                     "transform": attrs.get("transform", "")}
             if record.name == "image":
                 item.update({

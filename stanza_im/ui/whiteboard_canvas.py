@@ -117,6 +117,14 @@ def transform_str(transform: QtGui.QTransform) -> str:
         transform.dx(), transform.dy())
 
 
+def _parse_opacity(value) -> float:
+    """SVG opacity (0..1); a missing/invalid value means fully opaque."""
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 class WhiteboardCanvas(QtWidgets.QWidget):
     """Interactive drawing surface backed by a list of shape records."""
 
@@ -592,6 +600,10 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         value = str(shape.get("fill") or "")
         if not value or value.lower() == "none":
             return False
+        # Psi+ sends a fill colour with fill-opacity="0" for an outline: a
+        # transparent fill is no fill at all.
+        if float(shape.get("fill_opacity", 1.0)) <= 0:
+            return False
         if shape.get("kind") in ("remote", "text"):
             return True
         return shape["kind"] in CLOSED_KINDS
@@ -656,6 +668,7 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                     "stroke": str(item.get("stroke") or "#1a1a1a"),
                     "stroke_width": int(item.get("stroke-width") or 2),
                     "fill": fill,
+                    "fill_opacity": _parse_opacity(item.get("fill-opacity")),
                     "transform": _parse_transform(item.get("transform")),
                 }
             shape["group"] = group
@@ -993,7 +1006,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         if self._filled(shape):
-            painter.setBrush(QtGui.QColor(shape["fill"]))
+            fill = QtGui.QColor(shape["fill"])
+            fill.setAlphaF(float(shape.get("fill_opacity", 1.0)))
+            painter.setBrush(fill)
         else:
             painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         painter.drawPath(path)
@@ -1304,6 +1319,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                  f'stroke-width="{shape["stroke_width"]}"',
                  f'fill="{shape["fill"]}"'
                  if WhiteboardCanvas._filled(shape) else 'fill="none"']
+        opacity = float(shape.get("fill_opacity", 1.0))
+        if WhiteboardCanvas._filled(shape) and opacity < 1:
+            attrs.append(f'fill-opacity="{opacity:g}"')
         transform = transform_str(shape["transform"])
         if transform:
             attrs.append(f'transform="{transform}"')
