@@ -164,6 +164,9 @@ class WhiteboardManager:
                     "stroke-width": attrs.get("stroke-width", "2"),
                     "fill": attrs.get("fill", ""),
                     "fill-opacity": attrs.get("fill-opacity", ""),
+                    "stroke-linecap": attrs.get("stroke-linecap", ""),
+                    "stroke-linejoin": attrs.get("stroke-linejoin", ""),
+                    "fill-rule": attrs.get("fill-rule", ""),
                     "transform": attrs.get("transform", "")}
             if record.name == "image":
                 item.update({
@@ -550,7 +553,9 @@ class WhiteboardManager:
         if tag not in ("path", "image"):
             tag = "path"
         rid = doc.add_element(doc.root_rid, tag)
-        for key in ("id", "stroke", "stroke-width", "fill", "transform"):
+        for key in ("id", "stroke", "stroke-width", "fill",
+                    "stroke-linecap", "stroke-linejoin", "fill-rule",
+                    "transform"):
             value = attrs.get(key)
             if value:
                 doc.add_attr(rid, key, str(value))
@@ -585,8 +590,9 @@ class WhiteboardManager:
         sets: list[ET.Element] = []
         inv_sets: list[ET.Element] = []
         inv_removes: list[ET.Element] = []
-        for key in ("d", "stroke", "stroke-width", "fill", "transform",
-                    "x", "y", "width", "height"):
+        for key in ("d", "stroke", "stroke-width", "fill",
+                    "stroke-linecap", "stroke-linejoin", "fill-rule",
+                    "transform", "x", "y", "width", "height"):
             if key not in attrs:
                 continue
             existing = doc.find_attr(rid, key)

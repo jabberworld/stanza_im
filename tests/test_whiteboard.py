@@ -961,6 +961,34 @@ check("a partially transparent fill stays filled",
       WhiteboardCanvas._filled(_s3) is True
       and _s3["fill_opacity"] == 0.5)
 
+# 33. stroke-linecap / stroke-linejoin / fill-rule ---------------------------
+_sc = WhiteboardCanvas()
+_sc.load_shapes([
+    {"rid": "r1", "d": "M 0 0 L 10 10", "stroke-linecap": "square",
+     "stroke-linejoin": "bevel", "fill-rule": "nonzero", "fill": "#ff0000"},
+    {"rid": "r2", "d": "M 0 0 L 10 10"},
+])
+_p1, _p2 = _sc.shapes()
+check("incoming cap/join/fill-rule are read",
+      (_p1["stroke_linecap"], _p1["stroke_linejoin"], _p1["fill_rule"])
+      == ("square", "bevel", "nonzero"))
+check("a record without them uses the SVG defaults",
+      (_p2["stroke_linecap"], _p2["stroke_linejoin"], _p2["fill_rule"])
+      == ("butt", "miter", "nonzero"))
+_local = _sc._new_shape("pencil", points=[(0, 0), (5, 5)])
+check("our own shapes are round/round/evenodd",
+      (_local["stroke_linecap"], _local["stroke_linejoin"],
+       _local["fill_rule"]) == ("round", "round", "evenodd"))
+_attrs = WhiteboardCanvas.shape_attrs(_local)
+check("we emit the three attributes",
+      (_attrs.get("stroke-linecap"), _attrs.get("stroke-linejoin"),
+       _attrs.get("fill-rule")) == ("round", "round", "evenodd"))
+_sc_svg = _sc.to_svg()
+check("the SVG export carries the attributes",
+      'stroke-linecap="square"' in _sc_svg
+      and 'stroke-linejoin="bevel"' in _sc_svg
+      and 'fill-rule="nonzero"' in _sc_svg)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

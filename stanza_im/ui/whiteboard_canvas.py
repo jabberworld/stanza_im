@@ -125,6 +125,38 @@ def _parse_opacity(value) -> float:
         return 1.0
 
 
+#: SVG stroke-linecap / stroke-linejoin / fill-rule → Qt enums.  A record
+#: without the attribute uses the SVG default (butt / miter / nonzero); our
+#: own shapes are drawn, emitted and exported with round caps/joins and the
+#: even-odd fill rule (the look the board has always had).
+_CAP_STYLES = {
+    "butt": QtCore.Qt.PenCapStyle.FlatCap,
+    "round": QtCore.Qt.PenCapStyle.RoundCap,
+    "square": QtCore.Qt.PenCapStyle.SquareCap,
+}
+_JOIN_STYLES = {
+    "miter": QtCore.Qt.PenJoinStyle.MiterJoin,
+    "round": QtCore.Qt.PenJoinStyle.RoundJoin,
+    "bevel": QtCore.Qt.PenJoinStyle.BevelJoin,
+}
+_FILL_RULES = {
+    "nonzero": QtCore.Qt.FillRule.WindingFill,
+    "evenodd": QtCore.Qt.FillRule.OddEvenFill,
+}
+_CAP_DEFAULT = "butt"
+_JOIN_DEFAULT = "miter"
+_FILL_RULE_DEFAULT = "nonzero"
+_LOCAL_CAP = "round"
+_LOCAL_JOIN = "round"
+_LOCAL_FILL_RULE = "evenodd"
+
+
+def _enum_attr(value, choices: dict, default: str) -> str:
+    """One of *choices*' keys (case-insensitive), else *default*."""
+    value = str(value or "").strip().lower()
+    return value if value in choices else default
+
+
 class WhiteboardCanvas(QtWidgets.QWidget):
     """Interactive drawing surface backed by a list of shape records."""
 
@@ -481,6 +513,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             "stroke-width": str(shape["stroke_width"]),
             "fill": (shape["fill"] if WhiteboardCanvas._filled(shape)
                      else "none"),
+            "stroke-linecap": str(shape.get("stroke_linecap") or _LOCAL_CAP),
+            "stroke-linejoin": str(shape.get("stroke_linejoin") or _LOCAL_JOIN),
+            "fill-rule": str(shape.get("fill_rule") or _LOCAL_FILL_RULE),
             "transform": transform_str(shape["transform"]),
         }
 
@@ -669,6 +704,15 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                     "stroke_width": int(item.get("stroke-width") or 2),
                     "fill": fill,
                     "fill_opacity": _parse_opacity(item.get("fill-opacity")),
+                    "stroke_linecap": _enum_attr(
+                        item.get("stroke-linecap"), _CAP_STYLES,
+                        _CAP_DEFAULT),
+                    "stroke_linejoin": _enum_attr(
+                        item.get("stroke-linejoin"), _JOIN_STYLES,
+                        _JOIN_DEFAULT),
+                    "fill_rule": _enum_attr(
+                        item.get("fill-rule"), _FILL_RULES,
+                        _FILL_RULE_DEFAULT),
                     "transform": _parse_transform(item.get("transform")),
                 }
             shape["group"] = group
@@ -713,6 +757,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                  "group": "",
                  "stroke": self._stroke, "stroke_width": self._width,
                  "fill": (self._fill if self._fill_enabled else ""),
+                 "stroke_linecap": _LOCAL_CAP,
+                 "stroke_linejoin": _LOCAL_JOIN,
+                 "fill_rule": _LOCAL_FILL_RULE,
                  "transform": QtGui.QTransform()}
         shape.update(extra)
         return shape
@@ -1002,9 +1049,16 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         path = self._world_path(shape)
         pen = QtGui.QPen(QtGui.QColor(shape["stroke"]),
                          float(shape["stroke_width"]))
-        pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+        pen.setCapStyle(_CAP_STYLES.get(
+            str(shape.get("stroke_linecap") or ""),
+            _CAP_STYLES[_CAP_DEFAULT]))
+        pen.setJoinStyle(_JOIN_STYLES.get(
+            str(shape.get("stroke_linejoin") or ""),
+            _JOIN_STYLES[_JOIN_DEFAULT]))
         painter.setPen(pen)
+        path.setFillRule(_FILL_RULES.get(
+            str(shape.get("fill_rule") or ""),
+            _FILL_RULES[_FILL_RULE_DEFAULT]))
         if self._filled(shape):
             fill = QtGui.QColor(shape["fill"])
             fill.setAlphaF(float(shape.get("fill_opacity", 1.0)))
@@ -1322,6 +1376,11 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         opacity = float(shape.get("fill_opacity", 1.0))
         if WhiteboardCanvas._filled(shape) and opacity < 1:
             attrs.append(f'fill-opacity="{opacity:g}"')
+        cap = str(shape.get("stroke_linecap") or _LOCAL_CAP)
+        join = str(shape.get("stroke_linejoin") or _LOCAL_JOIN)
+        rule = str(shape.get("fill_rule") or _LOCAL_FILL_RULE)
+        attrs += [f'stroke-linecap="{cap}"', f'stroke-linejoin="{join}"',
+                  f'fill-rule="{rule}"']
         transform = transform_str(shape["transform"])
         if transform:
             attrs.append(f'transform="{transform}"')

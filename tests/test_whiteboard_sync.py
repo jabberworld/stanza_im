@@ -126,11 +126,16 @@ check("the document is seeded with a viewBox",
 # 3. add / update / remove shapes -------------------------------------------
 rid = mgr.add_shape(sid, {"id": "s1", "d": "M 0 0 L 10 10",
                           "stroke": "#000000", "stroke-width": "2",
-                          "fill": "none"})
+                          "fill": "none", "stroke-linecap": "round",
+                          "stroke-linejoin": "round",
+                          "fill-rule": "evenodd"})
 check("add_shape returns a record id", bool(rid))
 shapes = mgr.shapes(sid)
 check("the shape is listed", len(shapes) == 1 and shapes[0]["rid"] == rid)
 check("the shape keeps its path data", shapes[0]["d"] == "M 0 0 L 10 10")
+check("add_shape carries cap/join/fill-rule",
+      (shapes[0]["stroke-linecap"], shapes[0]["stroke-linejoin"],
+       shapes[0]["fill-rule"]) == ("round", "round", "evenodd"))
 check("adding a shape sends a <new> edit",
       _state_of(client).find(_q(NS_SXE, "new")) is not None)
 
