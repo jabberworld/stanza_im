@@ -422,6 +422,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_muc_hats = True
         self._avatar_radius = 20
         self._own_jid = ""
+        self._own_avatar = ""
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
         self._subject_font: tuple[str, int] = ("", 0)
@@ -1920,6 +1921,8 @@ class ChatWidget(QtWidgets.QWidget):
         if not self._show_avatars:
             return ""
         if direction == "outgoing":
+            if self._own_avatar:
+                return self._own_avatar
             if self._own_jid:
                 return avatar_data_uri(self._own_jid) or default_avatar_uri()
             return default_avatar_uri()
@@ -3463,6 +3466,10 @@ class ChatWidget(QtWidgets.QWidget):
         """Remember our own JID (used for the outgoing message avatar)."""
         # The avatar cache is keyed by the bare JID.
         self._own_jid = str(jid or "").split("/", 1)[0]
+
+    def set_own_avatar(self, uri: str) -> None:
+        """Set the pre-resolved data-URI of our own avatar (outgoing)."""
+        self._own_avatar = str(uri or "")
 
     def refresh_avatars(self):
         """Update avatar images in place after an avatar cached.

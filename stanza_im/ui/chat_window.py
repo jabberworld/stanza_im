@@ -66,6 +66,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_unread: dict[str, tuple[int, int]] = {}  # jid -> (unread, mentions)
         self._show_unread_in_tabs = True
         self._own_jid = ""
+        self._own_avatar = ""
         self._chat_options = {}
         self._participant_font = ("", 0)
         self._input_font = ("", 0)
@@ -179,6 +180,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(jid, display_name, self._theme)
         widget.set_chat_options(self._chat_options)
         widget.set_own_jid(self._own_jid)
+        widget.set_own_avatar(self._own_avatar)
         widget.set_input_font(*self._input_font)
         widget.set_mds_throttle(self._mds_throttle)
         widget.message_sent.connect(self._on_message_sent)
@@ -264,6 +266,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = ChatWidget(room, display_name, self._muc_theme, is_muc=True)
         widget.set_chat_options(self._chat_options)
         widget.set_own_jid(self._own_jid)
+        widget.set_own_avatar(self._own_avatar)
         widget.set_input_font(*self._input_font)
         widget.set_mds_throttle(self._mds_throttle)
         widget.set_participant_font(*self._participant_font)
@@ -450,6 +453,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._own_jid = str(jid or "").split("/", 1)[0]
         for widget in self._tabs.values():
             widget.set_own_jid(self._own_jid)
+
+    def set_own_avatar(self, uri: str) -> None:
+        """Set our own resolved avatar data-URI for outgoing messages."""
+        self._own_avatar = str(uri or "")
+        for widget in self._tabs.values():
+            widget.set_own_avatar(self._own_avatar)
 
     def refresh_avatars(self) -> None:
         """Refresh every open tab's avatars (a contact's or our own changed)."""

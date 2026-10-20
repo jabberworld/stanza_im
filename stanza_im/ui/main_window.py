@@ -19,7 +19,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr, load as load_i18n
 from stanza_im.include.avatars import (save_avatar, avatar_path, has_avatar,
-                                        default_avatar)
+                                        default_avatar, avatar_data_uri,
+                                        avatar_file_data_uri)
 from stanza_im.include.enumerators import (populate_translations,
                                            show_to_icon_key, MOODS,
                                            ACTIVITY_GROUPS, ACTIVITY_ORDER)
@@ -3691,6 +3692,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_client_signals()
         # The chat renders our own avatar on outgoing messages from this JID.
         self._chat_window.set_own_jid(self._client.jid_str)
+        self._chat_window.set_own_avatar(self._own_avatar_uri())
 
         # Show the last known roster right away and keep the UI usable while
         # the connection is established in the background; a first login
@@ -4294,6 +4296,7 @@ class MainWindow(QtWidgets.QMainWindow):
                if self._client else "")
         if bare_jid and bare_jid == own:
             # Our own avatar: every open chat shows it on outgoing messages.
+            self._chat_window.set_own_avatar(self._own_avatar_uri())
             self._chat_window.refresh_avatars()
         else:
             chat = self._chat_window.get_chat(bare_jid)
@@ -4303,6 +4306,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_avatar_updated(self, jid: str, path: str):
         """A contact's avatar changed via PEP (XEP-0084)."""
         self._refresh_avatar(jid, path)
+
+    def _own_avatar_uri(self) -> str:
+        """Resolve our own avatar (outgoing chat messages) to a data-URI."""
+        if not self._client or not self._client.jid_str:
+            return ""
+        own = self._client.jid_str.split("/", 1)[0]
+        path = getattr(self._client.get_contact(own), "avatar_path", "") or ""
+        return avatar_file_data_uri(path) or avatar_data_uri(own) or ""
 
     def _on_vcard_received(self, jid: str, card: dict):
         bare_jid = jid.split("/", 1)[0]
@@ -9528,6 +9539,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_account_ui(self) -> None:
         """Drop per-account UI state (roster, tabs, MUC maps, unread, tray)."""
         self._chat_window.set_own_jid("")
+        self._chat_window.set_own_avatar("")
         # Unread counters remain on disk; clear only the live totals/blink.
         self._unread_total = 0
         self._unread_jids = set()

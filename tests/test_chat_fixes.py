@@ -55,6 +55,9 @@ _cw.set_own_jid("me@example.com/desk")
 check("outgoing uses our own avatar once the JID is known",
       _cw._user_icon("outgoing") == avatars.avatar_data_uri("me@example.com")
       and _cw._user_icon("outgoing") != default_avatar_uri())
+_cw.set_own_avatar("data:image/png;base64,AAAA")
+check("an explicit own avatar overrides the cached one",
+      _cw._user_icon("outgoing") == "data:image/png;base64,AAAA")
 _cw.detach()
 
 # 2. the media preview shrinks a portrait image and pins the bottom ----------

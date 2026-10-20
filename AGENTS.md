@@ -2399,7 +2399,9 @@ contacts and MUC occupants. The chat threads render the sender avatar via
 `ChatWidget._user_icon`: incoming from the sender's cached avatar, outgoing from
 **our own** — `ChatWindow.set_own_jid` (the bare JID, set by `MainWindow` after
 login) feeds `avatar_data_uri(own)`, and our own vCard avatar is cached under the
-bare JID (not the full one); `ChatWindow.refresh_avatars` updates both incoming
+bare JID (not the full one); `MainWindow._own_avatar_uri` pre-resolves it from
+the contact's cached `avatar_path` first, so an older full-JID cache entry still
+renders; `ChatWindow.refresh_avatars` updates both incoming
 and outgoing `<img class="avatar">` elements in place when an avatar arrives. A
 PEP event is attributed to the XEP-0033
 `<addresses><address type='replyto'/>` JID when present (`_replyto_address`), so
