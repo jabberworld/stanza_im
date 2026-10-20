@@ -39,8 +39,12 @@ class _FakeStanza:
     def __getitem__(self, key):
         return self.fields.get(key)
 
-    def send(self):
+    def send(self, callback=None, timeout=None):
+        # IQs keep their result callback (the test fires it to simulate the
+        # acknowledgement); messages just record the stanza.
+        self.callback = callback
         self.sent.append(self)
+        return None
 
 
 class _FakeXmpp:
@@ -727,6 +731,138 @@ check("a move announces the transform attribute with a <new>",
 peer._apply_state(psess, state)
 check("the peer applies the move",
       peer.shapes("remote")[0]["transform"] == "matrix(1 0 0 1 5 7)")
+
+# 27. joining a peer-hosted session: accept echo, connect after the ack -------
+class _ResultStub:
+    def __init__(self, kind="result"):
+        self._kind = kind
+
+    def get(self, key, default=None):
+        return self._kind if key == "type" else default
+
+
+def _host_offer(sid, host="bob@example.com/pc"):
+    jingle = ET.Element(_q(wb_mod.NS_JINGLE, "jingle"))
+    jingle.set("sid", sid)
+    jingle.set("initiator", host)
+    content = ET.SubElement(jingle, _q(wb_mod.NS_JINGLE, "content"))
+    ET.SubElement(content, _q(wb_mod.NS_WHITEBOARD, "description"))
+    transport = ET.SubElement(content,
+                              _q(wb_mod.NS_SXE_TRANSPORT, "transport"))
+    host_el = ET.SubElement(transport, _q(wb_mod.NS_SXE_TRANSPORT, "host"))
+    host_el.text = host
+    return jingle
+
+
+def _connects(client):
+    out = []
+    for stanza in client.xmpp.sent:
+        el = stanza.xml.find(_q(NS_SXE, "sxe"))
+        if el is not None and el.find(_q(NS_SXE, "connect")) is not None:
+            out.append(el)
+    return out
+
+
+def _accept_stanza(client):
+    for stanza in reversed(client.xmpp.sent):
+        jingle = stanza.xml.find(_q(wb_mod.NS_JINGLE, "jingle"))
+        if jingle is not None and jingle.get("action") == "session-accept":
+            return stanza
+    return None
+
+
+async def _join(sid="host-1", host="bob@example.com/pc"):
+    client = _FakeClient()
+    manager = WhiteboardManager(client)
+    manager._connect_retry_delays = ()
+    await manager.dispatch("session-initiate", _host_offer(sid, host),
+                           _IqStub(host))
+    manager.join_session(host.split("/", 1)[0], sid)
+    return client, manager
+
+
+async def _accept_echo_case():
+    client, manager = await _join()
+    accept = _accept_stanza(client)
+    jingle = accept.xml.find(_q(wb_mod.NS_JINGLE, "jingle"))
+    host_el = jingle.find(".//%s" % _q(wb_mod.NS_SXE_TRANSPORT, "host"))
+    no_connect = not _connects(client)
+    accept.callback(_ResultStub("result"))
+    sent_connect = bool(_connects(client))
+    manager.end_session("host-1")
+    return host_el.text, jingle.get("responder"), no_connect, sent_connect
+
+
+_host_text, _responder, _no_connect, _sent_connect = asyncio.run(
+    _accept_echo_case())
+check("the accept echoes the offered host (not ourselves)",
+      _host_text == "bob@example.com/pc")
+check("the accept names the responder", _responder == "me@example.com/pc")
+check("no connect is sent before the accept is acknowledged", _no_connect)
+check("a connect follows the accept acknowledgement", _sent_connect)
+
+
+async def _retry_case():
+    client, manager = await _join("host-2")
+    manager._connect_retry_delays = (0.01, 0.01)
+    _accept_stanza(client).callback(_ResultStub("result"))
+    first = len(_connects(client))
+    await asyncio.sleep(0.05)
+    retried = len(_connects(client))
+    offer = ET.Element(_q(NS_SXE, "sxe"))
+    offer.set("session", "host-2")
+    ET.SubElement(offer, _q(NS_SXE, "state-offer"))
+    msg = _MsgStub("bob@example.com/pc")
+    msg.xml.append(offer)
+    await manager.handle_sxe(msg)
+    after_offer = len(_connects(client))
+    await asyncio.sleep(0.05)
+    still = len(_connects(client))
+    manager.end_session("host-2")
+    return first, retried, after_offer, still
+
+
+_first, _retried, _after_offer, _still = asyncio.run(_retry_case())
+check("the first connect is sent on the acknowledgement", _first == 1)
+check("the connect is retried while no state arrives", _retried == 3)
+check("a state offer stops the connect retries", _still == _after_offer)
+
+
+async def _buffer_case():
+    client, manager = await _join("host-3")
+    _accept_stanza(client).callback(_ResultStub("result"))
+    manager.add_shape("host-3", {"id": "mine", "d": "M 0 0 L 5 5"})
+    before = [s for s in client.xmpp.sent
+              if s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None]
+    state = ET.Element(_q(NS_SXE, "sxe"))
+    state.set("session", "host-3")
+    st = ET.SubElement(state, _q(NS_SXE, "state"))
+    begin = ET.SubElement(st, _q(NS_SXE, "document-begin"))
+    begin.set("prolog", wb_mod.DOC_PROLOG)
+    new = ET.SubElement(st, _q(NS_SXE, "new"))
+    for key, value in (("rid", "their-rid"), ("type", "element"),
+                       ("parent", "0"), ("primary-weight", "3"),
+                       ("name", "path")):
+        new.set(key, value)
+    end = ET.SubElement(st, _q(NS_SXE, "document-end"))
+    end.set("last-sender", "")
+    end.set("last-id", "")
+    msg = _MsgStub("bob@example.com/pc")
+    msg.xml.append(state)
+    await manager.handle_sxe(msg)
+    flushed = [s for s in client.xmpp.sent
+               if s.xml.find(".//%s" % _q(NS_SXE, "new")) is not None]
+    session = manager.session("host-3")
+    shapes = {s.get("id") for s in manager.shapes("host-3")}
+    manager.end_session("host-3")
+    return len(before), len(flushed), session.synced, shapes
+
+
+_before, _flushed, _synced, _shapes = asyncio.run(_buffer_case())
+check("an edit made before the state is not sent yet", _before == 0)
+check("the host snapshot marks the session synchronized", _synced)
+check("the buffered edit is flushed after the snapshot", _flushed > 0)
+check("both drawings are merged in the document", "mine" in _shapes)
 
 print()
 if FAILURES:

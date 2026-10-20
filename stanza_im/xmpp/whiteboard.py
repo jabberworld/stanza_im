@@ -76,6 +76,9 @@ class WhiteboardSession:
     ready: bool = False
     offered: bool = False       # we sent a state offer
     accepted: bool = False      # our offer was accepted
+    host: str = ""              # the session host (the initiator in a 1:1)
+    synced: bool = False        # the host's state has been received
+    pending: list = field(default_factory=list)  # edits waiting for the state
     state_buffering: bool = False
 
 
@@ -99,6 +102,11 @@ class WhiteboardManager:
         self._proposals: dict[str, str] = {}
         self._proceed_futures: dict[str, asyncio.Future] = {}
         self._proceeded: set[str] = set()
+        # Pending <connect/> requests of the sessions we joined.  The request
+        # goes out once the session-accept is acknowledged and is retried while
+        # the host has not offered its state yet.
+        self._connect_tasks: dict[str, asyncio.Task] = {}
+        self._connect_retry_delays = (2.0, 5.0, 10.0)
 
     @property
     def available(self) -> bool:
@@ -258,6 +266,7 @@ class WhiteboardManager:
                 self.sessions[sid] = session
             self._by_peer[peer] = sid
             session.ready = True
+            session.synced = True
             self._advertise(session)
             self._send(session, self._sxe(session, "connect"))
             self.client.emit("whiteboard_ready", sid)
@@ -267,6 +276,7 @@ class WhiteboardManager:
         session = WhiteboardSession(sid=sid, peer=peer, is_muc=False,
                                     is_host=True, name=name)
         self._seed_document(session.doc)
+        session.synced = True
         self.sessions[sid] = session
         self._by_peer[peer] = sid
         if peer.split("/", 1)[0] == (self.client.jid_str or ""):
@@ -322,11 +332,90 @@ class WhiteboardManager:
         if session is None:
             session = WhiteboardSession(sid=sid, peer=peer, is_muc=is_muc,
                                         is_host=False, name=name)
+            # A MUC board has no initial-state handshake: every occupant keeps
+            # its own document and the room relays the edits.
+            session.synced = is_muc
             self.sessions[sid] = session
         self._by_peer[peer] = sid
         if not is_muc:
-            self._send_jingle(session, "session-accept")
-        self._send(session, self._sxe(session, "connect"))
+            self._connect_after_accept(session)
+        else:
+            self._send(session, self._sxe(session, "connect"))
+
+    def _connect_after_accept(self, session: WhiteboardSession) -> None:
+        """Accept the session, then request its state once that is acknowledged.
+
+        The host offers the shared state on a ``<connect/>`` only when its own
+        payload channel is ready.  Iris (Psi) starts the accepted content on the
+        next event-loop turn after the ``session-accept`` reply, so a request
+        that arrives together with the accept is silently dropped and the host
+        never offers again.  Sending the request after the acknowledgement
+        avoids that race; the retries cover a host that was still busy.
+        """
+
+        def send_connect(result=None) -> None:
+            if self.sessions.get(session.sid) is not session or session.ready:
+                return
+            try:
+                failed = str(result.get("type") or "") == "error"
+            except AttributeError:
+                failed = False
+            if failed:
+                logger.info("Whiteboard: session-accept failed for %s",
+                            session.sid[:8])
+                return
+            self._send(session, self._sxe(session, "connect"))
+
+        self._send_jingle(session, "session-accept", on_result=send_connect)
+        # Even a lost acknowledgement must not leave the joiner without the
+        # state: the host may have received the accept after all.
+        self._schedule_connect_retries(session)
+
+    def _schedule_connect_retries(self, session: WhiteboardSession) -> None:
+        self._cancel_connect(session.sid)
+        task = self._spawn(self._retry_connect(session))
+        if task is not None:
+            self._connect_tasks[session.sid] = task
+
+    async def _retry_connect(self, session: WhiteboardSession) -> None:
+        try:
+            for delay in self._connect_retry_delays:
+                await asyncio.sleep(delay)
+                if self.sessions.get(session.sid) is not session:
+                    return
+                if session.ready:
+                    return
+                logger.info("Whiteboard: no state for %s yet, re-sending "
+                            "connect", session.sid[:8])
+                self._send(session, self._sxe(session, "connect"))
+        finally:
+            if self._connect_tasks.get(session.sid) is asyncio.current_task():
+                self._connect_tasks.pop(session.sid, None)
+
+    def _cancel_connect(self, sid: str) -> None:
+        task = self._connect_tasks.pop(sid, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _spawn(self, coro):
+        """Schedule *coro* on the client's event loop (when there is one)."""
+        start = getattr(self.client, "_start_task", None)
+        if callable(start):
+            try:
+                return start(coro)
+            except Exception:  # noqa: BLE001
+                logger.debug("Whiteboard: could not schedule a task",
+                             exc_info=True)
+                coro.close()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                coro.close()
+                return None
+        return loop.create_task(coro)
 
     def refuse_session(self, sid: str,
                        reason: str = "unsupported-applications") -> None:
@@ -339,6 +428,7 @@ class WhiteboardManager:
         session = self.sessions.pop(sid, None)
         if session is None:
             return
+        self._cancel_connect(sid)
         if self._by_peer.get(session.peer) == sid:
             self._by_peer.pop(session.peer, None)
         self._announce_inactive(session.peer)
@@ -440,6 +530,7 @@ class WhiteboardManager:
         session = self.sessions.pop(sid, None)
         if session is None:
             return
+        self._cancel_connect(sid)
         if self._by_peer.get(session.peer) == sid:
             self._by_peer.pop(session.peer, None)
         if session.is_muc:
@@ -857,6 +948,9 @@ class WhiteboardManager:
         if action == "session-initiate":
             session = WhiteboardSession(sid=sid, peer=peer, is_host=False,
                                         full_peer=frm)
+            # The offered transport names the host: in a 1:1 session it is the
+            # initiator (XEP-0284 §4.1) and the accept echoes it (§4.2).
+            session.host = self._offer_host(jingle, frm)
             self._seed_document(session.doc)
             self.sessions[sid] = session
             self._by_peer[peer] = sid
@@ -877,13 +971,25 @@ class WhiteboardManager:
         elif action == "session-terminate":
             session = self.sessions.pop(sid, None)
             if session is not None:
+                self._cancel_connect(sid)
                 self._announce_inactive(session.peer)
                 self.client.emit("whiteboard_ended", sid)
         else:
             logger.debug("Whiteboard: unhandled Jingle action %s", action)
 
+    @staticmethod
+    def _offer_host(jingle: ET.Element, fallback: str) -> str:
+        """The host named by an incoming Jingle offer's SXE transport."""
+        for transport in jingle.iter(_q(NS_SXE_TRANSPORT, "transport")):
+            for host in transport.iter(_q(NS_SXE_TRANSPORT, "host")):
+                text = (host.text or "").strip()
+                if text:
+                    return text
+        initiator = (jingle.get("initiator") or "").strip()
+        return initiator or fallback
+
     def _send_jingle(self, session: WhiteboardSession, action: str,
-                     reason: str = "") -> None:
+                     reason: str = "", on_result=None) -> None:
         iq = self.client.xmpp.Iq()
         iq["type"] = "set"
         iq["to"] = session.full_peer or session.peer
@@ -892,6 +998,9 @@ class WhiteboardManager:
         jingle.set("sid", session.sid)
         if action == "session-initiate":
             jingle.set("initiator", self.client._full_jid)
+        elif action == "session-accept":
+            # XEP-0166 §6.2.4.2: the accept names the responder.
+            jingle.set("responder", self.client._full_jid)
         if action != "session-terminate":
             content = ET.SubElement(jingle, _q(NS_JINGLE, "content"))
             content.set("creator", "initiator")
@@ -900,11 +1009,45 @@ class WhiteboardManager:
             transport = ET.SubElement(content,
                                       _q(NS_SXE_TRANSPORT, "transport"))
             host = ET.SubElement(transport, _q(NS_SXE_TRANSPORT, "host"))
-            host.text = session.peer if session.is_muc else self.client.jid_str
+            if session.is_muc:
+                host_text = session.peer
+            elif action == "session-accept":
+                # XEP-0284 §4.2: the accept repeats the offered host (the
+                # initiator in a 1:1 session), never ourselves.
+                host_text = (session.host or session.full_peer
+                             or session.peer)
+            else:
+                host_text = self.client.jid_str
+            host.text = host_text
         else:
             reason_el = ET.SubElement(jingle, _q(NS_JINGLE, "reason"))
             ET.SubElement(reason_el, _q(NS_JINGLE, reason or "success"))
-        iq.send()
+        try:
+            future = iq.send(callback=on_result)
+        except TypeError:
+            # A lightweight stanza stub (tests) has a plain send().
+            iq.send()
+            future = None
+            if on_result is not None:
+                try:
+                    on_result(None)
+                except Exception:  # noqa: BLE001
+                    logger.debug("Whiteboard: result handler failed",
+                                 exc_info=True)
+        if future is not None:
+            future.add_done_callback(self._log_iq_result)
+
+    @staticmethod
+    def _log_iq_result(future) -> None:
+        """Consume the Jingle IQ future so an error is not left unretrieved."""
+        if future.cancelled():
+            return
+        try:
+            exc = future.exception()
+        except Exception:  # noqa: BLE001
+            return
+        if exc is not None:
+            logger.debug("Whiteboard: Jingle IQ failed: %s", exc)
 
     # ── SXE messages ──────────────────────────────────────────────
 
@@ -929,8 +1072,15 @@ class WhiteboardManager:
         if child is None:
             return
         tag = child.tag
+        tag_name = tag.rsplit("}", 1)[-1]
+        if tag_name == "state":
+            logger.debug("Whiteboard: SXE state from %s in %s", frm, sid[:8])
+        else:
+            logger.info("Whiteboard: SXE %s from %s in %s", tag_name, frm,
+                        sid[:8])
         if tag == _q(NS_SXE, "close"):
             # A peer ended the session (MUC client extension): notify and drop.
+            self._cancel_connect(sid)
             self._announce_inactive(session.peer)
             self.sessions.pop(sid, None)
             if self._by_peer.get(session.peer) == sid:
@@ -976,6 +1126,9 @@ class WhiteboardManager:
         """A participant connected; as the host we offer the state."""
         if not session.is_host:
             return
+        # A repeated connect (a joiner that lost its channel) gets a fresh
+        # offer even when an earlier one was already accepted.
+        session.accepted = False
         session.offered = True
         self._send(session, self._sxe(session, "state-offer",
                                       {"description": True}), to=frm)
@@ -1039,8 +1192,13 @@ class WhiteboardManager:
                 doc.apply_remove(child)
         if not is_snapshot:
             self._record(session.sid, forward, inverse)
-        if state.find(_q(NS_SXE, "document-end")) is not None:
+        if (state.find(_q(NS_SXE, "document-end")) is not None
+                or is_snapshot):
             session.ready = True
+            if not session.synced:
+                session.synced = True
+                logger.info("Whiteboard: state received for %s", session.sid[:8])
+                self._flush_pending(session)
         self.client.emit("whiteboard_state", session.sid)
 
     # ── Sending ───────────────────────────────────────────────────
@@ -1071,6 +1229,10 @@ class WhiteboardManager:
         msg["type"] = "groupchat" if session.is_muc else "chat"
         msg["id"] = self._next_id()
         msg.xml.append(element)
+        kind = (element[0].tag.rsplit("}", 1)[-1]
+                if len(element) else "sxe")
+        logger.debug("Whiteboard: SXE out %s to %s in %s", kind, target,
+                     session.sid[:8])
         try:
             msg.send()
         except Exception:  # noqa: BLE001
@@ -1093,6 +1255,17 @@ class WhiteboardManager:
                     removes: list | None = None) -> None:
         if not (new or sets or removes):
             return
+        if not session.is_host and not session.synced:
+            # A joiner may edit only after it received the initial state
+            # (XEP-0284 §9) — the host already ignores edits from an
+            # unsynchronized peer.  Keep them and send them in order once the
+            # snapshot has been applied.
+            session.pending.extend(
+                copy.deepcopy(item)
+                for item in (*(new or []), *(sets or []), *(removes or [])))
+            logger.debug("Whiteboard: buffered an edit for %s (%d pending)",
+                         session.sid[:8], len(session.pending))
+            return
         el = self._sxe(session)
         state = ET.SubElement(el, _q(NS_SXE, "state"))
         for item in (new or []):
@@ -1102,6 +1275,20 @@ class WhiteboardManager:
         for item in (removes or []):
             state.append(item)
         self._send(session, el)
+
+    def _flush_pending(self, session: WhiteboardSession) -> None:
+        """Send the edits buffered while the initial state was awaited."""
+        pending = session.pending
+        session.pending = []
+        if not pending:
+            return
+        logger.info("Whiteboard: flushing %d buffered edit(s) for %s",
+                    len(pending), session.sid[:8])
+        self._send_edits(
+            session,
+            new=[e for e in pending if e.tag == _q(NS_SXE, "new")],
+            sets=[e for e in pending if e.tag == _q(NS_SXE, "set")],
+            removes=[e for e in pending if e.tag == _q(NS_SXE, "remove")])
 
     @staticmethod
     def _set_element(rid: str, doc: SxeDocument) -> ET.Element:

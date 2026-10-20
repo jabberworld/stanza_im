@@ -2315,6 +2315,18 @@ rebuilds the canvas (`WhiteboardCanvas.load_shapes`); an incoming
 invitation reaches the session through the XEP-0353 propose/proceed path (the
 `session-initiate` auto-joins), so `MainWindow._on_whiteboard_ready` opens the
 board (`show`/`raise_`/`activateWindow`) instead of leaving the user to open it.
+**Initial-state synchronization** follows XEP-0284 strictly: the accept echoes
+the host named by the offered `<transport><host/>` (§4.2) and carries
+`responder`, and the joiner sends `<connect/>` only after its `session-accept`
+is acknowledged. A host offers the state only once its payload channel is ready
+and silently drops a `connect` that arrives while it is still starting (Iris
+starts accepted contents on the next event-loop turn), so
+`WhiteboardManager._retry_connect` re-sends the request at 2/5/10 s until a
+`state-offer` arrives. Until the snapshot (`<document-end>`) is applied the
+joiner buffers its own edits (`WhiteboardSession.pending`, flushed in order once
+`synced`) — a host ignores edits from an unsynchronized peer. The SXE lifecycle
+(`connect`/`state-offer`/`accept-state`/`state`) is logged as
+`Whiteboard: SXE …` for diagnosis.
 [`tests/test_whiteboard.py`, `tests/test_whiteboard_sync.py`,
 `tests/test_jingle_error_router.py`, `tests/test_sxe.py`, `tests/test_svg_path.py`,
 `tests/test_svg_transform.py`]

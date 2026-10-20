@@ -2699,6 +2699,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   An incoming `session-initiate` (`whiteboard_invite`) asks the user to join; an
   accepted invitation reaches the session through the XEP-0353 propose/proceed
   path and `MainWindow._on_whiteboard_ready` opens the board.
+- **Initial-state synchronization** follows XEP-0284: the `session-accept`
+  echoes the host named in the offered `<transport><host/>` (§4.2) and sets
+  `responder`; the joiner sends `<connect/>` only after the accept is
+  acknowledged and retries it (2/5/10 s) until a `state-offer` arrives, since a
+  host drops a request that comes before its payload channel is ready. Edits
+  made before the snapshot are buffered and flushed once `<document-end>` has
+  been applied (a host ignores edits from an unsynchronized peer).
 - **Not implemented (possible future work):** the extended profile's optional
   attachment transfer over Jingle File Transfer (XEP-0234, §12.3). Large images
   are handled by embedding a `data:` URI or uploading via HTTP File Upload
