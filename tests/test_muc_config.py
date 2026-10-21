@@ -108,6 +108,16 @@ try:
     check("three tabs", dlg._tabs.count() == 3)
     check("owner sees the settings tab", dlg._tabs.isTabEnabled(2))
     check("hats tab present", dlg._tabs.tabText(1) == "Hats")
+    check("the long tabs scroll instead of pinning the dialog",
+          isinstance(dlg._tabs.widget(1), QtWidgets.QScrollArea)
+          and isinstance(dlg._tabs.widget(2), QtWidgets.QScrollArea))
+    check("the dialog can shrink vertically",
+          dlg.minimumSizeHint().height() <= 320
+          and dlg.minimumHeight() <= 320)
+    dlg.resize(480, 320)
+    check("a smaller size is accepted",
+          dlg.width() <= 480 and dlg.height() <= 320)
+    dlg.resize(660, 470)
     check("hats tree lists one category with one assignee",
           dlg._hats_tab._tree.topLevelItemCount() == 1
           and dlg._hats_tab._tree.topLevelItem(0).childCount() == 1)

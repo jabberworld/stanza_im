@@ -337,7 +337,9 @@ enabled for the owner only and hosts the `muc#owner` room-configuration
 `_align_selectors`). Edits are collected and applied on «Ок» via
 `client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
-only JIDs). [`tests/test_muc_config.py`]
+only JIDs). The «Шапки» and «Настройки» pages are wrapped in a `QScrollArea`, so
+a long configuration form never pins the window: it can be shrunk (460×300
+minimum, size grip) and scrolls instead. [`tests/test_muc_config.py`]
 
 **Voice requests (XEP-0045 §7.13)**: a visitor in a moderated room asks for
 voice with a bodyless `<message>` (**no `type`** — a `groupchat` type would be a

@@ -110,6 +110,10 @@ class MucConfigDialog(QtWidgets.QDialog):
 
         self.setWindowTitle(tr("muc_config_title", room=room))
         self.resize(660, 470)
+        # The content (a long room-configuration form) must not pin the
+        # window: every long page scrolls and the dialog can be made smaller.
+        self.setMinimumSize(460, 300)
+        self.setSizeGripEnabled(True)
         layout = QtWidgets.QVBoxLayout(self)
 
         self._tabs = QtWidgets.QTabWidget()
@@ -149,7 +153,7 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._hats_tab = HatsTab(
             client, room,
             can_manage=actor_affiliation in ("owner", "admin"))
-        self._tabs.addTab(self._hats_tab, tr("hats_tab"))
+        self._tabs.addTab(self._scrolled(self._hats_tab), tr("hats_tab"))
 
         # ── Settings ──────────────────────────────────────────────
         settings = QtWidgets.QWidget()
@@ -159,7 +163,8 @@ class MucConfigDialog(QtWidgets.QDialog):
         s_layout.addWidget(self._settings_status)
         self._settings_body = QtWidgets.QVBoxLayout()
         s_layout.addLayout(self._settings_body, 1)
-        self._tabs.addTab(settings, tr("muc_config_settings_tab"))
+        self._tabs.addTab(self._scrolled(settings),
+                          tr("muc_config_settings_tab"))
         self._tabs.setTabEnabled(2, self._can_configure)
 
         buttons = QtWidgets.QDialogButtonBox(
@@ -183,6 +188,15 @@ class MucConfigDialog(QtWidgets.QDialog):
             self._settings_status.setText(tr("muc_config_no_rights"))
 
     # ── Helpers ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _scrolled(widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
+        """Wrap a long page so the dialog keeps a usable minimum size."""
+        area = QtWidgets.QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        area.setWidget(widget)
+        return area
 
     def _start_task(self, coro):
         try:
