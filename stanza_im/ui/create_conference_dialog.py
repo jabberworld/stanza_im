@@ -95,9 +95,11 @@ class CreateConferenceDialog(QtWidgets.QDialog):
         public.clicked.connect(self._preset_public)
         calls = QtWidgets.QPushButton(tr("conference_preset_calls"))
         calls.clicked.connect(self._preset_calls)
+        omemo = QtWidgets.QPushButton(tr("conference_preset_omemo"))
+        omemo.clicked.connect(self._preset_omemo)
         private = QtWidgets.QPushButton(tr("conference_preset_private"))
         private.clicked.connect(self._preset_private)
-        for button in (public, calls, private):
+        for button in (public, calls, omemo, private):
             presets.addWidget(button)
         layout.addLayout(presets)
 
@@ -151,6 +153,15 @@ class CreateConferenceDialog(QtWidgets.QDialog):
         self._members_only.setChecked(False)
 
     def _preset_calls(self) -> None:
+        # Muji addresses every participant by their real JID, so the room must
+        # be non-anonymous; members-only is not required for calls.
+        self._invisible.setChecked(False)
+        self._members_only.setChecked(False)
+        self._anonymous.setChecked(False)
+
+    def _preset_omemo(self) -> None:
+        # XEP-0384 group chat: members-only and non-anonymous.
+        self._invisible.setChecked(False)
         self._members_only.setChecked(True)
         self._anonymous.setChecked(False)
 

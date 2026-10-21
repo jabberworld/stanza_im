@@ -521,10 +521,11 @@ The Actions menu's first item «Создать конференцию»
 **address** (required, the part before «@», with an info glyph), an optional
 **name** and the **server** (required, prefilled with the account's
 `discover_conference_service()`), plus the initial room settings — «Постоянная»
-/ «Невидимая» / «Для своих» / «Анонимная» (each with an info glyph) and three
-presets (Публичная = anonymous on, invisible/members off; Звонки/OMEMO =
-members-only on, anonymous off; Частная = invisible + members-only on,
-anonymous off).  The room is joined and, only when this join created it
+/ «Невидимая» / «Для своих» / «Анонимная» (each with an info glyph) and four
+presets: Публичная (anonymous on, invisible/members off), Звонки (public,
+non-anonymous, **not** members-only — Muji needs the real JIDs but no
+membership), OMEMO (non-anonymous + members-only, XEP-0384 §5.8) and Частная
+(invisible + members-only on, anonymous off).  The room is joined and, only when this join created it
 (XEP-0045 status code `201` — read both in `_join_muc_task` **and** in
 `_on_groupchat_presence` for the self-presence that arrives first, then passed
 through the `muc_joined` event), `MainWindow._apply_created_room_config`

@@ -83,8 +83,15 @@ check("the Public preset enables anonymity, disables invisible and members",
 
 dlg._preset_calls()
 c = dlg.collect()
-check("the Calls/OMEMO preset enables members-only and disables anonymity",
-      c["members_only"] is True and c["anonymous"] is False)
+check("the Calls preset is public, non-anonymous and not members-only",
+      c["members_only"] is False and c["anonymous"] is False
+      and c["invisible"] is False)
+
+dlg._preset_omemo()
+c = dlg.collect()
+check("the OMEMO preset enables members-only and disables anonymity",
+      c["members_only"] is True and c["anonymous"] is False
+      and c["invisible"] is False)
 
 dlg._anonymous.setChecked(True)
 dlg._preset_private()
@@ -204,6 +211,8 @@ client.xmpp = _FakeXmpp()
 client.groupchats = {"room@conf.example": GroupChatInfo(
     room="room@conf.example", nick="me")}
 client._muc_version_probed = set()
+# ``__new__`` skips __init__, so the handler's bookkeeping sets are absent.
+client._known_rooms = set()
 seen.clear()
 client._on_groupchat_presence(_SelfPresence({201, 110}))
 joined = next((e for e in seen if e and e[0] == "muc_joined"), None)

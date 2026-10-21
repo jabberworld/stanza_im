@@ -271,8 +271,9 @@ The Actions menu's first item «Создать конференцию»
 (`ui/create_conference_dialog.py`) collects the room address (required, the
 part before «@»), an optional name and the server (required, defaulted to
 `client.discover_conference_service()`), plus the initial settings «Постоянная»
-/ «Невидимая» / «Для своих» / «Анонимная» and three presets (Публичная /
-Звонки/OMEMO / Частная).  The room is joined and configured **only when the
+/ «Невидимая» / «Для своих» / «Анонимная» and four presets (Публичная /
+Звонки — public and non-anonymous but not members-only, which Muji needs /
+OMEMO — non-anonymous + members-only / Частная).  The room is joined and configured **only when the
 join created it** (XEP-0045 status `201` in
 `presence['muc']['status_codes']`, propagated via the `muc_joined` event):
 `client.muc_creation_values(opts)` maps the options to
