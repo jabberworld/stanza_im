@@ -69,8 +69,17 @@ class _ToolTipWindow(QtWidgets.QWidget):
         self._label.setFont(font)
         self._avatar.setFont(font)
 
-    def set_content(self, html: str, avatar_path: str | None) -> None:
+    def set_content(self, html: str, avatar_path: str | None,
+                    wrap: bool = False, max_width: int = 0) -> None:
         self._apply_style()
+        # Undo a width clamp left by a previous, very wide tooltip.
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(16777215)
+        self._label.setWordWrap(bool(wrap))
+        if wrap and max_width > 0:
+            self._label.setMaximumWidth(int(max_width))
+        else:
+            self._label.setMaximumWidth(16777215)  # QWIDGETSIZE_MAX
         self._label.setText(html)
         if avatar_path:
             pix = QtGui.QPixmap(avatar_path)
@@ -87,7 +96,8 @@ class _ToolTipWindow(QtWidgets.QWidget):
 
 _WINDOW: _ToolTipWindow | None = None
 _TIMER: QtCore.QTimer | None = None
-_PENDING: list = [QtCore.QPoint(), "", None]  # global_pos, html, avatar_path
+# global_pos, html, avatar_path, wrap, max_width
+_PENDING: list = [QtCore.QPoint(), "", None, False, 0]
 
 
 def _window() -> _ToolTipWindow:
@@ -107,6 +117,18 @@ def _place(pos: QtCore.QPoint) -> QtCore.QPoint:
         or QtWidgets.QApplication.primaryScreen()
     if screen is not None:
         area = screen.availableGeometry()
+        # Never let a wide (unwrapped) tooltip fall off the screen sideways.
+        limit_w = max(120, area.width() - 2 * _MARGIN)
+        limit_h = max(60, area.height() - 2 * _MARGIN)
+        if size.width() > limit_w:
+            # Pin the width (the label clips or wraps): a plain resize is
+            # ignored because the label's minimum hint is the huge text width.
+            win.setFixedWidth(limit_w)
+            win.adjustSize()
+            size = win.size()
+        if size.height() > limit_h:
+            win.resize(size.width(), limit_h)
+            size = win.size()
         target = QtCore.QPoint(
             min(max(area.left() + _MARGIN, target.x()),
                 area.right() - size.width() - _MARGIN),
@@ -116,24 +138,31 @@ def _place(pos: QtCore.QPoint) -> QtCore.QPoint:
 
 
 def _show_now(global_pos: QtCore.QPoint, html: str,
-              avatar_path: str | None) -> None:
+              avatar_path: str | None, wrap: bool = False,
+              max_width: int = 0) -> None:
     win = _window()
-    win.set_content(html, avatar_path)
+    win.set_content(html, avatar_path, wrap=wrap, max_width=max_width)
     win.move(_place(global_pos))
     win.show()
     win.raise_()
 
 
 def show(global_pos: QtCore.QPoint, html: str,
-         avatar_path: str | None = None) -> None:
-    """Schedule a popup near *global_pos* (restarting the delay timer)."""
+         avatar_path: str | None = None, wrap: bool = False,
+         max_width: int = 0) -> None:
+    """Schedule a popup near *global_pos* (restarting the delay timer).
+
+    *wrap* breaks long lines at *max_width* px (0 = leave the label's own
+    maximum), which keeps a long conference subject readable instead of
+    producing a tooltip wider than the screen.
+    """
     global _TIMER
     if _TIMER is None:
         _TIMER = QtCore.QTimer()
         _TIMER.setSingleShot(True)
         _TIMER.timeout.connect(
-            lambda: _show_now(_PENDING[0], _PENDING[1], _PENDING[2]))
-    _PENDING[:] = [global_pos, html, avatar_path]
+            lambda: _show_now(*_PENDING))
+    _PENDING[:] = [global_pos, html, avatar_path, bool(wrap), int(max_width)]
     _TIMER.start(_SHOW_DELAY_MS)
 
 

@@ -819,7 +819,10 @@ roster and the MUC participant list; its avatar is scaled to
 default 64). Its text font follows `appearance.tooltip_font`/`tooltip_font_size`
 (`tooltip.set_font`, Preferences → Appearance → «Шрифты»); the same setting also
 reaches the native Qt tooltips through a `QToolTip { … }` rule in
-`MainWindow._apply_widget_fonts`. The MUC participant tooltip names the occupant's client the way the
+`MainWindow._apply_widget_fonts`. `tooltip.show(..., wrap=True, max_width=…)`
+wraps long content (the MUC subject: 420 px, newlines become `<br>`), and
+`_place` pins the popup to the screen width so even an unwrapped long line
+cannot run off the screen. The MUC participant tooltip names the occupant's client the way the
 roster does: the XEP-0092 `client` if known, otherwise the XEP-0115 caps mapping
 (`clients.find_client(caps_node)`), with the caps icon before the nick.
 
