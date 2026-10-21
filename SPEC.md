@@ -1178,6 +1178,8 @@ the Chromium renderer processes are unaffected.
 
 ## 9. Chat Widget (`ui/chat_widget.py`)
 
+Focusing an already-open conversation (`ChatWindow._focus_tab` from a roster double click, a bookmark or a menu) restores a minimized window and activates it (`_raise_window`: `showNormal` + `show`/`raise_`/`activateWindow` in the separate mode, `attention_requested` when embedded), so the user always sees that the chat is already open.
+
 Single conversation tab. Layout:
 
 ```

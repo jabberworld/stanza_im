@@ -244,12 +244,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._apply_tab_unread(jid)
         if focus:
             self._tab_widget.setCurrentIndex(idx)
-            if self._embedded:
-                self.attention_requested.emit(jid)
-            else:
-                self.show()
-                self.raise_()
-                self.activateWindow()
+            self._raise_window(jid)
             self._update_title()
             widget.focus_input()
         return widget
@@ -339,12 +334,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_order.append(room)
         self._apply_tab_icon(room)
         self._tab_widget.setCurrentIndex(idx)
-        if self._embedded:
-            self.attention_requested.emit(room)
-        else:
-            self.show()
-            self.raise_()
-            self.activateWindow()
+        self._raise_window(room)
         self._update_title()
         widget.focus_input()
         return widget
@@ -963,6 +953,23 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._active_jid = current
         self._update_title()
 
+    def _raise_window(self, jid: str = "") -> None:
+        """Bring the chat window to the front, restoring it if minimized.
+
+        A plain ``show()``/``raise_()`` leaves a minimized window in the
+        taskbar on X11 (and never activates it), so an already-open chat did
+        not appear when the user opened it again from the roster or a
+        bookmark.
+        """
+        if self._embedded:
+            self.attention_requested.emit(jid)
+            return
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def _focus_tab(self, jid: str):
         widget = self._tabs.get(jid)
         if widget:
@@ -970,11 +977,7 @@ class ChatWindow(QtWidgets.QMainWindow):
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.setCurrentIndex(idx)
-            if self._embedded:
-                self.attention_requested.emit(jid)
-            else:
-                self.show()
-                self.raise_()
+            self._raise_window(jid)
 
     def _on_message_sent(self, jid: str, body: str):
         self.message_to_send.emit(jid, body)
