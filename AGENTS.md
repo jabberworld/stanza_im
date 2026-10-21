@@ -1850,8 +1850,12 @@ published to the private PEP node `urn:xmpp:mds:displayed:0` when the chat is
 focused/active (server-assist via a companion XEP-0333 marker when the server
 announces `urn:xmpp:mds:server-assist:0`); incoming PEP events (routed like the
 extended-presence notifications, see below) and a catch-up
-fetch apply remote displayed states (`mds_displayed(chat_jid, sid)`) and an open
-chat gets an "Displayed on another device" status line. The remote state is
+fetch apply remote displayed states (`mds_displayed(chat_jid, sid)`); they never
+add a chat status line. A PEP echo of a state this client published itself
+(recognised by the `_mds_own_sids` registry, which matters because the server
+buffers the echo while the client is inactive, XEP-0352) is ignored, so a
+single-device account never treats its own read position as "another device".
+The remote state is
 **clamped** against our own position instead of clearing blindly:
 `MainWindow._on_mds_displayed` resolves the incoming chat JID to one of our
 conversation keys (`_resolve_mds_key` — a 1:1 chat and a conference collapse to

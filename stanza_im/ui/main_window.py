@@ -6802,18 +6802,14 @@ class MainWindow(QtWidgets.QMainWindow):
         key = self._resolve_mds_key(chat_jid)
         if not key:
             return
-        entry = self._unread_chats.get(key)
-        if sid and entry and (entry["unread"] or entry["mentions"]):
-            self._start_task(self._clamp_read_state(key, sid))
         # A conversation without unread messages has nothing to apply.  Touching
         # it here used to re-anchor the tab to its newest rendered message, so a
         # remote state published for a message *we* had not seen yet (our own
         # XEP-0490 echo after a re-login, or a device ahead of us) moved the
         # stored read point forward and the next open started at the end.
-        chat = self._chat_window.get_chat(key)
-        if chat:
-            chat.add_status(tr("mds_displayed_elsewhere"),
-                            time.strftime("%H:%M:%S"))
+        entry = self._unread_chats.get(key)
+        if sid and entry and (entry["unread"] or entry["mentions"]):
+            self._start_task(self._clamp_read_state(key, sid))
 
     async def _clamp_read_state(self, key: str, sid: str) -> None:
         """Apply a remote displayed state to our own unread block (XEP-0490).

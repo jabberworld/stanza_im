@@ -138,6 +138,37 @@ check("track sid", c._mds_last_sid.get("eve@example.com") == "sid-track")
 c.mds_mark_displayed("eve@example.com")
 check("mark updates local", c._mds_local.get("eve@example.com") == "sid-track")
 
+# 6b. our own PEP echo is never "another device" -------------------------------
+c_own = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)
+own_events = []
+c_own.on("mds_displayed", lambda *a: own_events.append(a))
+c_own._mds_track("eve@example.com", slixmpp.Message(), "own-old")
+c_own.mds_mark_displayed("eve@example.com")
+c_own._mds_apply_remote("eve@example.com", "own-old")
+check("an immediate echo of our own publish is ignored", not own_events)
+c_own._mds_track("eve@example.com", slixmpp.Message(), "own-new")
+c_own.mds_mark_displayed("eve@example.com")
+c_own._mds_apply_remote("eve@example.com", "own-old")
+check("a delayed echo of an older own publish is ignored", not own_events)
+c_own._mds_apply_remote("eve@example.com", "remote-side")
+check("another device's state still applies",
+      own_events == [("eve@example.com", "remote-side")])
+
+# 6c. no "displayed on another device" status line ---------------------------
+import inspect
+
+from stanza_im.i18n import en, ru
+from stanza_im.ui.main_window import MainWindow
+
+_mds_src = inspect.getsource(MainWindow._on_mds_displayed)
+check("the MDS handler adds no chat status line",
+      "add_status" not in _mds_src
+      and "mds_displayed_elsewhere" not in _mds_src)
+check("the status text is gone from the dictionaries",
+      "mds_displayed_elsewhere" not in en.STRINGS
+      and "mds_displayed_elsewhere" not in ru.STRINGS)
+check("en and ru dictionaries stay in sync", set(en.STRINGS) == set(ru.STRINGS))
+
 # 7. seeded displayed state suppresses stale catch-up --------------------------
 c_seed = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)
 seed_events = []

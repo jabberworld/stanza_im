@@ -1153,6 +1153,10 @@ class JabberClient:
         self._mds_last_sid: dict[str, str] = {}
         self._mds_last_id: dict[str, str] = {}
         self._mds_local: dict[str, str] = {}
+        # Sids this client published itself: a PEP echo of our own publish
+        # (the server buffers it while the client is inactive, XEP-0352) must
+        # never be mistaken for another device's displayed state.
+        self._mds_own_sids: set[str] = set()
         self._mds_server_assist = False
         self._mds_pubsub_options = False
         self._upload_service_cache: str | None = None
@@ -5369,6 +5373,7 @@ class JabberClient:
             return
         msg_id = msg_id or self._mds_last_id.get(chat_jid, "")
         self._mds_local[chat_jid] = sid
+        self._note_own_sid(sid)
         loop = asyncio.get_event_loop()
         if self._mds_server_assist and msg_id:
             task = self._mds_publish_message(chat_jid, sid, msg_id)
@@ -5411,6 +5416,14 @@ class JabberClient:
             if by and by.split("/")[0] != self.jid_str:
                 continue
             self._mds_apply_remote(item_id, sid)
+
+    def _note_own_sid(self, sid: str) -> None:
+        """Remember a displayed sid published by this client."""
+        if not sid:
+            return
+        if len(self._mds_own_sids) > 500:
+            self._mds_own_sids.clear()
+        self._mds_own_sids.add(sid)
 
     async def _mds_publish_pep(self, chat_jid: str, sid: str) -> None:
         await self._mds_build_pep(chat_jid, sid).send()
@@ -5505,6 +5518,10 @@ class JabberClient:
 
     def _mds_apply_remote(self, chat_jid: str, sid: str) -> None:
         if not sid or not chat_jid:
+            return
+        if sid in self._mds_own_sids:
+            # Our own publish echoed back by the server, possibly delayed while
+            # the client was inactive (CSI): this is not another device.
             return
         if self._mds_local.get(chat_jid) == sid:
             return

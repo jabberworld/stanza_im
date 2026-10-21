@@ -356,7 +356,6 @@ STRINGS = {
     "msg_delivered": "✓ Доставлено",
     "reply_in_reply_to": "В ответ на {sender}",
     "reply_jump_tooltip": "Перейти к сообщению, на которое ответили",
-    "mds_displayed_elsewhere": "Просмотрено на другом устройстве",
     "reply_cancel": "Отменить ответ",
     "muc_mention_sender": "Упомянуть",
     "chat_file_transfer": "Передача файлов",
