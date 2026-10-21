@@ -77,12 +77,16 @@ class _FakeClient:
 
 
 class _FakeIncoming:
-    def __init__(self, frm, xml):
+    def __init__(self, frm, xml, mtype=""):
         self._frm = frm
         self.xml = xml
+        self._type = mtype
 
     def __getitem__(self, key):
         return self._frm if key == "from" else None
+
+    def get_type(self):
+        return self._type
 
 
 def _state_of(client, index=-1):
@@ -1013,6 +1017,85 @@ check("the buffered drawing reaches the host after the snapshot", _flushed)
 check("the host's viewBox wins after the merge", _join_box == (600, 400))
 check("the merged document keeps the local shape", "local1" in _join_ids)
 
+
+# 31. a conference board asks before joining --------------------------------
+def _muc_sxe_message(frm, sid, tag, mtype="groupchat"):
+    msg = _FakeIncoming(frm, ET.Element("{jabber:client}message"), mtype)
+    sxe = ET.SubElement(msg.xml, _q(NS_SXE, "sxe"))
+    sxe.set("session", sid)
+    ET.SubElement(sxe, _q(NS_SXE, tag))
+    return msg
+
+
+async def _muc_board_case():
+    client = _FakeClient()
+    manager = WhiteboardManager(client)
+    pres = _FakeIncoming("room@conference.example/alice",
+                         ET.Element("{jabber:client}presence"))
+    sxe = ET.SubElement(pres.xml, _q(NS_SXE, "sxe"))
+    sxe.set("session", "board-1")
+    await manager.handle_sxe_presence(pres)
+    session = manager.session("board-1")
+    invited = ("whiteboard_invite", "board-1",
+               "room@conference.example", True) in client.events
+    created = session is not None and not session.user_joined
+
+    await manager.handle_sxe(
+        _muc_sxe_message("room@conference.example/alice", "board-1",
+                         "state-offer"))
+    accepts = [st for st in client.xmpp.sent
+               if st.xml.find(".//%s" % _q(NS_SXE, "accept-state")) is not None]
+    invites = [e for e in client.events
+               if e[0] == "whiteboard_invite" and e[1] == "board-1"]
+    ready = [e for e in client.events
+             if e[0] == "whiteboard_ready" and e[1] == "board-1"]
+
+    manager.decline_session("board-1")
+    declined = manager.session("board-1").declined
+    refuses = [st for st in client.xmpp.sent
+               if st.xml.find(".//%s" % _q(NS_SXE, "refuse-state")) is not None]
+    before = len(client.events)
+    await manager.handle_sxe(
+        _muc_sxe_message("room@conference.example/alice", "board-1",
+                         "state-offer"))
+    invites_after_decline = len([
+        e for e in client.events[before:] if e[0] == "whiteboard_invite"])
+
+    joined = manager.session_for_peer("room@conference.example")
+    manager.join_session("room@conference.example", "board-1", True)
+    session = manager.session("board-1")
+    user_joined = session.user_joined and not session.declined
+    connects = [st for st in client.xmpp.sent
+                if st.xml.find(".//%s" % _q(NS_SXE, "connect")) is not None]
+    await manager.handle_sxe(
+        _muc_sxe_message("room@conference.example/alice", "board-1",
+                         "state-offer"))
+    accepts_after_join = [
+        st for st in client.xmpp.sent
+        if st.xml.find(".//%s" % _q(NS_SXE, "accept-state")) is not None]
+    ready_after_join = [e for e in client.events
+                        if e[0] == "whiteboard_ready" and e[1] == "board-1"]
+    return (invited, created, accepts, invites, ready, declined, refuses,
+            invites_after_decline, joined is not None, user_joined, connects,
+            accepts_after_join, ready_after_join)
+
+
+(_invited, _created, _accepts, _invites, _ready, _declined, _refuses,
+ _invites_after, _lookup, _user_joined, _connects, _accepts_join,
+ _ready_join) = asyncio.run(_muc_board_case())
+check("a room board invites instead of joining",
+      _invited and _created)
+check("no state is accepted before the user agrees", not _accepts)
+check("the invitation is shown once per session", len(_invites) == 1)
+check("no board becomes ready before the user agrees", not _ready)
+check("declining keeps the session and refuses its state",
+      _declined and bool(_refuses))
+check("a declined board does not re-prompt", _invites_after == 0)
+check("session_for_peer finds the room's board", _lookup)
+check("joining the room board marks it joined and connects",
+      _user_joined and bool(_connects))
+check("a joined room board accepts the state and becomes ready",
+      bool(_accepts_join) and bool(_ready_join))
 
 print()
 if FAILURES:

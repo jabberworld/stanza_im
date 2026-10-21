@@ -2350,6 +2350,16 @@ rebuilds the canvas (`WhiteboardCanvas.load_shapes`); an incoming
 invitation reaches the session through the XEP-0353 propose/proceed path (the
 `session-initiate` auto-joins), so `MainWindow._on_whiteboard_ready` opens the
 board (`show`/`raise_`/`activateWindow`) instead of leaving the user to open it.
+A **conference** board started by another occupant is never joined silently:
+the presence advertisement (`<sxe session=…/>`, tracked as the room's session),
+a groupchat `<connect/>`/`<state>` or an unsolicited `state-offer` emits
+`whiteboard_invite(sid, room, True)` once (`WhiteboardSession.invited`), and
+`_on_state_offer` refuses to accept the state until the user agrees
+(`user_joined`). Declining (`whiteboard.decline_session`) keeps the session and
+sends `refuse-state`, so the toolbar button and the roster's «Открыть доску»
+can join it later (`session_for_peer` + `join_session`); the dialog is created
+**without a parent** (a top-level window with its own taskbar entry) and is
+placed near the main window.
 **Initial-state synchronization** follows XEP-0284 strictly: the accept echoes
 the host named by the offered `<transport><host/>` (§4.2) and carries
 `responder`, and the joiner sends `<connect/>` only after its `session-accept`

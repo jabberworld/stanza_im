@@ -2747,7 +2747,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (`whiteboard_state`) rebuilds the canvas (`WhiteboardCanvas.load_shapes`).
   An incoming `session-initiate` (`whiteboard_invite`) asks the user to join; an
   accepted invitation reaches the session through the XEP-0353 propose/proceed
-  path and `MainWindow._on_whiteboard_ready` opens the board.
+  path and `MainWindow._on_whiteboard_ready` opens the board. A conference board
+  started by another occupant is offered rather than joined (one prompt per
+  session; declining keeps the session and refuses its state), and the dialog
+  is a top-level window so the toolbar/roster can join the running board later.
 - **Initial-state synchronization** follows XEP-0284: the `session-accept`
   echoes the host named in the offered `<transport><host/>` (§4.2) and sets
   `responder`; the joiner sends `<connect/>` only after the accept is

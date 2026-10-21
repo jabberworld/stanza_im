@@ -274,6 +274,7 @@ STRINGS = {
     "whiteboard_peer_maybe_unsupported": "The contact may not support the whiteboard; sharing anyway.",
     "whiteboard_invite_title": "Whiteboard invitation",
     "whiteboard_invite_text": "{jid} invites you to a shared whiteboard. Join?",
+    "whiteboard_room_invite_text": "A whiteboard has been started in «{jid}». Join the drawing?",
     "chat_send_file": "Send file",
     "ft_p2p": "P2P",
     "ft_p2p_ibb": "P2P IBB",

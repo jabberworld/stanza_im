@@ -79,6 +79,12 @@ class WhiteboardSession:
     host: str = ""              # the session host (the initiator in a 1:1)
     senders: str = "both"       # Jingle senders: who may edit the document
     synced: bool = False        # the host's state has been received
+    #: The user joined this session (hosted it, accepted an invite or pressed
+    #: the toolbar/roster button).  A conference board started by someone else
+    #: stays *not* joined until the user agrees.
+    user_joined: bool = False
+    declined: bool = False      # the invitation was declined (join later)
+    invited: bool = False       # the invitation has been shown once
     pending: list = field(default_factory=list)  # edits waiting for the state
     state_buffering: bool = False
 
@@ -288,6 +294,7 @@ class WhiteboardManager:
             self._by_peer[peer] = sid
             session.ready = True
             session.synced = True
+            session.user_joined = True
             self._advertise(session)
             self._send(session, self._sxe(session, "connect"))
             self.client.emit("whiteboard_ready", sid)
@@ -299,6 +306,7 @@ class WhiteboardManager:
         self._seed_document(session.doc, view_box)
         self._seed_shapes(session, shapes)
         session.synced = True
+        session.user_joined = True
         self.sessions[sid] = session
         self._by_peer[peer] = sid
         if peer.split("/", 1)[0] == (self.client.jid_str or ""):
@@ -359,6 +367,9 @@ class WhiteboardManager:
             session.synced = is_muc
             self.sessions[sid] = session
         self._by_peer[peer] = sid
+        session.user_joined = True
+        session.declined = False
+        session.invited = True
         if not is_muc:
             self._connect_after_accept(session)
         else:
@@ -413,6 +424,44 @@ class WhiteboardManager:
         finally:
             if self._connect_tasks.get(session.sid) is asyncio.current_task():
                 self._connect_tasks.pop(session.sid, None)
+
+    def decline_session(self, sid: str) -> None:
+        """Decline a conference board invitation but keep the session.
+
+        The room's board belongs to every occupant, so nothing is torn down:
+        the user can join later from the chat toolbar or the roster menu.
+        """
+        session = self.sessions.get(sid)
+        if session is None or session.user_joined:
+            return
+        session.declined = True
+        session.invited = True
+        if not session.accepted:
+            try:
+                self._send(session, self._sxe(session, "refuse-state"))
+            except Exception:  # noqa: BLE001
+                logger.debug("Whiteboard: could not refuse the state",
+                             exc_info=True)
+
+    def session_for_peer(self, peer: str) -> WhiteboardSession | None:
+        """The session of *peer* (bare JID or room), if there is one."""
+        sid = self._by_peer.get(peer)
+        if sid and sid in self.sessions:
+            return self.sessions[sid]
+        for session in self.sessions.values():
+            if session.peer == peer:
+                return session
+        return None
+
+    def _maybe_invite(self, session: WhiteboardSession) -> None:
+        """Ask before joining a conference board we did not start."""
+        if (not session.is_muc or session.is_host or session.user_joined
+                or session.declined or session.invited):
+            return
+        session.invited = True
+        logger.info("Whiteboard: inviting to the room board %s",
+                    session.sid[:8])
+        self.client.emit("whiteboard_invite", session.sid, session.peer, True)
 
     def _cancel_connect(self, sid: str) -> None:
         task = self._connect_tasks.pop(sid, None)
@@ -1179,6 +1228,12 @@ class WhiteboardManager:
         # Any other SXE from a peer means a board is active for that peer (this
         # is how a passive MUC occupant learns the room has a board).
         self._announce_active(session.peer)
+        try:
+            is_groupchat = msg.get_type() == "groupchat"
+        except Exception:  # noqa: BLE001 - a lightweight stanza stub
+            is_groupchat = False
+        if is_groupchat:
+            self._maybe_invite(session)
         if tag == _q(NS_SXE, "connect"):
             self._on_connect(session, frm)
         elif tag == _q(NS_SXE, "state-offer"):
@@ -1203,7 +1258,20 @@ class WhiteboardManager:
             pres["from"] or "") else ""
         if self._is_self_reflection(room, nick):
             return
+        el = pres.xml.find(_q(NS_SXE, "sxe"))
+        sid = str(el.get("session") or "") if el is not None else ""
+        session = self.sessions.get(sid) if sid else None
+        if session is None and sid:
+            # A conference board started by another occupant: track its session
+            # so the user can join it later from the toolbar or the roster.
+            session = WhiteboardSession(sid=sid, peer=room, is_muc=True,
+                                        is_host=False)
+            self._seed_document(session.doc)
+            self.sessions[sid] = session
+            self._by_peer[room] = sid
         self._announce_active(room)
+        if session is not None:
+            self._maybe_invite(session)
 
     def _is_self_reflection(self, bare: str, nick: str) -> bool:
         if not nick:
@@ -1223,8 +1291,16 @@ class WhiteboardManager:
                                       {"description": True}), to=frm)
 
     def _on_state_offer(self, session: WhiteboardSession, frm: str) -> None:
+        if session.declined:
+            self._send(session, self._sxe(session, "refuse-state"), to=frm)
+            return
         if session.accepted:
             self._send(session, self._sxe(session, "refuse-state"), to=frm)
+            return
+        if session.is_muc and not session.user_joined:
+            # A conference board started by someone else: never accept its
+            # state before the user agrees to join.
+            self._maybe_invite(session)
             return
         session.accepted = True
         session.ready = True

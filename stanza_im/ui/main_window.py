@@ -7539,8 +7539,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if dialog is None:
             from stanza_im.ui.whiteboard_dialog import WhiteboardDialog
             is_muc = jid in self._muc_self_nicks
-            parent = self._chat_dialog_parent() if is_muc else None
-            dialog = WhiteboardDialog(jid, parent=parent, client=self._client,
+            # A top-level window (no parent): a dialog parented to the chat
+            # window is a transient child on many WMs and gets no taskbar
+            # entry, so an automatically opened board could not be found.
+            dialog = WhiteboardDialog(jid, parent=None, client=self._client,
                                       is_muc=is_muc, config=self._config)
             dialog.share_requested.connect(self._on_whiteboard_share)
             dialog.share_png_requested.connect(
@@ -7550,14 +7552,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self._whiteboards[jid] = dialog
         return dialog
 
-    def _on_whiteboard_requested(self, jid: str) -> None:
-        """Open (or raise) the whiteboard dialog of the conversation *jid*."""
-        if not jid:
-            return
-        dialog = self._whiteboard_dialog(jid)
+    def _raise_whiteboard(self, dialog) -> None:
+        """Show the board as its own top-level window (taskbar entry)."""
+        if not getattr(dialog, "_placed", False):
+            self._place_window_near_main(dialog)
+            dialog._placed = True
+        if dialog.isMinimized():
+            dialog.showNormal()
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _on_whiteboard_requested(self, jid: str) -> None:
+        """Open, join or raise the whiteboard of the conversation *jid*."""
+        if not jid:
+            return
+        session = (self._client.whiteboard.session_for_peer(jid)
+                   if self._client is not None else None)
+        if (session is not None and session.is_muc
+                and not session.user_joined):
+            # The room already has a board: pressing the toolbar button (or
+            # the roster entry) joins that session instead of opening a local
+            # board that would never reach the room.
+            self._client.whiteboard.join_session(jid, session.sid, True)
+            dialog = self._whiteboard_dialog(jid)
+            dialog.attach_session(session.sid)
+            self._raise_whiteboard(dialog)
+            return
+        dialog = self._whiteboard_dialog(jid)
+        self._raise_whiteboard(dialog)
 
     def _on_whiteboard_share(self, jid: str, is_muc: bool) -> None:
         """Start a collaborative whiteboard session for *jid*."""
@@ -7575,6 +7598,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._notify_whiteboard_failed(session.failure)
             return
         dialog.attach_session(sid)
+        self._raise_whiteboard(dialog)
         if session is not None and session.local_only:
             dialog.set_local_only()
         elif not is_muc and not self._whiteboard_peer_supports(jid):
@@ -7676,20 +7700,24 @@ class MainWindow(QtWidgets.QMainWindow):
                                   is_muc: bool) -> None:
         if self._client is None:
             return
+        text = (tr("whiteboard_room_invite_text", jid=peer) if is_muc
+                else tr("whiteboard_invite_text", jid=peer))
         answer = QtWidgets.QMessageBox.question(
-            self, tr("whiteboard_invite_title"),
-            tr("whiteboard_invite_text", jid=peer))
+            self, tr("whiteboard_invite_title"), text)
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-            # Tell the initiator we will not take part (a bare silence would
-            # leave their Jingle session pending).
-            self._client.whiteboard.refuse_session(sid)
+            if is_muc:
+                # The room's board keeps running for everyone else; the user
+                # can join it later from the toolbar or the roster.
+                self._client.whiteboard.decline_session(sid)
+            else:
+                # Tell the initiator we will not take part (a bare silence
+                # would leave their Jingle session pending).
+                self._client.whiteboard.refuse_session(sid)
             return
         self._client.whiteboard.join_session(peer, sid, is_muc)
         dialog = self._whiteboard_dialog(peer)
         dialog.attach_session(sid)
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._raise_whiteboard(dialog)
 
     def _on_whiteboard_proposed(self, sid: str, peer: str, full: str) -> None:
         """An XEP-0353 whiteboard proposal arrived (the extended profile)."""
@@ -7727,9 +7755,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # An accepted invitation reaches the session via the XEP-0353
         # propose/proceed path (the session-initiate auto-joins), so open the
         # board here — otherwise the user must open it manually.
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._raise_whiteboard(dialog)
 
     def _on_whiteboard_state(self, sid: str) -> None:
         """Remote edits arrived: refresh the open board."""

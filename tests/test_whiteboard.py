@@ -1029,6 +1029,29 @@ check("editing can be restored",
       rod._canvas.is_editable() and rod._tool_buttons["pencil"].isEnabled())
 
 
+# 33. conference boards: prompt, join later, top-level window ---------------
+_mw_src = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "stanza_im", "ui", "main_window.py"),
+    encoding="utf-8").read()
+_dialog_src = _mw_src.split("def _whiteboard_dialog", 1)[1].split(
+    "\n    def ", 1)[0]
+check("the board is a top-level window (taskbar entry)",
+      "parent=None" in _dialog_src and "_chat_dialog_parent() if is_muc"
+      not in _dialog_src)
+_raise_src = _mw_src.split("def _raise_whiteboard", 1)[1].split(
+    "\n    def ", 1)[0]
+check("showing the board restores and activates the window",
+      "showNormal()" in _raise_src and "activateWindow()" in _raise_src)
+_requested = _mw_src.split("def _on_whiteboard_requested", 1)[1].split(
+    "\n    def ", 1)[0]
+check("the toolbar joins a running conference board",
+      "session_for_peer(" in _requested and "join_session(" in _requested)
+_prompt = _mw_src.split("def _prompt_whiteboard_invite", 1)[1].split(
+    "\n    def ", 1)[0]
+check("declining a conference board keeps its session",
+      "decline_session(sid)" in _prompt
+      and "whiteboard_room_invite_text" in _prompt)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
