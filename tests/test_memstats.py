@@ -125,13 +125,37 @@ _widgets, _views = memstats._qt_counts()
 check("qt counts return ints",
       isinstance(_widgets, int) and isinstance(_views, int))
 
-# 2f. the gc scan runs on every report (no throttle) -------------------------
+# 2f. the deep snapshot / gc scan cadence -----------------------------------
+check("the first report takes the deep snapshot", memstats._deep_due(1))
+check("the deep snapshot runs every fifth report",
+      all(memstats._deep_due(n) for n in (5, 10, 15, 20))
+      and not any(memstats._deep_due(n) for n in (2, 3, 4, 6, 9, 14)))
+
 memstats._gc_in_flight = False
 memstats._schedule_gc(logging.getLogger("test.memstats"), 5)
 _deadline = time.monotonic() + 5.0
 while memstats._gc_in_flight and time.monotonic() < _deadline:
     time.sleep(0.05)
 check("the gc scan finishes", not memstats._gc_in_flight)
+
+# 2g. the adaptive trim policy ----------------------------------------------
+_now = 1000.0
+_RSS = 500_000
+check("below the threshold nothing is trimmed",
+      not memstats.should_trim(_now, None, _RSS, _RSS + 50_000))
+check("a threshold growth after the interval trims",
+      memstats.should_trim(_now, _now - 400, _RSS, _RSS + 250_000))
+check("a threshold growth inside the interval waits",
+      not memstats.should_trim(_now, _now - 10, _RSS, _RSS + 250_000))
+check("a big jump trims regardless of the interval",
+      memstats.should_trim(_now, _now - 10, _RSS, _RSS + 700_000))
+check("the first measurement trims once",
+      memstats.should_trim(_now, None, 0, 900_000))
+check("an unknown rss does not trim",
+      not memstats.should_trim(_now, None, 0, None))
+check("a shrinking process does not trim",
+      not memstats.should_trim(_now, _now - 400, _RSS, _RSS - 10_000))
+check("trim_heap returns a bool", isinstance(memstats.trim_heap(), bool))
 
 # 2g. per-process memory fields ----------------------------------------------
 _mem = memstats._proc_mem(os.getpid())
@@ -161,6 +185,7 @@ check("deep mode uses a single frame",
 
 # 5. the deep snapshot runs in a worker thread and logs a package breakdown --
 handler.messages.clear()
+memstats._report_count = 0          # the first report is deep-due
 memstats.report(logger, deep=True)
 deadline = time.monotonic() + 5.0
 while memstats._snapshot_in_flight and time.monotonic() < deadline:
@@ -168,6 +193,29 @@ while memstats._snapshot_in_flight and time.monotonic() < deadline:
 deep_text = "\n".join(handler.messages)
 check("the deep snapshot logs a package breakdown",
       "python heap by package" in deep_text)
+check("the deep snapshot reports its own RSS cost",
+      "rss " in deep_text and "->" in deep_text)
+
+# 5b. the growth diff compares against the previous snapshot -----------------
+memstats._last_packages = {"stanza_im.ui": (1, 1)}
+handler.messages.clear()
+memstats._log_deep(logger, 5)
+diff_text = "\n".join(handler.messages)
+check("the deep snapshot logs growth against the previous run",
+      "growth since the previous snapshot" in diff_text)
+check("the snapshot records the packages for the next diff",
+      isinstance(memstats._last_packages, dict)
+      and bool(memstats._last_packages))
+
+# 5c. a non-deep report skips the snapshot ----------------------------------
+memstats._report_count = 1          # next report is #2 (not deep-due)
+memstats._last_packages = {"x": (1, 1)}
+handler.messages.clear()
+memstats.report(logger, deep=True)
+time.sleep(0.2)
+check("a non-due report does not take a snapshot",
+      "python heap by package" not in "\n".join(handler.messages)
+      and memstats._last_packages == {"x": (1, 1)})
 
 print()
 if FAILURES:

@@ -48,7 +48,8 @@ stanza_im/
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
 │   ├── privacy.py      — XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py — server disco/stream capability report (XEP list)
-│   └── memstats.py     — memory stats (CLI -m/-mm; smaps, descendants, gc)
+│   └── memstats.py     — memory stats (CLI -m/-mm; smaps, descendants, gc;
+│                          deep every 5th report, growth diff, adaptive trim)
 ├── ui/
 │   ├── main_window.py  — Main window (3-page stack), actions and menus
 │   ├── login_widget.py — Login form + config prefill/save + profile selector
@@ -1164,9 +1165,13 @@ frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub, and
 activating the tab (`ChatWindow._on_tab_changed` → `resume`) rebuilds the view
 and re-renders `_history`/`_messages`.
 
-`MainWindow._trim_main_process_memory` (30-min timer, plus after a tab closes
-or suspends) runs `gc.collect()` and glibc `malloc_trim(0)` to return freed
-main-process heap to the OS; the Chromium renderer processes are unaffected.
+`MainWindow._maybe_trim_memory` checks the RSS once a minute and calls
+`memstats.should_trim`: the heap is trimmed when the process grew by 200 MiB
+since the previous trim (at most once per 5 minutes) or by 600 MiB at once;
+`_trim_main_process_memory` then runs `memstats.trim_heap()` (`gc.collect()` +
+glibc `malloc_trim(0)`) and records the new baseline. The same trim runs after
+a tab closes or is suspended. This returns freed main-process heap to the OS;
+the Chromium renderer processes are unaffected.
 
 ## 9. Chat Widget (`ui/chat_widget.py`)
 

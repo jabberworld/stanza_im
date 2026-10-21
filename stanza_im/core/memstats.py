@@ -35,6 +35,23 @@ _HEAVY_STACKS = (
 
 _deep = False
 _snapshot_in_flight = False
+#: Every Nth report also takes the (expensive) deep snapshot and the gc scan.
+_deep_every = 5
+_report_count = 0
+#: Package -> (bytes, objects) of the previous deep snapshot, for the growth
+#: diff.  A few hundred entries, so no snapshot has to be kept alive.
+_last_packages: dict[str, tuple[int, int]] = {}
+#: The "no WebEngine view" hint is printed once per process, not every minute.
+_no_view_logged = False
+
+#: Adaptive housekeeping: hand freed heap back to the OS when the process grew
+#: by this much since the last trim (rate-limited), or immediately on a big
+#: jump (a runaway snapshot/leak must not double the footprint).
+TRIM_THRESHOLD_KB = 200 * 1024
+TRIM_URGENT_KB = 600 * 1024
+TRIM_MIN_INTERVAL_S = 300.0
+
+_libc = None
 
 
 def start_tracking(nframe: int = 1) -> None:
@@ -43,8 +60,10 @@ def start_tracking(nframe: int = 1) -> None:
     Called only for the deep (``-mm``) level; ``nframe=1`` keeps the overhead
     low (the default 12 frames is an order of magnitude slower).
     """
-    global _deep
+    global _deep, _report_count, _last_packages
     _deep = True
+    _report_count = 0
+    _last_packages = {}
     if not tracemalloc.is_tracing():
         tracemalloc.start(max(1, int(nframe)))
 
@@ -52,6 +71,48 @@ def start_tracking(nframe: int = 1) -> None:
 def is_deep() -> bool:
     """True when the deep (``tracemalloc``) level is enabled."""
     return _deep
+
+
+def rss_kb() -> int | None:
+    """The main process RSS in KiB (None when ``/proc`` is unavailable)."""
+    return _proc_mem(os.getpid()).get("rss")
+
+
+def trim_heap() -> bool:
+    """Run ``gc.collect()`` and return freed pages to the OS (malloc_trim)."""
+    global _libc
+    try:
+        gc.collect()
+    except Exception:  # noqa: BLE001 - diagnostics must never crash
+        pass
+    try:
+        if _libc is None:
+            import ctypes
+            _libc = ctypes.CDLL("libc.so.6")
+        return bool(_libc.malloc_trim(0))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def should_trim(now: float, last_trim: float | None,
+                last_rss_kb: int | None, rss: int | None) -> bool:
+    """Decide whether the freed heap should be returned to the OS now.
+
+    *last_rss_kb* is the RSS measured right after the previous trim and
+    *last_trim* its ``time.monotonic()`` stamp.  Trims are rate-limited to one
+    per :data:`TRIM_MIN_INTERVAL_S`; growth of :data:`TRIM_URGENT_KB` is
+    trimmed regardless.
+    """
+    if not rss:
+        return False
+    growth = int(rss) - int(last_rss_kb or 0)
+    if growth >= TRIM_URGENT_KB:
+        return True
+    if growth < TRIM_THRESHOLD_KB:
+        return False
+    if last_trim is None:
+        return True
+    return (float(now) - float(last_trim)) >= TRIM_MIN_INTERVAL_S
 
 
 # ── Process memory (cheap, from /proc) ────────────────────────────
@@ -231,8 +292,12 @@ def _qt_counts() -> tuple[int, int]:
                     if "WebEngineView" in type(w).__name__)
     if views == 0 and widgets:
         # Diagnostic: no WebEngine view found in allWidgets() although widgets
-        # exist — log the classes that could be a chat view so the reason is
-        # visible in the log.
+        # exist — log the classes that could be a chat view once per process
+        # (an idle app legitimately has no views).
+        global _no_view_logged
+        if _no_view_logged:
+            return len(widgets), views
+        _no_view_logged = True
         interesting = sorted({
             type(w).__name__ for w in widgets
             if any(tag in type(w).__name__
@@ -278,8 +343,9 @@ def _package_of(filename: str) -> str:
 
 def _log_deep(logger, top: int) -> None:
     """Take a snapshot (worker thread) and log the heap grouped by package."""
-    global _snapshot_in_flight
+    global _snapshot_in_flight, _last_packages
     try:
+        rss_before = _proc_mem(os.getpid())["rss"]
         snapshot = tracemalloc.take_snapshot()
         stats = snapshot.statistics("filename")
         groups: dict[str, list[int]] = {}
@@ -288,15 +354,35 @@ def _log_deep(logger, top: int) -> None:
             agg = groups.setdefault(_package_of(filename), [0, 0])
             agg[0] += stat.size
             agg[1] += stat.count
+        rss_after = _proc_mem(os.getpid())["rss"]
         ordered = sorted(groups.items(), key=lambda kv: kv[1][0], reverse=True)
-        lines = ["    python heap by package (tracemalloc nframe=1):"]
+        lines = [f"    python heap by package (tracemalloc nframe=1;"
+                 f" rss {_fmt(rss_before)} -> {_fmt(rss_after)}):"]
         for package, (size, count) in ordered[:top]:
             lines.append(f"      {_fmt_bytes(size)} x{count} {package}")
+        if _last_packages:
+            growth = []
+            for package, (size, _count) in ordered:
+                before = _last_packages.get(package, (0, 0))[0]
+                if size > before:
+                    growth.append((size - before, package, size))
+            growth.sort(reverse=True)
+            if growth:
+                lines.append("    growth since the previous snapshot:")
+                for delta, package, size in growth[:max(5, top // 2)]:
+                    lines.append(f"      +{_fmt_bytes(delta)} -> "
+                                 f"{_fmt_bytes(size)} {package}")
+        _last_packages = {pkg: (size, count)
+                          for pkg, (size, count) in groups.items()}
+        del stats, snapshot, groups, ordered
         logger.info("\n".join(lines))
     except Exception as exc:  # noqa: BLE001 - diagnostics must never crash
         logger.debug("Memory snapshot failed: %s", exc)
     finally:
         _snapshot_in_flight = False
+        # The snapshot itself churns tens of MB: give them back right away
+        # instead of waiting for the periodic housekeeping.
+        trim_heap()
 
 
 def _schedule_deep(logger, top: int) -> None:
@@ -351,6 +437,7 @@ def _log_gc(logger, top: int) -> None:
         logger.debug("gc object scan failed: %s", exc)
     finally:
         _gc_in_flight = False
+        trim_heap()
 
 
 def _schedule_gc(logger, top: int) -> None:
@@ -365,8 +452,16 @@ def _schedule_gc(logger, top: int) -> None:
 
 # ── Report ────────────────────────────────────────────────────────
 
+def _deep_due(count: int) -> bool:
+    """True when the *count*-th report should take the deep snapshot."""
+    return count <= 1 or count % max(1, _deep_every) == 0
+
+
 def report(logger, top: int = 12, deep: bool | None = None) -> None:
     """Log a compact memory snapshot (cheap; the deep part is threaded)."""
+    global _report_count
+    _report_count += 1
+    deep_due = _deep_due(_report_count)
     if deep is None:
         deep = _deep
     try:
@@ -413,11 +508,12 @@ def report(logger, top: int = 12, deep: bool | None = None) -> None:
                  f" heavy=[{', '.join(stacks)}]")
     logger.info("\n".join(lines))
 
-    if deep and tracemalloc.is_tracing():
+    if deep_due and deep and tracemalloc.is_tracing():
         _schedule_deep(logger, top)
     # A gc object-type breakdown is useful in both levels and does not inflate
-    # memory; it is throttled and runs in a worker thread.
-    _schedule_gc(logger, top)
+    # memory; it follows the deep cadence and runs in a worker thread.
+    if deep_due:
+        _schedule_gc(logger, top)
 
 
 def _fmt(kb):

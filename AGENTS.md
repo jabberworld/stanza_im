@@ -3129,10 +3129,13 @@ text is kept. Returning activity (`eventFilter`) resumes
    (default 50, 10–1000, Preferences → Chat → «General») is the on-open window;
    DB/MAM requests page in `_HISTORY_PAGE` (60) steps so a large window never
    turns into one huge request.
-8. **Housekeeping**: a 30-min `MainWindow._trim_main_process_memory` runs
-   `gc.collect()` + glibc `malloc_trim(0)` (also right after a tab closes or is
-   suspended) to return freed main-process heap to the OS; WebEngine renderers
-   are separate processes and are unaffected.
+8. **Housekeeping**: a 1-min `MainWindow._maybe_trim_memory` asks
+   `memstats.should_trim`; when the process grew by 200 MiB since the last trim
+   (rate-limited to one trim per 5 min) or by 600 MiB at once, it runs
+   `memstats.trim_heap()` (`gc.collect()` + glibc `malloc_trim(0)`) and records
+   the new RSS baseline. The same trim runs right after a tab closes or is
+   suspended. This keeps the RSS sawtooth flat with WebEngine children
+   unaffected (they are separate processes).
 
 ## Running
 
@@ -3157,11 +3160,17 @@ has two levels: `-m` is cheap (no tracing — main RSS/PSS/peak plus
 `private_dirty`/`anonymous`/`shared_clean` from `smaps_rollup` (heap vs
 library growth), the Chromium **descendant processes** grouped by type *and*
 listed one per line (`pid`, type, `comm`, rss, pss), the Qt
-widget/WebEngine-view counts and `QPixmapCache` limit, the loaded heavy stacks,
-plus a **gc object-type breakdown** logged on every report from a worker
-thread); `-mm` additionally enables `tracemalloc(nframe=1)` and logs the live
-Python heap grouped by package, the snapshot taken in a worker thread so the
-event loop is never blocked. Chromium forks its renderer/GPU/network processes
+widget/WebEngine-view counts and `QPixmapCache` limit, the loaded heavy stacks);
+`-mm` additionally enables `tracemalloc(nframe=1)` and logs the live Python
+heap grouped by package. The **deep snapshot and the gc object-type breakdown
+run on every fifth report only** (the first report is deep too): one
+snapshot+statistics cycle churns tens of megabytes of native heap, which used
+to dominate the RSS curve of a long `-mm` session. The snapshot runs in a
+worker thread (the event loop is never blocked), logs its own RSS cost
+(`rss before -> after`) and the **growth since the previous snapshot** per
+package (only the small `package -> (bytes, count)` map is kept, not the
+snapshot), and `malloc_trim(0)` runs right after it and after the gc scan so
+the diagnostic churn does not accumulate. Chromium forks its renderer/GPU/network processes
 from a zygote, so the whole descendant tree is walked (not just direct children)
 via `_descendants_from`/`_proc_tree`; the type comes from
 `--type=renderer|gpu-process|utility|zygote` (network = utility with

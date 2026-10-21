@@ -406,10 +406,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suspend_timer.timeout.connect(self._maybe_suspend_tabs)
         self._suspend_timer.start()
 
-        # Hand freed Python/Qt heap back to the OS periodically.
+        # Hand freed Python/Qt heap back to the OS when the process grew too
+        # much since the previous trim (see ``memstats.should_trim``); checked
+        # once a minute, rate-limited inside the policy.
+        self._trim_at: float | None = None
+        self._trim_rss = 0
         self._memory_timer = QtCore.QTimer(self)
-        self._memory_timer.setInterval(30 * 60 * 1000)
-        self._memory_timer.timeout.connect(self._trim_main_process_memory)
+        self._memory_timer.setInterval(60_000)
+        self._memory_timer.timeout.connect(self._maybe_trim_memory)
         self._memory_timer.start()
 
         # The heavy widgets (theme factories, chat window, tray, OSD, sounds,
@@ -6567,22 +6571,24 @@ class MainWindow(QtWidgets.QMainWindow):
         if suspended_any:
             self._trim_main_process_memory()
 
+    def _maybe_trim_memory(self) -> None:
+        """Trim the heap only when the process grew enough (adaptive)."""
+        from stanza_im.core import memstats
+        if memstats.should_trim(time.monotonic(), self._trim_at,
+                                self._trim_rss, memstats.rss_kb()):
+            self._trim_main_process_memory()
+
     def _trim_main_process_memory(self) -> None:
         """Return freed Python/Qt heap to the OS (glibc ``malloc_trim``).
 
         The WebEngine renderers run in separate processes and are not affected;
-        this only shrinks the main process after cache/list churn.
+        this only shrinks the main process after cache/list churn.  The RSS at
+        this point becomes the baseline for the adaptive policy.
         """
-        import gc
-        try:
-            gc.collect()
-        except Exception:
-            pass
-        try:
-            import ctypes
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except Exception:
-            pass
+        from stanza_im.core import memstats
+        memstats.trim_heap()
+        self._trim_at = time.monotonic()
+        self._trim_rss = memstats.rss_kb() or 0
 
     def _on_message_received(self, frm: str, body: str, ts,
                              unstyled: bool = False,
