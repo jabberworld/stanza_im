@@ -63,6 +63,23 @@ check("anonymous maps to moderators-only whois",
       JabberClient.muc_creation_values(
           {"anonymous": True})["muc#roomconfig_whois"] == "moderators")
 
+# A list value (jid-multi, e.g. the captcha whitelist) becomes several
+# <value/> elements instead of a stringified Python list.
+_form = JabberClient._config_form({
+    "muc#roomconfig_captcha_whitelist": ["a@example.com", "b@example.com"],
+    "muc#roomconfig_persistentroom": "1",
+})
+_field = _form.get_fields()["muc#roomconfig_captcha_whitelist"]
+check("a list value is kept for a multi field",
+      _field["value"] == ["a@example.com", "b@example.com"])
+_ns = "{jabber:x:data}"
+_xml_fields = {el.get("var"): el for el in _form.xml.findall(f"{_ns}field")}
+check("the form serialises one <value/> per list item",
+      len(_xml_fields["muc#roomconfig_captcha_whitelist"].findall(
+          f"{_ns}value")) == 2)
+check("scalar values stay single", len(
+    _xml_fields["muc#roomconfig_persistentroom"].findall(f"{_ns}value")) == 1)
+
 
 # ── dialog: defaults, presets, validation ────────────────────────
 dlg = CreateConferenceDialog(["conference.example", "muc.example"],

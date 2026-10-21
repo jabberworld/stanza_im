@@ -63,6 +63,28 @@ check("an empty text-multi yields no value lines",
                       "fields": [_field("text-multi", "x", "")]}
                      ).values()["x"] == [])
 
+# jid-multi is a list of JIDs (one per line), normalized on submit.
+form3 = {"title": "", "instructions": [], "type": "form", "fields": [
+    _field("jid-multi", "muc#roomconfig_captcha_whitelist",
+           ["a@example.com", "b@example.com"]),
+    _field("jid-multi", "empty", ""),
+]}
+widget3 = DataFormWidget(form3)
+_edit3 = widget3._fields["muc#roomconfig_captcha_whitelist"]
+check("jid-multi renders a multi-line editor",
+      isinstance(_edit3, QtWidgets.QPlainTextEdit))
+check("jid-multi shows one JID per line",
+      _edit3.toPlainText() == "a@example.com\nb@example.com")
+check("jid-multi submits a list of JIDs",
+      widget3.values()["muc#roomconfig_captcha_whitelist"]
+      == ["a@example.com", "b@example.com"])
+check("an empty jid-multi yields no values",
+      widget3.values()["empty"] == [])
+_edit3.setPlainText("xmpp:Alice@Example.COM/res, bob@example.com\n\n")
+check("jid-multi normalises the JIDs (scheme, resource, commas)",
+      widget3.values()["muc#roomconfig_captcha_whitelist"]
+      == ["Alice@example.com", "bob@example.com"])
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)

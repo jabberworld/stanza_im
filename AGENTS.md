@@ -1652,7 +1652,10 @@ input, link text is the field label (falling back to the short
 unchanged (`DataFormWidget._link_label`/`_link_fields`); a `fixed` field with
 no label spans the full row so its text is not wrapped into a narrow column;
 a `text-multi` field renders as a multi-line `QPlainTextEdit` whose value is
-the list of lines (one XEP-0004 `<value>` each).
+the list of lines (one XEP-0004 `<value>` each). A `jid-multi` field (e.g. the
+conference `muc#roomconfig_captcha_whitelist`) is edited the same way, one JID
+per line (commas also split), and every JID is normalised (`normalize_jid`);
+`JabberClient._config_form` submits a list as several `<value/>` elements.
 The dialog is sized to the form (`fit_dialog_to_content`, deferred after the
 form is built and re-run on the `media_ready` signal; it measures the live
 inner widget because `QScrollArea` caches its size hint, and clamps to the

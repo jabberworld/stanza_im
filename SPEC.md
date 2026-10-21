@@ -1603,7 +1603,8 @@ so the dialog can be shrunk below its content):
 - «Настройки» — enabled for the owner only; fetches the `muc#owner` room form
   (`client.muc_get_config`) into a `DataFormWidget`, whose `list-single`
   selectors are all sized to the widest one (`_align_selectors`); a `text-multi`
-  field is a multi-line `QPlainTextEdit` whose value is the list of lines.
+  field is a multi-line `QPlainTextEdit` whose value is the list of lines, and a
+  `jid-multi` field (the captcha whitelist) one normalised JID per line.
 
 Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
 `client.muc_set_config`); «Отмена» discards them. Only what changed is sent:

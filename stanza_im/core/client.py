@@ -4442,12 +4442,14 @@ class JabberClient:
         muc = self.xmpp.plugin["xep_0045"]
         return await muc.get_room_config(room)
 
-    async def muc_set_config(self, room: str, values: dict) -> None:
-        """Submit a room configuration (XEP-0045 ``muc#owner``).
+    @staticmethod
+    def _config_form(values: dict):
+        """Build a ``type='submit'`` room-configuration form.
 
-        *values* is a ``{var: value}`` mapping; a fresh ``type='submit'`` form
-        is built so the server's own form (with labels/options) is never
-        mutated by slixmpp's submit handling.
+        A list value becomes several ``<value/>`` elements (XEP-0004 multi
+        fields such as ``jid-multi``), every scalar is a string: slixmpp
+        serialises values with string methods, so an int raises
+        "'int' object has no attribute 'replace'".
         """
         from slixmpp.plugins.xep_0004.stanza import Form, FormField
         form = Form()
@@ -4455,11 +4457,23 @@ class JabberClient:
         for var, value in values.items():
             field = FormField()
             field["var"] = var
-            # slixmpp serialises form values as strings (it calls str methods
-            # on them), so an int here raises "'int' object has no attribute
-            # 'replace'" — always submit strings.
-            field["value"] = value if isinstance(value, str) else str(value)
+            if isinstance(value, (list, tuple)):
+                field["value"] = [str(item) for item in value]
+            elif isinstance(value, str):
+                field["value"] = value
+            else:
+                field["value"] = str(value)
             form.append(field)
+        return form
+
+    async def muc_set_config(self, room: str, values: dict) -> None:
+        """Submit a room configuration (XEP-0045 ``muc#owner``).
+
+        *values* is a ``{var: value}`` mapping; a fresh form is built so the
+        server's own form (with labels/options) is never mutated by slixmpp's
+        submit handling.
+        """
+        form = self._config_form(values)
         muc = self.xmpp.plugin["xep_0045"]
         await muc.set_room_config(room, form)
 

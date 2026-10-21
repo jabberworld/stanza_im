@@ -10,6 +10,7 @@ import urllib.request
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.xmpp_uri import normalize_jid
 
 _TEXT_TYPES = {"text-single", "text-private", "jid-single", "text-multi",
                "jid-multi"}
@@ -236,8 +237,11 @@ class DataFormWidget(QtWidgets.QWidget):
             return True
 
         if ftype in _TEXT_TYPES or ftype in ("", "text-single"):
-            if ftype == "text-multi":
-                # XEP-0004 text-multi is a list of lines (one <value> each).
+            if ftype in ("text-multi", "jid-multi"):
+                # Both are a list of values (one <value> each): text-multi
+                # keeps its lines as they are, jid-multi holds one JID per
+                # line (it used to render as a single-line field with only the
+                # first value).
                 edit = QtWidgets.QPlainTextEdit()
                 edit.setMinimumHeight(80)
                 if isinstance(value, (list, tuple)):
@@ -448,6 +452,13 @@ class DataFormWidget(QtWidgets.QWidget):
             return field["value"]
         if isinstance(widget, QtWidgets.QPlainTextEdit):
             text = widget.toPlainText()
+            if str(field.get("type") or "") == "jid-multi":
+                jids: list[str] = []
+                for chunk in text.replace(",", "\n").splitlines():
+                    jid = normalize_jid(chunk)
+                    if jid:
+                        jids.append(jid)
+                return jids
             return text.split("\n") if text else []
         if isinstance(widget, QtWidgets.QLineEdit):
             return widget.text()
