@@ -275,6 +275,8 @@ STRINGS = {
     "whiteboard_invite_title": "Приглашение на доску",
     "whiteboard_invite_text": "{jid} приглашает вас на общую доску. Присоединиться?",
     "whiteboard_room_invite_text": "В конференции «{jid}» начата доска. Присоединиться к рисованию?",
+    "whiteboard_participants": "Участники: {names}",
+    "whiteboard_you": "Вы",
     "chat_send_file": "Отправить файл",
     "ft_p2p": "P2P",
     "ft_p2p_ibb": "P2P IBB",

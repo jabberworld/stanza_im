@@ -1052,6 +1052,27 @@ check("declining a conference board keeps its session",
       "decline_session(sid)" in _prompt
       and "whiteboard_room_invite_text" in _prompt)
 
+# 34. the board shows its participants --------------------------------------
+pd = WhiteboardDialog("bob@example.com")
+pd.set_participants([("__me__", "You"), ("alice", "alice")], active="alice")
+_pd_text = pd._participants_label.text()
+check("the participant row lists everyone",
+      "You" in _pd_text and "alice" in _pd_text)
+check("the last editor is highlighted",
+      "font-weight:bold" in _pd_text and "alice</span>" in _pd_text)
+pd._clear_participant_highlight()
+check("the highlight fades after the timer",
+      "font-weight:bold" not in pd._participants_label.text())
+pd.set_participants([])
+check("an empty participant list hides the row",
+      pd._participants_label.isHidden())
+pd.deleteLater()
+
+_mw_src2 = _mw_src
+check("participant edits are wired to the board",
+      'c.on("whiteboard_edit", self._on_whiteboard_edit)' in _mw_src2
+      and "set_participants(" in _mw_src2)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

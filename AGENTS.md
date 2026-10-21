@@ -2359,7 +2359,11 @@ a groupchat `<connect/>`/`<state>` or an unsolicited `state-offer` emits
 sends `refuse-state`, so the toolbar button and the roster's «Открыть доску»
 can join it later (`session_for_peer` + `join_session`); the dialog is created
 **without a parent** (a top-level window with its own taskbar entry) and is
-placed near the main window.
+placed near the main window. The board lists **who is drawing** in a row under
+the canvas («Участники: …», ourselves first): `WhiteboardSession.participants`
+records every inbound sender (`room/nick` or full JID) and emits
+`whiteboard_edit(sid, frm)`, which `MainWindow` turns into labels (the MUC nick
+or the roster name) and a ~2 s highlight of the participant who edited last.
 **Initial-state synchronization** follows XEP-0284 strictly: the accept echoes
 the host named by the offered `<transport><host/>` (§4.2) and carries
 `responder`, and the joiner sends `<connect/>` only after its `session-accept`

@@ -275,6 +275,8 @@ STRINGS = {
     "whiteboard_invite_title": "Whiteboard invitation",
     "whiteboard_invite_text": "{jid} invites you to a shared whiteboard. Join?",
     "whiteboard_room_invite_text": "A whiteboard has been started in «{jid}». Join the drawing?",
+    "whiteboard_participants": "Participants: {names}",
+    "whiteboard_you": "You",
     "chat_send_file": "Send file",
     "ft_p2p": "P2P",
     "ft_p2p_ibb": "P2P IBB",

@@ -1097,6 +1097,38 @@ check("joining the room board marks it joined and connects",
 check("a joined room board accepts the state and becomes ready",
       bool(_accepts_join) and bool(_ready_join))
 
+# 32. the board remembers who drew -----------------------------------------
+async def _participants_case():
+    client = _FakeClient()
+    manager = WhiteboardManager(client)
+    session = WhiteboardSession(sid="p1", peer="room@conference.example",
+                                is_muc=True, is_host=True)
+    manager.sessions["p1"] = session
+    for nick in ("alice", "bob"):
+        msg = _FakeIncoming(f"room@conference.example/{nick}",
+                            ET.Element("{jabber:client}message"), "groupchat")
+        sxe = ET.SubElement(msg.xml, _q(NS_SXE, "sxe"))
+        sxe.set("session", "p1")
+        state = ET.SubElement(sxe, _q(NS_SXE, "state"))
+        new = ET.SubElement(state, _q(NS_SXE, "new"))
+        new.set("rid", "r-" + nick)
+        new.set("type", "element")
+        new.set("parent", "0")
+        new.set("name", "path")
+        await manager.handle_sxe(msg)
+    events = [e for e in client.events if e[0] == "whiteboard_edit"]
+    return (sorted(session.participants),
+            [(e[1], e[2]) for e in events])
+
+
+_participants, _edits = asyncio.run(_participants_case())
+check("both senders are recorded as participants",
+      _participants == ["room@conference.example/alice",
+                        "room@conference.example/bob"])
+check("each edit reports its sender",
+      _edits == [("p1", "room@conference.example/alice"),
+                 ("p1", "room@conference.example/bob")])
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

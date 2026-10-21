@@ -16,6 +16,7 @@ import asyncio
 import copy
 import hashlib
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
@@ -85,6 +86,9 @@ class WhiteboardSession:
     user_joined: bool = False
     declined: bool = False      # the invitation was declined (join later)
     invited: bool = False       # the invitation has been shown once
+    #: Who took part: sender identity (room/nick or full JID) -> last edit
+    #: (``time.monotonic()``).  The UI resolves the display names.
+    participants: dict = field(default_factory=dict)
     pending: list = field(default_factory=list)  # edits waiting for the state
     state_buffering: bool = False
 
@@ -1228,6 +1232,9 @@ class WhiteboardManager:
         # Any other SXE from a peer means a board is active for that peer (this
         # is how a passive MUC occupant learns the room has a board).
         self._announce_active(session.peer)
+        if tag_name in ("state", "connect", "state-offer", "accept-state"):
+            session.participants[frm] = time.monotonic()
+            self.client.emit("whiteboard_edit", sid, frm)
         try:
             is_groupchat = msg.get_type() == "groupchat"
         except Exception:  # noqa: BLE001 - a lightweight stanza stub

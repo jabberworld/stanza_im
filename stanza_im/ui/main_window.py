@@ -3884,6 +3884,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("whiteboard_proposed", self._on_whiteboard_proposed)
         c.on("whiteboard_ready", self._on_whiteboard_ready)
         c.on("whiteboard_state", self._on_whiteboard_state)
+        c.on("whiteboard_edit", self._on_whiteboard_edit)
         c.on("whiteboard_senders", self._on_whiteboard_senders)
         c.on("whiteboard_ended", self._on_whiteboard_ended)
         c.on("whiteboard_failed", self._on_whiteboard_failed)
@@ -7750,6 +7751,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if local and not session.is_host:
             self._client.whiteboard.seed_local_shapes(sid, local)
         dialog.attach_session(sid)
+        dialog.set_participants(self._whiteboard_participants(session))
         if session.local_only:
             dialog.set_local_only()
         # An accepted invitation reaches the session via the XEP-0353
@@ -7767,6 +7769,36 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = self._whiteboards.get(session.peer)
         if dialog is not None:
             dialog.refresh_from_session()
+            dialog.set_participants(self._whiteboard_participants(session))
+
+    def _whiteboard_participants(self, session) -> list[tuple[str, str]]:
+        """``(key, label)`` for the board's participant list (we come first)."""
+        entries: list[tuple[str, str]] = [("__me__", tr("whiteboard_you"))]
+        seen: set[str] = set()
+        for key in session.participants:
+            if session.is_muc:
+                label = key.split("/", 1)[1] if "/" in key else key
+            else:
+                key = key.split("/", 1)[0]
+                label = self._roster_name(key) or key
+            if label in seen:
+                continue
+            seen.add(label)
+            entries.append((key, label))
+        entries[1:] = sorted(entries[1:], key=lambda item: item[1].casefold())
+        return entries
+
+    def _on_whiteboard_edit(self, sid: str, frm: str = "") -> None:
+        """A participant edited (or joined) the board: refresh the list."""
+        if self._client is None:
+            return
+        session = self._client.whiteboard.session(sid)
+        if session is None:
+            return
+        dialog = self._whiteboards.get(session.peer)
+        if dialog is not None:
+            dialog.set_participants(
+                self._whiteboard_participants(session), active=frm)
 
     def _on_whiteboard_senders(self, sid: str, editable: bool) -> None:
         """The peer switched the board's edit rights (Jingle senders)."""

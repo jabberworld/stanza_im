@@ -227,6 +227,22 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._sync_label.setContentsMargins(6, 2, 6, 4)
         layout.addWidget(self._sync_label)
 
+        # Who is drawing (the last editor is highlighted briefly).
+        self._participants_label = QtWidgets.QLabel("")
+        self._participants_label.setTextFormat(
+            QtCore.Qt.TextFormat.RichText)
+        self._participants_label.setWordWrap(True)
+        self._participants_label.setContentsMargins(6, 0, 6, 4)
+        self._participants_label.setVisible(False)
+        layout.addWidget(self._participants_label)
+        self._participants: list[tuple[str, str]] = []
+        self._participant_active = ""
+        self._participant_timer = QtCore.QTimer(self)
+        self._participant_timer.setSingleShot(True)
+        self._participant_timer.setInterval(2000)
+        self._participant_timer.timeout.connect(
+            self._clear_participant_highlight)
+
         self._refresh_swatches()
 
         self._canvas.shape_added.connect(self._on_shape_added)
@@ -242,6 +258,36 @@ class WhiteboardDialog(QtWidgets.QDialog):
 
     def session_id(self) -> str:
         return self._sid
+
+    def set_participants(self, entries: list[tuple[str, str]],
+                         active: str = "") -> None:
+        """Show the drawing participants; *active* edited just now."""
+        self._participants = list(entries or [])
+        self._participant_active = str(active or "")
+        self._render_participants()
+        if self._participant_active:
+            self._participant_timer.start()
+
+    def _clear_participant_highlight(self) -> None:
+        self._participant_active = ""
+        self._render_participants()
+
+    def _render_participants(self) -> None:
+        if not self._participants:
+            self._participants_label.clear()
+            self._participants_label.setVisible(False)
+            return
+        from stanza_im.include.utils import escape_html
+        parts = []
+        for key, label in self._participants:
+            text = escape_html(str(label or key))
+            if key == self._participant_active:
+                text = ('<span style="font-weight:bold; color:#2e7d32;">'
+                        + text + "</span>")
+            parts.append(text)
+        self._participants_label.setText(
+            tr("whiteboard_participants", names=", ".join(parts)))
+        self._participants_label.setVisible(True)
 
     def board_shapes(self) -> list[dict]:
         """The board's local (not yet shared) shapes as document attributes."""
@@ -280,6 +326,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._share_btn.setChecked(False)
         self._sync_label.setText(tr("whiteboard_not_shared"))
         self.set_editable(True)
+        self.set_participants([])
         self._canvas.clear_history()
         # The drawing stays on the board as a local one: a later share seeds a
         # new session from it instead of starting with an empty document.
