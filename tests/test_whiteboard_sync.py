@@ -234,6 +234,17 @@ asyncio.run(mgr_muc.handle_sxe(offer_msg))
 check("the host offers the state to the joiner",
       _last_sxe(mgr_muc.client).find(_q(NS_SXE, "state-offer")) is not None)
 
+# 8b. a destroyed room ends its board, other rooms are untouched -------------
+mgr_other = WhiteboardManager(_FakeClient())
+sid_other = mgr_other.start_session("other@conference.example.com", is_muc=True)
+mgr_muc.drop_room(room)
+check("drop_room drops the destroyed room's board session",
+      sid_muc not in mgr_muc.sessions)
+check("drop_room reports the end",
+      ("whiteboard_ended", sid_muc) in mgr_muc.client.events)
+check("drop_room forgets the peer mapping", mgr_muc._by_peer.get(room) is None)
+check("drop_room leaves other rooms alone", sid_other in mgr_other.sessions)
+
 # 9. end a 1:1 session -------------------------------------------------------
 mgr.end_session(sid)
 check("ending a session drops it", sid not in mgr.sessions)

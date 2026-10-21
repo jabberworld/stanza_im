@@ -93,6 +93,8 @@ class _ParticipantEditDialog(QtWidgets.QDialog):
 class MucConfigDialog(QtWidgets.QDialog):
     """Room management: affiliation lists and (owner) room configuration."""
 
+    room_destroyed = QtCore.pyqtSignal(str)   # room JID
+
     def __init__(self, client, room: str, can_configure: bool = False,
                  parent=None, actor_affiliation: str = ""):
         super().__init__(parent)
@@ -166,6 +168,25 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._tabs.addTab(self._scrolled(settings),
                           tr("muc_config_settings_tab"))
         self._tabs.setTabEnabled(2, self._can_configure)
+
+        # ── Management (owner only) ──────────────────────────────
+        management = QtWidgets.QWidget()
+        m_layout = QtWidgets.QVBoxLayout(management)
+        self._management_info = QtWidgets.QLabel(
+            tr("muc_management_info", room=room))
+        self._management_info.setWordWrap(True)
+        m_layout.addWidget(self._management_info)
+        reason_form = QtWidgets.QFormLayout()
+        self._destroy_reason = QtWidgets.QLineEdit()
+        reason_form.addRow(tr("muc_destroy_reason"), self._destroy_reason)
+        m_layout.addLayout(reason_form)
+        self._destroy_btn = QtWidgets.QPushButton(tr("muc_destroy_button"))
+        self._destroy_btn.clicked.connect(self._on_destroy_room)
+        m_layout.addWidget(self._destroy_btn)
+        m_layout.addStretch(1)
+        self._tabs.addTab(self._scrolled(management),
+                          tr("muc_management_tab"))
+        self._tabs.setTabEnabled(3, self._actor_affiliation == "owner")
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -336,6 +357,36 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._initial_values = self._form_widget.values()
 
     # ── Apply ─────────────────────────────────────────────────────
+
+    def _on_destroy_room(self) -> None:
+        """Confirm, then destroy the room (owner only)."""
+        if self._client is None or self._actor_affiliation != "owner":
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self, self.windowTitle(),
+            tr("muc_destroy_confirm", room=self._room),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No)
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self._destroy_btn.setEnabled(False)
+        self._start_task(self._destroy_room())
+
+    async def _destroy_room(self) -> None:
+        try:
+            await self._client.destroy_room(
+                self._room, reason=self._destroy_reason.text().strip())
+        except Exception as exc:  # noqa: BLE001 - reported to the user
+            self._destroy_btn.setEnabled(True)
+            self._show_error(tr("muc_destroy_failed", error=str(exc)))
+            return
+        self.room_destroyed.emit(self._room)
+        self.accept()
+
+    def _show_error(self, text: str) -> None:
+        self._management_info.setText(text)
+        self._management_info.setStyleSheet("color: #c0392b;")
 
     def _on_ok(self) -> None:
         if self._busy:

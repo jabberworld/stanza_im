@@ -42,6 +42,7 @@ class _FakeClient:
     def __init__(self):
         self.affiliation_calls = []
         self.config_calls = []
+        self.destroy_calls = []
         self.form = _FakeForm(title="", instructions=[], fields=[])
         self.groupchats = {}
 
@@ -62,6 +63,9 @@ class _FakeClient:
 
     async def muc_set_config(self, room, values):
         self.config_calls.append((room, values))
+
+    async def destroy_room(self, room, reason="", alternate=""):
+        self.destroy_calls.append((room, reason, alternate))
 
     async def room_supports_hats(self, room):
         return True
@@ -105,7 +109,8 @@ async def scenario(can_configure):
 loop = asyncio.new_event_loop()
 try:
     client, dlg = loop.run_until_complete(scenario(True))
-    check("three tabs", dlg._tabs.count() == 3)
+    check("participants, hats, settings and management tabs",
+          dlg._tabs.count() == 4)
     check("owner sees the settings tab", dlg._tabs.isTabEnabled(2))
     check("hats tab present", dlg._tabs.tabText(1) == "Hats")
     check("the long tabs scroll instead of pinning the dialog",
@@ -176,10 +181,36 @@ try:
               ("room@conf.example", {"muc#roomconfig_roomname": "New"})])
     check("no affiliations sent for a settings-only edit",
           client.affiliation_calls == [])
+
+    # Management tab: owner only, and the destroy flow.
+    check("four tabs", dlg._tabs.count() == 4)
+    check("management tab label", dlg._tabs.tabText(3) == "Management")
+    check("owner can manage the room", dlg._tabs.isTabEnabled(3))
+    destroyed = []
+    dlg.room_destroyed.connect(destroyed.append)
+
+    async def _destroy():
+        QtWidgets.QMessageBox.question = staticmethod(
+            lambda *a, **k: QtWidgets.QMessageBox.StandardButton.Yes)
+        try:
+            dlg._destroy_reason.setText("cleanup")
+            dlg._on_destroy_room()
+            for _ in range(8):
+                await asyncio.sleep(0)
+        finally:
+            del QtWidgets.QMessageBox.question
+
+    loop.run_until_complete(_destroy())
+    check("destroy sends the optional reason",
+          client.destroy_calls == [
+              ("room@conf.example", "cleanup", "")])
+    check("a destroyed room is reported", destroyed == ["room@conf.example"])
     dlg.deleteLater()
 
     client2, dlg2 = loop.run_until_complete(scenario(False))
     check("admin cannot see the settings tab", not dlg2._tabs.isTabEnabled(2))
+    check("admin cannot manage (destroy) the room",
+          dlg2._tabs.count() == 4 and not dlg2._tabs.isTabEnabled(3))
     check("no-rights note shown", bool(dlg2._settings_status.text()))
     check("no config fetch for admin", dlg2._form_widget is None)
     dlg2.deleteLater()

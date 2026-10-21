@@ -347,6 +347,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_joined: set[str] = set()
         self._muc_join_grace: dict[str, float] = {}
         self._muc_config_dialogs: dict[str, object] = {}
+        # Rooms being destroyed by us, and remote destroys already reported
+        # (so our own delete and the server's presence never double-notify).
+        self._muc_destroying: set[str] = set()
+        self._muc_destroyed_seen: set[str] = set()
         self._hats_assign_dialogs: dict[str, object] = {}
         self._captcha_dialogs: dict[str, object] = {}
         self._muc_base_nicks: dict[str, str] = {}
@@ -2450,6 +2454,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                  can_configure=can_configure, parent=self,
                                  actor_affiliation=self._muc_affiliation(room))
         self._muc_config_dialogs[room] = dialog
+        dialog.room_destroyed.connect(self._on_room_destroyed)
         dialog.finished.connect(
             lambda *_, r=room: self._muc_config_dialog_closed(r))
         dialog.show()
@@ -2811,6 +2816,63 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._abort_muc_join(room, condition or "error")
 
+    def _drop_room_ui(self, room: str, close_chat: bool = False) -> None:
+        """Forget every piece of per-room UI state (a join failure/destroy)."""
+        self._muc_users.pop(room, None)
+        self._muc_self_nicks.pop(room, None)
+        self._muc_base_nicks.pop(room, None)
+        self._muc_joined.discard(room)
+        self._muc_join_grace.pop(room, None)
+        self._muc_join_tries.pop(room, None)
+        self._muc_create_opts.pop(room, None)
+        self._muc_names.pop(room, None)
+        self._muc_vcard_names.pop(room, None)
+        self._muc_avatar_paths.pop(room, None)
+        self._muc_room_features.pop(room, None)
+        self._muc_moderation.pop(room, None)
+        self._muc_moderation_pending.discard(room)
+        if room in self._conference_roster:
+            self._roster.remove_user(room)
+            self._conference_roster.discard(room)
+            self._schedule_roster_repaint()
+        if close_chat and self._chat_window.has_chat(room):
+            self._chat_window.close_chat(room)
+
+    def _on_muc_destroyed(self, room: str, reason: str = "",
+                          alternate: str = "") -> None:
+        """A room was destroyed by its owner: report it, keep the tab."""
+        if room in self._muc_destroying:
+            return  # our own delete already cleaned up
+        self._muc_destroyed_seen.add(room)
+        text = (tr("muc_destroyed_status", room=room, reason=reason)
+                if reason else tr("muc_destroyed_status_noreason", room=room))
+        chat = self._chat_window.get_chat(room)
+        if chat is not None:
+            # Keep the conversation open so the reason stays readable.
+            chat.add_status(text, time.strftime("%H:%M:%S"))
+        self._drop_room_ui(room, close_chat=False)
+        self._muc_autojoin_tries.pop(room, None)
+        if self._config.notifications.osd_enabled:
+            self._osd.show(self._menu_icon("muc.png"),
+                           tr("muc_destroyed_title"), text)
+
+    def _on_room_destroyed(self, room: str) -> None:
+        """The owner destroyed the room from our own management dialog."""
+        self._muc_destroying.add(room)
+        try:
+            self._drop_room_ui(room, close_chat=True)
+            self._muc_autojoin_tries.pop(room, None)
+        finally:
+            self._muc_destroying.discard(room)
+        if room in self._muc_destroyed_seen:
+            # The server's destroy presence already showed the notice.
+            self._muc_destroyed_seen.discard(room)
+            return
+        text = tr("muc_destroyed_own", room=room)
+        if self._config.notifications.osd_enabled:
+            self._osd.show(self._menu_icon("muc.png"),
+                           tr("muc_destroyed_title"), text)
+
     def _abort_muc_join(self, room: str, condition: str) -> None:
         """A permanent join rejection: report it and drop the room entirely.
 
@@ -2824,22 +2886,7 @@ class MainWindow(QtWidgets.QMainWindow):
             task = getattr(self._client, "_muc_join_tasks", {}).get(room)
             if task is not None and not task.done():
                 task.cancel()
-        self._muc_users.pop(room, None)
-        self._muc_self_nicks.pop(room, None)
-        self._muc_base_nicks.pop(room, None)
-        self._muc_joined.discard(room)
-        self._muc_join_grace.pop(room, None)
-        self._muc_join_tries.pop(room, None)
-        self._muc_create_opts.pop(room, None)
-        self._muc_names.pop(room, None)
-        self._muc_vcard_names.pop(room, None)
-        self._muc_avatar_paths.pop(room, None)
-        if room in self._conference_roster:
-            self._roster.remove_user(room)
-            self._conference_roster.discard(room)
-            self._schedule_roster_repaint()
-        if self._chat_window.has_chat(room):
-            self._chat_window.close_chat(room)
+        self._drop_room_ui(room, close_chat=True)
         message = tr("muc_join_cannot_join", room=room)
         if self._client is not None and room in getattr(
                 self._client, "autojoin_rooms", set()):
@@ -3889,6 +3936,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("whiteboard_ended", self._on_whiteboard_ended)
         c.on("whiteboard_failed", self._on_whiteboard_failed)
         c.on("whiteboard_activity", self._on_whiteboard_activity)
+        c.on("muc_destroyed", self._on_muc_destroyed)
         c.on("muc_join_error", self._on_muc_join_error)
         c.on("groupchat_presence_error", self._on_groupchat_presence_error)
         c.on("captcha_challenge", self._on_captcha_challenge)

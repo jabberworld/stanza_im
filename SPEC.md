@@ -1587,8 +1587,8 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
 The MUC tab header shows a gear button after the bookmark (hidden on 1:1 tabs),
 enabled only for owners/admins (`MainWindow._apply_muc_admin`, fed by our
 affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
-(`ui/muc_config_dialog.py`) with three tabs (the hats and settings pages scroll,
-so the dialog can be shrunk below its content):
+(`ui/muc_config_dialog.py`) with four tabs (the hats, settings and management
+pages scroll, so the dialog can be shrunk below its content):
 
 - «Участники» — a `QTreeWidget` with the four affiliation groups (Владельцы =
   owner, Администраторы = admin, Зарегистрированные пользователи = member,
@@ -1605,6 +1605,11 @@ so the dialog can be shrunk below its content):
   selectors are all sized to the widest one (`_align_selectors`); a `text-multi`
   field is a multi-line `QPlainTextEdit` whose value is the list of lines, and a
   `jid-multi` field (the captcha whitelist) one normalised JID per line.
+- «Управление» — enabled for the owner only («Удалить конференцию», after a
+  confirmation, with an optional «Причина» → `client.destroy_room` →
+  `xep_0045.destroy`, XEP-0045 §10.9). The dialog emits `room_destroyed(room)` on
+  success (the MainWindow closes the tab and drops the room from every per-room
+  map; the bookmark stays) and shows the error inline otherwise.
 
 Edits are collected and applied on «Ок» (`client.muc_set_affiliation`,
 `client.muc_set_config`); «Отмена» discards them. Only what changed is sent:
@@ -1613,6 +1618,17 @@ the XEP-0045 rule — owners may modify any list, admins only member/outcast, an
 the edit dialog warns immediately otherwise) and the configuration only when a
 form value changed, as a fresh `type='submit'` form built by
 `client.muc_set_config(room, values)` (the server's own form is never mutated).
+
+A room destroyed by its owner notifies the occupants with an unavailable
+presence carrying `<x xmlns='http://jabber.org/protocol/muc#user'><destroy
+jid='alternate'><reason>…</reason></destroy></x>` (§10.9).
+`core.client._muc_destroy_info` parses it, and `_on_groupchat_presence` handles
+it once per room (before the ordinary occupant path, so no "left" lines are
+produced): it drops the cached `GroupChatInfo` and `_known_rooms` entry, ends
+the room's board sessions (`WhiteboardManager.drop_room`) and emits
+`muc_destroyed(room, reason, alternate)`. The UI keeps the tab open and appends
+a status line with the reason, plus an OSD; a room destroyed from our own
+management dialog closes the tab instead and must not retry its auto-join.
 
 **Voice requests (XEP-0045 §7.13).** A `visitor` in a moderated room can ask for
 voice with the «Попросить голос» button on the action panel above the input

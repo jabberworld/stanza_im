@@ -623,6 +623,18 @@ class WhiteboardManager:
         self._announce_inactive(session.peer)
         self.client.emit("whiteboard_ended", sid)
 
+    def drop_room(self, room: str) -> None:
+        """The room was destroyed: end every board session hosted there."""
+        for sid, session in list(self.sessions.items()):
+            if not session.is_muc or session.peer != room:
+                continue
+            self._cancel_connect(sid)
+            self.sessions.pop(sid, None)
+            if self._by_peer.get(room) == sid:
+                self._by_peer.pop(room, None)
+            self._announce_inactive(room)
+            self.client.emit("whiteboard_ended", sid)
+
     def _advertise(self, session: WhiteboardSession) -> None:
         """Announce a MUC session in presence (XEP-0284 §4.2)."""
         try:

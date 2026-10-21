@@ -71,6 +71,30 @@ NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
 NS_ROSTERX = "http://jabber.org/protocol/rosterx"  # XEP-0144 Roster Item Exchange
 NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
+
+
+def _muc_destroy_info(pres) -> dict | None:
+    """The XEP-0045 ``<destroy/>`` of a MUC presence, or ``None``.
+
+    When an owner destroys a room the service sends every occupant an
+    unavailable presence carrying ``<x xmlns='…muc#user'><destroy
+    jid='alternate'><reason>…</reason></destroy></x>`` (§10.9).  The reason is
+    meant for the occupants, so the UI shows it instead of "everyone left".
+    """
+    try:
+        x = pres.xml.find("{%s}x" % NS_MUC_USER)
+    except AttributeError:
+        return None
+    if x is None:
+        return None
+    destroy = x.find("{%s}destroy" % NS_MUC_USER)
+    if destroy is None:
+        return None
+    reason = destroy.find("{%s}reason" % NS_MUC_USER)
+    return {
+        "reason": ((reason.text or "").strip() if reason is not None else ""),
+        "alternate": str(destroy.get("jid") or ""),
+    }
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 NS_STATS = "http://jabber.org/protocol/stats"  # XEP-0039 Statistics Gathering
 NS_LAST = "jabber:iq:last"                # XEP-0012 Last Activity (uptime)
@@ -1321,6 +1345,9 @@ class JabberClient:
         # Bare JIDs known to be MUC rooms (joined or seen), so the room's own
         # presence is never mistaken for a contact.
         self._known_rooms: set[str] = set()
+        # Rooms whose destroy presence was already handled (the service sends
+        # one per occupant; only the first one is reported).
+        self._destroyed_rooms: set[str] = set()
         self.presences: dict[str, dict] = {}  # {full_jid: {show, status, ...}}
         # Extended presence (XEP-0080/0107/0108/0118): bare JID -> parsed kinds
         self.pep_data: dict[str, dict] = {}
@@ -4537,6 +4564,16 @@ class JabberClient:
         muc = self.xmpp.plugin["xep_0045"]
         await muc.set_affiliation(room, affiliation, jid=jid, reason=reason)
 
+    async def destroy_room(self, room: str, reason: str = "",
+                           alternate: str = "") -> None:
+        """Destroy a room (XEP-0045 §10.9; the owner only).
+
+        The optional *reason* is delivered to the occupants in the destroy
+        presence; *alternate* names a room they should join instead.
+        """
+        muc = self.xmpp.plugin["xep_0045"]
+        await muc.destroy(room, reason=reason, altroom=alternate or None)
+
     # ── XEP-0317 Hats ─────────────────────────────────────────────
 
     async def room_supports_hats(self, room: str) -> bool:
@@ -6675,6 +6712,21 @@ class JabberClient:
                 error = {}
             condition = str(error.get("condition", "") or "")
             self.emit("groupchat_presence_error", room, nick, condition)
+            return
+        destroy = _muc_destroy_info(pres)
+        if destroy is not None:
+            # The room no longer exists: drop our state and report the reason
+            # once, never as "everyone left".
+            if room not in self._destroyed_rooms:
+                self._destroyed_rooms.add(room)
+                self.groupchats.pop(room, None)
+                self._known_rooms.discard(room)
+                try:
+                    self.whiteboard.drop_room(room)
+                except Exception:  # noqa: BLE001 - best effort
+                    logger.debug("Whiteboard room drop failed", exc_info=True)
+                self.emit("muc_destroyed", room, destroy["reason"],
+                          destroy["alternate"])
             return
         # Muji conference coordination (XEP-0272) piggybacks on MUC presence.
         try:

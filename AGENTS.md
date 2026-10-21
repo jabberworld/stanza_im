@@ -326,7 +326,7 @@ substitution in `smile_to_html` (`_boundary_ok`/`_sub_guarded`).
 **Room management** (`ui/muc_config_dialog.py`): the MUC header carries a gear
 button right after the bookmark (`ChatWidget._config_btn`), hidden on 1:1 tabs
 and enabled only for owners/admins (`MainWindow._apply_muc_admin` derives our
-affiliation from `_muc_users`). It opens a non-modal `MucConfigDialog` with three
+affiliation from `_muc_users`). It opens a non-modal `MucConfigDialog` with four
 tabs: «Участники» — a `QTreeWidget` grouped into Владельцы/Администраторы/
 Зарегистрированные пользователи/Заблокированные (owner/admin/member/outcast)
 with «Jabber ID» and «Примечание» columns (the note is the XEP-0045 `<reason>`)
@@ -334,7 +334,11 @@ and Add/Edit/Delete buttons (Delete sets affiliation `none`); «Шапки» —
 XEP-0317 hats (see below); «Настройки» —
 enabled for the owner only and hosts the `muc#owner` room-configuration
 `DataFormWidget` (its `list-single` selectors are aligned to one width via
-`_align_selectors`). Edits are collected and applied on «Ок» via
+`_align_selectors`); «Управление» — the owner only: a note that the room is
+removed for every participant (the bookmark is kept), an optional «Причина»
+and «Удалить конференцию» (confirmed) → `client.destroy_room` →
+`xep_0045.destroy` (XEP-0045 §10.9), then the `room_destroyed` signal, an
+error shown inline instead of a silent failure. Edits are collected and applied on «Ок» via
 `client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
 only JIDs). The «Шапки» and «Настройки» pages are wrapped in a `QScrollArea`, so
@@ -417,6 +421,18 @@ dialog warns immediately instead of deferring to the server), and the room
 configuration is sent only when a form value changed, as a fresh `type='submit'`
 form (`client.muc_set_config(room, values)`) so slixmpp never mutates the
 server's own form (which raised `('options', None)`).
+
+A room destroyed by its owner reaches the occupants as an unavailable
+presence carrying `<x xmlns='http://jabber.org/protocol/muc#user'><destroy
+jid='alternate'><reason/></destroy></x>`: `_muc_destroy_info(pres)` parses it and
+`_on_groupchat_presence` reports it **once per room** (`_destroyed_rooms`),
+drops `groupchats`/`_known_rooms` and ends the room's whiteboard sessions
+(`WhiteboardManager.drop_room`), emitting `muc_destroyed(room, reason,
+alternate)` — never a per-occupant "left" event. `MainWindow._on_muc_destroyed`
+keeps the room tab open with a status line («Конференция … удалена» plus the
+reason) and shows an OSD; our own delete (`_on_room_destroyed`) closes the tab,
+stops the auto-join retries (`_drop_room_ui` clears every per-room map and the
+conference roster row) and keeps the bookmark. [`tests/test_muc_destroy.py`]
 
 **MUC join reliability**: presence status lines (`muc_user_joined`/`left`/
 `muc_status_changed`) are shown only after a successful join — `MainWindow`
