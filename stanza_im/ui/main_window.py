@@ -3359,6 +3359,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.call_devices = self._call_device_config()
             self._client.call_auto_accept = bool(getattr(
                 getattr(self._config, "calls", None), "auto_accept", False))
+            from stanza_im.xmpp import jet as jet_mod
+            self._client.file_encryption = jet_mod.normalize_mode(
+                str(getattr(self._config.files, "encryption", "prefer")
+                    or "prefer"))
             csi = bool(getattr(self._config.connection, "csi", True))
             if csi != bool(self._client.csi):
                 self._client.set_csi_config(csi)
@@ -3672,6 +3676,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                         "omemo_load_mode", "lazy") or "lazy"),
             calls_load_mode=str(getattr(self._config.performance,
                                         "calls_load_mode", "lazy") or "lazy"),
+            file_encryption=str(getattr(self._config.files, "encryption",
+                                        "prefer") or "prefer"),
         )
         self._client.stun_turn_mode = getattr(connection, "stun_turn_mode",
                                               "auto")
@@ -3813,6 +3819,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("file_transfer_progress", self._on_file_transfer_progress)
         c.on("hash_mismatch", self._on_file_hash_mismatch)
         c.on("file_transfer_status", self._on_file_transfer_status)
+        c.on("file_offer_rejected", self._on_file_offer_rejected)
         c.on("file_offer", self._on_file_offer)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
@@ -7990,8 +7997,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 dlg.set_progress(index, int(detail or 0))
             return
         if phase == "start":
+            encrypted = detail == "encrypted"
+            if dlg is not None and index >= 0 and encrypted:
+                dlg.set_encrypted(index, True)
             if chat:
-                chat.add_status(tr("ft_upload_started",
+                key = ("file_transfer_encrypted" if encrypted
+                       else "ft_upload_started")
+                chat.add_status(tr(key,
                                    file=os.path.basename(path or detail)),
                                 time.strftime("%H:%M:%S"))
             return
@@ -8037,7 +8049,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 dlg.set_progress(index, int(detail or 0))
             return
         if phase == "start":
-            if chat and direction == "out":
+            encrypted = detail == "encrypted"
+            if dlg is not None and index >= 0 and encrypted:
+                dlg.set_encrypted(index, True)
+            if chat and encrypted:
+                chat.add_status(tr("file_transfer_encrypted", file=name),
+                                time.strftime("%H:%M:%S"))
+            elif chat and direction == "out":
                 chat.add_status(tr("ft_p2p_started", file=name),
                                 time.strftime("%H:%M:%S"))
             if direction == "in":
@@ -8073,6 +8091,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         chat.add_status(tr("media_hash_mismatch", algo=algo),
                         time.strftime("%H:%M:%S"))
+
+    def _on_file_offer_rejected(self, jid: str, reason: str) -> None:
+        """An incoming file offer was refused for its encryption."""
+        bare = jid.split("/")[0]
+        key = ("ft_unencrypted_rejected" if reason == "strict"
+               else "ft_undecryptable")
+        chat = self._chat_window.get_chat(bare)
+        if chat is not None:
+            chat.add_status(tr(key), time.strftime("%H:%M:%S"))
+        if self._config.notifications.osd_enabled:
+            self._osd.show(self._menu_icon("lock.svg"), tr("ft_recv_offer_title"),
+                           tr(key))
 
     def _on_file_transfer_status(self, jid: str, key: str):
         chat = (self._chat_window.get_chat(jid.split("/")[0])

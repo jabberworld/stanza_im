@@ -418,6 +418,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `files.download_notifications` | `true` | Show an OSD notification when an incoming file offer is accepted. |
 | `files.download_dir` | `""` | Directory for received files; empty falls back to `$XDG_DOWNLOAD_DIR` / `~/Downloads` (`include/utils.default_download_dir`). |
 | `files.verify_hashes` | `true` | Verify a downloaded file against the XEP-0300 hashes it was announced with (XEP-0385 SIMS or Jingle FT); a mismatch adds a service line to the chat. Only runs when a hash was announced (Preferences → file transfer). |
+| `files.encryption` | `prefer` | JET-OMEMO policy for P2P transfers: `off`, `prefer` (encrypt when both sides support it), `require` (only encrypted outgoing transfers; plain incoming offers are still accepted) or `strict` (additionally reject plain incoming offers). Files uploaded over HTTP from an OMEMO chat are always encrypted (XEP-0454). |
 
 ### 4.4 Call Settings (`devices.*`, `calls.*`, Preferences → Devices)
 
@@ -2536,6 +2537,20 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   the two fallback ranges; the features `urn:xmpp:sims:1`,
   `urn:xmpp:reference:0`, `urn:xmpp:hashes:2`, `jabber:x:oob`,
   `urn:xmpp:fallback:0` and `urn:xmpp:chat-markers:0` are advertised in disco.
+- **Encryption (XEP-0391/0396, `xmpp/jet.py`)**: when `files.encryption`
+  allows it and the peer advertises `urn:xmpp:jingle:jet:0` +
+  `urn:xmpp:jingle:jet-omemo:0`, the content carries
+  `<security xmlns='urn:xmpp:jingle:jet:0'
+  cipher='urn:xmpp:ciphers:aes-128-gcm-nopadding'
+  type='eu.siacs.conversations.axolotl'><encrypted …/></security>` — a legacy
+  OMEMO KeyTransportMessage (per-device `<key/>` plus `<iv/>`, no payload)
+  whose key and IV protect the stream. The transfer is one AES-128-GCM stream
+  with the 16-byte tag appended; the receiver decrypts with the equivalent CTR
+  keystream and verifies the tag with GCM at the end, keeping the data in
+  `<path>.part` until then. `require`/`strict` refuse to send without a key and
+  answer `security-error` when an encrypted offer cannot be decrypted; `strict`
+  also terminates a plain offer with `security-error`. Sizes and hashes
+  describe the plaintext file.
 - Verification (`files.verify_hashes`): the downloaded original is checked
   against the announced hashes (`include/media.verify_hashes`); a mismatch
   adds a service line to the chat (`media_hash_mismatch`). It never fires when

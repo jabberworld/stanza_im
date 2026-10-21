@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import hashlib
 import logging
 import mimetypes
@@ -28,6 +29,7 @@ from xml.etree import ElementTree as ET
 
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import bytestream
+from stanza_im.xmpp import jet
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +246,14 @@ class JingleSession:
     used_self: str = ""
     activated: str = ""
     peer_candidate_error: bool = False
+    # JET-OMEMO (XEP-0391/0396): the content is protected with this key/IV and
+    # the exact <security/> element we offered (echoed in an accept).
+    encrypted: bool = False
+    transport_key: bytes = b""
+    transport_iv: bytes = b""
+    security_el: object = None
+    decryptor: object = None       # inbound stream cipher
+    part_path: str = ""            # inbound: the file before its tag matches
 
 
 def _file_hashes(path: str) -> tuple[dict, int]:
@@ -295,6 +305,53 @@ class JingleFileTransferManager:
         async with self._send_lock:
             await self._send_one(jid, path, method)
 
+    # ── JET-OMEMO policy ──────────────────────────────────────────
+
+    def _encryption_mode(self) -> str:
+        return jet.normalize_mode(
+            getattr(self.client, "file_encryption", "prefer"))
+
+    def _omemo_ready(self) -> bool:
+        omemo = getattr(self.client, "omemo", None)
+        return bool(omemo is not None and getattr(omemo, "available", False))
+
+    def _peer_supports_jet(self, bare: str) -> bool:
+        try:
+            return (self.client.supports_feature(bare, jet.NS_JET_OMEMO)
+                    and self.client.supports_feature(bare, jet.NS_JET))
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _secret(session: JingleSession):
+        return jet.TransportSecret(session.transport_key, session.transport_iv)
+
+    async def _transport_secret(self, peer_bare: str):
+        """``(key, iv, <encrypted/>)`` for *peer_bare*, or ``None``."""
+        omemo = getattr(self.client, "omemo", None)
+        if omemo is None or not getattr(omemo, "available", False):
+            return None
+        try:
+            return await omemo.encrypt_transport_key(peer_bare)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("JET: cannot encrypt a key for %s: %s",
+                        peer_bare, exc)
+            return None
+
+    async def _decrypt_transport(self, encrypted, peer_bare: str):
+        omemo = getattr(self.client, "omemo", None)
+        if omemo is None or not getattr(omemo, "available", False):
+            return None
+        try:
+            made = await omemo.decrypt_transport_key(encrypted, peer_bare)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("JET: cannot decrypt the key from %s: %s",
+                        peer_bare, exc)
+            return None
+        if made is None:
+            return None
+        return tuple(made)
+
     async def _send_one(self, jid: str, path: str, method: str) -> None:
         path = str(path)
         if not os.path.isfile(path):
@@ -314,16 +371,38 @@ class JingleFileTransferManager:
                         hash_algo="sha-1",
                         hash_value=hashes.get("sha-1", ""))
         peer_bare = str(jid).split("/")[0]
+        decision = jet.outgoing_decision(
+            self._encryption_mode(),
+            peer_supports=self._peer_supports_jet(peer_bare),
+            omemo_ready=self._omemo_ready())
         session = JingleSession(
             sid=uuid.uuid4().hex, peer_bare=peer_bare,
             peer_full=self._best_full_jid(peer_bare) or peer_bare,
             self_full=self._full_jid(), initiator=True,
             content_name="file-%s" % uuid.uuid4().hex[:8], meta=meta,
             path=path)
+        if decision == jet.OUT_ENCRYPT:
+            made = await self._transport_secret(peer_bare)
+            if made is None:
+                if self._encryption_mode() == "prefer":
+                    logger.info("JET: no usable OMEMO device for %s, sending "
+                                "the file unprotected", peer_bare)
+                else:
+                    from stanza_im.i18n import tr
+                    self._emit("file_transfer_progress", jid, "error",
+                               tr("ft_encryption_required"), path, "out")
+                    return
+            else:
+                key, iv, envelope = made
+                session.encrypted = True
+                session.transport_key, session.transport_iv = key, iv
+                session.security_el = jet.build_security(
+                    session.content_name, envelope)
         session.accept_future = self._new_future()
         session.transfer_future = self._new_future()
         self.sessions[session.sid] = session
-        self._emit("file_transfer_progress", jid, "start", "", path, "out")
+        self._emit("file_transfer_progress", jid, "start",
+                   "encrypted" if session.encrypted else "", path, "out")
 
         try:
             if method in ("ibb", "p2p-ibb"):
@@ -439,13 +518,36 @@ class JingleFileTransferManager:
         if meta is None:
             return
         content = jingle.find(_q(NS_JINGLE, "content"))
-        s5b_el = content.find(_q(NS_S5B, "transport")) if content is not None else None
-        ibb_el = content.find(_q(NS_IBB, "transport")) if content is not None else None
+        if content is None:
+            return
+        status, encrypted_el = jet.parse_security(content)
+        if status == jet.SECURITY_UNSUPPORTED:
+            await self._refuse_security(sid, peer_full, peer_bare,
+                                        "unsupported")
+            return
+        if (jet.incoming_decision(
+                self._encryption_mode(),
+                offer_encrypted=(status == jet.SECURITY_OK))
+                == jet.IN_REJECT):
+            await self._refuse_security(sid, peer_full, peer_bare, "strict")
+            return
+        s5b_el = content.find(_q(NS_S5B, "transport"))
+        ibb_el = content.find(_q(NS_IBB, "transport"))
         method = "s5b" if s5b_el is not None else "ibb"
         session = JingleSession(
             sid=sid, peer_bare=peer_bare, peer_full=peer_full,
             self_full=self._full_jid(), initiator=False, content_name=name,
             meta=meta, method=method)
+        if status == jet.SECURITY_OK:
+            secret = await self._decrypt_transport(encrypted_el, peer_bare)
+            if secret is None:
+                await self._refuse_security(sid, peer_full, peer_bare,
+                                            "undecryptable")
+                return
+            session.encrypted = True
+            session.transport_key, session.transport_iv = secret
+            session.security_el = copy.deepcopy(
+                content.find(_q(jet.NS_JET, "security")))
         if s5b_el is not None:
             info = parse_s5b_transport(s5b_el)
             session.bsid = info["sid"]
@@ -456,7 +558,9 @@ class JingleFileTransferManager:
         session.transfer_future = self._new_future()
         self.sessions[sid] = session
         self._offers[sid] = session
-        self._emit("file_offer", sid, peer_full, meta.as_dict())
+        offered = meta.as_dict()
+        offered["encrypted"] = session.encrypted
+        self._emit("file_offer", sid, peer_full, offered)
 
     async def _on_session_accept(self, jingle: ET.Element) -> None:
         session = self.sessions.get(jingle.get("sid", ""))
@@ -716,25 +820,36 @@ class JingleFileTransferManager:
     async def _ibb_send_file(self, session: JingleSession) -> None:
         total = os.path.getsize(session.path) or 1
         sent = 0
+        encryptor = (jet.StreamEncryptor(self._secret(session))
+                     if session.encrypted else None)
         with open(session.path, "rb") as fh:
             while True:
                 chunk = fh.read(session.ibb_block)
                 if not chunk:
                     break
-                iq = self.xmpp.Iq()
-                iq["type"] = "set"
-                iq["to"] = session.peer_full
-                data = ET.SubElement(iq.xml, _q(NS_IBB_OLD, "data"))
-                data.set("seq", str(session.ibb_out_seq & 0xFFFF))
-                data.set("sid", session.ibb_sid)
-                data.text = base64.b64encode(chunk).decode("ascii")
-                session.ibb_out_seq = (session.ibb_out_seq + 1) & 0xFFFF
-                await iq.send(timeout=_IQ_TIMEOUT)
+                await self._ibb_send_block(
+                    session, encryptor.update(chunk) if encryptor else chunk)
                 sent += len(chunk)
                 self._emit("file_transfer_progress", session.peer_bare,
                            "progress", str(int(sent * 100 / total)),
                            session.path, "out")
+        if encryptor is not None:
+            tail = encryptor.finish()
+            if tail:
+                await self._ibb_send_block(session, tail)
         await self._ibb_send_close(session)
+
+    async def _ibb_send_block(self, session: JingleSession,
+                              chunk: bytes) -> None:
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = session.peer_full
+        data = ET.SubElement(iq.xml, _q(NS_IBB_OLD, "data"))
+        data.set("seq", str(session.ibb_out_seq & 0xFFFF))
+        data.set("sid", session.ibb_sid)
+        data.text = base64.b64encode(chunk).decode("ascii")
+        session.ibb_out_seq = (session.ibb_out_seq + 1) & 0xFFFF
+        await iq.send(timeout=_IQ_TIMEOUT)
 
     async def _ibb_send_close(self, session: JingleSession) -> None:
         iq = self.xmpp.Iq()
@@ -759,17 +874,30 @@ class JingleFileTransferManager:
         except ValueError:
             session.ibb_block = IBB_BLOCK_SIZE
         session.ibb_in_seq = 0
+        path = session.path
+        if session.encrypted:
+            try:
+                session.decryptor = jet.StreamDecryptor(self._secret(session))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cannot start decrypting the file: %s", exc)
+                session.state = "failed"
+                self._emit("file_transfer_progress", session.peer_bare,
+                           "error", str(exc), session.path, "in")
+                return
+            session.part_path = session.path + ".part"
+            path = session.part_path
         try:
-            session.ibb_reader = open(session.path, "wb")
+            session.ibb_reader = open(path, "wb")
         except OSError as exc:
             logger.warning("Cannot save incoming file: %s", exc)
             session.state = "failed"
+            self._discard_part(session)
             self._emit("file_transfer_progress", session.peer_bare, "error",
                        str(exc), session.path, "in")
             return
         session.state = "transferring"
         self._emit("file_transfer_progress", session.peer_bare, "start",
-                   "", session.path, "in")
+                   "encrypted" if session.encrypted else "", session.path, "in")
 
     def _on_ibb_data(self, iq) -> None:
         data = iq.xml.find(_q(NS_IBB_OLD, "data"))
@@ -791,6 +919,12 @@ class JingleFileTransferManager:
             chunk = base64.b64decode(data.text or "", validate=True)
         except Exception:
             return
+        if session.decryptor is not None:
+            try:
+                chunk = session.decryptor.update(chunk)
+            except jet.JetError as exc:
+                logger.warning("IBB decryption failed: %s", exc)
+                return
         try:
             session.ibb_reader.write(chunk)
             session.ibb_reader.flush()
@@ -809,12 +943,35 @@ class JingleFileTransferManager:
         session = self._find_ibb_session(close_el.get("sid", ""))
         if session is None or session.initiator:
             return
+        if session.decryptor is not None:
+            try:
+                tail = session.decryptor.finish()
+                if tail and session.ibb_reader is not None:
+                    session.ibb_reader.write(tail)
+            except jet.JetError as exc:
+                logger.warning("Receiving file failed: %s", exc)
+                if session.ibb_reader is not None:
+                    try:
+                        session.ibb_reader.close()
+                    except OSError:
+                        pass
+                    session.ibb_reader = None
+                session.state = "failed"
+                self._discard_part(session)
+                self._emit("file_transfer_progress", session.peer_bare,
+                           "error", str(exc), session.path, "in")
+                await self._terminate(session, "security-error")
+                return
+            session.decryptor = None
         if session.ibb_reader is not None:
             try:
                 session.ibb_reader.close()
             except OSError:
                 pass
             session.ibb_reader = None
+        if not self._release_part(session):
+            await self._terminate(session, "security-error")
+            return
         session.state = "done"
         self._verify_received(session)
         self._emit("file_transfer_progress", session.peer_bare, "done",
@@ -883,18 +1040,26 @@ class JingleFileTransferManager:
         reader, writer = transport
         total = os.path.getsize(session.path) or 1
         sent = 0
+        encryptor = (jet.StreamEncryptor(self._secret(session))
+                     if session.encrypted else None)
         try:
             with open(session.path, "rb") as fh:
                 while True:
                     chunk = fh.read(_CHUNK)
                     if not chunk:
                         break
-                    writer.write(chunk)
+                    writer.write(encryptor.update(chunk) if encryptor
+                                 else chunk)
                     await writer.drain()
                     sent += len(chunk)
                     self._emit("file_transfer_progress", session.peer_bare,
                                "progress", str(int(sent * 100 / total)),
                                session.path, "out")
+            if encryptor is not None:
+                tail = encryptor.finish()
+                if tail:
+                    writer.write(tail)
+                    await writer.drain()
         finally:
             await self._close_writer(writer)
         session.state = "done"
@@ -905,33 +1070,74 @@ class JingleFileTransferManager:
         reader, writer = transport
         total = session.meta.size or 0
         received = 0
+        decryptor = (jet.StreamDecryptor(self._secret(session))
+                     if session.encrypted else None)
+        path = session.path
+        if decryptor is not None:
+            session.part_path = session.path + ".part"
+            path = session.part_path
         try:
-            with open(session.path, "wb") as fh:
+            with open(path, "wb") as fh:
                 while True:
                     chunk = await reader.read(_CHUNK)
                     if not chunk:
                         break
-                    fh.write(chunk)
-                    received += len(chunk)
+                    plain = decryptor.update(chunk) if decryptor else chunk
+                    fh.write(plain)
+                    received += len(plain)
                     if total:
                         self._emit("file_transfer_progress",
                                    session.peer_bare, "progress",
                                    str(int(received * 100 / total)),
                                    session.path, "in")
-                        if received >= total:
+                        if received >= total and decryptor is None:
                             break
-        except OSError as exc:
+                if decryptor is not None:
+                    fh.write(decryptor.finish())
+        except (OSError, jet.JetError) as exc:
             logger.warning("Receiving file failed: %s", exc)
             session.state = "failed"
+            self._discard_part(session)
             self._emit("file_transfer_progress", session.peer_bare, "error",
                        str(exc), session.path, "in")
             await self._close_writer(writer)
             return
         await self._close_writer(writer)
+        if not self._release_part(session):
+            return
         session.state = "done"
         self._verify_received(session)
         self._emit("file_transfer_progress", session.peer_bare, "done",
                    "", session.path, "in")
+
+    @staticmethod
+    def _discard_part(session: JingleSession) -> None:
+        """Remove an unverified inbound file (a failed encrypted transfer)."""
+        part = getattr(session, "part_path", "")
+        if not part:
+            return
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        session.part_path = ""
+
+    def _release_part(self, session: JingleSession) -> bool:
+        """Move a fully decrypted (and authenticated) file into place."""
+        part = getattr(session, "part_path", "")
+        if not part:
+            return True
+        try:
+            os.replace(part, session.path)
+        except OSError as exc:
+            logger.warning("Cannot save the received file: %s", exc)
+            session.state = "failed"
+            self._discard_part(session)
+            self._emit("file_transfer_progress", session.peer_bare, "error",
+                       str(exc), session.path, "in")
+            return False
+        session.part_path = ""
+        return True
 
     def _verify_received(self, session: JingleSession) -> None:
         """Emit ``hash_mismatch`` when a received file's XEP-0300 hash differs.
@@ -1011,6 +1217,8 @@ class JingleFileTransferManager:
             content.append(build_s5b_transport(
                 session.bsid, session.my_candidates,
                 dstaddr=self._dst(session)))
+        if session.security_el is not None:
+            content.append(copy.deepcopy(session.security_el))
         try:
             await iq.send(timeout=_IQ_TIMEOUT)
         except Exception as exc:
@@ -1031,6 +1239,8 @@ class JingleFileTransferManager:
             content.append(build_s5b_transport(
                 session.bsid, session.my_candidates,
                 dstaddr=self._dst(session)))
+        if session.security_el is not None:
+            content.append(copy.deepcopy(session.security_el))
         try:
             await iq.send(timeout=_IQ_TIMEOUT)
         except Exception as exc:
@@ -1105,6 +1315,25 @@ class JingleFileTransferManager:
             session.state = "done" if reason == "success" else "failed"
         self._cleanup(session)
 
+    async def _refuse_security(self, sid: str, peer_full: str,
+                               peer_bare: str, why: str) -> None:
+        """Refuse an offer whose encryption we cannot honour (XEP-0391)."""
+        logger.info("JET: refusing file offer %s from %s (%s)", sid,
+                    peer_bare, why)
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = peer_full
+        jingle = ET.Element(_q(NS_JINGLE, "jingle"),
+                            {"action": "session-terminate", "sid": sid})
+        iq.xml.append(jingle)
+        reason_el = ET.SubElement(jingle, _q(NS_JINGLE, "reason"))
+        ET.SubElement(reason_el, _q(NS_JINGLE, "security-error"))
+        try:
+            await iq.send(timeout=_IQ_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not refuse the file offer", exc_info=True)
+        self._emit("file_offer_rejected", peer_bare, why)
+
     @staticmethod
     def _terminate_reason(jingle: ET.Element) -> str:
         reason = jingle.find(_q(NS_JINGLE, "reason"))
@@ -1139,6 +1368,7 @@ class JingleFileTransferManager:
             except OSError:
                 pass
             session.ibb_reader = None
+        self._discard_part(session)
         self.sessions.pop(session.sid, None)
         self._offers.pop(session.sid, None)
 

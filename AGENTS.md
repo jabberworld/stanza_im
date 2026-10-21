@@ -2405,7 +2405,19 @@ configured file proxy as a `proxy` candidate (priority 10); the initiator dials
 the peer candidates in priority order (`bytestream.connect_bytestream`, the
 SOCKS5 `DST.ADDR = SHA1(SID + initiator + responder)` calculated with port 0),
 sends `candidate-used`, activates a nominated proxy candidate and streams the
-file. `"P2P IBB"` uses **Jingle In-Band (XEP-0261/0047)** immediately; `"P2P"`
+file. **Encryption (XEP-0391/0396, `xmpp/jet.py`)**: when `files.encryption`
+(`off`/`prefer`/`require`/`strict`) allows it and the peer advertises
+`urn:xmpp:jingle:jet:0` + `urn:xmpp:jingle:jet-omemo:0`, the content carries
+`<security/>` with a legacy OMEMO KeyTransportMessage (a per-device `<key/>`
+header and `<iv/>`, no payload) holding the 16-byte transport key; the stream is
+one AES-128-GCM stream with the tag appended (`StreamEncryptor`), and the
+receiver decrypts with the CTR keystream plus a GCM tag check, keeping the file
+as `<path>.part` until it verifies. `require`/`strict` refuse to send without a
+key and answer `security-error` for an offer they cannot decrypt; `strict` also
+terminates a plain offer. A refused offer emits `file_offer_rejected`; an
+encrypted transfer shows a lock in the transfer/incoming dialogs and a chat
+status line. `"P2P IBB"` uses **Jingle In-Band (XEP-0261/0047)** immediately;
+`"P2P"`
 falls back to IBB automatically when SOCKS5 fails by sending a
 `transport-replace` and continuing as IBB. `client.send_file_p2p(jid, path,
 method)` is serialized by a lock so a batch runs one session at a time.

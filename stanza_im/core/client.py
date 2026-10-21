@@ -38,6 +38,7 @@ from stanza_im.xmpp.jingle import JingleFileTransferManager
 from stanza_im.xmpp.jingle_rtp import JingleRtpManager
 from stanza_im.xmpp import muji as muji_mod
 from stanza_im.xmpp.muji import MujiManager
+from stanza_im.xmpp import jet as jet_mod
 from stanza_im.xmpp import whiteboard as whiteboard_mod
 from stanza_im.xmpp.whiteboard import WhiteboardManager
 from stanza_im.include import pep
@@ -1091,13 +1092,16 @@ class JabberClient:
                  omemo_enabled: bool = True,
                  omemo_btbv: bool = True,
                  omemo_load_mode: str = "lazy",
-                 calls_load_mode: str = "lazy"):
+                 calls_load_mode: str = "lazy",
+                 file_encryption: str = "prefer"):
         self.jid_str = str(jid).split("/")[0]
         self.resource = resource
         self.host = host
         self.port = int(port or 0)
         self.priority_mode = priority_mode
         self.priority = int(priority or 0)
+        # JET-OMEMO policy for P2P file transfers (see xmpp/jet.py).
+        self.file_encryption = jet_mod.normalize_mode(file_encryption)
         self.proxy_mode = proxy_mode
         self.proxy_host = proxy_host
         self.proxy_port = int(proxy_port or 0)
@@ -1451,6 +1455,10 @@ class JabberClient:
         for _feature in (jingle_mod.NS_JINGLE, jingle_mod.NS_FT,
                          jingle_mod.NS_S5B, jingle_mod.NS_IBB):
             disco.add_feature(_feature)
+        # JET-OMEMO (XEP-0391/0396): a Jingle transport keyed by OMEMO.
+        if getattr(getattr(self, "omemo", None), "available", False):
+            disco.add_feature(jet_mod.NS_JET)
+            disco.add_feature(jet_mod.NS_JET_OMEMO)
         # Extended presence PEP nodes (XEP-0080/0107/0108/0118).
         for _node in (pep.NS_MOOD, pep.NS_ACTIVITY, pep.NS_TUNE, pep.NS_GEOLOC):
             disco.add_feature(_node + "+notify")
@@ -2426,7 +2434,7 @@ class JabberClient:
 
         if not getattr(self.omemo, "available", False):
             raise RuntimeError("OMEMO is not available")
-        self.emit("file_upload_progress", jid, "start", "", path)
+        self.emit("file_upload_progress", jid, "start", "encrypted", path)
         try:
             payload, fragment = await asyncio.to_thread(
                 XEP_0454.encrypt, None, Path(path))

@@ -14,6 +14,7 @@ import time
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import find_icon
 from stanza_im.include.utils import format_size
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
@@ -88,14 +89,25 @@ class _FileRow(QtWidgets.QWidget):
 
         text = QtWidgets.QVBoxLayout()
         text.setSpacing(2)
+        title = QtWidgets.QHBoxLayout()
+        title.setSpacing(4)
         name = QtWidgets.QLabel(os.path.basename(self._path), self)
         name.setWordWrap(True)
         name.setStyleSheet("font-weight: bold;")
+        title.addWidget(name)
+        self._lock = QtWidgets.QLabel(self)
+        lock_icon = find_icon("lock.svg")
+        if lock_icon:
+            self._lock.setPixmap(QtGui.QIcon(lock_icon).pixmap(14, 14))
+        self._lock.setToolTip(tr("ft_encrypted"))
+        self._lock.setVisible(False)
+        title.addWidget(self._lock)
+        title.addStretch(1)
         size_label = QtWidgets.QLabel(format_size(self._total), self)
         size_label.setStyleSheet("color: gray; font-size: 11px;")
         self._stats_label = QtWidgets.QLabel("\u2014", self)
         self._stats_label.setStyleSheet("color: gray; font-size: 11px;")
-        text.addWidget(name)
+        text.addLayout(title)
         text.addWidget(size_label)
         text.addWidget(self._stats_label)
         layout.addLayout(text, 1)
@@ -107,6 +119,10 @@ class _FileRow(QtWidgets.QWidget):
         layout.addWidget(self._bar, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
 
         self.setToolTip(self._path)
+
+    def set_encrypted(self, encrypted: bool) -> None:
+        """Mark the row as an end-to-end encrypted transfer."""
+        self._lock.setVisible(bool(encrypted))
 
     def set_progress(self, pct: int, now: float | None = None) -> None:
         pct = max(0, min(100, int(pct)))
@@ -225,6 +241,10 @@ class FileTransferDialog(QtWidgets.QDialog):
 
     def row_count(self) -> int:
         return len(self._rows)
+
+    def set_encrypted(self, index: int, encrypted: bool = True) -> None:
+        if 0 <= index < len(self._rows):
+            self._rows[index].set_encrypted(encrypted)
 
     def set_progress(self, index: int, pct: int, now: float | None = None) -> None:
         if 0 <= index < len(self._rows):

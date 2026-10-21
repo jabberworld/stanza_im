@@ -39,6 +39,19 @@ i18n_load("en")
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
+# ``asyncio.run`` clears the current loop on Python 3.11, while slixmpp needs
+# one whenever a client or a Future is created; run every coroutine on one
+# shared loop instead.
+_LOOP = asyncio.new_event_loop()
+
+
+def _run(coro):
+    asyncio.set_event_loop(_LOOP)
+    return _LOOP.run_until_complete(coro)
+
+
+asyncio.set_event_loop(_LOOP)
+
 FAILURES = []
 
 
@@ -109,7 +122,7 @@ async def _loopback():
     return data
 
 
-check("bytestream loopback", asyncio.run(_loopback()) == b"hello")
+check("bytestream loopback", _run(_loopback()) == b"hello")
 
 
 async def _reject():
@@ -130,7 +143,7 @@ async def _reject():
         await server.wait_closed()
 
 
-check("bytestream rejects wrong DST", asyncio.run(_reject()))
+check("bytestream rejects wrong DST", _run(_reject()))
 
 # ── 5. IBB receive path ----------------------------------------------------
 client = JabberClient("me@example.com/res", "pw")
@@ -147,7 +160,7 @@ open_iq = iq_with("open")
 open_el = ET.SubElement(open_iq.xml, "{%s}open" % jingle.NS_IBB_OLD)
 open_el.set("sid", "ibbsid")
 open_el.set("block-size", "4096")
-asyncio.run(manager._on_ibb_open(open_iq))
+_run(manager._on_ibb_open(open_iq))
 check("IBB open creates the file", session.ibb_reader is not None)
 
 for seq, chunk in enumerate((b"abc", b"def")):
@@ -181,7 +194,7 @@ manager._terminate = _noop
 close_iq = iq_with("close")
 close_el = ET.SubElement(close_iq.xml, "{%s}close" % jingle.NS_IBB_OLD)
 close_el.set("sid", "ibbsid")
-asyncio.run(manager._on_ibb_close(close_iq))
+_run(manager._on_ibb_close(close_iq))
 check("IBB close finalizes", session.ibb_reader is None)
 
 # ── 6. incoming offer event ------------------------------------------------
@@ -200,7 +213,7 @@ content.set("name", "file-offer")
 desc = ET.SubElement(content, "{%s}description" % jingle.NS_FT)
 desc.append(jingle.build_file_element(jingle.FileMeta(
     name="photo.jpg", size=2048, media_type="image/jpeg")))
-asyncio.run(offer_client.file_transfer._on_session_initiate(jingle_el, iq))
+_run(offer_client.file_transfer._on_session_initiate(jingle_el, iq))
 check("file_offer emitted",
       bool(offers) and offers[0][0] == "offer1"
       and offers[0][1] == "bob@example.com/phone"
@@ -230,7 +243,7 @@ fb_client._http_upload_slot = _fake_slot
 big = os.path.join(_SCRATCH, "big.bin")
 with open(big, "wb") as fh:
     fh.write(b"x" * 32)
-asyncio.run(fb_client._http_upload_flow("bob@example.com", big))
+_run(fb_client._http_upload_flow("bob@example.com", big))
 check("oversize falls back to P2P",
       fb_events == [("bob@example.com", big)])
 
@@ -313,9 +326,256 @@ async def _batch():
         serial.send_file("bob@example.com", "b", "p2p"))
 
 
-asyncio.run(_batch())
+_run(_batch())
 check("P2P batch is sequential",
       order == ["start:a", "end:a", "start:b", "end:b"])
+
+# ── 11. JET-OMEMO: policy, content security, refusal, stream ---------------
+from types import SimpleNamespace
+
+from stanza_im.xmpp import jet as jet_mod
+
+check("JET policy defaults to prefer",
+      JabberClient("me@example.com/res", "pw").file_encryption == "prefer")
+check("files.encryption defaults to prefer",
+      Config().files.encryption == "prefer")
+check("a custom policy is normalized",
+      JabberClient("me@example.com/res", "pw",
+                   file_encryption="bogus").file_encryption == "prefer")
+
+# The <security/> element is added to an outgoing initiate.
+enc_client = JabberClient("me@example.com/res", "pw")
+enc_client.file_encryption = "require"
+enc_client.supports_feature = lambda bare, feature: True
+
+
+async def _fake_key(peer):
+    envelope = ET.Element("{%s}encrypted" % jet_mod.NS_LEGACY_OMEMO)
+    return b"k" * 16, b"i" * 12, envelope
+
+
+enc_client.omemo = SimpleNamespace(available=True,
+                                   encrypt_transport_key=_fake_key)
+enc_mgr = enc_client.file_transfer
+enc_session = jingle.JingleSession(
+    sid="enc1", peer_bare="bob@example.com", peer_full="bob@example.com/r",
+    self_full="me@example.com/r", initiator=True, content_name="file-enc",
+    meta=jingle.FileMeta(name="a.bin", size=10), method="ibb",
+    ibb_sid="bsid", encrypted=True, transport_key=b"k" * 16,
+    transport_iv=b"i" * 12)
+enc_session.security_el = jet_mod.build_security(
+    "file-enc", ET.Element("{%s}encrypted" % jet_mod.NS_LEGACY_OMEMO))
+
+_sent_iqs = []
+_orig_send = slixmpp.Iq.send
+
+
+def _capture_send(self, *args, **kwargs):
+    _sent_iqs.append(self)
+
+    async def _done():
+        return None
+    return _done()
+
+
+slixmpp.Iq.send = _capture_send
+try:
+    _run(enc_mgr._send_session_initiate(enc_session, ibb=True))
+finally:
+    slixmpp.Iq.send = _orig_send
+_sec = (_sent_iqs[-1].xml.find(".//{%s}security" % jet_mod.NS_JET)
+        if _sent_iqs else None)
+check("an outgoing initiate carries the JET security",
+      _sec is not None
+      and _sec.get("cipher") == jet_mod.CIPHER_AES_128_GCM
+      and _sec.get("type") == jet_mod.NS_LEGACY_OMEMO
+      and _sec.get("name") == "file-enc"
+      and _sec.find("{%s}encrypted" % jet_mod.NS_LEGACY_OMEMO) is not None)
+
+# A require policy refuses when no key can be produced.
+refuse_client = JabberClient("me@example.com/res", "pw")
+refuse_client.file_encryption = "require"
+refuse_client.supports_feature = lambda bare, feature: False
+refuse_events = []
+refuse_client.on("file_transfer_progress",
+                 lambda *a: refuse_events.append(a))
+_run(refuse_client.file_transfer.send_file(
+    "bob@example.com", os.path.join(_SCRATCH, "source.bin")))
+check("require refuses when the peer has no JET",
+      bool(refuse_events) and refuse_events[-1][1] == "error")
+
+# A strict policy rejects a plain incoming offer; an unsupported envelope too.
+async def _offer(path_client, security_type=None):
+    client = JabberClient("me@example.com/res", "pw")
+    client.file_encryption = path_client
+    refused = []
+    client.on("file_offer_rejected", lambda *a: refused.append(a))
+    iq = slixmpp.Iq()
+    iq["type"] = "set"
+    iq["from"] = "bob@example.com/phone"
+    jingle_el = ET.SubElement(iq.xml, "{%s}jingle" % jingle.NS_JINGLE)
+    jingle_el.set("action", "session-initiate")
+    jingle_el.set("sid", "strict1")
+    content = ET.SubElement(jingle_el, "{%s}content" % jingle.NS_JINGLE)
+    content.set("creator", "initiator")
+    content.set("name", "file-strict")
+    desc = ET.SubElement(content, "{%s}description" % jingle.NS_FT)
+    desc.append(jingle.build_file_element(jingle.FileMeta(
+        name="x.bin", size=1)))
+    ET.SubElement(content, "{%s}transport" % jingle.NS_IBB).set("sid", "b")
+    if security_type:
+        sec = ET.SubElement(content, "{%s}security" % jet_mod.NS_JET)
+        sec.set("name", "file-strict")
+        sec.set("cipher", jet_mod.CIPHER_AES_128_GCM)
+        sec.set("type", security_type)
+        ET.SubElement(sec, "{%s}encrypted" % security_type)
+    await client.file_transfer._on_session_initiate(jingle_el, iq)
+    return refused
+
+
+check("strict rejects a plain offer",
+      _run(_offer("strict")) == [("bob@example.com", "strict")])
+check("an unsupported envelope is refused",
+      _run(_offer("prefer", "urn:xmpp:omemo:2"))
+      == [("bob@example.com", "unsupported")])
+check("require accepts a plain offer",
+      _run(_offer("require")) == [])
+
+
+# The encrypted S5B stream round-trips through the real helpers.
+async def _encrypted_stream():
+    payload = b"jet payload " * 5000
+    source = os.path.join(_SCRATCH, "source.bin")
+    target = os.path.join(_SCRATCH, "target.bin")
+    with open(source, "wb") as fh:
+        fh.write(payload)
+    for name in (target, target + ".part"):
+        try:
+            os.remove(name)
+        except OSError:
+            pass
+    transfer = JabberClient("me@example.com/res", "pw").file_transfer
+    secret = jet_mod.TransportSecret(b"k" * 16, b"i" * 12)
+    sender = jingle.JingleSession(
+        sid="st1", peer_bare="bob@example.com", peer_full="bob@example.com/r",
+        self_full="me@example.com/r", initiator=True, content_name="file-st",
+        meta=jingle.FileMeta(name="source.bin", size=len(payload)),
+        path=source, encrypted=True, transport_key=secret.key,
+        transport_iv=secret.iv)
+    receiver = jingle.JingleSession(
+        sid="st1", peer_bare="bob@example.com", peer_full="me@example.com/r",
+        self_full="bob@example.com/r", initiator=False,
+        content_name="file-st",
+        meta=jingle.FileMeta(name="source.bin", size=len(payload)),
+        path=target, encrypted=True, transport_key=secret.key,
+        transport_iv=secret.iv)
+
+    async def _on_conn(reader, writer):
+        await transfer._stream_out(sender, (reader, writer))
+
+    server = await asyncio.start_server(_on_conn, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    await transfer._stream_in(receiver, (reader, writer))
+    server.close()
+    await server.wait_closed()
+    with open(target, "rb") as fh:
+        got = fh.read()
+    return payload, got, os.path.exists(target + ".part"), receiver.part_path
+
+
+_payload, _got, _leftover, _part = _run(_encrypted_stream())
+check("an encrypted S5B transfer round-trips", _got == _payload)
+check("no unverified .part file is left behind",
+      not _leftover and not _part)
+
+# The encrypted IBB path assembles the file from the ciphertext blocks.
+async def _encrypted_ibb():
+    payload = b"ibb jet data " * 3000
+    source = os.path.join(_SCRATCH, "ibb-source.bin")
+    target = os.path.join(_SCRATCH, "ibb-target.bin")
+    with open(source, "wb") as fh:
+        fh.write(payload)
+    for name in (target, target + ".part"):
+        try:
+            os.remove(name)
+        except OSError:
+            pass
+    secret = jet_mod.TransportSecret(b"z" * 16, b"y" * 12)
+    sender_client = JabberClient("me@example.com/res", "pw")
+    sender = jingle.JingleSession(
+        sid="ibt1", peer_bare="bob@example.com", peer_full="bob@example.com/r",
+        self_full="me@example.com/res", initiator=True, content_name="file-ibt",
+        meta=jingle.FileMeta(name="ibb-source.bin", size=len(payload)),
+        path=source, method="ibb", ibb_sid="ibs", encrypted=True,
+        transport_key=secret.key, transport_iv=secret.iv)
+    blocks = []
+
+    async def _collect(session, chunk):
+        blocks.append(chunk)
+
+    async def _noop_close(session):
+        return None
+
+    sender_client.file_transfer._ibb_send_block = _collect
+    sender_client.file_transfer._ibb_send_close = _noop_close
+    await sender_client.file_transfer._ibb_send_file(sender)
+
+    receiver_client = JabberClient("bob@example.com/res", "pw")
+    receiver = jingle.JingleSession(
+        sid="ibt1", peer_bare="me@example.com", peer_full="me@example.com/res",
+        self_full="bob@example.com/res", initiator=False,
+        content_name="file-ibt",
+        meta=jingle.FileMeta(name="ibb-source.bin", size=len(payload)),
+        path=target, method="ibb", ibb_sid="ibs", encrypted=True,
+        transport_key=secret.key, transport_iv=secret.iv)
+    rmgr = receiver_client.file_transfer
+    rmgr.sessions["ibt1"] = receiver
+    open_iq = iq_with("open")
+    open_el = ET.SubElement(open_iq.xml, "{%s}open" % jingle.NS_IBB_OLD)
+    open_el.set("sid", "ibs")
+    open_el.set("block-size", "4096")
+    await rmgr._on_ibb_open(open_iq)
+    for seq, block in enumerate(blocks):
+        data_iq = iq_with("data")
+        data_el = ET.SubElement(data_iq.xml, "{%s}data" % jingle.NS_IBB_OLD)
+        data_el.set("seq", str(seq))
+        data_el.set("sid", "ibs")
+        data_el.text = base64.b64encode(block).decode("ascii")
+        rmgr._on_ibb_data(data_iq)
+
+    async def _noop(*_a, **_k):
+        return None
+
+    rmgr._send_received = _noop
+    rmgr._terminate = _noop
+    close_iq = iq_with("close")
+    close_el = ET.SubElement(close_iq.xml, "{%s}close" % jingle.NS_IBB_OLD)
+    close_el.set("sid", "ibs")
+    await rmgr._on_ibb_close(close_iq)
+    with open(target, "rb") as fh:
+        got = fh.read()
+    return (payload, got, sum(len(b) for b in blocks),
+            os.path.exists(target + ".part"))
+
+
+_ib_payload, _ib_got, _ib_wire, _ib_part = asyncio.get_event_loop().run_until_complete(
+    _encrypted_ibb())
+check("an encrypted IBB transfer round-trips", _ib_got == _ib_payload)
+check("the IBB wire carries only the tag overhead",
+      _ib_wire == len(_ib_payload) + jet_mod.TAG_SIZE)
+check("the IBB receiver leaves no .part file", not _ib_part)
+
+# Preferences expose the four modes.
+prefs2 = PreferencesDialog(Config(), chat_themes.ChatThemeFactory())
+_combo = prefs2._controls.get("file_encryption")
+check("the encryption selector exists with four modes",
+      _combo is not None and _combo.count() == 4)
+prefs2._controls["file_encryption"].setCurrentIndex(3)
+prefs2._apply_settings()
+check("the strict mode persists",
+      prefs2._config.files.encryption == "strict")
+prefs2.close()
 
 print("\nAll tests passed" if not FAILURES
       else f"\n{len(FAILURES)} failures")

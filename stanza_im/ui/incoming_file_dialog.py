@@ -39,6 +39,11 @@ class IncomingFileDialog(QtWidgets.QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
 
+        if self._meta.get("encrypted"):
+            note = QtWidgets.QLabel(tr("ft_encrypted"), self)
+            note.setStyleSheet("color: gray;")
+            layout.addWidget(note)
+
         buttons = QtWidgets.QHBoxLayout()
         buttons.addStretch(1)
         self._accept_btn = QtWidgets.QPushButton(tr("ft_recv_accept"), self)

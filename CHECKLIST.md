@@ -110,7 +110,7 @@ Stanza IM does not implement any of them (except where noted).
 | XEP-0333 (Displayed Markers) | ✅ | `<markable/>` on outgoing messages, incoming `<displayed/>` marks delivered, plus the XEP-0490 MDS server-assist marker |
 | XEP-0369 (MIX) | ❌ | |
 | XEP-0380 / XEP-0420 (E2EE tagging / Stanza Content Encryption) | ✅ | EME `<encryption/>` on OMEMO messages; a bundled SCE (XEP-0420) envelope implementation for OMEMO 2 |
-| XEP-0384 / XEP-0396 (OMEMO) | ⚠️ | XEP-0384 implemented (legacy 0.3 + OMEMO 2, optional stack); HTTP-upload files are end-to-end encrypted via XEP-0454 (see above); XEP-0396 (JET-OMEMO for P2P files) not implemented |
+| XEP-0384 / XEP-0396 (OMEMO) | ⚠️ | XEP-0384 implemented (legacy 0.3 + OMEMO 2, optional stack); HTTP-upload files are end-to-end encrypted via XEP-0454 (see above); XEP-0396 (JET-OMEMO for P2P files, XEP-0391) implemented in the **legacy** profile — the OMEMO 2 envelope variant is a Psi extension and is not supported |
 | XEP-0374 (OpenPGP for XMPP) | ❌ | |
 | XEP-0225 (Component Connections) | — | N/A (client) |
 | XEP-0390 (Entity Capabilities 2.0) | ❌ | XEP-0115 is used |

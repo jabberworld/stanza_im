@@ -409,6 +409,15 @@ class PreferencesDialog(QtWidgets.QDialog):
                                      tr("prefs_file_download_notifications")))
         file_form.addRow(self._check("file_verify_hashes",
                                      tr("prefs_file_verify_hashes")))
+        encryption = self._combo("file_encryption", [
+            ("prefs_file_encryption_off", "off"),
+            ("prefs_file_encryption_prefer", "prefer"),
+            ("prefs_file_encryption_require", "require"),
+            ("prefs_file_encryption_strict", "strict")], fixed_width=False)
+        file_form.addRow(
+            tr("prefs_file_encryption"),
+            self._row(encryption, self._info_label(
+                tr("prefs_file_encryption_tip")), trailing_stretch=True))
         directory = self._line("file_download_dir")
         directory.setMinimumWidth(260)
         browse = QtWidgets.QPushButton(tr("prefs_file_download_dir_browse"))
@@ -1883,6 +1892,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                 getattr(files, "download_notifications", True)),
             "file_verify_hashes": bool(
                 getattr(files, "verify_hashes", True)),
+            "file_encryption": str(
+                getattr(files, "encryption", "prefer") or "prefer"),
             "file_download_dir": getattr(files, "download_dir", "") or "",
             "devices_audio_input": getattr(
                 getattr(cfg, "devices", None), "audio_input", "") or "",
@@ -2057,6 +2068,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.files.download_notifications = self._value(
             "file_download_notifications")
         cfg.files.verify_hashes = self._value("file_verify_hashes")
+        cfg.files.encryption = self._value("file_encryption") or "prefer"
         cfg.files.download_dir = self._value("file_download_dir")
         if not hasattr(cfg, "devices"):
             cfg.set("devices", {"audio_input": "", "audio_output": "",
