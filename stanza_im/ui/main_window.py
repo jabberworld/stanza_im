@@ -34,7 +34,7 @@ from stanza_im.include import clients as clients_mod
 from stanza_im.include import sounds as sounds_mod
 from stanza_im.core.storage import Config
 from stanza_im.core import profiles, unread_state
-from stanza_im.ui.icons import init_icons
+from stanza_im.ui import icons as icons_mod
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.zoom_list import ZoomListWidget as _ZoomListWidget
 from stanza_im.ui.login_widget import LoginWidget
@@ -269,7 +269,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if saved_lang:
             load_i18n(saved_lang)
         populate_translations(tr)
-        self._icons = init_icons()
+        self._icons = icons_mod.init_icons()
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
         self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
         self._call_windows: dict[str, object] = {}      # sid -> CallWindow
@@ -4270,6 +4270,11 @@ class MainWindow(QtWidgets.QMainWindow):
         room_jid = (jid if jid in self._conference_roster
                     or jid in self._muc_self_nicks else "")
         if path:
+            # The avatar file keeps its name when it changes: drop the cached
+            # pixmaps (the icon cache and the renderer's scaled variants).
+            if icons_mod.icons is not None:
+                icons_mod.icons.forget(path)
+            self._roster.clear_pixmaps()
             if room_jid:
                 self._muc_avatar_paths[room_jid] = path
             contact = (self._client.get_contact(room_jid or bare_jid)

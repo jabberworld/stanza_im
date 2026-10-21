@@ -85,6 +85,10 @@ class RosterStyle:
         self._show_mood = bool(show_mood)
         self._show_clients = bool(show_clients)
         self._avatar_radius_pct = 20
+        # Scaled/rounded pixmaps are created once per (file, size, radius)
+        # instead of on every paint: a roster repaint otherwise churns a native
+        # QPixmap per avatar/icon row, which glibc keeps until the next trim.
+        self._pixmaps: dict[tuple, QtGui.QPixmap] = {}
         self.set_colors(bg_color, group_bg_color)
 
     def set_options(self, show_avatars: bool = True,
@@ -100,6 +104,32 @@ class RosterStyle:
     def set_avatar_radius(self, radius_pct: int) -> None:
         """Set the roster avatar corner rounding (0 = square, 100 = circle)."""
         self._avatar_radius_pct = max(0, min(100, int(radius_pct or 0)))
+
+    _PIXMAP_CACHE_LIMIT = 256
+
+    def clear_pixmaps(self) -> None:
+        """Drop the scaled-icon cache (e.g. after an avatar changed)."""
+        self._pixmaps.clear()
+
+    def _scaled(self, key: tuple, pixmap: QtGui.QPixmap, size: int,
+                radius: int | None = None) -> QtGui.QPixmap:
+        """Scale (and optionally round) *pixmap*, caching the result."""
+        cache_key = (key, int(size),
+                     None if radius is None else int(radius))
+        cached = self._pixmaps.get(cache_key)
+        if cached is not None and not cached.isNull():
+            return cached
+        if radius is None:
+            scaled = pixmap.scaled(
+                size, size, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
+        else:
+            scaled = rounded_avatar(pixmap, size, radius)
+        if len(self._pixmaps) >= self._PIXMAP_CACHE_LIMIT:
+            # A simple FIFO bound; a roster shows far fewer icons at once.
+            self._pixmaps.pop(next(iter(self._pixmaps)))
+        self._pixmaps[cache_key] = scaled
+        return scaled
 
     @staticmethod
     def _parse(value) -> QtGui.QColor | None:
@@ -230,10 +260,8 @@ class RosterStyle:
         if icons:
             status_pixmap = icons.get_status_icon(item.icon_key, "32x32")
             if not status_pixmap.isNull():
-                scaled = status_pixmap.scaled(
-                    self.STATUS_ICON_DRAW, self.STATUS_ICON_DRAW,
-                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                    QtCore.Qt.TransformationMode.SmoothTransformation)
+                scaled = self._scaled(("status", item.icon_key),
+                                      status_pixmap, self.STATUS_ICON_DRAW)
                 painter.drawPixmap(x, icon_y, scaled)
 
         # Text block (name + status message) between status icon and avatar.
@@ -242,8 +270,9 @@ class RosterStyle:
         if self._show_avatars and item.avatar_path and icons:
             ipix = icons.get(item.avatar_path)
             if not ipix.isNull():
-                scaled = rounded_avatar(
-                    ipix, self.AVATAR_SIZE, self._avatar_radius_pct)
+                scaled = self._scaled(("avatar", item.avatar_path), ipix,
+                                      self.AVATAR_SIZE,
+                                      self._avatar_radius_pct)
                 ax = avail_right - self.AVATAR_SIZE
                 ay = y + (rect.height() - self.AVATAR_SIZE) // 2
                 painter.drawPixmap(ax, ay, scaled)
@@ -253,10 +282,8 @@ class RosterStyle:
         if self._show_clients and item.client_icon and icons:
             cpix = icons.get(item.client_icon)
             if not cpix.isNull():
-                scaled = cpix.scaled(
-                    self.CLIENT_ICON_SIZE, self.CLIENT_ICON_SIZE,
-                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                    QtCore.Qt.TransformationMode.SmoothTransformation)
+                scaled = self._scaled(("client", item.client_icon), cpix,
+                                      self.CLIENT_ICON_SIZE)
                 cx = avail_right - self.CLIENT_ICON_SIZE
                 cy = y + (rect.height() - self.CLIENT_ICON_SIZE) // 2
                 painter.drawPixmap(cx, cy, scaled)
@@ -272,10 +299,8 @@ class RosterStyle:
                 if el_path:
                     el_pix = icons.get(el_path)
                     if not el_pix.isNull():
-                        scaled = el_pix.scaled(
-                            self.MOOD_ACTIVITY_SIZE, self.MOOD_ACTIVITY_SIZE,
-                            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                            QtCore.Qt.TransformationMode.SmoothTransformation)
+                        scaled = self._scaled(("pep", el_path), el_pix,
+                                              self.MOOD_ACTIVITY_SIZE)
                         ex = avail_right - self.MOOD_ACTIVITY_SIZE
                         ey = y + (rect.height() - self.MOOD_ACTIVITY_SIZE) // 2
                         painter.drawPixmap(ex, ey, scaled)

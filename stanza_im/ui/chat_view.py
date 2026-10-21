@@ -59,6 +59,20 @@ def clamp_zoom(factor: float) -> float:
         return 1.0
 
 
+def poll_allowed(state) -> bool:
+    """Whether the chat scroll poll may run JavaScript for *state*.
+
+    While the application is inactive nobody reads the chat, so the 250 ms
+    ``runJavaScript`` per visible view is skipped; the timer keeps running and
+    resumes on activation.  ``stanza:`` control links are only produced by
+    user interaction, so no relay is lost.
+    """
+    try:
+        return state == QtCore.Qt.ApplicationState.ApplicationActive
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def share_payload(link_url: str, media_url: str, media_kind: str,
                   selected_text: str) -> str:
     """The content a chat context menu should offer to share, or "".
@@ -1749,6 +1763,9 @@ window.__stanzaMentionRef = '';
 
         def _poll_scroll_position(self):
             if not self._ready:
+                return
+            app = QtWidgets.QApplication.instance()
+            if app is not None and not poll_allowed(app.applicationState()):
                 return
             # Detect Chromium-initiated zoom (Ctrl+wheel, pinch, Ctrl+/-) that
             # bypasses our wheelEvent.  Qt 6 removed the zoomFactorChanged

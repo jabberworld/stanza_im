@@ -1213,7 +1213,8 @@ Single conversation tab. Layout:
   all three labels are replayed after every page load (`_on_load_finished`) so a
   count seeded before the document existed still shows. The 250 ms scroll poll
   runs only while the view is on screen
-  (`hideEvent` stops it, `showEvent` starts it) and skips the last-seen query
+  (`hideEvent` stops it, `showEvent` starts it) and while the application is
+  active (`poll_allowed`), and skips the last-seen query
   when the view is at the bottom. Incoming messages never force a scroll to the
   bottom — only the user's own outgoing messages do.
 - MUC participant sidebar (`_users_list`, a `_ParticipantList` subclass): a
@@ -1997,12 +1998,16 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
 
 LRU cache for QPixmap icons:
 
-- Max 200 entries
-- 60-second stale TTL
-- Auto-eviction timer every 30 seconds
-- Methods: `get(path)`, `get_status_icon(show)`, `get_action_icon(name)`, `get_category_icon(name, size=16)`
+- Max 512 entries
+- No time-based TTL (icon files are immutable); `forget(path)` invalidates one
+  file whose content changed under the same name (avatars)
+- Eviction runs when the limit is exceeded (the stale-timer only runs when a
+  TTL is configured)
+- Methods: `get(path)`, `forget(path)`, `get_status_icon(show)`, `get_action_icon(name)`, `get_category_icon(name, size=16)`
 - Status icons: `online`/`chat` use the green-bulb `jabber-online-green`/`jabber-chat-green` (16/32 PNG + SVG); the blue originals stay on disk
-- Avatars NOT cached long-term — loaded on-demand in paintEvent
+- Avatars are **not** cached as full pixmaps; the roster renderer caches only
+  the scaled/rounded variant per `(file, size, radius)` (`RosterStyle._scaled`),
+  cleared by `clear_pixmaps()` when an avatar changes
 - Project-authored SVG icons live under `resources/images/scalable/<category>/`
   (`actions`, `categories`, `places`, `apps`); `include.constants.find_icon`
   resolves scalable first, then the sized dirs, and `get_category_icon`

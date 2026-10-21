@@ -65,6 +65,13 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._recalc_heights()
         self.update()
 
+    def clear_pixmaps(self) -> None:
+        """Drop the renderer's scaled-icon cache (an avatar changed)."""
+        clear = getattr(self._style, "clear_pixmaps", None)
+        if callable(clear):
+            clear()
+        self.update()
+
     def set_tooltip_provider(self, provider) -> None:
         """Set a callable ``(jid) -> (html, avatar_path|None)`` used for
         contact tooltips (default: no tooltips)."""

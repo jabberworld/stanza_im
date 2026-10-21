@@ -1153,8 +1153,11 @@ user's own outgoing messages do); the HTML button's click sets
 QWebChannel `bridge.on_jump_clicked` only as an optional fast path (the poll is
 the fallback when the transport is unavailable). The 250 ms scroll poll runs
 **only while the view is on screen** (`hideEvent` stops it, `showEvent` starts
-it, and a load starts it only when visible), so background tabs are never
-polled; the last-seen query is skipped while the view sits at the bottom. The
+it, and a load starts it only when visible) **and while the application is
+active** (`poll_allowed(QApplication.applicationState())`: an inactive app
+skips the `runJavaScript`, so a background window does not churn IPC/JS), so
+background tabs are never polled; the last-seen query is skipped while the view
+sits at the bottom. The
 `▼` shares a centred
 bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
 button (left) and the reaction `♥` button (right, see below); all three labels
@@ -2446,7 +2449,8 @@ XEP-0398 bridges the two: both paths funnel into `_apply_avatar(jid, raw)`,
 keyed by the SHA-1 of the image (unchanged avatars are skipped), which saves it
 and emits `avatar_updated(jid, path)`; `MainWindow._on_avatar_updated` reuses
 `_refresh_avatar` (the avatar-only part of `_on_vcard_received`) for the roster,
-contacts and MUC occupants. The chat threads render the sender avatar via
+contacts and MUC occupants (it also invalidates the cached icon and the roster's
+scaled pixmaps, since an avatar file keeps its name when it changes). The chat threads render the sender avatar via
 `ChatWidget._user_icon`: incoming from the sender's cached avatar, outgoing from
 **our own** — `ChatWindow.set_own_jid` (the bare JID, set by `MainWindow` after
 login) feeds `avatar_data_uri(own)`, and our own vCard avatar is cached under the
@@ -3103,8 +3107,11 @@ text is kept. Returning activity (`eventFilter`) resumes
 
 ## Memory Management Rules
 
-1. **IconCache**: max 200 entries, 60s TTL, auto-eviction every 30s
-2. **Avatars**: stored as `str` path, QPixmap created in paintEvent, never cached long-term
+1. **IconCache**: LRU, 512 entries, no time-based TTL (icon files are
+   immutable); `forget(path)` drops one file whose content changed (avatar)
+2. **Avatars**: stored as `str` path; the roster caches only the scaled/rounded
+   variants per `(file, size, radius)` (`RosterStyle._scaled`, invalidated by
+   `clear_pixmaps()` on an avatar update), never the full pixmap in `UserItem`
 3. **ChatView**: shared `QWebEngineProfile` (not per-tab)
 4. **Idle tab suspension**: `chat.idle_unload_minutes` (default `10`, `0` = off,
    Preferences → Chat → «General»). `MainWindow._maybe_suspend_tabs` (per-minute

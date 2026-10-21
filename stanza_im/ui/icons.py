@@ -13,16 +13,22 @@ from stanza_im.include.constants import (
 
 
 class IconCache:
-    """LRU cache for QPixmap icons with automatic stale eviction."""
+    """LRU cache for QPixmap icons.
 
-    def __init__(self, max_size: int = 200, stale_ttl: float = 60.0):
+    The TTL is disabled by default: icon files are immutable and a changed
+    avatar (same file name) is announced through :meth:`forget`, so reloading
+    everything every minute only churned disk I/O and native pixmaps.
+    """
+
+    def __init__(self, max_size: int = 512, stale_ttl: float = 0.0):
         self._cache: dict[str, QtGui.QPixmap] = {}
         self._access_times: dict[str, float] = {}
         self._max_size = max_size
         self._stale_ttl = stale_ttl
         self._timer = QtCore.QTimer()
         self._timer.timeout.connect(self._evict_stale)
-        self._timer.start(30_000)
+        if self._stale_ttl > 0:
+            self._timer.start(30_000)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -73,6 +79,11 @@ class IconCache:
             return self.get(path)
         return QtGui.QPixmap()
 
+    def forget(self, path: str) -> None:
+        """Drop one cached file (its content changed under the same name)."""
+        self._cache.pop(path, None)
+        self._access_times.pop(path, None)
+
     def clear(self) -> None:
         """Drop all cached pixmaps."""
         self._cache.clear()
@@ -81,6 +92,8 @@ class IconCache:
     # ── Eviction ─────────────────────────────────────────────────
 
     def _evict_stale(self) -> None:
+        if self._stale_ttl <= 0:
+            return
         now = time.monotonic()
         stale = [k for k, t in self._access_times.items() if now - t > self._stale_ttl]
         for k in stale:
