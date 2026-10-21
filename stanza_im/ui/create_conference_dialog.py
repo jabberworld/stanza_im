@@ -1,7 +1,7 @@
 """Create-conference dialog.
 
 Collects the room address, optional name and server, plus the initial room
-configuration (persistent / invisible / members-only / anonymous) with three
+configuration (persistent / invisible / members-only / anonymous) with four
 quick presets.  The caller joins the room and, when the room was created by
 this join (XEP-0045 status code 201), applies the chosen configuration.
 """
@@ -154,14 +154,13 @@ class CreateConferenceDialog(QtWidgets.QDialog):
 
     def _preset_calls(self) -> None:
         # Muji addresses every participant by their real JID, so the room must
-        # be non-anonymous; members-only is not required for calls.
-        self._invisible.setChecked(False)
-        self._members_only.setChecked(False)
+        # be non-anonymous. Membership and invisibility stay the user's choice
+        # (a call room is often members-only or hidden).
         self._anonymous.setChecked(False)
 
     def _preset_omemo(self) -> None:
-        # XEP-0384 group chat: members-only and non-anonymous.
-        self._invisible.setChecked(False)
+        # XEP-0384 group chat: members-only and non-anonymous. Invisibility is
+        # not dictated by this preset (only Public/Private force it).
         self._members_only.setChecked(True)
         self._anonymous.setChecked(False)
 

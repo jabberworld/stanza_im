@@ -98,17 +98,35 @@ check("the Public preset enables anonymity, disables invisible and members",
       c["anonymous"] is True and c["invisible"] is False
       and c["members_only"] is False)
 
+dlg._invisible.setChecked(True)
+dlg._members_only.setChecked(True)
 dlg._preset_calls()
 c = dlg.collect()
-check("the Calls preset is public, non-anonymous and not members-only",
-      c["members_only"] is False and c["anonymous"] is False
+check("the Calls preset only forces non-anonymity",
+      c["anonymous"] is False and c["members_only"] is True
+      and c["invisible"] is True)
+dlg._invisible.setChecked(False)
+dlg._members_only.setChecked(False)
+dlg._preset_calls()
+c = dlg.collect()
+check("the Calls preset leaves an open room open",
+      c["anonymous"] is False and c["members_only"] is False
       and c["invisible"] is False)
 
+dlg._invisible.setChecked(True)
 dlg._preset_omemo()
 c = dlg.collect()
 check("the OMEMO preset enables members-only and disables anonymity",
       c["members_only"] is True and c["anonymous"] is False
-      and c["invisible"] is False)
+      and c["invisible"] is True)
+
+dlg._invisible.setChecked(True)
+dlg._members_only.setChecked(True)
+dlg._preset_public()
+check("the Public preset clears invisible and members-only",
+      dlg.collect()["invisible"] is False
+      and dlg.collect()["members_only"] is False
+      and dlg.collect()["anonymous"] is True)
 
 dlg._anonymous.setChecked(True)
 dlg._preset_private()
