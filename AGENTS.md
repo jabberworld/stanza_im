@@ -796,9 +796,13 @@ Only pure confirmations, checkbox-only selectors (`ShareDialog`,
 `IncomingCallDialog`, `CaptchaDialog`) and pickers stay modal.
 
 **JID inputs** use `ui/jid_edit.py`: a `JidLineEdit` normalises what is pasted
-(`xmpp:` scheme, URI query and, unless `resource=True`, the resource are
-dropped; the domain is lower-cased) and its `jid()` normalises typed text, so a
-JID copied from a vCard or a chat fits any form. The bare-JID forms are the add
+right away (`xmpp:` scheme, URI query and, unless `resource=True`, the resource
+are dropped; the domain is lower-cased) and its `jid()` normalises typed text,
+so a JID copied from a vCard or a chat fits any form.  `QLineEdit` has no
+`insertFromMimeData` virtual, so the field hooks the paste shortcut
+(`keyPressEvent`) and drops itself, and normalises right after a context-menu
+paste (that action is wired to `QLineEdit::paste()` in C++ and cannot be
+replaced). The bare-JID forms are the add
 contact dialog (and its vCard/nick lookup), the MUC participant editor, the
 login form, the existing-account dialog and, via `normalize_jid`, the blocked
 list and the hats manual list; privacy rules keep the resource. Room forms

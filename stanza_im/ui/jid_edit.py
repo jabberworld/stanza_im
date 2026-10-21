@@ -7,7 +7,7 @@ any form.
 """
 from __future__ import annotations
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.xmpp_uri import normalize_jid, split_jid
 
@@ -15,9 +15,10 @@ from stanza_im.include.xmpp_uri import normalize_jid, split_jid
 class JidLineEdit(QtWidgets.QLineEdit):
     """A line edit whose value is a JID.
 
-    Pasting (Ctrl+V, middle click, drag and drop — Qt funnels all of them
-    through ``insertFromMimeData``) normalises the URI; :meth:`jid` returns the
-    normalised value of whatever was typed.
+    ``QLineEdit`` has no ``insertFromMimeData`` virtual and handles the paste
+    shortcut, the context menu and drops in C++, so the field normalises the
+    text at those entry points itself instead of relying on an override that
+    Qt would never call.
     """
 
     def __init__(self, *args, resource: bool = False, **kwargs):
@@ -25,13 +26,46 @@ class JidLineEdit(QtWidgets.QLineEdit):
         #: Whether the resource part is meaningful for this field.
         self._allow_resource = bool(resource)
 
-    def insertFromMimeData(self, source):  # noqa: N802 - Qt override
-        text = (source.text()
-                if source is not None and source.hasText() else "")
+    # ── Editing helpers ───────────────────────────────────────────
+
+    def _insert_text(self, text: str) -> None:
+        """Insert *text* normalised, replacing the selection."""
         if not text:
-            super().insertFromMimeData(source)
             return
         self.insert(normalize_jid(text, resource=self._allow_resource))
+
+    def _normalise_in_place(self) -> None:
+        """Rewrite the current text (used after a context-menu paste)."""
+        text = self.jid()
+        if text and text != self.text():
+            self.setText(text)
+
+    def _paste_clipboard(self) -> None:
+        self._insert_text(QtWidgets.QApplication.clipboard().text())
+
+    # ── Qt overrides ──────────────────────────────────────────────
+
+    def keyPressEvent(self, event):  # noqa: N802 - Qt override
+        if event.matches(QtGui.QKeySequence.StandardKey.Paste):
+            self._paste_clipboard()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def dropEvent(self, event):  # noqa: N802 - Qt override
+        mime = event.mimeData()
+        if mime is not None and mime.hasText():
+            self._insert_text(mime.text())
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
+    def contextMenuEvent(self, event):  # noqa: N802 - Qt override
+        # The standard menu's Paste action is wired to QLineEdit::paste() in
+        # C++, so it cannot be replaced: normalise right after the menu closes.
+        menu = self.createStandardContextMenu()
+        menu.exec(event.globalPos())
+        self._normalise_in_place()
 
     def jid(self) -> str:
         """The normalised JID of the field ("" when empty)."""
@@ -48,18 +82,21 @@ class RoomJidEdit(JidLineEdit):
 
     split = QtCore.pyqtSignal(str, str)   # room, server
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def insertFromMimeData(self, source):  # noqa: N802 - Qt override
-        text = (source.text()
-                if source is not None and source.hasText() else "")
+    def _insert_text(self, text: str) -> None:
         room, server = split_jid(text)
         if room and server:
             self.setText(room)
             self.split.emit(room, server)
             return
-        super().insertFromMimeData(source)
+        super()._insert_text(text)
+
+    def _normalise_in_place(self) -> None:
+        room, server = split_jid(self.text())
+        if room and server:
+            self.setText(room)
+            self.split.emit(room, server)
+            return
+        super()._normalise_in_place()
 
     def room(self) -> tuple[str, str]:
         """``(localpart, server)`` of the current text (server may be "")."""

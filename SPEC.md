@@ -2020,7 +2020,10 @@ LRU cache for QPixmap icons:
 
 `JidLineEdit` normalises a pasted or typed JID (`include.xmpp_uri.normalize_jid`):
 the `xmpp:` scheme, a URI query and (by default) the resource are dropped and
-the domain is lower-cased. `RoomJidEdit` additionally splits a pasted
+the domain is lower-cased.  Because `QLineEdit` has no `insertFromMimeData`
+virtual, the paste shortcut (`keyPressEvent`) and drops are normalised before
+the insert, while a context-menu paste is normalised right after the menu
+closes. `RoomJidEdit` additionally splits a pasted
 `room@conf[/nick]` into the room (kept in the field) and its server (emitted
 through `split`), so the create/join-conference and bookmark dialogs fill their
 server widget; `split_jid` is applied again when the dialog collects its values.

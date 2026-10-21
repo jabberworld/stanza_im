@@ -16,7 +16,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.include.xmpp_uri import normalize_jid, split_jid
@@ -34,10 +34,23 @@ def check(name, cond):
         FAILURES.append(name)
 
 
-def _paste(edit, text):
+def _ctrl_v(edit, text):
+    """Paste through a real Ctrl+V key event (the clipboard carries *text*)."""
+    QtWidgets.QApplication.clipboard().setText(text)
+    event = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress,
+                            QtCore.Qt.Key.Key_V,
+                            QtCore.Qt.KeyboardModifier.ControlModifier)
+    edit.keyPressEvent(event)
+
+
+def _drop(edit, text):
     mime = QtCore.QMimeData()
     mime.setText(text)
-    edit.insertFromMimeData(mime)
+    event = QtGui.QDropEvent(
+        QtCore.QPointF(0, 0), QtCore.Qt.DropAction.CopyAction, mime,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.NoModifier)
+    edit.dropEvent(event)
 
 
 # 1. the pure helper ---------------------------------------------------------
@@ -50,6 +63,9 @@ check("the resource is dropped by default",
 check("the resource is kept on request",
       normalize_jid("xmpp:user@example.com/Phone", resource=True)
       == "user@example.com/Phone")
+check("QLineEdit has no insertFromMimeData virtual (our hooks are real)",
+      not hasattr(QtWidgets.QLineEdit, "insertFromMimeData")
+      and "insertFromMimeData" not in JidLineEdit.__dict__)
 check("the domain is lower-cased, the localpart kept",
       normalize_jid("xmpp:User@Example.COM/Res") == "User@example.com")
 check("a URI query is dropped",
@@ -71,15 +87,23 @@ check("split_jid handles a bare room with a query",
 
 # 2. JidLineEdit -------------------------------------------------------------
 edit = JidLineEdit()
-_paste(edit, "xmpp:user@example.com/phone")
-check("pasting into a JID field strips the scheme and resource",
+_ctrl_v(edit, "xmpp:user@example.com/phone")
+check("Ctrl+V strips the scheme and resource",
       edit.text() == "user@example.com")
 check("jid() normalises typed text",
       (edit.setText("  xmpp:User@EXAMPLE.com/res  "), edit.jid())[1]
       == "User@example.com")
+edit.setText(" xmpp:User@EXAMPLE.com/res ")
+edit._normalise_in_place()
+check("a context-menu paste is normalised right after the menu",
+      edit.text() == "User@example.com")
+
+dropped = JidLineEdit()
+_drop(dropped, "xmpp:drop@Example.COM/res")
+check("a dropped JID is normalised", dropped.text() == "drop@example.com")
 
 res_edit = JidLineEdit(resource=True)
-_paste(res_edit, "xmpp:user@example.com/phone")
+_ctrl_v(res_edit, "xmpp:user@example.com/phone")
 check("a resource-aware field keeps the resource",
       res_edit.text() == "user@example.com/phone"
       and res_edit.jid() == "user@example.com/phone")
@@ -88,15 +112,15 @@ check("a resource-aware field keeps the resource",
 room_edit = RoomJidEdit()
 splits = []
 room_edit.split.connect(lambda room, server: splits.append((room, server)))
-_paste(room_edit, "xmpp:room@conf.example/nick")
-check("pasting a full room JID keeps the localpart",
+_ctrl_v(room_edit, "xmpp:room@conf.example/nick")
+check("Ctrl+V into a room field keeps the localpart",
       room_edit.text() == "room")
-check("pasting a full room JID reports the server",
+check("Ctrl+V into a room field reports the server",
       splits == [("room", "conf.example")])
 bare_edit = RoomJidEdit()
 bare_splits = []
 bare_edit.split.connect(lambda room, server: bare_splits.append((room, server)))
-_paste(bare_edit, "another")
+_ctrl_v(bare_edit, "another")
 check("pasting a bare room name does not split",
       bare_edit.text() == "another" and not bare_splits)
 room_edit.setText("typed@conf.example")
@@ -134,8 +158,15 @@ check("a bookmark pasted with a full JID has no doubled domain",
       bookmark.collect()["jid"] == "room@conf.example")
 bookmark.deleteLater()
 
+bookmark2 = BookmarkDialog(bookmark={}, default_nick="me")
+_ctrl_v(bookmark2._room, "xmpp:room@conf.example/nick")
+check("Ctrl+V into the bookmark room fills the server",
+      bookmark2._room.text() == "room"
+      and bookmark2._server.text() == "conf.example")
+bookmark2.deleteLater()
+
 create = CreateConferenceDialog(["conf.example"], default_server="conf.example")
-_paste(create._address, "xmpp:room@other.example/nick")
+_ctrl_v(create._address, "xmpp:room@other.example/nick")
 check("pasting a full JID fills the create-conference server",
       create._address.text() == "room"
       and create._server.currentText() == "other.example")
