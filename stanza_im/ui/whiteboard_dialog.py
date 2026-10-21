@@ -14,6 +14,7 @@ import time
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.avatars import default_avatar, rounded_avatar
 from stanza_im.include.constants import find_icon
 from stanza_im.ui.whiteboard_canvas import (IMAGE_MAX_BYTES, WhiteboardCanvas,
                                             image_data_uri)
@@ -209,6 +210,13 @@ class WhiteboardDialog(QtWidgets.QDialog):
         toolbar.addWidget(self._size_btn)
 
         toolbar.addWidget(self._separator())
+        self._participants_btn = self._tool_button(
+            "wb-participants.svg", tr("whiteboard_participants_toggle"),
+            checkable=True)
+        self._participants_btn.setChecked(False)
+        self._participants_btn.setEnabled(False)
+        self._participants_btn.toggled.connect(self._on_toggle_participants)
+        toolbar.addWidget(self._participants_btn)
         self._share_btn = self._tool_button("system-users.png",
                                             tr("whiteboard_share"))
         self._share_btn.setCheckable(True)
@@ -221,21 +229,47 @@ class WhiteboardDialog(QtWidgets.QDialog):
 
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
-        layout.addWidget(self._canvas, 1)
+
+        # Board + participant sidebar (hidden by default, session only).
+        body = QtWidgets.QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(4)
+        body.addWidget(self._canvas, 1)
+        self._participants_panel = QtWidgets.QWidget()
+        panel = QtWidgets.QVBoxLayout(self._participants_panel)
+        panel.setContentsMargins(0, 0, 4, 0)
+        panel.setSpacing(2)
+        self._participants_title = QtWidgets.QLabel(
+            tr("whiteboard_participants_title"))
+        title_font = self._participants_title.font()
+        title_font.setBold(True)
+        self._participants_title.setFont(title_font)
+        panel.addWidget(self._participants_title)
+        self._participants_list = QtWidgets.QListWidget()
+        self._participants_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
+        self._participants_list.setFocusPolicy(
+            QtCore.Qt.FocusPolicy.NoFocus)
+        self._participants_list.setResizeMode(
+            QtWidgets.QListView.ResizeMode.Adjust)
+        self._participants_list.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._participants_list.setWordWrap(False)
+        self._participants_list.setFixedWidth(190)
+        panel.addWidget(self._participants_list, 1)
+        self._participants_panel.setVisible(False)
+        body.addWidget(self._participants_panel)
+        layout.addLayout(body, 1)
 
         self._sync_label = QtWidgets.QLabel(tr("whiteboard_not_shared"))
         self._sync_label.setContentsMargins(6, 2, 6, 4)
         layout.addWidget(self._sync_label)
 
-        # Who is drawing (the last editor is highlighted briefly).
-        self._participants_label = QtWidgets.QLabel("")
-        self._participants_label.setTextFormat(
-            QtCore.Qt.TextFormat.RichText)
-        self._participants_label.setWordWrap(True)
-        self._participants_label.setContentsMargins(6, 0, 6, 4)
-        self._participants_label.setVisible(False)
-        layout.addWidget(self._participants_label)
-        self._participants: list[tuple[str, str]] = []
+        # Who is drawing: a toggleable sidebar; the last editor is highlighted
+        # briefly.  The state is per session and starts hidden.
+        self._participants: list[tuple[str, str, str]] = []
+        self._participant_rows: dict[str, QtWidgets.QWidget] = {}
+        self._participants_visible = False
         self._participant_active = ""
         self._participant_timer = QtCore.QTimer(self)
         self._participant_timer.setSingleShot(True)
@@ -259,35 +293,100 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def session_id(self) -> str:
         return self._sid
 
-    def set_participants(self, entries: list[tuple[str, str]],
-                         active: str = "") -> None:
-        """Show the drawing participants; *active* edited just now."""
-        self._participants = list(entries or [])
-        self._participant_active = str(active or "")
-        self._render_participants()
-        if self._participant_active:
+    def set_participants(self, entries, active: str = "") -> None:
+        """Update the board's participants; *active* edited just now.
+
+        An entry is ``(key, label[, avatar_path])`` or a dict with those keys;
+        1:1 keys are bare JIDs while *active* may carry a resource.
+        """
+        normalized = [self._normalize_participant(entry)
+                      for entry in (entries or ())]
+        active_key = self._resolve_active(active, normalized)
+        changed = normalized != self._participants
+        self._participants = normalized
+        self._participant_active = active_key
+        if changed:
+            self._rebuild_participants()
+        else:
+            self._apply_participant_highlight()
+        if active_key:
             self._participant_timer.start()
+        self._participants_btn.setEnabled(bool(normalized))
+        if not normalized:
+            self._participants_panel.setVisible(False)
+        elif self._participants_visible:
+            self._participants_panel.setVisible(True)
+
+    @staticmethod
+    def _normalize_participant(entry) -> tuple[str, str, str]:
+        if isinstance(entry, dict):
+            return (str(entry.get("key", "")), str(entry.get("label", "")),
+                    str(entry.get("avatar", "") or ""))
+        values = list(entry) + ["", "", ""]
+        return (str(values[0]), str(values[1]), str(values[2] or ""))
+
+    @staticmethod
+    def _resolve_active(active, entries) -> str:
+        """Match the editor's key (a 1:1 editor may be a full JID)."""
+        active = str(active or "")
+        if not active or not entries:
+            return ""
+        keys = [key for key, _label, _avatar in entries]
+        if active in keys:
+            return active
+        bare = active.split("/", 1)[0]
+        for key in keys:
+            if key.split("/", 1)[0] == bare:
+                return key
+        return ""
+
+    def _on_toggle_participants(self, checked: bool) -> None:
+        self._participants_visible = bool(checked)
+        self._participants_panel.setVisible(
+            bool(checked) and bool(self._participants))
 
     def _clear_participant_highlight(self) -> None:
         self._participant_active = ""
-        self._render_participants()
+        self._apply_participant_highlight()
 
-    def _render_participants(self) -> None:
-        if not self._participants:
-            self._participants_label.clear()
-            self._participants_label.setVisible(False)
-            return
-        from stanza_im.include.utils import escape_html
-        parts = []
-        for key, label in self._participants:
-            text = escape_html(str(label or key))
-            if key == self._participant_active:
-                text = ('<span style="font-weight:bold; color:#2e7d32;">'
-                        + text + "</span>")
-            parts.append(text)
-        self._participants_label.setText(
-            tr("whiteboard_participants", names=", ".join(parts)))
-        self._participants_label.setVisible(True)
+    def _rebuild_participants(self) -> None:
+        self._participants_list.clear()
+        self._participant_rows = {}
+        radius = 100
+        if self._config is not None:
+            radius = int(getattr(self._config.appearance, "avatar_radius", 100))
+        for key, label, avatar in self._participants:
+            row = QtWidgets.QWidget()
+            row.setObjectName("wbParticipantRow")
+            line = QtWidgets.QHBoxLayout(row)
+            line.setContentsMargins(2, 2, 2, 2)
+            line.setSpacing(6)
+            picture = QtWidgets.QLabel()
+            picture.setFixedSize(24, 24)
+            pixmap = QtGui.QPixmap(avatar or default_avatar())
+            if not pixmap.isNull():
+                picture.setPixmap(rounded_avatar(pixmap, 24, radius))
+            line.addWidget(picture)
+            text = QtWidgets.QLabel(label or key)
+            text.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                               QtWidgets.QSizePolicy.Policy.Preferred)
+            line.addWidget(text, 1)
+            item = QtWidgets.QListWidgetItem()
+            item.setSizeHint(QtCore.QSize(0, row.sizeHint().height()))
+            self._participants_list.addItem(item)
+            self._participants_list.setItemWidget(item, row)
+            self._participant_rows[key] = row
+        self._apply_participant_highlight()
+
+    def _apply_participant_highlight(self) -> None:
+        color = self.palette().color(QtGui.QPalette.ColorRole.Highlight)
+        color.setAlpha(70)
+        style = ("#wbParticipantRow { background-color: rgba(%d,%d,%d,%d);"
+                 " border-radius: 4px; }"
+                 % (color.red(), color.green(), color.blue(), color.alpha()))
+        for key, row in self._participant_rows.items():
+            active = bool(key) and key == self._participant_active
+            row.setStyleSheet(style if active else "")
 
     def board_shapes(self) -> list[dict]:
         """The board's local (not yet shared) shapes as document attributes."""
@@ -326,6 +425,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._share_btn.setChecked(False)
         self._sync_label.setText(tr("whiteboard_not_shared"))
         self.set_editable(True)
+        self._participants_btn.setChecked(False)
         self.set_participants([])
         self._canvas.clear_history()
         # The drawing stays on the board as a local one: a later share seeds a

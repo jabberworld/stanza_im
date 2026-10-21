@@ -7815,20 +7815,44 @@ class MainWindow(QtWidgets.QMainWindow):
             dialog.refresh_from_session()
             dialog.set_participants(self._whiteboard_participants(session))
 
-    def _whiteboard_participants(self, session) -> list[tuple[str, str]]:
-        """``(key, label)`` for the board's participant list (we come first)."""
-        entries: list[tuple[str, str]] = [("__me__", tr("whiteboard_you"))]
+    def _own_avatar(self) -> str:
+        """Our own avatar cache path (the default placeholder when none)."""
+        if self._client is None or not self._client.jid_str:
+            return default_avatar()
+        bare = self._client.jid_str.split("/", 1)[0]
+        path = getattr(self._client.get_contact(bare), "avatar_path", "") or ""
+        if not path and has_avatar(bare):
+            path = avatar_path(bare)
+        return path or default_avatar()
+
+    def _muc_participant_avatar(self, info: dict) -> str:
+        """A room occupant's cached avatar (the placeholder when none)."""
+        path = str(info.get("avatar_path") or "")
+        real = str(info.get("real_jid") or "").split("/", 1)[0]
+        if not path and real and has_avatar(real):
+            path = avatar_path(real)
+        return path or default_avatar()
+
+    def _whiteboard_participants(self, session) -> list[tuple[str, str, str]]:
+        """``(key, label, avatar)`` for the board's list (we come first)."""
+        entries: list[tuple[str, str, str]] = [
+            ("__me__", tr("whiteboard_you"), self._own_avatar())]
         seen: set[str] = set()
         for key in session.participants:
             if session.is_muc:
-                label = key.split("/", 1)[1] if "/" in key else key
+                room, _sep, nick = key.partition("/")
+                info = self._muc_users.get(room, {}).get(nick, {})
+                label = nick or key
+                avatar = (info.get("avatar_path")
+                          or self._muc_participant_avatar(info))
             else:
                 key = key.split("/", 1)[0]
                 label = self._roster_name(key) or key
+                avatar = self._call_avatar(key) or default_avatar()
             if label in seen:
                 continue
             seen.add(label)
-            entries.append((key, label))
+            entries.append((key, label, avatar))
         entries[1:] = sorted(entries[1:], key=lambda item: item[1].casefold())
         return entries
 

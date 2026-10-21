@@ -1052,20 +1052,42 @@ check("declining a conference board keeps its session",
       "decline_session(sid)" in _prompt
       and "whiteboard_room_invite_text" in _prompt)
 
-# 34. the board shows its participants --------------------------------------
+# 34. the board's participant sidebar ---------------------------------------
 pd = WhiteboardDialog("bob@example.com")
 pd.set_participants([("__me__", "You"), ("alice", "alice")], active="alice")
-_pd_text = pd._participants_label.text()
-check("the participant row lists everyone",
-      "You" in _pd_text and "alice" in _pd_text)
-check("the last editor is highlighted",
-      "font-weight:bold" in _pd_text and "alice</span>" in _pd_text)
+check("the participant sidebar is hidden by default",
+      pd._participants_panel.isHidden())
+check("the toggle becomes available with participants",
+      pd._participants_btn.isEnabled())
+pd._participants_btn.setChecked(True)
+check("the toggle shows the sidebar", not pd._participants_panel.isHidden())
+check("the sidebar lists everyone", pd._participants_list.count() == 2)
+check("the last editor row is highlighted",
+      bool(pd._participant_rows["alice"].styleSheet()))
+check("the other rows are not highlighted",
+      not pd._participant_rows["__me__"].styleSheet())
 pd._clear_participant_highlight()
 check("the highlight fades after the timer",
-      "font-weight:bold" not in pd._participants_label.text())
+      not any(row.styleSheet() for row in pd._participant_rows.values()))
+
+# A 1:1 editor arrives with its resource; entries are keyed by the bare JID.
+pd.set_participants([("__me__", "You"), ("bob@example.com", "Bob")],
+                    active="bob@example.com/desktop")
+check("a 1:1 editor is matched by the bare JID",
+      pd._participant_active == "bob@example.com"
+      and bool(pd._participant_rows["bob@example.com"].styleSheet()))
+
+# An unchanged set only refreshes the highlight (rows are not recreated).
+row_before = pd._participant_rows["bob@example.com"]
+pd.set_participants([("__me__", "You"), ("bob@example.com", "Bob")],
+                    active="bob@example.com/other")
+check("an unchanged participant set keeps its rows",
+      pd._participant_rows["bob@example.com"] is row_before)
+
 pd.set_participants([])
-check("an empty participant list hides the row",
-      pd._participants_label.isHidden())
+check("an empty participant list hides the sidebar and disables the toggle",
+      pd._participants_panel.isHidden()
+      and not pd._participants_btn.isEnabled())
 pd.deleteLater()
 
 _mw_src2 = _mw_src

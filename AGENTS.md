@@ -2389,10 +2389,15 @@ sends `refuse-state`, so the toolbar button and the roster's «Открыть д
 can join it later (`session_for_peer` + `join_session`); the dialog is created
 **without a parent** (a top-level window with its own taskbar entry) and is
 placed near the main window. The board lists **who is drawing** in a row under
-the canvas («Участники: …», ourselves first): `WhiteboardSession.participants`
+a toggleable **sidebar** (`wb-participants.svg`, right of the canvas, hidden by
+default and never persisted), ourselves first: `WhiteboardSession.participants`
 records every inbound sender (`room/nick` or full JID) and emits
-`whiteboard_edit(sid, frm)`, which `MainWindow` turns into labels (the MUC nick
-or the roster name) and a ~2 s highlight of the participant who edited last.
+`whiteboard_edit(sid, frm)`, which `MainWindow` turns into rows with the MUC nick
+or the roster name and an avatar (the `_muc_users` avatar, the real JID's cache,
+`avatar_path(bare)` for 1:1, else the placeholder) plus a ~2 s row highlight of
+the participant who edited last. The editor key is matched by bare JID, so 1:1
+highlights work too; an unchanged participant set only refreshes the highlight
+(the rows are not recreated on every SXE edit).
 **Initial-state synchronization** follows XEP-0284 strictly: the accept echoes
 the host named by the offered `<transport><host/>` (§4.2) and carries
 `responder`, and the joiner sends `<connect/>` only after its `session-accept`
