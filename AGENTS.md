@@ -114,7 +114,8 @@ stanza_im/                      # Python package
 │   ├── osd.py                   # OSD on-screen notification stack
 │   ├── sounds.py                # Sound-effect player (QSoundEffect)
 │   ├── url_schemes.py           # stanza/mam/xmpp QWebEngine scheme registration
-│   └── icons.py                 # LRU icon cache (lazy, auto-evict)
+│   ├── icons.py                 # LRU icon cache (lazy, auto-evict)
+│   └── jid_edit.py              # JID line edits (paste normalisation, room split)
 ├── xmpp/
 │   ├── message_styling.py       # XEP-0393 Message Styling parser
 │   ├── message_markup.py        # XEP-0394 Message Markup parser/renderer
@@ -789,6 +790,19 @@ moves into the `finished` slot and the dialog stays alive through its parent.
 Only pure confirmations, checkbox-only selectors (`ShareDialog`,
 `RosterExchangeDialog`), immediate prompts (`IncomingFileDialog`,
 `IncomingCallDialog`, `CaptchaDialog`) and pickers stay modal.
+
+**JID inputs** use `ui/jid_edit.py`: a `JidLineEdit` normalises what is pasted
+(`xmpp:` scheme, URI query and, unless `resource=True`, the resource are
+dropped; the domain is lower-cased) and its `jid()` normalises typed text, so a
+JID copied from a vCard or a chat fits any form. The bare-JID forms are the add
+contact dialog (and its vCard/nick lookup), the MUC participant editor, the
+login form, the existing-account dialog and, via `normalize_jid`, the blocked
+list and the hats manual list; privacy rules keep the resource. Room forms
+(`create_conference_dialog`, `JoinConferenceDialog`, `BookmarkDialog`) use a
+`RoomJidEdit`: pasting `room@conf[/nick]` leaves `room` in the field and emits
+the server, which fills the separate server widget (a full JID typed or pasted
+later also wins in `collect()` — otherwise the bookmark used to double the
+domain).
 
 The shared rich-text tooltip (`ui/tooltip.py`) is a frameless popup used by the
 roster and the MUC participant list; its avatar is scaled to

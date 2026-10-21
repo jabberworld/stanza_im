@@ -106,7 +106,8 @@ stanza_im/
 │   ├── tray.py         — System tray icon
 │   ├── sounds.py       — Sound-effect player (QSoundEffect, optional)
 │   ├── url_schemes.py  — stanza/mam/xmpp QWebEngine scheme registration
-│   └── icons.py        — LRU icon cache
+│   ├── icons.py        — LRU icon cache
+│   └── jid_edit.py     — JID inputs (paste normalisation, room split)
 ├── xmpp/               — Protocol helpers (message_styling.py = XEP-0393 parser,
 │                          message_markup.py = XEP-0394 parser/renderer,
 │                          jingle.py = XEP-0234/0260/0261 file transfer,
@@ -2012,6 +2013,15 @@ LRU cache for QPixmap icons:
   (`actions`, `categories`, `places`, `apps`); `include.constants.find_icon`
   resolves scalable first, then the sized dirs, and `get_category_icon`
   renders a scalable SVG at the requested size
+
+### 13.1 JID Input (`ui/jid_edit.py`)
+
+`JidLineEdit` normalises a pasted or typed JID (`include.xmpp_uri.normalize_jid`):
+the `xmpp:` scheme, a URI query and (by default) the resource are dropped and
+the domain is lower-cased. `RoomJidEdit` additionally splits a pasted
+`room@conf[/nick]` into the room (kept in the field) and its server (emitted
+through `split`), so the create/join-conference and bookmark dialogs fill their
+server widget; `split_jid` is applied again when the dialog collects its values.
 
 ## 14. XMPP Client (`core/client.py`)
 

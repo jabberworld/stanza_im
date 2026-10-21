@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from PyQt6 import QtWidgets
 
+from stanza_im.include.xmpp_uri import split_jid
 from stanza_im.i18n import tr
+from stanza_im.ui.jid_edit import RoomJidEdit
 
 
 class BookmarkDialog(QtWidgets.QDialog):
@@ -34,7 +36,9 @@ class BookmarkDialog(QtWidgets.QDialog):
         self._name = QtWidgets.QLineEdit(str(self._bookmark.get("name") or ""))
         self._nick = QtWidgets.QLineEdit(
             str(self._bookmark.get("nick") or "") or default_nick)
-        self._room = QtWidgets.QLineEdit(room)
+        self._room = RoomJidEdit(room)
+        self._room.split.connect(
+            lambda _room, host: self._server.setText(host))
         self._server = QtWidgets.QLineEdit(server)
         self._password = QtWidgets.QLineEdit(
             str(self._bookmark.get("password") or ""))
@@ -63,16 +67,21 @@ class BookmarkDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _room_parts(self) -> tuple[str, str]:
+        """``(room, server)``: a full JID in the room field wins."""
+        room, server = split_jid(self._room.text())
+        return room, server or self._server.text().strip()
+
     def _validate(self) -> None:
-        if not self._room.text().strip() or not self._server.text().strip():
+        room, server = self._room_parts()
+        if not room or not server:
             QtWidgets.QMessageBox.warning(
                 self, self.windowTitle(), tr("bookmark_room_required"))
             return
         self.accept()
 
     def collect(self) -> dict:
-        room = self._room.text().strip()
-        server = self._server.text().strip()
+        room, server = self._room_parts()
         return {
             "jid": f"{room}@{server}" if server else room,
             "name": self._name.text().strip(),

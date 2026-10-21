@@ -9,6 +9,7 @@ from stanza_im.i18n import tr
 from stanza_im.ui.data_form_widget import DataFormWidget
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.hats_dialog import HatsTab
+from stanza_im.ui.jid_edit import JidLineEdit
 
 _AFFILIATIONS = ("owner", "admin", "member", "outcast")
 _CATEGORY_KEYS = {
@@ -55,7 +56,7 @@ class _ParticipantEditDialog(QtWidgets.QDialog):
         if index >= 0:
             self._category.setCurrentIndex(index)
         form.addRow(tr("muc_config_category"), self._category)
-        self._jid = QtWidgets.QLineEdit(jid)
+        self._jid = JidLineEdit(jid)
         form.addRow(tr("muc_config_jid"), self._jid)
         self._note = QtWidgets.QLineEdit(note)
         form.addRow(tr("muc_config_note"), self._note)
@@ -71,7 +72,7 @@ class _ParticipantEditDialog(QtWidgets.QDialog):
         form.addRow(buttons)
 
     def _on_accept(self) -> None:
-        jid = self._jid.text().strip()
+        jid = self._jid.jid()
         if "@" not in jid and "." not in jid:
             QtWidgets.QMessageBox.warning(
                 self, self.windowTitle(), tr("muc_config_invalid_jid"))
@@ -85,7 +86,7 @@ class _ParticipantEditDialog(QtWidgets.QDialog):
         self.accept()
 
     def values(self) -> tuple[str, str, str]:
-        return (self._category.currentData(), self._jid.text().strip(),
+        return (self._category.currentData(), self._jid.jid(),
                 self._note.text().strip())
 
 

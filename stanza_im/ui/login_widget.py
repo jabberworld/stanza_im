@@ -6,6 +6,7 @@ import os
 from PyQt6 import QtCore, QtWidgets, QtGui
 
 from stanza_im.i18n import tr
+from stanza_im.ui.jid_edit import JidLineEdit
 from stanza_im.core.storage import Config
 from stanza_im.core import profiles
 from stanza_im.include.constants import find_icon
@@ -73,7 +74,7 @@ class LoginWidget(QtWidgets.QWidget):
 
         # ── Credentials group ────────────────────────────────────
         layout.addWidget(QtWidgets.QLabel(tr("login_title")))
-        self._jid_edit = QtWidgets.QLineEdit()
+        self._jid_edit = JidLineEdit()
         self._jid_edit.setPlaceholderText("user@server")
         self._jid_edit.returnPressed.connect(self._on_connect)
         layout.addWidget(self._jid_edit)
@@ -192,7 +193,7 @@ class LoginWidget(QtWidgets.QWidget):
         return QtGui.QIcon()
 
     def _on_connect(self):
-        jid = self._jid_edit.text().strip()
+        jid = self._jid_edit.jid()
         pw = self._pw_edit.text()
         show = self._show_combo.currentData()
         if not jid or not pw:

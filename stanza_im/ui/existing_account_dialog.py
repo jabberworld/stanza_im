@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui.jid_edit import JidLineEdit
 from stanza_im.core.profiles import Profile
 
 
@@ -27,7 +28,7 @@ class ExistingAccountDialog(QtWidgets.QDialog):
         form.setFieldGrowthPolicy(
             QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        self._jid = QtWidgets.QLineEdit()
+        self._jid = JidLineEdit()
         self._jid.setPlaceholderText("user@server")
         form.addRow(tr("login_title"), self._jid)
 
@@ -127,14 +128,14 @@ class ExistingAccountDialog(QtWidgets.QDialog):
         self._sync_proxy()
 
     def _on_ok(self) -> None:
-        if not self._jid.text().strip():
+        if not self._jid.jid():
             self._status.setText(tr("profiles_jid_required"))
             return
         self.accept()
 
     def profile(self) -> Profile:
         return Profile(
-            jid=self._jid.text().strip(),
+            jid=self._jid.jid(),
             password=self._password.text(),
             save_password=True,
             override_host=self._override.isChecked(),

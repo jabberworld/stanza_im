@@ -5,7 +5,9 @@ import asyncio
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.include.xmpp_uri import split_jid
 from stanza_im.i18n import tr
+from stanza_im.ui.jid_edit import RoomJidEdit
 from stanza_im.include.constants import CATEGORIES_DIR_16
 from stanza_im.ui.dialogs import show_modeless
 
@@ -120,7 +122,9 @@ class JoinConferenceDialog(QtWidgets.QDialog):
         layout.addLayout(head)
         form = QtWidgets.QFormLayout()
         self._nick = QtWidgets.QLineEdit(client.jid_str.split("@", 1)[0])
-        self._room = QtWidgets.QLineEdit(room)
+        self._room = RoomJidEdit(room)
+        self._room.split.connect(
+            lambda _room, host: self._server.setCurrentText(host))
         self._server = QtWidgets.QComboBox(); self._server.setEditable(True)
         self._server.addItems(self._server_values)
         if server:
@@ -150,7 +154,8 @@ class JoinConferenceDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
 
     def _validate(self):
-        if not self._room.text().strip() or not self._nick.text().strip():
+        room, _server = split_jid(self._room.text())
+        if not room or not self._nick.text().strip():
             return
         self.accept()
 
@@ -165,8 +170,10 @@ class JoinConferenceDialog(QtWidgets.QDialog):
         show_modeless(dlg)
 
     def collect(self):
-        return {"room": self._room.text().strip(), "nick": self._nick.text().strip(),
-                "server": self._server.currentText().strip(), "password": self._password.text(),
+        room, host = split_jid(self._room.text())
+        return {"room": room, "nick": self._nick.text().strip(),
+                "server": host or self._server.currentText().strip(),
+                "password": self._password.text(),
                 "save": self._save_bookmark.isChecked(),
                 "name": self._bookmark_name.text().strip(), "autojoin": self._auto_join.isChecked()}
 

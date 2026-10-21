@@ -12,6 +12,7 @@ import re
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.include.xmpp_uri import normalize_jid
 from stanza_im.i18n import tr
 from stanza_im.include import hats as hats_mod
 from stanza_im.ui.dialogs import show_modeless
@@ -216,6 +217,7 @@ class HatAssignDialog(QtWidgets.QDialog):
                 if jid and jid not in out:
                     out.append(jid)
         for token in re.split(r"[\s,;]+", self._manual.text().strip()):
+            token = normalize_jid(token)
             if token and "@" in token and token not in out:
                 out.append(token)
         return out

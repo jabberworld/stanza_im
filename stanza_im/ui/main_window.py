@@ -1849,7 +1849,9 @@ class MainWindow(QtWidgets.QMainWindow):
             jid = ""
         if not self._client:
             return
+        from stanza_im.include.xmpp_uri import normalize_jid
         from stanza_im.ui.add_contact_dialog import AddContactDialog
+        jid = normalize_jid(jid)
         groups = sorted({user.group for user in self._roster._users
                          if user.group not in _virtual_roster_groups()
                          | {tr("roster_group_ungrouped")}},
@@ -1864,7 +1866,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if result != QtWidgets.QDialog.DialogCode.Accepted:
                 return
             data = dlg.collect()
-            self._client.add_contact(data["jid"], data["name"],
+            target = normalize_jid(data["jid"])
+            if not target:
+                return
+            self._client.add_contact(target, data["name"],
                                      [data["group"]] if data["group"] else [],
                                      data["message"], data["subscribe"])
             self._client.request_roster()

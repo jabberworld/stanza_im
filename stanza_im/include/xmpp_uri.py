@@ -69,6 +69,50 @@ def parse_xmpp_uri(uri: str) -> dict | None:
     return {"jid": jid, "action": action, "params": params}
 
 
+def normalize_jid(value: str, *, resource: bool = False) -> str:
+    """Normalise a JID typed or pasted into a form.
+
+    Accepts a plain JID or an ``xmpp:`` URI (XEP-0147) — the form a copied
+    vCard address takes — and returns the bare JID: the ``xmpp:`` scheme, a
+    URI query and (unless *resource* is true) the resource part are dropped,
+    the domain is lower-cased (RFC 7622) and the surrounding whitespace is
+    removed.  An address-less URI (``xmpp:?message;body=…``) yields ``""``.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text:
+        return ""
+    if text.lower().startswith("xmpp:"):
+        parsed = parse_xmpp_uri(text)
+        text = (parsed or {}).get("jid", "") if parsed else text[5:]
+    else:
+        # A URI whose scheme was lost: ``user@host?message``.
+        text = text.partition("?")[0]
+    text = text.strip()
+    if not text:
+        return ""
+    if resource:
+        address, separator, resource_part = text.partition("/")
+        suffix = "/" + resource_part if separator and resource_part else ""
+    else:
+        address = text.partition("/")[0]
+        suffix = ""
+    local, at, domain = address.partition("@")
+    if at:
+        address = local + "@" + domain.lower()
+    return address + suffix
+
+
+def split_jid(value: str) -> tuple[str, str]:
+    """Split a (possibly ``xmpp:``) JID into ``(localpart, domain)``."""
+    jid = normalize_jid(value)
+    if not jid or "@" not in jid:
+        return jid, ""
+    local, _at, domain = jid.partition("@")
+    return local, domain
+
+
 def extract_xmpp_uris(body: str) -> list[str]:
     """Return every xmpp: URI substring found in *body* (in order)."""
     if not isinstance(body, str):

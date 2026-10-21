@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.include.xmpp_uri import split_jid
 from stanza_im.i18n import tr
+from stanza_im.ui.jid_edit import RoomJidEdit
 from stanza_im.include.constants import find_icon
 
 
@@ -44,8 +46,10 @@ class CreateConferenceDialog(QtWidgets.QDialog):
         form.setFieldGrowthPolicy(
             QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        self._address = QtWidgets.QLineEdit()
+        self._address = RoomJidEdit()
         self._address.setPlaceholderText(tr("conference_address_placeholder"))
+        self._address.split.connect(
+            lambda _room, server: self._server.setCurrentText(server))
         address_row = self._row(self._address,
                                 self._info_icon(tr("conference_address_info")))
         form.addRow(self._star_label(tr("conference_address")), address_row)
@@ -157,20 +161,27 @@ class CreateConferenceDialog(QtWidgets.QDialog):
 
     # ── Validation / result ───────────────────────────────────────
 
+    def _room_parts(self) -> tuple[str, str]:
+        """``(room, server)``: a full JID in the address wins over the combo."""
+        room, server = split_jid(self._address.text())
+        return room, server or self._server.currentText().strip()
+
     def _validate(self) -> None:
-        if not self._address.text().strip():
+        room, server = self._room_parts()
+        if not room:
             self._address.setFocus()
             return
-        if not self._server.currentText().strip():
+        if not server:
             self._server.setFocus()
             return
         self.accept()
 
     def collect(self) -> dict:
+        room, server = self._room_parts()
         return {
-            "room": self._address.text().strip(),
+            "room": room,
             "name": self._name.text().strip(),
-            "server": self._server.currentText().strip(),
+            "server": server,
             "persistent": self._persistent.isChecked(),
             "invisible": self._invisible.isChecked(),
             "members_only": self._members_only.isChecked(),

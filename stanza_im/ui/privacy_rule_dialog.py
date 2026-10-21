@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from PyQt6 import QtWidgets
 
+from stanza_im.include.xmpp_uri import normalize_jid
 from stanza_im.i18n import tr
 
 _TYPE_KEYS = (("privacy_type_jid", "jid"),
@@ -154,7 +155,9 @@ class PrivacyRuleDialog(QtWidgets.QDialog):
         itype = self._type.currentData()
         if itype == "subscription":
             value = str(self._value.currentData() or "")
-        elif itype in ("jid", "group"):
+        elif itype == "jid":
+            value = normalize_jid(self._value.currentText(), resource=True)
+        elif itype == "group":
             value = self._value.currentText().strip()
         else:
             value = ""

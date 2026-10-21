@@ -6,6 +6,7 @@ import asyncio
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui.jid_edit import JidLineEdit
 from stanza_im.include.constants import find_icon
 
 
@@ -57,7 +58,7 @@ class AddContactDialog(QtWidgets.QDialog):
 
         layout.addWidget(self._separator())
         form = QtWidgets.QFormLayout()
-        self._jid = QtWidgets.QLineEdit()
+        self._jid = JidLineEdit()
         self._name = QtWidgets.QLineEdit()
         self._group = QtWidgets.QComboBox()
         self._group.setEditable(True)
@@ -128,7 +129,7 @@ class AddContactDialog(QtWidgets.QDialog):
         return row
 
     def _entered_jid(self) -> str:
-        return self._jid.text().strip()
+        return self._jid.jid()
 
     def _show_entered_vcard(self):
         """Open the vCard of the JID typed in the field (if any)."""
@@ -195,14 +196,14 @@ class AddContactDialog(QtWidgets.QDialog):
             self._gateway_button.setEnabled(True)
 
     def _validate(self):
-        if not self._jid.text().strip():
+        if not self._jid.jid():
             QtWidgets.QMessageBox.warning(self, tr("add_contact_title"),
                                           tr("add_contact_jid_required"))
             return
         self.accept()
 
     def collect(self) -> dict:
-        return {"jid": self._jid.text().strip(), "name": self._name.text().strip(),
+        return {"jid": self._jid.jid(), "name": self._name.text().strip(),
                 "group": self._group.currentText().strip(),
                 "subscribe": self._subscribe.isChecked(),
                 "message": self._message.toPlainText().strip()}
