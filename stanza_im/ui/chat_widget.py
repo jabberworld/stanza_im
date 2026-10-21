@@ -3579,7 +3579,7 @@ class ChatWidget(QtWidgets.QWidget):
         # A long topic must wrap instead of producing a tooltip wider than the
         # screen.
         tooltip_mod.show(global_pos, escape_html(text).replace("\n", "<br>"),
-                         wrap=True, max_width=420)
+                         wrap=True, max_width=700)
 
     def reload_theme(self, variant: str = ""):
         self._view.load_theme(variant)
