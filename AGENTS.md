@@ -2493,7 +2493,11 @@ login) feeds `avatar_data_uri(own)`, and our own vCard avatar is cached under th
 bare JID (not the full one); `MainWindow._own_avatar_uri` pre-resolves it from
 the contact's cached `avatar_path` first, so an older full-JID cache entry still
 renders; `ChatWindow.refresh_avatars` updates both incoming
-and outgoing `<img class="avatar">` elements in place when an avatar arrives. A
+and outgoing `<img class="avatar">` elements in place when an avatar arrives.
+Message avatars follow `appearance.avatar_radius` too: `_user_icon` clips the
+PNG data URI (`_rounded_avatar_uri`, cached by `(uri, radius)`) and
+`ChatWindow.set_avatar_radius` applies it to every open tab (the QTextBrowser
+fallback gets the same clipped data URIs, since it has no CSS border-radius). A
 PEP event is attributed to the XEP-0033
 `<addresses><address type='replyto'/>` JID when present (`_replyto_address`), so
 a server that relays it from a service JID still resolves the real sender; an

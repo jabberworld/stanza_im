@@ -3344,7 +3344,10 @@ client.leave_muji(room)
   `ChatWidget._user_icon`: incoming from the sender's cache, outgoing from our
   own (`ChatWindow.set_own_jid`, the bare JID; the own vCard avatar is cached
   under the bare JID and `MainWindow._own_avatar_uri` prefers the contact's
-  cached path), and `ChatWindow.refresh_avatars` updates both in place.
+  cached path), and `ChatWindow.refresh_avatars` updates both in place. The
+  message avatars are clipped by `appearance.avatar_radius` as PNG data URIs
+  (`ChatWidget._rounded_avatar_uri`, cached by `(uri, radius)`), so the
+  QTextBrowser fallback rounds them too.
 - `_ensure_pep_subscription` also requests the `urn:xmpp:avatar:metadata`
   node as a fallback for servers that need an explicit PEP subscription.
 

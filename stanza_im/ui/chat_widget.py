@@ -421,6 +421,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._show_muc_clients = True
         self._show_muc_hats = True
         self._avatar_radius = 20
+        self._rounded_avatar_cache: dict = {}
         self._own_jid = ""
         self._own_avatar = ""
         self._participant_font: tuple[str, int] = ("", 0)
@@ -1917,15 +1918,16 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _user_icon(self, direction: str, sender_jid: str = "",
                    sender: str = "") -> str:
-        """Return a PNG data-URI for the sender avatar."""
+        """Return a PNG data-URI for the sender avatar (rounded as configured)."""
         if not self._show_avatars:
             return ""
         if direction == "outgoing":
             if self._own_avatar:
-                return self._own_avatar
+                return self._rounded_avatar_uri(self._own_avatar)
             if self._own_jid:
-                return avatar_data_uri(self._own_jid) or default_avatar_uri()
-            return default_avatar_uri()
+                return self._rounded_avatar_uri(
+                    avatar_data_uri(self._own_jid) or default_avatar_uri())
+            return self._rounded_avatar_uri(default_avatar_uri())
         if self.is_muc:
             if not sender_jid and sender:
                 participant = next(
@@ -1935,14 +1937,52 @@ class ChatWidget(QtWidgets.QWidget):
                     direct_uri = avatar_file_data_uri(
                         participant.get("avatar_path", ""))
                     if direct_uri:
-                        return direct_uri
+                        return self._rounded_avatar_uri(direct_uri)
                     sender_jid = (participant.get("avatar_jid", "")
                                   or participant.get("real_jid", ""))
                     if sender_jid:
                         logger.debug("Resolved historical avatar: room=%s nick=%s jid=%s",
                                      self.jid, sender, sender_jid)
-            return avatar_data_uri(sender_jid) or default_avatar_uri()
-        return avatar_data_uri(sender_jid or self.jid) or default_avatar_uri()
+            return self._rounded_avatar_uri(
+                avatar_data_uri(sender_jid) or default_avatar_uri())
+        return self._rounded_avatar_uri(
+            avatar_data_uri(sender_jid or self.jid) or default_avatar_uri())
+
+    _ROUND_CACHE_MAX = 64
+
+    def _rounded_avatar_uri(self, uri: str) -> str:
+        """Clip a PNG data-URI avatar by ``appearance.avatar_radius``.
+
+        The chat renders raw PNG data URIs, so the rounding cannot come from
+        CSS (the QTextBrowser fallback has none); the clipped variant is cached
+        by ``(uri, radius)``.
+        """
+        if not uri or self._avatar_radius <= 0:
+            return uri
+        key = (uri, self._avatar_radius)
+        cached = self._rounded_avatar_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            import base64
+            from stanza_im.include.avatars import rounded_avatar
+            payload = uri.split(",", 1)[1] if "," in uri else ""
+            pix = QtGui.QPixmap()
+            if not pix.loadFromData(base64.b64decode(payload), "PNG"):
+                return uri
+            rounded = rounded_avatar(pix, 64, self._avatar_radius)
+            buffer = QtCore.QBuffer()
+            buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+            rounded.save(buffer, "PNG")
+            result = ("data:image/png;base64,"
+                      + base64.b64encode(bytes(buffer.data())).decode("ascii"))
+        except Exception:  # noqa: BLE001 - fall back to the original avatar
+            return uri
+        if len(self._rounded_avatar_cache) >= self._ROUND_CACHE_MAX:
+            self._rounded_avatar_cache.pop(
+                next(iter(self._rounded_avatar_cache)))
+        self._rounded_avatar_cache[key] = result
+        return result
 
     @staticmethod
     def _same_nick(left: str, right: str) -> bool:
@@ -3359,8 +3399,13 @@ class ChatWidget(QtWidgets.QWidget):
             self._render_muc_users()
 
     def set_avatar_radius(self, radius_pct: int) -> None:
-        """Set the MUC participant avatar rounding (0 = square, 100 = circle)."""
-        self._avatar_radius = max(0, min(100, int(radius_pct or 0)))
+        """Set the avatar rounding for the sidebar and the message avatars."""
+        radius = max(0, min(100, int(radius_pct or 0)))
+        changed = radius != self._avatar_radius
+        self._avatar_radius = radius
+        if changed:
+            self._rounded_avatar_cache.clear()
+            self.refresh_avatars()
         if self.is_muc:
             self._render_muc_users()
 

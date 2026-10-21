@@ -581,11 +581,10 @@ class ChatWindow(QtWidgets.QMainWindow):
             widget.set_attention_enabled(plugin_active, peer_supports)
 
     def set_avatar_radius(self, radius_pct: int) -> None:
-        """Apply the avatar rounding to every open MUC participant list."""
+        """Apply the avatar rounding to every open chat and participant list."""
         self._avatar_radius = int(radius_pct or 0)
         for widget in self._tabs.values():
-            if widget.is_muc:
-                widget.set_avatar_radius(self._avatar_radius)
+            widget.set_avatar_radius(self._avatar_radius)
 
     def set_notes_enabled(self, enabled: bool) -> None:
         """Toggle the 'Add to notes' menu entry in every open tab."""

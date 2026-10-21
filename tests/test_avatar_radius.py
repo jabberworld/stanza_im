@@ -79,6 +79,56 @@ spin = prefs._controls["avatar_radius"]
 check("the spin range is 0..100",
       spin.minimum() == 0 and spin.maximum() == 100)
 
+# 4b. Chat message avatars ---------------------------------------------------
+import base64  # noqa: E402
+
+from PyQt6 import QtCore  # noqa: E402
+
+from stanza_im.include import avatars as avatars_mod  # noqa: E402
+from stanza_im.ui.chat_themes import ChatThemeFactory  # noqa: E402
+from stanza_im.ui.chat_widget import ChatWidget  # noqa: E402
+
+_image = QtGui.QImage(40, 40, QtGui.QImage.Format.Format_RGB32)
+_image.fill(QtGui.QColor("#3366cc"))
+_buffer = QtCore.QBuffer()
+_buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+_image.save(_buffer, "PNG")
+avatars_mod.save_avatar("bob@example.com", bytes(_buffer.data()))
+
+widget = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
+raw_uri = avatars_mod.avatar_data_uri("bob@example.com")
+widget.set_avatar_radius(0)
+check("radius 0 keeps the original chat avatar",
+      widget._user_icon("incoming", "bob@example.com") == raw_uri)
+
+widget.set_avatar_radius(100)
+rounded_uri = widget._user_icon("incoming", "bob@example.com")
+check("the chat avatar is rounded when the radius is set",
+      rounded_uri != raw_uri and rounded_uri.startswith("data:image/png;base64,"))
+check("the rounding is cached", widget._rounded_avatar_cache
+      and widget._user_icon("incoming", "bob@example.com") is rounded_uri)
+_payload = base64.b64decode(rounded_uri.split(",", 1)[1])
+_corner = QtGui.QImage.fromData(_payload, "PNG")
+_corner = _corner.scaled(64, 64) if _corner.width() != 64 else _corner
+check("the rounded chat avatar has transparent corners",
+      _corner.pixelColor(0, 0).alpha() == 0
+      and _corner.pixelColor(32, 32).alpha() > 0)
+widget.set_avatar_radius(40)
+check("changing the radius rebuilds the cached avatars",
+      not widget._rounded_avatar_cache)
+check("our own avatar is rounded too",
+      widget._user_icon("outgoing").startswith("data:image/png;base64,"))
+widget.detach()
+
+from stanza_im.ui.chat_window import ChatWindow  # noqa: E402
+
+window = ChatWindow(ChatThemeFactory())
+window.open_chat("bob@example.com", "Bob")
+window.set_avatar_radius(75)
+check("the radius reaches an open 1:1 tab",
+      window.get_chat("bob@example.com")._avatar_radius == 75)
+window.close()
+
 # 5. i18n --------------------------------------------------------------------
 check("the avatar radius label is translated",
       en.STRINGS.get("prefs_avatar_radius")
