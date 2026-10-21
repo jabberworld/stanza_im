@@ -3645,8 +3645,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connecting = True
         self._connect_progress_active = True
         self._conn_progress_value = 0
-        self._stack.setCurrentIndex(_PAGE_SPLASH)
-        self._set_splash(tr("login_connecting"), 10)
+        # The last known roster is shown before the client exists (when there
+        # is one), so the connection runs in the background; a first login
+        # without a cache keeps the splash.
+        if not self._show_cached_roster(jid):
+            self._stack.setCurrentIndex(_PAGE_SPLASH)
+            self._set_splash(tr("login_connecting"), 10)
 
         from stanza_im.core.client import JabberClient
         connection = self._config.connection
@@ -3709,24 +3713,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_own_jid(self._client.jid_str)
         self._chat_window.set_own_avatar(self._own_avatar_uri())
 
-        # Show the last known roster right away and keep the UI usable while
-        # the connection is established in the background; a first login
-        # without a cache falls back to the splash.
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
+        # Load the cache into the client for XEP-0237 roster versioning; the
+        # rows themselves were already rendered by ``_show_cached_roster``.
         self._client.seed_roster_cache()
-        cached = self._client.get_roster_snapshot()
-        if cached:
-            self._rebuild_roster(cached)
-            self._sync_all_conference_roster()
-            self._sync_all_pm_roster()
-            self._sync_self_roster()
-            self._recount_groups()
-            self._roster.sort_and_update()
-            self._stack.setCurrentIndex(_PAGE_ROSTER)
-            self._set_conn_progress(5)
-        else:
-            self._stack.setCurrentIndex(_PAGE_SPLASH)
-            self._set_splash(tr("login_connecting"), 10)
+        self._sync_all_conference_roster()
+        self._sync_all_pm_roster()
+        self._sync_self_roster()
+        self._recount_groups()
+        self._roster.sort_and_update()
         self._start_task(self._connect_async(jid, show))
 
     def _start_task(self, coro):
@@ -4202,6 +4197,39 @@ class MainWindow(QtWidgets.QMainWindow):
                      [i.get("jid") for i in items])
         for item in items:
             self._add_roster_item(item)
+
+    def _show_cached_roster(self, jid: str) -> bool:
+        """Render the last known roster from disk before the client exists.
+
+        Used at login: the cached roster appears immediately after pressing
+        Connect, while the client is created and the session is established in
+        the background.  Returns whether anything was rendered (a first login
+        without a cache falls back to the splash).
+        """
+        from stanza_im.core import roster_cache
+        try:
+            cached = roster_cache.load(jid) or {}
+        except Exception:  # noqa: BLE001 - a broken cache means "no cache"
+            cached = {}
+        items = [item for item in (cached.get("items") or [])
+                 if item.get("jid")]
+        if not items:
+            return False
+        self._rebuild_roster(items)
+        self._prefill_avatars(items)
+        self._recount_groups()
+        self._roster.sort_and_update()
+        self._stack.setCurrentIndex(_PAGE_ROSTER)
+        self._set_conn_progress(5)
+        return True
+
+    def _prefill_avatars(self, items: list) -> None:
+        """Show cached avatar files before the vCards are (re)fetched."""
+        from stanza_im.include import avatars
+        for item in items:
+            path = avatars.avatar_path(item["jid"])
+            if path and os.path.isfile(path):
+                self._roster.update_user(item["jid"], avatar_path=path)
 
     def _add_roster_item(self, item: dict):
         jid = item["jid"]

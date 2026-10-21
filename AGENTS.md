@@ -616,11 +616,15 @@ the roster often arrives *before* `_on_session_started` (the client requests it
 in `_on_session_start` and awaits the carbons enable before emitting
 `session_started`), so the post-session 60 % write in `_connect_async` runs
 after the finish — `_set_conn_progress` is a no-op once the connect finished and
-never steps the value backwards, so the bar cannot resurrect at 60 %. `_on_login` first seeds the **cached** roster (`client.
-seed_roster_cache()` → `get_roster_snapshot()`) and shows the roster page right
-away (with a thin `_conn_progress` bar above the status combo, `_set_conn_
-progress`), so the UI is usable while the connection is established in the
-background; the splash is kept only for a first login **without** a cache.
+never steps the value backwards, so the bar cannot resurrect at 60 %. `_on_login` renders the **cached** roster
+before the client is even created: `_show_cached_roster(jid)` reads
+`roster_cache.load(jid)` directly, rebuilds the rows, pre-fills the cached
+avatar files and switches to the roster page (with a thin `_conn_progress` bar
+above the status combo, `_set_conn_progress(5)`), so pressing Connect shows the
+roster immediately while the client is constructed and the session is
+established in the background; `client.seed_roster_cache()` is still called
+afterwards for XEP-0237 versioning, and the splash is kept only for a first
+login **without** a cache.
 `_connect_async` waits for the session to actually start (a `_session_ready`
 future resolved by `_on_session_started`, `_SESSION_TIMEOUT_S` = 30 s) —
 `connect_async()` resolves even when every attempt failed (slixmpp reschedules

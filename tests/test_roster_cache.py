@@ -156,5 +156,49 @@ with open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
 check("quit flushes the roster cache",
       "self._client.flush_roster_cache()" in mw)
 
+# ── the UI renders the cache before the client exists ----------------------
+from PyQt6 import QtCore, QtGui  # noqa: E402
+
+from stanza_im.core import profiles  # noqa: E402
+from stanza_im.include import avatars as avatars_mod  # noqa: E402
+from stanza_im.ui.main_window import MainWindow, _PAGE_ROSTER  # noqa: E402
+
+profiles.set_active(ACCOUNT)
+roster_cache.save(ACCOUNT, "", ITEMS)
+
+_image = QtGui.QImage(8, 8, QtGui.QImage.Format.Format_RGB32)
+_image.fill(QtGui.QColor("#3366cc"))
+_buffer = QtCore.QBuffer()
+_buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+_image.save(_buffer, "PNG")
+avatars_mod.save_avatar("alice@example.com", bytes(_buffer.data()))
+
+win = MainWindow(app)
+win._idle_timer.stop()
+win._suspend_timer.stop()
+win._memory_timer.stop()
+check("the cached roster is rendered before the client", 
+      win._show_cached_roster(ACCOUNT) is True)
+check("the roster page is shown",
+      win._stack.currentIndex() == _PAGE_ROSTER)
+check("the cached contacts are in the roster",
+      {"alice@example.com", "carol@example.com"}
+      <= {user.jid for user in win._roster._users})
+check("a cached avatar is prefilled",
+      any(user.jid == "alice@example.com" and user.avatar_path
+          for user in win._roster._users))
+check("no cache means no early roster",
+      win._show_cached_roster("nobody@example.com") is False)
+win.deleteLater()
+
+with open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
+          encoding="utf-8") as fh:
+    _mw_src = fh.read()
+_login_body = _mw_src.split("def _on_login(self", 1)[1].split(
+    "\n    def ", 1)[0]
+check("login shows the cached roster before creating the client",
+      _login_body.index("_show_cached_roster(jid)")
+      < _login_body.index("JabberClient("))
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

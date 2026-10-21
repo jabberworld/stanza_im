@@ -531,10 +531,12 @@ percent)`): «Подключение…» (10 %) → «Аутентификац�
 установлено» (60 %) → «Получение списка контактов…» (80 %, on `session_started`)
 → «Готово» (100 %, on `roster_received`, then the roster page is shown after a
 short delay). The roster page is switched on the actual `roster_received`, not a
-fixed timer. `_on_login` first seeds and shows the **cached** roster
-(`client.seed_roster_cache()`) with a thin progress bar above the status combo,
-so the UI is usable while connecting in the background; the splash is kept only
-for a first login without a cache. `_connect_async` waits for the session to
+fixed timer. `_on_login` renders the **cached** roster before the client is created
+(`MainWindow._show_cached_roster`: `roster_cache.load`, cached avatars
+pre-filled) with a thin progress bar above the status combo, so pressing
+Connect shows the roster immediately and the connection runs in the background;
+`client.seed_roster_cache()` then loads it for XEP-0237 versioning, and the
+splash is kept only for a first login without a cache. `_connect_async` waits for the session to
 actually start (a `_session_ready` future, `_SESSION_TIMEOUT_S` = 30 s), since
 `connect_async()` resolves even when every attempt failed; a failure goes to the
 offline state on the roster (`_on_connect_failed`) and the tray stays offline
