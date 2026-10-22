@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
-from stanza_im.include import svg_transform
+from stanza_im.include import svg_shapes, svg_transform
 from stanza_im.include.constants import WHITEBOARD_HEIGHT, WHITEBOARD_WIDTH
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import jmi
@@ -34,6 +34,11 @@ NS_WHITEBOARD = "urn:xmpp:jingle:apps:svg-whiteboard:0"
 NS_JINGLE = "urn:xmpp:jingle:1"
 NS_SVG = "http://www.w3.org/2000/svg"
 NS_XLINK = "http://www.w3.org/1999/xlink"
+
+#: SVG elements that become board objects: paths, images and the basic shapes
+#: a peer may use instead of a path (Psi draws rectangles/ellipses/polygons).
+_DRAWABLE_ELEMENTS = ("path", "image", "rect", "ellipse", "circle", "line",
+                      "polyline", "polygon")
 
 #: Fixed root record id of the shared SVG document.  Every participant uses the
 #: same value (``"0"``, the value the specification's examples use), so an
@@ -187,7 +192,11 @@ class WhiteboardManager:
                 self._collect_shapes(doc, child, out, child,
                                      attrs.get("transform", ""))
                 continue
-            if record.name not in ("path", "image"):
+            if record.name not in _DRAWABLE_ELEMENTS:
+                # SVG also allows e.g. <text/>; log it instead of dropping the
+                # element silently (a future interop gap stays diagnosable).
+                logger.debug("Whiteboard: unsupported document element %s",
+                             record.name)
                 continue
             item = {"rid": child, "id": attrs.get("id", ""),
                     "tag": record.name, "group": group,
@@ -206,8 +215,14 @@ class WhiteboardManager:
                     "width": attrs.get("width", "0"),
                     "height": attrs.get("height", "0"),
                     "href": attrs.get("xlink:href", "")})
-            else:
+            elif record.name == "path":
                 item["d"] = attrs.get("d", "")
+            else:
+                # A basic SVG shape (Psi sends <rect/>, <ellipse/>, <polygon/>):
+                # the canvas renders path data only, so convert it here.
+                item["d"] = svg_shapes.element_d(record.name, attrs)
+                if not item["d"]:
+                    continue
             out.append(item)
 
     def view_box(self, sid: str) -> tuple[int, int]:

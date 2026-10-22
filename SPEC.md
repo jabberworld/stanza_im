@@ -2671,6 +2671,11 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   uses the SVG default `butt`/`miter`/`nonzero`) and our own shapes carry
   `round`/`round`/`evenodd` in `shape_attrs`/`to_svg`, so peers render them as
   we do;
+  On receive the basic SVG shapes a peer may use instead of a `<path/>`
+  (`rect`, `ellipse`, `circle`, `line`, `polyline`, `polygon` — Psi sends them)
+  are converted to path data (`include/svg_shapes.element_d`), so they render,
+  select and export like any path; an unsupported element is logged, not
+  silently dropped.
   `to_svg()`/`save_svg()` and `render_image()`/`save_png()` serialise it (the SVG
   viewBox and the PNG are the board size from `include.constants.
   WHITEBOARD_WIDTH/HEIGHT`, overridable by the shared document's `viewBox` via

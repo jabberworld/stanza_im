@@ -258,28 +258,10 @@ def _arc_to(path: QtGui.QPainterPath, start: QtCore.QPointF, rx: float,
         theta1 += step
 
 
-def polyline_d(points: list[tuple[float, float]], close: bool = False) -> str:
-    """Build a ``d`` string for a polyline (optionally closed)."""
-    if not points:
-        return ""
-    parts = ["M %g %g" % (points[0][0], points[0][1])]
-    for x, y in points[1:]:
-        parts.append("L %g %g" % (x, y))
-    if close:
-        parts.append("Z")
-    return " ".join(parts)
-
-
-def rect_d(x: float, y: float, w: float, h: float) -> str:
-    return "M %g %g L %g %g L %g %g L %g %g Z" % (
-        x, y, x + w, y, x + w, y + h, x, y + h)
-
-
-def ellipse_d(cx: float, cy: float, rx: float, ry: float) -> str:
-    rx = abs(rx)
-    ry = abs(ry)
-    return ("M %g %g A %g %g 0 1 0 %g %g A %g %g 0 1 0 %g %g Z"
-            % (cx - rx, cy, rx, ry, cx + rx, cy, rx, ry, cx - rx, cy))
+# The basic-shape builders live in a Qt-free module (the XMPP layer needs
+# them too) and are re-exported here for the canvas and the tests.
+from stanza_im.include.svg_shapes import (  # noqa: F401
+    ellipse_d, points_pairs, polyline_d, rect_d)
 
 
 def path_to_d(path: QtGui.QPainterPath) -> str:

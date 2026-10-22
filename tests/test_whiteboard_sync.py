@@ -245,6 +245,56 @@ check("drop_room reports the end",
 check("drop_room forgets the peer mapping", mgr_muc._by_peer.get(room) is None)
 check("drop_room leaves other rooms alone", sid_other in mgr_other.sessions)
 
+# 8c. Psi's basic SVG shapes are converted to path data ---------------------
+def _psi_element(state, rid, name, attrs):
+    el = ET.SubElement(state, _q(NS_SXE, "new"))
+    el.set("rid", rid)
+    el.set("parent", "0")
+    el.set("type", "element")
+    el.set("name", name)
+    for index, (key, value) in enumerate(attrs.items()):
+        attr = ET.SubElement(state, _q(NS_SXE, "new"))
+        attr.set("rid", "%s.%d" % (rid, index))
+        attr.set("parent", rid)
+        attr.set("type", "attr")
+        attr.set("name", key)
+        attr.set("chdata", value)
+
+
+mgr_psi = WhiteboardManager(_FakeClient())
+sid_psi = mgr_psi.start_session("prim@conference.example.com", is_muc=True)
+psi_msg = _FakeIncoming("prim@conference.example.com/bob",
+                        ET.Element("{jabber:client}message"))
+psi_sxe = ET.SubElement(psi_msg.xml, _q(NS_SXE, "sxe"))
+psi_sxe.set("session", sid_psi)
+psi_state = ET.SubElement(psi_sxe, _q(NS_SXE, "state"))
+_psi_element(psi_state, "psi-rect", "rect",
+             {"x": "187.2", "y": "350.4", "width": "131.2", "height": "196.8",
+              "stroke": "#000000", "stroke-width": "1", "fill": "none"})
+_psi_element(psi_state, "psi-ellipse", "ellipse",
+             {"cx": "484.8", "cy": "240", "rx": "246.4", "ry": "102.4",
+              "stroke": "#000000", "stroke-width": "1", "fill": "none"})
+_psi_element(psi_state, "psi-polygon", "polygon",
+             {"points": "530.4,516.8 582.4,588 530.4,659.2 478.4,588",
+              "stroke": "#000000", "stroke-width": "1", "fill": "none"})
+_psi_element(psi_state, "psi-text", "text",
+             {"x": "10", "y": "20", "font-size": "12"})
+asyncio.run(mgr_psi.handle_sxe(psi_msg))
+psi_shapes = mgr_psi.shapes(sid_psi)
+psi_by_tag = {shape["tag"]: shape for shape in psi_shapes}
+check("Psi's rect/ellipse/polygon are rendered (not dropped)",
+      sorted(psi_by_tag) == ["ellipse", "polygon", "rect"])
+check("each basic shape carries closed path data",
+      all(shape["d"].startswith("M ") and "Z" in shape["d"]
+          for shape in psi_shapes))
+check("the rect keeps its stroke and fill attributes",
+      psi_by_tag["rect"]["stroke"] == "#000000"
+      and psi_by_tag["rect"]["fill"] == "none")
+check("a polygon path has one line per remaining point",
+      psi_by_tag["polygon"]["d"].count("L") == 3)
+check("an unsupported element is ignored, not fatal",
+      not [shape for shape in psi_shapes if shape["tag"] == "text"])
+
 # 9. end a 1:1 session -------------------------------------------------------
 mgr.end_session(sid)
 check("ending a session drops it", sid not in mgr.sessions)

@@ -60,6 +60,42 @@ bounds = ellipse_path.boundingRect()
 check("ellipse_d bounds", approx(bounds.width(), 40, 1e-3)
       and approx(bounds.height(), 20, 1e-3))
 
+# 4b. basic SVG shapes from a peer (Psi sends rect/ellipse/polygon) ----------
+from stanza_im.include import svg_shapes  # noqa: E402
+
+check("points pairs accept commas and spaces",
+      svg_shapes.points_pairs("530.4,516.8 582.4,588")
+      == [(530.4, 516.8), (582.4, 588.0)])
+check("points pairs drop junk and a lone trailing number",
+      svg_shapes.points_pairs("0,0 bad 10 10 5")
+      == [(0.0, 0.0), (10.0, 10.0)])
+rect = svg_path.parse_path(svg_shapes.element_d(
+    "rect", {"x": "10", "y": "20", "width": "30", "height": "40"}))
+check("element_d rect bounds",
+      approx(rect.boundingRect().width(), 30)
+      and approx(rect.boundingRect().height(), 40))
+circle = svg_path.parse_path(svg_shapes.element_d(
+    "circle", {"cx": "50", "cy": "50", "r": "10"}))
+check("element_d circle is an ellipse",
+      approx(circle.boundingRect().width(), 20, 1e-3)
+      and approx(circle.boundingRect().height(), 20, 1e-3))
+line = svg_path.parse_path(svg_shapes.element_d(
+    "line", {"x1": "0", "y1": "0", "x2": "10", "y2": "0"}))
+check("element_d line has the right length", approx(line.length(), 10, 1e-3))
+polygon_d = svg_shapes.element_d("polygon", {"points": "0,0 10,0 10,10"})
+check("element_d polygon is closed", polygon_d.count("L") == 2
+      and polygon_d.endswith("Z"))
+check("element_d polyline stays open",
+      not svg_shapes.element_d("polyline", {"points": "0,0 10,0"}).endswith("Z"))
+check("rounded rect keeps its size",
+      approx(svg_path.parse_path(svg_shapes.element_d(
+          "rect", {"width": "40", "height": "20", "rx": "5"})
+      ).boundingRect().width(), 40, 1e-3))
+check("an unsupported element has no path data",
+      svg_shapes.element_d("text", {"x": "1"}) == "")
+check("a zero-size rect has no path data",
+      svg_shapes.element_d("rect", {"width": "0", "height": "5"}) == "")
+
 # 5. curve commands ----------------------------------------------------------
 path = svg_path.parse_path("M 0 0 C 10 0 10 10 20 10")
 check("cubic curve produces elements", path.elementCount() >= 4)

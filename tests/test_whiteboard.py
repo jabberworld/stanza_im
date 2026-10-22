@@ -1066,6 +1066,7 @@ check("the last editor row is highlighted",
       bool(pd._participant_rows["alice"].styleSheet()))
 check("the other rows are not highlighted",
       not pd._participant_rows["__me__"].styleSheet())
+pd.set_participants([("__me__", "You"), ("alice", "alice")], active="alice")
 pd._clear_participant_highlight()
 check("the highlight fades after the timer",
       not any(row.styleSheet() for row in pd._participant_rows.values()))
@@ -1088,7 +1089,30 @@ pd.set_participants([])
 check("an empty participant list hides the sidebar and disables the toggle",
       pd._participants_panel.isHidden()
       and not pd._participants_btn.isEnabled())
+
 pd.deleteLater()
+
+# 35. converted basic shapes (Psi) render on the canvas ---------------------
+from stanza_im.include import svg_shapes  # noqa: E402
+
+basic = WhiteboardCanvas()
+basic.load_shapes([
+    {"rid": "r1", "tag": "rect", "stroke": "#000000", "fill": "",
+     "d": svg_shapes.element_d(
+         "rect", {"x": "10", "y": "20", "width": "30", "height": "40"})},
+    {"rid": "r2", "tag": "ellipse", "stroke": "#000000", "fill": "",
+     "d": svg_shapes.element_d(
+         "ellipse", {"cx": "50", "cy": "50", "rx": "20", "ry": "10"})},
+    {"rid": "r3", "tag": "polygon", "stroke": "#000000", "fill": "",
+     "d": svg_shapes.element_d(
+         "polygon", {"points": "0,0 10,0 10,10"})},
+])
+check("converted basic shapes are loaded as board objects",
+      len(basic.shapes()) == 3)
+check("each converted shape maps to a non-empty path",
+      all(basic._world_path(shape).elementCount() > 0
+          for shape in basic.shapes()))
+basic.deleteLater()
 
 _mw_src2 = _mw_src
 check("participant edits are wired to the board",

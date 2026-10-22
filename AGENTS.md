@@ -2291,7 +2291,11 @@ both clients render them the same way; a vector shape is exported as
 a `<path d="…"/>` (`include/svg_path.py`), an image as
 `<image x/y/width/height/xlink:href/>`; `to_svg()`/`save_svg()`/`render_image()`/
 `save_png()` serialise the document (the PNG is a board render, shapes only on
-white). In the
+white). On receive, the basic SVG shapes a peer may send instead of a `<path/>`
+(`rect`, `ellipse`, `circle`, `line`, `polyline`, `polygon` — Psi draws them)
+are converted to path data by `include/svg_shapes.py::element_d`
+(`WhiteboardManager._collect_shapes`); an unknown element is logged instead of
+silently dropped. In the
 **select** tool a click selects a shape and shows rotate/resize handles plus a
 **move** marker below the box (`wb-move.svg`) so even a tiny shape is easy to
 drag (dragging the shape body or the move marker moves it; the handles
@@ -2393,8 +2397,8 @@ a groupchat `<connect/>`/`<state>` or an unsolicited `state-offer` emits
 sends `refuse-state`, so the toolbar button and the roster's «Открыть доску»
 can join it later (`session_for_peer` + `join_session`); the dialog is created
 **without a parent** (a top-level window with its own taskbar entry) and is
-placed near the main window. The board lists **who is drawing** in a row under
-a toggleable **sidebar** (`wb-participants.svg`, right of the canvas, hidden by
+placed near the main window. The board lists **who is drawing** in a
+toggleable **sidebar** (`wb-participants.svg`, right of the canvas, hidden by
 default and never persisted), ourselves first: `WhiteboardSession.participants`
 records every inbound sender (`room/nick` or full JID) and emits
 `whiteboard_edit(sid, frm)`, which `MainWindow` turns into rows with the MUC nick
