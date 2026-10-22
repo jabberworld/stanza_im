@@ -2728,10 +2728,15 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   («Начата сессия рисования» / «Сессия рисования завершена») gated by
   `chat.whiteboard_show_status`: the manager emits `whiteboard_activity(peer,
   active)` once per span (`_active_peers`); a MUC `end_session` **broadcasts a
-  `<close/>`** (client extension) so all occupants see the end, and a passive
-  occupant / late room joiner learns of a board from any incoming SXE or the
-  presence `<sxe>` advertisement (`JabberClient._on_sxe_presence` →
-  `handle_sxe_presence`). **Undo/redo** (buttons after «Удалить», `Ctrl+Z` /
+  `<close/>`** (client extension) when **we** leave — the receiver keeps the
+  session and the document and only drops that participant from
+  `session.participants`, so the board continues for everyone else. Our own
+  leave starts a 60 s grace during which the room's SXE is ignored (no
+  immediate re-invite; an explicit share/join clears it, and a later declined
+  invitation is remembered). A passive occupant / late room joiner learns of a
+  board from any incoming SXE or the presence `<sxe>` advertisement
+  (`JabberClient._on_sxe_presence` → `handle_sxe_presence`); the state snapshot
+  comes from the host, so a late joiner after the host left may not get one. **Undo/redo** (buttons after «Удалить», `Ctrl+Z` /
   `Ctrl+Shift+Z`) is a shared history: every operation — own
   (`add_shape`/`update_shape`/`remove_shape`) or remote (`_apply_state`
   incremental edits; a join snapshot is not recorded) — pushes a patch of

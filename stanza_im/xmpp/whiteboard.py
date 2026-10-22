@@ -123,10 +123,26 @@ class WhiteboardManager:
         # the host has not offered its state yet.
         self._connect_tasks: dict[str, asyncio.Task] = {}
         self._connect_retry_delays = (2.0, 5.0, 10.0)
+        # Rooms we left recently (monotonic time): ignore their SXE for a short
+        # grace so the still-running board does not immediately re-invite us.
+        self._left_rooms: dict[str, float] = {}
+
+    #: Seconds during which a room's board is ignored after our own leave.
+    _LEFT_GRACE = 60.0
 
     @property
     def available(self) -> bool:
         return True
+
+    def _left_recently(self, room: str) -> bool:
+        """True while we ignore a room just after leaving its board."""
+        left_at = self._left_rooms.get(room)
+        if left_at is None:
+            return False
+        if time.monotonic() - left_at < self._LEFT_GRACE:
+            return True
+        self._left_rooms.pop(room, None)
+        return False
 
     def _announce_active(self, peer: str) -> None:
         if peer and peer not in self._active_peers:
@@ -311,9 +327,13 @@ class WhiteboardManager:
                 self._seed_shapes(session, shapes)
                 self.sessions[sid] = session
             self._by_peer[peer] = sid
+            self._left_rooms.pop(peer.split("/", 1)[0], None)
             session.ready = True
             session.synced = True
             session.user_joined = True
+            # An explicit share overrides an earlier declined invitation.
+            session.declined = False
+            session.invited = True
             self._advertise(session)
             self._send(session, self._sxe(session, "connect"))
             self.client.emit("whiteboard_ready", sid)
@@ -386,6 +406,7 @@ class WhiteboardManager:
             session.synced = is_muc
             self.sessions[sid] = session
         self._by_peer[peer] = sid
+        self._left_rooms.pop(peer.split("/", 1)[0], None)
         session.user_joined = True
         session.declined = False
         session.invited = True
@@ -625,7 +646,9 @@ class WhiteboardManager:
             self._by_peer.pop(session.peer, None)
         if session.is_muc:
             # A MUC board has no Jingle session: broadcast an explicit close so
-            # every occupant learns the session ended (a client extension).
+            # the other occupants drop *us* from their participant list (the
+            # board itself continues for them).
+            self._left_rooms[session.peer] = time.monotonic()
             try:
                 self._send(session, self._sxe(session, "close"))
             except Exception:  # noqa: BLE001
@@ -1231,14 +1254,22 @@ class WhiteboardManager:
         # Ignore our own MUC reflections.
         if self._is_self_reflection(bare, nick):
             return
+        if self._left_recently(bare):
+            # We just left this room's board: the others keep drawing, but do
+            # not rebuild a session or invite us again right away.
+            logger.debug("Whiteboard: ignoring SXE from %s (just left)", bare)
+            return
         session = self.sessions.get(sid)
-        if session is None:
+        created = session is None
+        if created:
             session = WhiteboardSession(sid=sid, peer=bare, is_muc=True,
                                         is_host=False)
             self._seed_document(session.doc)
             self.sessions[sid] = session
         child = next(iter(el), None)
         if child is None:
+            if created:
+                self.sessions.pop(sid, None)
             return
         tag = child.tag
         tag_name = tag.rsplit("}", 1)[-1]
@@ -1248,13 +1279,15 @@ class WhiteboardManager:
             logger.info("Whiteboard: SXE %s from %s in %s", tag_name, frm,
                         sid[:8])
         if tag == _q(NS_SXE, "close"):
-            # A peer ended the session (MUC client extension): notify and drop.
-            self._cancel_connect(sid)
-            self._announce_inactive(session.peer)
-            self.sessions.pop(sid, None)
-            if self._by_peer.get(session.peer) == sid:
-                self._by_peer.pop(session.peer, None)
-            self.client.emit("whiteboard_ended", sid)
+            # A participant left a conference board (client extension).  The
+            # board belongs to the room, so only that participant goes away;
+            # everyone else keeps drawing on the shared document.
+            if created:
+                self.sessions.pop(sid, None)
+                return
+            if session.participants.pop(frm, None) is not None:
+                logger.info("Whiteboard: %s left the board %s", frm, sid[:8])
+                self.client.emit("whiteboard_edit", sid, frm)
             return
         # Any other SXE from a peer means a board is active for that peer (this
         # is how a passive MUC occupant learns the room has a board).
@@ -1291,6 +1324,8 @@ class WhiteboardManager:
         nick = str(pres["from"] or "").split("/", 1)[1] if "/" in str(
             pres["from"] or "") else ""
         if self._is_self_reflection(room, nick):
+            return
+        if self._left_recently(room):
             return
         el = pres.xml.find(_q(NS_SXE, "sxe"))
         sid = str(el.get("session") or "") if el is not None else ""

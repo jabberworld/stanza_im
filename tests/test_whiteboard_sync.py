@@ -6,6 +6,7 @@ Run with:
 import asyncio
 import os
 import sys
+import time
 from xml.etree import ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -295,6 +296,83 @@ check("a polygon path has one line per remaining point",
 check("an unsupported element is ignored, not fatal",
       not [shape for shape in psi_shapes if shape["tag"] == "text"])
 
+# 8d. a peer's <close/> means "that participant left", not "board over" -----
+def _close_msg(room, nick, sid):
+    msg = _FakeIncoming(f"{room}/{nick}",
+                        ET.Element("{jabber:client}message"), "groupchat")
+    sxe_el = ET.SubElement(msg.xml, _q(NS_SXE, "sxe"))
+    sxe_el.set("session", sid)
+    ET.SubElement(sxe_el, _q(NS_SXE, "close"))
+    return msg
+
+
+def _state_msg(room, nick, sid):
+    msg = _FakeIncoming(f"{room}/{nick}",
+                        ET.Element("{jabber:client}message"), "groupchat")
+    sxe_el = ET.SubElement(msg.xml, _q(NS_SXE, "sxe"))
+    sxe_el.set("session", sid)
+    ET.SubElement(ET.SubElement(sxe_el, _q(NS_SXE, "state")),
+                  _q(NS_SXE, "document-begin"))
+    return msg
+
+
+mgr_leave = WhiteboardManager(_FakeClient())
+room_leave = "leave@conference.example.com"
+sid_leave = mgr_leave.start_session(room_leave, is_muc=True)
+mgr_leave.add_shape(sid_leave, {"id": "s1", "d": "M 0 0 L 10 10"})
+asyncio.run(mgr_leave.handle_sxe(_state_msg(room_leave, "bob", sid_leave)))
+check("a participant who sent state is listed",
+      f"{room_leave}/bob" in mgr_leave.sessions[sid_leave].participants)
+asyncio.run(mgr_leave.handle_sxe(_close_msg(room_leave, "bob", sid_leave)))
+check("a peer's close keeps the shared board session",
+      sid_leave in mgr_leave.sessions)
+check("the leaving participant is dropped",
+      f"{room_leave}/bob" not in mgr_leave.sessions[sid_leave].participants)
+check("a peer's close is not an end of the board",
+      ("whiteboard_ended", sid_leave) not in mgr_leave.client.events)
+check("the participant list is refreshed",
+      ("whiteboard_edit", sid_leave, f"{room_leave}/bob")
+      in mgr_leave.client.events)
+check("the document survives a peer's close",
+      len(mgr_leave.shapes(sid_leave)) == 1)
+asyncio.run(mgr_leave.handle_sxe(
+    _close_msg(room_leave, "ghost", "no-such-session")))
+check("a close for an unknown session creates nothing",
+      "no-such-session" not in mgr_leave.sessions)
+
+# 8e. after our own leave the running board is ignored for a grace window ---
+mgr_grace = WhiteboardManager(_FakeClient())
+room_grace = "grace@conference.example.com"
+sid_grace = mgr_grace.start_session(room_grace, is_muc=True)
+mgr_grace.end_session(sid_grace)
+check("our own leave closes our session", sid_grace not in mgr_grace.sessions)
+check("our own leave broadcasts close",
+      _last_sxe(mgr_grace.client) is not None
+      and _last_sxe(mgr_grace.client).find(_q(NS_SXE, "close")) is not None)
+check("our own leave starts the grace", room_grace in mgr_grace._left_rooms)
+mgr_grace.client.events.clear()
+asyncio.run(mgr_grace.handle_sxe(_state_msg(room_grace, "bob", sid_grace)))
+check("the running board is ignored right after our leave",
+      sid_grace not in mgr_grace.sessions
+      and not [e for e in mgr_grace.client.events
+               if e[0] == "whiteboard_invite"])
+mgr_grace._left_rooms[room_grace] = time.monotonic() - 61.0
+asyncio.run(mgr_grace.handle_sxe(_state_msg(room_grace, "bob", sid_grace)))
+check("after the grace the board is offered once",
+      sid_grace in mgr_grace.sessions
+      and [e for e in mgr_grace.client.events
+           if e[0] == "whiteboard_invite"])
+mgr_grace.decline_session(sid_grace)
+mgr_grace.client.events.clear()
+asyncio.run(mgr_grace.handle_sxe(_state_msg(room_grace, "bob", sid_grace)))
+check("a declined board is not offered again",
+      not [e for e in mgr_grace.client.events
+           if e[0] == "whiteboard_invite"])
+mgr_grace.start_session(room_grace, is_muc=True)
+check("an explicit share clears the grace and the decline",
+      room_grace not in mgr_grace._left_rooms
+      and not mgr_grace.sessions[sid_grace].declined)
+
 # 9. end a 1:1 session -------------------------------------------------------
 mgr.end_session(sid)
 check("ending a session drops it", sid not in mgr.sessions)
@@ -432,10 +510,15 @@ _sxe2 = ET.SubElement(_in2.xml, _q(NS_SXE, "sxe"))
 _sxe2.set("session", "peer-sid")
 ET.SubElement(_sxe2, _q(NS_SXE, "close"))
 asyncio.run(m2.handle_sxe(_in2))
-check("a <close/> ends the board activity",
-      ("whiteboard_activity", "room@conference.example", False) in c2.events)
-check("a <close/> emits whiteboard_ended",
-      ("whiteboard_ended", "peer-sid") in c2.events)
+check("a <close/> keeps the board running",
+      ("whiteboard_activity", "room@conference.example", False)
+      not in c2.events
+      and ("whiteboard_ended", "peer-sid") not in c2.events)
+check("a <close/> only drops the participant",
+      "room@conference.example/alice"
+      not in m2.sessions["peer-sid"].participants
+      and ("whiteboard_edit", "peer-sid",
+           "room@conference.example/alice") in c2.events)
 
 # end_session broadcasts <close/> in a MUC.
 c3 = _FakeClient()

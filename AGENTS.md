@@ -2339,12 +2339,20 @@ as a **chat status line** («Начата сессия рисования» / «
 завершена») gated by `chat.whiteboard_show_status` (default on): the manager
 emits `whiteboard_activity(peer, active)` once per activity span
 (`_active_peers`) from `start_session`/`_on_state_offer`/`session-initiate`
-(start) and `end_session`/`session-terminate`/a received `<close/>` (end). A MUC
-board **broadcasts a `<close/>`** on `end_session` (a client extension, since a
-MUC board has no Jingle session) so every occupant sees the end; a passive
-occupant (or a late room joiner, via the XEP-0284 §4.2 presence `<sxe>`
-advertisement — `JabberClient._on_sxe_presence` → `handle_sxe_presence`) learns
-of a board from any incoming SXE and gets the start line. **Undo/redo** (buttons
+(start) and `end_session`/`session-terminate` (end). A MUC board **broadcasts a
+`<close/>`** on `end_session` (a client extension, since a MUC board has no
+Jingle session), but it means **"this participant left"**, not "the board is
+over": a received `<close/>` keeps the session and the document, drops only the
+sender from `session.participants` and emits `whiteboard_edit` (so the others
+keep drawing with each other). Our own leave starts a 60 s grace
+(`_left_rooms`) during which the room's SXE/presence is ignored (the continuing
+board does not immediately re-invite us); an explicit `start_session`/`join_session`
+clears it. A passive occupant (or a late room joiner, via the XEP-0284 §4.2
+presence `<sxe>` advertisement — `JabberClient._on_sxe_presence` →
+`handle_sxe_presence`) learns of a board from any incoming SXE and gets the start
+line. Known limitation: the state snapshot is offered by the board's host, so a
+**late** joiner after the host left may not receive it (the already-joined
+clients keep drawing). **Undo/redo** (buttons
 after «Удалить», `Ctrl+Z`/`Ctrl+Shift+Z`) is a **shared** history: every document
 operation — own (`add_shape`/`update_shape`/`remove_shape`) or remote
 (`_apply_state` incremental edits; a join snapshot is not recorded) — pushes a
