@@ -95,6 +95,7 @@ stanza_im/                      # Python package
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
 │   ├── device_test.py           # Devices self-tests (mic meter/tone/camera)
 │   ├── status_message_dialog.py # Multiline presence status editor
+│   ├── suspend_monitor.py       # logind/UPower sleep notifications (presence)
 │   ├── captcha_dialog.py        # XEP-0158 CAPTCHA challenge prompt
 │   ├── account_registration_dialog.py  # XEP-0077 account creation wizard
 │   ├── registration_result_dialog.py   # Created-account summary (apply/copy)
@@ -3056,6 +3057,16 @@ text is kept. Returning activity (`eventFilter`) resumes
   without `tls-exporter` in `ssl.CHANNEL_BINDING_TYPES` (Python < 3.12),
   `filter_plus_mechs()` drops `*-PLUS` so SCRAM does not send an invalid
   channel binding and trigger a transient `failed_auth`.
+- **Presence on system sleep**: `connection.offline_on_suspend` (default on,
+  Preferences → Connection) — `ui/suspend_monitor.py` subscribes to logind's
+  `PrepareForSleep` (UPower `Sleeping` fallback) on the system bus;
+  `MainWindow._on_system_suspend` sends an `unavailable` presence with the
+  dedicated `status_suspend` text («Компьютер перешел в спящий режим») and
+  `_on_system_resume` restores the pre-sleep show and the user's status message
+  (combo/tray synced). A stream lost during sleep is restored by
+  `_on_session_started` (`_restore_suspended_presence`); auto-status is paused
+  while suspended. No logind delay inhibitor is taken (best-effort send).
+  [`tests/test_suspend_presence.py`]
 - **Language**: the stream advertises the UI language
   (`i18n.current_language()`) as `xml:lang` (`_StanzaXMPP(jid, password,
   lang=…)`) and `start_stream_handler` forces `peer_default_lang` to it, so

@@ -861,6 +861,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(self._check("auto_connect", tr("prefs_auto_connect")))
         form.addRow(self._check("auto_join_conferences", tr("prefs_auto_join_conferences")))
         form.addRow(self._check("message_carbons", tr("prefs_message_carbons")))
+        suspend_offline = self._check(
+            "offline_on_suspend", tr("prefs_offline_on_suspend"))
+        suspend_offline.setToolTip(tr("prefs_offline_on_suspend_tip"))
+        form.addRow(suspend_offline)
         form.addRow(self._check("save_status_message", tr("prefs_save_status_message")))
 
         privacy_row = QtWidgets.QHBoxLayout()
@@ -1762,6 +1766,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "auto_connect": cfg.auto_connect,
             "auto_join_conferences": connection.auto_join_conferences,
             "message_carbons": connection.message_carbons,
+            "offline_on_suspend": getattr(
+                connection, "offline_on_suspend", True),
             "save_status_message": connection.save_status_message,
             "resource": connection.resource, "override_host": connection.override_host,
             "resource_mode": getattr(connection, "resource_mode", "hostname"),
@@ -1990,6 +1996,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.connection.csi_keep_active_for_typing_osd = self._value(
             "csi_keep_active_for_typing_osd")
         cfg.connection.message_carbons = self._value("message_carbons")
+        cfg.connection.offline_on_suspend = bool(
+            self._value("offline_on_suspend"))
         for key in ("override_host", "port", "proxy_port"):
             cfg.connection[key] = self._value(key)
         for key in ("send_ctrl_enter", "show_status", "show_receipts",

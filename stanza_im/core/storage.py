@@ -136,6 +136,7 @@ class Config:
                         "starttls_mode": "always",
                         "pep_sweep_interval": 0,
                         "message_carbons": True,
+                        "offline_on_suspend": True,
                         "conference_servers": [], "service_servers": []},
         "privacy": {"send_software": True, "send_typing_notifications": True,
                      "send_activity_notifications": True, "send_chatstates": True},

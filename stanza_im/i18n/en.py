@@ -8,6 +8,7 @@ STRINGS = {
     "status_xa": "Extended away",
     "status_dnd": "DND",
     "status_offline": "Offline",
+    "status_suspend": "Computer went to sleep",
     "status_changed": "Status changed: {status}",
     "status_invisible": "Invisible",
     # Main window
@@ -1052,6 +1053,8 @@ STRINGS = {
     "login_connection_error_short": "Could not connect to the server",
     "prefs_auto_join_conferences": "Automatically join conferences on startup",
     "prefs_message_carbons": "Enable message carbons (sync across devices)",
+    "prefs_offline_on_suspend": "Go offline when the computer goes to sleep",
+    "prefs_offline_on_suspend_tip": "Send an unavailable presence before suspend and restore your status on wake.",
     "prefs_save_status_message": "Save the previous status message",
     "prefs_chat": "Chat",
     "prefs_chat_tab": "Chat",

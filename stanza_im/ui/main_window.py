@@ -379,6 +379,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._history_manager: object | None = None
         self._last_activity = time.monotonic()
         self._auto_status_applied = False
+        # System sleep: the monitor reports logind/UPower transitions; while
+        # asleep the presence is offline (see _on_system_suspend).
+        self._suspend_monitor = None
+        self._suspend_active = False
+        self._suspend_show = ""
+        self._restore_status_after_session = ""
         self._pep_sweep_active = True
         self._roster_repaint_pending = False
         self._roster_repaint_timer: QtCore.QTimer | None = None
@@ -665,6 +671,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Keep the «important messages» sticky OSD in step with the counters.
         self.unread_changed.connect(self._update_priority_sticky)
+
+        # System sleep notifications (logind, with a UPower fallback).
+        if self._suspend_monitor is None:
+            from stanza_im.ui.suspend_monitor import SuspendMonitor
+            self._suspend_monitor = SuspendMonitor(self)
+            self._suspend_monitor.suspending.connect(self._on_system_suspend)
+            self._suspend_monitor.resumed.connect(self._on_system_resume)
 
         # Apply the saved settings once, so everything (fonts including the
         # input font, colors, themes, interface mode) matches the config from
@@ -3981,6 +3994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._presence_osd_grace_until = time.monotonic() + _PRESENCE_OSD_GRACE_S
         self._set_tray_status_icon(self._config.last_status)
         self._set_status_combo(self._config.last_status)
+        self._restore_suspended_presence()
         self._republish_pep()
         # Restored counters are counted again so a re-login blinks the tray.
         self._recount_unread()
@@ -9696,7 +9710,69 @@ class MainWindow(QtWidgets.QMainWindow):
         if dlg is not None and dlg.isVisible():
             dlg.sync_font_size(key, int(size))
 
+    def _on_system_suspend(self) -> None:
+        """The computer is going to sleep: leave the network politely."""
+        if self._suspend_active:
+            return
+        if not bool(getattr(self._config.connection,
+                            "offline_on_suspend", True)):
+            return
+        client = self._client
+        if client is None:
+            return
+        try:
+            connected = client.xmpp.is_connected()
+        except Exception:  # noqa: BLE001
+            connected = False
+        if not connected:
+            return
+        show = str(self._status_combo.currentData()
+                   or self._config.last_status or "online")
+        if show == "offline":
+            return
+        self._suspend_active = True
+        self._suspend_show = show
+        client.send_presence(show="offline", status=tr("status_suspend"))
+        logger.info("System suspend: presence set offline (was %s)", show)
+
+    def _on_system_resume(self) -> None:
+        """The computer woke up: restore the status we had before sleep."""
+        if not self._suspend_active:
+            return
+        self._suspend_active = False
+        self._last_activity = time.monotonic()
+        show = self._suspend_show or self._config.last_status or "online"
+        self._suspend_show = ""
+        client = self._client
+        if client is None:
+            return
+        try:
+            connected = client.xmpp.is_connected()
+        except Exception:  # noqa: BLE001
+            connected = False
+        if not connected:
+            # The stream died during sleep: restore once the session is live.
+            self._restore_status_after_session = show
+            return
+        self._set_tray_status_icon(show)
+        self._set_status_combo(show)
+        self._send_presence(show)
+        logger.info("System resume: status %s restored", show)
+
+    def _restore_suspended_presence(self) -> None:
+        """Send the pre-sleep status after a reconnect (see _on_system_resume)."""
+        show = self._restore_status_after_session
+        if not show or self._client is None:
+            return
+        self._restore_status_after_session = ""
+        self._set_tray_status_icon(show)
+        self._set_status_combo(show)
+        self._send_presence(show)
+
     def _check_auto_status(self):
+        if self._suspend_active:
+            # Never turn the sleep presence into an auto-away transition.
+            return
         if not self._client:
             return
         idle_minutes = (time.monotonic() - self._last_activity) / 60
@@ -9810,6 +9886,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _reset_account_ui(self) -> None:
         """Drop per-account UI state (roster, tabs, MUC maps, unread, tray)."""
+        self._suspend_active = False
+        self._suspend_show = ""
+        self._restore_status_after_session = ""
         self._chat_window.set_own_jid("")
         self._chat_window.set_own_avatar("")
         # Unread counters remain on disk; clear only the live totals/blink.

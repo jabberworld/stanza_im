@@ -350,6 +350,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `csi_keep_active_for_typing_osd` | `false` | Keep the client active while `notifications.osd_typing` (and `osd_enabled`) are on, so servers do not buffer typing chat states |
 | `pep_sweep_interval` | `0` | Periodic XEP-0080/0107/0108/0118 sweep (s); `0` = off. Preferences presents a selector: Off / 30 s / 1 min / 2 min / 5 min |
 | `message_carbons` | `true` | XEP-0280 |
+| `connection.offline_on_suspend` | `true` | Send an `unavailable` presence (status «Компьютер перешел в спящий режим») right before the computer sleeps and restore the pre-sleep status on wake. `ui/suspend_monitor.py` listens to logind `PrepareForSleep` (UPower `Sleeping` fallback); Preferences → Connection. |
 | `file_proxy_mode` / `file_proxy_manual` | `auto` / — | XEP-0065 file proxy (JID) |
 | `stun_turn_mode` / `stun_turn_manual` | `auto` / — | STUN/TURN (host:port list) |
 | `conference_servers` / `service_servers` | `[]` | Used discovery servers |

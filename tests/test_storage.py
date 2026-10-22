@@ -90,6 +90,7 @@ cfg4.application.history_limit = 123
 cfg4.connection.priority = 64
 cfg4.connection.tls_mode = "normal"
 cfg4.connection.csi = False
+cfg4.connection.offline_on_suspend = False
 cfg4.notifications.osd_enabled = False
 cfg4.notifications.popups = "off"
 cfg4.status.auto_away = True
@@ -119,7 +120,8 @@ check("application section round-trips",
 check("connection section round-trips",
       cfg5.connection.priority == 64
       and cfg5.connection.tls_mode == "normal"
-      and cfg5.connection.csi is False)
+      and cfg5.connection.csi is False
+      and cfg5.connection.offline_on_suspend is False)
 check("notifications section round-trips",
       cfg5.notifications.osd_enabled is False
       and cfg5.notifications.popups == "off")

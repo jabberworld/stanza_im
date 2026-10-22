@@ -8,6 +8,7 @@ STRINGS = {
     "status_xa": "Далеко отошёл",
     "status_dnd": "Не беспокоить",
     "status_offline": "Не в сети",
+    "status_suspend": "Компьютер перешел в спящий режим",
     "status_changed": "Статус изменён: {status}",
     "status_invisible": "Невидимка",
     # Main window
@@ -1052,6 +1053,8 @@ STRINGS = {
     "login_connection_error_short": "Не удалось подключиться к серверу",
     "prefs_auto_join_conferences": "Автоматически подключаться к конференциям при запуске",
     "prefs_message_carbons": "Включить копии сообщений (синхронизация между устройствами)",
+    "prefs_offline_on_suspend": "Уходить в оффлайн при переходе компьютера в спящий режим",
+    "prefs_offline_on_suspend_tip": "Перед сном отправляется статус «не в сети», после пробуждения прежний статус восстанавливается.",
     "prefs_save_status_message": "Сохранять предыдущее статусное сообщение",
     "prefs_chat": "Чат",
     "prefs_chat_tab": "Чат",

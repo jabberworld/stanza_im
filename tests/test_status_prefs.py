@@ -68,6 +68,13 @@ dlg._apply_settings()
 check("applied xa > away", cfg.status.xa_minutes > cfg.status.away_minutes
       and cfg.status.away_minutes == 12)
 
+# 7. the sleep option lives on the Connection page -----------------------
+suspend = dlg._controls["offline_on_suspend"]
+check("suspend option is enabled by default", suspend.isChecked())
+suspend.setChecked(False)
+dlg._apply_settings()
+check("suspend option persists", cfg.connection.offline_on_suspend is False)
+
 # 7. helper standalone re-links an existing pair --------------------------
 cfg2 = Config()
 d2 = PreferencesDialog(cfg2, ChatThemeFactory())
