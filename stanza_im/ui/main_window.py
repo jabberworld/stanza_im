@@ -4350,6 +4350,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_avatar(self, jid: str, path: str) -> None:
         """Apply a cached avatar *path* to the roster, contacts and MUCs."""
+        # A conference participant card is keyed by room/nick: only that row
+        # (and its messages) change — the roster and the other participants do
+        # not, so skip the roster pixmap invalidation and the list walk.
+        parts = jid.split("/", 1)
+        if len(parts) == 2 and parts[0] in self._muc_users:
+            room, nick = parts
+            info = self._muc_users[room].get(nick)
+            if info is not None:
+                info["avatar_jid"] = jid
+                info["avatar_path"] = path
+                chat = self._chat_window.get_chat(room)
+                if chat is not None:
+                    chat.refresh_participant(nick)
+                    chat.refresh_avatar_for_sender(nick, jid)
+                muji = self._muji_windows.get(room)
+                if muji is not None and path:
+                    muji.set_avatars({nick: path})
+                return
         bare_jid = jid.split("/", 1)[0]
         room_jid = (jid if jid in self._conference_roster
                     or jid in self._muc_self_nicks else "")
@@ -4383,11 +4401,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if changed_nicks:
                 chat = self._chat_window.get_chat(room)
                 if chat:
-                    chat.update_muc_users(
-                        list(users.values()),
-                        self_nick=self._muc_self_nicks.get(room, ""),
-                        refresh_avatars=True)
                     for nick, avatar_jid in changed_nicks:
+                        chat.refresh_participant(nick)
                         chat.refresh_avatar_for_sender(nick, avatar_jid)
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:

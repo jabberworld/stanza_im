@@ -1249,7 +1249,9 @@ Single conversation tab. Layout:
   the misses are fetched one at a time (2/s, departing occupants skipped; the
   join-time `_seed_muc_chat` uses the same queue), and
   a cached avatar file for `room/nick` is used without any request
-  (`_muc_cached_avatar`). Right-click
+  (`_muc_cached_avatar`). A fetched card refreshes only that participant's row
+  and its messages (`ChatWidget.refresh_participant`), never the roster or the
+  whole list. Right-click
   opens the participant context menu; when the participant's real JID is
   visible it also offers «Пригласить в» (XEP-0249, §7.3).
 

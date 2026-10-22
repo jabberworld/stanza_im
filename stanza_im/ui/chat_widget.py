@@ -2936,6 +2936,23 @@ class ChatWidget(QtWidgets.QWidget):
             self._refresh_nick_colors()
         self._sync_muc_users(refresh_avatars=refresh_avatars)
 
+    def refresh_participant(self, nick: str,
+                            refresh_avatar: bool = True) -> None:
+        """Update one participant row in place (its vCard/avatar arrived).
+
+        A vCard response used to refresh the whole list (and every avatar
+        file); only the affected participant needs to be re-applied.
+        """
+        nick = str(nick or "")
+        if not nick or not self.is_muc:
+            return
+        state = self._muc_rows.get(nick)
+        user = next((item for item in self._users
+                     if str(item.get("nick", "")) == nick), None)
+        if state is None or user is None:
+            return
+        self._apply_muc_user_row(state, user, refresh_avatars=refresh_avatar)
+
     def set_self_nick(self, nick: str):
         nick = nick or self._self_nick
         if nick == self._self_nick:

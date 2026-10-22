@@ -8,6 +8,7 @@ touching the others.
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_muc_participants.py
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -20,7 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import load as i18n_load, tr
 from stanza_im.ui import chat_themes
@@ -208,6 +209,64 @@ cw2.update_muc_users(big)
 check("a full snapshot after the dump creates no rows", len(built2) == 200)
 check("the large list holds every participant", len(cw2._muc_rows) == 200)
 cw2.close()
+
+# 9. one avatar/vCard update touches only that participant's row ----------
+cw3 = chat_widget_mod.ChatWidget(
+    "room@conf.example/me", "Room", chat_themes.ChatThemeFactory(), is_muc=True)
+cw3.update_muc_users([_user("alice"), _user("bob"), _user("carol")])
+bob_row = cw3._muc_rows["bob"]["row"]
+alice_row = cw3._muc_rows["alice"]["row"]
+avatar_before = cw3._muc_rows["bob"]["avatar"].pixmap().cacheKey()
+pix = QtGui.QPixmap(24, 24)
+pix.fill(QtGui.QColor("#d32f2f"))
+avatar_file = os.path.join(_SCRATCH, "bob.png")
+pix.save(avatar_file)
+bob_user = next(u for u in cw3._users if u["nick"] == "bob")
+bob_user["avatar_path"] = avatar_file
+cw3.refresh_participant("bob")
+check("refresh_participant keeps every row object in place",
+      cw3._muc_rows["bob"]["row"] is bob_row
+      and cw3._muc_rows["alice"]["row"] is alice_row)
+check("refresh_participant applies the new avatar to that row",
+      cw3._muc_rows["bob"]["avatar_path"] == avatar_file
+      and cw3._muc_rows["bob"]["avatar"].pixmap().cacheKey()
+      != avatar_before)
+check("refresh_participant ignores a missing participant",
+      cw3.refresh_participant("nobody") is None)
+cw3.close()
+
+# 10. a participant card never invalidates the roster or the whole list -----
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
+
+
+class _FakeChat:
+    def __init__(self):
+        self.calls = []
+
+    def refresh_participant(self, nick):
+        self.calls.append(("row", nick))
+
+    def refresh_avatar_for_sender(self, nick, jid):
+        self.calls.append(("message", nick, jid))
+
+
+win = MainWindow.__new__(MainWindow)
+room = "room@conf.example"
+win._muc_users = {room: {"bob": {"nick": "bob"}}}
+fake_chat = _FakeChat()
+win._chat_window = type("Win", (), {
+    "get_chat": lambda self, jid: fake_chat if jid == room else None})()
+win._muji_windows = {}
+win._refresh_avatar(f"{room}/bob", "/tmp/bob-card.png")
+check("a participant card updates only its row and messages",
+      win._muc_users[room]["bob"]["avatar_path"] == "/tmp/bob-card.png"
+      and win._muc_users[room]["bob"]["avatar_jid"] == f"{room}/bob"
+      and fake_chat.calls == [("row", "bob"),
+                              ("message", "bob", f"{room}/bob")])
+_src = inspect.getsource(MainWindow._refresh_avatar)
+check("a participant card skips the whole-list avatar reload",
+      "refresh_avatars=True" not in _src
+      and "chat.refresh_participant(nick)" in _src)
 
 cw.close()
 if FAILURES:

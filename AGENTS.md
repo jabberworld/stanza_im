@@ -1056,6 +1056,9 @@ to a single rate-limited background worker (2 requests/s, skipping occupants
 who left); `_seed_muc_chat` uses the same queue for the join-time occupant list
 (never one vCard IQ per occupant); a cached avatar **file** for `room/nick` is used immediately
 (`_muc_cached_avatar`) so a returning nick shows its avatar without a request.
+A card that finally arrives updates **only that participant's row** and its
+messages (`ChatWidget.refresh_participant`) — the roster and the other rows are
+not touched (no `clear_pixmaps`, no full-list avatar reload).
 The conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →
 Appearance → «Конференции», all `true`; a participant's caps node is captured in
