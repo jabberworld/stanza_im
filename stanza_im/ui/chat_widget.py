@@ -887,6 +887,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._content_splitter.splitterMoved.connect(self._on_splitter_moved)
         layout.addWidget(self._content_splitter, stretch=1)
 
+        # A resumed tab renders once, shortly after the view is recreated: an
+        # unread tab immediately replaces that window with its history load
+        # (set_history cancels this timer), so the page is not built twice.
+        self._resume_render_timer = QtCore.QTimer(self)
+        self._resume_render_timer.setSingleShot(True)
+        self._resume_render_timer.setInterval(80)
+        self._resume_render_timer.timeout.connect(self._render_after_resume)
+
         self._typing_timer = QtCore.QTimer(self)
         self._typing_timer.setSingleShot(True)
         self._typing_timer.setInterval(_TYPING_DEBOUNCE_MS)
@@ -2007,6 +2015,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._anchor_bottom = True
         self._render_all()
 
+    def _render_after_resume(self) -> None:
+        self._render_all()
+
     def _render_all(self) -> list[dict]:
         """Clear the view and re-render everything, restoring scroll.
 
@@ -2014,6 +2025,9 @@ class ChatWidget(QtWidgets.QWidget):
         that seed the jump button (:meth:`_seed_unseen`) measure the very same
         set the separator was placed in.
         """
+        timer = getattr(self, "_resume_render_timer", None)
+        if timer is not None:
+            timer.stop()
         keep = self._preserve_fraction if self._preserve_fraction is not None \
             else self._view.scroll_fraction()
         self._view.clear()
@@ -2092,6 +2106,10 @@ class ChatWidget(QtWidgets.QWidget):
         except RuntimeError:
             pass
         try:
+            self._resume_render_timer.stop()
+        except RuntimeError:
+            pass
+        try:
             self._view.shutdown()
         except (AttributeError, RuntimeError):
             pass
@@ -2117,6 +2135,10 @@ class ChatWidget(QtWidgets.QWidget):
         """
         if self._suspended or self._released:
             return False
+        try:
+            self._resume_render_timer.stop()
+        except RuntimeError:
+            pass
         try:
             self._suspended_fraction = self._view.scroll_fraction()
         except (AttributeError, RuntimeError):
@@ -2150,7 +2172,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._chat_col.insertWidget(0, view, 1)
         self._view.set_chat_zoom(self._text_scale)
         self._preserve_fraction = self._suspended_fraction
-        self._render_all()
+        # Deferred: an unread tab replaces this window with its history load in
+        # the same turn (``set_history`` -> ``_render_all`` cancels the timer).
+        self._resume_render_timer.start()
         return True
 
     @property
@@ -3408,16 +3432,28 @@ class ChatWidget(QtWidgets.QWidget):
     # ── Misc API ──────────────────────────────────────────────────
 
     def set_show_avatars(self, show: bool):
+        show = bool(show)
+        if show == self._show_avatars:
+            return
         self._show_avatars = show
 
     def set_participant_font(self, family: str = "", size: int = 0):
         """Set the MUC participant sidebar font (empty = system default)."""
-        self._participant_font = (family or "", int(size or 0))
+        value = (family or "", int(size or 0))
         base = QtGui.QFont(QtWidgets.QApplication.font())
         if family:
             base.setFamily(family)
         if size > 0:
             base.setPointSize(int(size))
+        current = self._users_list.font()
+        unchanged = (value == self._participant_font
+                     and current.family() == base.family()
+                     and (size <= 0 or current.pointSize() == int(size)))
+        self._participant_font = value
+        if unchanged:
+            # Re-applied on every tab activation; only a real change needs the
+            # row heights (and therefore a rebuild) updated.
+            return
         self._users_list.setFont(base)
         if self.is_muc:
             self._render_muc_users()
@@ -3507,25 +3543,33 @@ class ChatWidget(QtWidgets.QWidget):
     def set_muc_participant_options(self, show_avatars: bool = True,
                                     show_clients: bool = True) -> None:
         """Toggle participant avatars / client icons in the MUC sidebar."""
-        self._show_muc_avatars = bool(show_avatars)
-        self._show_muc_clients = bool(show_clients)
+        show_avatars = bool(show_avatars)
+        show_clients = bool(show_clients)
+        if (show_avatars == self._show_muc_avatars
+                and show_clients == self._show_muc_clients):
+            return
+        self._show_muc_avatars = show_avatars
+        self._show_muc_clients = show_clients
         if self.is_muc:
             self._render_muc_users()
 
     def set_avatar_radius(self, radius_pct: int) -> None:
         """Set the avatar rounding for the sidebar and the message avatars."""
         radius = max(0, min(100, int(radius_pct or 0)))
-        changed = radius != self._avatar_radius
+        if radius == self._avatar_radius:
+            return
         self._avatar_radius = radius
-        if changed:
-            self._rounded_avatar_cache.clear()
-            self.refresh_avatars()
+        self._rounded_avatar_cache.clear()
+        self.refresh_avatars()
         if self.is_muc:
             self._render_muc_users()
 
     def set_colored_muc_nicks(self, enabled: bool):
         """Toggle per-participant colorized nicknames in this MUC tab."""
-        self._colored_muc_nicks = bool(enabled)
+        enabled = bool(enabled)
+        if enabled == self._colored_muc_nicks:
+            return
+        self._colored_muc_nicks = enabled
         if self.is_muc:
             self._refresh_nick_colors()
             self._render_muc_users()
@@ -3558,7 +3602,10 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_muc_hats_visible(self, visible: bool) -> None:
         """Toggle the XEP-0317 hat chips under messages in a MUC tab."""
-        self._show_muc_hats = bool(visible)
+        visible = bool(visible)
+        if visible == self._show_muc_hats:
+            return
+        self._show_muc_hats = visible
         if self.is_muc:
             self._render_all()
 
@@ -3597,7 +3644,10 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_text_scale(self, factor: float):
         """Re-apply the text-scale factor (reopened tabs keep the zoom)."""
-        self._text_scale = float(factor or 1.0)
+        factor = float(factor or 1.0)
+        if factor == self._text_scale:
+            return
+        self._text_scale = factor
         self._view.set_chat_zoom(self._text_scale)
 
     def mark_delivered(self, message_id: str) -> None:

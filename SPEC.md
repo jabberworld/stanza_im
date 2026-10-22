@@ -1167,9 +1167,11 @@ the history paging menus.
 Cold tabs are additionally suspended: after `chat.idle_unload_minutes`
 (default 10, `0` = off) `MainWindow._maybe_suspend_tabs` unloads a tab that is
 not current, has no unread message and saw no recent activity; `ChatWidget.suspend`
-frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub, and
-activating the tab (`ChatWindow._on_tab_changed` → `resume`) rebuilds the view
-and re-renders `_history`/`_messages`.
+frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub; on
+activation `resume` schedules **one** deferred render (`_resume_render_timer`,
+80 ms) that an unread tab's history load replaces, and the window-level setters
+(passive font/options/hats/colours/radius) are idempotent, so returning to a
+tab no longer rebuilds the chat 3-4 times and the participant list for nothing.
 
 `MainWindow._maybe_trim_memory` checks the RSS once a minute and calls
 `memstats.should_trim`: the heap is trimmed when the process grew by 200 MiB

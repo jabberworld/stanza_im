@@ -3226,8 +3226,13 @@ text is kept. Returning activity (`eventFilter`) resumes
    unread message and saw no activity within the window; `ChatWidget.suspend`
    frees the `ChatView`/WebEngine page and swaps in a `_NullView` stub (messages
    keep accumulating in Python), while `resume` (lazy, on tab activation)
-   rebuilds the view and re-renders `_history`/`_messages`.
-   [`tests/test_tab_suspend.py`]
+   rebuilds the view and re-renders `_history`/`_messages` **once**, deferred by
+   80 ms (`_resume_render_timer`): an unread tab replaces that window with its
+   history load, whose `_render_all` cancels the timer. The window-level setters
+   `ChatWindow._resume_widget` re-applies are idempotent (participant font/
+   options, coloured nicks, hats, avatar radius, text scale), so an unchanged
+   activation no longer triggers 3-4 page loads and full participant rebuilds.
+   [`tests/test_tab_suspend.py`, `tests/test_tab_resume.py`]
 5. **Roster**: no child widgets, single QPainter pass
 6. **Closed tabs**: `ChatWindow.close_chat` removes the tab, then
    `setParent(None)` + `deleteLater()` on the `ChatWidget` — a `QTabWidget`
