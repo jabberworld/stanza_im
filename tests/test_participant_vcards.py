@@ -141,8 +141,8 @@ asyncio.run(ordered())
 
 check("participant cards have a day-long TTL",
       JabberClient.PARTICIPANT_VCARD_MAX_AGE == 24 * 60 * 60)
-check("participant fetches are spaced",
-      JabberClient.PARTICIPANT_VCARD_INTERVAL >= 0.2)
+check("participant fetches run at two per second",
+      JabberClient.PARTICIPANT_VCARD_INTERVAL == 0.5)
 
 # 5. the UI uses the queue and a cached avatar file by nick -----------------
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
@@ -153,6 +153,13 @@ check("a presence queues the card instead of requesting it directly",
       and "get_vcard(" not in src)
 check("the presence uses the cached-avatar fallback",
       "_muc_cached_avatar(" in src)
+
+join_src = inspect.getsource(MainWindow._on_muc_joined)
+seed_src = inspect.getsource(MainWindow._seed_muc_chat)
+check("a room join queues the participant cards",
+      "queue_participant_vcard(room, nick)" in join_src
+      and "get_vcard(" not in join_src
+      and "get_vcard(" not in seed_src)
 
 from stanza_im.include.avatars import (  # noqa: E402
     avatar_path, default_avatar, save_avatar)

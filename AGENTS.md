@@ -1052,8 +1052,9 @@ applied live via `MainWindow._apply_avatar_radius`). A participant's vCard is
 resolved **cache-first**: `MainWindow._on_groupchat_presence` only calls
 `client.queue_participant_vcard(room, nick)` (never one vCard IQ per presence),
 which applies a cached card at once (participant TTL 24 h) or appends the nick
-to a single rate-limited background worker (~3 requests/s, skipping occupants
-who left); a cached avatar **file** for `room/nick` is used immediately
+to a single rate-limited background worker (2 requests/s, skipping occupants
+who left); `_seed_muc_chat` uses the same queue for the join-time occupant list
+(never one vCard IQ per occupant); a cached avatar **file** for `room/nick` is used immediately
 (`_muc_cached_avatar`) so a returning nick shows its avatar without a request.
 The conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →

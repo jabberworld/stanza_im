@@ -2629,9 +2629,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 room, self._muc_display_name(room))
             chat.set_bookmarked(room in self._bookmarks)
         if self._client:
-            for nick, info in users.items():
-                real_jid = info.get("real_jid")
-                self._client.get_vcard(real_jid or f"{room}/{nick}")
+            # Join-time card resolution goes through the cache-first, rate
+            # limited participant queue: a 200-occupant room used to fire one
+            # vCard IQ per occupant in a burst.
+            for nick in users:
+                self._client.queue_participant_vcard(room, nick)
             self._client.get_muc_info(room)
         self._sync_conference_roster(room)
 

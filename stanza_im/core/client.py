@@ -4781,8 +4781,9 @@ class JabberClient:
     #: and name rarely change, and refetching one per presence floods the
     #: server during a large-room join.
     PARTICIPANT_VCARD_MAX_AGE = 24 * 60 * 60
-    #: Spacing between two background participant-vCard requests (seconds).
-    PARTICIPANT_VCARD_INTERVAL = 0.35
+    #: Spacing between two background participant-vCard requests (seconds):
+    #: two per second, so a large room never floods the server.
+    PARTICIPANT_VCARD_INTERVAL = 0.5
 
     def queue_participant_vcard(self, room: str, nick: str) -> None:
         """Resolve a MUC participant's vCard: cache first, then a slow queue.

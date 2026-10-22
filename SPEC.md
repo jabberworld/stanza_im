@@ -1246,7 +1246,8 @@ Single conversation tab. Layout:
   others; the section counters follow. A participant's vCard is cache-first:
   `MainWindow._on_groupchat_presence` only enqueues it
   (`client.queue_participant_vcard`), a cached card (24 h) is applied at once,
-  the misses are fetched one at a time (~3/s, departing occupants skipped), and
+  the misses are fetched one at a time (2/s, departing occupants skipped; the
+  join-time `_seed_muc_chat` uses the same queue), and
   a cached avatar file for `room/nick` is used without any request
   (`_muc_cached_avatar`). Right-click
   opens the participant context menu; when the participant's real JID is
