@@ -28,9 +28,10 @@ VIEW_W = WHITEBOARD_WIDTH
 VIEW_H = WHITEBOARD_HEIGHT
 
 #: Tools that draw a new shape (as opposed to editing an existing one).
-DRAW_TOOLS = ("pencil", "line", "arrow", "rect", "ellipse", "polygon")
+DRAW_TOOLS = ("pencil", "line", "arrow", "rect", "ellipse", "diamond",
+              "polygon")
 #: Shapes whose closed area is filled with the fill colour.
-CLOSED_KINDS = ("rect", "ellipse", "polygon")
+CLOSED_KINDS = ("rect", "ellipse", "diamond", "polygon")
 
 #: View (zoom) limits.
 MIN_VIEW_ZOOM = 0.25
@@ -649,7 +650,20 @@ class WhiteboardCanvas(QtWidgets.QWidget):
         elif kind == "ellipse":
             cx, cy, rx, ry = shape["ellipse"]
             path.addEllipse(QtCore.QPointF(cx, cy), rx, ry)
+        elif kind == "diamond":
+            points = WhiteboardCanvas._diamond_points(*shape["rect"])
+            path.moveTo(points[0][0], points[0][1])
+            for x, y in points[1:]:
+                path.lineTo(x, y)
+            path.closeSubpath()
         return path
+
+    @staticmethod
+    def _diamond_points(x: float, y: float, w: float, h: float):
+        """Vertices of a rhombus inscribed in the (x, y, w, h) rectangle."""
+        cx = x + abs(w) / 2.0
+        cy = y + abs(h) / 2.0
+        return [(cx, y), (x + abs(w), cy), (cx, y + abs(h)), (x, cy)]
 
     def _world_path(self, shape: dict) -> QtGui.QPainterPath:
         return self._shape_matrix(shape).map(self._local_path(shape))
@@ -684,6 +698,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             return svg_path.rect_d(*shape["rect"])
         if kind == "ellipse":
             return svg_path.ellipse_d(*shape["ellipse"])
+        if kind == "diamond":
+            return svg_path.diamond_d(*shape["rect"])
         return ""
 
     @staticmethod
@@ -1157,6 +1173,9 @@ class WhiteboardCanvas(QtWidgets.QWidget):
             elif tool == "ellipse":
                 self._active = self._new_shape(
                     "ellipse", ellipse=(world.x(), world.y(), 0.0, 0.0))
+            elif tool == "diamond":
+                self._active = self._new_shape(
+                    "diamond", rect=(world.x(), world.y(), 0.0, 0.0))
             elif tool in ("line", "arrow"):
                 self._active = self._new_shape(
                     tool, points=[(world.x(), world.y()),
@@ -1188,6 +1207,8 @@ class WhiteboardCanvas(QtWidgets.QWidget):
                 self._active["rect"] = self._rect_from(self._start, world)
             elif kind == "ellipse":
                 self._active["ellipse"] = self._ellipse_from(self._start, world)
+            elif kind == "diamond":
+                self._active["rect"] = self._rect_from(self._start, world)
             self.update()
             return
         if self._manip:

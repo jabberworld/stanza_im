@@ -229,6 +229,7 @@ STRINGS = {
     "whiteboard_tool_arrow": "Стрелка",
     "whiteboard_tool_rect": "Прямоугольник",
     "whiteboard_tool_ellipse": "Эллипс",
+    "whiteboard_tool_diamond": "Ромб",
     "whiteboard_tool_polygon": "Многоугольник",
     "whiteboard_tool_fill": "Залить замкнутую фигуру",
     "whiteboard_tool_eraser": "Ластик (удаляет фигуры)",

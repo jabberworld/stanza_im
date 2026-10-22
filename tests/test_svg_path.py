@@ -91,6 +91,13 @@ check("rounded rect keeps its size",
       approx(svg_path.parse_path(svg_shapes.element_d(
           "rect", {"width": "40", "height": "20", "rx": "5"})
       ).boundingRect().width(), 40, 1e-3))
+diamond = svg_path.parse_path(svg_shapes.diamond_d(10, 20, 40, 60))
+check("diamond_d bounds",
+      approx(diamond.boundingRect().width(), 40, 1e-3)
+      and approx(diamond.boundingRect().height(), 60, 1e-3))
+check("diamond_d is closed and re-exported",
+      diamond.elementCount() >= 5
+      and svg_path.diamond_d(0, 0, 10, 10).endswith("Z"))
 check("an unsupported element has no path data",
       svg_shapes.element_d("text", {"x": "1"}) == "")
 check("a zero-size rect has no path data",

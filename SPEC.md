@@ -2622,6 +2622,7 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - Tools (grouped by `QFrame` separators): the manipulation tools (select /
   move / rotate / scale and «Удалить», an object operation) then, after a
   separator, the drawing tools (pencil / line / **arrow** / rectangle / ellipse
+  / rhombus
   / polygon, a **bucket** «Заливка» that fills — or on a second click unfills —
   only the closed shape under the cursor, the empty background is never flooded,
   an **eraser** that removes the shape under the cursor on a click and while

@@ -29,6 +29,7 @@ _TOOLS = (
     ("arrow", "wb-arrow.svg", "whiteboard_tool_arrow"),
     ("rect", "wb-rect.svg", "whiteboard_tool_rect"),
     ("ellipse", "wb-ellipse.svg", "whiteboard_tool_ellipse"),
+    ("diamond", "wb-diamond.svg", "whiteboard_tool_diamond"),
     ("polygon", "wb-polygon.svg", "whiteboard_tool_polygon"),
     ("fill", "wb-fill.svg", "whiteboard_tool_fill"),
     ("eraser", "wb-eraser.svg", "whiteboard_tool_eraser"),

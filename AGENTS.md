@@ -2236,7 +2236,7 @@ from `include.constants.WHITEBOARD_WIDTH/HEIGHT`, overridden by the shared
 document's `viewBox` via `set_view_box`) with an icon-only tool palette
 grouped by `QFrame` separators: the manipulation tools (select / move / rotate /
 scale and «Удалить», an object operation) then, after a separator, the drawing
-tools (pencil / line / **arrow** / rectangle / ellipse / polygon, a **bucket**
+tools (pencil / line / **arrow** / rectangle / ellipse / rhombus / polygon, a **bucket**
 «Заливка» that fills — or, on a second click, unfills — only the closed shape
 under the cursor, and an **eraser** that removes the shape under the cursor on a
 click and while dragging, plus a **text** tool: a click opens a multiline input

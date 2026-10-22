@@ -229,6 +229,7 @@ STRINGS = {
     "whiteboard_tool_arrow": "Arrow",
     "whiteboard_tool_rect": "Rectangle",
     "whiteboard_tool_ellipse": "Ellipse",
+    "whiteboard_tool_diamond": "Diamond",
     "whiteboard_tool_polygon": "Polygon",
     "whiteboard_tool_fill": "Fill a closed shape",
     "whiteboard_tool_eraser": "Eraser (removes shapes)",

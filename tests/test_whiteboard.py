@@ -63,6 +63,8 @@ canvas.set_tool("rect")
 drag(canvas, 100, 100, 200, 150)
 canvas.set_tool("ellipse")
 drag(canvas, 250, 100, 350, 180)
+canvas.set_tool("diamond")
+drag(canvas, 500, 100, 560, 160)
 canvas.set_tool("line")
 drag(canvas, 100, 200, 200, 250)
 canvas.set_tool("pencil")
@@ -71,21 +73,26 @@ canvas.set_tool("polygon")
 drag(canvas, 400, 100, 470, 110, steps=6)
 check("all shape kinds are drawn",
       [s["kind"] for s in canvas.shapes()]
-      == ["rect", "ellipse", "line", "pencil", "polygon"])
+      == ["rect", "ellipse", "diamond", "line", "pencil", "polygon"])
 check("a rect stores its geometry",
       canvas.shapes()[0]["rect"][2] == 100
       and canvas.shapes()[0]["rect"][3] == 50)
+check("a diamond is inscribed in its drag rectangle",
+      canvas.shapes()[2]["rect"] == (500, 100, 60, 60)
+      and WhiteboardCanvas._is_closed(canvas.shapes()[2]))
 check("a pencil stores its points",
-      len(canvas.shapes()[3]["points"]) >= 2)
+      len(canvas.shapes()[4]["points"]) >= 2)
 
 # 2. SVG export --------------------------------------------------------------
 svg = canvas.to_svg()
 check("the SVG has the root and viewBox",
       "<svg" in svg and 'viewBox="0 0 1280 720"' in svg)
 check("the SVG serialises every shape as a path",
-      svg.count("<path") == 5)
+      svg.count("<path") == 6)
 check("the rect geometry is written as path data",
       "M 100 100 L 200 100 L 200 150 L 100 150 Z" in svg)
+check("the diamond is written as a closed path",
+      "M 530 100 L 560 130 L 530 160 L 500 130 Z" in svg)
 check("a polygon is closed in the path data", " Z" in svg)
 check("a filled shape carries a fill colour", 'fill="#e53935"' in svg)
 
@@ -110,7 +117,7 @@ canvas.set_tool("select")
 QtWidgets.QApplication.sendEvent(canvas, _event(
     QtCore.QEvent.Type.MouseButtonPress, 190, 150))
 canvas.delete_selected()
-check("delete removes the selected shape", len(canvas.shapes()) == 4)
+check("delete removes the selected shape", len(canvas.shapes()) == 5)
 canvas.clear()
 check("clear empties the board", canvas.shapes() == [])
 
@@ -119,7 +126,8 @@ dialog = WhiteboardDialog("bob@example.com")
 check("the dialog has every tool button",
       set(dialog._tool_buttons) == {
           "select", "move", "rotate", "scale", "pencil", "line", "arrow",
-          "rect", "ellipse", "polygon", "fill", "eraser", "text"})
+          "rect", "ellipse", "diamond", "polygon", "fill", "eraser",
+          "text"})
 check("the pencil tool is active by default",
       dialog._tool_buttons["pencil"].isChecked())
 check("the dialog embeds the canvas",

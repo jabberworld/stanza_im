@@ -261,7 +261,7 @@ def _arc_to(path: QtGui.QPainterPath, start: QtCore.QPointF, rx: float,
 # The basic-shape builders live in a Qt-free module (the XMPP layer needs
 # them too) and are re-exported here for the canvas and the tests.
 from stanza_im.include.svg_shapes import (  # noqa: F401
-    ellipse_d, points_pairs, polyline_d, rect_d)
+    diamond_d, ellipse_d, points_pairs, polyline_d, rect_d)
 
 
 def path_to_d(path: QtGui.QPainterPath) -> str:

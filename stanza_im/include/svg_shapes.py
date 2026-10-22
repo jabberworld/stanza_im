@@ -50,6 +50,20 @@ def rect_d(x: float, y: float, w: float, h: float,
            radius_x, radius_y, x + radius_x, y))
 
 
+def diamond_d(x: float, y: float, w: float, h: float) -> str:
+    """Path data for a rhombus inscribed in the (x, y, w, h) rectangle.
+
+    The vertices sit at the middle of each side, so the drag rectangle defines
+    the diamond's corners exactly like it defines an ellipse's extents.
+    """
+    w = abs(w)
+    h = abs(h)
+    cx = x + w / 2.0
+    cy = y + h / 2.0
+    return "M %g %g L %g %g L %g %g L %g %g Z" % (
+        cx, y, x + w, cy, cx, y + h, x, cy)
+
+
 def ellipse_d(cx: float, cy: float, rx: float, ry: float) -> str:
     rx = abs(rx)
     ry = abs(ry)
