@@ -341,9 +341,13 @@ and «Удалить конференцию» (confirmed) → `client.destroy_ro
 error shown inline instead of a silent failure. Edits are collected and applied on «Ок» via
 `client.muc_set_affiliation`/`client.muc_set_config`; `client.muc_get_affiliations`
 builds a custom `muc#admin` IQ so the `reason` survives (slixmpp's helper keeps
-only JIDs). The «Шапки» and «Настройки» pages are wrapped in a `QScrollArea`, so
-a long configuration form never pins the window: it can be shrunk (460×300
-minimum, size grip) and scrolls instead. [`tests/test_muc_config.py`]
+only JIDs). The «Шапки», «Настройки» and «Управление» pages are wrapped in a
+`QScrollArea`, so a long configuration form never pins the window: it can be
+shrunk (460×300 minimum, size grip) and scrolls instead. The dialog opens
+~1.5× taller (`_initial_height`, ≈720 px bounded by 85 % of the screen) and its
+width follows the content (`_fit_to_content`, only growing, ≤90 % of the
+screen), so the usual form needs no horizontal scrollbar; a page wider than the
+screen still scrolls and the window stays resizable. [`tests/test_muc_config.py`]
 
 **Voice requests (XEP-0045 §7.13)**: a visitor in a moderated room asks for
 voice with a bodyless `<message>` (**no `type`** — a `groupchat` type would be a

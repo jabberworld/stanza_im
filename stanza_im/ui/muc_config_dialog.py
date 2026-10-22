@@ -111,7 +111,11 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._busy = False
 
         self.setWindowTitle(tr("muc_config_title", room=room))
-        self.resize(660, 470)
+        self._fitting = False
+        self._fit_scheduled = False
+        # A taller initial window (≈1.5× the old 470 px, bounded by the
+        # screen) while the width follows the content — see _fit_to_content.
+        self.resize(660, self._initial_height())
         # The content (a long room-configuration form) must not pin the
         # window: every long page scrolls and the dialog can be made smaller.
         self.setMinimumSize(460, 300)
@@ -208,6 +212,64 @@ class MucConfigDialog(QtWidgets.QDialog):
         else:
             self._settings_status.setText(tr("muc_config_no_rights"))
 
+    # ── Geometry ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _initial_height() -> int:
+        """≈1.5× the old 470 px, never more than 85 % of the screen."""
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return 720
+        return max(470, min(720, int(screen.availableGeometry().height() * 0.85)))
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._schedule_fit()
+
+    def _schedule_fit(self) -> None:
+        """Coalesce content-driven width fits into one event-loop turn."""
+        if self._fit_scheduled:
+            return
+        self._fit_scheduled = True
+        QtCore.QTimer.singleShot(0, self._run_fit)
+
+    def _run_fit(self) -> None:
+        self._fit_scheduled = False
+        self._fit_to_content()
+
+    def _fit_to_content(self) -> None:
+        """Grow the window to its widest page so no horizontal bar is needed.
+
+        Only the initial geometry is computed from the content: a page that
+        still does not fit (a wider-than-screen form) keeps its scrollbars and
+        the user can resize freely.
+        """
+        if not self.isVisible():
+            return
+        hint = 0
+        for index in range(self._tabs.count()):
+            page = self._tabs.widget(index)
+            extra = 0
+            if isinstance(page, QtWidgets.QScrollArea):
+                bar = page.verticalScrollBar()
+                extra = bar.sizeHint().width() if bar is not None else 0
+                page = page.widget()
+            if page is None:
+                continue
+            hint = max(hint, page.sizeHint().width(),
+                       page.minimumSizeHint().width() + extra)
+        target = hint + 48
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            target = min(target, int(screen.availableGeometry().width() * 0.9))
+        target = max(target, 520)
+        if target > self.width():
+            self._fitting = True
+            try:
+                self.resize(target, self.height())
+            finally:
+                self._fitting = False
+
     # ── Helpers ───────────────────────────────────────────────────
 
     @staticmethod
@@ -260,6 +322,7 @@ class MucConfigDialog(QtWidgets.QDialog):
                     }
         self._participants_status.setText("")
         self._rebuild_tree()
+        self._schedule_fit()
 
     def _rebuild_tree(self) -> None:
         selected = self._selected_jid()
@@ -355,6 +418,7 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._settings_body.addWidget(self._form_widget)
         self._settings_status.setText("")
         self._initial_values = self._form_widget.values()
+        self._schedule_fit()
 
     # ── Apply ─────────────────────────────────────────────────────
 

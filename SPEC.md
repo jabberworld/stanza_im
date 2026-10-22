@@ -1590,7 +1590,9 @@ The MUC tab header shows a gear button after the bookmark (hidden on 1:1 tabs),
 enabled only for owners/admins (`MainWindow._apply_muc_admin`, fed by our
 affiliation in `_muc_users`). It opens a non-modal `MucConfigDialog`
 (`ui/muc_config_dialog.py`) with four tabs (the hats, settings and management
-pages scroll, so the dialog can be shrunk below its content):
+pages scroll, so the dialog can be shrunk below its content; it opens taller,
+≈720 px bounded by the screen, and its width is fitted to the widest page so a
+normal form shows no horizontal scrollbar):
 
 - «Участники» — a `QTreeWidget` with the four affiliation groups (Владельцы =
   owner, Администраторы = admin, Зарегистрированные пользователи = member,

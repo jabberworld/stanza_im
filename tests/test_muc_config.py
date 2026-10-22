@@ -119,9 +119,25 @@ try:
     check("the dialog can shrink vertically",
           dlg.minimumSizeHint().height() <= 320
           and dlg.minimumHeight() <= 320)
+    _screen = QtWidgets.QApplication.primaryScreen()
+    _avail = _screen.availableGeometry() if _screen else None
+    _expected_h = (max(470, min(720, int(_avail.height() * 0.85)))
+                   if _avail else 720)
+    check("the dialog opens ~1.5x taller", dlg.height() == _expected_h)
+    dlg.show()
+    QtWidgets.QApplication.processEvents()
+    dlg._fit_to_content()
+    QtWidgets.QApplication.processEvents()
+    _settings_page = dlg._tabs.widget(2)
+    check("no horizontal scrollbar by default",
+          not _settings_page.horizontalScrollBar().isVisible())
+    check("the width follows the content",
+          dlg.width() + 1 >= _settings_page.widget()
+          .minimumSizeHint().width())
     dlg.resize(480, 320)
     check("a smaller size is accepted",
           dlg.width() <= 480 and dlg.height() <= 320)
+    dlg.hide()
     dlg.resize(660, 470)
     check("hats tree lists one category with one assignee",
           dlg._hats_tab._tree.topLevelItemCount() == 1
