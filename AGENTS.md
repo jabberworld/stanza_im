@@ -1039,8 +1039,13 @@ and the resource's live local time (`local_time_from_tzo`, XEP-0202 `client_tzo`
 on their **own** row, then the client line (`<img client-icon> Клиент: name
 version / OS`) and «Статус: message» (`tooltip_status`).
 The MUC participant sidebar shows the same client icon before the avatar
-(`ChatWidget._add_muc_user_row`, `set_muc_participant_options`) and its tooltip
-before the nick; roster and participant avatars are clipped by
+(`ChatWidget._build_muc_user_row`/`_apply_muc_user_row`,
+`set_muc_participant_options`) and its tooltip before the nick; a presence
+**merges** into the sidebar (`_sync_muc_users`/`_sync_muc_order`): only the
+changed participant's row is created/updated/removed, rows move between the
+moderator/participant/guest sections in place and the section counters
+(`… (N)`) are refreshed, so a large-room join no longer recreates every row
+per presence; roster and participant avatars are clipped by
 `include.avatars.rounded_avatar` with `appearance.avatar_radius` (0 = square,
 100 = circle; `RosterStyle.set_avatar_radius`/`ChatWidget.set_avatar_radius`,
 applied live via `MainWindow._apply_avatar_radius`). The conference toggles are

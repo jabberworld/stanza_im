@@ -1237,7 +1237,11 @@ Single conversation tab. Layout:
   (`ResizeMode.Adjust` + `ScrollBarAlwaysOff`) and a long nick is a `_FadeLabel`
   that clips and fades its right edge into the background (Psi+ style), so the
   status icon, client icon and avatar stay visible; the sidebar width is
-  remembered in `appearance.muc_participant_width`. Right-click
+  remembered in `appearance.muc_participant_width`. Presences are merged
+  incrementally (`_sync_muc_users`/`_sync_muc_order`): a row is created once,
+  updated in place (show/badge/colour/client/avatar), moved between the
+  moderator/participant/guest sections and removed without touching the
+  others; the section counters follow. Right-click
   opens the participant context menu; when the participant's real JID is
   visible it also offers «Пригласить в» (XEP-0249, §7.3).
 

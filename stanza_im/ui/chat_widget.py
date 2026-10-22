@@ -447,6 +447,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._preserve_fraction: float | None = None
         self._users: list[dict] = []
         self._self_nick: str = ""
+        # Incremental participant rows: nick -> {item, row, status, label,
+        # client, avatar, user} plus the section header items.  A presence
+        # updates one row in place instead of rebuilding the whole list
+        # (a 200-participant join used to recreate every row per presence).
+        self._muc_rows: dict[str, dict] = {}
+        self._muc_headers: dict[str, QtWidgets.QListWidgetItem] = {}
+        self._muc_color_keys: set = set()
         self._hovered_participant: str = ""
         self._nick_colors = NickColorAllocator()
         self._colored_muc_nicks: bool = True
@@ -2884,66 +2891,131 @@ class ChatWidget(QtWidgets.QWidget):
 
     # ── MUC participant sidebar ───────────────────────────────────
 
-    def update_muc_users(self, users: list[dict], self_nick: str = ""):
-        """Replace the MUC participant list (dicts with nick/show/status/
-        role/affiliation)."""
+    def update_muc_users(self, users: list[dict], self_nick: str = "",
+                         refresh_avatars: bool = False):
+        """Merge a MUC participant snapshot into the sidebar (incrementally).
+
+        A presence changes one participant; recreating every row (as this used
+        to do) made a large conference join quadratic in widgets and pixmaps.
+        *refresh_avatars* forces a reload of the cached avatar files for every
+        row (an avatar file keeps its name when its content changes).
+        """
         self._users = list(users or [])
         if self_nick:
             self._self_nick = self_nick
         self._view.highlight_nick = self._self_nick
-        self._refresh_nick_colors()
-        self._render_muc_users()
+        if not self.is_muc:
+            return
+        keys = {self._user_color_key(user) for user in self._users}
+        if keys != self._muc_color_keys:
+            self._muc_color_keys = keys
+            self._refresh_nick_colors()
+        self._sync_muc_users(refresh_avatars=refresh_avatars)
 
     def set_self_nick(self, nick: str):
-        self._self_nick = nick or self._self_nick
-        self._view.highlight_nick = self._self_nick
+        nick = nick or self._self_nick
+        if nick == self._self_nick:
+            self._view.highlight_nick = nick
+            return
+        self._self_nick = nick
+        self._view.highlight_nick = nick
         self._refresh_nick_colors()
-        self._render_muc_users()
+        self._sync_muc_users()
 
     def _render_muc_users(self):
+        """Drop every participant row and build the list from scratch."""
         if not self.is_muc:
             return
         self._users_list.clear()
-        sections = {
-            "moderators": [],
-            "participants": [],
-            "guests": [],
-        }
+        self._muc_rows = {}
+        self._muc_headers = {}
+        self._muc_color_keys = set()
+        self._refresh_nick_colors()
+        self._sync_muc_users()
+
+    @staticmethod
+    def _muc_section(user: dict) -> str:
+        role = str(user.get("role", ""))
+        if role == "moderator" or user.get("affiliation") in ("owner", "admin"):
+            return "moderators"
+        if role == "visitor":
+            return "guests"
+        return "participants"
+
+    def _sync_muc_users(self, refresh_avatars: bool = False) -> None:
+        """Add/update/remove only the participant rows that changed."""
+        by_nick: dict[str, dict] = {}
         for user in self._users:
-            role = user.get("role", "")
-            affiliation = user.get("affiliation", "")
-            if role == "moderator" or affiliation in ("owner", "admin"):
-                section = "moderators"
-            elif role == "visitor":
-                section = "guests"
+            nick = str(user.get("nick", ""))
+            if nick:
+                by_nick[nick] = user
+        for nick in [name for name in self._muc_rows if name not in by_nick]:
+            state = self._muc_rows.pop(nick)
+            index = self._users_list.row(state["item"])
+            if index >= 0:
+                self._users_list.takeItem(index)
+            state["row"].setParent(None)
+            state["row"].deleteLater()
+        for nick, user in by_nick.items():
+            state = self._muc_rows.get(nick)
+            if state is None:
+                self._muc_rows[nick] = self._build_muc_user_row(user)
             else:
-                section = "participants"
-            sections[section].append(user)
+                self._apply_muc_user_row(state, user, refresh_avatars)
+        self._sync_muc_order(by_nick)
 
-        for section, users in sections.items():
-            if not users:
+    def _sync_muc_order(self, by_nick: dict) -> None:
+        """Keep the section headers, their counts and the row order in step."""
+        grouped: dict[str, list[str]] = {
+            "moderators": [], "participants": [], "guests": []}
+        for nick, user in by_nick.items():
+            grouped[self._muc_section(user)].append(nick)
+        desired: list[QtWidgets.QListWidgetItem] = []
+        for section in ("moderators", "participants", "guests"):
+            nicks = sorted(grouped[section], key=str.casefold)
+            if not nicks:
+                header = self._muc_headers.pop(section, None)
+                if header is not None:
+                    index = self._users_list.row(header)
+                    if index >= 0:
+                        self._users_list.takeItem(index)
                 continue
-            header = QtWidgets.QListWidgetItem(
-                f"{tr(f'muc_section_{section}')} ({len(users)})")
-            font = header.font()
-            font.setBold(True)
-            header.setFont(font)
-            header.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
-            self._users_list.addItem(header)
-            for user in sorted(users, key=lambda u: u.get("nick", "").lower()):
-                self._add_muc_user_row(user)
+            header = self._muc_headers.get(section)
+            if header is None:
+                header = QtWidgets.QListWidgetItem()
+                font = header.font()
+                font.setBold(True)
+                header.setFont(font)
+                header.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
+                self._muc_headers[section] = header
+            text = f"{tr(f'muc_section_{section}')} ({len(nicks)})"
+            if header.text() != text:
+                header.setText(text)
+            desired.append(header)
+            for nick in nicks:
+                desired.append(self._muc_rows[nick]["item"])
+        for index, item in enumerate(desired):
+            if self._users_list.item(index) is item:
+                continue
+            current = self._users_list.row(item)
+            if current >= 0:
+                self._users_list.takeItem(current)
+            self._users_list.insertItem(index, item)
+            nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
+            if nick:
+                state = self._muc_rows.get(str(nick))
+                if state is not None:
+                    self._users_list.setItemWidget(item, state["row"])
+        while self._users_list.count() > len(desired):
+            item = self._users_list.takeItem(len(desired))
+            if item is not None:
+                del item
 
-    def _add_muc_user_row(self, user: dict):
-        nick = user.get("nick", "")
-        badge = (_MUC_BADGES.get(user.get("affiliation", ""), "")
-                 or _MUC_BADGES.get(user.get("role", ""), ""))
-        label = f"{badge} {nick}" if badge else nick
-        if self._self_nick and nick == self._self_nick:
-            label = f"{label} ({tr('muc_you')})"
-
+    def _build_muc_user_row(self, user: dict) -> dict:
+        nick = str(user.get("nick", ""))
         row = _ParticipantRow(
             self._users_list,
-            on_hover=lambda pos: self._muc_user_hover(nick, pos),
+            on_hover=lambda pos, n=nick: self._muc_user_hover(n, pos),
             on_leave=self._muc_user_leave,
             on_press=tooltip_mod.hide,
             on_wheel=self._participant_wheel_font_zoom)
@@ -2952,38 +3024,20 @@ class ChatWidget(QtWidgets.QWidget):
         layout.setSpacing(4)
         status = QtWidgets.QLabel(row)
         status.setMouseTracking(True)
-        status.setPixmap(self._status_icon(user.get("show", "offline"))
-                         .pixmap(16, 16))
-        text = _FadeLabel(label, row)
-        if self._colored_muc_nicks:
-            color = self._nick_colors.color_for(
-                self._user_color_key(user))
-            if color:
-                text.setTextColor(color)
         layout.addWidget(status)
+        text = _FadeLabel("", row)
         layout.addWidget(text, 1)
+        client_label = None
         if self._show_muc_clients:
-            icon = clients_mod.client_icon_for(
-                str(user.get("caps_node") or ""), 16)
-            if icon:
-                client_label = QtWidgets.QLabel(row)
-                client_label.setMouseTracking(True)
-                client_pix = QtGui.QPixmap(icon)
-                if not client_pix.isNull():
-                    client_label.setPixmap(client_pix.scaled(
-                        16, 16, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                        QtCore.Qt.TransformationMode.SmoothTransformation))
-                    layout.addWidget(client_label)
+            client_label = QtWidgets.QLabel(row)
+            client_label.setMouseTracking(True)
+            client_label.hide()
+            layout.addWidget(client_label)
+        avatar = None
         if self._show_muc_avatars:
             avatar = QtWidgets.QLabel(row)
             avatar.setMouseTracking(True)
             avatar.setFixedSize(28, 28)
-            path = user.get("avatar_path", "") or default_avatar()
-            pix = QtGui.QPixmap(path)
-            if not pix.isNull():
-                from stanza_im.include.avatars import rounded_avatar
-                avatar.setPixmap(
-                    rounded_avatar(pix, 28, self._avatar_radius))
             layout.addWidget(avatar)
         # The child labels swallow wheel events; forward them to the row so a
         # Ctrl+wheel over any part of the row changes the participant font.
@@ -2991,9 +3045,69 @@ class ChatWidget(QtWidgets.QWidget):
             row.watch_wheel(child)
         item = QtWidgets.QListWidgetItem()
         item.setData(QtCore.Qt.ItemDataRole.UserRole, nick)
+        state = {"item": item, "row": row, "status": status, "label": text,
+                 "client": client_label, "avatar": avatar, "user": user,
+                 "label_text": None, "color": None, "show": None,
+                 "client_icon": None, "avatar_path": None}
+        self._apply_muc_user_row(state, user, refresh_avatars=True)
         item.setSizeHint(QtCore.QSize(0, row.sizeHint().height()))
-        self._users_list.addItem(item)
-        self._users_list.setItemWidget(item, row)
+        return state
+
+    def _apply_muc_user_row(self, state: dict, user: dict,
+                            refresh_avatars: bool = False) -> None:
+        """Write one participant's state into an existing row."""
+        nick = str(user.get("nick", ""))
+        badge = (_MUC_BADGES.get(user.get("affiliation", ""), "")
+                 or _MUC_BADGES.get(user.get("role", ""), ""))
+        label = f"{badge} {nick}" if badge else nick
+        if self._self_nick and nick == self._self_nick:
+            label = f"{label} ({tr('muc_you')})"
+        if label != state["label_text"]:
+            state["label_text"] = label
+            state["label"].setText(label)
+        color = None
+        if self._colored_muc_nicks:
+            color = self._nick_colors.color_for(self._user_color_key(user))
+        if color != state["color"]:
+            state["color"] = color
+            state["label"].setTextColor(color)
+        show = str(user.get("show", "offline") or "offline")
+        if show != state["show"]:
+            state["show"] = show
+            state["status"].setPixmap(
+                self._status_icon(show).pixmap(16, 16))
+        icon_path = ""
+        if self._show_muc_clients:
+            icon_path = clients_mod.client_icon_for(
+                str(user.get("caps_node") or ""), 16)
+        if icon_path != state["client_icon"]:
+            state["client_icon"] = icon_path
+            client_label = state.get("client")
+            if client_label is not None:
+                if icon_path:
+                    pix = QtGui.QPixmap(icon_path)
+                    if not pix.isNull():
+                        client_label.setPixmap(pix.scaled(
+                            16, 16,
+                            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                            QtCore.Qt.TransformationMode.SmoothTransformation))
+                        client_label.show()
+                    else:
+                        client_label.clear()
+                        client_label.hide()
+                else:
+                    client_label.clear()
+                    client_label.hide()
+        if self._show_muc_avatars and state.get("avatar") is not None:
+            path = str(user.get("avatar_path") or "")
+            if refresh_avatars or path != state["avatar_path"]:
+                state["avatar_path"] = path
+                pix = QtGui.QPixmap(path or default_avatar())
+                if not pix.isNull():
+                    from stanza_im.include.avatars import rounded_avatar
+                    state["avatar"].setPixmap(
+                        rounded_avatar(pix, 28, self._avatar_radius))
+        state["user"] = user
 
     def _participant_wheel_font_zoom(self, event) -> bool:
         """Handle a Ctrl+wheel over a participant row; True when consumed."""

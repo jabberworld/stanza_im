@@ -4383,7 +4383,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if chat:
                     chat.update_muc_users(
                         list(users.values()),
-                        self_nick=self._muc_self_nicks.get(room, ""))
+                        self_nick=self._muc_self_nicks.get(room, ""),
+                        refresh_avatars=True)
                     for nick, avatar_jid in changed_nicks:
                         chat.refresh_avatar_for_sender(nick, avatar_jid)
                 muji = self._muji_windows.get(room)
