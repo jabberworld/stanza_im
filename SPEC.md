@@ -2151,6 +2151,15 @@ Registers XEP plugins (conditionally where noted):
   (`client.set_displayed_state`), so the startup catch-up does not wipe restored
   unread while a newer remote state still clears it.
   Config `chat.message_displayed_sync` (default on).
+- **History behind an open tab**: the join-time room replay arrives as archived
+  groupchat messages and is stored without rendering; the MAM backfill likewise
+  stores rows while the tab is open. `ChatWidget.schedule_tail_refresh` /
+  `refresh_tail_if_newer` reloads the window when the stored newest is newer
+  than the rendered one — only for the visible, not-scrolled-up conversation,
+  preserving the unread boundary and the bottom position; a suspended tab defers
+  it to `resume`, a background tab is left to its next open. `history._insert`
+  repairs a stale timestamp on an archive/origin/message-id match (never the
+  body), so a row stored with a wrong timestamp cannot keep the tail hidden.
 - **Partial progress**: scrolling a conversation into view records the newest
   visible message (`ChatView._find_last_visible_ref`) and publishes it as
   `displayed` through a single-shot throttle (`MainWindow._mds_throttle_timer`,

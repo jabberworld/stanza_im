@@ -894,6 +894,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._resume_render_timer.setSingleShot(True)
         self._resume_render_timer.setInterval(80)
         self._resume_render_timer.timeout.connect(self._render_after_resume)
+        # Merge newly stored history (a conference's join-time replay, MAM) into
+        # the open window without waiting for a tab reopen.
+        self._tail_refresh_timer = QtCore.QTimer(self)
+        self._tail_refresh_timer.setSingleShot(True)
+        self._tail_refresh_timer.setInterval(400)
+        self._tail_refresh_timer.timeout.connect(self._run_tail_refresh)
+        self._tail_refresh_on_resume = False
 
         self._typing_timer = QtCore.QTimer(self)
         self._typing_timer.setSingleShot(True)
@@ -2017,6 +2024,9 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _render_after_resume(self) -> None:
         self._render_all()
+        if self._tail_refresh_on_resume:
+            self._tail_refresh_on_resume = False
+            self._start_task(self.refresh_tail_if_newer())
 
     def _render_all(self) -> list[dict]:
         """Clear the view and re-render everything, restoring scroll.
@@ -2110,6 +2120,11 @@ class ChatWidget(QtWidgets.QWidget):
         except RuntimeError:
             pass
         try:
+            self._tail_refresh_timer.stop()
+        except RuntimeError:
+            pass
+        self._tail_refresh_on_resume = False
+        try:
             self._view.shutdown()
         except (AttributeError, RuntimeError):
             pass
@@ -2137,6 +2152,12 @@ class ChatWidget(QtWidgets.QWidget):
             return False
         try:
             self._resume_render_timer.stop()
+        except RuntimeError:
+            pass
+        try:
+            if self._tail_refresh_timer.isActive():
+                self._tail_refresh_timer.stop()
+                self._tail_refresh_on_resume = True
         except RuntimeError:
             pass
         try:
@@ -2762,6 +2783,64 @@ class ChatWidget(QtWidgets.QWidget):
         if self._history:
             return self._history[0].get("id")
         return None
+
+    def newest_ts(self) -> str:
+        """The newest timestamp among the rendered history and live rows."""
+        newest = ""
+        for entry in self._history + self._messages:
+            ts = str(entry.get("timestamp") or "")
+            if ts > newest:
+                newest = ts
+        return newest
+
+    def schedule_tail_refresh(self, delay_ms: int | None = None) -> None:
+        """Merge newly stored history into the window soon (debounced)."""
+        if self._released:
+            return
+        if self._suspended:
+            self._tail_refresh_on_resume = True
+            return
+        delay = (self._tail_refresh_timer.interval()
+                 if delay_ms is None else int(delay_ms))
+        self._tail_refresh_timer.start(max(0, delay))
+
+    def _run_tail_refresh(self) -> None:
+        self._start_task(self.refresh_tail_if_newer())
+
+    async def refresh_tail_if_newer(self, force: bool = False) -> bool:
+        """Reload the window when newer messages were stored behind it.
+
+        A conference server replays its history on join as archived groupchat
+        messages and the MAM backfill may store newer rows while the tab is
+        open; both used to stay invisible until the tab was reopened.  Only the
+        visible, not-scrolled-up conversation is refreshed (a background tab
+        must not build a page); a suspended tab defers it to ``resume``.
+        """
+        if self._released:
+            return False
+        if self._suspended:
+            self._tail_refresh_on_resume = True
+            return False
+        if not force and (not self.isVisible()
+                          or self._view.is_scrolled_up()):
+            return False
+        from stanza_im.core import history
+        newest = await history.newest_timestamp_async(self.jid)
+        if not newest or newest <= (self.newest_ts() or ""):
+            return False
+        if self._released or self._suspended:
+            return False
+        rows = await history.load_history_async(self.jid, self._window_size)
+        if not rows:
+            return False
+        exhausted = not await history.older_available_timestamp_async(
+            self.jid, rows[0].get("timestamp", ""))
+        # Stay at the bottom instead of jumping to an older restore anchor.
+        self._restore_anchor = {}
+        self.set_history(rows, self._window_size, exhausted,
+                         anchor=self._unread_boundary or None,
+                         seen_anchor=self._unread_boundary or None)
+        return True
 
     def oldest_ts(self):
         timestamps = [entry.get("timestamp", "") for entry in self._history

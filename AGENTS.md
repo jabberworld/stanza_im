@@ -438,6 +438,20 @@ reason) and shows an OSD; our own delete (`_on_room_destroyed`) closes the tab,
 stops the auto-join retries (`_drop_room_ui` clears every per-room map and the
 conference roster row) and keeps the bookmark. [`tests/test_muc_destroy.py`]
 
+**History behind an open tab**: a conference server replays its archive on
+join as **archived** groupchat messages (`<archived xmlns='urn:xmpp:mam:tmp'/>`
++ `<delay>`) and the MAM backfill may store newer rows while the tab is open;
+both are stored but not rendered immediately (`_on_groupchat_message`'s archived
+branch returns after storing). `ChatWidget.schedule_tail_refresh` (debounced,
+also called after `server_fetch_done`) reloads the window only for the visible,
+not-scrolled-up conversation (`refresh_tail_if_newer`), keeps the unread
+boundary and stays at the bottom; a suspended tab defers it to `resume`, a
+background/scrolled-up tab is left alone. `history._insert` also **repairs a
+stale timestamp** when an archive/origin/message id already exists with a
+different one (the body is never rewritten — an edit is a separate update), so
+an old malformed row cannot hide the new messages forever.
+[`tests/test_history_tail_refresh.py`, `tests/test_history_dedup.py`]
+
 **MUC join reliability**: presence status lines (`muc_user_joined`/`left`/
 `muc_status_changed`) are shown only after a successful join — `MainWindow`
 tracks `_muc_joined`/`_muc_join_grace` and suppresses them until

@@ -36,6 +36,25 @@ check("archive dup: first stored", first is True)
 check("archive dup: second skipped", second is False)
 check("archive dup: count==1", history.count_messages(jid) == 1)
 
+# 1b. a stale archive timestamp is repaired without touching the body -------
+jid1b = "dedup-archive-repair@example.com"
+history.store_message(jid1b, "incoming", "fixed", sender="Bob",
+                      timestamp="2026-10-21T15:14:13.000000Z",
+                      archive_id="arch-repair")
+repaired = history.store_message(jid1b, "incoming", "fixed", sender="Bob",
+                                 timestamp="2026-10-22T13:09:08.000000Z",
+                                 archive_id="arch-repair")
+rows = history.load_history(jid1b, 10)
+check("archive repair updates the timestamp", repaired is True
+      and len(rows) == 1
+      and rows[0]["timestamp"] == "2026-10-22T13:09:08.000000Z")
+rewritten = history.store_message(jid1b, "incoming", "changed", sender="Bob",
+                                  timestamp="2026-10-22T13:09:08.000000Z",
+                                  archive_id="arch-repair")
+rows = history.load_history(jid1b, 10)
+check("archive repair never rewrites the body",
+      rewritten is False and rows[0]["body"] == "fixed")
+
 # 2. id-less identical content is not duplicated -----------------------------
 jid2 = "dedup-content@example.com"
 history.store_message(jid2, "incoming", "same", sender="Ann",

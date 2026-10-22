@@ -308,9 +308,21 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             "AND timestamp = ?)")
         params.extend([direction, sender, body, ts])
         row = conn.execute(
-            "SELECT id FROM messages WHERE (" + " OR ".join(clauses)
+            "SELECT id, archive_id, origin_id, message_id, timestamp "
+            "FROM messages WHERE (" + " OR ".join(clauses)
             + ") LIMIT 1", params).fetchone()
-        if row:
+        if row is not None:
+            stable = bool(
+                (archive_id and archive_id == (row[1] or ""))
+                or (origin_id and origin_id == (row[2] or ""))
+                or (message_id and message_id == (row[3] or "")))
+            if stable and ts and ts != (row[4] or ""):
+                # An older build may have stored this archived message with a
+                # wrong timestamp: repair it.  The body is never rewritten (an
+                # XEP-0308 correction is a separate row update).
+                conn.execute("UPDATE messages SET timestamp = ? WHERE id = ?",
+                             (ts, row[0]))
+                return True
             return False
     conn.execute(
         "INSERT INTO messages "

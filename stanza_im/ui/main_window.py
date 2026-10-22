@@ -6208,6 +6208,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 tr("history_server_loaded", n=stored or 0)
                 if stored else tr("history_server_empty"))
             chat.server_fetch_done(stored or 0)
+            # The fetched page may be newer than the window loaded at open (a
+            # join-time replay was stored first, so the page counts as
+            # duplicates): let the visible conversation merge the new tail.
+            if (self._chat_area_visible()
+                    and self._chat_window.current_jid() == jid):
+                chat.schedule_tail_refresh(200)
 
     def _on_mam_parse_error(self, jid: str, results: int,
                             parsed: int, skipped: int):
@@ -6973,6 +6979,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 sender=nick, archive_id=archive_id,
                 origin_id=reply_able_id,
                 reply_to=reply_to, reply_id=reply_id, markup=markup))
+            # A join-time history replay is stored, not rendered: merge it into
+            # the window when the room is the conversation on screen.
+            if (self._chat_area_visible()
+                    and self._chat_window.current_jid() == room):
+                chat = self._chat_window.get_chat(room)
+                if chat is not None:
+                    chat.schedule_tail_refresh()
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
