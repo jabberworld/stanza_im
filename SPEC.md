@@ -1241,7 +1241,12 @@ Single conversation tab. Layout:
   incrementally (`_sync_muc_users`/`_sync_muc_order`): a row is created once,
   updated in place (show/badge/colour/client/avatar), moved between the
   moderator/participant/guest sections and removed without touching the
-  others; the section counters follow. Right-click
+  others; the section counters follow. A participant's vCard is cache-first:
+  `MainWindow._on_groupchat_presence` only enqueues it
+  (`client.queue_participant_vcard`), a cached card (24 h) is applied at once,
+  the misses are fetched one at a time (~3/s, departing occupants skipped), and
+  a cached avatar file for `room/nick` is used without any request
+  (`_muc_cached_avatar`). Right-click
   opens the participant context menu; when the participant's real JID is
   visible it also offers «Пригласить в» (XEP-0249, §7.3).
 

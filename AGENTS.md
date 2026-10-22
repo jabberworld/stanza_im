@@ -1048,7 +1048,14 @@ moderator/participant/guest sections in place and the section counters
 per presence; roster and participant avatars are clipped by
 `include.avatars.rounded_avatar` with `appearance.avatar_radius` (0 = square,
 100 = circle; `RosterStyle.set_avatar_radius`/`ChatWidget.set_avatar_radius`,
-applied live via `MainWindow._apply_avatar_radius`). The conference toggles are
+applied live via `MainWindow._apply_avatar_radius`). A participant's vCard is
+resolved **cache-first**: `MainWindow._on_groupchat_presence` only calls
+`client.queue_participant_vcard(room, nick)` (never one vCard IQ per presence),
+which applies a cached card at once (participant TTL 24 h) or appends the nick
+to a single rate-limited background worker (~3 requests/s, skipping occupants
+who left); a cached avatar **file** for `room/nick` is used immediately
+(`_muc_cached_avatar`) so a returning nick shows its avatar without a request.
+The conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →
 Appearance → «Конференции», all `true`; a participant's caps node is captured in
 `_on_groupchat_presence`). `muc_show_hats` gates the XEP-0317 hat chips under

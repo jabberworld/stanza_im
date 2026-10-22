@@ -17,6 +17,7 @@ import secrets
 import platform
 import ssl
 import time
+from collections import deque
 import uuid
 from typing import Any, Callable
 from xml.etree import ElementTree as ET
@@ -1378,6 +1379,13 @@ class JabberClient:
         self._mam_cursors: dict[str, str] = {}
         self._vcard_cache = VCardCache()
         self._vcard_inflight: set[str] = set()
+        # Conference participant cards: a nick is resolved once per session
+        # (cache first) and the misses are fetched by one rate-limited worker
+        # instead of one IQ per presence (a 200-participant join would flood).
+        self._participant_vcards: deque = deque()
+        self._participant_vcard_set: set[tuple[str, str]] = set()
+        self._participant_vcard_done: set[tuple[str, str]] = set()
+        self._participant_vcard_task: asyncio.Task | None = None
         # XEP-0237: cached roster items + version for the next login; loaded
         # lazily by ``_seed_roster_cache`` so a throwaway registration client
         # never touches the disk.
@@ -4768,6 +4776,86 @@ class JabberClient:
             return
         self._on_vcard(iq, jid)
         self._vcard_inflight.discard(jid)
+
+    #: A conference participant's card is reused for a day: a nick's avatar
+    #: and name rarely change, and refetching one per presence floods the
+    #: server during a large-room join.
+    PARTICIPANT_VCARD_MAX_AGE = 24 * 60 * 60
+    #: Spacing between two background participant-vCard requests (seconds).
+    PARTICIPANT_VCARD_INTERVAL = 0.35
+
+    def queue_participant_vcard(self, room: str, nick: str) -> None:
+        """Resolve a MUC participant's vCard: cache first, then a slow queue.
+
+        The card is fetched through the occupant JID (``room/nick``), which a
+        conference server relays to the real user's card even when the room
+        hides real JIDs.  A cached card is applied immediately; otherwise the
+        participant enters a background queue processed at a low rate.
+        """
+        room = str(room or "").strip()
+        nick = str(nick or "").strip()
+        if not room or not nick:
+            return
+        key = (room, nick)
+        if key in self._participant_vcard_done:
+            return
+        cached = self._vcard_cache.get(
+            f"{room}/{nick}", max_age=self.PARTICIPANT_VCARD_MAX_AGE)
+        if cached is not None:
+            self._participant_vcard_done.add(key)
+            self.emit("vcard_received", f"{room}/{nick}", cached)
+            return
+        if key in self._participant_vcard_set:
+            return
+        self._participant_vcard_set.add(key)
+        self._participant_vcards.append(key)
+        self._start_participant_vcard_worker()
+
+    def _start_participant_vcard_worker(self) -> None:
+        task = self._participant_vcard_task
+        if task is not None and not task.done():
+            return
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        self._participant_vcard_task = loop.create_task(
+            self._participant_vcard_loop())
+
+    async def _participant_vcard_loop(self) -> None:
+        try:
+            while self._participant_vcards:
+                room, nick = self._participant_vcards.popleft()
+                self._participant_vcard_set.discard((room, nick))
+                key = (room, nick)
+                if key in self._participant_vcard_done:
+                    continue
+                # The occupant may have left while queued.
+                gi = self.groupchats.get(room)
+                if gi is None or nick not in gi.users:
+                    continue
+                cached = self._vcard_cache.get(
+                    f"{room}/{nick}",
+                    max_age=self.PARTICIPANT_VCARD_MAX_AGE)
+                if cached is not None:
+                    self._participant_vcard_done.add(key)
+                    self.emit("vcard_received", f"{room}/{nick}", cached)
+                    continue
+                self._participant_vcard_done.add(key)
+                await self._participant_vcard_fetch(f"{room}/{nick}")
+                await asyncio.sleep(self.PARTICIPANT_VCARD_INTERVAL)
+        finally:
+            self._participant_vcard_task = None
+            if self._participant_vcards:
+                self._start_participant_vcard_worker()
+
+    async def _participant_vcard_fetch(self, jid: str) -> None:
+        """Fetch one participant card (indirection point for the queue tests)."""
+        try:
+            vcard = self.xmpp.plugin["xep_0054"]
+        except (KeyError, AttributeError):
+            return
+        await self._fetch_vcard(vcard, jid)
 
     async def set_own_vcard(self, card: dict) -> bool:
         """Publish *card* (see :func:`stanza_im.include.vcard.parse_vcard`) as

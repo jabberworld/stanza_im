@@ -7026,6 +7026,24 @@ class MainWindow(QtWidgets.QMainWindow):
         node = gi.users.get(nick, {}).get("caps_node", "") if gi else ""
         return node or previous.get("caps_node", "")
 
+    @staticmethod
+    def _muc_cached_avatar(room: str, nick: str,
+                           previous: dict) -> tuple[str, str]:
+        """``(avatar_path, avatar_jid)`` for an occupant, cache-first by nick.
+
+        A previously cached avatar file is used without a vCard request; the
+        card itself is fetched in the background by the client's participant
+        queue (a large-room join must not issue one IQ per occupant).
+        """
+        path = str(previous.get("avatar_path") or "")
+        avatar_jid = str(previous.get("avatar_jid") or "")
+        if path:
+            return path, avatar_jid
+        virtual = f"{room}/{nick}"
+        if has_avatar(virtual):
+            return avatar_path(virtual), virtual
+        return "", avatar_jid
+
     def _muc_occupant_id(self, room: str, nick: str) -> str:
         """The occupant's XEP-0421 occupant-id (from the client's groupchat)."""
         if not self._client:
@@ -7047,12 +7065,14 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             previous = users.get(nick, {})
             occupant_id = self._muc_occupant_id(room, nick)
+            avatar_path_value, avatar_jid_value = self._muc_cached_avatar(
+                room, nick, previous)
             users[nick] = {
                 "nick": nick, "show": show, "status": status,
                 "role": role, "affiliation": affiliation,
                 "real_jid": real_jid or previous.get("real_jid", ""),
-                "avatar_jid": previous.get("avatar_jid", ""),
-                "avatar_path": previous.get("avatar_path", ""),
+                "avatar_jid": avatar_jid_value,
+                "avatar_path": avatar_path_value,
                 "client": previous.get("client", ""),
                 "caps_node": self._muc_caps_node(room, nick, previous),
                 "occupant_id": occupant_id or previous.get("occupant_id", ""),
@@ -7061,9 +7081,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 "status_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             if self._client:
-                request_jid = (real_jid if isinstance(real_jid, str)
-                               and real_jid.lower() != "none" else "")
-                self._client.get_vcard(request_jid or f"{room}/{nick}")
+                # Cache first; a miss enters the client's rate-limited queue
+                # (never one vCard IQ per presence).
+                self._client.queue_participant_vcard(room, nick)
         chat = self._chat_window.get_chat(room)
         if chat:
             self_nick = self._muc_self_nicks.get(room, "")
