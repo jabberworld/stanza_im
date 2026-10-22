@@ -2781,11 +2781,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   started by another occupant is offered rather than joined (one prompt per
   session; declining keeps the session and refuses its state), and the dialog
   is a top-level window so the toolbar/roster can join the running board later.
-  A toggleable participant sidebar (hidden by default, never persisted) lists
-  the senders recorded in `WhiteboardSession.participants` (`whiteboard_edit`)
-  with their nicks/roster names and avatars, and highlights the last editor for
-  two seconds (the key is matched by bare JID, so 1:1 works too). An unchanged
-  participant set refreshes only the highlight.
+  A toggleable participant sidebar (hidden by default, never persisted, sharing
+  a `QSplitter` with the canvas so its width is adjustable) lists the senders
+  recorded in `WhiteboardSession.participants` (`whiteboard_edit`) with their
+  nicks/roster names and avatars, and highlights the last editor for two seconds
+  with a palette-highlight row background (the key is matched by bare JID, so
+  1:1 works too). An unchanged participant set refreshes only the highlight, and
+  a plain `whiteboard_state` refresh keeps it.
 - **Initial-state synchronization** follows XEP-0284: the `session-accept`
   echoes the host named in the offered `<transport><host/>` (§4.2) and sets
   `responder`; the joiner sends `<connect/>` only after the accept is

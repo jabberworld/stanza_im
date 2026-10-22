@@ -230,12 +230,14 @@ class WhiteboardDialog(QtWidgets.QDialog):
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
-        # Board + participant sidebar (hidden by default, session only).
-        body = QtWidgets.QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(4)
-        body.addWidget(self._canvas, 1)
+        # Board + participant sidebar (hidden by default, session only).  The
+        # splitter lets the user trade canvas space for the list.
+        self._splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.setHandleWidth(4)
+        self._splitter.addWidget(self._canvas)
         self._participants_panel = QtWidgets.QWidget()
+        self._participants_panel.setMinimumWidth(140)
         panel = QtWidgets.QVBoxLayout(self._participants_panel)
         panel.setContentsMargins(0, 0, 4, 0)
         panel.setSpacing(2)
@@ -255,11 +257,16 @@ class WhiteboardDialog(QtWidgets.QDialog):
         self._participants_list.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._participants_list.setWordWrap(False)
-        self._participants_list.setFixedWidth(190)
         panel.addWidget(self._participants_list, 1)
+        self._splitter.addWidget(self._participants_panel)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 0)
+        self._splitter.setSizes([820, 190])
         self._participants_panel.setVisible(False)
-        body.addWidget(self._participants_panel)
-        layout.addLayout(body, 1)
+        handle = self._splitter.handle(1)
+        if handle is not None:
+            handle.setVisible(False)
+        layout.addWidget(self._splitter, 1)
 
         self._sync_label = QtWidgets.QLabel(tr("whiteboard_not_shared"))
         self._sync_label.setContentsMargins(6, 2, 6, 4)
@@ -293,29 +300,31 @@ class WhiteboardDialog(QtWidgets.QDialog):
     def session_id(self) -> str:
         return self._sid
 
-    def set_participants(self, entries, active: str = "") -> None:
-        """Update the board's participants; *active* edited just now.
+    def set_participants(self, entries, active=None) -> None:
+        """Update the board's participants.
 
         An entry is ``(key, label[, avatar_path])`` or a dict with those keys;
-        1:1 keys are bare JIDs while *active* may carry a resource.
+        1:1 keys are bare JIDs while *active* may carry a resource.  *active*
+        names the participant who edited just now; ``None`` keeps the current
+        highlight (a plain document refresh must not wipe it) and ``""``
+        clears it.
         """
         normalized = [self._normalize_participant(entry)
                       for entry in (entries or ())]
-        active_key = self._resolve_active(active, normalized)
         changed = normalized != self._participants
         self._participants = normalized
-        self._participant_active = active_key
+        if active is not None or not normalized:
+            self._participant_active = self._resolve_active(active, normalized)
+            if self._participant_active:
+                self._participant_timer.start()
+            else:
+                self._participant_timer.stop()
         if changed:
             self._rebuild_participants()
         else:
             self._apply_participant_highlight()
-        if active_key:
-            self._participant_timer.start()
         self._participants_btn.setEnabled(bool(normalized))
-        if not normalized:
-            self._participants_panel.setVisible(False)
-        elif self._participants_visible:
-            self._participants_panel.setVisible(True)
+        self._update_participants_visibility()
 
     @staticmethod
     def _normalize_participant(entry) -> tuple[str, str, str]:
@@ -342,8 +351,19 @@ class WhiteboardDialog(QtWidgets.QDialog):
 
     def _on_toggle_participants(self, checked: bool) -> None:
         self._participants_visible = bool(checked)
-        self._participants_panel.setVisible(
-            bool(checked) and bool(self._participants))
+        self._update_participants_visibility()
+
+    def _update_participants_visibility(self) -> None:
+        visible = bool(self._participants_visible and self._participants)
+        if visible and not self._participants_panel.isVisible():
+            sizes = self._splitter.sizes()
+            if len(sizes) == 2 and sizes[1] <= 0:
+                width = max(320, self.width() - 190)
+                self._splitter.setSizes([width, 190])
+        self._participants_panel.setVisible(visible)
+        handle = self._splitter.handle(1)
+        if handle is not None:
+            handle.setVisible(visible)
 
     def _clear_participant_highlight(self) -> None:
         self._participant_active = ""
@@ -356,8 +376,12 @@ class WhiteboardDialog(QtWidgets.QDialog):
         if self._config is not None:
             radius = int(getattr(self._config.appearance, "avatar_radius", 100))
         for key, label, avatar in self._participants:
-            row = QtWidgets.QWidget()
+            row = QtWidgets.QFrame()
             row.setObjectName("wbParticipantRow")
+            # A plain QWidget does not paint a stylesheet background; the
+            # editor highlight is exactly such a background.
+            row.setAttribute(
+                QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
             line = QtWidgets.QHBoxLayout(row)
             line.setContentsMargins(2, 2, 2, 2)
             line.setSpacing(6)
@@ -380,7 +404,7 @@ class WhiteboardDialog(QtWidgets.QDialog):
 
     def _apply_participant_highlight(self) -> None:
         color = self.palette().color(QtGui.QPalette.ColorRole.Highlight)
-        color.setAlpha(70)
+        color.setAlpha(120)
         style = ("#wbParticipantRow { background-color: rgba(%d,%d,%d,%d);"
                  " border-radius: 4px; }"
                  % (color.red(), color.green(), color.blue(), color.alpha()))

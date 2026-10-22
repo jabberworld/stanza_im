@@ -1066,6 +1066,20 @@ check("the last editor row is highlighted",
       bool(pd._participant_rows["alice"].styleSheet()))
 check("the other rows are not highlighted",
       not pd._participant_rows["__me__"].styleSheet())
+check("the row paints its own stylesheet background",
+      pd._participant_rows["alice"].testAttribute(
+          QtCore.Qt.WidgetAttribute.WA_StyledBackground))
+
+# A plain document refresh (whiteboard_state) must keep the highlight; only an
+# explicit empty active (or the timer) clears it.
+pd.set_participants([("__me__", "You"), ("alice", "alice")])
+check("a plain state refresh keeps the editor highlight",
+      pd._participant_active == "alice"
+      and bool(pd._participant_rows["alice"].styleSheet()))
+pd.set_participants([("__me__", "You"), ("alice", "alice")], active="")
+check("an explicit empty active clears the highlight",
+      pd._participant_active == ""
+      and not any(row.styleSheet() for row in pd._participant_rows.values()))
 pd.set_participants([("__me__", "You"), ("alice", "alice")], active="alice")
 pd._clear_participant_highlight()
 check("the highlight fades after the timer",
@@ -1089,6 +1103,30 @@ pd.set_participants([])
 check("an empty participant list hides the sidebar and disables the toggle",
       pd._participants_panel.isHidden()
       and not pd._participants_btn.isEnabled())
+
+# The list and the canvas share a resizable splitter.
+check("the sidebar sits in a splitter with the canvas",
+      pd._splitter.count() == 2
+      and pd._splitter.widget(1) is pd._participants_panel
+      and pd._splitter.handleWidth() == 4
+      and not pd._splitter.childrenCollapsible())
+check("the list can grow (no fixed width)",
+      pd._participants_panel.minimumWidth() == 140
+      and not pd._participants_list.minimumWidth())
+pd.set_participants([("__me__", "You")])
+pd._participants_btn.setChecked(True)
+pd.resize(900, 650)
+pd.show()
+QtWidgets.QApplication.processEvents()
+pd._splitter.setSizes([500, 260])
+QtWidgets.QApplication.processEvents()
+check("the participant list width is adjustable",
+      pd._splitter.sizes()[1] >= 200)
+pd._participants_btn.setChecked(False)
+QtWidgets.QApplication.processEvents()
+check("hiding the list gives the canvas the space and hides the handle",
+      pd._participants_panel.isHidden()
+      and pd._splitter.handle(1).isHidden())
 
 pd.deleteLater()
 
