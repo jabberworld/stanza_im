@@ -336,6 +336,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # unread counters still show as roster badges before that.
         self._muc_users: dict[str, dict[str, dict]] = {}
         self._muc_room_features: dict[str, set] = {}
+        # Rooms that answered a MAM query with an error (old servers without
+        # an archive): never retry the query for this session.
+        self._mam_unsupported: set[str] = set()
         self._muc_moderation: dict[str, bool] = {}
         self._muc_moderation_pending: set[str] = set()
         self._muc_self_nicks: dict[str, str] = {}
@@ -6317,8 +6320,19 @@ class MainWindow(QtWidgets.QMainWindow):
         """Load the whole server-side conversation into the chat window."""
         if not self._client:
             return
-        logger.info("Requesting MAM history for %s before %s", jid, since or "now")
         chat = self._chat_window.get_chat(jid)
+        features = self._muc_room_features.get(jid)
+        no_archive = (jid in self._mam_unsupported
+                      or (jid in self._muc_self_nicks
+                          and features is not None
+                          and "urn:xmpp:mam:2" not in features))
+        if no_archive:
+            self._mam_unsupported.add(jid)
+            if chat:
+                chat.mark_server_exhausted()
+                chat.set_history_status(tr("history_server_unavailable"))
+            return
+        logger.info("Requesting MAM history for %s before %s", jid, since or "now")
         if chat:
             chat.set_history_status(tr("history_server_fetching"))
         self._start_task(self._fetch_server_history(jid, since or None))
@@ -6362,6 +6376,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.set_history_status(tr("history_server_parse_error"))
 
     def _on_mam_unavailable(self, jid: str):
+        self._mam_unsupported.add(jid)
         chat = self._chat_window.get_chat(jid)
         if not chat:
             return
@@ -7128,12 +7143,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 origin_id=reply_able_id,
                 reply_to=reply_to, reply_id=reply_id, markup=markup))
             # A join-time history replay is stored, not rendered: merge it into
-            # the window when the room is the conversation on screen.
-            if (self._chat_area_visible()
-                    and self._chat_window.current_jid() == room):
-                chat = self._chat_window.get_chat(room)
-                if chat is not None:
-                    chat.schedule_tail_refresh()
+            # the window when the room is the conversation on screen.  A replay
+            # has no archive id and is usually older than the tail this client
+            # already has, so it needs a forced reload (a MAM page does not).
+            chat = self._chat_window.get_chat(room)
+            if (chat is not None and self._chat_area_visible()
+                    and self._chat_window.current_jid() == room
+                    and not getattr(chat, "_user_scrolled_up", False)):
+                chat.schedule_tail_refresh(force=not archive_id)
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
@@ -10054,6 +10071,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_users.clear()
         self._muc_vcard_names.clear()
         self._muc_avatar_paths.clear()
+        self._muc_room_features.clear()
+        self._mam_unsupported.clear()
         self._bookmarks = {}
         for dialog in self._whiteboards.values():
             dialog.deleteLater()

@@ -51,6 +51,8 @@ class _StubView(QtWidgets.QWidget):
         self.highlight_nick = ""
         self.scrolled_up = False
         self.cleared = 0
+        self.time_scrolls = []
+        self.bottom_scrolls = 0
 
     def shutdown(self):
         pass
@@ -71,7 +73,10 @@ class _StubView(QtWidgets.QWidget):
         pass
 
     def scroll_to_bottom(self):
-        pass
+        self.bottom_scrolls += 1
+
+    def scroll_to_time(self, timestamp):
+        self.time_scrolls.append(timestamp)
 
     def set_scroll_fraction(self, fraction):
         pass
@@ -148,6 +153,49 @@ check("a suspended tab defers the tail refresh",
       and asyncio.run(cw.refresh_tail_if_newer()) is False)
 cw._suspended = False
 cw._tail_refresh_on_resume = False
+
+# A join replay may be older than the shown tail: a forced refresh reloads the
+# window, a normal one still treats "nothing newer" as a no-op.
+jid2 = "replay@conf.example"
+for i in range(5):
+    history.store_message(jid2, "incoming", f"m{i}", sender="A",
+                          timestamp=f"2026-10-2{i + 1}T10:00:00.000000Z")
+rows = history.load_history(jid2, 10)
+w = chat_widget_mod.ChatWidget(
+    jid2, "Room", chat_themes.ChatThemeFactory(), is_muc=True)
+w._view = _StubView()
+w.set_history(rows[3:], 10, True)
+w._window_size = 10
+w.show()
+app.processEvents()
+history.store_message(jid2, "incoming", "replay old", sender="B",
+                      timestamp="2026-10-22T09:00:00.000000Z")
+check("an older-only stored row does not trigger a normal refresh",
+      asyncio.run(w.refresh_tail_if_newer()) is False)
+check("a forced refresh reloads the window",
+      asyncio.run(w.refresh_tail_if_newer(force=True)) is True)
+check("the older replay row is merged",
+      any(entry["body"] == "replay old" for entry in w._history))
+w.detach()
+
+# The read anchor may point at a legacy row without ids: scroll by timestamp,
+# and never leave the reloaded page at its top.
+w2 = chat_widget_mod.ChatWidget(
+    "anchor@conf.example", "Room", chat_themes.ChatThemeFactory(), is_muc=True)
+w2._view = _StubView()
+w2._history = [{"sender": "A", "body": "old", "direction": "incoming",
+                "timestamp": "2026-10-22T10:00:00.000000Z",
+                "message_id": "", "origin_id": "", "archive_id": ""}]
+w2._messages = []
+w2._restore_anchor = {"ref": "", "ts": "2026-10-22T10:00:00.000000Z"}
+w2._restore_from_anchor()
+check("an id-less anchor scrolls by its timestamp",
+      w2._view.time_scrolls == ["2026-10-22T10:00:00.000000Z"])
+w2._restore_anchor = {"ref": "", "ts": "2020-01-01T00:00:00.000000Z"}
+w2._restore_from_anchor()
+check("an unreachable anchor falls back to the bottom",
+      w2._view.bottom_scrolls == 1)
+w2.detach()
 
 # The archived replay and the MAM fetch both schedule the refresh.
 from stanza_im.ui.main_window import MainWindow  # noqa: E402

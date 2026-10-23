@@ -6218,11 +6218,7 @@ class JabberClient:
         """Extract (unstyled, ts, reply_to, reply_id, stable_id) from a
         1:1 message stanza (shared by direct messages and XEP-0280 carbons)."""
         unstyled = _has_stanza_element(msg, "unstyled")
-        ts = msg.get("delay", {}).get("stamp", None)
-        if isinstance(ts, datetime.datetime):
-            ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
-        elif ts:
-            ts = _normalize_ts(str(ts))
+        ts = _delay_stamp(msg) or None
         reply_to, reply_id = _reply_reference(msg)
         stable_id = _origin_id(msg) or str(msg.get("id") or "")
         return unstyled, ts, reply_to, reply_id, stable_id
@@ -6344,14 +6340,12 @@ class JabberClient:
             self.emit("muc_subject_changed", room, list(subjects))
             return
         unstyled = _has_stanza_element(msg, "unstyled")
-        ts = msg.get("delay", {}).get("stamp", None)
-        if isinstance(ts, datetime.datetime):
-            ts = _normalize_ts(ts.strftime("%Y-%m-%dT%H:%M:%S"))
-        elif ts:
-            ts = _normalize_ts(str(ts))
-        # Live room echoes may also carry an archive marker. History replay
-        # additionally has delayed delivery, which is the reliable signal.
-        archived = _has_stanza_element(msg, "archived") and bool(ts)
+        ts = _delay_stamp(msg) or None
+        # A delayed delivery is the reliable history signal: old MUC servers
+        # replay their cache with only <delay/> (no <archived/>), and treating
+        # that as a live message would sound/OSD it and count it unread.  Live
+        # room echoes may carry an archive marker instead.
+        archived = bool(ts)
         archive_id = _archive_result_id(msg) if archived else ""
         reply_to, reply_id = _reply_reference(msg)
         stable_id = _stanza_id(msg, room)
@@ -7504,6 +7498,19 @@ def _normalize_ts(ts: str) -> str:
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
     parsed = parsed.astimezone(datetime.timezone.utc)
     return parsed.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _delay_stamp(message) -> str:
+    """The XEP-0203 original delivery timestamp of a message (canonical).
+
+    ``xep_0203`` is not registered, so ``message.get("delay")`` is empty even
+    though the stanza carries a ``<delay/>`` element; read it from the XML.
+    """
+    delay = _stanza_value(message, "delay")
+    stamp = _stanza_value(delay, "stamp")
+    if isinstance(stamp, datetime.datetime):
+        return _normalize_ts(stamp.strftime("%Y-%m-%dT%H:%M:%S"))
+    return _normalize_ts(str(stamp).strip()) if stamp else ""
 
 
 def _message_timestamp(message, result=None) -> str:

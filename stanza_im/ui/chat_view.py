@@ -2627,8 +2627,46 @@ window.__stanzaMentionRef = '';
             kind = pending[0]
             if kind == "message":
                 self._run_scroll_to_message(pending[1], pending[2])
+            elif kind == "time":
+                self._run_scroll_to_time(pending[1])
             elif kind == "bottom":
                 self.scroll_to_bottom()
+
+        def scroll_to_time(self, timestamp: str) -> None:
+            """Scroll to the newest message at or before *timestamp*.
+
+            Old rows may have no ``origin-id``/``archive_id`` (a legacy
+            database), so the read-anchor resume cannot address them by id;
+            the rendered node still carries the raw timestamp it was stored
+            with.
+            """
+            stamp = str(timestamp or "")
+            if not stamp:
+                return
+            if not self._ready or self._pending:
+                self._deferred_scroll = ("time", stamp)
+                self._scroll_suspended = True
+                return
+            self._run_scroll_to_time(stamp)
+
+        def _run_scroll_to_time(self, timestamp: str) -> None:
+            safe = json.dumps(timestamp or "")
+            self.page().runJavaScript(f"""
+            (function() {{
+                var ts = {safe};
+                if (!ts) return;
+                var nodes = document.querySelectorAll('.stanza-message');
+                var target = null;
+                for (var i = 0; i < nodes.length; i++) {{
+                    var t = nodes[i].getAttribute('data-stanza-time') || '';
+                    if (t && t <= ts) target = nodes[i];
+                }}
+                if (target) {{ target.scrollIntoView({{block: 'center'}}); return; }}
+                if (nodes.length) {{
+                    nodes[nodes.length - 1].scrollIntoView({{block: 'end'}});
+                }}
+            }})();
+            """)
 
         def _run_scroll_to_message(self, message_id: str,
                                    highlight: bool = True) -> None:
@@ -2899,6 +2937,10 @@ else:
                               highlight: bool = True) -> None:
             """No-op: the QTextBrowser fallback has no per-message nodes."""
             return
+
+        def scroll_to_time(self, timestamp: str) -> None:
+            """No per-message nodes: keep the newest messages in view."""
+            self.scroll_to_bottom()
 
         def clear_unread_separator(self) -> bool:
             """Remove the divider paragraph from the fallback document.

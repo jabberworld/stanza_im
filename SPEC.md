@@ -1838,7 +1838,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   archived MAM replay never is. `_reset_unread` also stores the read anchor
   (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
   `origin-id` → own message id — plus its raw timestamp), so an unread
-  conversation can be restored from the point the user stopped reading.
+  conversation can be restored from the point the user stopped reading. The
+  restore finds the row by a stable id, else by its timestamp
+  (`ChatView.scroll_to_time`, for legacy rows without ids), else pages the
+  archive; an unreachable anchor scrolls to the bottom instead of leaving the
+  freshly loaded page at its oldest message.
 - In a conference an unread message naming our nickname also shows a floating
   `@ N` button left of the `▼ N` one (shared `#stanza-fabs` row; the WebEngine
   backend uses the in-page `#stanza-mention` div, the fallback a `QToolButton`,
@@ -2180,15 +2184,22 @@ Registers XEP plugins (conditionally where noted):
   (`client.set_displayed_state`), so the startup catch-up does not wipe restored
   unread while a newer remote state still clears it.
   Config `chat.message_displayed_sync` (default on).
-- **History behind an open tab**: the join-time room replay arrives as archived
-  groupchat messages and is stored without rendering; the MAM backfill likewise
-  stores rows while the tab is open. `ChatWidget.schedule_tail_refresh` /
+- **History behind an open tab**: the join-time room replay arrives as
+  **delayed** groupchat messages; a XEP-0203 `<delay/>` is the reliable history
+  signal (old servers send it without `<archived/>`, and it is read from the
+  XML since `xep_0203` is not registered), so it is stored without rendering,
+  sound, OSD or unread counters. The MAM backfill likewise stores rows while
+  the tab is open. `ChatWidget.schedule_tail_refresh` /
   `refresh_tail_if_newer` reloads the window when the stored newest is newer
   than the rendered one — only for the visible, not-user-scrolled conversation
   (a genuine `last_seen` scroll-up, cleared at the bottom; a transient
   non-bottom state while the page loads does not block it), preserving the
-  unread boundary and the bottom position; a suspended tab defers it to
-  `resume`, a background tab is left to its next open. `history._insert`
+  unread boundary and the bottom position. A replay with no archive id forces
+  the reload (it is usually older than the tail this client already has); a
+  MAM page does not. A suspended tab defers it to
+  `resume`, a background tab is left to its next open. A MAM query is skipped
+  for a room whose known disco features lack `urn:xmpp:mam:2`, and a failed
+  query marks the room archive-less for the session (`mam_unavailable`). `history._insert`
   repairs a stale timestamp on an archive/origin/message-id match (never the
   body), so a row stored with a wrong timestamp cannot keep the tail hidden.
 - **Partial progress**: scrolling a conversation into view records the newest

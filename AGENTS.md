@@ -442,16 +442,22 @@ stops the auto-join retries (`_drop_room_ui` clears every per-room map and the
 conference roster row) and keeps the bookmark. [`tests/test_muc_destroy.py`]
 
 **History behind an open tab**: a conference server replays its archive on
-join as **archived** groupchat messages (`<archived xmlns='urn:xmpp:mam:tmp'/>`
-+ `<delay>`) and the MAM backfill may store newer rows while the tab is open;
-both are stored but not rendered immediately (`_on_groupchat_message`'s archived
-branch returns after storing). `ChatWidget.schedule_tail_refresh` (debounced,
-also called after `server_fetch_done`) reloads the window only for the visible,
-not-user-scrolled conversation (`refresh_tail_if_newer`; the flag is set by an
-actual `last_seen` scroll-up and cleared when the view reaches the bottom, so a
-transient "not at the bottom" while the page loads cannot block it), keeps the
-unread boundary and stays at the bottom; a suspended tab defers it to `resume`,
-a background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
+join as **delayed** groupchat messages — a XEP-0203 `<delay/>` is the reliable
+signal; old servers send it **without** `<archived/>` (and `xep_0203` is not
+registered, so the stamp is read from the XML, `_delay_stamp`). Any delayed
+groupchat message is history: `JabberClient._on_groupchat_message` sets
+`archived = bool(ts)` and `_on_groupchat_message`'s archived branch stores it
+without rendering, sounding, OSD or unread counters. The MAM backfill may also
+store rows while the tab is open. `ChatWidget.schedule_tail_refresh`
+(debounced, also called after `server_fetch_done`) reloads the window only for
+the visible, not-user-scrolled conversation (`refresh_tail_if_newer`; the flag
+is set by an actual `last_seen` scroll-up and cleared when the view reaches the
+bottom, so a transient "not at the bottom" while the page loads cannot block
+it). A **join-time replay** (no archive id) forces the reload (`force=True`,
+skipping the "nothing newer" check) because it is usually older than the tail
+already on screen; a MAM page does not. The refresh keeps the unread boundary
+and stays at the bottom; a suspended tab defers it to `resume`, a
+background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
 merge. `history._insert` also **repairs a
 stale timestamp** when an archive/origin/message id already exists with a
 different one (the body is never rewritten — an edit is a separate update), so
@@ -1490,7 +1496,11 @@ the tab (`ChatWidget.set_restore_anchor`) on open (`_on_contact_open`,
 calls `_restore_from_anchor`, which scrolls to the anchor message (by ref, else
 by timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`), so an unread chat opens with the unread block right below
-the last message the user read. The anchor is applied once and dropped. The
+the last message the user read. A legacy row with no replyable id is addressed
+by its timestamp (`ChatView.scroll_to_time`, the last `.stanza-message` with
+`data-stanza-time <= ts`), and an unreachable anchor falls back to the bottom
+instead of leaving the reloaded page at its oldest row. The anchor is applied
+once and dropped. The
 parked scroll is **suspended** meanwhile (`ChatView._scroll_suspended`), so the
 view does not report an "at the bottom" position for a document that is still
 loading and the fresh window cannot mark itself read on its own. The explicit
@@ -1561,11 +1571,12 @@ unread chat shows `▼ N` instead of an empty tail; a re-render does not recount
 it. The count is cleared only when the view actually reaches the newest message
 (`ChatView._note_bottom`, edge-triggered and suspension-aware), never by the
 transient "at the bottom" position during the anchor restore.
-`ChatView.scroll_to_message` parks the request in `_deferred_scroll` while the
-document is empty or has buffered chunks (`clear()` loads a fresh page
-asynchronously), replaying it in `_on_load_finished`/`_probe_chat_alive` after
-the pending markup is appended — otherwise the anchor resume ran against a blank
-document and the chat stayed scrolled to the newest message.
+`ChatView.scroll_to_message`/`scroll_to_time` park the request in
+`_deferred_scroll` while the document is empty or has buffered chunks
+(`clear()` loads a fresh page asynchronously), replaying it in
+`_on_load_finished`/`_probe_chat_alive` after the pending markup is appended —
+otherwise the anchor resume ran against a blank document and the chat stayed
+scrolled to the newest message.
 [`tests/test_read_anchor_restore.py`]
 
 A conversation is marked read when its view **reaches the newest

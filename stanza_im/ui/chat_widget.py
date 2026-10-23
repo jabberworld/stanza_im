@@ -933,6 +933,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._tail_refresh_timer.setSingleShot(True)
         self._tail_refresh_timer.setInterval(400)
         self._tail_refresh_timer.timeout.connect(self._run_tail_refresh)
+        self._tail_refresh_force = False
         self._tail_refresh_on_resume = False
 
         self._typing_timer = QtCore.QTimer(self)
@@ -2063,7 +2064,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._render_all()
         if self._tail_refresh_on_resume:
             self._tail_refresh_on_resume = False
-            self._start_task(self.refresh_tail_if_newer())
+            force = bool(self.__dict__.pop("_tail_refresh_force", False))
+            self._start_task(self.refresh_tail_if_newer(force=force))
 
     def _render_all(self) -> list[dict]:
         """Clear the view and re-render everything, restoring scroll.
@@ -2641,27 +2643,39 @@ class ChatWidget(QtWidgets.QWidget):
             return
         ref = str(anchor.get("ref") or "")
         entry = self._find_message(ref) if ref else None
-        if entry is not None:
-            self._view.scroll_to_message(self._reply_target_id(entry))
+        if entry is not None and self._scroll_to_entry(entry):
             return
         # The anchor message is outside the loaded window: fall back to its
         # timestamp, and only then walk the local archive page by page.
         entry = self._entry_before_or_at(str(anchor.get("ts") or ""))
-        if entry is not None:
-            self._view.scroll_to_message(self._reply_target_id(entry))
+        if entry is not None and self._scroll_to_entry(entry):
             return
         if ref:
             self._jump_to_message(ref)
-        else:
-            # Nothing to page back to: place the separator on what we have.
-            self._finish_unread_resolve(None)
+            return
+        # Nothing to page back to: keep the newest message in view instead of
+        # silently leaving the reloaded page scrolled to its oldest row.
+        self._view.scroll_to_bottom()
+        self._finish_unread_resolve(None)
+
+    def _scroll_to_entry(self, entry: dict) -> bool:
+        """Scroll to a stored row, by stable id or (for old rows) timestamp."""
+        target = self._reply_target_id(entry)
+        if target:
+            self._view.scroll_to_message(target)
+            return True
+        stamp = str(entry.get("timestamp") or "")
+        if stamp:
+            self._view.scroll_to_time(stamp)
+            return True
+        return False
 
     def _entry_before_or_at(self, ts: str):
         """The newest loaded message whose raw timestamp is not newer than *ts*."""
         if not ts:
             return None
         best = None
-        for entry in list(self._history) + list(self._messages):
+        for entry in self._ordered_entries():
             stamp = entry.get("timestamp") or ""
             if stamp and stamp <= ts:
                 best = entry
@@ -2831,10 +2845,18 @@ class ChatWidget(QtWidgets.QWidget):
                 newest = ts
         return newest
 
-    def schedule_tail_refresh(self, delay_ms: int | None = None) -> None:
-        """Merge newly stored history into the window soon (debounced)."""
+    def schedule_tail_refresh(self, delay_ms: int | None = None,
+                              force: bool = False) -> None:
+        """Merge newly stored history into the window soon (debounced).
+
+        *force* reloads the window even when the stored tail is not newer than
+        what is on screen — a MUC server replay on join is usually older than
+        the tail this client already has, yet belongs in the visible history.
+        """
         if self._released:
             return
+        if force:
+            self._tail_refresh_force = True
         if self._suspended:
             self._tail_refresh_on_resume = True
             return
@@ -2843,7 +2865,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._tail_refresh_timer.start(max(0, delay))
 
     def _run_tail_refresh(self) -> None:
-        self._start_task(self.refresh_tail_if_newer())
+        force = bool(self.__dict__.pop("_tail_refresh_force", False))
+        self._start_task(self.refresh_tail_if_newer(force=force))
 
     async def refresh_tail_if_newer(self, force: bool = False) -> bool:
         """Reload the window when newer messages were stored behind it.
@@ -2864,7 +2887,10 @@ class ChatWidget(QtWidgets.QWidget):
         from stanza_im.core import history
         newest = await history.newest_timestamp_async(self.jid)
         rendered = self.newest_ts()
-        if not newest or newest <= (rendered or ""):
+        if not newest:
+            logger.debug("TAIL[refresh] jid=%s no stored rows", self.jid)
+            return False
+        if not force and newest <= (rendered or ""):
             logger.debug("TAIL[refresh] jid=%s nothing newer (db=%s shown=%s)",
                          self.jid, newest, rendered)
             return False
