@@ -2624,9 +2624,11 @@ Message avatars follow `appearance.avatar_radius` too: `_user_icon` clips the
 data URI (`_rounded_avatar_uri`, cached by `(uri, radius)`; the source format is
 auto-detected, so a JPEG/GIF/WebP vCard photo is rounded like a PNG and
 re-encoded as PNG). The page also carries a CSS fallback
-(`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`)
-so an image Qt cannot decode (e.g. an animated WebP) is still rounded in
-WebEngine, and
+(`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`;
+`avatar_css_radius` uses **half** the setting, since CSS percentages are
+relative to the whole box while `rounded_avatar` uses the half-size) so an
+image Qt cannot decode (e.g. an animated WebP) is still rounded like the rest,
+and
 `ChatWindow.set_avatar_radius` applies it to every open tab (the QTextBrowser
 fallback gets the same clipped data URIs, since it has no CSS border-radius). A
 PEP event is attributed to the XEP-0033

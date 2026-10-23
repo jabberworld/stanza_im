@@ -59,6 +59,20 @@ def clamp_zoom(factor: float) -> float:
         return 1.0
 
 
+def avatar_css_radius(pct) -> float:
+    """CSS ``border-radius`` (percent of the box) for a rounding setting.
+
+    ``include.avatars.rounded_avatar`` interprets ``radius_pct`` as a
+    percentage of the half-size (100 = full circle), while a CSS percentage is
+    relative to the whole box — so the equivalent CSS value is half of it.
+    """
+    try:
+        value = max(0, min(100, int(pct or 0)))
+    except (TypeError, ValueError):
+        value = 20
+    return value / 2.0
+
+
 def poll_allowed(state) -> bool:
     """Whether the chat scroll poll may run JavaScript for *state*.
 
@@ -1685,8 +1699,8 @@ window.__stanzaMentionRef = '';
                   "var el=document.getElementById(id);"
                   "if(!el){el=document.createElement('style');el.id=id;"
                   "document.head.appendChild(el);}"
-                  "el.textContent='img.avatar { border-radius: %d%%; }';})();"
-                  % self._avatar_radius)
+                  "el.textContent='img.avatar { border-radius: %g%%; }';})();"
+                  % avatar_css_radius(self._avatar_radius))
             try:
                 self._page.runJavaScript(js)
             except RuntimeError:

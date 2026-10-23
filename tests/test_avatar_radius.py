@@ -190,6 +190,26 @@ check("the radius reaches an open 1:1 tab",
       window.get_chat("bob@example.com")._avatar_radius == 75)
 window.close()
 
+# 4d. the CSS fallback uses the same scale as the data-URI clip -------------
+from stanza_im.ui.chat_view import avatar_css_radius  # noqa: E402
+
+check("CSS radius 0 means no rounding", avatar_css_radius(0) == 0)
+check("CSS radius is half of the setting (20 -> 10)", avatar_css_radius(20) == 10)
+check("CSS radius at 50 matches the moderate data-URI clip",
+      avatar_css_radius(50) == 25)
+check("CSS radius at 100 is a circle (50 % of the box)",
+      avatar_css_radius(100) == 50)
+check("CSS radius clamps out-of-range values",
+      avatar_css_radius(150) == 50 and avatar_css_radius(-10) == 0)
+check("CSS radius falls back to the default for junk",
+      avatar_css_radius("junk") == 10)
+_css_src = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "stanza_im", "ui", "chat_view.py"),
+    encoding="utf-8").read()
+check("the page CSS is built from the shared scale helper",
+      "% avatar_css_radius(self._avatar_radius)" in _css_src
+      and "border-radius: %d%%" not in _css_src)
+
 # 5. i18n --------------------------------------------------------------------
 check("the avatar radius label is translated",
       en.STRINGS.get("prefs_avatar_radius")

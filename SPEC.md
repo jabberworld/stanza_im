@@ -3442,8 +3442,11 @@ client.leave_muji(room)
   (`ChatWidget._rounded_avatar_uri`, cached by `(uri, radius)`; the image
   format is auto-detected and the clipped result re-encoded as PNG), so the
   QTextBrowser fallback rounds them too. A CSS fallback
-  (`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`)
-  also rounds an image Qt cannot decode (e.g. an animated WebP).
+  (`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`;
+  `avatar_css_radius` uses **half** the setting, since CSS percentages are
+  relative to the whole box while `rounded_avatar` uses the half-size) also
+  rounds an image Qt cannot decode (e.g. an animated WebP) exactly like the
+  rest.
 - `_ensure_pep_subscription` also requests the `urn:xmpp:avatar:metadata`
   node as a fallback for servers that need an explicit PEP subscription.
 
