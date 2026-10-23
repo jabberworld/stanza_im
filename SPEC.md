@@ -822,8 +822,9 @@ service types (`subscribe`/`subscribed`/`unsubscribe`/`unsubscribed`/`probe`/
 `error`) are ignored.
 
 The roster is cached across sessions for **XEP-0237 roster versioning**
-(`core/roster_cache.py` → `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json`,
-0600). `_seed_roster_cache()` (the start of `_on_session_start`, before
+`core/roster_cache.py` → `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json`,
+0600; a Unicode account name gets a short SHA-1 suffix and the payload carries
+its account, so two such accounts never share one file). `_seed_roster_cache()` (the start of `_on_session_start`, before
 `request_roster`) loads it lazily and preloads `client_roster` and its
 `version`; the request then carries the cached `ver`, and an unchanged
 roster is answered with an empty result that keeps the seeded list. Every

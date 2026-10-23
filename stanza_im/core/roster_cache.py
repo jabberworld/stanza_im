@@ -10,6 +10,7 @@ One JSON file per account at
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -31,12 +32,21 @@ def set_profile(jid: str) -> None:
 _STATE_FIELDS = ("name", "groups", "from", "to", "whitelisted",
                  "pending_out", "pending_in")
 _SAFE_RE = re.compile(r"[^A-Za-z0-9_.@-]")
+# A Unicode localpart is sanitised to underscores; the digest keeps two such
+# accounts from sharing one roster cache.
+_DIGEST_LEN = 10
+_PREFIX_MAX = 180
 
 _DIRNAME = "roster"
 
 
 def _safe_name(account: str) -> str:
-    return _SAFE_RE.sub("_", str(account or "").lower())
+    value = str(account or "").lower()
+    safe = _SAFE_RE.sub("_", value)
+    if safe != value:
+        digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:_DIGEST_LEN]
+        safe = f"{safe[:_PREFIX_MAX]}-{digest}"
+    return safe
 
 
 def path(account: str) -> str:
@@ -61,6 +71,11 @@ def load(account: str) -> dict | None:
         return None
     if not isinstance(data, dict):
         return None
+    stored = str(data.get("account") or "")
+    if stored and stored.lower() != account.lower():
+        logger.debug("ROSTER[cache] ignoring %s written for %s",
+                     path(account), stored)
+        return None
     items = data.get("items")
     if not isinstance(items, list):
         return None
@@ -79,6 +94,7 @@ def save(account: str, version: str, items: list[dict]) -> None:
     if not account:
         return
     payload = {
+        "account": str(account),
         "version": str(version or ""),
         "items": [
             {key: entry.get(key) for key in ("jid",) + _STATE_FIELDS}

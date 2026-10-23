@@ -1856,7 +1856,9 @@ subscription changes. Presence is aggregated by **bare JID** across resources
 (best `show` wins via `SHOW_ORDER`), and empty/`available` shows are normalized
 to `"online"`. The roster is cached across sessions for
 **XEP-0237 roster versioning** (`core/roster_cache.py`,
-`$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json`, 0600): `_seed_roster_cache()`
+`$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json`, 0600; a Unicode
+account name gets a short SHA-1 suffix and the payload records its account, so
+two such accounts never share a file): `_seed_roster_cache()`
 (called at the start of `_on_session_start`, before `request_roster`) loads it
 lazily and preloads `client_roster` + `version`, so the server can answer an
 unchanged version with an empty result

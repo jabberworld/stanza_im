@@ -68,6 +68,31 @@ check("malformed items yield None", roster_cache.load(ACCOUNT) is None)
 roster_cache.save(ACCOUNT, "v1", ITEMS)
 
 
+# ── cache file names ─────────────────────────────────────────────
+UNI_A = "мария@example.com"
+UNI_B = "ольга@example.com"
+check("non-ASCII accounts get distinct cache files",
+      roster_cache.path(UNI_A) != roster_cache.path(UNI_B))
+check("an ASCII account keeps its plain cache name",
+      os.path.basename(roster_cache.path(ACCOUNT)) == "me@example.com.json")
+check("the account name is case-stable",
+      roster_cache.path(UNI_A) == roster_cache.path(UNI_A.upper()))
+
+roster_cache.save(UNI_A, "u1", ITEMS[:1])
+with open(roster_cache.path(UNI_A), encoding="utf-8") as fh:
+    _payload = json.load(fh)
+check("the cache records its account", _payload.get("account") == UNI_A)
+check("a non-ASCII cache round-trips",
+      roster_cache.load(UNI_A)["version"] == "u1")
+with open(roster_cache.path(UNI_A), "w", encoding="utf-8") as fh:
+    json.dump({"account": UNI_B, "version": "u2", "items": ITEMS}, fh)
+check("a cache written for another account is ignored",
+      roster_cache.load(UNI_A) is None)
+with open(roster_cache.path(UNI_A), "w", encoding="utf-8") as fh:
+    json.dump({"version": "u3", "items": ITEMS}, fh)
+check("a legacy cache without an account still loads",
+      roster_cache.load(UNI_A)["version"] == "u3")
+
 # ── seeding the live roster ──────────────────────────────────────
 client = JabberClient(ACCOUNT + "/desk", "pw")
 client._roster_cache = roster_cache.load(ACCOUNT)
