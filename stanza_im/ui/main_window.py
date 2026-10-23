@@ -4429,7 +4429,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat = self._chat_window.get_chat(room)
                 if chat is not None:
                     chat.refresh_participant(nick)
-                    chat.refresh_avatar_for_sender(nick, jid)
+                    chat.refresh_avatar_for_sender(nick, jid, force=True)
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:
                     muji.set_avatars({nick: path})
@@ -4470,7 +4470,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if chat:
                     for nick, avatar_jid in changed_nicks:
                         chat.refresh_participant(nick)
-                        chat.refresh_avatar_for_sender(nick, avatar_jid)
+                        chat.refresh_avatar_for_sender(nick, avatar_jid,
+                                                       force=True)
                         self._refresh_pm_avatars(room, nick)
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:
@@ -7160,7 +7161,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_groupchat_presence(self, room: str, nick: str, show: str,
                                status: str, role: str = "",
                                affiliation: str = "", real_jid: str = "",
-                               hats=None):
+                               hats=None, photo_hash: str = ""):
         users = self._muc_users.setdefault(room, {})
         was_present = nick in users
         previous_show = users.get(nick, {}).get("show", "")
@@ -7182,12 +7183,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 "occupant_id": occupant_id or previous.get("occupant_id", ""),
                 "hats": (list(hats) if hats is not None
                          else previous.get("hats", [])),
+                "photo_hash": photo_hash or previous.get("photo_hash", ""),
                 "status_updated": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
             if self._client:
                 # Cache first; a miss enters the client's rate-limited queue
-                # (never one vCard IQ per presence).
-                self._client.queue_participant_vcard(room, nick)
+                # (never one vCard IQ per presence).  A cached card with a
+                # different vCard photo hash is re-validated in the background.
+                self._client.queue_participant_vcard(
+                    room, nick, photo_hash)
         chat = self._chat_window.get_chat(room)
         if chat:
             self_nick = self._muc_self_nicks.get(room, "")

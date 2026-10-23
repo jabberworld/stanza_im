@@ -1091,8 +1091,13 @@ who left); `_seed_muc_chat` uses the same queue for the join-time occupant list
 (never one vCard IQ per occupant); a cached avatar **file** for `room/nick` is used immediately
 (`_muc_cached_avatar`) so a returning nick shows its avatar without a request.
 A card that finally arrives updates **only that participant's row** and its
-messages (`ChatWidget.refresh_participant`) — the roster and the other rows are
-not touched (no `clear_pixmaps`, no full-list avatar reload).
+messages (`ChatWidget.refresh_participant`; the message avatars are repainted
+with `refresh_avatar_for_sender(..., force=True)`, since the avatar file keeps
+its path and the sender JID does not change) — the roster and the other rows
+are not touched (no `clear_pixmaps`, no full-list avatar reload). A cached
+participant card is re-validated **once per session** when the presence's
+XEP-0153 photo hash differs from the cached card's `photo_hash` (a nick can be
+reused by another person), showing the cached avatar meanwhile.
 The conference toggles are
 `appearance.muc_show_avatars`/`muc_show_clients`/`muc_show_hats` (Preferences →
 Appearance → «Конференции», all `true`; a participant's caps node is captured in
@@ -2601,7 +2606,10 @@ and outgoing `<img class="avatar">` elements in place when an avatar arrives.
 Message avatars follow `appearance.avatar_radius` too: `_user_icon` clips the
 data URI (`_rounded_avatar_uri`, cached by `(uri, radius)`; the source format is
 auto-detected, so a JPEG/GIF/WebP vCard photo is rounded like a PNG and
-re-encoded as PNG) and
+re-encoded as PNG). The page also carries a CSS fallback
+(`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`)
+so an image Qt cannot decode (e.g. an animated WebP) is still rounded in
+WebEngine, and
 `ChatWindow.set_avatar_radius` applies it to every open tab (the QTextBrowser
 fallback gets the same clipped data URIs, since it has no CSS border-radius). A
 PEP event is attributed to the XEP-0033

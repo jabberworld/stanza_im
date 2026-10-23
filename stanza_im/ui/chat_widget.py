@@ -505,6 +505,7 @@ class ChatWidget(QtWidgets.QWidget):
         # in QtWebEngine; the module registers the custom URL schemes on load.
         from stanza_im.ui.chat_view import ChatView
         view = ChatView(theme)
+        view.set_avatar_radius(self._avatar_radius)
         view.mention_senders = self.is_muc
         view.link_clicked.connect(self._open_link)
         view.link_clicked.connect(self.link_clicked)
@@ -3670,6 +3671,10 @@ class ChatWidget(QtWidgets.QWidget):
         if radius == self._avatar_radius:
             return
         self._avatar_radius = radius
+        try:
+            self._view.set_avatar_radius(radius)
+        except AttributeError:
+            pass
         self._rounded_avatar_cache.clear()
         self.refresh_avatars()
         if self.is_muc:
@@ -3770,12 +3775,18 @@ class ChatWidget(QtWidgets.QWidget):
                 self._view.mark_message_delivered(message_id)
                 return
 
-    def refresh_avatar_for_sender(self, sender: str, sender_jid: str) -> None:
-        """Refresh only messages belonging to a participant avatar update."""
+    def refresh_avatar_for_sender(self, sender: str, sender_jid: str,
+                                  force: bool = False) -> None:
+        """Refresh only messages belonging to a participant avatar update.
+
+        The avatar *file* keeps its path, so the sender JID often does not
+        change at all; *force* repaints the messages anyway (a new vCard photo
+        for the same occupant).
+        """
         changed = False
         for entry in self._history + self._messages:
             if self._same_nick(entry.get("sender", ""), sender):
-                if entry.get("sender_jid", "") != sender_jid:
+                if force or entry.get("sender_jid", "") != sender_jid:
                     entry["sender_jid"] = sender_jid
                     changed = True
         if changed:

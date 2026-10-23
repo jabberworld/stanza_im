@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 from types import SimpleNamespace
+from xml.etree import ElementTree as ET
 
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_participant_vcards_")
 os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6 import QtWidgets
 
-from stanza_im.core.client import JabberClient
+from stanza_im.core.client import JabberClient, _vcard_photo_hash
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["test"])
 
@@ -134,10 +135,61 @@ async def ordered():
           fetched == [f"{room}/u1", f"{room}/u2", f"{room}/u3"])
 
 
+# 4b. a changed vCard photo hash re-validates a cached card ----------------
+async def revalidate():
+    room = "reval@conf.example"
+    client = _client(room, ["vera"])
+    events = _events(client)
+    fetched = []
+
+    async def fake(jid):
+        fetched.append(jid)
+
+    client._participant_vcard_fetch = fake
+    client._vcard_cache.put(f"{room}/vera",
+                            {"fn": "Vera", "photo_hash": "old"})
+    client.queue_participant_vcard(room, "vera", "new")
+    check("a cached stale card is still applied at once",
+          events and events[0][0] == f"{room}/vera")
+    await _wait(client)
+    check("a changed photo hash re-validates once",
+          fetched == [f"{room}/vera"])
+    client.queue_participant_vcard(room, "vera", "new")
+    await _wait(client)
+    check("the re-validation does not repeat in the session",
+          fetched == [f"{room}/vera"])
+
+    match_room = "match@conf.example"
+    match = _client(match_room, ["vera"])
+    match_fetched = []
+
+    async def match_fake(jid):
+        match_fetched.append(jid)
+
+    match._participant_vcard_fetch = match_fake
+    match._vcard_cache.put(f"{match_room}/vera",
+                           {"fn": "Vera", "photo_hash": "same"})
+    match.queue_participant_vcard(match_room, "vera", "same")
+    await _wait(match)
+    check("a matching photo hash needs no request", match_fetched == [])
+
+
+# 4c. the presence photo hash parser ---------------------------------------
+xml = ET.fromstring(
+    "<presence xmlns='jabber:client'><x xmlns='vcard-temp:x:update'>"
+    "<photo>hash123</photo></x></presence>")
+check("the XEP-0153 photo hash is parsed",
+      _vcard_photo_hash(SimpleNamespace(xml=xml)) == "hash123")
+check("a presence without a photo hash yields nothing",
+      _vcard_photo_hash(SimpleNamespace(
+          xml=ET.fromstring("<presence xmlns='jabber:client'/>"))) == "")
+
+
 asyncio.run(cache_hit())
 asyncio.run(cache_miss())
 asyncio.run(departed())
 asyncio.run(ordered())
+asyncio.run(revalidate())
 
 check("participant cards have a day-long TTL",
       JabberClient.PARTICIPANT_VCARD_MAX_AGE == 24 * 60 * 60)
@@ -149,7 +201,8 @@ from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
 src = inspect.getsource(MainWindow._on_groupchat_presence)
 check("a presence queues the card instead of requesting it directly",
-      "queue_participant_vcard(room, nick)" in src
+      "queue_participant_vcard(" in src
+      and "photo_hash" in src
       and "get_vcard(" not in src)
 check("the presence uses the cached-avatar fallback",
       "_muc_cached_avatar(" in src)

@@ -117,6 +117,47 @@ widget.set_avatar_radius(40)
 check("changing the radius rebuilds the cached avatars",
       not widget._rounded_avatar_cache)
 
+# 4c. a forced avatar update repaints the sender's messages ----------------
+class _StubView:
+    def __init__(self):
+        self.calls = []
+        self.radius = None
+
+    def update_sender_avatar(self, sender, uri):
+        self.calls.append((sender, uri))
+
+    def set_avatar_radius(self, pct):
+        self.radius = pct
+
+
+cw = ChatWidget("room@conf.example", "Room", ChatThemeFactory(), is_muc=True)
+cw._view = _StubView()
+cw.update_muc_users([{"nick": "vera", "show": "online",
+                      "role": "participant",
+                      "avatar_path": avatars_mod.avatar_path(
+                          "bob@example.com")}])
+cw._messages = [{"sender": "vera", "sender_jid": "room@conf.example/vera",
+                 "direction": "incoming", "body": "hi",
+                 "timestamp": "2026-10-22T12:00:00.000000Z"}]
+cw.refresh_avatar_for_sender("vera", "room@conf.example/vera")
+check("an unchanged sender JID does not repaint the messages",
+      cw._view.calls == [])
+cw.refresh_avatar_for_sender("vera", "room@conf.example/vera", force=True)
+check("a forced avatar update repaints that sender",
+      len(cw._view.calls) == 1 and cw._view.calls[0][0] == "vera")
+cw.set_avatar_radius(60)
+check("the view receives the CSS avatar radius", cw._view.radius == 60)
+cw.detach()
+
+# The WebEngine page carries a CSS rounding fallback for image formats Qt
+# cannot decode (e.g. an animated WebP).
+_view_src = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "stanza_im", "ui", "chat_view.py"),
+    encoding="utf-8").read()
+check("the chat page injects an img.avatar border-radius rule",
+      "img.avatar { border-radius:" in _view_src
+      and "stanza-avatar-radius" in _view_src)
+
 # 4b. a JPEG avatar is rounded too (the lists auto-detect the format) --------
 _jimage = QtGui.QImage(40, 40, QtGui.QImage.Format.Format_RGB32)
 _jimage.fill(QtGui.QColor("#cc6633"))

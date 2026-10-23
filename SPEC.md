@@ -1257,8 +1257,11 @@ Single conversation tab. Layout:
   join-time `_seed_muc_chat` uses the same queue), and
   a cached avatar file for `room/nick` is used without any request
   (`_muc_cached_avatar`). A fetched card refreshes only that participant's row
-  and its messages (`ChatWidget.refresh_participant`), never the roster or the
-  whole list. Right-click
+  and its messages (`ChatWidget.refresh_participant`; the messages are repainted
+  with `refresh_avatar_for_sender(..., force=True)` because the avatar path and
+  sender JID stay the same), never the roster or the whole list. A cached card
+  whose XEP-0153 photo hash differs from the presence is re-validated once per
+  session (the cached avatar is shown until then). Right-click
   opens the participant context menu; when the participant's real JID is
   visible it also offers «Пригласить в» (XEP-0249, §7.3).
 
@@ -3426,7 +3429,9 @@ client.leave_muji(room)
   message avatars are clipped by `appearance.avatar_radius` as PNG data URIs
   (`ChatWidget._rounded_avatar_uri`, cached by `(uri, radius)`; the image
   format is auto-detected and the clipped result re-encoded as PNG), so the
-  QTextBrowser fallback rounds them too.
+  QTextBrowser fallback rounds them too. A CSS fallback
+  (`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`)
+  also rounds an image Qt cannot decode (e.g. an animated WebP).
 - `_ensure_pep_subscription` also requests the `urn:xmpp:avatar:metadata`
   node as a fallback for servers that need an explicit PEP subscription.
 

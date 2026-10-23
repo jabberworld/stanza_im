@@ -620,6 +620,10 @@ if HAS_WEBENGINE:
             self.mention_senders = False
             self.highlight_nick = ""
             self._zoom = 1.0
+            # CSS fallback for the avatar rounding: the data-URI clip already
+            # rounds PNG/JPEG/GIF, but a format Qt cannot decode (e.g. an
+            # animated WebP) would otherwise render with square corners.
+            self._avatar_radius = 20
             self._last_edit_ref = ""
             self._last_reply_ref = ""
             self._last_mention_ref = ""
@@ -976,6 +980,7 @@ if HAS_WEBENGINE:
                 self._install_mention_js()
                 self._install_reaction_js()
                 self._install_action_js()
+                self._apply_avatar_radius_css()
                 # The floating buttons were created just now; replay the
                 # counters that were seeded before the page was ready.
                 self._update_jump_label()
@@ -1662,6 +1667,30 @@ window.__stanzaMentionRef = '';
             window.addEventListener('scroll', function () { closeMenu(); }, true);
         })();
         """
+
+        def set_avatar_radius(self, pct: int) -> None:
+            """Set the CSS avatar rounding (a fallback for undecodable images)."""
+            try:
+                value = max(0, min(100, int(pct or 0)))
+            except (TypeError, ValueError):
+                value = 20
+            self._avatar_radius = value
+            if self._ready:
+                self._apply_avatar_radius_css()
+
+        def _apply_avatar_radius_css(self) -> None:
+            if not self._ready:
+                return
+            js = ("(function(){var id='stanza-avatar-radius';"
+                  "var el=document.getElementById(id);"
+                  "if(!el){el=document.createElement('style');el.id=id;"
+                  "document.head.appendChild(el);}"
+                  "el.textContent='img.avatar { border-radius: %d%%; }';})();"
+                  % self._avatar_radius)
+            try:
+                self._page.runJavaScript(js)
+            except RuntimeError:
+                pass
 
         def _install_action_js(self):
             code = (self._ACTION_JS
@@ -2833,6 +2862,10 @@ else:
 
         def set_notes_enabled(self, enabled: bool) -> None:
             self._notes_enabled = bool(enabled)
+
+        def set_avatar_radius(self, pct: int) -> None:
+            # The fallback clips the data URI itself; no CSS is available.
+            pass
 
         def set_chat_zoom(self, factor: float):
             """Set a persisted text-scale factor as the document font size."""

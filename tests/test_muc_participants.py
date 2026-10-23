@@ -246,7 +246,7 @@ class _FakeChat:
     def refresh_participant(self, nick):
         self.calls.append(("row", nick))
 
-    def refresh_avatar_for_sender(self, nick, jid):
+    def refresh_avatar_for_sender(self, nick, jid, force=False):
         self.calls.append(("message", nick, jid))
 
 

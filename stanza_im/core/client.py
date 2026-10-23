@@ -96,6 +96,18 @@ def _muc_destroy_info(pres) -> dict | None:
         "reason": ((reason.text or "").strip() if reason is not None else ""),
         "alternate": str(destroy.get("jid") or ""),
     }
+def _vcard_photo_hash(pres) -> str:
+    """The XEP-0153 avatar hash carried by a MUC presence ("" when none)."""
+    try:
+        x = pres.xml.find("{vcard-temp:x:update}x")
+    except AttributeError:
+        return ""
+    if x is None:
+        return ""
+    photo = x.find("{vcard-temp:x:update}photo")
+    return (photo.text or "").strip() if photo is not None else ""
+
+
 NS_TIME = "urn:xmpp:time"                 # XEP-0202 Entity Time
 NS_STATS = "http://jabber.org/protocol/stats"  # XEP-0039 Statistics Gathering
 NS_LAST = "jabber:iq:last"                # XEP-0012 Last Activity (uptime)
@@ -1388,6 +1400,9 @@ class JabberClient:
         self._participant_vcards: deque = deque()
         self._participant_vcard_set: set[tuple[str, str]] = set()
         self._participant_vcard_done: set[tuple[str, str]] = set()
+        # Cached cards re-validated once per session (a nick reused by another
+        # person must not keep the previous occupant's avatar).
+        self._participant_vcard_revalidated: set[tuple[str, str]] = set()
         self._participant_vcard_task: asyncio.Task | None = None
         # XEP-0237: cached roster items + version for the next login; loaded
         # lazily by ``_seed_roster_cache`` so a throwaway registration client
@@ -4788,31 +4803,50 @@ class JabberClient:
     #: two per second, so a large room never floods the server.
     PARTICIPANT_VCARD_INTERVAL = 0.5
 
-    def queue_participant_vcard(self, room: str, nick: str) -> None:
+    def queue_participant_vcard(self, room: str, nick: str,
+                                photo_hash: str = "") -> None:
         """Resolve a MUC participant's vCard: cache first, then a slow queue.
 
         The card is fetched through the occupant JID (``room/nick``), which a
         conference server relays to the real user's card even when the room
         hides real JIDs.  A cached card is applied immediately; otherwise the
         participant enters a background queue processed at a low rate.
+
+        *photo_hash* is the XEP-0153 hash from the presence.  A cached card
+        carrying a different hash (or none) is shown at once and re-validated
+        once per session: nicks can be reused by another person, and the old
+        avatar must not stick for a day.
         """
         room = str(room or "").strip()
         nick = str(nick or "").strip()
         if not room or not nick:
             return
         key = (room, nick)
-        if key in self._participant_vcard_done:
-            return
         cached = self._vcard_cache.get(
             f"{room}/{nick}", max_age=self.PARTICIPANT_VCARD_MAX_AGE)
         if cached is not None:
-            self._participant_vcard_done.add(key)
-            self.emit("vcard_received", f"{room}/{nick}", cached)
+            if key not in self._participant_vcard_done:
+                self._participant_vcard_done.add(key)
+                self.emit("vcard_received", f"{room}/{nick}", cached)
+            stored = str(cached.get("photo_hash") or "")
+            if (photo_hash and stored != photo_hash
+                    and key not in self._participant_vcard_revalidated):
+                self._participant_vcard_revalidated.add(key)
+                self._enqueue_participant_vcard(room, nick, force=True)
             return
+        if key in self._participant_vcard_done:
+            return
+        if photo_hash:
+            self._participant_vcard_revalidated.add(key)
+        self._enqueue_participant_vcard(room, nick, force=False)
+
+    def _enqueue_participant_vcard(self, room: str, nick: str,
+                                   force: bool = False) -> None:
+        key = (room, nick)
         if key in self._participant_vcard_set:
             return
         self._participant_vcard_set.add(key)
-        self._participant_vcards.append(key)
+        self._participant_vcards.append((room, nick, bool(force)))
         self._start_participant_vcard_worker()
 
     def _start_participant_vcard_worker(self) -> None:
@@ -4829,22 +4863,23 @@ class JabberClient:
     async def _participant_vcard_loop(self) -> None:
         try:
             while self._participant_vcards:
-                room, nick = self._participant_vcards.popleft()
+                room, nick, force = self._participant_vcards.popleft()
                 self._participant_vcard_set.discard((room, nick))
                 key = (room, nick)
-                if key in self._participant_vcard_done:
+                if key in self._participant_vcard_done and not force:
                     continue
                 # The occupant may have left while queued.
                 gi = self.groupchats.get(room)
                 if gi is None or nick not in gi.users:
                     continue
-                cached = self._vcard_cache.get(
-                    f"{room}/{nick}",
-                    max_age=self.PARTICIPANT_VCARD_MAX_AGE)
-                if cached is not None:
-                    self._participant_vcard_done.add(key)
-                    self.emit("vcard_received", f"{room}/{nick}", cached)
-                    continue
+                if not force:
+                    cached = self._vcard_cache.get(
+                        f"{room}/{nick}",
+                        max_age=self.PARTICIPANT_VCARD_MAX_AGE)
+                    if cached is not None:
+                        self._participant_vcard_done.add(key)
+                        self.emit("vcard_received", f"{room}/{nick}", cached)
+                        continue
                 self._participant_vcard_done.add(key)
                 await self._participant_vcard_fetch(f"{room}/{nick}")
                 await asyncio.sleep(self.PARTICIPANT_VCARD_INTERVAL)
@@ -6944,6 +6979,7 @@ class JabberClient:
             pass
 
         hats = hats_mod.parse_hats(pres)
+        photo_hash = _vcard_photo_hash(pres)
 
         gi = self.groupchats.setdefault(room, GroupChatInfo(room=room, nick=nick))
         if show == "unavailable":
@@ -6963,6 +6999,7 @@ class JabberClient:
                 "caps_node": _caps_node(pres),
                 "occupant_id": _occupant_id(pres),
                 "hats": hats,
+                "photo_hash": photo_hash,
             }
             if real_jid and (room, nick) not in self._muc_version_probed:
                 self._muc_version_probed.add((room, nick))
@@ -6979,7 +7016,7 @@ class JabberClient:
             self._emit_muc_joined(room, gi.subject, list(gi.users),
                                   created=created)
         self.emit("groupchat_presence", room, nick, show, status, role,
-                  affiliation, real_jid, hats)
+                  affiliation, real_jid, hats, photo_hash)
 
     async def _prefetch_muc_version(self, room: str, nick: str,
                                     jid: str) -> None:
@@ -7189,7 +7226,8 @@ class JabberClient:
             try:
                 from stanza_im.include.avatars import save_avatar
                 card["avatar_path"] = save_avatar(jid or bare, photo)
-                self._avatar_ids[bare] = hashlib.sha1(photo).hexdigest()
+                card["photo_hash"] = hashlib.sha1(photo).hexdigest()
+                self._avatar_ids[bare] = card["photo_hash"]
             except Exception:
                 pass
         if "/" not in jid:
