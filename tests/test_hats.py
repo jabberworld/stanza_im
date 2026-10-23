@@ -271,7 +271,7 @@ check("presence hats stored on the occupant",
       c.groupchats["room@conf.example"].users["Bob"]["hats"][0]["title"]
       == "Host")
 check("presence event carries hats",
-      events and events[-1][-1] and events[-1][-1][0]["title"] == "Host")
+      events and events[-1][-2] and events[-1][-2][0]["title"] == "Host")
 
 # 6. MainWindow stores hats and offers the context submenu --------------------
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)

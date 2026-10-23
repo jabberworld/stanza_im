@@ -424,6 +424,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._rounded_avatar_cache: dict = {}
         self._own_jid = ""
         self._own_avatar = ""
+        self._pm_mode = False
+        self._pm_real_jid = ""
         # A private conversation with a conference occupant has no roster
         # contact: its avatar comes from the participant data.
         self._peer_avatar = ""
@@ -718,12 +720,16 @@ class ChatWidget(QtWidgets.QWidget):
             self._send_file_btn.clicked.connect(
                 lambda: self._choose_file_send("http"))
         else:
+            self._send_p2p_action = None
+            self._send_p2p_ibb_action = None
             send_menu = QtWidgets.QMenu(self)
             send_p2p = send_menu.addAction(tr("ft_p2p"))
             send_p2p.triggered.connect(lambda: self._choose_file_send("p2p"))
             send_p2p_ibb = send_menu.addAction(tr("ft_p2p_ibb"))
             send_p2p_ibb.triggered.connect(
                 lambda: self._choose_file_send("p2p-ibb"))
+            self._send_p2p_action = send_p2p
+            self._send_p2p_ibb_action = send_p2p_ibb
             send_http = send_menu.addAction(tr("ft_http_upload"))
             send_http.triggered.connect(lambda: self._choose_file_send("http"))
             self._send_file_btn.setPopupMode(
@@ -2047,7 +2053,7 @@ class ChatWidget(QtWidgets.QWidget):
         that seed the jump button (:meth:`_seed_unseen`) measure the very same
         set the separator was placed in.
         """
-        timer = getattr(self, "_resume_render_timer", None)
+        timer = self.__dict__.get("_resume_render_timer")
         if timer is not None:
             timer.stop()
         keep = self._preserve_fraction if self._preserve_fraction is not None \
@@ -3426,8 +3432,28 @@ class ChatWidget(QtWidgets.QWidget):
         icon = "lock.svg" if self._omemo_mode == "omemo" else "lock-open.svg"
         self._omemo_btn.setIcon(self._chat_icon(icon))
 
+    def set_pm_mode(self, real_jid: str = "") -> None:
+        """A conference private chat: keep only the features that work.
+
+        Jingle (calls, whiteboard, P2P files) is not routable to a MUC
+        occupant JID; HTTP Upload, text, reactions, replies and the participant
+        vCard do work.  The HTTP Upload entry stays in the file menu.
+        """
+        self._pm_mode = True
+        self._pm_real_jid = str(real_jid or "")
+        for button in (self._whiteboard_btn, self._call_btn,
+                       self._attention_btn, self._omemo_btn,
+                       self._omemo_shield_btn):
+            button.setVisible(False)
+        for action in (getattr(self, "_send_p2p_action", None),
+                       getattr(self, "_send_p2p_ibb_action", None)):
+            if action is not None:
+                action.setVisible(False)
+
     def set_attention_enabled(self, plugin_active: bool,
                               peer_supports: bool) -> None:
+        if self._pm_mode:
+            plugin_active = False
         """Show the XEP-0224 bell while the plugin is active and gate it on
         the peer advertising ``urn:xmpp:attention:0``."""
         visible = bool(plugin_active) and not self.is_muc

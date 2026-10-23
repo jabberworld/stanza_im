@@ -2296,9 +2296,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_contact_status(
             target, str(info.get("show") or "online"))
         if room:
+            self._pm_targets[target] = (room, nick)
             self._vcard_muc_ctx[target] = True
         if chat is not None:
             self._set_pm_avatar(chat, target, info)
+            real = self._participant_real_jid(info)
+            if hasattr(chat, "set_pm_mode"):
+                chat.set_pm_mode(real)
 
     @staticmethod
     def _set_pm_avatar(chat, target: str, info: dict) -> None:
@@ -2319,6 +2323,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_pm_avatar(chat, target, info)
             chat.refresh_avatars()
 
+    def _remove_pm_row(self, target: str) -> None:
+        """Hide a private-message row (the tab and history stay)."""
+        if not target:
+            return
+        self._pm_roster.discard(target)
+        self._roster.remove_user(target)
+        self._schedule_roster_repaint()
+
     def _sync_all_pm_roster(self) -> None:
         """Re-add the private-message rows after the roster was rebuilt.
 
@@ -2327,8 +2339,10 @@ class MainWindow(QtWidgets.QMainWindow):
         ``_pm_targets`` — otherwise the group disappears until the next private
         message.
         """
-        for target, (room, nick) in list(self._pm_targets.items()):
-            self._sync_pm_roster(target, room, nick)
+        for target in list(self._pm_roster):
+            room, nick = self._pm_targets.get(target, ("", ""))
+            if room:
+                self._sync_pm_roster(target, room, nick)
 
     def _sync_all_conference_roster(self):
         for room in self._muc_self_nicks:
@@ -4966,6 +4980,8 @@ class MainWindow(QtWidgets.QMainWindow):
         (``self._attention_feature`` set) and *enabled* only when the peer
         advertises that namespace.
         """
+        if jid in self._pm_targets:
+            return
         feature = getattr(self, "_attention_feature", "")
         plugin_active = bool(feature)
         bare = jid.split("/", 1)[0]
@@ -5844,6 +5860,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client:
             self._client.ensure_caps(jid)
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
+        if jid in self._pm_roster:
+            self._build_pm_menu(jid).exec(pos)
+            return
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))
         menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
@@ -5981,6 +6000,53 @@ class MainWindow(QtWidgets.QMainWindow):
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_remove_contact"), lambda: self._on_remove_contact(jid))
         menu.exec(pos)
+
+    def _build_pm_menu(self, target: str) -> QtWidgets.QMenu:
+        """Context menu of a private-message row (occupant features only)."""
+        menu = QtWidgets.QMenu()
+
+        def defer(callback):
+            menu.close()
+            QtCore.QTimer.singleShot(0, callback)
+
+        room, nick = self._pm_targets.get(target, ("", ""))
+        info = self._participant_info(room, nick) if room else {}
+        real = self._participant_real_jid(info)
+        menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
+                       lambda: self._on_contact_open(target))
+        menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
+                       lambda checked=False: defer(
+                           lambda: self._on_chat_vcard(target)))
+        menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
+                       lambda checked=False: defer(
+                           lambda: self._on_history_contact(target)))
+        if self._client:
+            menu.addAction(
+                self._menu_icon("upload.svg"), tr("chat_send_file"),
+                lambda checked=False: defer(
+                    lambda: self._pick_and_send_file(target, "http")))
+        if real:
+            known = bool(self._client and real in self._client.contacts)
+            if not known:
+                menu.addAction(
+                    self._menu_icon("add-user.png"), tr("ctx_add_to_roster"),
+                    lambda checked=False: defer(
+                        lambda: self._on_add_contact(jid=real)))
+            self._build_invite_menu(menu, real)
+            menu.addAction(
+                self._menu_icon("add-user.png"), tr("ctx_send_contact"),
+                lambda checked=False: defer(
+                    lambda: self._on_send_contact(real)))
+        menu.addSeparator()
+        menu.addAction(self._menu_icon("ok.png"), tr("ctx_mark_read"),
+                       lambda: self._mark_chat_read(target))
+        menu.addAction(self._menu_icon("clear.png"),
+                       tr("ctx_clear_history"),
+                       lambda: self._on_clear_history(target))
+        menu.addAction(self._menu_icon("process-stop.png"),
+                       tr("ctx_remove_pm_row"),
+                       lambda: self._remove_pm_row(target))
+        return menu
 
     def _group_jids(self, group: str) -> list[str]:
         """Unique JIDs of the roster rows currently shown in *group*."""
@@ -6980,6 +7046,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if active and self._client and self._chat_at_bottom(target):
             self._client.mds_mark_displayed(target)
 
+    def _note_pm_message(self, target: str) -> None:
+        """A PM was actually exchanged: show its row in the PM group."""
+        room_nick = self._pm_targets.get(target)
+        if room_nick and room_nick[0]:
+            self._sync_pm_roster(target, room_nick[0], room_nick[1])
+
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
             jid = jid.strip()
@@ -7001,6 +7073,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 jid, "outgoing", body,
                 timestamp=_current_timestamp(), sender="Me",
                 origin_id=message_id, message_id=message_id))
+            self._note_pm_message(jid)
             self._remember_contact(jid)
             self._play_sound("message_send", "sound_on_send")
 
@@ -7224,13 +7297,15 @@ class MainWindow(QtWidgets.QMainWindow):
         for target, (target_room, target_nick) in list(self._pm_targets.items()):
             if target_room == room and target_nick == nick:
                 if show == "unavailable":
-                    self._roster.update_user(
-                        target, status="offline",
-                        icon_key=show_to_icon_key("offline"))
-                    self._schedule_roster_repaint()
+                    if target in self._pm_roster:
+                        self._roster.update_user(
+                            target, status="offline",
+                            icon_key=show_to_icon_key("offline"))
+                        self._schedule_roster_repaint()
                     self._chat_window.set_contact_status(target, "offline")
                 else:
-                    self._sync_pm_roster(target, room, nick)
+                    if target in self._pm_roster:
+                        self._sync_pm_roster(target, room, nick)
                     self._apply_pm_presence(target, room, nick)
 
     def _on_groupchat_presence_details(self, room: str, nick: str):
@@ -8884,7 +8959,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._opening_chat = False
         self._apply_pm_presence(target, room, nick, chat)
         self._apply_call_support(target)
-        self._sync_pm_roster(target, room, nick)
         self._focus_chat(target, chat)
 
     def _on_muc_participant_context(self, room: str, nick: str, pos):

@@ -581,6 +581,8 @@ STRINGS = {
     "ctx_view_profile": "View vCard",
     "ctx_open_whiteboard": "Open Whiteboard",
     "ctx_rename": "Rename",
+    "ctx_add_to_roster": "Add to contacts…",
+    "ctx_remove_pm_row": "Remove from private messages",
     "ctx_send_contact": "Send contact…",
     "ctx_rename_prompt": "New nickname:",
     "ctx_move_group": "Move to group",

@@ -581,6 +581,8 @@ STRINGS = {
     "ctx_view_profile": "Просмотр визитки",
     "ctx_open_whiteboard": "Открыть доску",
     "ctx_rename": "Переименовать",
+    "ctx_add_to_roster": "Добавить в контакты…",
+    "ctx_remove_pm_row": "Убрать из личных сообщений",
     "ctx_send_contact": "Отправить контакт…",
     "ctx_rename_prompt": "Новое имя:",
     "ctx_move_group": "Переместить в группу",

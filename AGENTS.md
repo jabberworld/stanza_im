@@ -989,16 +989,27 @@ and a room PM the server relays from the real JID is mapped back by
 chat with the same user (bare JID) stays a separate conversation.
 `MainWindow._sync_pm_roster(target, room, nick)` gives the conversation its own
 row in the «Личные сообщения» group (`roster_group_personal_messages`), which
-is exactly where its unread counter lives; `_on_muc_private_message` and
-`_on_muc_participant_clicked` create/refresh it, `_apply_pm_presence` pushes the
-participant's status/avatar into the tab (`ChatWidget.set_peer_avatar`) and the
-toolbar vCard routes through `_show_muc_participant_profile` (bare real JID or
-`room/nick`), and `_on_groupchat_presence` keeps it in step with presence —
-an occupant who **leaves the room stays in the group shown offline** (the row
-lives for the whole session and is only cleared on logout by
-`_reset_account_ui`); a full roster refresh restores it through
-`_sync_all_pm_roster` (called from `_on_roster_received` after
-`_rebuild_roster`, which clears the widget). The group shows the usual
+is exactly where its unread counter lives. The row appears only once a message
+was actually **exchanged**: an incoming PM (`_on_muc_private_message`) or the
+first outgoing one (`_note_pm_message` from `_on_message_send`) creates it,
+while merely opening a participant's chat registers the target in
+`_pm_targets` (no row). The row can be removed again from its context menu
+(`_remove_pm_row`, session-only: the tab and history stay). `_apply_pm_presence`
+pushes the participant's status/avatar into the tab (`ChatWidget.set_peer_avatar`),
+switches it to the occupant feature set (`set_pm_mode`: no calls, whiteboard,
+attention bell, OMEMO or P2P files — HTTP Upload, text, reactions, reply and
+the participant vCard stay), and the toolbar vCard routes through
+`_show_muc_participant_profile` (bare real JID or `room/nick`);
+`_on_groupchat_presence` keeps it in step with presence — an occupant who
+**leaves the room stays in the group shown offline** (the row lives for the
+whole session and is only cleared on logout by `_reset_account_ui`); a full
+roster refresh restores it through `_sync_all_pm_roster` (only the rows in
+`_pm_roster`; called from `_on_roster_received` after `_rebuild_roster`, which
+clears the widget). The PM context menu (`_build_pm_menu`) carries only the
+occupant-safe actions: open chat, vCard, history, send file (HTTP Upload),
+add to contacts (real JID known and not yet a contact), invite to a conference
+and send contact (real JID known), mark read, clear history and remove the
+row. The group shows the usual
 online/total count through `_recount_groups`. The badge label is
 `RosterStyle.badge_text`: `N`, or
 `N / M` when the conversation has `M` unread messages naming our own nickname.

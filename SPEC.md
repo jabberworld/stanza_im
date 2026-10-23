@@ -1012,11 +1012,20 @@ room (`MainWindow._sync_conference_roster`). A **MUC private message** is
 always keyed by `room/nick` (the occupant identity in every room type; the real
 JID is metadata for the status/avatar/vCard, and a room PM relayed from the real
 JID is mapped back by `JabberClient._room_pm_occupant`), so it gets its own row
-in the private-messages group — `MainWindow._sync_pm_roster` creates/updates it
-when the message arrives or the participant's chat is opened; the tab's
-status/avatar come from the participant data (`_apply_pm_presence`,
-`ChatWidget.set_peer_avatar`) and its vCard button uses
-`_show_muc_participant_profile`. A normal 1:1 chat with the same user stays a
+in the private-messages group. The row is created only when a message is
+actually exchanged (`MainWindow._sync_pm_roster` from the incoming path and
+`_note_pm_message` from an outgoing send); merely opening the participant's chat
+only registers the target (`_pm_targets`). The row can be hidden again with
+«Убрать из личных сообщений» (`_remove_pm_row` — session only, tab and history
+stay). The tab's status/avatar come from the participant data
+(`_apply_pm_presence`, `ChatWidget.set_peer_avatar`), its feature set is the
+occupant one (`ChatWidget.set_pm_mode`: no Jingle calls/whiteboard/P2P files
+and no attention/OMEMO buttons; HTTP Upload, text, reactions, reply and the
+participant profile stay), and its vCard button uses
+`_show_muc_participant_profile`. The PM context menu (`_build_pm_menu`) offers
+open chat, vCard, history, send file (HTTP Upload), add to contacts (real JID
+known, not a contact), invite/send contact (real JID known), mark read, clear
+history and remove the row. A normal 1:1 chat with the same user stays a
 separate conversation. The row lives for the
 whole session (cleared only on logout by `_reset_account_ui`); an occupant who
 leaves the room is shown **offline**, and a full roster refresh restores the

@@ -27,6 +27,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.core.client import JabberClient, NS_MUC_USER
 from stanza_im.core.storage import Config
 from stanza_im.i18n import load as i18n_load
+from stanza_im.i18n import tr
 from stanza_im.include import avatars as avatars_mod
 from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_widget import ChatWidget
@@ -105,12 +106,16 @@ class _FakeChat:
     def __init__(self):
         self.peer = ""
         self.refreshed = 0
+        self.pm_real = None
 
     def set_peer_avatar(self, uri):
         self.peer = uri
 
     def refresh_avatars(self):
         self.refreshed += 1
+
+    def set_pm_mode(self, real_jid=""):
+        self.pm_real = real_jid
 
 
 class _FakeChatWindow:
@@ -128,6 +133,7 @@ class _FakeChatWindow:
 chat = _FakeChat()
 win._chat_window = _FakeChatWindow(chat)
 win._participant_info = lambda r, n: win._muc_users.get(r, {}).get(n, {})
+win._participant_real_jid = lambda info: "bob@example.com"
 win._apply_pm_presence(target, room, "Bob", chat)
 check("the PM tab gets the participant's status",
       win._chat_window.status == [(target, "dnd")])
@@ -137,6 +143,8 @@ check("the PM chat is marked as a room context",
       win._vcard_muc_ctx.get(target) is True)
 check("the participant avatar is the one from the list",
       chat.peer == avatars_mod.avatar_file_data_uri(avatar_path))
+check("the PM tab is switched to the occupant feature set",
+      chat.pm_real == "bob@example.com")
 
 # 4. the PM toolbar vCard follows the participant profile ------------------
 shown = []
@@ -167,6 +175,98 @@ check("opening a participant's PM uses the occupant key",
 presence = inspect.getsource(MainWindow._on_groupchat_presence)
 check("participant presence updates the PM tab",
       "_apply_pm_presence(target, room, nick)" in presence)
+check("opening a PM does not create its roster row",
+      "_sync_pm_roster" not in opened)
+
+# 7. the PM row appears only once a message was exchanged ------------------
+synced = []
+win._sync_pm_roster = lambda jid, r="", n="": synced.append((jid, r, n))
+win._pm_targets = {target: (room, "Bob"),
+                   "other@conf.example/Carol": ("other@conf.example", "Carol"),
+                   "plain@example.com": ("", "")}
+win._pm_roster = set()
+win._note_pm_message(target)
+check("an outgoing PM opens the row",
+      synced == [(target, room, "Bob")])
+win._note_pm_message("plain@example.com")
+check("a plain 1:1 chat is not a PM target", len(synced) == 1)
+
+win._pm_roster = {target}
+win._sync_all_pm_roster()
+check("a roster rebuild restores only the chatted PM rows",
+      synced == [(target, room, "Bob"), (target, room, "Bob")])
+
+# 8. removing the PM row keeps the tab and its target ----------------------
+class _FakeRoster:
+    def __init__(self):
+        self.removed = []
+        self.updated = []
+
+    def remove_user(self, jid):
+        self.removed.append(jid)
+
+    def update_user(self, jid, **kwargs):
+        self.updated.append((jid, kwargs))
+
+
+win._roster = _FakeRoster()
+win._schedule_roster_repaint = lambda: None
+win._remove_pm_row(target)
+check("removing the row drops only the roster entry",
+      win._roster.removed == [target]
+      and target not in win._pm_roster
+      and win._pm_targets.get(target) == (room, "Bob"))
+
+# 9. the PM context menu carries only occupant-safe actions ----------------
+invited = []
+win._build_invite_menu = lambda menu, jid: invited.append(jid)
+win._on_chat_vcard = lambda jid: None
+win._on_history_contact = lambda jid: None
+win._pick_and_send_file = lambda jid, method: None
+win._mark_chat_read = lambda jid: None
+win._on_clear_history = lambda jid: None
+win._remove_pm_row = lambda jid: None
+win._on_contact_open = lambda jid: None
+win._on_add_contact = lambda jid=None: None
+win._on_send_contact = lambda jid: None
+win._client = SimpleNamespace(contacts={"bob@example.com": object()})
+win._pm_roster = {target}
+labels = [a.text() for a in win._build_pm_menu(target).actions() if a.text()]
+check("the PM menu offers the occupant actions",
+      tr("ctx_open_chat") in labels and tr("ctx_view_profile") in labels
+      and tr("ctx_show_history") in labels and tr("chat_send_file") in labels
+      and tr("ctx_remove_pm_row") in labels)
+check("a known contact is not offered «add to contacts»",
+      tr("ctx_add_to_roster") not in labels)
+check("a PM with a real JID can invite/send the contact",
+      invited == ["bob@example.com"] and tr("ctx_send_contact") in labels)
+
+win._client = SimpleNamespace(contacts={})
+labels = [a.text() for a in win._build_pm_menu(target).actions() if a.text()]
+check("an unknown real JID can be added to contacts",
+      tr("ctx_add_to_roster") in labels)
+win._participant_real_jid = lambda info: ""
+invited.clear()
+labels = [a.text() for a in win._build_pm_menu(target).actions() if a.text()]
+check("no real JID means no roster/invite/send-contact entries",
+      tr("ctx_add_to_roster") not in labels
+      and tr("ctx_send_contact") not in labels and invited == [])
+
+# 10. the PM toolbar keeps only the working features -----------------------
+pm = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+pm.set_pm_mode("bob@example.com")
+check("PM mode hides the 1:1-only toolbar buttons",
+      pm._whiteboard_btn.isHidden() and pm._call_btn.isHidden()
+      and pm._attention_btn.isHidden()
+      and pm._omemo_btn.isHidden())
+check("PM mode hides the P2P file options",
+      not pm._send_p2p_action.isVisible()
+      and not pm._send_p2p_ibb_action.isVisible())
+http_actions = [a for a in pm._send_file_btn.menu().actions()
+                if a.text() == tr("ft_http_upload")]
+check("PM mode keeps the HTTP Upload option",
+      bool(http_actions) and http_actions[0].isVisible())
+pm.detach()
 
 if FAILURES:
     print("FAILURES:", FAILURES)
