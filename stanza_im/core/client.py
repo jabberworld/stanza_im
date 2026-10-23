@@ -1147,6 +1147,9 @@ class JabberClient:
         self._discovered: dict | None = None
         self.auto_join_conferences = auto_join_conferences
         self.autojoin_rooms: set[str] = set()
+        # Bookmark list fetched at session start, handed to the UI once (the
+        # auto-join already used the fresh list; no second IQ is needed).
+        self._bookmarks_snapshot: list[dict] | None = None
         self.message_carbons = message_carbons
         self.message_displayed_sync = message_displayed_sync
         self.allow_incoming_edits = allow_incoming_edits
@@ -5358,6 +5361,11 @@ class JabberClient:
                 logger.debug("update_caps failed", exc_info=True)
         self._seed_roster_cache()
         self.request_roster()
+        # Auto-join before the initial presence: the fresh bookmark list is
+        # authoritative (a room removed on another client is not joined) and
+        # the fetch must not queue behind the roster/PEP burst.  The initial
+        # presence follows immediately afterwards.
+        await self._autojoin_bookmarks()
         self.send_presence()
         # Cache the domain features (privacy/blocking/report gating) and the
         # XEP-0191 blocklist for the roster's strikethrough state.
@@ -5374,37 +5382,76 @@ class JabberClient:
             loop.create_task(self._mds_init())
         # PEP subscriptions survive a reconnect, so re-subscribe to the
         # currently known contacts (servers typically drop them on session end).
-        for bare in self.contacts:
-            self._ensure_pep_subscription(bare)
+        # This is background work: it must not hold up the session start.
+        loop.create_task(self._subscribe_pep_contacts())
         self._start_pep_sweep()
         self._start_muc_self_ping()
         self.emit("session_started")
         self.emit("connection_info", self.connection_info())
         self._sync_csi()
-        loop = asyncio.get_event_loop()
-        loop.create_task(self._autojoin_bookmarks())
         # File-transfer proxy / STUN-TURN discovery is only needed for p2p
         # transfers and calls much later, so run it in the background and
         # never let it delay the session.
         loop.create_task(self.discover_transfer_services())
+
+    async def _subscribe_pep_contacts(self) -> None:
+        """Re-subscribe to the known contacts' PEP nodes (background)."""
+        for bare in list(self.contacts):
+            self._ensure_pep_subscription(bare)
+            await asyncio.sleep(0)
+
+    def bookmarks_snapshot(self) -> list[dict] | None:
+        """The list fetched at session start (one-shot; ``None`` when absent)."""
+        bookmarks = self._bookmarks_snapshot
+        self._bookmarks_snapshot = None
+        return bookmarks
+
+    def _schedule_bookmark_retry(self) -> None:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._autojoin_bookmarks_retry())
+
+    async def _autojoin_bookmarks_retry(self) -> None:
+        """Retry a failed bookmark fetch in the background (never delays login)."""
+        for attempt in range(2):
+            await asyncio.sleep(1 + attempt)
+            try:
+                bookmarks = await self.list_bookmarks()
+            except Exception:  # noqa: BLE001
+                bookmarks = None
+            if bookmarks is None:
+                logger.debug("Bookmarks fetch failed (retry %d)", attempt + 1)
+                continue
+            self._bookmarks_snapshot = bookmarks
+            self._join_autojoin_rooms(bookmarks)
+            return
+        logger.debug("Bookmarks fetch failed permanently")
 
     async def _autojoin_bookmarks(self) -> None:
         """Join bookmarked MUC rooms flagged for auto-join (XEP-0048/0402).
 
         Implemented here (instead of the plugin's ``auto_join`` flag) because
         the shipped slixmpp ``_autojoin`` does not await the coroutine-returning
-        ``get_bookmarks``.
+        ``get_bookmarks``.  A successful empty answer is not an error; only a
+        failed fetch is retried, in the background.
         """
         if not self.auto_join_conferences:
             return
-        bookmarks: list[dict] = []
-        for attempt in range(3):
+        bookmarks = None
+        try:
             bookmarks = await self.list_bookmarks()
-            if bookmarks:
-                break
-            logger.debug("Bookmarks fetch failed (attempt %d)",
-                         attempt + 1)
-            await asyncio.sleep(1 + attempt)
+        except Exception:  # noqa: BLE001
+            logger.debug("Bookmarks fetch failed", exc_info=True)
+        if bookmarks is None:
+            self._schedule_bookmark_retry()
+            return
+        self._bookmarks_snapshot = bookmarks
+        self._join_autojoin_rooms(bookmarks)
+
+    def _join_autojoin_rooms(self, bookmarks: list[dict]) -> None:
+        """Join the auto-join rooms of *bookmarks* (skipping joined rooms)."""
         if not bookmarks:
             logger.debug("No bookmarks to auto-join")
             return

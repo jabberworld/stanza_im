@@ -2013,7 +2013,11 @@ class MainWindow(QtWidgets.QMainWindow):
         show_modeless(dlg, finished)
 
     async def _load_bookmarks(self):
-        bookmarks = await self._client.list_bookmarks()
+        if not self._client:
+            return
+        bookmarks = self._client.bookmarks_snapshot()
+        if bookmarks is None:
+            bookmarks = await self._client.list_bookmarks()
         self._apply_bookmarks(bookmarks)
 
     def _apply_bookmarks(self, bookmarks: list[dict]):

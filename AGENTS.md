@@ -474,6 +474,14 @@ its tab closed, and the reason is shown — a `QMessageBox` with
 `muc_join_cannot_join` for a manual join, a tray balloon/OSD for an auto-join — a
 members-only room cannot be entered until we are added, so nothing is left
 looking like a joined room.
+`client._on_session_start` fetches the bookmark list **once, before the initial
+presence** (the roster request is already in flight) and joins the auto-join
+rooms from that fresh list — a room removed on another client is never joined,
+and the join no longer queues behind the roster/PEP burst. A successful empty
+answer is not an error; only a failed fetch is retried (1/2 s) in the
+background, and the PEP subscriptions to the known contacts are background
+work too. The fetched list is handed to the Bookmarks tab once
+(`bookmarks_snapshot()`), so it needs no second request.
 Auto-joined rooms are retried on transient
 `muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
 `internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and

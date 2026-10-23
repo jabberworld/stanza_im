@@ -1762,7 +1762,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `service-unavailable`) with a bounded 5/15/45 s backoff
   (`MainWindow._schedule_autojoin_retry`/`_retry_muc_join`); other permanent
   conditions surface a failure status.
-- `client._autojoin_bookmarks` retries the bookmarks fetch and skips only rooms
+- `JabberClient._on_session_start` fetches the bookmark list once **before the
+  initial presence** (the roster request is already in flight) and joins the
+  auto-join rooms from that fresh list (a room removed on another client is
+  never joined); a successful empty answer is not an error, and only a failed
+  fetch is retried (1/2 s) in the background. The fetched list is handed to the
+  Bookmarks tab once (`bookmarks_snapshot()`), and the PEP subscriptions to the
+  known contacts run as background work. `_autojoin_bookmarks` skips only rooms
   that actually joined (`GroupChatInfo.joined`), so a stale entry from a failed
   attempt does not block the retry; `client.join_muc` cancels a pending join
   task before starting a new one.
