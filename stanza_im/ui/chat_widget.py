@@ -424,6 +424,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._rounded_avatar_cache: dict = {}
         self._own_jid = ""
         self._own_avatar = ""
+        # A private conversation with a conference occupant has no roster
+        # contact: its avatar comes from the participant data.
+        self._peer_avatar = ""
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
         self._subject_font: tuple[str, int] = ("", 0)
@@ -1950,6 +1953,8 @@ class ChatWidget(QtWidgets.QWidget):
                 return self._rounded_avatar_uri(
                     avatar_data_uri(self._own_jid) or default_avatar_uri())
             return self._rounded_avatar_uri(default_avatar_uri())
+        if self._peer_avatar:
+            return self._rounded_avatar_uri(self._peer_avatar)
         if self.is_muc:
             if not sender_jid and sender:
                 participant = next(
@@ -3777,6 +3782,10 @@ class ChatWidget(QtWidgets.QWidget):
     def set_own_avatar(self, uri: str) -> None:
         """Set the pre-resolved data-URI of our own avatar (outgoing)."""
         self._own_avatar = str(uri or "")
+
+    def set_peer_avatar(self, uri: str) -> None:
+        """Set the peer avatar of a 1:1/private chat (data-URI or path)."""
+        self._peer_avatar = str(uri or "")
 
     def refresh_avatars(self):
         """Update avatar images in place after an avatar cached.

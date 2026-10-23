@@ -970,13 +970,19 @@ never becomes an ordinary contact. `_sync_self_roster` shows it on demand as a
 single virtual row in the leading «Свой контакт» group
 (`roster_group_self`) — only when `appearance.roster_show_self` is on (View
 menu «Показывать свой контакт», default off) — with the account's name/JID;
-clicking it opens a self-chat (notes to self via MAM). A **private message is attributed to
-its sender**: `MainWindow._sync_pm_roster(target, room, nick)` gives the
-conversation its own row in the «Личные сообщения» group
-(`roster_group_personal_messages`) keyed by the chat key (the real JID when the
-room revealed one, otherwise `room/nick`), which is exactly where its unread
-counter lives; `_on_muc_private_message` and `_on_muc_participant_clicked`
-create/refresh it, and `_on_groupchat_presence` keeps it in step with presence —
+clicking it opens a self-chat (notes to self via MAM). A **MUC private message
+is always keyed by `room/nick`** (the occupant identity, whether or not the room
+reveals real JIDs; the real JID is metadata for the status, avatar and vCard,
+and a room PM the server relays from the real JID is mapped back by
+`JabberClient._room_pm_occupant` when the MUC `<x/>` marks it). A normal 1:1
+chat with the same user (bare JID) stays a separate conversation.
+`MainWindow._sync_pm_roster(target, room, nick)` gives the conversation its own
+row in the «Личные сообщения» group (`roster_group_personal_messages`), which
+is exactly where its unread counter lives; `_on_muc_private_message` and
+`_on_muc_participant_clicked` create/refresh it, `_apply_pm_presence` pushes the
+participant's status/avatar into the tab (`ChatWidget.set_peer_avatar`) and the
+toolbar vCard routes through `_show_muc_participant_profile` (bare real JID or
+`room/nick`), and `_on_groupchat_presence` keeps it in step with presence —
 an occupant who **leaves the room stays in the group shown offline** (the row
 lives for the whole session and is only cleared on logout by
 `_reset_account_ui`); a full roster refresh restores it through
@@ -1555,8 +1561,7 @@ file is a **v2 payload**:
 "seen_sid": "<stanza-id>", "seen_ts": "<ts>", "seen_ref": "<message-id>",
 "seen_at": <unix>}}}`,
 where *chat-key* is the conversation key the chat tabs use — a bare JID for 1:1
-and MUC private messages (the real JID when the room reveals one, otherwise
-`room/nick`), the bare room JID for a conference. `read_sid` is the last
+and MUC private messages (always `room/nick`), the bare room JID for a conference. `read_sid` is the last
 displayed MDS
 stanza-id (the v1 `{"count": N, "displayed": "sid"}` layout and the v0
 `{"jid": N}` one are still read); `_flush_unread` collects it from the client's

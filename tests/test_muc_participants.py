@@ -253,6 +253,7 @@ class _FakeChat:
 win = MainWindow.__new__(MainWindow)
 room = "room@conf.example"
 win._muc_users = {room: {"bob": {"nick": "bob"}}}
+win._pm_targets = {}
 fake_chat = _FakeChat()
 win._chat_window = type("Win", (), {
     "get_chat": lambda self, jid: fake_chat if jid == room else None})()

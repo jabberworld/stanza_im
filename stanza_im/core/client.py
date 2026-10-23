@@ -6092,21 +6092,30 @@ class JabberClient:
             server_sid = _stanza_id(msg, self.jid_str)
             replace_ref = _replace_reference(msg)
             room, separator, nick = frm.partition("/")
+            pm = None
             if separator and room in self.groupchats:
+                pm = (room, nick)
+            else:
+                # A room PM relayed from the real JID (a non-anonymous room)
+                # still belongs to the occupant conversation.
+                pm = self._room_pm_occupant(frm, msg)
+            if pm is not None:
+                pm_room, pm_nick = pm
+                pm_key = f"{pm_room}/{pm_nick}"
                 if server_sid:
-                    self._mds_track(frm, msg, server_sid)
+                    self._mds_track(pm_key, msg, server_sid)
                 if replace_ref:
                     if self.allow_incoming_edits:
-                        self.emit("message_corrected", frm, replace_ref,
+                        self.emit("message_corrected", pm_key, replace_ref,
                                   body, ts, unstyled, stable_id,
                                   reply_to, reply_id, media=media,
                                   markup=markup)
                         return
                     logger.debug("Incoming correction ignored (edits disabled)")
-                self.emit("muc_private_message", room, nick, body, ts, unstyled,
-                          stable_id, frm, reply_to, reply_id, media=media,
-                          encrypted=self._omemo_flag(msg), markup=markup,
-                          urgency=_shim_urgency(msg))
+                self.emit("muc_private_message", pm_room, pm_nick, body, ts,
+                          unstyled, stable_id, frm, reply_to, reply_id,
+                          media=media, encrypted=self._omemo_flag(msg),
+                          markup=markup, urgency=_shim_urgency(msg))
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -6283,6 +6292,28 @@ class JabberClient:
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
                   media=media, encrypted=self._omemo_flag(msg), markup=markup,
                   urgency=_shim_urgency(msg))
+
+    def _room_pm_occupant(self, frm: str, msg) -> tuple[str, str] | None:
+        """Occupant ``(room, nick)`` of a room PM relayed from the real JID.
+
+        A non-anonymous room may stamp a private message with the sender's real
+        JID; the MUC user extension marks it as a room message.  Only an
+        unambiguous match among the rooms we are in is mapped back (a plain 1:1
+        message never carries that extension).
+        """
+        xml = getattr(msg, "xml", None)
+        if xml is None or xml.find("{%s}x" % NS_MUC_USER) is None:
+            return None
+        sender = frm.split("/", 1)[0].strip().lower()
+        if not sender:
+            return None
+        matches: list[tuple[str, str]] = []
+        for room, gi in self.groupchats.items():
+            for nick, info in gi.users.items():
+                real = str(info.get("real_jid") or "").split("/", 1)[0]
+                if real and real.strip().lower() == sender:
+                    matches.append((room, nick))
+        return matches[0] if len(matches) == 1 else None
 
     def _on_groupchat_subject(self, msg) -> None:
         """A MUC subject was set/announced (subject-only message).

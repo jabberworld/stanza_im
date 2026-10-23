@@ -1009,10 +1009,15 @@ return in the roster) is never rendered as an ordinary contact
 virtual «Свой контакт» row by `MainWindow._sync_self_roster` when
 `appearance.roster_show_self` is on. A conference renders as one row per joined
 room (`MainWindow._sync_conference_roster`). A **MUC private message** is
-attributed to its sender, so it gets its own row in the private-messages group
-keyed by the chat key (the real JID when the room revealed one, otherwise
-`room/nick`) — `MainWindow._sync_pm_roster` creates/updates it when the
-message arrives or the participant's chat is opened. The row lives for the
+always keyed by `room/nick` (the occupant identity in every room type; the real
+JID is metadata for the status/avatar/vCard, and a room PM relayed from the real
+JID is mapped back by `JabberClient._room_pm_occupant`), so it gets its own row
+in the private-messages group — `MainWindow._sync_pm_roster` creates/updates it
+when the message arrives or the participant's chat is opened; the tab's
+status/avatar come from the participant data (`_apply_pm_presence`,
+`ChatWidget.set_peer_avatar`) and its vCard button uses
+`_show_muc_participant_profile`. A normal 1:1 chat with the same user stays a
+separate conversation. The row lives for the
 whole session (cleared only on logout by `_reset_account_ui`); an occupant who
 leaves the room is shown **offline**, and a full roster refresh restores the
 rows through `_sync_all_pm_roster` (called after `_rebuild_roster`). The group

@@ -2278,6 +2278,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pm_roster.add(target)
         self._schedule_roster_repaint()
 
+    def _apply_pm_presence(self, target: str, room: str, nick: str,
+                           chat=None) -> None:
+        """Push a conference participant's status/avatar into a PM tab.
+
+        Conference private chats are always keyed by ``room/nick`` (the
+        occupant identity, whether or not the room reveals real JIDs); their
+        status, avatar and vCard come from the participant data.
+        """
+        info = self._participant_info(room, nick) if room else {}
+        if chat is None:
+            chat = self._chat_window.get_chat(target)
+        self._chat_window.set_contact_status(
+            target, str(info.get("show") or "online"))
+        if room:
+            self._vcard_muc_ctx[target] = True
+        if chat is not None:
+            self._set_pm_avatar(chat, target, info)
+
+    @staticmethod
+    def _set_pm_avatar(chat, target: str, info: dict) -> None:
+        path = str((info or {}).get("avatar_path") or "")
+        uri = ((avatar_file_data_uri(path) if path else "")
+               or avatar_data_uri(target) or "")
+        chat.set_peer_avatar(uri)
+
+    def _refresh_pm_avatars(self, room: str, nick: str) -> None:
+        """Apply a participant's new avatar to their open PM tab only."""
+        info = self._muc_users.get(room, {}).get(nick, {})
+        for target, (pm_room, pm_nick) in list(self._pm_targets.items()):
+            if pm_room != room or pm_nick != nick:
+                continue
+            chat = self._chat_window.get_chat(target)
+            if chat is None:
+                continue
+            self._set_pm_avatar(chat, target, info)
+            chat.refresh_avatars()
+
     def _sync_all_pm_roster(self) -> None:
         """Re-add the private-message rows after the roster was rebuilt.
 
@@ -4392,6 +4429,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:
                     muji.set_avatars({nick: path})
+                self._refresh_pm_avatars(room, nick)
                 return
         bare_jid = jid.split("/", 1)[0]
         room_jid = (jid if jid in self._conference_roster
@@ -4429,6 +4467,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     for nick, avatar_jid in changed_nicks:
                         chat.refresh_participant(nick)
                         chat.refresh_avatar_for_sender(nick, avatar_jid)
+                        self._refresh_pm_avatars(room, nick)
                 muji = self._muji_windows.get(room)
                 if muji is not None and path:
                     muji.set_avatars({nick: path for nick, _ in changed_nicks})
@@ -5722,9 +5761,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 is_new = not self._chat_window.has_chat(jid)
                 chat = self._chat_window.open_chat(jid, display_name)
                 self._apply_call_support(jid)
-                chat_show = next((user.status for user in self._roster._users
-                                  if user.jid == jid), None)
-                self._chat_window.set_contact_status(jid, chat_show)
+                pm = self._pm_targets.get(jid)
+                if pm:
+                    self._apply_pm_presence(jid, pm[0], pm[1], chat)
+                else:
+                    chat_show = next(
+                        (user.status for user in self._roster._users
+                         if user.jid == jid), None)
+                    self._chat_window.set_contact_status(jid, chat_show)
                 self._focus_chat(jid, chat, is_new=is_new)
                 self._request_vcard(jid)
         finally:
@@ -6886,20 +6930,21 @@ class MainWindow(QtWidgets.QMainWindow):
                                   markup: dict | None = None,
                                   urgency: str = ""):
         info = self._participant_info(room, nick)
+        # Conference PMs use the occupant identity in every room type; the real
+        # JID (when the room reveals one) is metadata for status/avatar/vCard.
+        target = f"{room}/{nick}"
         real_jid = info.get("real_jid")
-        target = real_jid.strip() if isinstance(real_jid, str) else ""
-        if not target or target.lower() == "none":
-            target = f"{room}/{nick}"
-        # The priority is the sender's (a bare real JID); a `room/nick` key has
-        # no contact to look up.
-        sender_bare = (target.split("/", 1)[0]
-                       if "@" in target and "/" not in target else "")
+        bare_real = (real_jid.split("/", 1)[0].strip()
+                     if isinstance(real_jid, str) else "")
+        sender_bare = (bare_real
+                       if "@" in bare_real and "/" not in bare_real else "")
         priority = self._effective_priority(sender_bare, urgency)
         self._remember_contact(target, name=nick, is_conference=True)
         self._sync_pm_roster(target, room, nick)
         self._notify_incoming_message(target, body)
         stamp = ts or _current_timestamp()
         chat = self._chat_window.open_chat(target, nick)
+        self._apply_pm_presence(target, room, nick, chat)
         self._apply_call_support(target)
         self._arm_unread_separator(target, chat)
         chat.add_message(sender=nick, body=body,
@@ -7175,8 +7220,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         target, status="offline",
                         icon_key=show_to_icon_key("offline"))
                     self._schedule_roster_repaint()
+                    self._chat_window.set_contact_status(target, "offline")
                 else:
                     self._sync_pm_roster(target, room, nick)
+                    self._apply_pm_presence(target, room, nick)
 
     def _on_groupchat_presence_details(self, room: str, nick: str):
         """A participant's client (XEP-0092) arrived later — refresh tooltips."""
@@ -7296,8 +7343,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_chat_vcard(self, jid: str):
         if jid in self._muc_self_nicks:
             self._show_muc_room_info(jid)
-        else:
-            self._show_profile(jid)
+            return
+        pm = self._pm_targets.get(jid)
+        if pm:
+            # The same path as the participant menu: a bare real JID (when the
+            # room reveals one) or room/nick, plus the MUC context.
+            room, nick = pm
+            info = self._participant_info(room, nick)
+            self._show_muc_participant_profile(
+                room, nick, self._participant_real_jid(info))
+            return
+        self._show_profile(jid)
 
     def _on_input_height_changed(self, jid: str, height: int):
         self._config.chat.input_height = max(40, min(240, int(height)))
@@ -8808,11 +8864,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return self._muc_users.get(room, {}).get(nick, {})
 
     def _on_muc_participant_clicked(self, room: str, nick: str):
-        info = self._participant_info(room, nick)
-        real_jid = info.get("real_jid")
-        target = real_jid.strip() if isinstance(real_jid, str) else ""
-        if not target or target.lower() == "none":
-            target = f"{room}/{nick}"
+        # The occupant identity is the conversation key in every room type.
+        target = f"{room}/{nick}"
         # Before the open: focusing the tab clears the counters, so the stored
         # read anchor of an unread private chat is captured by ``_focus_chat``
         # itself (the tab_focused handler is suppressed while opening).
@@ -8821,6 +8874,7 @@ class MainWindow(QtWidgets.QMainWindow):
             chat = self._chat_window.open_chat(target, nick)
         finally:
             self._opening_chat = False
+        self._apply_pm_presence(target, room, nick, chat)
         self._apply_call_support(target)
         self._sync_pm_roster(target, room, nick)
         self._focus_chat(target, chat)
