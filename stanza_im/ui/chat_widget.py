@@ -458,6 +458,8 @@ class ChatWidget(QtWidgets.QWidget):
         # (a 200-participant join used to recreate every row per presence).
         self._muc_rows: dict[str, dict] = {}
         self._muc_headers: dict[str, QtWidgets.QListWidgetItem] = {}
+        self._muc_grouped: dict[str, list[str]] = {}
+        self._participant_filter = ""
         self._muc_color_keys: set = set()
         self._hovered_participant: str = ""
         self._nick_colors = NickColorAllocator()
@@ -881,7 +883,6 @@ class ChatWidget(QtWidgets.QWidget):
         self._users_list.setMinimumWidth(120)
         self._users_list.setMaximumWidth(420)
         self._users_list.setAcceptDrops(False)
-        self._users_list.setVisible(self.is_muc)
         self._users_list.font_zoom_requested.connect(
             self._on_participant_font_zoom)
         self._users_list.setContextMenuPolicy(
@@ -891,10 +892,28 @@ class ChatWidget(QtWidgets.QWidget):
         self._users_list.customContextMenuRequested.connect(
             self._on_muc_context_menu)
 
+        # The MUC sidebar carries a live participant search above the list;
+        # the splitter sizes the whole panel.
+        self._users_panel = QtWidgets.QWidget(self)
+        self._users_panel.setMinimumWidth(120)
+        self._users_panel.setMaximumWidth(420)
+        panel_layout = QtWidgets.QVBoxLayout(self._users_panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        self._participant_search = QtWidgets.QLineEdit(self._users_panel)
+        self._participant_search.setPlaceholderText(
+            tr("muc_search_placeholder"))
+        self._participant_search.setClearButtonEnabled(True)
+        self._participant_search.textChanged.connect(
+            self.set_participant_filter)
+        panel_layout.addWidget(self._participant_search)
+        panel_layout.addWidget(self._users_list, 1)
+        self._users_panel.setVisible(self.is_muc)
+
         self._content_splitter = QtWidgets.QSplitter(
             QtCore.Qt.Orientation.Horizontal, self)
         self._content_splitter.addWidget(chat_panel)
-        self._content_splitter.addWidget(self._users_list)
+        self._content_splitter.addWidget(self._users_panel)
         self._content_splitter.setStretchFactor(0, 1)
         self._content_splitter.setStretchFactor(1, 0)
         self._content_splitter.setSizes([self.width() - 180, 180])
@@ -3130,9 +3149,9 @@ class ChatWidget(QtWidgets.QWidget):
                 header.setFont(font)
                 header.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
                 self._muc_headers[section] = header
-            text = f"{tr(f'muc_section_{section}')} ({len(nicks)})"
-            if header.text() != text:
-                header.setText(text)
+            self._muc_grouped = grouped
+            header.setData(
+                QtCore.Qt.ItemDataRole.UserRole + 1, section)
             desired.append(header)
             for nick in nicks:
                 desired.append(self._muc_rows[nick]["item"])
@@ -3152,6 +3171,45 @@ class ChatWidget(QtWidgets.QWidget):
             item = self._users_list.takeItem(len(desired))
             if item is not None:
                 del item
+        self._apply_participant_filter()
+
+    @staticmethod
+    def _normalize_participant_filter(text: str) -> str:
+        import unicodedata
+        return " ".join(
+            unicodedata.normalize("NFKC", str(text or "")).split()
+        ).casefold()
+
+    def set_participant_filter(self, text: str) -> None:
+        """Filter the MUC participant list by nick (live, case-insensitive)."""
+        self._participant_filter = str(text or "")
+        self._apply_participant_filter()
+
+    def _apply_participant_filter(self) -> None:
+        """Hide non-matching participant rows and report matched/total."""
+        if not hasattr(self, "_participant_search"):
+            return
+        needle = self._normalize_participant_filter(self._participant_filter)
+        for section, nicks in self._muc_grouped.items():
+            header = self._muc_headers.get(section)
+            if header is None:
+                continue
+            matched = [nick for nick in nicks
+                       if not needle or needle in
+                       self._normalize_participant_filter(nick)]
+            for nick in nicks:
+                state = self._muc_rows.get(nick)
+                if state is not None:
+                    hide = bool(needle) and nick not in matched
+                    state["item"].setHidden(hide)
+                    state["row"].setVisible(not hide)
+            title = tr(f"muc_section_{section}")
+            if needle:
+                header.setText(f"{title} ({len(matched)}/{len(nicks)})")
+                header.setHidden(not matched)
+            else:
+                header.setText(f"{title} ({len(nicks)})")
+                header.setHidden(False)
 
     def _build_muc_user_row(self, user: dict) -> dict:
         nick = str(user.get("nick", ""))
@@ -3668,7 +3726,7 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self.is_muc:
-            self.participant_width_changed.emit(self._users_list.width())
+            self.participant_width_changed.emit(self._users_panel.width())
 
     def set_participant_width(self, width: int) -> None:
         """Size the MUC sidebar to *width* px (0 = keep the default)."""

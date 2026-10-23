@@ -687,6 +687,7 @@ STRINGS = {
     "muc_leave": "Leave Room",
     "muc_leave_confirm": "Do you really want to leave the conference {room}?",
     "muc_topic": "{topic}",
+    "muc_search_placeholder": "Search participant…",
     "muc_participants": "Participants",
     "muc_you": "you",
     "muc_section_moderators": "Moderators",

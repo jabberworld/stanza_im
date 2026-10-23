@@ -687,6 +687,7 @@ STRINGS = {
     "muc_leave": "Покинуть комнату",
     "muc_leave_confirm": "Покинуть конференцию {room}?",
     "muc_topic": "{topic}",
+    "muc_search_placeholder": "Поиск участника…",
     "muc_participants": "Участники",
     "muc_you": "вы",
     "muc_section_moderators": "Модераторы",

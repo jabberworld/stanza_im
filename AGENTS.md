@@ -1119,6 +1119,12 @@ The sidebar never scrolls horizontally: the list
 uses `QListView.ResizeMode.Adjust` + `ScrollBarAlwaysOff` and the nick is a
 `_FadeLabel` that clips the text and fades its right edge into the background
 (Psi+ style), so the status icon, client icon and avatar always stay visible.
+A live search field above the list (`ChatWidget._participant_search`,
+`set_participant_filter`) filters the rows by nick (NFKC + case-fold, so case
+and width variants match), hides a section whose occupants all miss and shows
+its count as `matched/total` (the plain count without a filter); a presence
+arriving while the filter is active is filtered too, and a 1:1 tab shows no
+search field.
 Its width is remembered in `appearance.muc_participant_width`
 (`ChatWidget.participant_width_changed` → `ChatWindow.set_muc_participant_width`)
 and restored for new MUC tabs. The data file

@@ -1255,7 +1255,10 @@ Single conversation tab. Layout:
   (`ResizeMode.Adjust` + `ScrollBarAlwaysOff`) and a long nick is a `_FadeLabel`
   that clips and fades its right edge into the background (Psi+ style), so the
   status icon, client icon and avatar stay visible; the sidebar width is
-  remembered in `appearance.muc_participant_width`. Presences are merged
+  remembered in `appearance.muc_participant_width`. A live search field above
+  the list filters the participants by nick (NFKC + case-fold), hides a section
+  with no match and reports its count as `matched/total`; a 1:1 tab has no
+  search field. Presences are merged
   incrementally (`_sync_muc_users`/`_sync_muc_order`): a row is created once,
   updated in place (show/badge/colour/client/avatar), moved between the
   moderator/participant/guest sections and removed without touching the
