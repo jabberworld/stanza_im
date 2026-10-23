@@ -199,8 +199,10 @@ The Contacts tab (icon `system-users.png`) is active at startup and is the
 only this left part). The Bookmarks tab (icon `bookmarks.svg`)
 replaces the old menu: a search field plus a `QListWidget` of the conferences
 (`_rebuild_bookmarks_view`), where a double click joins (`_join_bookmark`) and
-the right-click menu offers Join (`ok.png`) / Edit (`edit.png`) / Auto-join
-(checkable) / Remove (`_set_bookmark_autojoin`/`_remove_bookmark_confirmed`);
+the right-click menu offers Join (`ok.png`) / Edit (`edit.png`) / Share
+(`send-arrow.svg`, sends `xmpp:<room>?join` through the share dialog,
+`_share_bookmark`) / Auto-join (checkable) / Remove
+(`_set_bookmark_autojoin`/`_remove_bookmark_confirmed`);
 it loads the server bookmarks on tab activation (`_on_roster_tab_changed` →
 `_load_bookmarks`). Below the list a toolbar of four wide (2:1) icon-only
 buttons — Join (`ok.png`), Create (`about.png`), Edit (`edit.png`) and Remove

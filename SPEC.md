@@ -147,7 +147,8 @@ icon-only `QTabBar` (tooltip = purpose) over a `QStackedWidget` — **Contacts**
 (existing roster content; icon `system-users.png`; active at startup), **Bookmarks**
 (icon `bookmarks.svg`; a search field plus a list of the conference bookmarks showing
 the name only, JID in the tooltip; double click joins, right-click menu
-Join / Edit / Auto-join / Remove; a toolbar of four wide (2:1) icon-only
+Join / Edit / Share (`xmpp:<room>?join` via the share dialog) / Auto-join /
+Remove; a toolbar of four wide (2:1) icon-only
 buttons Join / Create / Edit / Remove below the list, sized like the roster
 status bar (same height, full width), with Join/Edit/Remove enabled only for a
 selected bookmark; Create and Edit open

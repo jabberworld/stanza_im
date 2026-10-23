@@ -4,6 +4,7 @@ Run with:
     LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu \
     QT_QPA_PLATFORM=offscreen python3 tests/test_bookmarks.py
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -227,6 +228,19 @@ check("a changed address removes the old bookmark",
 check("a changed address saves the new bookmark",
       win._client.saved[-1][0] == "renamed@conf.example")
 win.close()
+
+# 5. the bookmark menu shares an xmpp: join link --------------------------
+win = MainWindow.__new__(MainWindow)
+shared = []
+win._on_share_requested = (
+    lambda content, parent=None, media=None: shared.append(content))
+win._share_bookmark({"jid": "chat@conf.example"})
+win._share_bookmark({})
+check("a bookmark is shared as an xmpp: join link",
+      shared == ["xmpp:chat@conf.example?join"])
+_menu_src = inspect.getsource(MainWindow._on_bookmark_context_menu)
+check("the bookmark context menu offers Share",
+      'tr("ctx_share")' in _menu_src and "_share_bookmark(bookmark)" in _menu_src)
 
 print()
 if FAILURES:

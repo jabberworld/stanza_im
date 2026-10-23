@@ -1618,6 +1618,9 @@ class MainWindow(QtWidgets.QMainWindow):
         join.triggered.connect(lambda: self._join_bookmark(bookmark))
         edit = menu.addAction(self._menu_icon("edit.png"), tr("bookmark_edit"))
         edit.triggered.connect(lambda: self._edit_bookmark(bookmark))
+        share = menu.addAction(self._menu_icon("send-arrow.svg"),
+                               tr("ctx_share"))
+        share.triggered.connect(lambda: self._share_bookmark(bookmark))
         auto = menu.addAction(tr("bookmark_autojoin"))
         auto.setCheckable(True)
         auto.setChecked(bool(bookmark.get("autojoin")))
@@ -1628,6 +1631,14 @@ class MainWindow(QtWidgets.QMainWindow):
         remove.triggered.connect(
             lambda: self._remove_bookmark_confirmed(bookmark))
         menu.exec(self._bookmarks_list.mapToGlobal(pos))
+
+    def _share_bookmark(self, bookmark: dict) -> None:
+        """Share a bookmark's conference join link through the share dialog."""
+        room = str((bookmark or {}).get("jid") or "").strip()
+        if not room:
+            return
+        from stanza_im.include.xmpp_uri import make_xmpp_uri
+        self._on_share_requested(make_xmpp_uri(room, action="join"))
 
     def _filter_bookmarks(self, text: str) -> None:
         needle = (text or "").strip().casefold()
