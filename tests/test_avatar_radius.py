@@ -116,6 +116,26 @@ check("the rounded chat avatar has transparent corners",
 widget.set_avatar_radius(40)
 check("changing the radius rebuilds the cached avatars",
       not widget._rounded_avatar_cache)
+
+# 4b. a JPEG avatar is rounded too (the lists auto-detect the format) --------
+_jimage = QtGui.QImage(40, 40, QtGui.QImage.Format.Format_RGB32)
+_jimage.fill(QtGui.QColor("#cc6633"))
+_jbuf = QtCore.QBuffer()
+_jbuf.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+_jimage.save(_jbuf, "JPEG")
+avatars_mod.save_avatar("jpeg@example.com", bytes(_jbuf.data()))
+widget.set_avatar_radius(100)
+_jpeg_uri = widget._user_icon("incoming", "jpeg@example.com")
+check("a JPEG avatar is re-encoded as a rounded PNG",
+      _jpeg_uri.startswith("data:image/png;base64,")
+      and _jpeg_uri != avatars_mod.avatar_data_uri("jpeg@example.com"))
+_jpeg_rounded = QtGui.QImage.fromData(
+    base64.b64decode(_jpeg_uri.split(",", 1)[1]), "PNG")
+if _jpeg_rounded.width() != 64:
+    _jpeg_rounded = _jpeg_rounded.scaled(64, 64)
+check("the rounded JPEG avatar has transparent corners",
+      _jpeg_rounded.pixelColor(0, 0).alpha() == 0
+      and _jpeg_rounded.pixelColor(32, 32).alpha() > 0)
 check("our own avatar is rounded too",
       widget._user_icon("outgoing").startswith("data:image/png;base64,"))
 widget.detach()

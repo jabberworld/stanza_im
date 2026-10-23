@@ -3411,7 +3411,8 @@ client.leave_muji(room)
   under the bare JID and `MainWindow._own_avatar_uri` prefers the contact's
   cached path), and `ChatWindow.refresh_avatars` updates both in place. The
   message avatars are clipped by `appearance.avatar_radius` as PNG data URIs
-  (`ChatWidget._rounded_avatar_uri`, cached by `(uri, radius)`), so the
+  (`ChatWidget._rounded_avatar_uri`, cached by `(uri, radius)`; the image
+  format is auto-detected and the clipped result re-encoded as PNG), so the
   QTextBrowser fallback rounds them too.
 - `_ensure_pep_subscription` also requests the `urn:xmpp:avatar:metadata`
   node as a fallback for servers that need an explicit PEP subscription.

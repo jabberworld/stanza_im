@@ -2583,7 +2583,9 @@ the contact's cached `avatar_path` first, so an older full-JID cache entry still
 renders; `ChatWindow.refresh_avatars` updates both incoming
 and outgoing `<img class="avatar">` elements in place when an avatar arrives.
 Message avatars follow `appearance.avatar_radius` too: `_user_icon` clips the
-PNG data URI (`_rounded_avatar_uri`, cached by `(uri, radius)`) and
+data URI (`_rounded_avatar_uri`, cached by `(uri, radius)`; the source format is
+auto-detected, so a JPEG/GIF/WebP vCard photo is rounded like a PNG and
+re-encoded as PNG) and
 `ChatWindow.set_avatar_radius` applies it to every open tab (the QTextBrowser
 fallback gets the same clipped data URIs, since it has no CSS border-radius). A
 PEP event is attributed to the XEP-0033

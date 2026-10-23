@@ -1990,7 +1990,9 @@ class ChatWidget(QtWidgets.QWidget):
             from stanza_im.include.avatars import rounded_avatar
             payload = uri.split(",", 1)[1] if "," in uri else ""
             pix = QtGui.QPixmap()
-            if not pix.loadFromData(base64.b64decode(payload), "PNG"):
+            # Avatars are not always PNG (vCards may carry JPEG/GIF/WebP); let
+            # Qt detect the format, then re-encode the clipped variant as PNG.
+            if not pix.loadFromData(base64.b64decode(payload)):
                 return uri
             rounded = rounded_avatar(pix, 64, self._avatar_radius)
             buffer = QtCore.QBuffer()
