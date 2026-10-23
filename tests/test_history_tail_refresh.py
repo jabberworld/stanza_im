@@ -119,15 +119,24 @@ check("a hidden tab is not refreshed",
 cw.show()
 app.processEvents()
 cw._view.scrolled_up = True
-check("a tab scrolled up is not refreshed",
-      asyncio.run(cw.refresh_tail_if_newer()) is False)
-
-cw._view.scrolled_up = False
-check("a visible, at-bottom tab merges the new tail",
-      asyncio.run(cw.refresh_tail_if_newer()) is True)
+check("a transient non-bottom view does not block the refresh",
+      asyncio.run(cw.refresh_tail_if_newer(force=False)) is True)
 check("the new message is now the newest",
       cw.newest_ts() == "2026-10-22T12:00:00.000000Z"
       and cw._history[-1]["body"] == "new today")
+
+# A genuine user scroll-up (reported by the view) keeps the window alone.
+cw._on_view_bottom()
+check("reaching the bottom clears the user-scroll flag",
+      cw._user_scrolled_up is False)
+cw._view.scrolled_up = True
+cw._on_last_seen("someone@conf/today", "2026-10-22T12:00:00.000000Z", "")
+check("a user scroll sets the flag", cw._user_scrolled_up is True)
+check("a tab scrolled up by the user is not refreshed",
+      asyncio.run(cw.refresh_tail_if_newer()) is False)
+
+cw._on_view_bottom()
+cw._view.scrolled_up = False
 check("a second refresh is a no-op when nothing is newer",
       asyncio.run(cw.refresh_tail_if_newer()) is False)
 

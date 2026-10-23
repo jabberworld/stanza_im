@@ -447,9 +447,12 @@ join as **archived** groupchat messages (`<archived xmlns='urn:xmpp:mam:tmp'/>`
 both are stored but not rendered immediately (`_on_groupchat_message`'s archived
 branch returns after storing). `ChatWidget.schedule_tail_refresh` (debounced,
 also called after `server_fetch_done`) reloads the window only for the visible,
-not-scrolled-up conversation (`refresh_tail_if_newer`), keeps the unread
-boundary and stays at the bottom; a suspended tab defers it to `resume`, a
-background/scrolled-up tab is left alone. `history._insert` also **repairs a
+not-user-scrolled conversation (`refresh_tail_if_newer`; the flag is set by an
+actual `last_seen` scroll-up and cleared when the view reaches the bottom, so a
+transient "not at the bottom" while the page loads cannot block it), keeps the
+unread boundary and stays at the bottom; a suspended tab defers it to `resume`,
+a background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
+merge. `history._insert` also **repairs a
 stale timestamp** when an archive/origin/message id already exists with a
 different one (the body is never rewritten — an edit is a separate update), so
 an old malformed row cannot hide the new messages forever.

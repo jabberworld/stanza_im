@@ -2168,9 +2168,11 @@ Registers XEP plugins (conditionally where noted):
   groupchat messages and is stored without rendering; the MAM backfill likewise
   stores rows while the tab is open. `ChatWidget.schedule_tail_refresh` /
   `refresh_tail_if_newer` reloads the window when the stored newest is newer
-  than the rendered one — only for the visible, not-scrolled-up conversation,
-  preserving the unread boundary and the bottom position; a suspended tab defers
-  it to `resume`, a background tab is left to its next open. `history._insert`
+  than the rendered one — only for the visible, not-user-scrolled conversation
+  (a genuine `last_seen` scroll-up, cleared at the bottom; a transient
+  non-bottom state while the page loads does not block it), preserving the
+  unread boundary and the bottom position; a suspended tab defers it to
+  `resume`, a background tab is left to its next open. `history._insert`
   repairs a stale timestamp on an archive/origin/message-id match (never the
   body), so a row stored with a wrong timestamp cannot keep the tail hidden.
 - **Partial progress**: scrolling a conversation into view records the newest

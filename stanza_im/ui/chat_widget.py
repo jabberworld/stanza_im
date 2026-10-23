@@ -467,6 +467,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._last_view_h = 0
         self._suspended = False
         self._suspended_fraction = 1.0
+        # True only after the *user* scrolled up; a transient "not at the
+        # bottom" while the page loads must not block the history tail refresh.
+        self._user_scrolled_up = False
         self._text_scale = 1.0
         self._jump_pending = ""
         self._jump_pages = 0
@@ -519,6 +522,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.note_requested.connect(
             lambda content: self.note_requested.emit(self.jid, content))
         view.near_top.connect(self._on_near_top)
+        view.bottom_reached.connect(self._on_view_bottom)
         view.bottom_reached.connect(self.bottom_reached)
         view.last_seen_changed.connect(self._on_last_seen)
         view.mention_jump_requested.connect(self._jump_to_next_mention)
@@ -2223,6 +2227,7 @@ class ChatWidget(QtWidgets.QWidget):
         forward pager.  Without an anchor the window carries no separator.
         """
         self._history = list(entries or [])
+        self._user_scrolled_up = False
         self._window_size = max(50, int(window_size))
         self._db_exhausted = bool(exhausted)
         self._server_exhausted = False
@@ -2828,12 +2833,14 @@ class ChatWidget(QtWidgets.QWidget):
         if self._suspended:
             self._tail_refresh_on_resume = True
             return False
-        if not force and (not self.isVisible()
-                          or self._view.is_scrolled_up()):
+        if not force and (not self.isVisible() or self._user_scrolled_up):
             return False
         from stanza_im.core import history
         newest = await history.newest_timestamp_async(self.jid)
-        if not newest or newest <= (self.newest_ts() or ""):
+        rendered = self.newest_ts()
+        if not newest or newest <= (rendered or ""):
+            logger.debug("TAIL[refresh] jid=%s nothing newer (db=%s shown=%s)",
+                         self.jid, newest, rendered)
             return False
         if self._released or self._suspended:
             return False
@@ -2847,6 +2854,7 @@ class ChatWidget(QtWidgets.QWidget):
         self.set_history(rows, self._window_size, exhausted,
                          anchor=self._unread_boundary or None,
                          seen_anchor=self._unread_boundary or None)
+        logger.debug("TAIL[refresh] jid=%s merged up to %s", self.jid, newest)
         return True
 
     def oldest_ts(self):
@@ -3930,10 +3938,15 @@ class ChatWidget(QtWidgets.QWidget):
         except (AttributeError, RuntimeError):
             pass
 
+    def _on_view_bottom(self) -> None:
+        self._user_scrolled_up = False
+
     def _on_last_seen(self, ref: str = "", ts: str = "", sid: str = ""):
         try:
             ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
             scrolled_up = self._view.is_scrolled_up()
+            if scrolled_up:
+                self._user_scrolled_up = True
             same = (ref, ts, sid) == (
                 self._last_seen_ref, self._last_seen_ts, self._last_seen_sid)
             not_newer = bool(ts) and bool(self._last_seen_ts) \
