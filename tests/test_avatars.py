@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 asyncio.set_event_loop(asyncio.new_event_loop())
 
 import slixmpp
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.core.client import JabberClient, _avatar_data_from_iq
@@ -199,6 +199,44 @@ _src = open(os.path.join(
 check("avatar fetch handles expected failures without a traceback",
       "except (slixmpp.exceptions.IqError, asyncio.TimeoutError) as exc:" in _src
       and 'logger.debug("Avatar retrieval for %s failed: %s", jid, exc)' in _src)
+
+# ── avatar cache file names ──────────────────────────────────────
+from stanza_im.include import avatars as avatars_mod
+
+room = "obshenie@conference.jabberworld.info"
+paths = {nick: avatars_mod.avatar_path(f"{room}/{nick}")
+         for nick in ("Мария", "Ольга", "Дарья", "Иван", "Пётр")}
+check("non-ASCII nicknames get distinct avatar files",
+      len(set(paths.values())) == len(paths))
+check("the readable room prefix is kept",
+      all(os.path.basename(path).startswith(
+          "obshenie@conference.jabberworld.info_")
+          for path in paths.values()))
+check("the same key always maps to the same file",
+      avatars_mod.avatar_path(f"{room}/Мария") == paths["Мария"])
+check("an ASCII JID keeps its plain file name",
+      os.path.basename(avatars_mod.avatar_path("bob@example.com"))
+      == "bob@example.com.png")
+long_a = f"{room}/" + "ю" * 250
+long_b = f"{room}/" + "я" * 250
+check("long non-ASCII keys stay within the file-name limit and differ",
+      len(os.path.basename(avatars_mod.avatar_path(long_a))) <= 200
+      and avatars_mod.avatar_path(long_a) != avatars_mod.avatar_path(long_b))
+
+img = QtGui.QImage(3, 3, QtGui.QImage.Format.Format_RGB32)
+img.fill(QtGui.QColor("#cc0000"))
+buffer = QtCore.QBuffer()
+buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+img.save(buffer, "PNG")
+_png2 = bytes(buffer.data())
+saved_a = avatars_mod.save_avatar(f"{room}/Мария", _PNG)
+saved_b = avatars_mod.save_avatar(f"{room}/Ольга", _png2)
+check("colliding nicknames are stored in different files", saved_a != saved_b)
+check("both cached avatar files exist",
+      os.path.isfile(saved_a) and os.path.isfile(saved_b))
+check("the cached avatars stay distinct",
+      avatars_mod.avatar_data_uri(f"{room}/Мария")
+      != avatars_mod.avatar_data_uri(f"{room}/Ольга"))
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

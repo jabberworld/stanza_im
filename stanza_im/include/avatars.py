@@ -7,6 +7,7 @@ the chat theme inlines a small PNG as a data-URI.
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import re
 
@@ -20,13 +21,21 @@ _VCARD_NS = "vcard-temp"
 _SAFE_RE = re.compile(r"[^A-Za-z0-9_.@-]")
 _URI_CACHE: dict[str, str | None] = {}
 _MISSING = object()
+# A non-ASCII key (a conference nick, a Unicode localpart) is sanitised to
+# underscores; the digest keeps two such keys from sharing one file.
+_DIGEST_LEN = 10
+_PREFIX_MAX = 180
 
 
 def _safe_name(jid: str) -> str:
     value = str(jid)
     bare, separator, resource = value.partition("/")
     key = value if separator and "@" in bare else bare
-    return _SAFE_RE.sub("_", key)
+    safe = _SAFE_RE.sub("_", key)
+    if safe != key:
+        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:_DIGEST_LEN]
+        safe = f"{safe[:_PREFIX_MAX]}-{digest}"
+    return safe
 
 
 def ensure_dirs() -> None:

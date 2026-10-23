@@ -3409,6 +3409,11 @@ client.leave_muji(room)
 
 ### 14.10.3 User Avatars (XEP-0084 / XEP-0153 / XEP-0398)
 
+- Avatar files live in `$XDG_CACHE_HOME/stanza-im/avatars/`, named after the
+  sanitized JID key (`room/nick` for a MUC occupant, otherwise the bare JID).
+  A key with characters outside `[A-Za-z0-9_.@-]` (Cyrillic nicknames, Unicode
+  localparts) gets a short SHA-1 suffix (and a bounded prefix), so different
+  non-Latin nicknames of the same length never collide in one cache file.
 - `xep_0153` advertises our vCard avatar hash in outgoing presence
   (`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`) and fires
   `vcard_avatar_update` when a contact's advertised hash changes;

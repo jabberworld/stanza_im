@@ -2597,7 +2597,12 @@ an HTTP Upload slot is rejected for size (`file-too-large` /
 `http_upload_oversize(jid, path)` and MainWindow retries that file over P2P.
 
 **User avatars (XEP-0084 / XEP-0153 / XEP-0398)** (`core/client.py`,
-`include/avatars.py`): `xep_0153` advertises our vCard avatar hash in presence
+`include/avatars.py`): avatar files live in
+`$XDG_CACHE_HOME/stanza-im/avatars/`; the name is the sanitized JID key
+(`room/nick` for an occupant, else the bare JID) and, when the key contains
+anything outside `[A-Za-z0-9_.@-]` (a Cyrillic nick, a Unicode localpart), a
+short SHA-1 suffix is appended (`…______-ed48fde817.png`) so two non-Latin
+nicks of the same length never share one cached file. `xep_0153` advertises our vCard avatar hash in presence
 (`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`); its
 `vcard_avatar_update` event makes `_on_vcard_avatar_update` refetch a contact's
 vCard (`get_vcard(bare, force=True)`) when the hash changes. `xep_0084`
