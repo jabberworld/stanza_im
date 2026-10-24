@@ -916,13 +916,29 @@ def _block_items(xml) -> set[str]:
             xml.iter("{%s}item" % NS_BLOCKING) if el.get("jid")}
 
 
-def _caps_node(pres) -> str:
-    """The XEP-0115 ``<c node=…/>`` of a presence stanza ("" when absent)."""
+def _caps_element(pres):
     xml = getattr(pres, "xml", None)
     if xml is None:
-        return ""
-    element = xml.find("{%s}c" % NS_CAPS)
+        return None
+    return xml.find("{%s}c" % NS_CAPS)
+
+
+def _caps_node(pres) -> str:
+    """The XEP-0115 ``<c node=…/>`` of a presence stanza ("" when absent)."""
+    element = _caps_element(pres)
     return str(element.get("node") or "") if element is not None else ""
+
+
+def _caps_ver(pres) -> str:
+    """The XEP-0115 ``<c ver=…/>`` of a presence stanza ("" when absent)."""
+    element = _caps_element(pres)
+    return str(element.get("ver") or "") if element is not None else ""
+
+
+def _caps_hash(pres) -> str:
+    """The XEP-0115 ``<c hash=…/>`` of a presence stanza ("" when absent)."""
+    element = _caps_element(pres)
+    return str(element.get("hash") or "") if element is not None else ""
 
 
 def _occupant_id(pres) -> str:
@@ -1385,7 +1401,11 @@ class JabberClient:
         self._pep_sweep_paused = False
         # XEP-0115 features per full JID (for call-capability gating)
         self.contact_features: dict[str, set] = {}
+        # Full caps data per resource (features, identities, raw XML) for the
+        # client-capabilities viewer.
+        self.contact_caps_info: dict[str, dict] = {}
         self._caps_inflight: set[str] = set()
+        self._caps_disco_inflight: set[str] = set()
         # Full JIDs whose (possibly stale) caps were verified with a live
         # disco#info, so the extra request happens once per resource.
         self._caps_verified: set[str] = set()
@@ -6465,9 +6485,12 @@ class JabberClient:
         except (TypeError, ValueError):
             priority = 0
         caps_node = _caps_node(pres)
+        caps_ver = _caps_ver(pres)
+        caps_hash = _caps_hash(pres)
         self.presences[frm] = {"show": show, "status": status, "type": ptype,
                                "priority": priority, "client": "",
-                               "caps_node": caps_node}
+                               "caps_node": caps_node, "caps_ver": caps_ver,
+                               "caps_hash": caps_hash}
 
         contact = self.get_contact(bare)
         if ptype != "available":
@@ -6482,6 +6505,8 @@ class JabberClient:
                 "client_os": previous.get("client_os", ""),
                 "client_tzo": previous.get("client_tzo", ""),
                 "caps_node": caps_node,
+                "caps_ver": caps_ver,
+                "caps_hash": caps_hash,
             }
             if resource and frm not in self._version_probed:
                 self._version_probed.add(frm)
@@ -6634,6 +6659,7 @@ class JabberClient:
             return
         self._caps_inflight.add(full_jid)
         try:
+            caps = None
             features: set[str] = set()
             for delay in (0.0, 0.5, 1.0, 2.0, 4.0):
                 if delay:
@@ -6646,6 +6672,9 @@ class JabberClient:
                 features = self._features_from_caps(caps)
                 if features:
                     break
+            info = self._caps_info(caps)
+            if info:
+                self.contact_caps_info[full_jid] = info
             if not features:
                 logger.debug("CAPS %s: no features resolved", full_jid)
                 return
@@ -6676,6 +6705,48 @@ class JabberClient:
                 return set(caps.get("features") or [])
             except Exception:
                 return set()
+
+    @staticmethod
+    def _caps_info(caps) -> dict:
+        """Normalise a slixmpp caps ``disco#info`` stanza for the UI."""
+        if caps is None:
+            return {}
+        features: list[str] = []
+        try:
+            features = sorted({str(item) for item in caps.get_features()})
+        except AttributeError:
+            try:
+                features = sorted(
+                    {str(item) for item in (caps.get("features") or [])})
+            except Exception:
+                features = []
+        identities: list[dict] = []
+        try:
+            identities = list(caps.dict_identities())
+        except Exception:
+            try:
+                for ident in caps.get_identities():
+                    identities.append({
+                        "category": ident[0] if len(ident) > 0 else "",
+                        "type": ident[1] if len(ident) > 1 else "",
+                        "xml_lang": ident[2] if len(ident) > 2 else "",
+                        "name": ident[3] if len(ident) > 3 else "",
+                    })
+            except Exception:
+                identities = []
+        try:
+            node = str(caps.get("node") or "")
+        except Exception:
+            node = ""
+        raw = ""
+        try:
+            xml = getattr(caps, "xml", None)
+            if xml is not None:
+                raw = ET.tostring(xml, encoding="unicode")
+        except Exception:
+            raw = ""
+        return {"features": features, "identities": identities, "node": node,
+                "ver": "", "hash": "", "raw": raw, "source": "caps"}
 
     def client_icon(self, bare: str) -> str:
         """Absolute client icon path for *bare* (XEP-0115 caps), else ``""``.
@@ -6781,23 +6852,110 @@ class JabberClient:
         await self._load_caps_from_disco(full_jid)
 
     async def _load_caps_from_disco(self, full_jid: str) -> None:
-        try:
-            info = await self.xmpp.plugin["xep_0030"].get_info(full_jid)
-        except Exception:
-            logger.debug("disco#info failed for %s", full_jid)
+        full_jid = str(full_jid or "")
+        if not full_jid or full_jid in self._caps_disco_inflight:
             return
-        features: set[str] = set()
-        xml = getattr(info, "xml", None)
-        if xml is not None:
-            features = {el.get("var") or "" for el in xml.iter(
+        self._caps_disco_inflight.add(full_jid)
+        try:
+            try:
+                info = await self.xmpp.plugin["xep_0030"].get_info(full_jid)
+            except Exception:
+                logger.debug("disco#info failed for %s", full_jid)
+                return
+            xml = getattr(info, "xml", None)
+            if xml is None:
+                return
+            query = xml.find("{%s}query" % NS_DISCO_INFO)
+            if query is None:
+                query = xml
+            features = {el.get("var") or "" for el in query.iter(
                 "{%s}feature" % NS_DISCO_INFO)}
-        if features:
-            # Union with the caps features so a stale entry cannot hide a real
-            # capability (a live disco#info is authoritative).
+            identities = []
+            for el in query.iter("{%s}identity" % NS_DISCO_INFO):
+                identities.append({
+                    "category": el.get("category") or "",
+                    "type": el.get("type") or "",
+                    "xml_lang": el.get(
+                        "{http://www.w3.org/XML/1998/namespace}lang") or "",
+                    "name": el.get("name") or "",
+                })
+            raw = ET.tostring(query, encoding="unicode")
             existing = self.contact_features.get(full_jid, set())
-            self.contact_features[full_jid] = set(existing) | features
-            logger.debug("CAPS(disco) %s: %d features", full_jid, len(features))
-            self.emit("contact_caps", full_jid.split("/")[0])
+            merged = set(existing) | features
+            self.contact_features[full_jid] = merged
+            previous = self.contact_caps_info.get(full_jid) or {}
+            self.contact_caps_info[full_jid] = {
+                "features": sorted(merged),
+                "identities": identities,
+                "node": previous.get("node", ""),
+                "ver": previous.get("ver", ""),
+                "hash": previous.get("hash", ""),
+                "raw": raw,
+                "source": "disco",
+            }
+            if features:
+                logger.debug("CAPS(disco) %s: %d features", full_jid,
+                             len(features))
+                self.emit("contact_caps", full_jid.split("/")[0])
+        finally:
+            self._caps_disco_inflight.discard(full_jid)
+
+    async def resource_caps(self, full_jid: str, refresh: bool = False) -> dict:
+        """Features, identities and raw caps data for one peer resource.
+
+        Uses the XEP-0115 caps cache; when it holds no features (or *refresh*
+        is set) a live ``disco#info`` is requested for a 1:1 resource.  A MUC
+        occupant only uses caps: a live disco to ``room/nick`` may be answered
+        by the room itself and would show the room's features instead.
+        """
+        result = {"features": [], "identities": [], "node": "", "ver": "",
+                  "hash": "", "raw": "", "source": ""}
+        full_jid = str(full_jid or "")
+        if not full_jid or "/" not in full_jid:
+            return result
+        bare, _, resource = full_jid.partition("/")
+        is_room = bare in self._known_rooms or bare in self.groupchats
+        if is_room:
+            groupchat = self.groupchats.get(bare)
+            source_info = (groupchat.users.get(resource, {})
+                           if groupchat is not None else {})
+        else:
+            source_info = self.get_contact(bare).resources.get(resource, {})
+        node = str(source_info.get("caps_node") or "")
+        ver = str(source_info.get("caps_ver") or "")
+        caps_hash = str(source_info.get("caps_hash") or "")
+        if not ver:
+            try:
+                ver = str(await self.xmpp.plugin["xep_0115"].get_verstring(
+                    full_jid) or "")
+            except Exception:
+                ver = ""
+        cached = self.contact_caps_info.get(full_jid) or {}
+        has_features = bool(cached.get("features")
+                            or self.contact_features.get(full_jid))
+        if refresh or not has_features:
+            if is_room:
+                await self._load_caps(full_jid)
+            elif refresh:
+                await self._load_caps_from_disco(full_jid)
+            else:
+                await self._load_caps(full_jid)
+                if not (self.contact_caps_info.get(full_jid) or {}).get(
+                        "features"):
+                    await self._load_caps_from_disco(full_jid)
+            cached = self.contact_caps_info.get(full_jid) or {}
+        features = set(cached.get("features") or ())
+        features |= set(self.contact_features.get(full_jid) or ())
+        result.update({
+            "features": sorted(features),
+            "identities": list(cached.get("identities") or []),
+            "node": str(cached.get("node") or node),
+            "ver": str(cached.get("ver") or ver),
+            "hash": str(cached.get("hash") or caps_hash),
+            "raw": str(cached.get("raw") or ""),
+            "source": str(cached.get("source") or ""),
+        })
+        return result
 
     def supports_feature(self, bare: str, feature: str,
                          full_jid: str = "") -> bool:
@@ -7014,6 +7172,8 @@ class JabberClient:
                 "client_os": previous.get("client_os", ""),
                 "client_tzo": previous.get("client_tzo", ""),
                 "caps_node": _caps_node(pres),
+                "caps_ver": _caps_ver(pres),
+                "caps_hash": _caps_hash(pres),
                 "occupant_id": _occupant_id(pres),
                 "hats": hats,
                 "photo_hash": photo_hash,

@@ -51,6 +51,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
     edit_requested = QtCore.pyqtSignal(str)   # jid
     refresh_requested = QtCore.pyqtSignal(str)  # jid
+    features_requested = QtCore.pyqtSignal(str)  # full resource JID
 
     def __init__(self, jid: str, card: dict, status: dict | None = None,
                  parent=None, show_edit: bool = False,
@@ -240,6 +241,11 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._clients_label = QtWidgets.QLabel()
         self._clients_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self._clients_label.setWordWrap(True)
+        self._clients_label.setOpenExternalLinks(False)
+        self._clients_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse
+            | QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._clients_label.linkActivated.connect(self._on_clients_link)
         clients_caption = QtWidgets.QLabel(f"{tr('vcard_field_clients')}:")
         clients_caption.setAlignment(
             QtCore.Qt.AlignmentFlag.AlignLeft
@@ -251,12 +257,27 @@ class VCardInfoDialog(QtWidgets.QDialog):
 
     def _render_clients(self, clients: list) -> None:
         """Render the per-resource client blocks (mirrors the roster tooltip)."""
-        html = resource_tree_html(clients) if clients else ""
+        linkable = any(str(item.get("full_jid") or "") for item in clients)
+        html = (resource_tree_html(
+            clients, link_prefix="stanza-features:",
+            link_title=tr("vcard_clients_click_hint")) if clients else "")
         self._clients_label.setText(html)
         self._clients_label.setVisible(bool(html))
+        self._clients_label.setToolTip(
+            tr("vcard_clients_click_hint") if linkable else "")
         form = getattr(self, "_status_form", None)
         if form is not None:
             form.setRowVisible(self._clients_label, bool(html))
+
+    def _on_clients_link(self, href: str) -> None:
+        """A click on a resource row opens its client capabilities."""
+        prefix = "stanza-features:"
+        if not href.startswith(prefix):
+            return
+        from urllib.parse import unquote
+        full_jid = unquote(href[len(prefix):])
+        if full_jid:
+            self.features_requested.emit(full_jid)
 
     def _fields_page(self, values: dict, keys: tuple[str, ...],
                      hide_empty: bool = False) -> QtWidgets.QWidget:

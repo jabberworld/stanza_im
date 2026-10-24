@@ -57,6 +57,7 @@ stanza_im/                      # Python package
 │   ├── unread_state.py          # Persisted per-chat read state (unread/mentions/anchor)
 │   ├── profiles.py              # Account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
+│   ├── client_features_dialog.py # Peer client caps viewer (vCard resource click)
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
 │   ├── privacy.py               # XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py       # Server disco/stream capability report (XEP list)
@@ -280,7 +281,13 @@ in a dedicated **«Клиенты:»** form row (label left, tree right, hidden 
 empty) built by `MainWindow._vcard_status` from `contact.resources` — or, for a
 MUC participant opened from the room (`_show_muc_participant_profile` sets
 `_vcard_muc_ctx`), from the single occupant — while a plain 1:1 contact is never
-given a room nick (the old bogus «Ресурс»). Each client line reads «Клиент: name
+given a room nick (the old bogus «Ресурс»). In the vCard only, each resource's
+status icon and name are links (`resource_tree_html(..., link_prefix=
+"stanza-features:", link_title=…)`): a click emits `features_requested(full_jid)`
+and `MainWindow._on_resource_features_requested` opens the non-modal
+`ui/client_features_dialog.ClientFeaturesDialog` (one window per full JID) with
+the caps features/identities/raw XML — a hidden debugging aid, no menu entry;
+the roster tooltip passes no prefix and keeps plain text. Each client line reads «Клиент: name
 version / OS»; the old per-entity «Клиент»/«Версия клиента»/«ОС»/«Время
 клиента» rows are gone (client, version, OS and the local time live only in the
 tree, per resource), leaving `ping` as the single entity row. The «Клиенты»
@@ -2792,7 +2799,11 @@ string alone, a peer that shares our caps node (a second instance of this
 client) can inherit our own cached feature set; when the resolved features lack
 a call feature the resource is verified with a **live `disco#info`**
 (`_load_caps_from_disco`, unioned in, once per resource via `_caps_verified`,
-also reachable from `ensure_caps`). `JabberClient.__init__` also recomputes our
+also reachable from `ensure_caps`). `contact_caps_info[full_jid]` keeps the
+full caps data (features, identities, node, raw XML, source) and
+`JabberClient.resource_caps(full_jid, refresh)` serves it to the vCard's client
+features viewer (a MUC occupant uses caps only — a live disco to `room/nick`
+could be answered by the room). `JabberClient.__init__` also recomputes our
 own caps (`update_caps`) after the full disco is registered. STUN/TURN come from `client.ice_servers()`
 (XEP-0215 `urn:xmpp:extdisco:2` → the connection settings' STUN/TURN endpoint →
 SRV discovery). The «Звонок» call menu is a submenu in the roster contact

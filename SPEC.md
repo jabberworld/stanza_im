@@ -88,6 +88,7 @@ stanza_im/
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── history_manager.py   — Per-contact history browser
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
+│   ├── client_features_dialog.py — peer client caps viewer (vCard resource click),
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
 │   ├── account_registration_dialog.py — XEP-0077 account creation wizard
 │   ├── registration_result_dialog.py — created-account summary (apply/copy)
@@ -205,7 +206,11 @@ its own row, the client line «Клиент: name version / OS» and «Стат�
 all aligned under the name) in a **«Клиенты:»** row (label left, top-aligned,
 tree right) built by `MainWindow._vcard_status`; a MUC participant opened from
 the room (`_show_muc_participant_profile` → `_vcard_muc_ctx`) shows the single
-occupant, a 1:1 contact shows `contact.resources`. The old per-entity
+occupant, a 1:1 contact shows `contact.resources`. In the vCard each resource's
+status icon and name are links (`stanza-features:<full JID>`): clicking one
+opens the non-modal `ClientFeaturesDialog` with the client's XEP-0115 features,
+identities and raw `disco#info` XML (a hidden debugging aid; the roster tooltip
+has no links). The old per-entity
 «Клиент»/«Версия клиента»/«ОС»/«Время клиента» rows are gone (they live only in
 the tree, per resource); `ping` is the single entity row. The dialog opens with
 headroom (700×550 clamped) and every tab page is wrapped in a `QScrollArea` so
@@ -1082,6 +1087,8 @@ peer's XEP-0115 caps (`supports_calls`); a caps entry lacking a call feature is
 verified with a live `disco#info` (`_load_caps_from_disco`, unioned in, once per
 resource via `_caps_verified`), because slixmpp caches caps by the verification
 string alone and a peer sharing our caps node can inherit our own cached set;
+`contact_caps_info[full_jid]` (features, identities, node, raw XML, source)
+feeds `resource_caps` and the vCard's client-features viewer;
 `JabberClient.__init__` also recomputes our own caps (`update_caps`) after the
 full disco is registered. For a non-conference contact the menu
 carries «Пригласить в» (`ctx_invite_to`) — a submenu of the conferences we are

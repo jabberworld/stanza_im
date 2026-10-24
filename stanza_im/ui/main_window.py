@@ -379,6 +379,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # JIDs whose *already open* vCard dialog is being refreshed in place.
         self._vcard_refreshing: set[str] = set()
         self._vcard_dialogs: dict[str, object] = {}
+        # Client-capabilities windows, keyed by the full resource JID.
+        self._feature_dialogs: dict[str, object] = {}
         self._history_manager: object | None = None
         self._last_activity = time.monotonic()
         self._auto_status_applied = False
@@ -4739,7 +4741,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _client_block(resource: str, show, status, client, version, os_name,
-                      tzo, caps_node) -> dict:
+                      tzo, caps_node, full_jid: str = "",
+                      caps_ver: str = "", caps_hash: str = "",
+                      priority=None) -> dict:
         return {
             "resource": resource or "*",
             "show": show or "",
@@ -4749,6 +4753,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "os": os_name or "",
             "tzo": tzo or "",
             "caps_node": caps_node or "",
+            "full_jid": full_jid or "",
+            "caps_ver": caps_ver or "",
+            "caps_hash": caps_hash or "",
+            "priority": priority,
         }
 
     def _contact_clients(self, contact) -> list[dict]:
@@ -4762,18 +4770,29 @@ class MainWindow(QtWidgets.QMainWindow):
                 resource, info.get("show"), info.get("status"),
                 info.get("client"), info.get("client_version"),
                 info.get("client_os"), info.get("client_tzo"),
-                info.get("caps_node")))
+                info.get("caps_node"),
+                full_jid=f"{contact.jid}/{resource}",
+                caps_ver=info.get("caps_ver", ""),
+                caps_hash=info.get("caps_hash", ""),
+                priority=info.get("priority")))
         return blocks
 
-    def _muc_occupant_block(self, jid: str) -> tuple[str, dict] | None:
-        """The tracked MUC occupant matching *jid* (``(nick, info)`` or None)."""
+    def _muc_occupant_target(self, jid: str):
+        """The tracked MUC occupant matching *jid* as ``(room, nick, info)``."""
         for room, users in self._muc_users.items():
             for nick, info in users.items():
                 if (info.get("real_jid", "") == jid
                         or info.get("avatar_jid", "") == jid
                         or f"{room}/{nick}" == jid):
-                    return nick, info
+                    return room, nick, info
         return None
+
+    def _muc_occupant_block(self, jid: str) -> tuple[str, dict] | None:
+        """The tracked MUC occupant matching *jid* (``(nick, info)`` or None)."""
+        target = self._muc_occupant_target(jid)
+        if target is None:
+            return None
+        return target[1], target[2]
 
     def _vcard_status(self, jid: str, card: dict) -> dict:
         """Presence/PEP status block for the vCard info dialog."""
@@ -4800,9 +4819,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # MUC lookup is gated on the caller's context so a roster contact that
         # merely shares a JID with a room occupant never gets a room nick.
         if self._vcard_muc_ctx.get(jid):
-            occupant = self._muc_occupant_block(jid)
-            if occupant is not None:
-                nick, info = occupant
+            target = self._muc_occupant_target(jid)
+            if target is not None:
+                room, nick, info = target
                 status["presence"] = info.get("show", "")
                 status["status_message"] = info.get("status", "")
                 status["status_updated"] = info.get("status_updated", "")
@@ -4810,7 +4829,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     nick, info.get("show"), info.get("status"),
                     info.get("client"), info.get("client_version"),
                     info.get("client_os"), info.get("client_tzo"),
-                    info.get("caps_node"))]
+                    info.get("caps_node"), full_jid=f"{room}/{nick}",
+                    caps_ver=info.get("caps_ver", ""),
+                    caps_hash=info.get("caps_hash", ""),
+                    priority=info.get("priority"))]
         elif self._client:
             status["clients"] = self._contact_clients(
                 self._client.get_contact(bare))
@@ -4882,6 +4904,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.finished.connect(lambda _result, key=jid:
                              self._vcard_dialogs.pop(key, None))
         dlg.refresh_requested.connect(self._refresh_vcard)
+        dlg.features_requested.connect(
+            self._on_resource_features_requested)
         if is_room:
             dlg.edit_requested.connect(
                 lambda _j, room=bare, c=card, p=parent:
@@ -4950,6 +4974,50 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.update_status(
             {"clients": self._contact_clients(
                 self._client.get_contact(bare))})
+
+    def _client_block_for(self, full_jid: str) -> dict:
+        """The presence/client block for one full resource JID."""
+        bare, _, resource = str(full_jid or "").partition("/")
+        if not bare or not resource:
+            return self._client_block("", "", "", "", "", "", "", "")
+        room_users = self._muc_users.get(bare, {})
+        info = room_users.get(resource)
+        if info is None and self._client is not None:
+            info = self._client.get_contact(bare).resources.get(resource, {})
+        info = info or {}
+        return self._client_block(
+            resource, info.get("show"), info.get("status"),
+            info.get("client"), info.get("client_version"),
+            info.get("client_os"), info.get("client_tzo"),
+            info.get("caps_node"), full_jid=full_jid,
+            caps_ver=info.get("caps_ver", ""),
+            caps_hash=info.get("caps_hash", ""),
+            priority=info.get("priority"))
+
+    def _on_resource_features_requested(self, full_jid: str):
+        """Open (or raise) the client-capabilities window for a resource."""
+        full_jid = str(full_jid or "")
+        if self._client is None or not full_jid:
+            return
+        existing = self._feature_dialogs.get(full_jid)
+        if existing is not None:
+            try:
+                existing.show()
+                existing.raise_()
+                existing.activateWindow()
+                return
+            except RuntimeError:
+                self._feature_dialogs.pop(full_jid, None)
+        from stanza_im.ui.client_features_dialog import ClientFeaturesDialog
+        block = self._client_block_for(full_jid)
+        parent = self._find_open_vcard(full_jid) or self._chat_dialog_parent()
+        dialog = ClientFeaturesDialog(self._client, full_jid, block,
+                                      parent=parent)
+        self._feature_dialogs[full_jid] = dialog
+        dialog.finished.connect(
+            lambda _result, key=full_jid:
+            self._feature_dialogs.pop(key, None))
+        dialog.show()
 
     async def _reprobe_versions(self, jid: str) -> None:
         """Force a fresh resource-version lookup on a vCard refresh."""
@@ -7589,7 +7657,11 @@ class MainWindow(QtWidgets.QMainWindow):
         clients = [self._client_block(
             occ_nick, occ.get("show"), occ.get("status"), occ.get("client"),
             occ.get("client_version"), occ.get("client_os"),
-            occ.get("client_tzo"), occ.get("caps_node"))]
+            occ.get("client_tzo"), occ.get("caps_node"),
+            full_jid=f"{room}/{nick}",
+            caps_ver=occ.get("caps_ver", ""),
+            caps_hash=occ.get("caps_hash", ""),
+            priority=occ.get("priority"))]
         for key in (f"{room}/{nick}", occ.get("real_jid", "")):
             dialog = self._find_open_vcard(key) if key else None
             if dialog is not None:
