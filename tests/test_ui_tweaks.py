@@ -246,6 +246,28 @@ check("the roster ad-hoc dialog is non-modal", "setModal(False)" in mw_src)
 check("the service-browser ad-hoc dialog is non-modal",
       "setModal(False)" in _src("stanza_im", "ui", "service_browser.py"))
 
+# A zoomed participant nick keeps its font even after the application
+# stylesheet re-polishes the widgets (it used to shrink back to the default).
+from PyQt6 import QtGui  # noqa: E402
+
+from stanza_im.ui.chat_widget import _FadeLabel, _ParticipantList  # noqa: E402
+
+_nick = _FadeLabel("nick")
+_nick.set_participant_font(QtGui.QFont("Sans", 17))
+app.setStyleSheet("QWidget { font-size: 9pt; }")
+_nick.setFont(QtGui.QFont("Sans", 9))   # what the re-polish does
+check("a zoomed participant nick keeps its font after a style reset",
+      _nick._effective_font.pointSize() == 17)
+check("the nick row height follows the zoomed font",
+      _nick.sizeHint().height()
+      == QtGui.QFontMetrics(_nick._effective_font).height())
+_app_list = _ParticipantList()
+_app_list.setFont(QtGui.QFont("Sans", 18))
+check("participant section headers follow the participant font",
+      _app_list.header_font().pointSize() == 18
+      and _app_list.header_font().bold())
+app.setStyleSheet("")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

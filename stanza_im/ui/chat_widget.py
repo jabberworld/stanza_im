@@ -138,10 +138,20 @@ class _FadeLabel(QtWidgets.QWidget):
         super().__init__(parent)
         self._text = str(text or "")
         self._color: QtGui.QColor | None = None
+        # The application stylesheet re-polishes every widget and resets the
+        # font of those without a stylesheet of their own (this label used to
+        # paint at the app default after the participant font was zoomed).
+        # Keep the intended font here and use it for painting/metrics.
+        self._effective_font = QtGui.QFont(self.font())
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
                            QtWidgets.QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(self._MIN_WIDTH)
         self.setMouseTracking(True)
+
+    def set_participant_font(self, font: QtGui.QFont) -> None:
+        self._effective_font = QtGui.QFont(font)
+        self.updateGeometry()
+        self.update()
 
     def setText(self, text: str) -> None:
         self._text = str(text or "")
@@ -155,10 +165,12 @@ class _FadeLabel(QtWidgets.QWidget):
         self.update()
 
     def sizeHint(self) -> QtCore.QSize:
-        return QtCore.QSize(self._MIN_WIDTH + 16, self.fontMetrics().height())
+        metrics = QtGui.QFontMetrics(self._effective_font)
+        return QtCore.QSize(self._MIN_WIDTH + 16, metrics.height())
 
     def minimumSizeHint(self) -> QtCore.QSize:
-        return QtCore.QSize(self._MIN_WIDTH, self.fontMetrics().height())
+        return QtCore.QSize(self._MIN_WIDTH,
+                            QtGui.QFontMetrics(self._effective_font).height())
 
     def paintEvent(self, event) -> None:
         if not self._text:
@@ -169,9 +181,9 @@ class _FadeLabel(QtWidgets.QWidget):
         pixmap.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(pixmap)
         # The paint device is a bare pixmap, so the painter has no parent
-        # widget font — set this label's own (inherited) font explicitly,
-        # otherwise the nick is drawn at the application default size.
-        painter.setFont(self.font())
+        # widget font — set the label's effective font explicitly, otherwise
+        # the nick is drawn at the application default size.
+        painter.setFont(self._effective_font)
         painter.setPen(color)
         painter.drawText(self.rect(),
                          QtCore.Qt.AlignmentFlag.AlignVCenter
@@ -248,6 +260,11 @@ class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
         self.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setWordWrap(False)
+
+    def header_font(self) -> QtGui.QFont:
+        font = QtGui.QFont(self.font())
+        font.setBold(True)
+        return font
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if (event.button() == QtCore.Qt.MouseButton.LeftButton
@@ -3233,9 +3250,7 @@ class ChatWidget(QtWidgets.QWidget):
             header = self._muc_headers.get(section)
             if header is None:
                 header = QtWidgets.QListWidgetItem()
-                font = header.font()
-                font.setBold(True)
-                header.setFont(font)
+                header.setFont(self._users_list.header_font())
                 header.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
                 self._muc_headers[section] = header
             self._muc_grouped = grouped
@@ -3740,6 +3755,8 @@ class ChatWidget(QtWidgets.QWidget):
             # row heights (and therefore a rebuild) updated.
             return
         self._users_list.setFont(base)
+        for state in getattr(self, "_muc_rows", {}).values():
+            state["label"].set_participant_font(base)
         if self.is_muc:
             self._render_muc_users()
 

@@ -3165,9 +3165,12 @@ bar** or a **tab bar** changes `appearance.menu_font_size`/`tab_font_size`
 consumed so the tabs do not switch). `MainWindow.__init__` ends with
 `_on_settings_applied()`, so all saved settings (fonts, colors, themes,
 interface mode) are in effect from the first frame. The MUC participant nick is
-drawn by `_FadeLabel.paintEvent`, which sets its own font on the pixmap painter
-(a painter on a bare pixmap otherwise uses the application default, so the nick
-would not resize).
+drawn by `_FadeLabel.paintEvent`, which uses the label's stored
+`_effective_font` on the pixmap painter (a painter on a bare pixmap otherwise
+uses the application default, and the application stylesheet re-polish resets a
+plain widget font — either way the nick would not resize); the section headers
+use `_ParticipantList.header_font()` (bold from the list font), so Ctrl+wheel
+scales the nicks and their group titles together.
 Fonts affect text only — avatars/images scale solely with the text-scale
 slider. Changing the chat font re-renders open tabs via
 `ChatWindow.rerender_messages`.
