@@ -207,6 +207,12 @@ class CameraPreviewDialog(QtWidgets.QDialog):
         self._session = None
         self._video_widget = None
 
+    def hideEvent(self, event):  # noqa: N802 - Qt override
+        # Closing the Preferences window only hides its child dialogs: never
+        # keep the camera device busy in the background.
+        self._teardown()
+        super().hideEvent(event)
+
     def closeEvent(self, event):  # noqa: N802 - Qt override
         self._teardown()
         super().closeEvent(event)

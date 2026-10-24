@@ -3366,7 +3366,11 @@ client.leave_muji(room)
   Preferences → **Calls** has three tabs: **Devices** (microphone/speaker/
   camera from `devices.*`, the camera's supported modes
   `devices.camera_mode` applied to PyAV's v4l2 open, plus mic/speaker/camera
-  self-tests, disabled during a call), **Codecs** (`calls.audio_codec`/`video_codec` via
+  self-tests, disabled during a call and stopped by a 1 s monitor when a call
+  starts; the camera preview closes with the dialog and releases `QCamera` on
+  hide, so it never keeps the device busy for the call (`_VideoCaptureTrack.
+  stop()` clears its container and a localized `av.open` failure is decoded by
+  `decode_ffmpeg_error`), **Codecs** (`calls.audio_codec`/`video_codec` via
   `RTCRtpTransceiver.setCodecPreferences` before the offer/answer,
   `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
   `xmpp/media.py` encoder shim, and the outgoing camera

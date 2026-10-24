@@ -187,6 +187,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._theme_factory = theme_factory
         self._osd_manager = osd_manager
         self._client = client
+        self._camera_preview = None
+        self._test_monitor = None
         self._sound_player = (sound_player if sound_player is not None
                               else SoundPlayer())
         self.setWindowTitle(tr("prefs_title"))
@@ -332,6 +334,11 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
+        if self._test_monitor is None:
+            self._test_monitor = QtCore.QTimer(self)
+            self._test_monitor.setInterval(1000)
+            self._test_monitor.timeout.connect(self._on_test_monitor)
+        self._test_monitor.start()
         # After the dialog is visible, warm up the remaining pages in the
         # background so the first switch to any section is instant.  The timer
         # is a child of the dialog so it dies with it (no dangling callback).
@@ -742,23 +749,48 @@ class PreferencesDialog(QtWidgets.QDialog):
         if not self._guard_device_test():
             return
         from stanza_im.ui import device_test
+        if self._camera_preview is not None:
+            self._camera_preview.close()
         dialog = device_test.CameraPreviewDialog(
             self._value("devices_video_input") or "", self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.finished.connect(self._on_camera_preview_finished)
+        self._camera_preview = dialog
         dialog.show()
+
+    def _on_camera_preview_finished(self, *_args) -> None:
+        self._camera_preview = None
+
+    def _on_test_monitor(self) -> None:
+        """A call owns the devices: stop the previews/tests immediately."""
+        if not self._call_active():
+            return
+        if self._camera_preview is not None:
+            self._camera_preview.close()
+            self._camera_preview = None
+        self._stop_device_tests(keep_preview=True)
+        self._update_device_tests()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt override
+        if self._test_monitor is not None:
+            self._test_monitor.stop()
+        super().hideEvent(event)
 
     def _on_device_test_failed(self, message: str) -> None:
         QtWidgets.QMessageBox.warning(
             self, tr("prefs_calls_devices"),
             tr("prefs_device_test_failed", error=message))
 
-    def _stop_device_tests(self) -> None:
+    def _stop_device_tests(self, keep_preview: bool = False) -> None:
         tester = getattr(self, "_mic_tester", None)
         if tester is not None:
             tester.stop()
         speaker = getattr(self, "_speaker_tester", None)
         if speaker is not None:
             speaker.stop()
+        if not keep_preview and self._camera_preview is not None:
+            self._camera_preview.close()
+            self._camera_preview = None
 
     @staticmethod
     def _device_test_icon(name: str) -> QtGui.QIcon:

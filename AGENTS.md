@@ -2920,7 +2920,13 @@ Multimedia) plus the camera's supported modes
 v4l2 input as `video_size`/`framerate`/`input_format`, a failed mode falls back
 to the driver default), and its **self-tests** (`ui/device_test.py`): a live
 microphone peak meter, a speaker test tone and a camera preview window,
-disabled while a call owns the devices. The self-test controls are icon-only
+disabled while a call owns the devices. The camera preview is closed when the
+settings dialog closes and as soon as a call starts (a 1 s monitor in the
+Preferences dialog), and it releases `QCamera` on hide — a background preview
+must never keep `/dev/video*` busy for a call. `_VideoCaptureTrack.stop()`
+clears its container, and a failed `av.open` logs the real FFmpeg reason via
+`decode_ffmpeg_error` (PyAV raises a `UnicodeDecodeError` for a localized
+error such as "Устройство занято" instead of the `FFmpegError`). The self-test controls are icon-only
 buttons on the same row as the device selector; the mic control toggles
 (checkable) the meter, whose level bar sits on the same row. The mic meter and
 the call's capture track read the `QAudioSource` stream directly

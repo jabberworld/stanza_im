@@ -410,6 +410,63 @@ check("the main window provides the info to the windows",
       and "info_provider=self._call_quality_info"
       in inspect.getsource(MainWindow._open_call_window))
 
+# 9. camera preview never keeps the device busy ---------------------------
+busy = UnicodeDecodeError("ascii", "Устройство занято".encode("utf-8"),
+                          0, 1, "ordinal not in range(128)")
+check("the localized FFmpeg error is decoded for the log",
+      media.decode_ffmpeg_error(busy) == "Устройство занято")
+_camera_src = inspect.getsource(media._VideoCaptureTrack._open_camera)
+check("the camera open logs the decoded reason",
+      "decode_ffmpeg_error(exc)" in _camera_src)
+
+
+class _Container:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+track = media._VideoCaptureTrack.__new__(media._VideoCaptureTrack)
+track._stopped = False
+track._container = _Container()
+track._stream = object()
+track.stop()
+check("stopping the capture track releases the camera device",
+      track._container is None and track._stream is None
+      and track._stopped)
+
+
+class _Preview:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+cfg4 = Config.defaults()
+dlg4 = PreferencesDialog(cfg4, ChatThemeFactory())
+preview = _Preview()
+dlg4._camera_preview = preview
+dlg4._stop_device_tests()
+check("closing the settings stops the camera preview",
+      preview.closed and dlg4._camera_preview is None)
+
+preview2 = _Preview()
+dlg4._camera_preview = preview2
+dlg4._call_active = lambda: True
+dlg4._on_test_monitor()
+check("a call starting stops the camera preview",
+      preview2.closed and dlg4._camera_preview is None)
+dlg4.close()
+
+from stanza_im.ui import device_test  # noqa: E402
+check("the preview releases the device when hidden",
+      "hideEvent" in inspect.getsource(
+          device_test.CameraPreviewDialog))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

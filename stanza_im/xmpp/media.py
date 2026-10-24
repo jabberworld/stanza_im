@@ -720,10 +720,11 @@ if HAS_AIORTC:
                 logger.info("CALL camera opened: %s (%s)", path,
                             self._camera_mode or "auto")
             except Exception as exc:  # noqa: BLE001 - degrade to black frames
+                reason = decode_ffmpeg_error(exc)
                 if options:
                     logger.warning(
                         "CALL camera mode %s failed for %s (%s); using auto",
-                        self._camera_mode, path, exc)
+                        self._camera_mode, path, reason)
                     try:
                         self._container = av.open(path, format="v4l2")
                         self._stream = self._container.streams.video[0]
@@ -731,7 +732,8 @@ if HAS_AIORTC:
                         return
                     except Exception as retry_exc:  # noqa: BLE001
                         exc = retry_exc
-                logger.warning("CALL camera open failed for %s: %s", path, exc)
+                logger.warning("CALL camera open failed for %s: %s", path,
+                               decode_ffmpeg_error(exc))
                 self._container = None
 
         def set_enabled(self, enabled: bool) -> None:
@@ -866,9 +868,12 @@ if HAS_AIORTC:
 
         def stop(self):
             self._stopped = True
+            container = self._container
+            self._container = None
+            self._stream = None
             try:
-                if self._container is not None:
-                    self._container.close()
+                if container is not None:
+                    container.close()
             except Exception:
                 pass
 
