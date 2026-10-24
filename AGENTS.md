@@ -105,6 +105,7 @@ stanza_im/                      # Python package
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
 │   ├── connection_info_dialog.py # Live connection details dialog
 │   ├── server_info_dialog.py    # Server capability report (XEP support)
+│   ├── cache_dialog.py          # Cache sizes + per-cache clearing (Help)
 │   ├── privacy_lists_dialog.py  # XEP-0016 privacy-list manager
 │   ├── privacy_rule_dialog.py   # XEP-0016 rule add/edit dialog
 │   ├── blocked_contacts_dialog.py # XEP-0191 blocklist editor
@@ -3150,9 +3151,12 @@ text is kept. Returning activity (`eventFilter`) resumes
   `resources/images/16x16/actions/info.svg` (a blue «i» circle) via
   `PreferencesDialog._info_icon()`.
 - **Help menu — connection / certificate / server info**: the «Справка» menu
-  carries three non-modal dialogs (disabled until `session_started`, enabled
-  again on `stream_resumed`, disabled on disconnect/auth/TLS failure via
-  `_set_info_actions_enabled`). «О подключении» (`_on_connection_info`) shows
+  carries the three session-gated non-modal dialogs below (disabled until
+  `session_started`, enabled again on `stream_resumed`, disabled on
+  disconnect/auth/TLS failure via `_set_info_actions_enabled`) plus «О кэше»,
+  which needs no session. The icons are distinct: `connected.svg`, `shield.svg`
+  (security), `server.svg` and `cache.svg`. «О подключении»
+  (`_on_connection_info`) shows
   `ui/connection_info_dialog.ConnectionInfoDialog`, which renders
   `connection_info_lines(info)` — the same lines as the Preferences connection
   tooltip. «О сертификате» (`_on_certificate_info`) reuses
@@ -3179,6 +3183,27 @@ text is kept. Returning activity (`eventFilter`) resumes
   above the table with clickable links, `xmpp:` ones routed through
   `MainWindow._on_xmpp_uri` (`ServerInfoDialog.contact_uri_clicked`).
   [`tests/test_server_features.py`]
+- **Cache overview (Help → «О кэше», `ui/cache_dialog.py`)**: a non-modal
+  `CacheDialog` lists every on-disk cache with its size and a per-row
+  «Очистить…» button (each asks for confirmation, then clears and re-measures;
+  the total is shown below). Rows: media previews (`MediaCache.total_bytes`,
+  `clear()`, plus `MediaPreviewService.clear_memory()`), avatars
+  (`include.avatars.clear_cache`, then `_URI_CACHE`, `client._avatar_ids`/
+  `_avatar_failed`, the roster pixmaps and the open chats are refreshed), map
+  tiles (`TileCache.total_bytes`/`clear()`), the vCard metadata file
+  (`VCardCache.clear()`), the discovery file (`DiscoveryCache.clear()`), the
+  roster cache (`roster_cache.clear()`; the client keeps it absent until the
+  next login via `_roster_cache_cleared`, the dialog warns it is recreated at
+  login), the Chromium HTTP cache (`QWebEngineProfile.cachePath()` +
+  `clearHttpCache()` when WebEngine is already imported, otherwise
+  `QStandardPaths.CacheLocation/QtWebEngine/Default` is removed — importing
+  Chromium just for the dialog is never done) and the whole local message
+  history (`history.clear_all()`: closes the pooled connections, removes the
+  SQLite/JSONL files, then resets the unread/read state and `_mds_local`, clears
+  every open tab via `ChatWidget.reset_history()` and closes the History
+  Manager; the server archive is untouched). The dialog is parented to the main
+  window and kept as `_cache_dialog`.
+  [`tests/test_cache_dialog.py`]
 - **Privacy lists & blocking (XEP-0016/0191/0377)**: Preferences → Connection →
   «Подключение» carries two buttons gated on the account domain's disco
   (`supports_privacy`/`supports_blocking`, probed by `refresh_server_features`

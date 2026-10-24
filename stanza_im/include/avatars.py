@@ -51,6 +51,28 @@ def has_avatar(jid: str) -> bool:
     return os.path.exists(avatar_path(jid))
 
 
+def clear_cache() -> int:
+    """Delete every cached avatar (keeps the generated placeholder)."""
+    _URI_CACHE.clear()
+    removed = 0
+    try:
+        names = os.listdir(AVATARS_DIR)
+    except OSError:
+        return 0
+    for name in names:
+        if name == PLACEHOLDER_FILENAME:
+            continue
+        path = os.path.join(AVATARS_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def save_avatar(jid: str, raw: bytes) -> str:
     """Persist avatar bytes for *jid* and return the cache path."""
     ensure_dirs()

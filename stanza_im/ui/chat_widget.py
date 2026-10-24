@@ -2293,6 +2293,25 @@ class ChatWidget(QtWidgets.QWidget):
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
 
+    def reset_history(self) -> None:
+        """Drop the locally loaded conversation (a global history wipe).
+
+        The window stays open as an empty conversation; a server archive may
+        refill it later (MAM), while the local rows are gone for good.
+        """
+        self._history = []
+        self._messages = []
+        self._status_lines = []
+        self._unread_boundary = {}
+        self._restore_anchor = {}
+        self._cleared = False
+        self._hist_loading = False
+        self._server_fetching = False
+        self._db_exhausted = True
+        self._server_exhausted = False
+        self._render_all()
+        self._view.scroll_to_bottom()
+
     # ── Unread separator ───────────────────────────────────────────
 
     def set_unread_boundary(self, anchor: dict | None) -> None:

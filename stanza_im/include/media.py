@@ -282,6 +282,30 @@ class MediaCache:
     def total_bytes(self) -> int:
         return sum(self._entry_size(key) for key in self._index)
 
+    def clear(self) -> int:
+        """Remove every cached preview and its index (returns the row count)."""
+        removed = len(self._index)
+        for key in list(self._index):
+            self._delete_entry(key)
+        try:
+            for name in os.listdir(self._dir):
+                if name == "index.json":
+                    continue
+                path = os.path.join(self._dir, name)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        try:
+            os.remove(self._index_file)
+        except OSError:
+            pass
+        self._dirty = False
+        return removed
+
     def prune(self) -> int:
         """Drop entries unused longer than the TTL and enforce the size cap."""
         removed = 0

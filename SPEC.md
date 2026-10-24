@@ -93,6 +93,7 @@ stanza_im/
 │   ├── registration_result_dialog.py — created-account summary (apply/copy)
 │   ├── connection_info_dialog.py — Live connection details dialog
 │   ├── server_info_dialog.py — Server capability report (XEP support)
+│   ├── cache_dialog.py       — Cache sizes and per-cache clearing (Help)
 │   ├── privacy_lists_dialog.py — XEP-0016 privacy-list manager
 │   ├── privacy_rule_dialog.py — XEP-0016 rule add/edit dialog
 │   ├── blocked_contacts_dialog.py — XEP-0191 blocklist editor
@@ -655,11 +656,11 @@ apply (both managers rebuild so they stay in sync). The bundled
 Notes plugin's tab is appended after the built-ins (`roster`/`bookmarks`/
 `events`); `_tab_index`/`_tab_key` resolve the live `_roster_tab_keys` list.
 
-### 5.5 Help Menu — Connection / Certificate / Server Info
+### 5.5 Help Menu — Connection / Certificate / Server Info / Cache
 
-The «Справка» menu holds three non-modal entries, disabled until the session
-starts (`_set_info_actions_enabled`, toggled on `session_started`/
-`stream_resumed` and off on disconnect/auth/TLS failure):
+The «Справка» menu holds three session-gated non-modal entries
+(`_set_info_actions_enabled`, toggled on `session_started`/`stream_resumed` and
+off on disconnect/auth/TLS failure) plus «О кэше», which needs no session:
 
 - «О подключении» — `ui/connection_info_dialog.ConnectionInfoDialog` renders
   `connection_info_lines(info)` from `client.connection_info()` (the same lines
@@ -688,6 +689,16 @@ starts (`_set_info_actions_enabled`, toggled on `session_started`/
   `disco#info` (falling back to the node query) and renders a «Контакты
   сервера» group above the table, values as clickable links (`xmpp:` ones
   emitted via `ServerInfoDialog.contact_uri_clicked` → `MainWindow._on_xmpp_uri`).
+- «О кэше» — `ui/cache_dialog.CacheDialog` lists the media previews, avatars,
+  map tiles, the vCard metadata file, the discovery file, the roster cache, the
+  Chromium HTTP cache and the whole local message history with their sizes and
+  a total; every row has a «Очистить…» action with its own confirmation. The
+  roster cache is kept absent for the session (`_roster_cache_cleared`) and
+  recreated at the next login; clearing the history wipes the SQLite/JSONL
+  store, resets the local unread/read state and clears every open tab (the
+  server archive is untouched). QtWebEngine is never imported just for the
+  dialog: its HTTP cache is cleared through the profile when already loaded,
+  otherwise the standard `QtWebEngine/Default` cache directory is removed.
 
 ### 5.6 Privacy Lists & Blocking (XEP-0016 / XEP-0191 / XEP-0377)
 

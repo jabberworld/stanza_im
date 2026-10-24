@@ -336,6 +336,29 @@ class TileCache:
         self._save_index()
         return path
 
+    def clear(self) -> int:
+        """Drop every cached tile and its index (returns the entry count)."""
+        removed = len(self._index)
+        try:
+            for root, dirs, files in os.walk(self._dir, topdown=False):
+                for name in files:
+                    if name.endswith(".png"):
+                        try:
+                            os.remove(os.path.join(root, name))
+                        except OSError:
+                            pass
+                for name in dirs:
+                    try:
+                        os.rmdir(os.path.join(root, name))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        self._index.clear()
+        self._dirty = True
+        self._save_index()
+        return removed
+
     def total_bytes(self) -> int:
         return sum(int(entry.get("size") or 0)
                    for entry in self._index.values())

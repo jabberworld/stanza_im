@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+     viewBox="0 0 16 16">
+  <!-- a database cylinder: the client's on-disk caches -->
+  <g fill="none" stroke="#2e3436" stroke-width="1.2">
+    <ellipse cx="8" cy="3.6" rx="4.6" ry="1.8"/>
+    <path d="M3.4 3.6v8.8c0 1 2.1 1.8 4.6 1.8s4.6-.8 4.6-1.8V3.6"/>
+    <path d="M3.4 8c0 1 2.1 1.8 4.6 1.8s4.6-.8 4.6-1.8"/>
+  </g>
+</svg>

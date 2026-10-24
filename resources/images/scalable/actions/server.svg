@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+     viewBox="0 0 16 16">
+  <!-- a two-unit server rack: the XMPP server information dialog -->
+  <g fill="none" stroke="#2e3436" stroke-width="1.2">
+    <rect x="2.5" y="2.5" width="11" height="4.2" rx="0.9"/>
+    <rect x="2.5" y="9.3" width="11" height="4.2" rx="0.9"/>
+  </g>
+  <circle cx="4.7" cy="4.6" r="0.6" fill="#2e9e5b"/>
+  <circle cx="4.7" cy="11.4" r="0.6" fill="#2e9e5b"/>
+</svg>

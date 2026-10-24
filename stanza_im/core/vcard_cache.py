@@ -34,6 +34,14 @@ class VCardCache:
         except (OSError, ValueError):
             self._items = {}
 
+    def clear(self) -> None:
+        """Forget every cached card and remove the backing file."""
+        self._items = {}
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
     @staticmethod
     def _key(jid: str) -> str:
         value = str(jid)

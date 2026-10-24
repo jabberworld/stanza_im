@@ -65,6 +65,11 @@ class MediaPreviewService(QtCore.QObject):
     def set_mode(self, mode: str) -> None:
         self._mode = mode if mode in MODES else "images"
 
+    def clear_memory(self) -> None:
+        """Drop the in-memory thumbnail LRU (the disk cache was cleared)."""
+        self._thumb_uris.clear()
+        self._thumb_bytes = 0
+
     def set_size(self, size) -> None:
         try:
             size = int(size or 200)

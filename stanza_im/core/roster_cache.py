@@ -55,6 +55,25 @@ def path(account: str) -> str:
     return os.path.join(directory, _safe_name(account) + ".json")
 
 
+def clear() -> int:
+    """Remove every cached roster file of the active profile."""
+    directory = os.path.join(DATA_DIR, _DIRNAME)
+    removed = 0
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            os.remove(os.path.join(directory, name))
+            removed += 1
+        except OSError as exc:
+            logger.warning("Could not remove roster cache %s: %s", name, exc)
+    return removed
+
+
 def load(account: str) -> dict | None:
     """Return ``{"version": str, "items": [...]}`` or ``None``.
 

@@ -1856,17 +1856,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._show_self_action = show_self
 
         help_menu = menubar.addMenu(tr("menu_help"))
-        conn_info = help_menu.addAction(self._menu_icon("info.svg"),
+        conn_info = help_menu.addAction(self._menu_icon("connected.svg"),
                                         tr("menu_connection_info"))
         conn_info.triggered.connect(self._on_connection_info)
-        cert_info = help_menu.addAction(self._menu_icon("info.svg"),
+        cert_info = help_menu.addAction(self._menu_icon("shield.svg"),
                                         tr("menu_certificate_info"))
         cert_info.triggered.connect(self._on_certificate_info)
         server_info = help_menu.addAction(
-            self._menu_icon("service-discovery.png"), tr("menu_server_info"))
+            self._menu_icon("server.svg"), tr("menu_server_info"))
         server_info.triggered.connect(self._on_server_info)
         self._info_actions = [conn_info, cert_info, server_info]
         self._set_info_actions_enabled(False)
+        cache_info = help_menu.addAction(self._menu_icon("cache.svg"),
+                                         tr("menu_cache_info"))
+        cache_info.triggered.connect(self._on_cache_info)
         help_menu.addSeparator()
         about = help_menu.addAction(self._menu_icon("about.png"),
                                     tr("menu_about"))
@@ -3753,6 +3756,158 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = ServerInfoDialog(self._client, self)
         dialog.contact_uri_clicked.connect(self._on_xmpp_uri)
         self._show_info_dialog(dialog)
+
+    # ── Cache overview ────────────────────────────────────────────
+
+    def _cache_entries(self):
+        """The rows of the Cache dialog (size probes and clear callbacks)."""
+        from stanza_im.include import avatars as avatars_mod
+        from stanza_im.include import constants as constants_mod
+        from stanza_im.include import geo as geo_mod
+        from stanza_im.core import history as history_mod
+        from stanza_im.core import roster_cache as roster_cache_mod
+        from stanza_im.ui.cache_dialog import (
+            CacheEntry, dir_size, file_size, webengine_cache_path)
+        roster_dir = os.path.join(constants_mod.profile_data_dir(), "roster")
+        entries = [
+            CacheEntry(
+                "media", tr("cache_media"), tr("cache_media_hint"),
+                tr("cache_media_warning"),
+                lambda: self._media_cache.total_bytes(),
+                self._clear_media_cache),
+            CacheEntry(
+                "avatars", tr("cache_avatars"), tr("cache_avatars_hint"),
+                tr("cache_avatars_warning"),
+                lambda: dir_size(avatars_mod.AVATARS_DIR),
+                self._clear_avatar_cache),
+            CacheEntry(
+                "tiles", tr("cache_tiles"), tr("cache_tiles_hint"),
+                tr("cache_tiles_warning"),
+                lambda: (self._tile_cache.total_bytes()
+                         if self._tile_cache is not None
+                         else dir_size(geo_mod.TILES_DIR)),
+                self._clear_tile_cache),
+            CacheEntry(
+                "vcard", tr("cache_vcard"), tr("cache_vcard_hint"),
+                tr("cache_vcard_warning"),
+                lambda: file_size(os.path.join(
+                    constants_mod.CACHE_DIR, "vcard-cache.json")),
+                self._clear_vcard_cache),
+            CacheEntry(
+                "discovery", tr("cache_discovery"), tr("cache_discovery_hint"),
+                tr("cache_discovery_warning"),
+                lambda: file_size(os.path.join(
+                    constants_mod.CACHE_DIR, "discovery.json")),
+                self._clear_discovery_cache),
+            CacheEntry(
+                "roster", tr("cache_roster"), tr("cache_roster_hint"),
+                tr("cache_roster_warning"),
+                lambda: dir_size(roster_dir),
+                self._clear_roster_cache),
+            CacheEntry(
+                "webengine", tr("cache_webengine"),
+                tr("cache_webengine_hint"), tr("cache_webengine_warning"),
+                lambda: (dir_size(webengine_cache_path())
+                         if webengine_cache_path() else None),
+                self._clear_webengine_cache),
+            CacheEntry(
+                "history", tr("cache_history"), tr("cache_history_hint"),
+                tr("cache_history_warning"),
+                lambda: dir_size(history_mod.HISTORY_DIR),
+                self._clear_history_all),
+        ]
+        return entries
+
+    def _on_cache_info(self):
+        """Open the (non-modal) cache overview from the Help menu."""
+        from stanza_im.ui.cache_dialog import CacheDialog
+        dialog = getattr(self, "_cache_dialog", None)
+        if dialog is not None:
+            dialog.close()
+        dialog = CacheDialog(self._cache_entries(), self)
+        self._cache_dialog = dialog
+        dialog.finished.connect(
+            lambda *_: setattr(self, "_cache_dialog", None))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _clear_media_cache(self) -> None:
+        self._media_cache.clear()
+        self._media_service.clear_memory()
+
+    def _clear_avatar_cache(self) -> None:
+        from stanza_im.include import avatars as avatars_mod
+        avatars_mod.clear_cache()
+        if self._client is not None:
+            getattr(self._client, "_avatar_ids", {}).clear()
+            getattr(self._client, "_avatar_failed", set()).clear()
+        self._roster.clear_pixmaps()
+        self._schedule_roster_repaint()
+        if self._chat_window is not None:
+            self._chat_window.refresh_avatars()
+
+    def _clear_tile_cache(self) -> None:
+        from stanza_im.include import geo as geo_mod
+        if self._tile_cache is not None:
+            self._tile_cache.clear()
+        else:
+            geo_mod.TileCache().clear()
+
+    def _clear_vcard_cache(self) -> None:
+        cache = getattr(self._client, "_vcard_cache", None)
+        if cache is not None:
+            cache.clear()
+            return
+        from stanza_im.core.vcard_cache import VCardCache
+        VCardCache().clear()
+
+    def _clear_discovery_cache(self) -> None:
+        from stanza_im.core.discovery import DiscoveryCache
+        DiscoveryCache().clear()
+
+    def _clear_roster_cache(self) -> None:
+        from stanza_im.core import roster_cache as roster_cache_mod
+        roster_cache_mod.clear()
+        client = self._client
+        if client is not None:
+            handle = getattr(client, "_roster_save_handle", None)
+            if handle is not None:
+                handle.cancel()
+                client._roster_save_handle = None
+            client._roster_cache = None
+            client._roster_cache_cleared = True
+
+    def _clear_webengine_cache(self) -> None:
+        from stanza_im.ui.cache_dialog import clear_webengine_cache
+        clear_webengine_cache()
+
+    def _clear_history_all(self) -> None:
+        """Wipe the local message history and every restored read state."""
+        from stanza_im.core import history as history_mod
+        history_mod.clear_all()
+        self._history_loading.clear()
+        self._history_load_seq.clear()
+        self._unread_chats = {}
+        if self._client is not None:
+            for attr in ("_mds_local", "_mds_own_sids"):
+                value = getattr(self._client, attr, None)
+                if hasattr(value, "clear"):
+                    value.clear()
+        self._flush_unread()
+        self._recount_unread()
+        self._sync_tray_blink()
+        if self._chat_window is not None:
+            for jid in list(self._chat_window.tabs()):
+                chat = self._chat_window.get_chat(jid)
+                if chat is None:
+                    continue
+                chat.reset_history()
+                self._push_unread_to_chat(jid)
+        if self._history_manager is not None:
+            self._history_manager.close()
+            self._history_manager = None
+        self.unread_changed.emit()
 
     # ── Login / Connect ───────────────────────────────────────────
 

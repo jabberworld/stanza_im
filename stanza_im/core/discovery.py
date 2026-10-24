@@ -81,6 +81,14 @@ class DiscoveryCache:
             return False, None
         return True, entry.get("value")
 
+    def clear(self) -> None:
+        """Forget every discovered service and remove the backing file."""
+        self._data = {}
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
     def put(self, key: str, value) -> None:
         self._data[key] = {"fetched_at": time.time(), "value": value,
                            "ok": bool(value)}

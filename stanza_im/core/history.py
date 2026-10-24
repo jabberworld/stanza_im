@@ -893,6 +893,26 @@ def clear(jid: str) -> None:
         logger.warning("Could not remove legacy history for %s: %s", jid, exc)
 
 
+def clear_all() -> int:
+    """Delete the local history of every conversation (all store files)."""
+    close_all()
+    removed = 0
+    try:
+        names = os.listdir(HISTORY_DIR)
+    except OSError:
+        return 0
+    for name in names:
+        if not (name.endswith(".sqlite3") or name.endswith(".sqlite3-wal")
+                or name.endswith(".sqlite3-shm") or name.endswith(".jsonl")):
+            continue
+        try:
+            os.remove(os.path.join(HISTORY_DIR, name))
+            removed += 1
+        except OSError as exc:
+            logger.warning("Could not remove history file %s: %s", name, exc)
+    return removed
+
+
 def close(jid: str) -> None:
     """Close and drop *jid*'s pooled connection (call on tab close)."""
     with _lock:
