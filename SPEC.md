@@ -3299,7 +3299,11 @@ client.leave_muji(room)
   `<group>` and echoes the peer's `<trickle/>`/`<renomination/>` transport
   options, so libwebrtc peers (Conversations) leave their *connecting* state.
   Peers advertising `urn:xmpp:jingle-message:0` are rung with
-  XEP-0353 propose/proceed first. slixmpp only fires the `message` event for
+  XEP-0353 propose/proceed first: the propose goes to every JMI-capable
+  resource's full JID with `<private/>` + `<no-copy/>` hints (XEP-0280 §9), so a
+  non-JMI desktop is not carbon-copied and cannot reject the call for the
+  phones; without a JMI resource it falls back to the bare JID. slixmpp only
+  fires the `message` event for
   stanzas with a `<body>`, so bodyless propose/retract and XEP-0482 invites have
   dedicated `MatchXPath` handlers; proposals are answered with
   `client.answer_proposal` (`proceed`/`reject`), the proposed media kind comes
