@@ -833,7 +833,8 @@ class JingleRtpManager:
             self._ice_servers(), self._devices(),
             on_ice_candidate=lambda cand: self._on_local_candidate(session, cand),
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
-            on_state=lambda *a: None,
+            on_state=lambda kind, state, s=session:
+                self._on_media_state(s, kind, state),
             on_local_frame=lambda frame: self._forward_local(session, frame))
         self._bind_call(session, call)
         call.add_audio()
@@ -1058,7 +1059,8 @@ class JingleRtpManager:
             self._ice_servers(), self._devices(),
             on_ice_candidate=lambda cand: self._on_local_candidate(session, cand),
             on_remote_track=lambda *a: self._on_remote_track(session, *a),
-            on_state=lambda *a: None,
+            on_state=lambda kind, state, s=session:
+                self._on_media_state(s, kind, state),
             on_local_frame=lambda frame: self._forward_local(session, frame))
         self._bind_call(session, call)
         call.add_audio()
@@ -1084,7 +1086,7 @@ class JingleRtpManager:
                     session.peer_full, call.ice_role())
         self.client.xmpp.send(iq)
         self.client.emit("call_state", session.sid, session.peer_full,
-                         "active")
+                         "connecting")
         self.client._start_task(self._nomination_fallback(session))
 
     async def _nomination_fallback(self, session: CallSession,
@@ -1141,7 +1143,29 @@ class JingleRtpManager:
         role = session.call.ice_role() if session.call is not None else ""
         logger.info("CALL session-accept from %s (ICE role=%s)",
                     session.peer_full, role)
-        self.client.emit("call_state", session.sid, session.peer_full, "active")
+        self.client.emit("call_state", session.sid, session.peer_full,
+                         "connecting")
+
+    def _on_media_state(self, session: CallSession, kind: str,
+                        state: str) -> None:
+        """Promote a call to 'active' only when its media is connected."""
+        if kind != "connection":
+            return
+        if state == "connected":
+            if session.state == "active":
+                return
+            session.state = "active"
+            logger.info("CALL media connected: %s", session.sid)
+            self.client.emit("call_state", session.sid, session.peer_full,
+                             "active")
+        elif state == "failed":
+            if session.state in ("ended", "failed"):
+                return
+            logger.warning("CALL media connection failed: %s", session.sid)
+            self.client.emit("call_failed", session.peer_full,
+                             "connection failed")
+            self._terminate(session, "connectivity-error", send=True)
+            self._close_session(session, "failed", "connectivity-error")
 
     async def _on_transport_info(self, jingle: ET.Element) -> None:
         session = self.sessions.get(jingle.get("sid", ""))

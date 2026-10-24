@@ -3355,7 +3355,10 @@ client.leave_muji(room)
   `include/screen.py` (`grab_region`/`grab_screen`, also used by the OSD) handles
   the DPR and the "region grab ignores the position" fallback. Wayland warns.
   A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS` past an hour) runs
-  from the call becoming active (`start_duration`) and from the Muji join.
+  from the call becoming active (`start_duration`) and from the first active
+  Muji session. The call state is `ringing` → `connecting` (on `session-accept`)
+  → `active` only when the peer connection reports `connected`; a failed media
+  connection ends the session with `connectivity-error`.
   Preferences → **Calls** has three tabs: **Devices** (microphone/speaker/
   camera from `devices.*`, the camera's supported modes
   `devices.camera_mode` applied to PyAV's v4l2 open, plus mic/speaker/camera

@@ -2822,7 +2822,13 @@ top-level windows** (never children of the main window, which would embed them
 over the roster); both label the peer with its **roster name**
 (`MainWindow._call_display_name`, the bare JID when unknown — the client's
 `call_incoming`/`call_proposed` events carry the full JID with the resource).
-The incoming prompt puts Reject at the left edge and Accept at the right, a
+The call state follows the media connection, not the SDP accept: `ringing`
+(«Звоним…») → `connecting` («Соединение…», emitted on `session-accept`, by the
+caller and the answerer) → `active` («Соединение установлено») only when the
+peer connection reports `connected`; a `failed` media connection ends the call
+with `connectivity-error`. The capture window opens on `connecting`, so it is
+not shown as an established call while ICE/DTLS is still negotiating. The
+incoming prompt puts Reject at the left edge and Accept at the right, a
 stretch between them. The incoming prompt and an **audio** call window show the
 peer's avatar (or the default placeholder, `MainWindow._call_avatar`) centered,
 with the name and the call message below it (a video call shows the video
@@ -2879,8 +2885,10 @@ also used by the OSD) handles the DPR and the "region grab ignores the position"
 fallback. Wayland warns (grabs are usually blocked). `MujiCallWindow` switches
 every session of the room. [`tests/test_screen_share.py`]
 A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS`
-past an hour) runs from the call becoming active (`CallWindow.start_duration`,
-stopped on the end) and from the Muji join (`MujiCallWindow.start_duration`). The
+past an hour) runs from the call becoming active — the media connection, not
+the session-accept (`CallWindow.start_duration`, stopped on the end) — and from
+the first `active` session of the room in Muji
+(`MujiCallWindow.start_duration`). The
 **«Звонки»** preferences section has three tabs: **«Устройства»**,
 **«Кодеки»** and **«Экран»**. «Устройства» also lists the camera's supported modes
 (`devices.camera_mode`, `media.camera_formats` from Qt Multimedia; the mode is

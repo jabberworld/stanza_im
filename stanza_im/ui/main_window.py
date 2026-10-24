@@ -5286,13 +5286,26 @@ class MainWindow(QtWidgets.QMainWindow):
                    if self._client else None)
         if getattr(session, "muji_room", ""):
             self._sync_muji_preview(session.muji_room)
+            if state == "active":
+                window = self._muji_windows.get(session.muji_room)
+                if (window is not None
+                        and not getattr(window, "_duration_start", 0)):
+                    window.start_duration()
             return
         if state == "ringing":
-            self._open_call_window(sid, peer,
-                                   bool(getattr(session, "video", False)))
+            window = self._open_call_window(
+                sid, peer, bool(getattr(session, "video", False)))
+            window.set_state(tr("call_ringing"))
             self._start_call_ringback()
             return
         window = self._call_windows.get(sid)
+        if state == "connecting":
+            self._stop_call_ringback()
+            if window is None:
+                window = self._open_call_window(
+                    sid, peer, bool(getattr(session, "video", False)))
+            window.set_state(tr("call_connecting"))
+            return
         if state == "active":
             self._stop_call_ringback()
             if window is None:
@@ -5512,7 +5525,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._on_video_mode_requested)
             self._place_window_near_main(window)
             window.show()
-            window.start_duration()
             self._muji_windows[room] = window
         self._on_muji_updated(room)
 
