@@ -1511,8 +1511,10 @@ so every open tab and every new tab picks it up, and calls
 `PreferencesDialog.sync_font_size` so the dialog spin box follows.
 `MainWindow.__init__` ends with `_on_settings_applied()`, so the saved fonts
 (and every other setting) are active from the first frame. The participant nick
-is drawn by `_FadeLabel.paintEvent`, which sets `self.font()` on the pixmap
-painter so the nick actually resizes with the list font. A non-empty application
+is drawn by `_FadeLabel.paintEvent`, which uses the label's stored
+`_effective_font` on the pixmap painter (immune to the application-stylesheet
+font reset) and the section headers use a bold copy of the list font, so
+Ctrl+wheel scales nicks and group titles together so the nick actually resizes with the list font. A non-empty application
 stylesheet (`MainWindow._apply_widget_fonts`, from the menu/tab/selector/tooltip
 fonts) makes Qt re-polish the widgets without a stylesheet of their own and drop
 these fonts, so `ChatWindow.reapply_fonts` runs right after
