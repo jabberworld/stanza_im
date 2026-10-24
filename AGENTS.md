@@ -2748,9 +2748,16 @@ contents to one transport and the peer's `<trickle/>`/`<renomination/>`
 transport options are echoed.
 When the peer advertises `urn:xmpp:jingle-message:0`
 the call is announced with XEP-0353 propose/proceed before `session-initiate`.
-Per XEP-0353 the `propose` targets the peer's **bare** JID while the responses
+Per XEP-0353 the `propose` targets the peer's **bare** JID (the server forks it
+to the available resources, so every phone rings) while the responses
 (`proceed`/`reject`/`retract`) and the `session-initiate` are addressed to the
-**full** JID of the resource that accepted (the `proceed` sender) — a peer with
+**full** JID of the resource that accepted (the `proceed` sender). A
+`<reject><busy/></reject>` from a resource whose caps lack
+`urn:xmpp:jingle-message:0` (a desktop client such as Psi+ that cannot take the
+call) is **ignored** while another resource of that account advertises JMI —
+otherwise it would abort the call while the phones are still ringing. The
+initial `peer_full` fallback is the best JMI-capable resource
+(`_best_jmi_resource`), not the highest-priority resource — a peer with
 several resources must not receive the Jingle IQ on a non-call resource.
 Bodyless `<message>` stanzas (propose/retract, XEP-0482 call invites and
 XEP-0249 MUC invitations) never reach

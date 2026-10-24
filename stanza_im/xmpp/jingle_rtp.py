@@ -656,6 +656,27 @@ class JingleRtpManager:
                 best, best_show = full, show
         return best or bare
 
+    def _best_jmi_resource(self, bare: str) -> str:
+        """The best resource that advertises Jingle Message Initiation.
+
+        Used as the fallback target for a direct ``session-initiate`` when the
+        peer has a JMI-capable device: the initial ``session-initiate`` must
+        not go to an unrelated (non-JMI) resource such as a desktop client
+        that only rejected the proposal.
+        """
+        from stanza_im.include.enumerators import SHOW_ORDER
+        best, best_rank = "", None
+        for full, features in (self.client.contact_features or {}).items():
+            if full.split("/")[0] != bare or NS_JINGLE_MSG not in features:
+                continue
+            info = (self.client.presences or {}).get(full, {})
+            show = SHOW_ORDER.get(info.get("show", "online"), 99)
+            has_rtp = "urn:xmpp:jingle:apps:rtp:1" in features
+            rank = (0 if has_rtp else 1, show)
+            if best_rank is None or rank < best_rank:
+                best, best_rank = full, rank
+        return best
+
     def _best_call_resource(self, bare: str) -> str:
         """Prefer a resource whose XEP-0115 caps announce Jingle RTP."""
         required = ("urn:xmpp:jingle:1",
@@ -686,7 +707,8 @@ class JingleRtpManager:
         use_jmi = use_message and self._peer_supports_messages(peer_bare)
         session = CallSession(
             sid=sid, peer_bare=peer_bare,
-            peer_full=(self._best_full_jid(peer_bare) if use_jmi
+            peer_full=((self._best_jmi_resource(peer_bare)
+                        or self._best_full_jid(peer_bare)) if use_jmi
                        else (self._best_call_resource(peer_bare)
                              or self._best_full_jid(peer_bare))),
             self_full=self._full_jid(), initiator=True, video=video,
@@ -1193,6 +1215,12 @@ class JingleRtpManager:
                                 action, frm_full, sid)
                 logger.info("CALL %s for outgoing call %s", action, sid)
             elif action in ("reject", "retract"):
+                if action == "reject" and self._ignore_non_jmi_reject(frm_full):
+                    logger.info(
+                        "CALL ignoring reject from a non-JMI resource %s "
+                        "(sid=%s); a JMI-capable device is still ringing",
+                        frm_full, sid)
+                    return True
                 self._pending_proposals.pop(sid, None)
                 self._proceeded.discard(sid)
                 session = self.sessions.get(sid)
@@ -1202,6 +1230,19 @@ class JingleRtpManager:
                     self.client.emit("call_proposal_ended", sid, action)
             return True
         return False
+
+    def _ignore_non_jmi_reject(self, frm_full: str) -> bool:
+        """A busy/reject from a resource that cannot process JMI is spurious.
+
+        Old servers fork the ``<propose/>`` to every resource; a desktop client
+        without JMI/RTP (e.g. Psi+) may answer ``<reject><busy/></reject>`` and
+        thus end the call although a phone is still ringing.  Ignore such a
+        reject only while another resource of that account advertises JMI.
+        """
+        features = (self.client.contact_features or {}).get(frm_full)
+        if not features or NS_JINGLE_MSG in features:
+            return False
+        return bool(self._best_jmi_resource(frm_full.split("/")[0]))
 
     def answer_proposal(self, sid: str, accept: bool,
                         video: bool = False) -> None:
