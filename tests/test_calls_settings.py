@@ -538,6 +538,26 @@ check("a decode failure drops a custom mode and reopens auto",
 check("no pending decode error is a no-op",
       track2._handle_decode_error() is False)
 
+# 11. the configured video bitrate is a hard ceiling for REMB --------------
+from aiortc.codecs.vpx import Vp8Encoder  # noqa: E402
+from aiortc.codecs.h264 import H264Encoder  # noqa: E402
+
+media.set_media_defaults(video_kbps=500)
+for _cls in (Vp8Encoder, H264Encoder):
+    _enc = _cls()
+    check(_cls.__name__ + " starts at the configured bitrate",
+          _enc.target_bitrate == 500000)
+    _enc.target_bitrate = 900000
+    check(_cls.__name__ + " refuses to exceed the cap",
+          _enc.target_bitrate == 500000)
+    _enc.target_bitrate = 100000
+    _low = 250000 if _cls is Vp8Encoder else 500000
+    check(_cls.__name__ + " still adapts below the cap",
+          _enc.target_bitrate == _low)
+media.set_media_defaults(video_kbps=1000)
+check("a live cap update reaches the encoder",
+      _enc.target_bitrate == 1000000)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

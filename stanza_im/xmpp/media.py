@@ -1191,6 +1191,34 @@ def _patch_encoder_defaults(encoder_cls, kind: str) -> None:
     encoder_cls._stanza_defaults_patched = True
 
 
+def _patch_video_bitrate_cap(encoder_cls) -> None:
+    """Never let REMB raise the encoder above the configured video bitrate.
+
+    The settings/live menu value is a hard ceiling; the network may adapt the
+    encoder lower, but not higher.
+    """
+    if encoder_cls is None or getattr(encoder_cls, "_stanza_cap_patched",
+                                      False):
+        return
+    original = encoder_cls.target_bitrate
+
+    def getter(self):
+        return original.fget(self)
+
+    def setter(self, value):
+        cap = _MEDIA_DEFAULTS.get("video_bitrate") or 0
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            numeric = None
+        if numeric is not None and cap:
+            numeric = min(numeric, cap)
+        original.fset(self, numeric if numeric is not None else value)
+
+    encoder_cls.target_bitrate = property(getter, setter)
+    encoder_cls._stanza_cap_patched = True
+
+
 def _patch_video_encoder_keyframes(encoder_cls) -> None:
     """Let ``request_video_keyframe`` force the next encoded frame to be an I-frame."""
     if encoder_cls is None or getattr(encoder_cls, "_stanza_keyframe_patched",
@@ -1223,8 +1251,9 @@ def _install_encoder_defaults() -> None:
             continue
         _patch_encoder_defaults(getattr(module, class_name, None), kind)
         if kind == "video":
-            _patch_video_encoder_keyframes(
-                getattr(module, class_name, None))
+            video_cls = getattr(module, class_name, None)
+            _patch_video_bitrate_cap(video_cls)
+            _patch_video_encoder_keyframes(video_cls)
 
 
 def _install_audio_resampler_compat() -> None:

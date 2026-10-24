@@ -2933,7 +2933,9 @@ in auto mode and logs the decoded FFmpeg reason instead of a black picture. «К
 `RTCRtpTransceiver.setCodecPreferences` before an offer/answer; «auto» keeps
 aiortc's order), the audio and video bitrate (`calls.*_bitrate_kbps`, applied
 by the encoder shim in `xmpp/media.py` to `OpusEncoder.codec.bit_rate` and
-`Vp8/H264Encoder.target_bitrate`) and the outgoing camera resolution cap
+`Vp8/H264Encoder.target_bitrate`; the video value is a **hard cap** — REMB may
+lower the encoder, never raise it above the setting — and a live quality
+change re-applies it) and the outgoing camera resolution cap
 (`calls.video_max_height`, applied by `_limit_video_frame`, downscale only).
 «Экран» holds the screen-sharing box and frame rate. The **«Устройства»** tab
 hosts

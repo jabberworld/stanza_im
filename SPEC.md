@@ -443,7 +443,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `calls.audio_codec` | `auto` | Preferred audio codec (`auto`/`opus`/`g722`/`pcmu`/`pcma`), set via `RTCRtpTransceiver.setCodecPreferences` before an offer/answer. |
 | `calls.video_codec` | `auto` | Preferred video codec (`auto`/`vp8`/`h264`); a codec cannot change during a call. |
 | `calls.audio_bitrate_kbps` | `96` | Opus target bitrate (16–128); applied when the encoder is created. |
-| `calls.video_bitrate_kbps` | `500` | Initial VP8/H264 target bitrate (100–2000); REMB may lower it. |
+| `calls.video_bitrate_kbps` | `500` | VP8/H264 target bitrate (100–2000) and a hard ceiling: REMB may lower it, never raise it above the setting. |
 | `calls.video_max_height` | `0` | Outgoing camera height cap (0 = source size, 1080/720/480/360 presets); downscale only. |
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
@@ -3385,7 +3385,8 @@ client.leave_muji(room)
   `decode_ffmpeg_error`), **Codecs** (`calls.audio_codec`/`video_codec` via
   `RTCRtpTransceiver.setCodecPreferences` before the offer/answer,
   `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
-  `xmpp/media.py` encoder shim, and the outgoing camera
+  `xmpp/media.py` encoder shim (the video value is a hard cap, so REMB can
+  only lower the encoder), and the outgoing camera
   `calls.video_max_height` downscale cap) and **Screen** (the screen-sharing
   output box and frame rate). A live call (and a Muji conference) additionally
   has an icon-only quality menu: video bitrate 200/500/1000 kbps and resolution
