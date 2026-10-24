@@ -70,61 +70,50 @@ def _fmt_size(width, height) -> str:
     return "%d×%d" % (int(width), int(height))
 
 
-def _info_button(parent, provider, key):
-    """An icon-only popup with the negotiated codec/resolution/bitrate."""
+def _info_toggle(parent) -> QtWidgets.QToolButton:
+    """A checkable button that shows/hides the codec information line."""
     button = QtWidgets.QToolButton(parent)
     button.setIcon(_icon("info"))
     button.setIconSize(QtCore.QSize(20, 20))
     button.setToolTip(tr("call_info"))
-    button.setPopupMode(
-        QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
-    menu = QtWidgets.QMenu(button)
+    button.setCheckable(True)
+    button.setAutoRaise(True)
+    return button
 
-    def refresh():
-        menu.clear()
-        try:
-            info = provider(key) if provider is not None else None
-        except Exception:  # noqa: BLE001 - diagnostics only
-            info = None
-        if not info:
-            action = menu.addAction(tr("call_info_unavailable"))
-            action.setEnabled(False)
-            return
-        out_line = " · ".join([
-            info.get("video_codec") or entire_unknown(),
-            _fmt_size(info.get("out_width"), info.get("out_height")),
-            tr("call_info_target", kbps=_fmt_kbps(info.get("video_kbps"))),
-        ])
-        actual = info.get("out_video_bps")
-        if actual is not None:
-            out_line += " (" + tr("call_info_actual",
-                                  kbps=_fmt_kbps(actual / 1000)) + ")"
-        menu.addAction(tr("call_info_out") + ": " + out_line).setEnabled(False)
-        in_bps = info.get("in_bps")
-        in_line = " · ".join([
-            info.get("video_codec") or entire_unknown(),
-            _fmt_size(info.get("in_width"), info.get("in_height")),
-            _fmt_kbps(in_bps / 1000 if in_bps is not None else None),
-        ])
-        menu.addAction(tr("call_info_in") + ": " + in_line).setEnabled(False)
-        if info.get("audio_codec"):
-            menu.addAction(tr("call_info_audio") + ": " + " · ".join([
-                info.get("audio_codec"),
-                _fmt_kbps(info.get("audio_kbps")),
-            ])).setEnabled(False)
-        sessions = int(info.get("sessions") or 0)
-        if sessions > 1:
-            menu.addAction(tr("call_info_sessions",
-                              n=sessions)).setEnabled(False)
 
-    menu.aboutToShow.connect(refresh)
-    timer = QtCore.QTimer(menu)
-    timer.setInterval(1000)
-    timer.timeout.connect(refresh)
-    menu.aboutToShow.connect(timer.start)
-    menu.aboutToHide.connect(timer.stop)
-    button.setMenu(menu)
-    return button, refresh
+def _format_info_line(info) -> str:
+    """One compact line with the negotiated codecs/resolution/bitrates."""
+    if not info:
+        return tr("call_info_unavailable")
+    parts: list[str] = []
+    video_codec = str(info.get("video_codec") or "")
+    if video_codec:
+        out = video_codec + " " + _fmt_size(info.get("out_width"),
+                                            info.get("out_height"))
+        target = info.get("video_kbps")
+        if target is not None:
+            rate = _fmt_kbps(target)
+            actual = info.get("out_video_bps")
+            if actual is not None:
+                rate += " (" + _fmt_kbps(actual / 1000) + ")"
+            out += " · " + rate
+        parts.append(out)
+        if info.get("in_width") and info.get("in_height"):
+            incoming = tr("call_info_in_short") + " " + _fmt_size(
+                info.get("in_width"), info.get("in_height"))
+            if info.get("in_bps") is not None:
+                incoming += " · " + _fmt_kbps(info["in_bps"] / 1000)
+            parts.append(incoming)
+    audio_codec = str(info.get("audio_codec") or "")
+    if audio_codec:
+        audio = audio_codec
+        if info.get("audio_kbps") is not None:
+            audio += " " + _fmt_kbps(info["audio_kbps"])
+        parts.append(audio)
+    sessions = int(info.get("sessions") or 0)
+    if sessions > 1:
+        parts.append(tr("call_info_sessions", n=sessions))
+    return " · ".join(parts) if parts else tr("call_info_unavailable")
 
 
 def _quality_button(parent, bitrate: int, height: int, on_change):
@@ -318,9 +307,33 @@ class CallWindow(QtWidgets.QWidget):
         self._muted = False
 
         layout = QtWidgets.QVBoxLayout(self)
+        header = QtWidgets.QHBoxLayout()
+        self._header = QtWidgets.QLabel(self)
+        self._header.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._header.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self._state_text = tr("call_connecting")
+        self._update_header()
+        header.addWidget(self._header, 1)
+        self._duration_label = QtWidgets.QLabel("", self)
+        self._duration_label.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignRight
+            | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self._duration_label.setStyleSheet("color: gray;")
+        self._duration_label.setVisible(False)
+        header.addWidget(self._duration_label, 0)
+        layout.addLayout(header)
+
+        self._info_label = QtWidgets.QLabel("", self)
+        self._info_label.setStyleSheet("color: gray;")
+        self._info_label.setWordWrap(True)
+        self._info_label.setVisible(False)
+        layout.addWidget(self._info_label)
+
         if not video:
             # An audio call has no video surface — show the contact's avatar
-            # (or the placeholder) above the name.
+            # (or the placeholder) below the header.
             avatar = QtWidgets.QLabel(self)
             avatar.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             pix = _rounded_avatar(avatar_path or default_avatar(), 96,
@@ -328,20 +341,6 @@ class CallWindow(QtWidgets.QWidget):
             if not pix.isNull():
                 avatar.setPixmap(pix)
             layout.addWidget(avatar)
-        self._title = QtWidgets.QLabel(peer, self)
-        self._title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self._title.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(self._title)
-
-        self._state = QtWidgets.QLabel(tr("call_connecting"), self)
-        self._state.setStyleSheet("color: gray;")
-        layout.addWidget(self._state)
-
-        self._duration_label = QtWidgets.QLabel("", self)
-        self._duration_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self._duration_label.setStyleSheet("color: gray;")
-        self._duration_label.setVisible(False)
-        layout.addWidget(self._duration_label)
         self._duration_timer = QtCore.QTimer(self)
         self._duration_timer.setInterval(1000)
         self._duration_timer.timeout.connect(self._tick_duration)
@@ -394,8 +393,8 @@ class CallWindow(QtWidgets.QWidget):
             self, self._quality_bitrate, self._quality_height,
             self._on_quality)
         controls.addWidget(self._quality_btn)
-        self._info_btn, self._refresh_info = _info_button(
-            self, info_provider, sid)
+        self._info_btn = _info_toggle(self)
+        self._info_btn.toggled.connect(self._toggle_info)
         controls.addWidget(self._info_btn)
         controls.addStretch(1)
 
@@ -407,8 +406,30 @@ class CallWindow(QtWidgets.QWidget):
         controls.addWidget(self._hangup_btn)
         layout.addLayout(controls)
 
+    def _update_header(self) -> None:
+        from stanza_im.include.utils import escape_html
+        self._header.setText(
+            "<span style='font-weight:bold;font-size:14px'>%s</span> "
+            "<span style='color:gray'>(%s)</span>"
+            % (escape_html(self.peer), escape_html(self._state_text)))
+
     def set_state(self, text: str):
-        self._state.setText(text)
+        self._state_text = text
+        self._update_header()
+
+    def _toggle_info(self, checked: bool) -> None:
+        self._info_label.setVisible(bool(checked))
+        if checked:
+            self._refresh_info()
+
+    def _refresh_info(self) -> None:
+        info = None
+        if self._info_provider is not None:
+            try:
+                info = self._info_provider(self.sid)
+            except Exception:  # noqa: BLE001 - diagnostics only
+                info = None
+        self._info_label.setText(_format_info_line(info))
 
     def start_duration(self) -> None:
         """Start (or restart) the call-duration counter."""
@@ -426,6 +447,8 @@ class CallWindow(QtWidgets.QWidget):
             return
         self._duration_label.setText(
             format_duration(time.monotonic() - self._duration_start))
+        if self._info_label.isVisible():
+            self._refresh_info()
 
     def set_frame(self, image):
         self._video_view.set_frame(image)
@@ -526,6 +549,11 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._title = QtWidgets.QLabel(room, self)
         self._title.setStyleSheet("font-weight: bold;")
         layout.addWidget(self._title)
+        self._info_label = QtWidgets.QLabel("", self)
+        self._info_label.setStyleSheet("color: gray;")
+        self._info_label.setWordWrap(True)
+        self._info_label.setVisible(False)
+        layout.addWidget(self._info_label)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal, self)
 
@@ -597,8 +625,8 @@ class MujiCallWindow(QtWidgets.QWidget):
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._video_btn)
         controls.addWidget(self._quality_btn)
-        self._info_btn, self._refresh_info = _info_button(
-            self, info_provider, room)
+        self._info_btn = _info_toggle(self)
+        self._info_btn.toggled.connect(self._toggle_info)
         controls.addWidget(self._info_btn)
         controls.addStretch(1)
         controls.addWidget(self._leave_btn)
@@ -614,6 +642,20 @@ class MujiCallWindow(QtWidgets.QWidget):
     def set_video(self, enabled: bool) -> None:
         self._video.setVisible(enabled)
         self._video_btn.setVisible(enabled)
+
+    def _toggle_info(self, checked: bool) -> None:
+        self._info_label.setVisible(bool(checked))
+        if checked:
+            self._refresh_info()
+
+    def _refresh_info(self) -> None:
+        info = None
+        if self._info_provider is not None:
+            try:
+                info = self._info_provider(self.room)
+            except Exception:  # noqa: BLE001 - diagnostics only
+                info = None
+        self._info_label.setText(_format_info_line(info))
 
     def _on_quality(self, bitrate, height) -> None:
         if bitrate is not None:
@@ -660,6 +702,8 @@ class MujiCallWindow(QtWidgets.QWidget):
             return
         self._duration_label.setText(
             format_duration(time.monotonic() - self._duration_start))
+        if self._info_label.isVisible():
+            self._refresh_info()
 
     def set_self_nick(self, nick: str) -> None:
         """Update our own conference nick (labels the mirrored self tile)."""

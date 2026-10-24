@@ -383,7 +383,9 @@ check("quality_info for a Muji room counts its sessions",
 check("quality_info without a call is empty",
       mgr2.quality_info("missing") is None)
 
-# The call windows build the info menu from the provider.
+# The call window shows the info as a toggle line, not a popup menu.
+from stanza_im.ui import call_window as call_window_mod  # noqa: E402
+
 info_window = CallWindow(
     "sid-info", "Peer", video=True,
     info_provider=lambda key: {
@@ -394,15 +396,41 @@ info_window = CallWindow(
         "out_video_bps": 420000, "in_bps": 380000,
         "sessions": 1,
     })
-info_window._refresh_info()
-info_texts = [action.text() for action in
-              info_window._info_btn.menu().actions()]
-check("the call info menu lists outgoing/incoming/audio",
-      any("VP8" in text and "1280×720" in text and "Outgoing" in text
-          for text in info_texts)
-      and any("640×480" in text and "Incoming" in text
-              for text in info_texts)
-      and any("opus" in text and "Audio" in text for text in info_texts))
+info_window._info_btn.setChecked(True)
+info_line = info_window._info_label.text()
+check("the info toggle shows one compact codec line",
+      not info_window._info_label.isHidden()
+      and "VP8" in info_line and "1280×720" in info_line
+      and "500" in info_line and "640×480" in info_line
+      and "opus" in info_line)
+info_window._info_btn.setChecked(False)
+check("the info line is hidden while the button is released",
+      info_window._info_label.isHidden())
+
+info_window.set_state("Call established")
+check("the header shows the nick and the state on one line",
+      "Peer" in info_window._header.text()
+      and "Call established" in info_window._header.text())
+window_src = inspect.getsource(CallWindow.__init__)
+check("the duration sits in the same header row, right-aligned",
+      "header.addWidget(self._duration_label" in window_src
+      and "AlignRight" in window_src)
+audio_line = call_window_mod._format_info_line(
+    {"audio_codec": "Opus", "audio_kbps": 96})
+check("an audio-only info line has no resolution",
+      "Opus" in audio_line and "96" in audio_line and "×" not in audio_line)
+
+muji_info = MujiCallWindow(
+    "room@conf.example", info_provider=lambda key: {
+        "video_codec": "VP8", "audio_codec": "opus",
+        "out_width": 640, "out_height": 480,
+        "video_kbps": 300, "audio_kbps": 96, "sessions": 2,
+    })
+muji_info._info_btn.setChecked(True)
+check("the Muji window toggles the same info line",
+      "VP8" in muji_info._info_label.text()
+      and "2" in muji_info._info_label.text())
+muji_info.close()
 info_window.close()
 
 check("the main window provides the info to the windows",

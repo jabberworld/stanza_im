@@ -1512,6 +1512,7 @@ STRINGS = {
     'call_info': 'О звонке',
     'call_info_unavailable': 'Медиа ещё не установлено',
     'call_info_out': 'Исходящее',
+    'call_info_in_short': 'вх.',
     'call_info_in': 'Входящее',
     'call_info_audio': 'Аудио',
     'call_info_target': 'цель {kbps}',

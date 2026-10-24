@@ -2854,14 +2854,20 @@ codec with a keyframe on the next frame) and `set_video_quality`
 (`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). The
 choice is session-only (defaults come from the Calls preferences); the codec
 cannot change during a call (that needs renegotiation) and audio is only
-changed in the settings. An **info** button (`info.svg`) opens a live popup:
-the outgoing and incoming codec and resolution plus the target and measured
-bitrates. The codecs come from the negotiated answer SDP
-(`media.sdp_media_codecs`), the outgoing size from the capture track and the
-incoming size from the decoded remote frame; the actual rates are sampled every
-2 s from the sender/transport octet counters (`AiortcCall.sample_stats`).
-aiortc has no per-stream received bytes, so the incoming figure is the
-transport total. A Muji room shows its first session plus the session count. A peer that missed the initial keyframe (a green
+changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
+one compact line under the header — the outgoing and incoming codec and
+resolution plus the target and measured bitrates (an audio call shows just the
+codec and bitrate) — and refreshes it once a second while visible (the call/
+duration timer drives it, so nothing is rebuilt and the line never disappears).
+The codecs come from the negotiated answer SDP (`media.sdp_media_codecs`), the
+outgoing size from the capture track and the incoming size from the decoded
+remote frame; the actual rates are sampled every 2 s from the sender/transport
+octet counters (`AiortcCall.sample_stats`). aiortc has no per-stream received
+bytes, so the incoming figure is the transport total. The 1:1 window's header
+is a single row — bold nick + gray `(state)` on the left and the session
+duration on the right — so the video gets the space the old three rows used;
+the `VideoView` caption keeps the nick over the video. A Muji room shows the
+same toggle line under its title (first session plus the session count). A peer that missed the initial keyframe (a green
 picture until the local video was toggled) is recovered by
 `request_video_keyframe`: the VP8/H264 encoder shim forces the next frame to be
 an I-frame (`_stanza_keyframe`, requested when the media connection becomes

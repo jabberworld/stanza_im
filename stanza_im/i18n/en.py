@@ -1511,6 +1511,7 @@ STRINGS = {
     'call_info': 'Call info',
     'call_info_unavailable': 'No media yet',
     'call_info_out': 'Outgoing',
+    'call_info_in_short': 'in',
     'call_info_in': 'Incoming',
     'call_info_audio': 'Audio',
     'call_info_target': 'target {kbps}',
