@@ -3305,7 +3305,11 @@ client.leave_muji(room)
   `client.answer_proposal` (`proceed`/`reject`), the proposed media kind comes
   from all `<description>` elements (`_propose_media` returns video when any of
   them is a video m-line), and the following
-  session-initiate is auto-accepted.
+  session-initiate is auto-accepted. A busy/reject from a resource whose caps
+  lack `urn:xmpp:jingle-message:0` is ignored while another resource of the
+  account advertises JMI (a desktop client must not abort the call the phones
+  are still ringing for); the fallback `peer_full` is the best JMI-capable
+  resource.
 - Capability gating mirrors Conversations: `client.supports_calls(bare, video)`
   checks the peer's XEP-0115 caps (`jingle:1 + ice-udp:1 + rtp:1 + dtls:0 +
   rtp:audio [+ rtp:video]`). The roster contact context menu and the chat
