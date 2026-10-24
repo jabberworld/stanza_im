@@ -208,6 +208,10 @@ check("clearing the history resets the read state",
 check("clearing the roster cache keeps it absent until the next login",
       "_roster_cache_cleared = True"
       in inspect.getsource(MainWindow._clear_roster_cache))
+from stanza_im.core.client import JabberClient  # noqa: E402
+check("the client never rewrites a cleared roster cache",
+      "_roster_cache_cleared" in inspect.getsource(
+          JabberClient._save_roster_cache))
 check("clearing avatars resets the known avatar hashes",
       "_avatar_ids" in inspect.getsource(MainWindow._clear_avatar_cache))
 

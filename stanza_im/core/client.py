@@ -1408,6 +1408,7 @@ class JabberClient:
         # lazily by ``_seed_roster_cache`` so a throwaway registration client
         # never touches the disk.
         self._roster_cache = None
+        self._roster_cache_cleared = False
         self._roster_save_handle = None
         self._muc_join_tasks: dict[str, asyncio.Task] = {}
         self._muc_last_activity: dict[str, float] = {}
@@ -2938,6 +2939,8 @@ class JabberClient:
 
     def _schedule_roster_save(self) -> None:
         """Coalesce roster-cache writes."""
+        if getattr(self, "_roster_cache_cleared", False):
+            return
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -2950,7 +2953,7 @@ class JabberClient:
 
     def _save_roster_cache(self) -> None:
         self._roster_save_handle = None
-        if not self.jid_str:
+        if not self.jid_str or getattr(self, "_roster_cache_cleared", False):
             return
         try:
             version = str(self.xmpp.client_roster.version or "")
