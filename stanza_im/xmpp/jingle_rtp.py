@@ -656,26 +656,29 @@ class JingleRtpManager:
                 best, best_show = full, show
         return best or bare
 
-    def _best_jmi_resource(self, bare: str) -> str:
-        """The best resource that advertises Jingle Message Initiation.
+    def _jmi_resources(self, bare: str) -> list[str]:
+        """Every resource that advertises Jingle Message Initiation.
 
-        Used as the fallback target for a direct ``session-initiate`` when the
-        peer has a JMI-capable device: the initial ``session-initiate`` must
-        not go to an unrelated (non-JMI) resource such as a desktop client
-        that only rejected the proposal.
+        Best first (RTP-capable, then presence).  A desktop client without
+        JMI (e.g. Psi+) is deliberately excluded: it would answer the proposal
+        with a spurious ``<busy/>`` that reaches the phones through carbons.
         """
         from stanza_im.include.enumerators import SHOW_ORDER
-        best, best_rank = "", None
+        ranked: list[tuple[tuple, str]] = []
         for full, features in (self.client.contact_features or {}).items():
             if full.split("/")[0] != bare or NS_JINGLE_MSG not in features:
                 continue
             info = (self.client.presences or {}).get(full, {})
             show = SHOW_ORDER.get(info.get("show", "online"), 99)
             has_rtp = "urn:xmpp:jingle:apps:rtp:1" in features
-            rank = (0 if has_rtp else 1, show)
-            if best_rank is None or rank < best_rank:
-                best, best_rank = full, rank
-        return best
+            ranked.append(((0 if has_rtp else 1, show, full), full))
+        ranked.sort(key=lambda item: item[0])
+        return [full for _rank, full in ranked]
+
+    def _best_jmi_resource(self, bare: str) -> str:
+        """The best resource that advertises Jingle Message Initiation."""
+        targets = self._jmi_resources(bare)
+        return targets[0] if targets else ""
 
     def _best_call_resource(self, bare: str) -> str:
         """Prefer a resource whose XEP-0115 caps announce Jingle RTP."""
@@ -705,10 +708,11 @@ class JingleRtpManager:
         peer_bare = str(jid).split("/")[0]
         sid = uuid.uuid4().hex
         use_jmi = use_message and self._peer_supports_messages(peer_bare)
+        jmi_targets = self._jmi_resources(peer_bare) if use_jmi else []
         session = CallSession(
             sid=sid, peer_bare=peer_bare,
-            peer_full=((self._best_jmi_resource(peer_bare)
-                        or self._best_full_jid(peer_bare)) if use_jmi
+            peer_full=((jmi_targets[0] if jmi_targets else
+                        self._best_full_jid(peer_bare)) if use_jmi
                        else (self._best_call_resource(peer_bare)
                              or self._best_full_jid(peer_bare))),
             self_full=self._full_jid(), initiator=True, video=video,
@@ -719,7 +723,15 @@ class JingleRtpManager:
         self.client.emit("call_state", sid, session.peer_full, "ringing")
         try:
             if use_message and not muji_room and use_jmi:
-                await self._send_jingle_message("propose", session)
+                if jmi_targets:
+                    # Ring every JMI-capable device without letting the
+                    # server carbon-copy the proposal to the other resources
+                    # (a non-JMI desktop would reject it for everyone).
+                    for target in jmi_targets:
+                        await self._send_jingle_message(
+                            "propose", session, target=target, private=True)
+                else:
+                    await self._send_jingle_message("propose", session)
                 session.ringed = True
                 await self._wait_proceed(session, timeout=30)
             await self._send_session_initiate(session)
@@ -813,17 +825,34 @@ class JingleRtpManager:
                            session.sid)
 
     async def _send_jingle_message(self, action: str, session: CallSession,
-                                   extra: ET.Element | None = None) -> None:
-        # propose goes to the bare JID; responses to the full JID (XEP-0353).
-        target = (session.peer_bare if action == "propose"
-                  else (session.peer_full or session.peer_bare))
+                                   extra: ET.Element | None = None,
+                                   target: str = "",
+                                   private: bool = False) -> None:
+        # propose goes to the bare JID by default; responses to the full JID
+        # (XEP-0353).  A per-resource propose passes its target explicitly.
+        target = (target or (session.peer_bare if action == "propose"
+                             else (session.peer_full or session.peer_bare)))
         await self._send_message_action(action, target, session.sid,
-                                        session.video, extra)
+                                        session.video, extra,
+                                        private=private)
+
+    @staticmethod
+    def _mark_private(msg) -> None:
+        """Hide a JMI message from the recipient's other resources.
+
+        XEP-0280 §9: ``<private/>`` + ``<no-copy/>`` on a message addressed to
+        a full JID stops the recipient's server from carbon-copying it to the
+        account's other resources (a non-JMI desktop must not see, and reject,
+        a proposal meant for a phone).
+        """
+        ET.SubElement(msg.xml, "{urn:xmpp:carbons:2}private")
+        ET.SubElement(msg.xml, "{urn:xmpp:hints}no-copy")
 
     async def _send_message_action(self, action: str, to_jid: str, sid: str,
                                    video: bool = False,
                                    extra: ET.Element | None = None,
-                                   descriptions=None) -> None:
+                                   descriptions=None,
+                                   private: bool = False) -> None:
         """Send a XEP-0353 ``<propose|proceed|reject|retract|accept>`` message.
 
         Per XEP-0353 ``propose`` goes to the bare JID while the responses
@@ -839,6 +868,8 @@ class JingleRtpManager:
                 if video:
                     descriptions.append((NS_RTP, {"media": "video"}))
         msg = jmi.build(self.client, action, to_jid, sid, descriptions)
+        if private:
+            self._mark_private(msg)
         if extra is not None:
             element = jmi.action_element(msg)
             if element is not None:

@@ -100,6 +100,10 @@ best = mgr._best_jmi_resource(BARE)
 check("the best JMI resource is a phone, not the non-JMI desktop",
       best in (PHONE1, PHONE2))
 check("the resource with the better presence wins", best == PHONE1)
+check("every JMI resource is a propose target",
+      mgr._jmi_resources(BARE) == [PHONE1, PHONE2])
+check("the non-JMI desktop is never a propose target",
+      PSI not in mgr._jmi_resources(BARE))
 check("a bare JID without JMI resources yields nothing",
       mgr._best_jmi_resource("other@example.com") == "")
 
@@ -128,10 +132,24 @@ check("a lone non-JMI resource can still reject",
 # 5. start_call leaves the propose on the bare JID --------------------------
 src = inspect.getsource(JingleRtpManager.start_call)
 check("the fallback session-initiate targets a JMI resource",
-      "_best_jmi_resource(peer_bare)" in src)
-check("the propose still goes to the bare JID",
-      'target = (session.peer_bare if action == "propose"' in
-      inspect.getsource(JingleRtpManager._send_jingle_message))
+      "jmi_targets[0]" in src)
+propose_src = inspect.getsource(JingleRtpManager.start_call)
+check("the propose rings every JMI resource",
+      "for target in jmi_targets:" in propose_src
+      and "private=True" in propose_src)
+check("without a JMI resource the propose falls back to the bare JID",
+      "await self._send_jingle_message(\"propose\", session)" in propose_src)
+_defaults = inspect.getsource(JingleRtpManager._send_jingle_message)
+check("a JMI response still targets the full JID",
+      "session.peer_full" in _defaults and "action == \"propose\"" in _defaults)
+
+private = slixmpp.Message()
+private["from"] = "me@example.com/r"
+private["to"] = PHONE1
+JingleRtpManager._mark_private(private)
+check("a per-resource propose is hidden from the other resources",
+      private.xml.find("{urn:xmpp:carbons:2}private") is not None
+      and private.xml.find("{urn:xmpp:hints}no-copy") is not None)
 
 if FAILURES:
     print("FAILURES:", FAILURES)
