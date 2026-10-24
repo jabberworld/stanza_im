@@ -2750,8 +2750,11 @@ When the peer advertises `urn:xmpp:jingle-message:0`
 the call is announced with XEP-0353 propose/proceed before `session-initiate`.
 Per XEP-0353 the `propose` rings the peer's resources while the responses
 (`proceed`/`reject`/`retract`) and the `session-initiate` go to the **full**
-JID of the resource that accepted (the `proceed` sender). When the peer has
-JMI-capable resources, the propose is sent to **each of their full JIDs**
+JID of the resource that accepted (the `proceed` sender). Before choosing the targets, `JabberClient.ensure_resource_caps` runs a live
+`disco#info` for every available resource whose caps lack JMI (the old
+`ensure_caps` stopped at the first call-capable resource, so a second phone
+whose caps fetch failed was never proposed to). When the peer has JMI-capable
+resources, the propose is sent to **each of their full JIDs**
 (`_jmi_resources`, RTP-capable first) with
 `<private xmlns='urn:xmpp:carbons:2'/>` + `<no-copy xmlns='urn:xmpp:hints'/>`
 (XEP-0280 §9): the recipient's server then does not carbon-copy it to the
@@ -2760,8 +2763,9 @@ rejects — a proposal meant for a phone. Both phones ring; the first `proceed`
 wins and its carbon stops the other. Without a JMI resource the propose falls
 back to the **bare** JID (server forking). A `<reject><busy/></reject>` from a
 resource whose caps lack `urn:xmpp:jingle-message:0` is still **ignored** while
-another resource of that account advertises JMI (a defence for forking
-servers). The initial `peer_full` fallback is the best JMI-capable resource
+another resource of that account advertises JMI, but only for a forked
+(bare-JID) propose: a reject from a device we addressed directly
+(`session.propose_targeted`) is a real decline and ends the call. The initial `peer_full` fallback is the best JMI-capable resource
 (`_best_jmi_resource`), not the highest-priority resource — a peer with
 several resources must not receive the Jingle IQ on a non-call resource.
 Bodyless `<message>` stanzas (propose/retract, XEP-0482 call invites and

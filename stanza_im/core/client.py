@@ -6765,6 +6765,21 @@ class JabberClient:
             self._caps_verified.add(best)
             self._start_task(self._load_caps_from_disco(best))
 
+    async def ensure_resource_caps(self, full_jid: str) -> None:
+        """Live ``disco#info`` for one resource whose caps are missing.
+
+        ``ensure_caps`` only verifies one resource (and returns as soon as any
+        resource of the account advertises calls), so a second phone whose
+        caps fetch failed stayed invisible to the per-resource call targeting.
+        """
+        full_jid = str(full_jid or "")
+        if not full_jid or "/" not in full_jid:
+            return
+        if full_jid in self._caps_verified:
+            return
+        self._caps_verified.add(full_jid)
+        await self._load_caps_from_disco(full_jid)
+
     async def _load_caps_from_disco(self, full_jid: str) -> None:
         try:
             info = await self.xmpp.plugin["xep_0030"].get_info(full_jid)

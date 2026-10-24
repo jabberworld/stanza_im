@@ -48,6 +48,7 @@ PHONE2 = f"{BARE}/phone2"
 
 class _Client:
     def __init__(self):
+        self.caps_requests = []
         self.contact_features = {
             PSI: {"urn:xmpp:jingle:1", "urn:xmpp:jingle:apps:file-transfer:5"},
             PHONE1: {JMI, RTP, "urn:xmpp:jingle:apps:rtp:video"},
@@ -62,6 +63,10 @@ class _Client:
 
     def emit(self, *args):
         self.emitted.append(args)
+
+    async def ensure_resource_caps(self, full_jid):
+        self.caps_requests.append(full_jid)
+        self.contact_features.setdefault(full_jid, set()).add(JMI)
 
 
 def manager():
@@ -92,6 +97,23 @@ def reject(frm, sid, busy=True):
         ET.SubElement(reason, "{%s}busy" % NS_JINGLE)
     return msg
 
+
+# 0. every resource without JMI caps is verified before targeting ----------
+import asyncio  # noqa: E402
+
+mgr0 = manager()
+del mgr0.client.contact_features[PHONE2]
+mgr0.client.contact_features[PSI] = {"urn:xmpp:jingle:1"}
+asyncio.run(mgr0._ensure_peer_caps(BARE))
+check("a resource without resolved caps is looked up",
+      PHONE2 in mgr0.client.caps_requests)
+check("a resource with JMI is not looked up again",
+      PHONE1 not in mgr0.client.caps_requests)
+check("the resolved resource becomes a JMI target",
+      PHONE2 in mgr0._jmi_resources(BARE))
+check("the call resolves the peer caps before targeting",
+      "await self._ensure_peer_caps(peer_bare)"
+      in inspect.getsource(JingleRtpManager.start_call))
 
 # 1. a JMI-capable resource is chosen for the fallback session-initiate -----
 mgr = manager()
@@ -128,6 +150,14 @@ mgr2.sessions["s2"] = SimpleNamespace(sid="s2", peer_full=BARE)
 mgr2.handle_message(reject(PSI, "s2"))
 check("a lone non-JMI resource can still reject",
       mgr2.closed == [("s2", "ended", "reject")])
+
+# 4b. a targeted propose honours a reject from a non-JMI resource -----------
+mgr3 = manager()
+session3 = SimpleNamespace(sid="s3", peer_full=BARE, propose_targeted=True)
+mgr3.sessions["s3"] = session3
+mgr3.handle_message(reject(PSI, "s3"))
+check("a targeted propose honours any reject (a real decline)",
+      mgr3.closed == [("s3", "ended", "reject")])
 
 # 5. start_call leaves the propose on the bare JID --------------------------
 src = inspect.getsource(JingleRtpManager.start_call)

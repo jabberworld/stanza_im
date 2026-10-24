@@ -583,6 +583,9 @@ class CallSession:
     content_name: str = "voice"
     video_content: str = "video"
     ringed: bool = False
+    #: The propose was sent to specific JMI resources (not the bare JID), so
+    #: any reject from one of them is a legitimate decline.
+    propose_targeted: bool = False
     muji_room: str = ""
     local_preview: bool = False
 
@@ -656,6 +659,39 @@ class JingleRtpManager:
                 best, best_show = full, show
         return best or bare
 
+    async def _ensure_peer_caps(self, bare: str) -> None:
+        """Resolve the caps of every available resource of *bare*.
+
+        ``client.ensure_caps`` stops at the first call-capable resource; a
+        second phone whose caps lookup failed would never be proposed to.
+        """
+        client = self.client
+        ensure = getattr(client, "ensure_resource_caps", None)
+        if ensure is None:
+            return
+        missing = []
+        for full, info in (getattr(client, "presences", {}) or {}).items():
+            if full.split("/")[0] != bare:
+                continue
+            if info.get("type") != "available":
+                continue
+            features = (getattr(client, "contact_features", {}) or {}).get(full)
+            if features and NS_JINGLE_MSG in features:
+                continue
+            missing.append(full)
+        if not missing:
+            return
+        logger.debug("CALL resolving caps for %s", missing)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(ensure(full) for full in missing),
+                               return_exceptions=True),
+                timeout=3.0)
+        except asyncio.TimeoutError:
+            logger.info("CALL caps lookup timed out for %s", bare)
+        except Exception:  # noqa: BLE001 - caps are best effort
+            logger.debug("CALL caps lookup failed for %s", bare, exc_info=True)
+
     def _jmi_resources(self, bare: str) -> list[str]:
         """Every resource that advertises Jingle Message Initiation.
 
@@ -707,6 +743,7 @@ class JingleRtpManager:
             return
         peer_bare = str(jid).split("/")[0]
         sid = uuid.uuid4().hex
+        await self._ensure_peer_caps(peer_bare)
         use_jmi = use_message and self._peer_supports_messages(peer_bare)
         jmi_targets = self._jmi_resources(peer_bare) if use_jmi else []
         session = CallSession(
@@ -727,6 +764,7 @@ class JingleRtpManager:
                     # Ring every JMI-capable device without letting the
                     # server carbon-copy the proposal to the other resources
                     # (a non-JMI desktop would reject it for everyone).
+                    session.propose_targeted = True
                     for target in jmi_targets:
                         await self._send_jingle_message(
                             "propose", session, target=target, private=True)
@@ -1289,7 +1327,12 @@ class JingleRtpManager:
                                 action, frm_full, sid)
                 logger.info("CALL %s for outgoing call %s", action, sid)
             elif action in ("reject", "retract"):
-                if action == "reject" and self._ignore_non_jmi_reject(frm_full):
+                reject_session = self.sessions.get(sid)
+                if (action == "reject"
+                        and reject_session is not None
+                        and not getattr(reject_session, "propose_targeted",
+                                        False)
+                        and self._ignore_non_jmi_reject(frm_full)):
                     logger.info(
                         "CALL ignoring reject from a non-JMI resource %s "
                         "(sid=%s); a JMI-capable device is still ringing",

@@ -3299,10 +3299,14 @@ client.leave_muji(room)
   `<group>` and echoes the peer's `<trickle/>`/`<renomination/>` transport
   options, so libwebrtc peers (Conversations) leave their *connecting* state.
   Peers advertising `urn:xmpp:jingle-message:0` are rung with
-  XEP-0353 propose/proceed first: the propose goes to every JMI-capable
+  XEP-0353 propose/proceed first: before targeting, a live `disco#info` is
+  run for every available resource whose caps lack JMI (the old single-resource
+  check hid a second phone); the propose then goes to every JMI-capable
   resource's full JID with `<private/>` + `<no-copy/>` hints (XEP-0280 §9), so a
   non-JMI desktop is not carbon-copied and cannot reject the call for the
-  phones; without a JMI resource it falls back to the bare JID. slixmpp only
+  phones; without a JMI resource it falls back to the bare JID. A reject from
+  a directly addressed device is honoured; the non-JMI ignore applies only to
+  the forked bare-JID propose. slixmpp only
   fires the `message` event for
   stanzas with a `<body>`, so bodyless propose/retract and XEP-0482 invites have
   dedicated `MatchXPath` handlers; proposals are answered with
