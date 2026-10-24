@@ -18,6 +18,7 @@ import importlib
 import logging
 import math
 import time
+import weakref
 from fractions import Fraction
 
 logger = logging.getLogger("stanza_im.call.media")
@@ -51,6 +52,72 @@ AUDIO_RATE = 48000
 AUDIO_CHANNELS = 2                       # stereo matches the Opus encoder input
 AUDIO_FORMAT = "s16"
 AUDIO_SAMPLES_PER_FRAME = int(AUDIO_RATE * 0.02)   # 20 ms
+
+#: Encoder defaults (bits/s); the live encoders are tracked so a quality
+#: change takes effect without renegotiating the session.
+_MEDIA_DEFAULTS = {"audio_bitrate": 96000, "video_bitrate": 500000}
+_AUDIO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
+_VIDEO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def media_defaults() -> dict:
+    """The current encoder defaults (bits/s)."""
+    return dict(_MEDIA_DEFAULTS)
+
+
+def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
+    """Set the initial encoder bitrates and update the live encoders.
+
+    Audio is normally only changed before a call (Opus may need the codec to
+    be reopened), video takes effect on the next encoded frame (aiortc
+    recreates its codec when the target moves by more than 10 %).
+    """
+    if audio_kbps:
+        try:
+            value = max(8, min(256, int(audio_kbps))) * 1000
+        except (TypeError, ValueError):
+            value = 0
+        if value:
+            _MEDIA_DEFAULTS["audio_bitrate"] = value
+            for encoder in list(_AUDIO_ENCODERS):
+                try:
+                    encoder.codec.bit_rate = value
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+    if video_kbps:
+        try:
+            value = max(50, min(4000, int(video_kbps))) * 1000
+        except (TypeError, ValueError):
+            value = 0
+        if value:
+            _MEDIA_DEFAULTS["video_bitrate"] = value
+            for encoder in list(_VIDEO_ENCODERS):
+                try:
+                    encoder.target_bitrate = value
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+
+
+def _ordered_codecs(kind: str, choice: str) -> list:
+    """Capabilities reordered with the preferred codec first (``auto`` empty).
+
+    The negotiated payload types stay the same, so this only changes our SDP
+    preference order; it must be applied before an offer/answer is created.
+    """
+    if not HAS_AIORTC or not choice or str(choice).lower() == "auto":
+        return []
+    try:
+        from aiortc import RTCRtpSender
+        codecs = list(RTCRtpSender.getCapabilities(kind).codecs or [])
+    except Exception:  # noqa: BLE001 - optional dependency
+        return []
+    wanted = str(choice).lower()
+    chosen = [codec for codec in codecs
+              if str(getattr(codec, "mimeType", "")).lower().split("/")[-1]
+              == wanted]
+    if not chosen:
+        return []
+    return chosen + [codec for codec in codecs if codec not in chosen]
 
 
 def enumerate_devices() -> dict:
@@ -469,7 +536,8 @@ if HAS_AIORTC:
         """
 
         def __init__(self, device_id: str = "", on_frame=None,
-                     screen_fps: int = 5, screen_max_width: int = 1920):
+                     screen_fps: int = 5, screen_max_width: int = 1920,
+                     screen_max_height: int = 0, max_height: int = 0):
             super().__init__()
             self.kind = "video"
             self._container = None
@@ -482,6 +550,8 @@ if HAS_AIORTC:
             self._region = None
             self._screen_fps = max(1, int(screen_fps or 5))
             self._screen_max_width = max(0, int(screen_max_width or 0))
+            self._screen_max_height = max(0, int(screen_max_height or 0))
+            self._max_height = max(0, int(max_height or 0))
             self._last_grab = 0.0
             self._last_image = None
             self._open_camera()
@@ -511,6 +581,15 @@ if HAS_AIORTC:
 
         def set_enabled(self, enabled: bool) -> None:
             self._enabled = enabled
+
+        def set_max_height(self, height: int) -> None:
+            """Cap the outgoing camera height (0 = the source size)."""
+            self._max_height = max(0, int(height or 0))
+
+        def set_screen_box(self, width: int, height: int) -> None:
+            """Cap the outgoing screen-share resolution (0 = the source)."""
+            self._screen_max_width = max(0, int(width or 0))
+            self._screen_max_height = max(0, int(height or 0))
 
         def set_source(self, mode: str, region=None) -> None:
             """Switch the outgoing video between the camera and a screen area.
@@ -561,6 +640,7 @@ if HAS_AIORTC:
             if frame is None:
                 frame = _black_frame()
             else:
+                frame = _limit_video_frame(frame, self._max_height)
                 # Surface the real camera frame for the local self-preview
                 # (black frames are not mirrored to the UI).
                 self._emit_local(frame)
@@ -580,7 +660,8 @@ if HAS_AIORTC:
                 self._last_image = _grab_screen_image(self._region)
             if self._last_image is None:
                 return None
-            return _qimage_to_frame(self._last_image, self._screen_max_width)
+            return _qimage_to_frame(self._last_image, self._screen_max_width,
+                                    self._screen_max_height)
 
         def _emit_local(self, frame) -> None:
             if self._on_frame is None:
@@ -639,21 +720,33 @@ def _frame_to_qimage(frame):
         return None
 
 
-def _qimage_to_frame(image, max_width: int = 0):
+def _qimage_to_frame(image, max_width: int = 0, max_height: int = 0):
     """Convert a ``QImage`` to a yuv420p ``av.VideoFrame``; None on failure.
 
-    *max_width* scales the image down (keeping the aspect ratio) so a large
-    screen capture does not flood the encoder.  PyQt6 is imported locally
-    because screen capture does not need Qt Multimedia.
+    The image is only ever **downscaled** to fit the ``max_width``×``max_height``
+    box (aspect preserved); a smaller capture is sent as is.  PyQt6 is
+    imported locally because screen capture does not need Qt Multimedia.
     """
     if av is None or image is None or image.isNull():
         return None
     from PyQt6 import QtCore, QtGui
     try:
+        scale = 1.0
         if max_width and image.width() > max_width:
-            image = image.scaledToWidth(
-                int(max_width),
+            scale = min(scale, max_width / float(image.width()))
+        if max_height and image.height() > max_height:
+            scale = min(scale, max_height / float(image.height()))
+        if scale < 1.0:
+            target_w = max(2, int(image.width() * scale)) & ~1
+            target_h = max(2, int(image.height() * scale)) & ~1
+            image = image.scaled(
+                target_w, target_h,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                 QtCore.Qt.TransformationMode.SmoothTransformation)
+        # yuv420p needs even dimensions; trim a stray pixel, never upscale.
+        if image.width() % 2 or image.height() % 2:
+            image = image.copy(0, 0, image.width() - image.width() % 2,
+                               image.height() - image.height() % 2)
         if image.format() != QtGui.QImage.Format.Format_RGB888:
             image = image.convertToFormat(QtGui.QImage.Format.Format_RGB888)
         width, height = image.width(), image.height()
@@ -677,6 +770,20 @@ def _qimage_to_frame(image, max_width: int = 0):
     except Exception:
         logger.debug("CALL screen frame conversion failed", exc_info=True)
         return None
+
+
+def _limit_video_frame(frame, max_height: int = 0):
+    """Downscale a camera frame to *max_height* (never enlarge it)."""
+    if frame is None or not max_height or frame.height <= max_height:
+        return frame
+    scale = max_height / float(frame.height)
+    width = max(2, int(frame.width * scale)) & ~1
+    height = max(2, int(max_height)) & ~1
+    try:
+        return frame.reformat(width=width, height=height, format="yuv420p")
+    except Exception:  # noqa: BLE001 - keep the original frame
+        logger.debug("CALL camera downscale failed", exc_info=True)
+        return frame
 
 
 def _grab_screen_image(region=None):
@@ -802,6 +909,48 @@ def _patch_audio_encoder(encoder_cls) -> None:
     encoder_cls._stanza_patched = True
 
 
+def _patch_encoder_defaults(encoder_cls, kind: str) -> None:
+    """Apply the configured bitrate when aiortc creates an encoder."""
+    if encoder_cls is None or getattr(encoder_cls, "_stanza_defaults_patched",
+                                      False):
+        return
+    original_init = encoder_cls.__init__
+
+    def __init__(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        try:
+            if kind == "audio":
+                codec = getattr(self, "codec", None)
+                if codec is not None:
+                    codec.bit_rate = _MEDIA_DEFAULTS["audio_bitrate"]
+                _AUDIO_ENCODERS.add(self)
+            else:
+                self.target_bitrate = _MEDIA_DEFAULTS["video_bitrate"]
+                _VIDEO_ENCODERS.add(self)
+        except Exception:  # noqa: BLE001 - never break the encoder setup
+            logger.debug("CALL could not apply the encoder defaults",
+                         exc_info=True)
+
+    encoder_cls.__init__ = __init__
+    encoder_cls._stanza_defaults_patched = True
+
+
+def _install_encoder_defaults() -> None:
+    """Patch the Opus/VP8/H264 encoders with the configured bitrates."""
+    if not HAS_AIORTC:
+        return
+    for module_name, class_name, kind in (
+            ("aiortc.codecs.opus", "OpusEncoder", "audio"),
+            ("aiortc.codecs.vpx", "Vp8Encoder", "video"),
+            ("aiortc.codecs.h264", "H264Encoder", "video")):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:  # noqa: BLE001 - not every build has every codec
+            logger.debug("CALL %s is not available", module_name)
+            continue
+        _patch_encoder_defaults(getattr(module, class_name, None), kind)
+
+
 def _install_audio_resampler_compat() -> None:
     """Patch aiortc's audio encoders (never the immutable PyAV classes)."""
     if not HAS_AIORTC:
@@ -827,6 +976,7 @@ def _install_audio_resampler_compat() -> None:
 
 
 _install_audio_resampler_compat()
+_install_encoder_defaults()
 
 
 def audio_encode_selftest() -> tuple[bool, str]:
@@ -879,6 +1029,12 @@ if HAS_AIORTC:
                      on_ice_candidate=None, on_remote_track=None,
                      on_state=None, on_local_frame=None):
             self.devices = devices or {}
+            self._codec_choices = {
+                "audio": str(self.devices.get("audio_codec") or "auto").lower(),
+                "video": str(self.devices.get("video_codec") or "auto").lower(),
+            }
+            set_media_defaults(self.devices.get("audio_bitrate_kbps"),
+                               self.devices.get("video_bitrate_kbps"))
             self.on_ice_candidate = on_ice_candidate
             self.on_remote_track = on_remote_track
             self.on_state = on_state
@@ -971,6 +1127,7 @@ if HAS_AIORTC:
             self._local_audio = _AudioCaptureTrack(
                 self.devices.get("audio_input", ""))
             self.pc.addTrack(self._local_audio)
+            self._apply_codec_preferences("audio")
             logger.info("CALL added local audio track")
 
         def add_video(self):
@@ -979,8 +1136,13 @@ if HAS_AIORTC:
                 on_frame=self._forward_local_frame,
                 screen_fps=int(self.devices.get("screen_fps", 5) or 5),
                 screen_max_width=int(
-                    self.devices.get("screen_max_width", 1920) or 0))
+                    self.devices.get("screen_max_width", 1920) or 0),
+                screen_max_height=int(
+                    self.devices.get("screen_max_height", 0) or 0),
+                max_height=int(
+                    self.devices.get("video_max_height", 0) or 0))
             self.pc.addTrack(self._local_video)
+            self._apply_codec_preferences("video")
             logger.info("CALL added local video track")
 
         def _forward_local_frame(self, frame):
@@ -1018,14 +1180,39 @@ if HAS_AIORTC:
             if self._local_video is not None:
                 self._local_video.set_source(mode, region)
 
+        def _apply_codec_preferences(self, kind: str) -> None:
+            """Prefer the configured codec for the transceivers of *kind*."""
+            ordered = _ordered_codecs(kind, self._codec_choices.get(kind, ""))
+            if not ordered:
+                return
+            try:
+                transceivers = self.pc.getTransceivers()
+            except Exception:  # noqa: BLE001 - older aiortc
+                return
+            for transceiver in transceivers:
+                track = getattr(transceiver.receiver, "track", None)
+                if getattr(track, "kind", "") != kind:
+                    continue
+                try:
+                    transceiver.setCodecPreferences(ordered)
+                    logger.debug("CALL %s codec preference -> %s",
+                                 kind, self._codec_choices.get(kind))
+                except Exception:  # noqa: BLE001 - optional API
+                    logger.debug("CALL setCodecPreferences failed",
+                                 exc_info=True)
+
         # ── SDP ───────────────────────────────────────────────────
         async def create_offer(self) -> str:
+            self._apply_codec_preferences("audio")
+            self._apply_codec_preferences("video")
             offer = await self.pc.createOffer()
             await self.pc.setLocalDescription(offer)
             logger.debug("CALL local offer SDP:\n%s", self.pc.localDescription.sdp)
             return self.pc.localDescription.sdp
 
         async def create_answer(self) -> str:
+            self._apply_codec_preferences("audio")
+            self._apply_codec_preferences("video")
             answer = await self.pc.createAnswer()
             await self.pc.setLocalDescription(answer)
             logger.debug("CALL local answer SDP:\n%s", self.pc.localDescription.sdp)

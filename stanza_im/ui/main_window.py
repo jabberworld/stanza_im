@@ -4982,6 +4982,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _call_device_config(self) -> dict:
         dev = getattr(self._config, "devices", None)
+        calls = getattr(self._config, "calls", None)
         return {
             "audio_input": getattr(dev, "audio_input", "") or "",
             "audio_output": getattr(dev, "audio_output", "") or "",
@@ -4989,6 +4990,16 @@ class MainWindow(QtWidgets.QMainWindow):
             "screen_fps": int(getattr(dev, "screen_share_fps", 5) or 5),
             "screen_max_width": int(
                 getattr(dev, "screen_share_max_width", 1920) or 0),
+            "screen_max_height": int(
+                getattr(dev, "screen_share_max_height", 0) or 0),
+            "audio_codec": str(getattr(calls, "audio_codec", "auto") or "auto"),
+            "video_codec": str(getattr(calls, "video_codec", "auto") or "auto"),
+            "audio_bitrate_kbps": int(
+                getattr(calls, "audio_bitrate_kbps", 96) or 96),
+            "video_bitrate_kbps": int(
+                getattr(calls, "video_bitrate_kbps", 500) or 500),
+            "video_max_height": int(
+                getattr(calls, "video_max_height", 0) or 0),
         }
 
     def _on_call_requested(self, jid: str, video: bool = False) -> None:

@@ -435,7 +435,15 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `devices.audio_input` | `""` | Microphone device id (Qt Multimedia); empty = system default. |
 | `devices.audio_output` | `""` | Speaker device id; empty = system default. |
 | `devices.video_input` | `""` | Camera device id; empty = system default. |
+| `devices.screen_share_fps` | `5` | Screen-sharing frame rate (2/5/10/15). |
+| `devices.screen_share_max_width` | `1920` | Screen-sharing output box width (`0` = no limit on that side); only downscales. |
+| `devices.screen_share_max_height` | `1080` | Screen-sharing output box height (a legacy width-only value gets a 16:9 height). |
 | `calls.auto_accept` | `false` | Automatically accept incoming 1:1 calls (no prompt). |
+| `calls.audio_codec` | `auto` | Preferred audio codec (`auto`/`opus`/`g722`/`pcmu`/`pcma`), set via `RTCRtpTransceiver.setCodecPreferences` before an offer/answer. |
+| `calls.video_codec` | `auto` | Preferred video codec (`auto`/`vp8`/`h264`); a codec cannot change during a call. |
+| `calls.audio_bitrate_kbps` | `96` | Opus target bitrate (16–128); applied when the encoder is created. |
+| `calls.video_bitrate_kbps` | `500` | Initial VP8/H264 target bitrate (100–2000); REMB may lower it. |
+| `calls.video_max_height` | `0` | Outgoing camera height cap (0 = source size, 1080/720/480/360 presets); downscale only. |
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
@@ -3336,16 +3344,21 @@ client.leave_muji(room)
   `media._VideoCaptureTrack.set_source("screen", region)` switches the source
   live with no renegotiation (the camera opens lazily); the screen is grabbed
   with `QScreen.grabWindow` on the GUI thread, throttled to
-  `devices.screen_share_fps` (default 5) and scaled to
-  `devices.screen_share_max_width` (default 1920, `0` = unlimited). The shared
+  `devices.screen_share_fps` (default 5) and downscaled only to fit the
+  `devices.screen_share_max_width`×`screen_share_max_height` box (default
+  1920×1080; a smaller region is sent unchanged, never upscaled). The shared
   `include/screen.py` (`grab_region`/`grab_screen`, also used by the OSD) handles
   the DPR and the "region grab ignores the position" fallback. Wayland warns.
   A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS` past an hour) runs
-  from the call becoming active (`start_duration`) and from the Muji join. Preferences →
-  Devices selects
-  the microphone/speaker/camera (`devices.*`, Qt Multimedia) and offers mic/
-  speaker/camera self-tests (icon-only buttons on the same row as the device
-  selector, `ui/device_test.py`, disabled during a call). The
+  from the call becoming active (`start_duration`) and from the Muji join.
+  Preferences → **Calls** has three tabs: **Devices** (microphone/speaker/
+  camera from `devices.*` plus mic/speaker/camera self-tests, disabled during a
+  call), **Codecs** (`calls.audio_codec`/`video_codec` via
+  `RTCRtpTransceiver.setCodecPreferences` before the offer/answer,
+  `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
+  `xmpp/media.py` encoder shim, and the outgoing camera
+  `calls.video_max_height` downscale cap) and **Screen** (the screen-sharing
+  output box and frame rate). The
   mic meter and the capture track read the `QAudioSource` stream directly
   (`io.read()`/`readyRead`) instead of waiting on the QIODevice's
   `bytesAvailable()` (which can report 0 while audio streams, freezing the

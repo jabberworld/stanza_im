@@ -2847,18 +2847,28 @@ rectangle, `Esc`/right click cancels, clamped to the monitor under its top-left
 corner. `media._VideoCaptureTrack` switches its source
 live (`set_source("screen", region)`) — the camera opens lazily, the screen is
 grabbed with `QScreen.grabWindow` on the GUI thread, throttled to
-`devices.screen_share_fps` (default 5) and scaled to
-`devices.screen_share_max_width` (default 1920, `0` = unlimited) — with no
-renegotiation; the shared `include/screen.py` (`grab_region`/`grab_screen`,
+`devices.screen_share_fps` (default 5) and **downscaled only** to fit the
+`devices.screen_share_max_width`×`screen_share_max_height` box (default
+1920×1080; `0` = no limit on that side) — a smaller region is sent unchanged,
+there is no upscale — with no renegotiation; the shared `include/screen.py` (`grab_region`/`grab_screen`,
 also used by the OSD) handles the DPR and the "region grab ignores the position"
 fallback. Wayland warns (grabs are usually blocked). `MujiCallWindow` switches
 every session of the room. [`tests/test_screen_share.py`]
 A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS`
 past an hour) runs from the call becoming active (`CallWindow.start_duration`,
-stopped on the end) and from the Muji join (`MujiCallWindow.start_duration`). Preferences
-gains a **Devices** page
+stopped on the end) and from the Muji join (`MujiCallWindow.start_duration`). The
+**«Звонки»** preferences section has three tabs: **«Устройства»**,
+**«Кодеки»** and **«Экран»**. «Кодеки» carries the preferred audio/video codec
+(`calls.audio_codec`/`video_codec`, applied via
+`RTCRtpTransceiver.setCodecPreferences` before an offer/answer; «auto» keeps
+aiortc's order), the audio and video bitrate (`calls.*_bitrate_kbps`, applied
+by the encoder shim in `xmpp/media.py` to `OpusEncoder.codec.bit_rate` and
+`Vp8/H264Encoder.target_bitrate`) and the outgoing camera resolution cap
+(`calls.video_max_height`, applied by `_limit_video_frame`, downscale only).
+«Экран» holds the screen-sharing box and frame rate. The **«Устройства»** tab
+hosts
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
-Multimedia). The page also hosts **self-tests** (`ui/device_test.py`): a live
+Multimedia) and its **self-tests** (`ui/device_test.py`): a live
 microphone peak meter, a speaker test tone and a camera preview window,
 disabled while a call owns the devices. The self-test controls are icon-only
 buttons on the same row as the device selector; the mic control toggles
@@ -2943,7 +2953,7 @@ without it the engine is a `NullMediaEngine` and calling is disabled.
 
 Preferences use icon navigation and nested tabs. The section icons come from
 `IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
-icon, «Устройства» the headset, «Внешний вид» `draw-brush`, «Приватность» the
+icon, «Звонки» the headset, «Внешний вид» `draw-brush`, «Приватность» the
 shield, «Плагины» the puzzle piece, «Статус» the speech bubble and «Горячие
 клавиши» the keyboard. Pages are built **lazily** (`_ensure_page`): only the
 first (visible) section is built when the dialog opens, the rest on first

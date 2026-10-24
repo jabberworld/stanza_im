@@ -26,6 +26,20 @@ CONNECTION_FIELD_WIDTH = 300
 SPIN_WIDTH = 90
 COMBO_WIDTH = 260
 
+#: Camera output height presets (0 = keep the source size).
+_CAMERA_HEIGHT_PRESETS = (0, 1080, 720, 480, 360)
+#: Screen-sharing output boxes (width, height); (0, 0) = the source size.
+_SCREEN_PRESETS = ((0, 0), (1920, 1080), (1280, 720), (854, 480))
+
+
+def _screen_box(width, height) -> tuple[int, int]:
+    """Normalise a stored screen box (a legacy width-only value gets 16:9)."""
+    width = max(0, int(width or 0))
+    height = max(0, int(height or 0))
+    if width and not height:
+        height = max(2, int(width * 9 / 16))
+    return width, height
+
 
 def _default_download_dir() -> str:
     """Default directory for received files (XDG Downloads or ~/Downloads)."""
@@ -250,7 +264,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         sections = (
             ("prefs_application", "stanza-im", self._page_application),
             ("prefs_connection", "transports", self._page_connection),
-            ("prefs_devices", "devices", self._page_devices),
+            ("prefs_calls", "devices", self._page_calls),
             ("prefs_chat", "muc", self._page_chat),
             ("prefs_privacy", "privacy", self._page_privacy),
             ("prefs_appearance", "draw-brush", self._page_appearance),
@@ -477,8 +491,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         if path:
             self._set("file_download_dir", path)
 
-    def _page_devices(self):
-        """Audio/video device selectors and self-tests (Qt Multimedia)."""
+    def _page_calls(self):
+        """Call settings: devices, codecs/bitrate and screen sharing."""
         page, form = self._page()
         if str(getattr(self._config.performance, "calls_load_mode",
                        "lazy") or "lazy") == "off":
@@ -543,17 +557,88 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self._camera_test_button = button
                 controls.append(button)
             form.addRow(tr(label_key), self._row(*controls))
-        form.addRow(
-            tr("prefs_screen_share_fps"),
-            self._combo("devices_screen_share_fps", [
-                ("2", 2), ("5", 5), ("10", 10), ("15", 15)]))
-        width = self._spin("devices_screen_share_max_width", 0, 3840)
-        form.addRow(tr("prefs_screen_share_max_width"), width)
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
         self._update_device_tests()
-        return page
+
+        # ── codecs / bitrate / outgoing camera resolution ──────────
+        codecs_page, codecs_form = self._page()
+        calls = getattr(self._config, "calls", None)
+        audio_codec = self._combo("calls_audio_codec", [
+            ("prefs_codec_auto", "auto"), ("prefs_codec_opus", "opus"),
+            ("prefs_codec_g722", "g722"), ("prefs_codec_pcmu", "pcmu"),
+            ("prefs_codec_pcma", "pcma")])
+        codecs_form.addRow(
+            tr("prefs_audio_codec"),
+            self._row(audio_codec, self._info_label(
+                tr("prefs_audio_codec_tip")), trailing_stretch=True))
+        video_codec = self._combo("calls_video_codec", [
+            ("prefs_codec_auto", "auto"), ("prefs_codec_vp8", "vp8"),
+            ("prefs_codec_h264", "h264")])
+        codecs_form.addRow(
+            tr("prefs_video_codec"),
+            self._row(video_codec, self._info_label(
+                tr("prefs_video_codec_tip")), trailing_stretch=True))
+        audio_rate = self._spin("calls_audio_bitrate_kbps", 16, 128)
+        codecs_form.addRow(
+            tr("prefs_audio_bitrate"),
+            self._row(audio_rate, self._info_label(
+                tr("prefs_audio_bitrate_tip")), trailing_stretch=True))
+        video_rate = self._spin("calls_video_bitrate_kbps", 100, 2000)
+        codecs_form.addRow(
+            tr("prefs_video_bitrate"),
+            self._row(video_rate, self._info_label(
+                tr("prefs_video_bitrate_tip")), trailing_stretch=True))
+        height = self._combo("calls_video_max_height", [
+            ("prefs_resolution_auto", 0), ("prefs_resolution_1080", 1080),
+            ("prefs_resolution_720", 720), ("prefs_resolution_480", 480),
+            ("prefs_resolution_360", 360)])
+        stored_height = int(getattr(calls, "video_max_height", 0) or 0)
+        if stored_height not in _CAMERA_HEIGHT_PRESETS:
+            height.insertItem(0, tr("prefs_resolution_custom",
+                                    size=stored_height), stored_height)
+        codecs_form.addRow(
+            tr("prefs_video_max_height"),
+            self._row(height, self._info_label(
+                tr("prefs_video_max_height_tip")), trailing_stretch=True))
+        codecs_form.addItem(QtWidgets.QSpacerItem(
+            1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Expanding))
+
+        # ── screen sharing ─────────────────────────────────────────
+        screen_page, screen_form = self._page()
+        stored = getattr(self._config, "devices", None)
+        width, box_height = _screen_box(
+            getattr(stored, "screen_share_max_width", 1920),
+            getattr(stored, "screen_share_max_height", 0))
+        screen = self._combo("devices_screen_resolution", [
+            ("prefs_screen_native", "0x0"),
+            ("prefs_screen_1920", "1920x1080"),
+            ("prefs_screen_1280", "1280x720"),
+            ("prefs_screen_854", "854x480")], fixed_width=False)
+        key = "%dx%d" % (width, box_height)
+        if (width or box_height) and key not in [screen.itemData(i)
+                                                 for i in range(screen.count())]:
+            screen.insertItem(0, tr("prefs_screen_custom",
+                                    size="%d×%d" % (width, box_height)), key)
+        screen_form.addRow(
+            tr("prefs_screen_resolution"),
+            self._row(screen, self._info_label(
+                tr("prefs_screen_resolution_tip")), trailing_stretch=True))
+        screen_form.addRow(
+            tr("prefs_screen_fps"),
+            self._combo("devices_screen_share_fps", [
+                ("2", 2), ("5", 5), ("10", 10), ("15", 15)]))
+        screen_form.addItem(QtWidgets.QSpacerItem(
+            1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Expanding))
+
+        return self._tabs([
+            (tr("prefs_calls_devices"), page),
+            (tr("prefs_calls_codecs"), codecs_page),
+            (tr("prefs_calls_screen"), screen_page),
+        ])
 
     def _call_active(self) -> bool:
         rtp = getattr(self._client, "rtp_calls", None)
@@ -571,7 +656,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         """False (and warn) while a call owns the devices."""
         if self._call_active():
             QtWidgets.QMessageBox.warning(
-                self, tr("prefs_devices"), tr("prefs_device_test_busy"))
+                self, tr("prefs_calls_devices"), tr("prefs_device_test_busy"))
             return False
         return True
 
@@ -614,7 +699,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     def _on_device_test_failed(self, message: str) -> None:
         QtWidgets.QMessageBox.warning(
-            self, tr("prefs_devices"),
+            self, tr("prefs_calls_devices"),
             tr("prefs_device_test_failed", error=message))
 
     def _stop_device_tests(self) -> None:
@@ -1757,6 +1842,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         notifications = cfg.notifications
         status = cfg.status
         files = getattr(cfg, "files", None)
+        calls = getattr(cfg, "calls", None)
         values = {
             "close_to_tray": cfg.ui.close_to_tray,
             "language": getattr(cfg.ui, "language", "") or "",
@@ -1909,9 +1995,19 @@ class PreferencesDialog(QtWidgets.QDialog):
                 getattr(cfg, "devices", None), "video_input", "") or "",
             "devices_screen_share_fps": int(getattr(
                 getattr(cfg, "devices", None), "screen_share_fps", 5) or 5),
-            "devices_screen_share_max_width": int(getattr(
-                getattr(cfg, "devices", None), "screen_share_max_width",
-                1920) or 0),
+            "devices_screen_resolution": "%dx%d" % _screen_box(
+                getattr(getattr(cfg, "devices", None),
+                        "screen_share_max_width", 1920),
+                getattr(getattr(cfg, "devices", None),
+                        "screen_share_max_height", 0)),
+            "calls_audio_codec": getattr(calls, "audio_codec", "auto") or "auto",
+            "calls_video_codec": getattr(calls, "video_codec", "auto") or "auto",
+            "calls_audio_bitrate_kbps": int(getattr(
+                calls, "audio_bitrate_kbps", 96) or 96),
+            "calls_video_bitrate_kbps": int(getattr(
+                calls, "video_bitrate_kbps", 500) or 500),
+            "calls_video_max_height": int(getattr(
+                calls, "video_max_height", 0) or 0),
         }
         performance = getattr(cfg, "performance", None)
         values["defer_ui_build"] = bool(getattr(
@@ -2085,8 +2181,23 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.devices[key] = self._value("devices_" + key) or ""
         cfg.devices.screen_share_fps = int(
             self._value("devices_screen_share_fps") or 5)
-        cfg.devices.screen_share_max_width = int(
-            self._value("devices_screen_share_max_width") or 0)
+        preset = str(self._value("devices_screen_resolution") or "0x0")
+        try:
+            screen_w, screen_h = (int(part) for part in preset.split("x", 1))
+        except (TypeError, ValueError):
+            screen_w, screen_h = 0, 0
+        cfg.devices.screen_share_max_width = max(0, screen_w)
+        cfg.devices.screen_share_max_height = max(0, screen_h)
+        if not hasattr(cfg, "calls"):
+            cfg.set("calls", {"auto_accept": False})
+        cfg.calls.audio_codec = self._value("calls_audio_codec") or "auto"
+        cfg.calls.video_codec = self._value("calls_video_codec") or "auto"
+        cfg.calls.audio_bitrate_kbps = int(
+            self._value("calls_audio_bitrate_kbps") or 96)
+        cfg.calls.video_bitrate_kbps = int(
+            self._value("calls_video_bitrate_kbps") or 500)
+        cfg.calls.video_max_height = int(
+            self._value("calls_video_max_height") or 0)
         # Apply the plugin manager page (mirror of Actions → Plugins) and let
         # the main window (de)activate the affected plugins live.
         plugin_ids = None
