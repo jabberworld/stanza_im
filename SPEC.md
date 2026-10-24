@@ -3370,7 +3370,11 @@ client.leave_muji(room)
   `JingleRtpManager.set_call_video_quality` to the live encoders
   (`target_bitrate`, aiortc recreates the codec with a keyframe) and the
   capture track (downscale only). It is session-only; audio changes are
-  pre-call and a codec change needs renegotiation. The
+  pre-call and a codec change needs renegotiation. A green peer view (a missed
+  initial keyframe) recovers through `request_video_keyframe`: the VP8/H264
+  encoder shim forces the next I-frame, requested when the media connects,
+  after a source/resolution change and after the first real video frame; black
+  frames keep the last real size and a failed camera open is retried. The
   mic meter and the capture track read the `QAudioSource` stream directly
   (`io.read()`/`readyRead`) instead of waiting on the QIODevice's
   `bytesAvailable()` (which can report 0 while audio streams, freezing the

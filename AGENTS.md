@@ -2843,7 +2843,13 @@ codec with a keyframe on the next frame) and `set_video_quality`
 (`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). The
 choice is session-only (defaults come from the Calls preferences); the codec
 cannot change during a call (that needs renegotiation) and audio is only
-changed in the settings. The mute/camera buttons toggle
+changed in the settings. A peer that missed the initial keyframe (a green
+picture until the local video was toggled) is recovered by
+`request_video_keyframe`: the VP8/H264 encoder shim forces the next frame to be
+an I-frame (`_stanza_keyframe`, requested when the media connection becomes
+`connected`, after a source/resolution change and once the first real video
+frame is sent). The capture track keeps the last real frame size for its black
+frames and retries a failed camera open every 2 s. The mute/camera buttons toggle
 the **outgoing** capture — the muted
 microphone sends silence and the switched-off camera sends black frames
 (`set_audio_enabled`/`set_video_enabled`, no renegotiation, tracks stay
