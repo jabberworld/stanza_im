@@ -2446,6 +2446,12 @@ Registers XEP plugins (conditionally where noted):
   missing Python modules, with no install command, since the client runs on
   many platforms) and an «OMEMO» row on Help → About. The chat/roster entries are hidden; an
   unexpected init failure is logged briefly (no traceback at WARNING).
+- A peer's device list may contain `label`/`labelsig` (non-standard in legacy
+  OMEMO 0.3, standard but unknown to older OMEMO 2 schemas). The plugin strips
+  them for the legacy parser and retries without them when an old OMEMO 2
+  schema rejects them, so the device ids survive (labels are display-only and
+  fall back to aliases/learned names); a logging filter reduces a malformed
+  list to a one-line warning.
 - The `xep_0380` (EME) plugin is registered and OMEMO messages carry
   `<encryption xmlns='urn:xmpp:eme:0' namespace='…' name='OMEMO'/>`. The
   `xep_0384` plugin is registered only when available; disco advertises

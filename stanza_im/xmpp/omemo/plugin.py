@@ -25,6 +25,80 @@ from stanza_im.xmpp.omemo.storage import OmemoStorage
 
 logger = logging.getLogger("stanza_im.omemo")
 
+
+def _strip_device_labels(element) -> None:
+    """Remove the optional label attributes from every ``<device/>``."""
+    for node in element.iter():
+        if str(node.tag).rsplit("}", 1)[-1] != "device":
+            continue
+        node.attrib.pop("label", None)
+        node.attrib.pop("labelsig", None)
+
+
+def _install_device_list_compat() -> None:
+    """Tolerate ``label``/``labelsig`` in a peer's OMEMO device list.
+
+    Legacy OMEMO 0.3 does not define those attributes (Conversations/Psi+ add
+    them anyway) and older OMEMO 2 schemas predate the standard signed label;
+    strict validation would drop the whole list, losing every device id.  The
+    labels are display metadata only — the device ids/keys are what OMEMO uses
+    — so a sanitised retry is safe.
+    """
+    import copy
+    try:
+        import oldmemo.etree as old_etree
+    except Exception:  # noqa: BLE001 - optional backend
+        old_etree = None
+    try:
+        import twomemo.etree as two_etree
+    except Exception:  # noqa: BLE001 - optional backend
+        two_etree = None
+
+    if old_etree is not None and not getattr(
+            old_etree.parse_device_list, "_stanza_patched", False):
+        original_old = old_etree.parse_device_list
+
+        def parse_old(element, _original=original_old):
+            sanitised = copy.deepcopy(element)
+            _strip_device_labels(sanitised)
+            return _original(sanitised)
+
+        parse_old._stanza_patched = True
+        old_etree.parse_device_list = parse_old
+
+    if two_etree is not None and not getattr(
+            two_etree.parse_device_list, "_stanza_patched", False):
+        original_two = two_etree.parse_device_list
+
+        def parse_two(element, _original=original_two):
+            try:
+                return _original(element)
+            except Exception:  # noqa: BLE001 - older schema without labels
+                sanitised = copy.deepcopy(element)
+                _strip_device_labels(sanitised)
+                return _original(sanitised)
+
+        parse_two._stanza_patched = True
+        two_etree.parse_device_list = parse_two
+
+    omemo_log = logging.getLogger("slixmpp_omemo.xep_0384")
+    if not any(getattr(item, "_stanza_schema_filter", False)
+               for item in omemo_log.filters):
+        class _SchemaTracebackFilter(logging.Filter):
+            _stanza_schema_filter = True
+
+            def filter(self, record):
+                exc = record.exc_info[1] if record.exc_info else None
+                if (exc is not None
+                        and type(exc).__name__ == "XMLSchemaValidationError"):
+                    record.exc_info = None
+                return True
+
+        omemo_log.addFilter(_SchemaTracebackFilter())
+
+
+_install_device_list_compat()
+
 #: ``(devices, identifier)`` callback used to surface trust changes in the UI.
 TrustCallback = Callable[[FrozenSet[DeviceInformation], Optional[str]], Any]
 

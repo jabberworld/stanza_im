@@ -2149,7 +2149,15 @@ Help → About; the chat/roster entries are hidden and an unexpected init failur
 is logged without a traceback. The availability probe
 (which imports the backends) runs in a **background daemon thread** started by
 `app.py`, so the login window never waits for it; the module is imported once,
-so the first access at login/About time is instant. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
+so the first access at login/About time is instant. A peer's device list may carry `label`/`labelsig` attributes (Psi+/Conversations
+add them to the legacy OMEMO 0.3 list, where they are not part of the schema,
+and older OMEMO 2 schemas predate the standard signed label). Strict validation
+used to drop the whole list, losing every device id (and logging a traceback);
+`plugin._install_device_list_compat` strips the attributes for the legacy
+parser and retries without them when an old OMEMO 2 schema rejects them, so the
+device ids — and encryption — survive. Labels are display metadata only and
+fall back to the local aliases/learned client names; a logging filter keeps a
+genuinely malformed list to a one-line warning. Keys live per profile (`storage.py`: JSON `omemo.json` in the account's
 data dir, 0600). The concrete plugin (`plugin.py`, `OmemoPlugin(XEP_0384)`)
 implements the storage and the trust policy: BTBV on (`omemo.blind_trust`,
 default) blindly trusts new devices and warns via `_devices_blindly_trusted`;
