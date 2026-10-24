@@ -2869,7 +2869,10 @@ A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS`
 past an hour) runs from the call becoming active (`CallWindow.start_duration`,
 stopped on the end) and from the Muji join (`MujiCallWindow.start_duration`). The
 **«Звонки»** preferences section has three tabs: **«Устройства»**,
-**«Кодеки»** and **«Экран»**. «Кодеки» carries the preferred audio/video codec
+**«Кодеки»** and **«Экран»**. «Устройства» also lists the camera's supported modes
+(`devices.camera_mode`, `media.camera_formats` from Qt Multimedia; the mode is
+passed to PyAV's v4l2 input as `video_size`/`framerate`/`input_format` and a
+failed mode falls back to the driver default). «Кодеки» carries the preferred audio/video codec
 (`calls.audio_codec`/`video_codec`, applied via
 `RTCRtpTransceiver.setCodecPreferences` before an offer/answer; «auto» keeps
 aiortc's order), the audio and video bitrate (`calls.*_bitrate_kbps`, applied
@@ -2879,7 +2882,10 @@ by the encoder shim in `xmpp/media.py` to `OpusEncoder.codec.bit_rate` and
 «Экран» holds the screen-sharing box and frame rate. The **«Устройства»** tab
 hosts
 (`devices.audio_input/audio_output/video_input`, enumerated with Qt
-Multimedia) and its **self-tests** (`ui/device_test.py`): a live
+Multimedia) plus the camera's supported modes
+(`devices.camera_mode`, `media.camera_formats`; the mode is passed to PyAV's
+v4l2 input as `video_size`/`framerate`/`input_format`, a failed mode falls back
+to the driver default), and its **self-tests** (`ui/device_test.py`): a live
 microphone peak meter, a speaker test tone and a camera preview window,
 disabled while a call owns the devices. The self-test controls are icon-only
 buttons on the same row as the device selector; the mic control toggles

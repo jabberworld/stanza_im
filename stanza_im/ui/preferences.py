@@ -515,6 +515,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._mic_test_button = None
         self._speaker_test_button = None
         self._camera_test_button = None
+        self._camera_combo = None
         for key, label_key, kind in (
                 ("devices_audio_input", "prefs_device_mic", "audio_input"),
                 ("devices_audio_output", "prefs_device_speaker", "audio_output"),
@@ -555,8 +556,20 @@ class PreferencesDialog(QtWidgets.QDialog):
                 button.setToolTip(tr("prefs_device_camera_test_tip"))
                 button.clicked.connect(self._on_camera_test)
                 self._camera_test_button = button
+                self._camera_combo = combo
                 controls.append(button)
             form.addRow(tr(label_key), self._row(*controls))
+        self._camera_mode_combo = self._combo(
+            "devices_camera_mode", [("prefs_camera_mode_auto", "")],
+            fixed_width=False)
+        self._refresh_camera_modes()
+        if self._camera_combo is not None:
+            self._camera_combo.currentIndexChanged.connect(
+                lambda _idx: self._refresh_camera_modes())
+        form.addRow(
+            tr("prefs_camera_mode"),
+            self._row(self._camera_mode_combo, self._info_label(
+                tr("prefs_camera_mode_tip")), trailing_stretch=True))
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
@@ -639,6 +652,43 @@ class PreferencesDialog(QtWidgets.QDialog):
             (tr("prefs_calls_codecs"), codecs_page),
             (tr("prefs_calls_screen"), screen_page),
         ])
+
+    def _refresh_camera_modes(self) -> None:
+        """List the selected camera's supported modes (Auto by default)."""
+        combo = getattr(self, "_camera_mode_combo", None)
+        camera = getattr(self, "_camera_combo", None)
+        if combo is None:
+            return
+        stored = str(getattr(getattr(self._config, "devices", None),
+                             "camera_mode", "") or "")
+        current = str(combo.currentData() or "") if combo.count() else ""
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(tr("prefs_camera_mode_auto"), "")
+        device_id = str(camera.currentData() or "") if camera else ""
+        try:
+            from stanza_im.xmpp import media
+            modes = media.camera_formats(device_id)
+        except Exception:  # noqa: BLE001 - optional dependency
+            modes = []
+        for mode in modes:
+            label = "%d×%d · %g fps" % (mode["width"], mode["height"],
+                                        mode["fps"])
+            if mode.get("format"):
+                label += " · " + str(mode["format"]).upper()
+            data = "%dx%d@%g" % (mode["width"], mode["height"], mode["fps"])
+            if mode.get("format"):
+                data += ":" + str(mode["format"])
+            if combo.findData(data) < 0:
+                combo.addItem(label, data)
+        for value in (current, stored):
+            if value and combo.findData(value) < 0:
+                combo.insertItem(1, tr("prefs_camera_mode_custom",
+                                       mode=value), value)
+        wanted = current or stored
+        index = combo.findData(wanted) if wanted else 0
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
 
     def _call_active(self) -> bool:
         rtp = getattr(self._client, "rtp_calls", None)
@@ -1995,6 +2045,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                 getattr(cfg, "devices", None), "video_input", "") or "",
             "devices_screen_share_fps": int(getattr(
                 getattr(cfg, "devices", None), "screen_share_fps", 5) or 5),
+            "devices_camera_mode": str(getattr(
+                getattr(cfg, "devices", None), "camera_mode", "") or ""),
             "devices_screen_resolution": "%dx%d" % _screen_box(
                 getattr(getattr(cfg, "devices", None),
                         "screen_share_max_width", 1920),
@@ -2179,6 +2231,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                                 "video_input": ""})
         for key in ("audio_input", "audio_output", "video_input"):
             cfg.devices[key] = self._value("devices_" + key) or ""
+        cfg.devices.camera_mode = self._value("devices_camera_mode") or ""
         cfg.devices.screen_share_fps = int(
             self._value("devices_screen_share_fps") or 5)
         preset = str(self._value("devices_screen_resolution") or "0x0")

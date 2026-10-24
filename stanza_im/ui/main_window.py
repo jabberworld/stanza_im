@@ -4987,6 +4987,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "audio_input": getattr(dev, "audio_input", "") or "",
             "audio_output": getattr(dev, "audio_output", "") or "",
             "video_input": getattr(dev, "video_input", "") or "",
+            "camera_mode": str(getattr(dev, "camera_mode", "") or ""),
             "screen_fps": int(getattr(dev, "screen_share_fps", 5) or 5),
             "screen_max_width": int(
                 getattr(dev, "screen_share_max_width", 1920) or 0),

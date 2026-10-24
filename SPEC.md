@@ -435,6 +435,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `devices.audio_input` | `""` | Microphone device id (Qt Multimedia); empty = system default. |
 | `devices.audio_output` | `""` | Speaker device id; empty = system default. |
 | `devices.video_input` | `""` | Camera device id; empty = system default. |
+| `devices.camera_mode` | `""` | Camera source mode `WxH@F[:pixelformat]` (from Qt Multimedia's list); empty = the driver default. |
 | `devices.screen_share_fps` | `5` | Screen-sharing frame rate (2/5/10/15). |
 | `devices.screen_share_max_width` | `1920` | Screen-sharing output box width (`0` = no limit on that side); only downscales. |
 | `devices.screen_share_max_height` | `1080` | Screen-sharing output box height (a legacy width-only value gets a 16:9 height). |
@@ -3352,8 +3353,9 @@ client.leave_muji(room)
   A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS` past an hour) runs
   from the call becoming active (`start_duration`) and from the Muji join.
   Preferences → **Calls** has three tabs: **Devices** (microphone/speaker/
-  camera from `devices.*` plus mic/speaker/camera self-tests, disabled during a
-  call), **Codecs** (`calls.audio_codec`/`video_codec` via
+  camera from `devices.*`, the camera's supported modes
+  `devices.camera_mode` applied to PyAV's v4l2 open, plus mic/speaker/camera
+  self-tests, disabled during a call), **Codecs** (`calls.audio_codec`/`video_codec` via
   `RTCRtpTransceiver.setCodecPreferences` before the offer/answer,
   `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
   `xmpp/media.py` encoder shim, and the outgoing camera

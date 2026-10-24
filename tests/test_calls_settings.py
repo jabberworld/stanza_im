@@ -169,6 +169,35 @@ check("a custom camera height is shown",
 dlg2.close()
 dlg.close()
 
+# 5b. camera source mode (the driver's resolution/frame-rate list) ---------
+check("a camera mode parses into v4l2 options",
+      media._v4l2_open_options("1280x720@30:mjpeg")
+      == {"video_size": "1280x720", "framerate": "30",
+          "input_format": "mjpeg"})
+check("an explicit resolution without a format parses too",
+      media._v4l2_open_options("640x480@15")
+      == {"video_size": "640x480", "framerate": "15"})
+check("auto has no v4l2 options", media._v4l2_open_options("") == {})
+modes = media.camera_formats("")
+check("the camera format probe never raises", isinstance(modes, list))
+if not media.HAS_QTMM:
+    check("no camera modes without Qt Multimedia", modes == [])
+
+cfg3 = Config.defaults()
+check("the camera mode defaults to auto", cfg3.devices.camera_mode == "")
+cfg3.devices.camera_mode = "1280x720@30:mjpeg"
+dlg3 = PreferencesDialog(cfg3, ChatThemeFactory())
+dlg3._ensure_all_pages()
+check("the camera mode control is present",
+      "devices_camera_mode" in dlg3._controls)
+check("a stored custom camera mode stays selected",
+      dlg3._controls["devices_camera_mode"].currentData()
+      == "1280x720@30:mjpeg")
+dlg3._apply_settings()
+check("apply keeps the camera mode",
+      cfg3.devices.camera_mode == "1280x720@30:mjpeg")
+dlg3.close()
+
 # 6. live video quality (bitrate + resolution, no renegotiation) -----------
 from stanza_im.xmpp.jingle_rtp import JingleRtpManager  # noqa: E402
 

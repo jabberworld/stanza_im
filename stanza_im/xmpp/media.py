@@ -145,6 +145,90 @@ def enumerate_devices() -> dict:
     return result
 
 
+def _qt_pixel_format(pixel_format) -> str:
+    """Map a Qt pixel format to the FFmpeg/v4l2 input format name."""
+    name = str(getattr(pixel_format, "name", pixel_format))
+    if "MJpeg" in name:
+        return "mjpeg"
+    if "YUYV" in name:
+        return "yuyv422"
+    if "UYVY" in name:
+        return "uyvy422"
+    if "NV12" in name:
+        return "nv12"
+    if "NV21" in name:
+        return "nv21"
+    return ""
+
+
+def camera_formats(device_id: str = "") -> list[dict]:
+    """Supported camera modes: ``{width, height, fps, format}`` (best effort).
+
+    Qt Multimedia enumerates the driver's formats (including the MJPG modes
+    many webcams expose); the chosen mode is passed to PyAV's v4l2 input.
+    """
+    if not HAS_QTMM:
+        return []
+    try:
+        device = _find_device(QMediaDevices.videoInputs(), device_id)
+        if device is None:
+            return []
+        supports = (getattr(device, "videoFormats", None)
+                    or getattr(device, "supportedVideoFormats", None))
+        if supports is None:
+            return []
+        formats = supports()
+    except Exception:  # noqa: BLE001 - optional capability
+        return []
+    result: list[dict] = []
+    seen: set[tuple] = set()
+    for fmt in formats or []:
+        try:
+            size = fmt.resolution()
+            item = {
+                "width": int(size.width()),
+                "height": int(size.height()),
+                "fps": float(fmt.maxFrameRate() or 0),
+                "format": _qt_pixel_format(fmt.pixelFormat()),
+            }
+        except Exception:  # noqa: BLE001 - skip a malformed entry
+            continue
+        if not item["width"] or not item["height"]:
+            continue
+        key = (item["width"], item["height"], round(item["fps"], 1),
+               item["format"])
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    result.sort(key=lambda row: (row["width"] * row["height"], row["fps"],
+                                 row["format"]), reverse=True)
+    return result
+
+
+def _v4l2_open_options(mode: str) -> dict:
+    """Parse ``WxH@F[:pixelformat]`` into PyAV v4l2 open options."""
+    mode = str(mode or "").strip()
+    if not mode:
+        return {}
+    spec, _, pixel = mode.partition(":")
+    size, _, fps = spec.partition("@")
+    width, _, height = size.partition("x")
+    options: dict[str, str] = {}
+    if width.isdigit() and height.isdigit():
+        options["video_size"] = "%sx%s" % (width, height)
+    if fps:
+        try:
+            float(fps)
+        except ValueError:
+            pass
+        else:
+            options["framerate"] = fps
+    if pixel:
+        options["input_format"] = pixel
+    return options
+
+
 def _find_device(devices, device_id):
     for dev in devices:
         if bytes(dev.id()).decode("utf-8", "replace") == device_id:
@@ -537,7 +621,8 @@ if HAS_AIORTC:
 
         def __init__(self, device_id: str = "", on_frame=None,
                      screen_fps: int = 5, screen_max_width: int = 1920,
-                     screen_max_height: int = 0, max_height: int = 0):
+                     screen_max_height: int = 0, max_height: int = 0,
+                     camera_mode: str = ""):
             super().__init__()
             self.kind = "video"
             self._container = None
@@ -552,6 +637,7 @@ if HAS_AIORTC:
             self._screen_max_width = max(0, int(screen_max_width or 0))
             self._screen_max_height = max(0, int(screen_max_height or 0))
             self._max_height = max(0, int(max_height or 0))
+            self._camera_mode = str(camera_mode or "")
             self._last_grab = 0.0
             self._last_image = None
             self._open_camera()
@@ -570,12 +656,29 @@ if HAS_AIORTC:
             if self._container is not None or av is None:
                 return
             path = self._device_path()
+            options = _v4l2_open_options(self._camera_mode)
             try:
                 # PyAV takes the file/device as a positional argument.
-                self._container = av.open(path, format="v4l2")
+                if options:
+                    self._container = av.open(path, format="v4l2",
+                                              options=options)
+                else:
+                    self._container = av.open(path, format="v4l2")
                 self._stream = self._container.streams.video[0]
-                logger.info("CALL camera opened: %s", path)
+                logger.info("CALL camera opened: %s (%s)", path,
+                            self._camera_mode or "auto")
             except Exception as exc:  # noqa: BLE001 - degrade to black frames
+                if options:
+                    logger.warning(
+                        "CALL camera mode %s failed for %s (%s); using auto",
+                        self._camera_mode, path, exc)
+                    try:
+                        self._container = av.open(path, format="v4l2")
+                        self._stream = self._container.streams.video[0]
+                        logger.info("CALL camera opened: %s (auto)", path)
+                        return
+                    except Exception as retry_exc:  # noqa: BLE001
+                        exc = retry_exc
                 logger.warning("CALL camera open failed for %s: %s", path, exc)
                 self._container = None
 
@@ -1140,7 +1243,8 @@ if HAS_AIORTC:
                 screen_max_height=int(
                     self.devices.get("screen_max_height", 0) or 0),
                 max_height=int(
-                    self.devices.get("video_max_height", 0) or 0))
+                    self.devices.get("video_max_height", 0) or 0),
+                camera_mode=str(self.devices.get("camera_mode") or ""))
             self.pc.addTrack(self._local_video)
             self._apply_codec_preferences("video")
             logger.info("CALL added local video track")
