@@ -2616,7 +2616,10 @@ an HTTP Upload slot is rejected for size (`file-too-large` /
 (`room/nick` for an occupant, else the bare JID) and, when the key contains
 anything outside `[A-Za-z0-9_.@-]` (a Cyrillic nick, a Unicode localpart), a
 short SHA-1 suffix is appended (`…______-ed48fde817.png`) so two non-Latin
-nicks of the same length never share one cached file. `xep_0153` advertises our vCard avatar hash in presence
+nicks of the same length never share one cached file. A path from the older
+naming scheme (e.g. a vCard cache entry) is copied to the current name by
+`include.avatars.ensure_avatar` when it is applied
+(`MainWindow._refresh_avatar`), so the sidebar and the chat agree on the file. `xep_0153` advertises our vCard avatar hash in presence
 (`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`); its
 `vcard_avatar_update` event makes `_on_vcard_avatar_update` refetch a contact's
 vCard (`get_vcard(bare, force=True)`) when the hash changes. `xep_0084`
@@ -2632,7 +2635,10 @@ and emits `avatar_updated(jid, path)`; `MainWindow._on_avatar_updated` reuses
 `_refresh_avatar` (the avatar-only part of `_on_vcard_received`) for the roster,
 contacts and MUC occupants (it also invalidates the cached icon and the roster's
 scaled pixmaps, since an avatar file keeps its name when it changes). The chat threads render the sender avatar via
-`ChatWidget._user_icon`: incoming from the sender's cached avatar, outgoing from
+`ChatWidget._user_icon` (for a MUC it prefers the participant's `avatar_path`
+from the sidebar, then falls back to the JID-keyed file; a participant whose
+cached avatar appears after the history was rendered gets that sender's messages
+repainted by `update_muc_users`): incoming from the sender's cached avatar, outgoing from
 **our own** — `ChatWindow.set_own_jid` (the bare JID, set by `MainWindow` after
 login) feeds `avatar_data_uri(own)`, and our own vCard avatar is cached under the
 bare JID (not the full one); `MainWindow._own_avatar_uri` pre-resolves it from

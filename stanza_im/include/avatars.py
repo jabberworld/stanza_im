@@ -10,6 +10,7 @@ import base64
 import hashlib
 import os
 import re
+import shutil
 
 from PyQt6 import QtCore, QtGui
 
@@ -27,10 +28,15 @@ _DIGEST_LEN = 10
 _PREFIX_MAX = 180
 
 
-def _safe_name(jid: str) -> str:
+def _key(jid: str) -> str:
+    """The cache key: the full occupant JID, else the bare JID."""
     value = str(jid)
     bare, separator, resource = value.partition("/")
-    key = value if separator and "@" in bare else bare
+    return value if separator and "@" in bare else bare
+
+
+def _safe_name(jid: str) -> str:
+    key = _key(jid)
     safe = _SAFE_RE.sub("_", key)
     if safe != key:
         digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:_DIGEST_LEN]
@@ -79,11 +85,30 @@ def save_avatar(jid: str, raw: bytes) -> str:
     path = avatar_path(jid)
     with open(path, "wb") as fh:
         fh.write(raw)
-    value = str(jid)
-    bare, separator, resource = value.partition("/")
-    key = value if separator and "@" in bare else bare
-    _URI_CACHE.pop(key, None)
+    _URI_CACHE.pop(_key(jid), None)
     return path
+
+
+def ensure_avatar(jid: str, path: str) -> str:
+    """Return the canonical cache path, migrating an older-named file.
+
+    The cache name gained a digest suffix for non-ASCII keys; a vCard cache
+    may still hand out the old path.  The list paints that path directly while
+    the chat resolves the avatar by JID, so the file is copied to the current
+    canonical name (the old one is kept) and the data-URI cache is dropped.
+    """
+    canonical = avatar_path(jid)
+    path = str(path or "")
+    if path and os.path.isfile(path):
+        if os.path.abspath(path) != os.path.abspath(canonical):
+            if not os.path.isfile(canonical):
+                try:
+                    shutil.copyfile(path, canonical)
+                except OSError:
+                    return path
+            _URI_CACHE.pop(_key(jid), None)
+        return canonical
+    return canonical if os.path.isfile(canonical) else ""
 
 
 def rounded_avatar(pix: QtGui.QPixmap, size: int,
@@ -154,9 +179,7 @@ def default_avatar_uri() -> str:
 
 def avatar_data_uri(jid: str) -> str | None:
     """Return a PNG data-URI for *jid*'s cached avatar, or ``None``."""
-    jid = str(jid)
-    bare, separator, resource = jid.partition("/")
-    jid = jid if separator and "@" in bare else bare
+    jid = _key(jid)
     uri = _URI_CACHE.get(jid, _MISSING)
     if uri is not _MISSING:
         return uri

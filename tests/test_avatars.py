@@ -238,5 +238,29 @@ check("the cached avatars stay distinct",
       avatars_mod.avatar_data_uri(f"{room}/Мария")
       != avatars_mod.avatar_data_uri(f"{room}/Ольга"))
 
+# ── old cache names are migrated to the current scheme ──────────
+legacy_nick = "Миграция"
+legacy_jid = f"{room}/{legacy_nick}"
+avatars_mod.ensure_dirs()
+legacy_path = os.path.join(
+    avatars_mod.AVATARS_DIR,
+    avatars_mod._SAFE_RE.sub("_", legacy_jid) + ".png")
+with open(legacy_path, "wb") as fh:
+    fh.write(_PNG)
+canonical = avatars_mod.avatar_path(legacy_jid)
+check("an old avatar file name is migrated",
+      avatars_mod.ensure_avatar(legacy_jid, legacy_path) == canonical
+      and os.path.isfile(canonical))
+check("the old file is kept for a stale list path",
+      os.path.isfile(legacy_path))
+check("the migrated avatar is readable by JID",
+      avatars_mod.avatar_data_uri(legacy_jid) is not None)
+check("a canonical path is returned unchanged",
+      avatars_mod.ensure_avatar(legacy_jid, canonical) == canonical)
+check("a missing path falls back to the cached file",
+      avatars_mod.ensure_avatar(legacy_jid, "/no/such/avatar.png") == canonical)
+check("an unknown JID without a file yields an empty path",
+      avatars_mod.ensure_avatar("unknown@example.com", "") == "")
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

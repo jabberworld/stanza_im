@@ -3436,7 +3436,11 @@ client.leave_muji(room)
   sanitized JID key (`room/nick` for a MUC occupant, otherwise the bare JID).
   A key with characters outside `[A-Za-z0-9_.@-]` (Cyrillic nicknames, Unicode
   localparts) gets a short SHA-1 suffix (and a bounded prefix), so different
-  non-Latin nicknames of the same length never collide in one cache file.
+  non-Latin nicknames of the same length never collide in one cache file. A
+  cached path in the old (pre-digest) format is copied to the canonical name
+  by `avatars.ensure_avatar`; a MUC message uses the participant's
+  `avatar_path` from the sidebar (the same file) rather than a fresh JID
+  lookup, and a late cached avatar repaints that sender's messages.
 - `xep_0153` advertises our vCard avatar hash in outgoing presence
   (`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`) and fires
   `vcard_avatar_update` when a contact's advertised hash changes;

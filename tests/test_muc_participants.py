@@ -258,9 +258,15 @@ fake_chat = _FakeChat()
 win._chat_window = type("Win", (), {
     "get_chat": lambda self, jid: fake_chat if jid == room else None})()
 win._muji_windows = {}
-win._refresh_avatar(f"{room}/bob", "/tmp/bob-card.png")
+_card_dir = tempfile.mkdtemp(prefix="stanza_bobcard_")
+_bob_card = os.path.join(_card_dir, "bob-card.png")
+with open(_bob_card, "wb") as _fh:
+    _fh.write(b"\x89PNG\r\n\x1a\n")
+win._refresh_avatar(f"{room}/bob", _bob_card)
+from stanza_im.include.avatars import avatar_path as _avatar_path
+_canonical = _avatar_path(f"{room}/bob")
 check("a participant card updates only its row and messages",
-      win._muc_users[room]["bob"]["avatar_path"] == "/tmp/bob-card.png"
+      win._muc_users[room]["bob"]["avatar_path"] == _canonical
       and win._muc_users[room]["bob"]["avatar_jid"] == f"{room}/bob"
       and fake_chat.calls == [("row", "bob"),
                               ("message", "bob", f"{room}/bob")])

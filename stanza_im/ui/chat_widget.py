@@ -1987,20 +1987,25 @@ class ChatWidget(QtWidgets.QWidget):
         if self._peer_avatar:
             return self._rounded_avatar_uri(self._peer_avatar)
         if self.is_muc:
-            if not sender_jid and sender:
+            participant = None
+            if sender:
                 participant = next(
                     (user for user in self._users
                      if self._same_nick(user.get("nick", ""), sender)), None)
-                if participant:
-                    direct_uri = avatar_file_data_uri(
-                        participant.get("avatar_path", ""))
-                    if direct_uri:
-                        return self._rounded_avatar_uri(direct_uri)
+            if participant:
+                # The sidebar paints this very file, so prefer it over a JID
+                # lookup (which may be stale or carry a real-JID key).
+                direct_uri = avatar_file_data_uri(
+                    participant.get("avatar_path", ""))
+                if direct_uri:
+                    return self._rounded_avatar_uri(direct_uri)
+                if not sender_jid:
                     sender_jid = (participant.get("avatar_jid", "")
                                   or participant.get("real_jid", ""))
                     if sender_jid:
-                        logger.debug("Resolved historical avatar: room=%s nick=%s jid=%s",
-                                     self.jid, sender, sender_jid)
+                        logger.debug(
+                            "Resolved historical avatar: room=%s nick=%s jid=%s",
+                            self.jid, sender, sender_jid)
             return self._rounded_avatar_uri(
                 avatar_data_uri(sender_jid) or default_avatar_uri())
         return self._rounded_avatar_uri(
@@ -3089,6 +3094,8 @@ class ChatWidget(QtWidgets.QWidget):
         *refresh_avatars* forces a reload of the cached avatar files for every
         row (an avatar file keeps its name when its content changes).
         """
+        previous = {str(user.get("nick", "")): str(user.get("avatar_path") or "")
+                    for user in self._users}
         self._users = list(users or [])
         if self_nick:
             self._self_nick = self_nick
@@ -3100,6 +3107,18 @@ class ChatWidget(QtWidgets.QWidget):
             self._muc_color_keys = keys
             self._refresh_nick_colors()
         self._sync_muc_users(refresh_avatars=refresh_avatars)
+        # A cached avatar can appear after the history was rendered (the
+        # participant list is seeded after the local window): repaint that
+        # sender's already drawn messages once.
+        if self._history or self._messages:
+            for user in self._users:
+                nick = str(user.get("nick", ""))
+                path = str(user.get("avatar_path") or "")
+                if not path or path == previous.get(nick):
+                    continue
+                self.refresh_avatar_for_sender(
+                    nick, str(user.get("avatar_jid")
+                              or user.get("real_jid") or ""), force=True)
 
     def refresh_participant(self, nick: str,
                             refresh_avatar: bool = True) -> None:

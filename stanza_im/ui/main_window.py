@@ -4588,6 +4588,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_avatar(self, jid: str, path: str) -> None:
         """Apply a cached avatar *path* to the roster, contacts and MUCs."""
+        if path:
+            from stanza_im.include.avatars import ensure_avatar
+            path = ensure_avatar(jid, path)
         # A conference participant card is keyed by room/nick: only that row
         # (and its messages) change — the roster and the other participants do
         # not, so skip the roster pixmap invalidation and the list walk.
