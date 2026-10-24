@@ -2915,7 +2915,12 @@ the first `active` session of the room in Muji
 **«Кодеки»** and **«Экран»**. «Устройства» also lists the camera's supported modes
 (`devices.camera_mode`, `media.camera_formats` from Qt Multimedia; the mode is
 passed to PyAV's v4l2 input as `video_size`/`framerate`/`input_format` and a
-failed mode falls back to the driver default). «Кодеки» carries the preferred audio/video codec
+failed mode falls back to the driver default). Qt 6 names the MJPG pixel format
+`Format_Jpeg` (`_qt_pixel_format` maps it to `mjpeg`); a stored mode without a
+format is normalised through the camera's format list (`normalize_camera_mode`,
+preferring MJPG) so a high-frame-rate mode opens with `input_format=mjpeg`. If
+frame decoding still fails, the track drops the custom mode, reopens the camera
+in auto mode and logs the decoded FFmpeg reason instead of a black picture. «Кодеки» carries the preferred audio/video codec
 (`calls.audio_codec`/`video_codec`, applied via
 `RTCRtpTransceiver.setCodecPreferences` before an offer/answer; «auto» keeps
 aiortc's order), the audio and video bitrate (`calls.*_bitrate_kbps`, applied

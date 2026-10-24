@@ -495,6 +495,49 @@ check("the preview releases the device when hidden",
       "hideEvent" in inspect.getsource(
           device_test.CameraPreviewDialog))
 
+# 10. the camera mode maps Qt's Format_Jpeg and falls back to auto ---------
+from types import SimpleNamespace as _NS  # noqa: E402
+
+check("Qt's Format_Jpeg is mapped to mjpeg",
+      media._qt_pixel_format(_NS(name="Format_Jpeg")) == "mjpeg")
+check("YUYV keeps its FFmpeg name",
+      media._qt_pixel_format(_NS(name="Format_YUYV")) == "yuyv422")
+check("an unknown pixel format stays empty",
+      media._qt_pixel_format(_NS(name="Format_Unknown")) == "")
+
+_orig_formats = media.camera_formats
+media.camera_formats = lambda device_id="": [
+    {"width": 1280, "height": 720, "fps": 30.0, "format": "mjpeg"},
+    {"width": 1280, "height": 720, "fps": 30.0, "format": "yuyv422"},
+    {"width": 640, "height": 480, "fps": 30.0, "format": "yuyv422"},
+]
+check("a stored mode without a format gets MJPG",
+      media.normalize_camera_mode("1280x720@30")
+      == "1280x720@30:mjpeg")
+check("an explicit pixel format is kept",
+      media.normalize_camera_mode("1280x720@30:yuyv422")
+      == "1280x720@30:yuyv422")
+check("an unknown mode is left unchanged",
+      media.normalize_camera_mode("1024x768@30") == "1024x768@30")
+media.camera_formats = _orig_formats
+check("the camera open normalizes the stored mode",
+      "normalize_camera_mode(self._camera_mode" in inspect.getsource(
+          media._VideoCaptureTrack._open_camera))
+
+track2 = media._VideoCaptureTrack.__new__(media._VideoCaptureTrack)
+track2._camera_mode = "1280x720@30:mjpeg"
+track2._decode_error = "Устройство занято"
+track2._container = _Container()
+track2._stream = object()
+track2._last_open_attempt = 99.0
+check("a decode failure drops a custom mode and reopens auto",
+      track2._handle_decode_error() is True
+      and track2._camera_mode == ""
+      and track2._container is None and track2._stream is None
+      and track2._last_open_attempt == 0.0)
+check("no pending decode error is a no-op",
+      track2._handle_decode_error() is False)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

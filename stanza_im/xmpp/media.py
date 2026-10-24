@@ -197,7 +197,7 @@ def enumerate_devices() -> dict:
 def _qt_pixel_format(pixel_format) -> str:
     """Map a Qt pixel format to the FFmpeg/v4l2 input format name."""
     name = str(getattr(pixel_format, "name", pixel_format))
-    if "MJpeg" in name:
+    if "Jpeg" in name:          # Qt 6 names it Format_Jpeg (was MJpeg)
         return "mjpeg"
     if "YUYV" in name:
         return "yuyv422"
@@ -253,6 +253,38 @@ def camera_formats(device_id: str = "") -> list[dict]:
     result.sort(key=lambda row: (row["width"] * row["height"], row["fps"],
                                  row["format"]), reverse=True)
     return result
+
+
+def normalize_camera_mode(mode: str, device_id: str = "") -> str:
+    """Add the pixel format to a stored ``WxH@fps`` mode (prefer MJPG).
+
+    A mode saved before the pixel format was recognized (e.g. Qt reports
+    ``Format_Jpeg``) would otherwise open the camera without
+    ``input_format=mjpeg``, and the high-frame-rate MJPG mode cannot deliver
+    frames in the driver's default format.
+    """
+    mode = str(mode or "").strip()
+    if not mode or ":" in mode:
+        return mode
+    size, _, fps = mode.partition("@")
+    candidates = []
+    for item in camera_formats(device_id):
+        if "%dx%d" % (item["width"], item["height"]) != size:
+            continue
+        if fps:
+            try:
+                wanted = float(fps)
+            except ValueError:
+                return mode
+            if abs(float(item.get("fps") or 0) - wanted) > 0.5:
+                continue
+        candidates.append(item)
+    if not candidates:
+        return mode
+    chosen = next((item for item in candidates
+                   if item.get("format") == "mjpeg"), candidates[0])
+    pixel_format = str(chosen.get("format") or "")
+    return mode + (":" + pixel_format if pixel_format else "")
 
 
 def _v4l2_open_options(mode: str) -> dict:
@@ -689,6 +721,7 @@ if HAS_AIORTC:
             self._camera_mode = str(camera_mode or "")
             self._last_size = None
             self._last_open_attempt = 0.0
+            self._decode_error = ""
             self._last_grab = 0.0
             self._last_image = None
             self._open_camera()
@@ -708,7 +741,9 @@ if HAS_AIORTC:
                 return
             self._last_open_attempt = time.monotonic()
             path = self._device_path()
-            options = _v4l2_open_options(self._camera_mode)
+            effective_mode = normalize_camera_mode(self._camera_mode,
+                                                   self._device_id)
+            options = _v4l2_open_options(effective_mode)
             try:
                 # PyAV takes the file/device as a positional argument.
                 if options:
@@ -717,8 +752,8 @@ if HAS_AIORTC:
                 else:
                     self._container = av.open(path, format="v4l2")
                 self._stream = self._container.streams.video[0]
-                logger.info("CALL camera opened: %s (%s)", path,
-                            self._camera_mode or "auto")
+                logger.info("CALL camera opened: %s (%s, %s)", path,
+                            effective_mode or "auto", options or "default")
             except Exception as exc:  # noqa: BLE001 - degrade to black frames
                 reason = decode_ffmpeg_error(exc)
                 if options:
@@ -823,6 +858,9 @@ if HAS_AIORTC:
             except RuntimeError:
                 self._stopped = True
                 return _black()
+            if self._handle_decode_error():
+                await asyncio.sleep(0.05)
+                return _black()
             if frame is None:
                 frame = _black_frame(self._last_size)
             else:
@@ -862,9 +900,33 @@ if HAS_AIORTC:
             try:
                 for frame in self._container.decode(self._stream):
                     return frame.reformat(format="yuv420p")
-            except Exception:
-                logger.debug("CALL camera decode ended", exc_info=True)
+            except Exception as exc:  # noqa: BLE001 - localized FFmpeg error
+                self._decode_error = decode_ffmpeg_error(exc)
             return None
+
+        def _handle_decode_error(self) -> bool:
+            """Drop a failing capture and reopen it (auto after a custom mode)."""
+            error = self._decode_error
+            if not error:
+                return False
+            self._decode_error = ""
+            container = self._container
+            self._container = None
+            self._stream = None
+            try:
+                if container is not None:
+                    container.close()
+            except Exception:
+                pass
+            if self._camera_mode:
+                logger.warning(
+                    "CALL camera mode %s failed to decode (%s); using auto",
+                    self._camera_mode, error)
+                self._camera_mode = ""
+            else:
+                logger.warning("CALL camera decode failed: %s", error)
+            self._last_open_attempt = 0.0
+            return True
 
         def stop(self):
             self._stopped = True

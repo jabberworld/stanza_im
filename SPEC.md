@@ -3369,7 +3369,9 @@ client.leave_muji(room)
   connection ends the session with `connectivity-error`.
   Preferences → **Calls** has three tabs: **Devices** (microphone/speaker/
   camera from `devices.*`, the camera's supported modes
-  `devices.camera_mode` applied to PyAV's v4l2 open, plus mic/speaker/camera
+  `devices.camera_mode` applied to PyAV's v4l2 open (`Format_Jpeg` maps to
+  `mjpeg`, a mode without a pixel format is normalised to the camera's MJPG
+  entry, and a decode failure falls back to auto), plus mic/speaker/camera
   self-tests, disabled during a call and stopped by a 1 s monitor when a call
   starts; the camera preview closes with the dialog and releases `QCamera` on
   hide, so it never keeps the device busy for the call (`_VideoCaptureTrack.
