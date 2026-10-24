@@ -3,6 +3,7 @@
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_calls_settings.py
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from stanza_im.core.storage import Config
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui import preferences as prefs_mod
+from stanza_im.ui.main_window import MainWindow
 from stanza_im.ui.preferences import PreferencesDialog
 from stanza_im.xmpp import media
 
@@ -166,6 +168,92 @@ check("a custom camera height is shown",
       dlg2._controls["calls_video_max_height"].currentData() == 900)
 dlg2.close()
 dlg.close()
+
+# 6. live video quality (bitrate + resolution, no renegotiation) -----------
+from stanza_im.xmpp.jingle_rtp import JingleRtpManager  # noqa: E402
+
+
+class _QualityCall:
+    def __init__(self):
+        self.bitrate = None
+        self.height = None
+
+    def set_video_bitrate(self, kbps):
+        self.bitrate = kbps
+
+    def set_video_quality(self, height):
+        self.height = height
+
+
+class _QualitySession:
+    def __init__(self, sid, muji_room=""):
+        self.sid = sid
+        self.muji_room = muji_room
+        self.call = _QualityCall()
+
+
+sid_session = _QualitySession("sid-1")
+room_sessions = [_QualitySession("sid-2", "room@conf.example"),
+                 _QualitySession("sid-3", "room@conf.example")]
+mgr = JingleRtpManager.__new__(JingleRtpManager)
+mgr.sessions = {s.sid: s for s in [sid_session] + room_sessions}
+mgr.set_call_video_quality("sid-1", 200, 720)
+check("a single call gets the live bitrate and resolution",
+      sid_session.call.bitrate == 200 and sid_session.call.height == 720)
+mgr.set_call_video_quality("room@conf.example", 1000, 480)
+check("a Muji room applies the quality to all its sessions",
+      all(s.call.bitrate == 1000 and s.call.height == 480
+          for s in room_sessions))
+
+from stanza_im.xmpp.media import AiortcCall  # noqa: E402
+
+
+class _FakeTrack:
+    def __init__(self):
+        self.height = None
+        self.box = None
+
+    def set_max_height(self, height):
+        self.height = height
+
+    def set_screen_box(self, width, height):
+        self.box = (width, height)
+
+
+call = AiortcCall.__new__(AiortcCall)
+call._local_video = _FakeTrack()
+call.set_video_quality(720)
+check("the live resolution caps the camera and the screen",
+      call._local_video.height == 720 and call._local_video.box == (0, 720))
+
+# The call windows expose the quality menu and emit the choice.
+from PyQt6 import QtCore  # noqa: E402
+from stanza_im.ui.call_window import CallWindow, MujiCallWindow  # noqa: E402
+
+window = CallWindow("sid-9", "Peer", video=True, video_bitrate=500,
+                    max_height=720)
+emitted = []
+window.quality_requested.connect(lambda *a: emitted.append(a))
+window._on_quality(200, 480)
+check("the 1:1 call quality menu emits the live choice",
+      emitted == [("sid-9", 200, 480)]
+      and window._quality_bitrate_actions[200].isChecked()
+      and window._quality_height_actions[480].isChecked())
+window.close()
+
+muji = MujiCallWindow("room@conf.example", self_nick="me",
+                      video_bitrate=500, max_height=0)
+muji_emitted = []
+muji.quality_requested.connect(lambda *a: muji_emitted.append(a))
+muji._on_quality(1000, 720)
+check("the Muji quality menu emits for the room",
+      muji_emitted == [("room@conf.example", 1000, 720)])
+muji.close()
+
+check("the main window wires both quality menus",
+      all("quality_requested.connect" in inspect.getsource(
+          getattr(MainWindow, name))
+          for name in ("_open_call_window", "_on_muji_joined")))
 
 print()
 if FAILURES:

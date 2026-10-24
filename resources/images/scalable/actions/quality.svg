@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+     viewBox="0 0 16 16">
+  <!-- signal bars: outgoing call quality -->
+  <g fill="#2e3436">
+    <rect x="2.4" y="9.2" width="2.4" height="3.8" rx="0.5"/>
+    <rect x="6.8" y="6.2" width="2.4" height="6.8" rx="0.5"/>
+    <rect x="11.2" y="3.0" width="2.4" height="10.0" rx="0.5"/>
+  </g>
+</svg>

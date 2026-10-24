@@ -1175,6 +1175,17 @@ if HAS_AIORTC:
             if self._local_video is not None:
                 self._local_video.set_enabled(enabled)
 
+        def set_video_quality(self, max_height: int) -> None:
+            """Change the outgoing video resolution cap live (0 = source)."""
+            if self._local_video is None:
+                return
+            self._local_video.set_max_height(max_height)
+            self._local_video.set_screen_box(0, max_height)
+
+        def set_video_bitrate(self, kbps: int) -> None:
+            """Change the outgoing video bitrate live (updates live encoders)."""
+            set_media_defaults(video_kbps=kbps)
+
         def set_video_source(self, mode: str, region=None) -> None:
             """Switch the outgoing video between the camera and a screen area."""
             if self._local_video is not None:

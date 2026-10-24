@@ -3358,7 +3358,13 @@ client.leave_muji(room)
   `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
   `xmpp/media.py` encoder shim, and the outgoing camera
   `calls.video_max_height` downscale cap) and **Screen** (the screen-sharing
-  output box and frame rate). The
+  output box and frame rate). A live call (and a Muji conference) additionally
+  has an icon-only quality menu: video bitrate 200/500/1000 kbps and resolution
+  source/1080/720/480/360, applied through
+  `JingleRtpManager.set_call_video_quality` to the live encoders
+  (`target_bitrate`, aiortc recreates the codec with a keyframe) and the
+  capture track (downscale only). It is session-only; audio changes are
+  pre-call and a codec change needs renegotiation. The
   mic meter and the capture track read the `QAudioSource` stream directly
   (`io.read()`/`readyRead`) instead of waiting on the QIODevice's
   `bytesAvailable()` (which can report 0 while audio streams, freezing the

@@ -707,6 +707,40 @@ class JingleRtpManager:
             self.client.emit("call_failed", session.peer_full, str(exc))
             self._terminate(session, "connectivity-error", send=True)
 
+    def set_call_video_quality(self, key: str, video_kbps=None,
+                               max_height=None) -> None:
+        """Change the outgoing video quality of a call (or a Muji room).
+
+        *key* is a Jingle session id or a room JID (all its Muji sessions).
+        The bitrate reaches the live encoders (aiortc recreates its codec with
+        a keyframe on the next frame); the resolution caps the capture track,
+        so no SDP renegotiation is needed.  Audio is not changed live.
+        """
+        session = self.sessions.get(key)
+        if session is not None:
+            sessions = [session]
+        else:
+            sessions = [item for item in self.sessions.values()
+                        if getattr(item, "muji_room", "") == key]
+        for item in sessions:
+            call = getattr(item, "call", None)
+            if call is None:
+                continue
+            if video_kbps:
+                try:
+                    call.set_video_bitrate(int(video_kbps))
+                except Exception:  # noqa: BLE001 - best effort
+                    logger.debug("CALL video bitrate change failed",
+                                 exc_info=True)
+            if max_height is not None:
+                try:
+                    call.set_video_quality(int(max_height))
+                except Exception:  # noqa: BLE001 - best effort
+                    logger.debug("CALL video resolution change failed",
+                                 exc_info=True)
+        logger.info("CALL quality %s: bitrate=%s height=%s (%d session(s))",
+                    key, video_kbps, max_height, len(sessions))
+
     async def _session_timeout(self, sid: str, timeout: float = 45.0) -> None:
         """Fail an outgoing call that never received a session-accept."""
         await asyncio.sleep(timeout)

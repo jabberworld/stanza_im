@@ -5002,6 +5002,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 getattr(calls, "video_max_height", 0) or 0),
         }
 
+    def _call_quality_defaults(self) -> tuple[int, int]:
+        """The configured video bitrate/height for the live quality menu."""
+        calls = getattr(self._config, "calls", None)
+        return (int(getattr(calls, "video_bitrate_kbps", 500) or 500),
+                int(getattr(calls, "video_max_height", 0) or 0))
+
+    def _on_call_quality_requested(self, sid: str, bitrate: int,
+                                   height: int) -> None:
+        if self._client is not None:
+            self._client.rtp_calls.set_call_video_quality(
+                sid, bitrate, height)
+
     def _on_call_requested(self, jid: str, video: bool = False) -> None:
         if not self._client:
             return
@@ -5244,13 +5256,16 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.call_window import CallWindow
         # A separate top-level window (never a child of the main window, which
         # would embed it over the roster).
+        bitrate, max_height = self._call_quality_defaults()
         window = CallWindow(sid, self._call_display_name(peer), video,
                             avatar_path=self._call_avatar(peer),
-                            avatar_radius=self._call_avatar_radius())
+                            avatar_radius=self._call_avatar_radius(),
+                            video_bitrate=bitrate, max_height=max_height)
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.video_mode_requested.connect(self._on_video_mode_requested)
         window.receive_toggled.connect(self._on_call_receive_toggled)
+        window.quality_requested.connect(self._on_call_quality_requested)
         self._place_window_near_main(window)
         window.show()
         window.raise_()
@@ -5466,15 +5481,26 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("MUJI join %s (video=%s)", room, video)
         self._client.join_muji(room, nick, video)
 
+    def _on_muji_quality_requested(self, room: str, bitrate: int,
+                                   height: int) -> None:
+        if self._client is not None:
+            self._client.rtp_calls.set_call_video_quality(
+                room, bitrate, height)
+
     def _on_muji_joined(self, room: str) -> None:
         from stanza_im.ui.call_window import MujiCallWindow
         window = self._muji_windows.get(room)
         if window is None:
             nick = self._muc_self_nicks.get(room, "")
-            window = MujiCallWindow(room, self_nick=nick)
+            bitrate, max_height = self._call_quality_defaults()
+            window = MujiCallWindow(room, self_nick=nick,
+                                    video_bitrate=bitrate,
+                                    max_height=max_height)
             window.set_avatar_radius(
                 getattr(self._config.appearance, "avatar_radius", 20))
             window.leave.connect(self._client.leave_muji)
+            window.quality_requested.connect(
+                self._on_muji_quality_requested)
             window.participant_audio.connect(
                 self._on_muji_participant_audio)
             window.participant_receive.connect(

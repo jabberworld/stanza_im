@@ -2825,7 +2825,18 @@ translucent nickname caption over the image. Every call control is **icon-only**
 (tooltips instead of labels) using the 16px glyphs in
 `resources/images/16x16/actions/` via `call_window._icon`: `mic`/`mic-off`,
 `camera`/`camera-off` (the camera is a webcam glyph), `speaker`/`speaker-off`,
-a red `call-hangup` and a green `call-accept`. The mute/camera buttons toggle
+a red `call-hangup`, a green `call-accept` and a **quality** button
+(`quality.svg`, a small bars glyph). Its menu changes the outgoing video
+**bitrate** (200/500/1000 kbps) and **resolution** (source/1080/720/480/360) of
+a live call (in Muji — of every session of the room):
+`MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
+`rtp_calls.set_call_video_quality` → the engine call's `set_video_bitrate`
+(updates the live encoders through the weak registry; aiortc recreates its
+codec with a keyframe on the next frame) and `set_video_quality`
+(`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). The
+choice is session-only (defaults come from the Calls preferences); the codec
+cannot change during a call (that needs renegotiation) and audio is only
+changed in the settings. The mute/camera buttons toggle
 the **outgoing** capture — the muted
 microphone sends silence and the switched-off camera sends black frames
 (`set_audio_enabled`/`set_video_enabled`, no renegotiation, tracks stay

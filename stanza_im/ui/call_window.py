@@ -46,6 +46,44 @@ _VIDEO_MODE_ICONS = {"off": "camera-off", "camera": "camera",
 _VIDEO_MODE_TIPS = {"off": "video_mode_off", "camera": "video_mode_camera",
                     "region": "video_mode_region", "screen": "video_mode_screen"}
 
+#: Live outgoing video quality presets (value, i18n key).
+_QUALITY_BITRATES = ((200, "call_quality_low"), (500, "call_quality_medium"),
+                     (1000, "call_quality_high"))
+_QUALITY_HEIGHTS = ((0, "call_quality_source"), (1080, "call_quality_1080"),
+                    (720, "call_quality_720"), (480, "call_quality_480"),
+                    (360, "call_quality_360"))
+
+
+def _quality_button(parent, bitrate: int, height: int, on_change):
+    """An icon-only menu button for the live video bitrate/resolution."""
+    button = QtWidgets.QToolButton(parent)
+    button.setIcon(_icon("quality"))
+    button.setIconSize(QtCore.QSize(20, 20))
+    button.setToolTip(tr("call_quality"))
+    button.setPopupMode(
+        QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+    menu = QtWidgets.QMenu(button)
+    bitrate_menu = menu.addMenu(tr("call_quality_bitrate"))
+    bitrate_actions = {}
+    for value, key in _QUALITY_BITRATES:
+        action = bitrate_menu.addAction(tr(key))
+        action.setCheckable(True)
+        action.setChecked(value == int(bitrate or 0))
+        action.triggered.connect(
+            lambda checked=False, v=value: on_change(v, None))
+        bitrate_actions[value] = action
+    height_menu = menu.addMenu(tr("call_quality_resolution"))
+    height_actions = {}
+    for value, key in _QUALITY_HEIGHTS:
+        action = height_menu.addAction(tr(key))
+        action.setCheckable(True)
+        action.setChecked(value == int(height or 0))
+        action.triggered.connect(
+            lambda checked=False, v=value: on_change(None, v))
+        height_actions[value] = action
+    button.setMenu(menu)
+    return button, bitrate_actions, height_actions
+
 
 def _rounded_avatar(path: str, size: int = 24,
                     radius_pct: int = 100) -> QtGui.QPixmap:
@@ -189,12 +227,16 @@ class CallWindow(QtWidgets.QWidget):
     audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
     video_mode_requested = QtCore.pyqtSignal(str, str)  # sid, mode
     receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
+    quality_requested = QtCore.pyqtSignal(str, int, int)  # sid, kbps, height
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
-                 avatar_path: str | None = None, avatar_radius: int = 100):
+                 avatar_path: str | None = None, avatar_radius: int = 100,
+                 video_bitrate: int = 500, max_height: int = 0):
         super().__init__(parent)
         self.sid = sid
         self.peer = peer
+        self._quality_bitrate = int(video_bitrate or 0)
+        self._quality_height = int(max_height or 0)
         self._video = video
         self.setWindowTitle(tr("call_window_title", peer=peer))
         self.setMinimumSize(420, 340)
@@ -272,6 +314,11 @@ class CallWindow(QtWidgets.QWidget):
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
         controls.addWidget(self._video_btn)
+        (self._quality_btn, self._quality_bitrate_actions,
+         self._quality_height_actions) = _quality_button(
+            self, self._quality_bitrate, self._quality_height,
+            self._on_quality)
+        controls.addWidget(self._quality_btn)
         controls.addStretch(1)
 
         self._hangup_btn = QtWidgets.QToolButton(self)
@@ -331,6 +378,18 @@ class CallWindow(QtWidgets.QWidget):
         for m, action in self._video_actions.items():
             action.setChecked(m == mode)
 
+    def _on_quality(self, bitrate, height) -> None:
+        if bitrate is not None:
+            self._quality_bitrate = int(bitrate)
+        if height is not None:
+            self._quality_height = int(height)
+        for value, action in self._quality_bitrate_actions.items():
+            action.setChecked(value == self._quality_bitrate)
+        for value, action in self._quality_height_actions.items():
+            action.setChecked(value == self._quality_height)
+        self.quality_requested.emit(
+            self.sid, self._quality_bitrate, self._quality_height)
+
     def closeEvent(self, event):
         # Closing the window also ends the call.
         self.hangup.emit(self.sid)
@@ -357,10 +416,14 @@ class MujiCallWindow(QtWidgets.QWidget):
     participant_receive = QtCore.pyqtSignal(str, str, bool)  # room, nick, receive-enabled
     participant_camera = QtCore.pyqtSignal(str, str, bool)   # room, nick, video-enabled
     video_mode_requested = QtCore.pyqtSignal(str, str)       # room, mode
+    quality_requested = QtCore.pyqtSignal(str, int, int)     # room, kbps, px
 
-    def __init__(self, room: str, self_nick: str = "", parent=None):
+    def __init__(self, room: str, self_nick: str = "", parent=None,
+                 video_bitrate: int = 500, max_height: int = 0):
         super().__init__(parent)
         self.room = room
+        self._quality_bitrate = int(video_bitrate or 0)
+        self._quality_height = int(max_height or 0)
         self.self_nick = self_nick or ""
         self.setWindowTitle(tr("muji_window_title", room=room))
         self.setMinimumSize(560, 400)
@@ -446,9 +509,14 @@ class MujiCallWindow(QtWidgets.QWidget):
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
         self._video_btn.setVisible(False)
+        (self._quality_btn, self._quality_bitrate_actions,
+         self._quality_height_actions) = _quality_button(
+            self, self._quality_bitrate, self._quality_height,
+            self._on_quality)
         controls.addWidget(self._all_mic_btn)
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._video_btn)
+        controls.addWidget(self._quality_btn)
         controls.addStretch(1)
         controls.addWidget(self._leave_btn)
         right_layout.addLayout(controls)
@@ -463,6 +531,18 @@ class MujiCallWindow(QtWidgets.QWidget):
     def set_video(self, enabled: bool) -> None:
         self._video.setVisible(enabled)
         self._video_btn.setVisible(enabled)
+
+    def _on_quality(self, bitrate, height) -> None:
+        if bitrate is not None:
+            self._quality_bitrate = int(bitrate)
+        if height is not None:
+            self._quality_height = int(height)
+        for value, action in self._quality_bitrate_actions.items():
+            action.setChecked(value == self._quality_bitrate)
+        for value, action in self._quality_height_actions.items():
+            action.setChecked(value == self._quality_height)
+        self.quality_requested.emit(
+            self.room, self._quality_bitrate, self._quality_height)
 
     def _on_video_mode(self, mode: str) -> None:
         """Pick the outgoing video source for the whole conference."""
