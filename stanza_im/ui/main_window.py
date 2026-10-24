@@ -7316,7 +7316,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 timestamp=ts or _current_timestamp(),
                 sender=nick, archive_id=archive_id,
                 origin_id=reply_able_id,
-                reply_to=reply_to, reply_id=reply_id, markup=markup))
+                reply_to=reply_to, reply_id=reply_id, markup=markup,
+                archived=True))
             # A join-time history replay is stored, not rendered: merge it into
             # the window when the room is the conversation on screen.  A replay
             # has no archive id and is usually older than the tail this client

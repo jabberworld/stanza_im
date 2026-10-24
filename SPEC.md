@@ -698,8 +698,8 @@ off on disconnect/auth/TLS failure) plus «О кэше», which needs no session
   store, resets the local unread/read state and clears every open tab (the
   server archive is untouched). Rows are single-line (the hint elides, its full
   text is the tooltip) with `ResizeToContents` row heights re-fitted on the
-  first show, and the clear action is a flat icon button (`process-stop.png`)
-  in the OMEMO manager style. QtWebEngine is never imported just for the
+  first show, and the clear action is a flat icon button (`process-stop.png`,
+  its tooltip is the row's warning) in the OMEMO manager style. QtWebEngine is never imported just for the
   dialog: its HTTP cache is cleared through the profile when already loaded,
   otherwise the standard `QtWebEngine/Default` cache directory is removed.
 
@@ -2221,6 +2221,10 @@ Registers XEP plugins (conditionally where noted):
   premature MAM request. `history._insert`
   repairs a stale timestamp on an archive/origin/message-id match (never the
   body), so a row stored with a wrong timestamp cannot keep the tail hidden.
+  A groupchat message's stable id is its `origin-id` (then the room
+  `stanza-id`, the MAM archive id and the stanza `id`); an archived row without
+  an id match adopts one id-less twin (same direction/sender/body) and repairs
+  its timestamp instead of duplicating an older build's live copy.
 - **Partial progress**: scrolling a conversation into view records the newest
   visible message (`ChatView._find_last_visible_ref`) and publishes it as
   `displayed` through a single-shot throttle (`MainWindow._mds_throttle_timer`,

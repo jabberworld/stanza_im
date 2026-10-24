@@ -77,6 +77,42 @@ history.store_message(jid3, "incoming", "msg", sender="Cid",
                       archive_id="arch-9")
 check("live+mam deduped", history.count_messages(jid3) == 1)
 
+# 4b. a delayed replay adopts the older live copy (receive time) -----------
+jid4 = "dedup-replay-legacy@example.com"
+history.store_message(jid4, "incoming", "replayed", sender="Dan",
+                      timestamp="2026-01-01T12:05:00.000000Z")
+adopted = history.store_message(
+    jid4, "incoming", "replayed", sender="Dan",
+    timestamp="2026-01-01T11:00:00.000000Z",
+    origin_id="orig-1", archived=True)
+rows = history.load_history(jid4, 10)
+check("an archived replay adopts the live copy", adopted is True
+      and len(rows) == 1
+      and rows[0]["timestamp"] == "2026-01-01T11:00:00.000000Z"
+      and rows[0].get("origin_id") == "orig-1")
+
+# 4c. a live row never adopts an id-less one --------------------------------
+jid5 = "dedup-live-no-adopt@example.com"
+history.store_message(jid5, "incoming", "live same", sender="Eve",
+                      timestamp="2026-01-01T12:05:00.000000Z")
+history.store_message(jid5, "incoming", "live same", sender="Eve",
+                      timestamp="2026-01-01T12:05:10.000000Z",
+                      origin_id="orig-2")
+check("two live copies are kept", history.count_messages(jid5) == 2)
+
+# 4d. the same replay re-stored with a stable id is not duplicated ---------
+jid6 = "dedup-replay-repeat@example.com"
+history.store_message(jid6, "incoming", "again", sender="Fay",
+                      timestamp="2026-01-01T13:00:00.000000Z",
+                      origin_id="orig-3")
+history.store_message(jid6, "incoming", "again", sender="Fay",
+                      timestamp="2026-01-01T13:00:05.000000Z",
+                      origin_id="orig-3")
+rows = history.load_history(jid6, 10)
+check("a stable-id replay dedups across the wrong timestamp",
+      len(rows) == 1
+      and rows[0]["timestamp"] == "2026-01-01T13:00:05.000000Z")
+
 # 5. distinct archived rows with same text/time are kept --------------------
 jid4 = "dedup-distinct-archive@example.com"
 history.store_message(jid4, "incoming", "ping", sender="Dan",

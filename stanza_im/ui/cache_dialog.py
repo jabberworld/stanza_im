@@ -200,7 +200,7 @@ class CacheDialog(QtWidgets.QDialog):
             button.setIconSize(QtCore.QSize(16, 16))
             button.setFixedSize(24, 24)
             button.setAutoRaise(True)
-            button.setToolTip(tr("cache_clear"))
+            button.setToolTip(entry.warning)
             button.clicked.connect(
                 lambda _checked=False, e=entry: self.clear_entry(e))
             holder = QtWidgets.QWidget(self._table)

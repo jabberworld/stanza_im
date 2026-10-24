@@ -459,7 +459,13 @@ skipping the "nothing newer" check) because it is usually older than the tail
 already on screen; a MAM page does not. The refresh keeps the unread boundary
 and stays at the bottom; a suspended tab defers it to `resume`, a
 background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
-merge. Local paging is independent of the server archive: a room without MAM
+merge. A groupchat message's stable id is its `origin-id` (falling back to the
+room `stanza-id`, the MAM archive id and the stanza `id`), so the replay, MAM
+and live copies of one message dedup; an archived row that finds no id match
+**adopts** one id-less twin with the same direction/sender/body (an older build
+stored the replay as live with the receive time): the ids are written onto that
+row and its timestamp repaired, instead of adding a duplicate. Live rows never
+adopt. Local paging is independent of the server archive: a room without MAM
 (or a failed query, `mam_unavailable`) gets
 `ChatWidget.set_server_archive_available(False)`, which only stops server
 requests — scrolling up keeps loading the SQLite pages (`_on_near_top` no
@@ -3219,7 +3225,8 @@ text is kept. Returning activity (`eventFilter`) resumes
   `ResizeToContents` and the first `showEvent` re-fits the rows after the real
   column widths are known) and each row carries a flat, frameless
   `QToolButton` (`process-stop.png`) like the OMEMO device manager instead of a
-  text button. The dialog is parented to the main window and kept as
+  text button; its tooltip is the row's warning (what is stored, what clearing
+  affects). The dialog is parented to the main window and kept as
   `_cache_dialog`.
   [`tests/test_cache_dialog.py`]
 - **Privacy lists & blocking (XEP-0016/0191/0377)**: Preferences → Connection →

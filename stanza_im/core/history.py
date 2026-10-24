@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
 
+#: SQL predicate for a row that carries no stable id at all.
+_NO_IDS_SQL = ("(archive_id IS NULL OR archive_id = '') "
+               "AND (origin_id IS NULL OR origin_id = '') "
+               "AND (message_id IS NULL OR message_id = '')")
+
 # jid -> (connection, last_use_monotonic)
 _pool: OrderedDict[str, tuple[sqlite3.Connection, float]] = OrderedDict()
 
@@ -108,9 +113,7 @@ def _migrate_dedup(conn: sqlite3.Connection) -> None:
         version = 0
     if version >= 1:
         return
-    no_ids = ("(archive_id IS NULL OR archive_id = '') "
-              "AND (origin_id IS NULL OR origin_id = '') "
-              "AND (message_id IS NULL OR message_id = '')")
+    no_ids = _NO_IDS_SQL
     try:
         conn.execute(
             "DELETE FROM messages WHERE archive_id IS NOT NULL "
@@ -286,8 +289,14 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             skip_existing: bool,
             retract_reason: str = "", retract_by: str = "",
             media: str = "", markup: str = "", encrypted: bool = False,
-            encryption: str = "") -> bool:
-    """Insert one row; returns True when a row was actually written."""
+            encryption: str = "", archived: bool = False) -> bool:
+    """Insert one row; returns True when a row was actually written.
+
+    *archived* marks a message that came from a server replay or a MAM page.
+    Such a row may adopt an existing id-less twin (an older build stored the
+    same replay as a live message with the receive time), so the historical
+    copy is not duplicated.
+    """
     if skip_existing:
         clauses: list[str] = []
         params: list = []
@@ -324,6 +333,25 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
                              (ts, row[0]))
                 return True
             return False
+        if archived and (archive_id or origin_id or message_id):
+            # The same message may already be stored without any stable id by
+            # an older build (a join replay that was rendered as live, with the
+            # receive time).  Adopt that row instead of adding a duplicate.
+            legacy = conn.execute(
+                "SELECT id FROM messages WHERE " + _NO_IDS_SQL +
+                " AND direction = ? AND sender = ? AND body = ? "
+                "ORDER BY id LIMIT 1",
+                (direction, sender, body)).fetchone()
+            if legacy is not None:
+                conn.execute(
+                    "UPDATE messages SET archive_id = ?, origin_id = ?, "
+                    "message_id = ?, timestamp = ? WHERE id = ?",
+                    (archive_id or None, origin_id or None,
+                     message_id or None, ts, legacy[0]))
+                logger.debug(
+                    "HISTORY[dedup] adopted legacy row id=%s sender=%r body=%r",
+                    legacy[0], sender, body[:40])
+                return True
     conn.execute(
         "INSERT INTO messages "
         "(direction, sender, body, timestamp, archive_id, "
@@ -351,7 +379,8 @@ def store_message(jid: str, direction: str, body: str,
                   retract_marker: bool = False,
                   retract_reason: str = "", retract_by: str = "",
                   media: dict | None = None, markup: dict | None = None,
-                  encrypted: bool = False, encryption: str = "") -> bool:
+                  encrypted: bool = False, encryption: str = "",
+                  archived: bool = False) -> bool:
     """Append a message to *jid*'s history.
 
     By default (``skip_existing``) an already stored message is not duplicated.
@@ -374,7 +403,7 @@ def store_message(jid: str, direction: str, body: str,
                                if media else "",
                                json.dumps(markup, ensure_ascii=False)
                                if markup else "",
-                               encrypted, encryption)
+                               encrypted, encryption, archived)
             conn.commit()
             return inserted
     except sqlite3.Error as exc:
@@ -421,7 +450,8 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
                            json.dumps(entry.get("markup"), ensure_ascii=False)
                            if entry.get("markup") else "",
                            bool(entry.get("encrypted", False)),
-                           entry.get("encryption", "")):
+                           entry.get("encryption", ""),
+                           archived=True):
                     inserted += 1
             conn.commit()
         return inserted
@@ -991,13 +1021,14 @@ async def store_message_async(jid: str, direction: str, body: str,
                               media: dict | None = None,
                               markup: dict | None = None,
                               encrypted: bool = False,
-                              encryption: str = "") -> bool:
+                              encryption: str = "",
+                              archived: bool = False) -> bool:
     return await asyncio.to_thread(
         store_message, jid, direction, body, timestamp=timestamp,
         sender=sender, skip_existing=skip_existing, archive_id=archive_id,
         origin_id=origin_id, reply_to=reply_to, reply_id=reply_id,
         message_id=message_id, edited=edited, media=media, markup=markup,
-        encrypted=encrypted, encryption=encryption)
+        encrypted=encrypted, encryption=encryption, archived=archived)
 
 
 async def store_many_async(jid: str, rows: list[dict]) -> int:

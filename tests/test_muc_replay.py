@@ -43,7 +43,7 @@ def check(name, cond):
         FAILURES.append(name)
 
 
-def message(body, stamp="", archived=False):
+def message(body, stamp="", archived=False, origin=""):
     msg = slixmpp.Message()
     msg["from"] = "room@conf.example/Alice"
     msg["type"] = "groupchat"
@@ -51,6 +51,9 @@ def message(body, stamp="", archived=False):
     if stamp:
         delay = ET.SubElement(msg.xml, "{urn:xmpp:delay}delay")
         delay.set("stamp", stamp)
+    if origin:
+        origin_id = ET.SubElement(msg.xml, "{urn:xmpp:sid:0}origin-id")
+        origin_id.set("id", origin)
     if archived:
         ET.SubElement(msg.xml, "{urn:xmpp:mam:tmp}archived")
     return msg
@@ -74,13 +77,15 @@ c = client()
 events = []
 c.on("groupchat_message", lambda *a, **k: events.append((a, k)))
 
-c._on_groupchat_message(message("old one", "2026-10-23T18:26:48Z"))
+c._on_groupchat_message(message("old one", "2026-10-23T18:26:48Z",
+                                origin="origin-1"))
 args, kwargs = events[-1]
 check("a delay-only replay is classified as history", args[4] is True)
 check("its original timestamp is used",
       args[3] == "2026-10-23T18:26:48.000000Z")
 check("it carries no archive id (the room has no MAM)",
       args[5] == "")
+check("the origin-id becomes the stable id", args[7] == "origin-1")
 
 c._on_groupchat_message(message("live now"))
 args, kwargs = events[-1]

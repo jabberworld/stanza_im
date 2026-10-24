@@ -6351,9 +6351,14 @@ class JabberClient:
         archived = bool(ts)
         archive_id = _archive_result_id(msg) if archived else ""
         reply_to, reply_id = _reply_reference(msg)
-        stable_id = _stanza_id(msg, room)
+        # Prefer the sender's origin-id: old MUC servers replay their history
+        # without a <stanza-id>, and the replay/MAM/live copies of one message
+        # must share a stable id so the history dedups them.
+        stable_id = _origin_id(msg) or _stanza_id(msg, room)
         if not stable_id and archived and archive_id:
             stable_id = archive_id
+        if not stable_id:
+            stable_id = str(msg.get("id") or "")
         if stable_id:
             self._mds_track(room, msg, stable_id)
         media = message_media(msg)

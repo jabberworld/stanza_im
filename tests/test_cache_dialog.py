@@ -89,6 +89,9 @@ check("clear buttons are flat icon buttons in the OMEMO style",
           for button in dialog._buttons.values()))
 check("the full hint stays in the tooltip",
       dialog._table.item(1, 1).toolTip() == long_hint)
+check("the clear button tooltip explains the cache",
+      all(button.toolTip() == entry.warning
+          for entry, button in zip(entries, dialog._buttons.values())))
 dialog.show()
 app.processEvents()
 check("rows stay compact with a long hint even on first display",
