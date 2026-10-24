@@ -3330,6 +3330,11 @@ class ChatWidget(QtWidgets.QWidget):
         status.setMouseTracking(True)
         layout.addWidget(status)
         text = _FadeLabel("", row)
+        # A non-empty application stylesheet makes Qt give a newly created
+        # child the *application* font instead of the list's font, so the nick
+        # used to stay at the default size while the headers scaled.  Set the
+        # participant font explicitly.
+        text.set_participant_font(self._users_list.font())
         layout.addWidget(text, 1)
         client_label = None
         if self._show_muc_clients:

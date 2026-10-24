@@ -268,6 +268,30 @@ check("participant section headers follow the participant font",
       and _app_list.header_font().bold())
 app.setStyleSheet("")
 
+# The participant nick must also scale when an application stylesheet is set:
+# Qt otherwise gives the newly created label the application font, not the
+# list's font (headers are created with an explicit item font and scaled).
+from PyQt6 import QtGui  # noqa: E402
+
+from stanza_im.ui.chat_widget import ChatWidget, _FadeLabel  # noqa: E402
+from stanza_im.ui.chat_themes import ChatThemeFactory  # noqa: E402
+
+app.setStyleSheet("QMenuBar, QMenu { font-size: 12pt; }")
+_muc = ChatWidget("room@conference.test", "Room", ChatThemeFactory(),
+                  is_muc=True)
+_muc.set_participant_font("", 22)
+_muc.update_muc_users([{"nick": "alice", "show": "online",
+                        "role": "participant", "affiliation": "member"}],
+                      self_nick="me")
+_row = next(iter(_muc._muc_rows.values()))
+check("a participant nick follows the list font under an app stylesheet",
+      _row["label"]._effective_font.pointSize() == 22)
+_muc._on_participant_font_zoom(26)
+_row = next(iter(_muc._muc_rows.values()))
+check("a participant nick follows a Ctrl+wheel zoom under an app stylesheet",
+      _row["label"]._effective_font.pointSize() == 26)
+app.setStyleSheet("")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
