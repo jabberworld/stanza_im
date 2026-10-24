@@ -2849,7 +2849,14 @@ codec with a keyframe on the next frame) and `set_video_quality`
 (`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). The
 choice is session-only (defaults come from the Calls preferences); the codec
 cannot change during a call (that needs renegotiation) and audio is only
-changed in the settings. A peer that missed the initial keyframe (a green
+changed in the settings. An **info** button (`info.svg`) opens a live popup:
+the outgoing and incoming codec and resolution plus the target and measured
+bitrates. The codecs come from the negotiated answer SDP
+(`media.sdp_media_codecs`), the outgoing size from the capture track and the
+incoming size from the decoded remote frame; the actual rates are sampled every
+2 s from the sender/transport octet counters (`AiortcCall.sample_stats`).
+aiortc has no per-stream received bytes, so the incoming figure is the
+transport total. A Muji room shows its first session plus the session count. A peer that missed the initial keyframe (a green
 picture until the local video was toggled) is recovered by
 `request_video_keyframe`: the VP8/H264 encoder shim forces the next frame to be
 an I-frame (`_stanza_keyframe`, requested when the media connection becomes

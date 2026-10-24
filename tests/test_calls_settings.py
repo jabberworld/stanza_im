@@ -7,6 +7,7 @@ import inspect
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_calls_")
@@ -324,6 +325,90 @@ check("the track remembers the sent resolution",
 check("media connection requests a keyframe",
       "request_video_keyframe" in inspect.getsource(
           media.AiortcCall._log_state))
+
+# 8. call info: negotiated codec, both resolutions, target/actual bitrate --
+SDP = """v=0
+m=audio 9 UDP/TLS/RTP/SAVPF 111 0
+a=rtpmap:111 opus/48000/2
+a=rtpmap:0 PCMU/8000
+m=video 9 UDP/TLS/RTP/SAVPF 96 104
+a=rtpmap:96 VP8/90000
+a=rtpmap:104 H264/90000
+"""
+check("the answer codecs are parsed",
+      media.sdp_media_codecs(SDP) == {"audio": "opus", "video": "VP8"})
+check("an empty SDP has no codecs", media.sdp_media_codecs("") == {})
+
+call = media.AiortcCall.__new__(media.AiortcCall)
+call._remote_sdp = SDP
+call._remote_kind = "answer"
+call._local_sdp = ""
+call._remote_size = (640, 480)
+
+
+class _LocalTrack:
+    def last_size(self):
+        return (1280, 720)
+
+
+call._local_video = _LocalTrack()
+call._stats = {"out_video_bps": 420000, "in_total_bps": 380000}
+call._sender_encoder = lambda kind: None
+info = call.quality_info()
+check("quality_info reports the negotiated codecs",
+      info["audio_codec"] == "opus" and info["video_codec"] == "VP8")
+check("quality_info reports both resolutions",
+      (info["out_width"], info["out_height"]) == (1280, 720)
+      and (info["in_width"], info["in_height"]) == (640, 480))
+check("quality_info reports the target and actual bitrates",
+      info["video_kbps"] == 500 and info["audio_kbps"] == 96
+      and info["out_video_bps"] == 420000 and info["in_bps"] == 380000)
+
+
+class _InfoSession:
+    def __init__(self, sid, room=""):
+        self.sid = sid
+        self.muji_room = room
+        self.call = SimpleNamespace(quality_info=lambda: {"video_codec": "VP8"})
+
+
+mgr2 = JingleRtpManager.__new__(JingleRtpManager)
+mgr2.sessions = {"one": _InfoSession("one"),
+                 "two": _InfoSession("two", "room@conf.example"),
+                 "three": _InfoSession("three", "room@conf.example")}
+check("quality_info for a single call", mgr2.quality_info("one")["sessions"] == 1)
+room_info = mgr2.quality_info("room@conf.example")
+check("quality_info for a Muji room counts its sessions",
+      room_info["sessions"] == 2 and room_info["video_codec"] == "VP8")
+check("quality_info without a call is empty",
+      mgr2.quality_info("missing") is None)
+
+# The call windows build the info menu from the provider.
+info_window = CallWindow(
+    "sid-info", "Peer", video=True,
+    info_provider=lambda key: {
+        "video_codec": "VP8", "audio_codec": "opus",
+        "out_width": 1280, "out_height": 720,
+        "in_width": 640, "in_height": 480,
+        "video_kbps": 500, "audio_kbps": 96,
+        "out_video_bps": 420000, "in_bps": 380000,
+        "sessions": 1,
+    })
+info_window._refresh_info()
+info_texts = [action.text() for action in
+              info_window._info_btn.menu().actions()]
+check("the call info menu lists outgoing/incoming/audio",
+      any("VP8" in text and "1280×720" in text and "Outgoing" in text
+          for text in info_texts)
+      and any("640×480" in text and "Incoming" in text
+              for text in info_texts)
+      and any("opus" in text and "Audio" in text for text in info_texts))
+info_window.close()
+
+check("the main window provides the info to the windows",
+      "quality_info(key)" in inspect.getsource(MainWindow._call_quality_info)
+      and "info_provider=self._call_quality_info"
+      in inspect.getsource(MainWindow._open_call_window))
 
 print()
 if FAILURES:

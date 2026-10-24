@@ -763,6 +763,25 @@ class JingleRtpManager:
         logger.info("CALL quality %s: bitrate=%s height=%s (%d session(s))",
                     key, video_kbps, max_height, len(sessions))
 
+    def quality_info(self, key: str) -> dict | None:
+        """Codec/resolution/bitrate of a call (or the first Muji session)."""
+        session = self.sessions.get(key)
+        count = 1
+        if session is None:
+            matches = [item for item in self.sessions.values()
+                       if getattr(item, "muji_room", "") == key]
+            session = matches[0] if matches else None
+            count = len(matches)
+        if session is None or session.call is None:
+            return None
+        try:
+            info = session.call.quality_info()
+        except Exception:  # noqa: BLE001 - diagnostics must not break the UI
+            logger.debug("CALL quality_info failed", exc_info=True)
+            return None
+        info["sessions"] = count
+        return info
+
     async def _session_timeout(self, sid: str, timeout: float = 45.0) -> None:
         """Fail an outgoing call that never received a session-accept."""
         await asyncio.sleep(timeout)

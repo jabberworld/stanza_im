@@ -5003,6 +5003,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 getattr(calls, "video_max_height", 0) or 0),
         }
 
+    def _call_quality_info(self, key: str):
+        """Codec/resolution/bitrate snapshot for the call info popup."""
+        if self._client is None:
+            return None
+        try:
+            return self._client.rtp_calls.quality_info(key)
+        except Exception:  # noqa: BLE001 - diagnostics must not break the UI
+            return None
+
     def _call_quality_defaults(self) -> tuple[int, int]:
         """The configured video bitrate/height for the live quality menu."""
         calls = getattr(self._config, "calls", None)
@@ -5261,7 +5270,8 @@ class MainWindow(QtWidgets.QMainWindow):
         window = CallWindow(sid, self._call_display_name(peer), video,
                             avatar_path=self._call_avatar(peer),
                             avatar_radius=self._call_avatar_radius(),
-                            video_bitrate=bitrate, max_height=max_height)
+                            video_bitrate=bitrate, max_height=max_height,
+                            info_provider=self._call_quality_info)
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.video_mode_requested.connect(self._on_video_mode_requested)
@@ -5509,7 +5519,8 @@ class MainWindow(QtWidgets.QMainWindow):
             bitrate, max_height = self._call_quality_defaults()
             window = MujiCallWindow(room, self_nick=nick,
                                     video_bitrate=bitrate,
-                                    max_height=max_height)
+                                    max_height=max_height,
+                                    info_provider=self._call_quality_info)
             window.set_avatar_radius(
                 getattr(self._config.appearance, "avatar_radius", 20))
             window.leave.connect(self._client.leave_muji)

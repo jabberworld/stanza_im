@@ -54,6 +54,79 @@ _QUALITY_HEIGHTS = ((0, "call_quality_source"), (1080, "call_quality_1080"),
                     (360, "call_quality_360"))
 
 
+def entire_unknown() -> str:
+    return tr("call_info_unknown")
+
+
+def _fmt_kbps(value) -> str:
+    if value is None:
+        return entire_unknown()
+    return tr("call_info_kbps", value=int(round(float(value))))
+
+
+def _fmt_size(width, height) -> str:
+    if not width or not height:
+        return entire_unknown()
+    return "%d×%d" % (int(width), int(height))
+
+
+def _info_button(parent, provider, key):
+    """An icon-only popup with the negotiated codec/resolution/bitrate."""
+    button = QtWidgets.QToolButton(parent)
+    button.setIcon(_icon("info"))
+    button.setIconSize(QtCore.QSize(20, 20))
+    button.setToolTip(tr("call_info"))
+    button.setPopupMode(
+        QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+    menu = QtWidgets.QMenu(button)
+
+    def refresh():
+        menu.clear()
+        try:
+            info = provider(key) if provider is not None else None
+        except Exception:  # noqa: BLE001 - diagnostics only
+            info = None
+        if not info:
+            action = menu.addAction(tr("call_info_unavailable"))
+            action.setEnabled(False)
+            return
+        out_line = " · ".join([
+            info.get("video_codec") or entire_unknown(),
+            _fmt_size(info.get("out_width"), info.get("out_height")),
+            tr("call_info_target", kbps=_fmt_kbps(info.get("video_kbps"))),
+        ])
+        actual = info.get("out_video_bps")
+        if actual is not None:
+            out_line += " (" + tr("call_info_actual",
+                                  kbps=_fmt_kbps(actual / 1000)) + ")"
+        menu.addAction(tr("call_info_out") + ": " + out_line).setEnabled(False)
+        in_bps = info.get("in_bps")
+        in_line = " · ".join([
+            info.get("video_codec") or entire_unknown(),
+            _fmt_size(info.get("in_width"), info.get("in_height")),
+            _fmt_kbps(in_bps / 1000 if in_bps is not None else None),
+        ])
+        menu.addAction(tr("call_info_in") + ": " + in_line).setEnabled(False)
+        if info.get("audio_codec"):
+            menu.addAction(tr("call_info_audio") + ": " + " · ".join([
+                info.get("audio_codec"),
+                _fmt_kbps(info.get("audio_kbps")),
+            ])).setEnabled(False)
+        sessions = int(info.get("sessions") or 0)
+        if sessions > 1:
+            menu.addAction(tr("call_info_sessions",
+                              n=sessions)).setEnabled(False)
+
+    menu.aboutToShow.connect(refresh)
+    timer = QtCore.QTimer(menu)
+    timer.setInterval(1000)
+    timer.timeout.connect(refresh)
+    menu.aboutToShow.connect(timer.start)
+    menu.aboutToHide.connect(timer.stop)
+    button.setMenu(menu)
+    return button, refresh
+
+
 def _quality_button(parent, bitrate: int, height: int, on_change):
     """An icon-only menu button for the live video bitrate/resolution."""
     button = QtWidgets.QToolButton(parent)
@@ -231,12 +304,14 @@ class CallWindow(QtWidgets.QWidget):
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
                  avatar_path: str | None = None, avatar_radius: int = 100,
-                 video_bitrate: int = 500, max_height: int = 0):
+                 video_bitrate: int = 500, max_height: int = 0,
+                 info_provider=None):
         super().__init__(parent)
         self.sid = sid
         self.peer = peer
         self._quality_bitrate = int(video_bitrate or 0)
         self._quality_height = int(max_height or 0)
+        self._info_provider = info_provider
         self._video = video
         self.setWindowTitle(tr("call_window_title", peer=peer))
         self.setMinimumSize(420, 340)
@@ -319,6 +394,9 @@ class CallWindow(QtWidgets.QWidget):
             self, self._quality_bitrate, self._quality_height,
             self._on_quality)
         controls.addWidget(self._quality_btn)
+        self._info_btn, self._refresh_info = _info_button(
+            self, info_provider, sid)
+        controls.addWidget(self._info_btn)
         controls.addStretch(1)
 
         self._hangup_btn = QtWidgets.QToolButton(self)
@@ -419,11 +497,13 @@ class MujiCallWindow(QtWidgets.QWidget):
     quality_requested = QtCore.pyqtSignal(str, int, int)     # room, kbps, px
 
     def __init__(self, room: str, self_nick: str = "", parent=None,
-                 video_bitrate: int = 500, max_height: int = 0):
+                 video_bitrate: int = 500, max_height: int = 0,
+                 info_provider=None):
         super().__init__(parent)
         self.room = room
         self._quality_bitrate = int(video_bitrate or 0)
         self._quality_height = int(max_height or 0)
+        self._info_provider = info_provider
         self.self_nick = self_nick or ""
         self.setWindowTitle(tr("muji_window_title", room=room))
         self.setMinimumSize(560, 400)
@@ -517,6 +597,9 @@ class MujiCallWindow(QtWidgets.QWidget):
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._video_btn)
         controls.addWidget(self._quality_btn)
+        self._info_btn, self._refresh_info = _info_button(
+            self, info_provider, room)
+        controls.addWidget(self._info_btn)
         controls.addStretch(1)
         controls.addWidget(self._leave_btn)
         right_layout.addLayout(controls)

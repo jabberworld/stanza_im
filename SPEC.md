@@ -3373,7 +3373,14 @@ client.leave_muji(room)
   `JingleRtpManager.set_call_video_quality` to the live encoders
   (`target_bitrate`, aiortc recreates the codec with a keyframe) and the
   capture track (downscale only). It is session-only; audio changes are
-  pre-call and a codec change needs renegotiation. A green peer view (a missed
+  pre-call and a codec change needs renegotiation. An info button
+  (`info.svg`) shows the outgoing/incoming codec and resolution and the
+  target/actual bitrates: the codecs are parsed from the negotiated answer
+  (`sdp_media_codecs`), the sizes come from the capture track and the decoded
+  remote frame, and the actual rates from the sender/transport octet counters
+  sampled every 2 s (aiortc exposes no per-stream received bytes, so the
+  incoming figure is the transport total); Muji shows the first session plus
+  its session count. A green peer view (a missed
   initial keyframe) recovers through `request_video_keyframe`: the VP8/H264
   encoder shim forces the next I-frame, requested when the media connects,
   after a source/resolution change and after the first real video frame; black

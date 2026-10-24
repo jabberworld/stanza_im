@@ -116,6 +116,37 @@ def request_video_keyframe(reason: str = "") -> int:
     return count
 
 
+def sdp_media_codecs(sdp: str) -> dict:
+    """The negotiated codec per media kind from an SDP answer.
+
+    The first payload of each ``m=`` line is the codec selected for that
+    stream; the name comes from the matching ``a=rtpmap``.
+    """
+    first_payload: dict[str, str] = {}
+    rtpmap: dict[tuple[str, str], str] = {}
+    kind = ""
+    for raw in str(sdp or "").splitlines():
+        line = raw.strip()
+        if line.startswith("m="):
+            parts = line[2:].split()
+            kind = parts[0] if parts else ""
+            if kind and len(parts) > 3 and kind not in first_payload:
+                first_payload[kind] = parts[3]
+        elif line.startswith("a=rtpmap:") and kind:
+            value = line[len("a=rtpmap:"):]
+            payload, _, rest = value.partition(" ")
+            name = rest.split("/", 1)[0] if rest else ""
+            if payload and name:
+                rtpmap[(kind, payload)] = name
+    result = {}
+    for media in ("audio", "video"):
+        payload = first_payload.get(media, "")
+        name = rtpmap.get((media, payload), "")
+        if name:
+            result[media] = name
+    return result
+
+
 def _ordered_codecs(kind: str, choice: str) -> list:
     """Capabilities reordered with the preferred codec first (``auto`` empty).
 
@@ -1223,6 +1254,14 @@ if HAS_AIORTC:
             self._tasks: list[asyncio.Task] = []
             self._local_audio = None
             self._local_video = None
+            self._local_sdp = ""
+            self._remote_sdp = ""
+            self._remote_kind = ""
+            self._remote_size = None
+            self._stats: dict[str, int | None] = {}
+            self._stats_prev: dict[str, tuple[float, int]] = {}
+            self._stats_task = None
+            self._closed = False
             servers = _valid_ice_servers(ice_servers)
             logger.info("CALL creating RTCPeerConnection, ICE servers=%s",
                         [s.get("urls") for s in servers])
@@ -1239,6 +1278,8 @@ if HAS_AIORTC:
         def _log_state(self):
             state = getattr(self.pc, "connectionState", "")
             logger.info("CALL connection state: %s", state)
+            if state == "connected":
+                self._start_stats()
             if state == "connected" and self._local_video is not None:
                 # A peer that missed the initial keyframe shows a green
                 # picture until it is forced to decode a fresh I-frame.
@@ -1305,6 +1346,7 @@ if HAS_AIORTC:
                     # Normal at call end (MediaStreamError) — no traceback.
                     logger.debug("CALL video track ended")
                     return
+                self._remote_size = (frame.width, frame.height)
                 image = _frame_to_qimage(frame)
                 if image is not None and self.on_remote_track:
                     self.on_remote_track("frame", image)
@@ -1379,6 +1421,99 @@ if HAS_AIORTC:
             if self._local_video is not None:
                 self._local_video.set_source(mode, region)
 
+        def _answer_sdp(self) -> str:
+            """The SDP that carries the negotiated codecs (the answer)."""
+            if self._remote_kind == "answer" and self._remote_sdp:
+                return self._remote_sdp
+            return self._local_sdp
+
+        def _sender_encoder(self, kind: str):
+            try:
+                for sender in self.pc.getSenders():
+                    if getattr(sender, "kind", "") == kind:
+                        return getattr(sender, "_RTCRtpSender__encoder", None)
+            except Exception:  # noqa: BLE001 - aiortc internals
+                pass
+            return None
+
+        def _start_stats(self) -> None:
+            if self._stats_task is not None or self._closed:
+                return
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return
+            self._stats_task = loop.create_task(self._stats_loop())
+
+        async def _stats_loop(self) -> None:
+            try:
+                while not self._closed:
+                    await self.sample_stats()
+                    await asyncio.sleep(2.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - stats must never break the call
+                logger.debug("CALL stats loop stopped", exc_info=True)
+
+        async def sample_stats(self) -> None:
+            """Sample the RTP octet counters and derive the current bitrates."""
+            now = time.monotonic()
+            totals: dict[str, tuple[float, int]] = {}
+            try:
+                senders = list(self.pc.getSenders())
+            except Exception:  # noqa: BLE001
+                senders = []
+            for sender in senders:
+                kind = getattr(sender, "kind", "")
+                try:
+                    report = await sender.getStats()
+                except Exception:  # noqa: BLE001
+                    continue
+                for stat in report.values():
+                    stype = getattr(stat, "type", "")
+                    if stype == "outbound-rtp":
+                        totals["out_" + kind] = (
+                            now, int(getattr(stat, "bytesSent", 0) or 0))
+                    elif stype == "transport":
+                        totals["in_total"] = (
+                            now, int(getattr(stat, "bytesReceived", 0) or 0))
+            for key, (stamp, total) in totals.items():
+                previous = self._stats_prev.get(key)
+                if previous is not None and stamp > previous[0]:
+                    bits = max(0, total - previous[1]) * 8
+                    self._stats[key + "_bps"] = int(
+                        bits / (stamp - previous[0]))
+                self._stats_prev[key] = (stamp, total)
+
+        def quality_info(self) -> dict:
+            """Codec/resolution/bitrate snapshot for the call info popup."""
+            codecs = sdp_media_codecs(self._answer_sdp())
+            defaults = media_defaults()
+            out_size = (self._local_video.last_size()
+                        if self._local_video is not None else None)
+            video_encoder = self._sender_encoder("video")
+            audio_encoder = self._sender_encoder("audio")
+            video_target = getattr(video_encoder, "target_bitrate", None)
+            audio_target = getattr(getattr(audio_encoder, "codec", None),
+                                   "bit_rate", None)
+            return {
+                "audio_codec": codecs.get("audio", ""),
+                "video_codec": codecs.get("video", ""),
+                "out_width": out_size[0] if out_size else None,
+                "out_height": out_size[1] if out_size else None,
+                "in_width": (self._remote_size[0]
+                             if self._remote_size else None),
+                "in_height": (self._remote_size[1]
+                              if self._remote_size else None),
+                "video_kbps": int(round((video_target
+                                         or defaults["video_bitrate"]) / 1000)),
+                "audio_kbps": int(round((audio_target
+                                         or defaults["audio_bitrate"]) / 1000)),
+                "out_video_bps": self._stats.get("out_video_bps"),
+                "out_audio_bps": self._stats.get("out_audio_bps"),
+                "in_bps": self._stats.get("in_total_bps"),
+            }
+
         def _apply_codec_preferences(self, kind: str) -> None:
             """Prefer the configured codec for the transceivers of *kind*."""
             ordered = _ordered_codecs(kind, self._codec_choices.get(kind, ""))
@@ -1406,19 +1541,23 @@ if HAS_AIORTC:
             self._apply_codec_preferences("video")
             offer = await self.pc.createOffer()
             await self.pc.setLocalDescription(offer)
-            logger.debug("CALL local offer SDP:\n%s", self.pc.localDescription.sdp)
-            return self.pc.localDescription.sdp
+            self._local_sdp = self.pc.localDescription.sdp
+            logger.debug("CALL local offer SDP:\n%s", self._local_sdp)
+            return self._local_sdp
 
         async def create_answer(self) -> str:
             self._apply_codec_preferences("audio")
             self._apply_codec_preferences("video")
             answer = await self.pc.createAnswer()
             await self.pc.setLocalDescription(answer)
-            logger.debug("CALL local answer SDP:\n%s", self.pc.localDescription.sdp)
-            return self.pc.localDescription.sdp
+            self._local_sdp = self.pc.localDescription.sdp
+            logger.debug("CALL local answer SDP:\n%s", self._local_sdp)
+            return self._local_sdp
 
         async def set_remote(self, sdp: str, kind: str = "offer") -> None:
             logger.debug("CALL remote %s SDP:\n%s", kind, sdp)
+            self._remote_sdp = str(sdp or "")
+            self._remote_kind = kind
             await self.pc.setRemoteDescription(RTCSessionDescription(sdp, kind))
 
         async def add_ice(self, cand: dict, sdp_mid: str = "",
@@ -1545,6 +1684,10 @@ if HAS_AIORTC:
 
         def close(self):
             logger.info("CALL closing peer connection")
+            self._closed = True
+            if self._stats_task is not None:
+                self._stats_task.cancel()
+                self._stats_task = None
             for task in self._tasks:
                 task.cancel()
             self._tasks.clear()
