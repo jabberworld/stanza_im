@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.core import discovery, history, roster_cache, vcard_cache
 from stanza_im.i18n import load as i18n_load
@@ -61,10 +61,11 @@ def clear_beta():
     os.remove(beta)
 
 
+long_hint = "a verbose hint that would wrap the row " * 8
 entries = [
     CacheEntry("alpha", "Alpha", "the alpha cache", "Clear alpha?",
                lambda: dir_size(alpha), clear_alpha),
-    CacheEntry("beta", "Beta", "the beta cache", "Clear beta?",
+    CacheEntry("beta", "Beta", long_hint, "Clear beta?",
                lambda: file_size(beta), clear_beta),
     CacheEntry("none", "None", "not there", "Clear none?",
                lambda: None, lambda: cleared.append("none")),
@@ -78,6 +79,21 @@ check("the table has one row per cache",
       dialog._table.rowCount() == 3
       and dialog._table.item(0, 0).text() == "Alpha")
 check("each row carries a clear button", len(dialog._buttons) == 3)
+check("the table keeps its four columns", dialog._table.columnCount() == 4)
+check("the hint column elides instead of wrapping",
+      dialog._table.wordWrap() is False
+      and dialog._table.textElideMode() == QtCore.Qt.TextElideMode.ElideRight)
+check("clear buttons are flat icon buttons in the OMEMO style",
+      all(isinstance(button, QtWidgets.QToolButton)
+          and button.autoRaise() and not button.icon().isNull()
+          for button in dialog._buttons.values()))
+check("the full hint stays in the tooltip",
+      dialog._table.item(1, 1).toolTip() == long_hint)
+dialog.show()
+app.processEvents()
+check("rows stay compact with a long hint even on first display",
+      all(dialog._table.rowHeight(row) <= 34
+          for row in range(dialog._table.rowCount())))
 
 # A declined confirmation clears nothing.
 _orig_question = QtWidgets.QMessageBox.question

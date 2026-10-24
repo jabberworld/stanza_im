@@ -696,7 +696,10 @@ off on disconnect/auth/TLS failure) plus «О кэше», which needs no session
   roster cache is kept absent for the session (`_roster_cache_cleared`) and
   recreated at the next login; clearing the history wipes the SQLite/JSONL
   store, resets the local unread/read state and clears every open tab (the
-  server archive is untouched). QtWebEngine is never imported just for the
+  server archive is untouched). Rows are single-line (the hint elides, its full
+  text is the tooltip) with `ResizeToContents` row heights re-fitted on the
+  first show, and the clear action is a flat icon button (`process-stop.png`)
+  in the OMEMO manager style. QtWebEngine is never imported just for the
   dialog: its HTTP cache is cleared through the profile when already loaded,
   otherwise the standard `QtWebEngine/Default` cache directory is removed.
 

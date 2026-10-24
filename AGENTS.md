@@ -3214,8 +3214,13 @@ text is kept. Returning activity (`eventFilter`) resumes
   history (`history.clear_all()`: closes the pooled connections, removes the
   SQLite/JSONL files, then resets the unread/read state and `_mds_local`, clears
   every open tab via `ChatWidget.reset_history()` and closes the History
-  Manager; the server archive is untouched). The dialog is parented to the main
-  window and kept as `_cache_dialog`.
+  Manager; the server archive is untouched). Rows are one line each (the hint
+  column elides, the full text stays in its tooltip; the vertical header uses
+  `ResizeToContents` and the first `showEvent` re-fits the rows after the real
+  column widths are known) and each row carries a flat, frameless
+  `QToolButton` (`process-stop.png`) like the OMEMO device manager instead of a
+  text button. The dialog is parented to the main window and kept as
+  `_cache_dialog`.
   [`tests/test_cache_dialog.py`]
 - **Privacy lists & blocking (XEP-0016/0191/0377)**: Preferences → Connection →
   «Подключение» carries two buttons gated on the account domain's disco

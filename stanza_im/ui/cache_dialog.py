@@ -14,9 +14,10 @@ import sys
 from dataclasses import dataclass
 from typing import Callable
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.include.constants import find_icon
 from stanza_im.include.media import human_size
 
 
@@ -118,7 +119,12 @@ class CacheDialog(QtWidgets.QDialog):
             QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self._table.setEditTriggers(
             QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.setWordWrap(True)
+        # One line per cache: a long hint elides (the tooltip keeps it whole)
+        # instead of wrapping the whole row.
+        self._table.setWordWrap(False)
+        self._table.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
+        self._table.verticalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(
             0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
@@ -187,15 +193,33 @@ class CacheDialog(QtWidgets.QDialog):
             self._table.setItem(row, 0, name)
             self._table.setItem(row, 1, hint)
             self._table.setItem(row, 2, size_item)
-            button = QtWidgets.QPushButton(tr("cache_clear"))
-            button.setToolTip(entry.warning)
+            button = QtWidgets.QToolButton()
+            icon = QtGui.QIcon(find_icon("process-stop.png"))
+            if not icon.isNull():
+                button.setIcon(icon)
+            button.setIconSize(QtCore.QSize(16, 16))
+            button.setFixedSize(24, 24)
+            button.setAutoRaise(True)
+            button.setToolTip(tr("cache_clear"))
             button.clicked.connect(
                 lambda _checked=False, e=entry: self.clear_entry(e))
-            self._table.setCellWidget(row, 3, button)
+            holder = QtWidgets.QWidget(self._table)
+            cell = QtWidgets.QHBoxLayout(holder)
+            cell.setContentsMargins(0, 0, 0, 0)
+            cell.addStretch(1)
+            cell.addWidget(button)
+            cell.addStretch(1)
+            self._table.setCellWidget(row, 3, holder)
             self._buttons[entry.key] = button
-        self._table.resizeRowsToContents()
         self._total_label.setText(
             tr("cache_total", size=human_size(self.total_size) or "0 B"))
+
+    def showEvent(self, event):  # noqa: N802 - Qt override
+        super().showEvent(event)
+        # ``refresh`` runs before the first layout: the hint column is still
+        # narrow there, so the rows would be measured against wrapped text.
+        # Re-fit them once the real widths are in place.
+        QtCore.QTimer.singleShot(0, self._table.resizeRowsToContents)
 
     def clear_entry(self, entry: CacheEntry) -> bool:
         """Confirm and clear one cache; returns whether it was cleared."""
