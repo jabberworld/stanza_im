@@ -98,6 +98,24 @@ def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
                     pass
 
 
+def request_video_keyframe(reason: str = "") -> int:
+    """Ask the live video encoders for a keyframe (fixes a green peer view)."""
+    count = 0
+    for encoder in list(_VIDEO_ENCODERS):
+        try:
+            encoder._stanza_keyframe = True
+            count += 1
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+    if count:
+        logger.info("CALL keyframe requested (%s), %d encoder(s)",
+                    reason or "manual", count)
+    else:
+        logger.debug("CALL keyframe requested (%s), no live encoder yet",
+                     reason or "manual")
+    return count
+
+
 def _ordered_codecs(kind: str, choice: str) -> list:
     """Capabilities reordered with the preferred codec first (``auto`` empty).
 
@@ -638,6 +656,8 @@ if HAS_AIORTC:
             self._screen_max_height = max(0, int(screen_max_height or 0))
             self._max_height = max(0, int(max_height or 0))
             self._camera_mode = str(camera_mode or "")
+            self._last_size = None
+            self._last_open_attempt = 0.0
             self._last_grab = 0.0
             self._last_image = None
             self._open_camera()
@@ -655,6 +675,7 @@ if HAS_AIORTC:
         def _open_camera(self):
             if self._container is not None or av is None:
                 return
+            self._last_open_attempt = time.monotonic()
             path = self._device_path()
             options = _v4l2_open_options(self._camera_mode)
             try:
@@ -688,11 +709,34 @@ if HAS_AIORTC:
         def set_max_height(self, height: int) -> None:
             """Cap the outgoing camera height (0 = the source size)."""
             self._max_height = max(0, int(height or 0))
+            self._schedule_keyframe("camera-height")
 
         def set_screen_box(self, width: int, height: int) -> None:
             """Cap the outgoing screen-share resolution (0 = the source)."""
             self._screen_max_width = max(0, int(width or 0))
             self._screen_max_height = max(0, int(height or 0))
+            self._schedule_keyframe("screen-box")
+
+        @staticmethod
+        def _schedule_keyframe(reason: str) -> None:
+            try:
+                asyncio.get_event_loop().call_later(
+                    0.3, request_video_keyframe, reason)
+            except Exception:  # noqa: BLE001 - no loop in tests
+                pass
+
+        def _note_size(self, frame) -> None:
+            """Remember the sent frame size; keyframe once the video starts."""
+            if frame is None:
+                return
+            first = self._last_size is None
+            self._last_size = (frame.width, frame.height)
+            if first:
+                self._schedule_keyframe("first-video-frame")
+
+        def last_size(self):
+            """The last sent frame size (width, height) or None."""
+            return self._last_size
 
         def set_source(self, mode: str, region=None) -> None:
             """Switch the outgoing video between the camera and a screen area.
@@ -704,6 +748,8 @@ if HAS_AIORTC:
             self._region = tuple(region) if region else None
             self._last_image = None
             self._last_grab = 0.0
+            self._last_size = None
+            self._schedule_keyframe("source-change")
             if self._source == "camera":
                 self._open_camera()
             logger.info("CALL video source -> %s%s", self._source,
@@ -720,7 +766,7 @@ if HAS_AIORTC:
                 return frame
 
             def _black():
-                return _stamp(_black_frame())
+                return _stamp(_black_frame(self._last_size))
 
             if self._stopped or not self._enabled:
                 await asyncio.sleep(0.05)
@@ -729,8 +775,12 @@ if HAS_AIORTC:
                 frame = self._screen_frame()
                 if frame is None:
                     return _black()
+                self._note_size(frame)
                 self._emit_local(frame)
                 return _stamp(frame)
+            if self._container is None and (time.monotonic()
+                                            - self._last_open_attempt > 2.0):
+                self._open_camera()
             if self._container is None or self._stream is None:
                 await asyncio.sleep(0.05)
                 return _black()
@@ -741,9 +791,10 @@ if HAS_AIORTC:
                 self._stopped = True
                 return _black()
             if frame is None:
-                frame = _black_frame()
+                frame = _black_frame(self._last_size)
             else:
                 frame = _limit_video_frame(frame, self._max_height)
+                self._note_size(frame)
                 # Surface the real camera frame for the local self-preview
                 # (black frames are not mirrored to the UI).
                 self._emit_local(frame)
@@ -799,8 +850,12 @@ def _silence(samples: int, channels: int = AUDIO_CHANNELS):
     return frame
 
 
-def _black_frame():
-    frame = av.VideoFrame(320, 240, "yuv420p")
+def _black_frame(size=None):
+    """A black frame; *size* keeps the last real frame's dimensions."""
+    width, height = size or (320, 240)
+    width = max(2, int(width)) & ~1
+    height = max(2, int(height)) & ~1
+    frame = av.VideoFrame(width, height, "yuv420p")
     for plane in frame.planes:
         plane.update(b"\x00" * plane.buffer_size)
     return frame
@@ -1038,6 +1093,23 @@ def _patch_encoder_defaults(encoder_cls, kind: str) -> None:
     encoder_cls._stanza_defaults_patched = True
 
 
+def _patch_video_encoder_keyframes(encoder_cls) -> None:
+    """Let ``request_video_keyframe`` force the next encoded frame to be an I-frame."""
+    if encoder_cls is None or getattr(encoder_cls, "_stanza_keyframe_patched",
+                                      False):
+        return
+    original_encode = encoder_cls.encode
+
+    def encode(self, frame, force_keyframe=False):
+        if getattr(self, "_stanza_keyframe", False):
+            force_keyframe = True
+            self._stanza_keyframe = False
+        return original_encode(self, frame, force_keyframe)
+
+    encoder_cls.encode = encode
+    encoder_cls._stanza_keyframe_patched = True
+
+
 def _install_encoder_defaults() -> None:
     """Patch the Opus/VP8/H264 encoders with the configured bitrates."""
     if not HAS_AIORTC:
@@ -1052,6 +1124,9 @@ def _install_encoder_defaults() -> None:
             logger.debug("CALL %s is not available", module_name)
             continue
         _patch_encoder_defaults(getattr(module, class_name, None), kind)
+        if kind == "video":
+            _patch_video_encoder_keyframes(
+                getattr(module, class_name, None))
 
 
 def _install_audio_resampler_compat() -> None:
@@ -1162,11 +1237,20 @@ if HAS_AIORTC:
 
         # ── logging ───────────────────────────────────────────────
         def _log_state(self):
-            logger.info("CALL connection state: %s",
-                        getattr(self.pc, "connectionState", "?"))
+            state = getattr(self.pc, "connectionState", "")
+            logger.info("CALL connection state: %s", state)
+            if state == "connected" and self._local_video is not None:
+                # A peer that missed the initial keyframe shows a green
+                # picture until it is forced to decode a fresh I-frame.
+                try:
+                    loop = asyncio.get_event_loop()
+                    for delay in (0.5, 1.5, 3.0):
+                        loop.call_later(delay, request_video_keyframe,
+                                        "connected")
+                except Exception:  # noqa: BLE001 - no running loop
+                    pass
             if self.on_state:
-                self.on_state("connection",
-                              getattr(self.pc, "connectionState", ""))
+                self.on_state("connection", state)
 
         def _log_ice_state(self):
             logger.info("CALL ICE state: %s",

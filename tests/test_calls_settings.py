@@ -284,6 +284,47 @@ check("the main window wires both quality menus",
           getattr(MainWindow, name))
           for name in ("_open_call_window", "_on_muji_joined")))
 
+# 7. keyframes: a green peer view recovers without toggling the video ------
+class _FakeEncoder:
+    def __init__(self):
+        self.calls = []
+
+    def encode(self, frame, force_keyframe=False):
+        self.calls.append(force_keyframe)
+        return [], None
+
+
+media._patch_video_encoder_keyframes(_FakeEncoder)
+encoder = _FakeEncoder()
+encoder._stanza_keyframe = True
+encoder.encode(object())
+encoder.encode(object())
+check("a requested keyframe forces the next video frame",
+      encoder.calls == [True, False])
+
+live = _FakeEncoder()
+media._VIDEO_ENCODERS.add(live)
+check("requesting a keyframe reaches the live encoders",
+      media.request_video_keyframe("test") >= 1 and live._stanza_keyframe)
+media._VIDEO_ENCODERS.discard(live)
+
+black = media._black_frame((640, 480))
+check("a black frame keeps the last real size",
+      black.width == 640 and black.height == 480)
+black = media._black_frame()
+check("the default black frame is 320x240",
+      black.width == 320 and black.height == 240)
+
+track = media._VideoCaptureTrack.__new__(media._VideoCaptureTrack)
+track._last_size = None
+track._schedule_keyframe = lambda reason: None
+track._note_size(av.VideoFrame(1280, 720, "yuv420p"))
+check("the track remembers the sent resolution",
+      track.last_size() == (1280, 720))
+check("media connection requests a keyframe",
+      "request_video_keyframe" in inspect.getsource(
+          media.AiortcCall._log_state))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
