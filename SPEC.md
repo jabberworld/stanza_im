@@ -2210,7 +2210,12 @@ Registers XEP plugins (conditionally where noted):
   MAM page does not. A suspended tab defers it to
   `resume`, a background tab is left to its next open. A MAM query is skipped
   for a room whose known disco features lack `urn:xmpp:mam:2`, and a failed
-  query marks the room archive-less for the session (`mam_unavailable`). `history._insert`
+  query marks the room archive-less for the session (`mam_unavailable`);
+  `set_server_archive_available(False)` then disables only the server paging,
+  so scrolling up still loads the local SQLite pages (never blocked by
+  `_server_exhausted`). A near-top before the first window is applied
+  (`_initial_load_done`) does nothing, so opening a room never issues a
+  premature MAM request. `history._insert`
   repairs a stale timestamp on an archive/origin/message-id match (never the
   body), so a row stored with a wrong timestamp cannot keep the tail hidden.
 - **Partial progress**: scrolling a conversation into view records the newest

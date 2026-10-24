@@ -2713,6 +2713,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._chat_window.set_chat_title(
                 room, self._muc_display_name(room))
             chat.set_bookmarked(room in self._bookmarks)
+            features = self._muc_room_features.get(room)
+            if features is not None:
+                chat.set_server_archive_available(
+                    "urn:xmpp:mam:2" in features)
         if self._client:
             # Join-time card resolution goes through the cache-first, rate
             # limited participant queue: a 200-occupant room used to fire one
@@ -3024,6 +3028,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if features is not None:
             self._muc_room_features[room] = set(features)
             self._apply_voice_request(room)
+            chat = (self._chat_window.get_chat(room)
+                    if self._chat_window is not None else None)
+            if chat is not None:
+                chat.set_server_archive_available(
+                    "urn:xmpp:mam:2" in features)
         if room in self._muc_self_nicks and name:
             self._muc_names[room] = name
             self._apply_muc_name(room)
@@ -5910,6 +5919,11 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.set_subject(self._client.get_muc_subjects(room))
         self._chat_window.set_chat_title(room, chat_title)
         chat.set_bookmarked(room in self._bookmarks)
+        features = self._muc_room_features.get(room)
+        if features is not None:
+            chat.set_server_archive_available("urn:xmpp:mam:2" in features)
+        elif room in self._mam_unsupported:
+            chat.set_server_archive_available(False)
         if anchor:
             chat.set_restore_anchor(anchor)
             seen = {}
@@ -6487,11 +6501,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if no_archive:
             self._mam_unsupported.add(jid)
             if chat:
+                chat.set_server_archive_available(False)
                 chat.mark_server_exhausted()
                 chat.set_history_status(tr("history_server_unavailable"))
             return
         logger.info("Requesting MAM history for %s before %s", jid, since or "now")
         if chat:
+            chat.set_server_archive_available(True)
             chat.set_history_status(tr("history_server_fetching"))
         self._start_task(self._fetch_server_history(jid, since or None))
 
@@ -6538,6 +6554,7 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if not chat:
             return
+        chat.set_server_archive_available(False)
         from stanza_im.include.utils import format_time
         chat.mark_server_exhausted()
         chat.set_history_status(tr("history_server_unavailable"))

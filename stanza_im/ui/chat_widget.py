@@ -934,6 +934,12 @@ class ChatWidget(QtWidgets.QWidget):
         self._tail_refresh_timer.setInterval(400)
         self._tail_refresh_timer.timeout.connect(self._run_tail_refresh)
         self._tail_refresh_force = False
+        # Until the first local window is applied a near-top event must not
+        # ask the server: the local load is already in flight.
+        self._initial_load_done = False
+        # Whether the server has an archive at all (a MUC without MAM does
+        # not): gates server paging, never the local one.
+        self._server_archive_available = True
         self._tail_refresh_on_resume = False
 
         self._typing_timer = QtCore.QTimer(self)
@@ -2260,6 +2266,7 @@ class ChatWidget(QtWidgets.QWidget):
         forward pager.  Without an anchor the window carries no separator.
         """
         self._history = list(entries or [])
+        self._initial_load_done = True
         self._user_scrolled_up = False
         self._window_size = max(50, int(window_size))
         self._db_exhausted = bool(exhausted)
@@ -2827,6 +2834,15 @@ class ChatWidget(QtWidgets.QWidget):
         self._hist_loading = False
         self._server_exhausted = True
 
+    def set_server_archive_available(self, available: bool) -> None:
+        """Whether this conversation has a server archive to page through.
+
+        A conference room without MAM (or a failed query) still has its local
+        SQLite archive: only the server requests are disabled, the local
+        paging keeps working and no "loading from server" status is shown.
+        """
+        self._server_archive_available = bool(available)
+
     def refresh_history(self, size: int | None = None):
         """Re-read the conversation tail from the local DB."""
         size = size or min(self._window_size * 2, _HISTORY_MAX)
@@ -2946,7 +2962,8 @@ class ChatWidget(QtWidgets.QWidget):
         return max(self._window_size, 3 * estimate)
 
     def needs_more(self) -> bool:
-        return (not self._hist_loading and not self._server_fetching
+        return (self._initial_load_done
+                and not self._hist_loading and not self._server_fetching
                 and not self._cleared and not self._db_exhausted
                 and len(self._history) < self._window_size)
 
@@ -2956,13 +2973,16 @@ class ChatWidget(QtWidgets.QWidget):
             self._render_all()
 
     def _load_older_batch(self):
-        if self._hist_loading or self._server_fetching:
+        if (not self._initial_load_done or self._hist_loading
+                or self._server_fetching):
             return
         if self._cleared:
-            self.load_more_from_server()
+            if self._server_archive_available:
+                self.load_more_from_server()
             return
         if self._db_exhausted:
-            self.load_more_from_server()
+            if self._server_archive_available:
+                self.load_more_from_server()
             return
         self._hist_loading = True
         self._start_task(self._load_older_batch_async(self.oldest_ts()))
@@ -2987,7 +3007,8 @@ class ChatWidget(QtWidgets.QWidget):
         else:
             self._db_exhausted = True
             self._hist_loading = False
-            self.load_more_from_server()
+            if self._server_archive_available:
+                self.load_more_from_server()
 
     def _jump_to_message(self, ref_id: str) -> None:
         """Scroll to a replied message, resolving it from local history.
@@ -3055,7 +3076,8 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.scroll_to_message(self._reply_target_id(entry))
 
     def load_more_from_server(self):
-        if self._server_fetching or self._server_exhausted:
+        if (self._server_fetching or self._server_exhausted
+                or not self._server_archive_available):
             return
         self._server_fetching = True
         logger.info("Requesting server history from widget: jid=%s since=%s",
@@ -3063,10 +3085,13 @@ class ChatWidget(QtWidgets.QWidget):
         self.server_history_requested.emit(self.jid, self.oldest_ts() or None)
 
     def _on_near_top(self):
-        logger.info("History near-top: jid=%s local=%d db_exhausted=%s server_exhausted=%s fetching=%s",
-                    self.jid, len(self._history), self._db_exhausted,
-                    self._server_exhausted, self._server_fetching)
-        if (self._cleared or self._server_exhausted or self._hist_loading
+        logger.info(
+            "History near-top: jid=%s local=%d db_exhausted=%s "
+            "server_exhausted=%s archive=%s fetching=%s initial=%s",
+            self.jid, len(self._history), self._db_exhausted,
+            self._server_exhausted, self._server_archive_available,
+            self._server_fetching, self._initial_load_done)
+        if (not self._initial_load_done or self._hist_loading
                 or self._server_fetching):
             return
         self._load_older_batch()

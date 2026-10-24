@@ -459,8 +459,15 @@ skipping the "nothing newer" check) because it is usually older than the tail
 already on screen; a MAM page does not. The refresh keeps the unread boundary
 and stays at the bottom; a suspended tab defers it to `resume`, a
 background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
-merge. `history._insert` also **repairs a
-stale timestamp** when an archive/origin/message id already exists with a
+merge. Local paging is independent of the server archive: a room without MAM
+(or a failed query, `mam_unavailable`) gets
+`ChatWidget.set_server_archive_available(False)`, which only stops server
+requests — scrolling up keeps loading the SQLite pages (`_on_near_top` no
+longer treats `_server_exhausted` as "no history at all"). A near-top event
+before the first local window is applied (`_initial_load_done`, set by
+`set_history`) does nothing, so opening a room never fires a premature MAM
+query or flashes the "loading from server" status. `history._insert` also
+**repairs a stale timestamp** when an archive/origin/message id already exists with a
 different one (the body is never rewritten — an edit is a separate update), so
 an old malformed row cannot hide the new messages forever.
 [`tests/test_history_tail_refresh.py`, `tests/test_history_dedup.py`]

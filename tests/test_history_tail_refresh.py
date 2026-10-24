@@ -197,6 +197,44 @@ check("an unreachable anchor falls back to the bottom",
       w2._view.bottom_scrolls == 1)
 w2.detach()
 
+# Local paging is independent of the server archive state.
+calls = []
+w3 = chat_widget_mod.ChatWidget(
+    "paging@conf.example", "Room", chat_themes.ChatThemeFactory(), is_muc=True)
+w3._view = _StubView()
+_real_older = w3._load_older_batch
+w3._load_older_batch = lambda: calls.append("local")
+w3._on_near_top()
+check("a near-top before the first window does not page",
+      calls == [])
+w3._window_size = 10
+w3.set_history([], 10, False)
+w3._on_near_top()
+check("after the first window a near-top pages locally",
+      calls == ["local"])
+
+calls.clear()
+w3._server_exhausted = True
+w3._on_near_top()
+check("an exhausted server archive does not block local paging",
+      calls == ["local"])
+
+calls.clear()
+w3._load_older_batch = _real_older
+server = []
+w3.load_more_from_server = lambda: server.append("server")
+w3._db_exhausted = True
+w3._server_archive_available = False
+w3._on_near_top()
+check("a room without an archive does not ask the server",
+      server == [] and calls == [])
+
+w3._server_archive_available = True
+w3._on_near_top()
+check("an available archive is asked when the local window ends",
+      server == ["server"] and calls == [])
+w3.detach()
+
 # The archived replay and the MAM fetch both schedule the refresh.
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 

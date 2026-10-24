@@ -115,12 +115,16 @@ class _FakeChat:
     def __init__(self):
         self.exhausted = False
         self.status = ""
+        self.archive = []
 
     def mark_server_exhausted(self):
         self.exhausted = True
 
     def set_history_status(self, text):
         self.status = text
+
+    def set_server_archive_available(self, available):
+        self.archive.append(bool(available))
 
 
 class _FakeChatWindow:
@@ -142,6 +146,8 @@ win._start_task = lambda coro: started.append(coro)
 win._on_server_history("room@conf.example")
 check("a known non-MAM room is not queried",
       started == [] and win._chat_window.chat.exhausted)
+check("server paging is disabled for the room",
+      win._chat_window.chat.archive == [False])
 check("the room is remembered as archive-less",
       "room@conf.example" in win._mam_unsupported)
 
@@ -152,12 +158,22 @@ check("a MAM room is queried", len(started) == 1)
 for coro in started:
     coro.close()
 
-win._on_mam_unavailable("other@conf.example")
+win._chat_window.chat.archive.clear()
+win._on_mam_unavailable("room@conf.example")
 check("a failed MAM query is remembered",
-      "other@conf.example" in win._mam_unsupported)
+      "room@conf.example" in win._mam_unsupported)
+check("it disables only server paging",
+      win._chat_window.chat.archive == [False])
 history_src = inspect.getsource(MainWindow._on_server_history)
 check("the history request consults the archive-less set",
       "self._mam_unsupported" in history_src)
+check("opening a room applies its known archive support",
+      "set_server_archive_available" in inspect.getsource(
+          MainWindow._seed_muc_chat)
+      and "urn:xmpp:mam:2" in inspect.getsource(MainWindow._seed_muc_chat))
+check("the room disco updates the archive support",
+      "set_server_archive_available" in inspect.getsource(
+          MainWindow._on_muc_info_received))
 
 if FAILURES:
     print("FAILURES:", FAILURES)
