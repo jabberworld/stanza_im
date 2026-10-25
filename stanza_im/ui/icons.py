@@ -4,11 +4,10 @@ from __future__ import annotations
 import os
 import time
 
-from PyQt6 import QtGui, QtCore
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import (
-    STATUS_DIR_16, STATUS_DIR_32, ICON_DIRS_ACTIONS, ICON_DIRS_CATEGORIES,
-    find_icon,
+    STATUS_DIR_16, STATUS_DIR_32, find_icon_sized,
 )
 
 
@@ -60,24 +59,54 @@ class IconCache:
         filename = key_file.get(show, "jabber-offline.png")
         return self.get(os.path.join(base, filename))
 
-    def get_action_icon(self, name: str) -> QtGui.QPixmap:
-        """Return an action icon (scalable/actions first, then sized dirs)."""
-        path = find_icon(f"{name}.png", ICON_DIRS_ACTIONS)
-        return self.get(path) if path else QtGui.QPixmap()
+    def get_action_icon(self, name: str,
+                        size: int = 16) -> QtGui.QPixmap:
+        """Return an action icon (scalable first, then sized dirs)."""
+        return self.get_icon_pixmap(name, size)
 
     def get_category_icon(self, name: str,
                           size: int = 16) -> QtGui.QPixmap:
-        """Return a category icon (scalable SVG preferred, rendered at *size*)."""
-        for ext in ("svg", "png"):
-            path = find_icon(f"{name}.{ext}", ICON_DIRS_CATEGORIES)
-            if not path:
-                continue
-            if ext == "svg":
-                pixmap = QtGui.QIcon(path).pixmap(size, size)
-                if not pixmap.isNull():
-                    return pixmap
-            return self.get(path)
-        return QtGui.QPixmap()
+        """Return a category/action icon rendered at *size* logical pixels."""
+        dpr = self._screen_dpr()
+        path = find_icon_sized(name, size, dpr)
+        if not path:
+            return QtGui.QPixmap()
+        target = max(1, int(round(int(size or 16) * dpr)))
+        pixmap = QtGui.QIcon(path).pixmap(target, target)
+        if dpr != 1.0 and not pixmap.isNull():
+            pixmap.setDevicePixelRatio(dpr)
+        return pixmap
+
+    def get_icon(self, name: str, size: int = 16,
+                 dpr: float | None = None) -> QtGui.QIcon:
+        """A QIcon whose source is chosen for the logical *size* and DPR."""
+        dpr = self._screen_dpr() if dpr is None else float(dpr)
+        path = find_icon_sized(name, size, dpr)
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
+
+    def get_icon_pixmap(self, name: str, size: int = 16,
+                        dpr: float | None = None) -> QtGui.QPixmap:
+        """Render an icon at ``size`` logical pixels for the current screen."""
+        dpr = self._screen_dpr() if dpr is None else float(dpr)
+        path = find_icon_sized(name, size, dpr)
+        if not path:
+            return QtGui.QPixmap()
+        target = max(1, int(round(int(size or 16) * dpr)))
+        pixmap = QtGui.QIcon(path).pixmap(target, target)
+        if dpr != 1.0 and not pixmap.isNull():
+            pixmap.setDevicePixelRatio(dpr)
+        return pixmap
+
+    @staticmethod
+    def _screen_dpr() -> float:
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return 1.0
+        screen = app.primaryScreen()
+        try:
+            return float(screen.devicePixelRatio()) if screen else 1.0
+        except Exception:
+            return 1.0
 
     def forget(self, path: str) -> None:
         """Drop one cached file (its content changed under the same name)."""

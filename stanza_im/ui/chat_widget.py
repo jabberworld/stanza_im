@@ -3526,11 +3526,7 @@ class ChatWidget(QtWidgets.QWidget):
     @staticmethod
     def _chat_icon(filename: str) -> QtGui.QIcon:
         path = find_icon(filename)
-        if path:
-            pix = QtGui.QPixmap(path)
-            if not pix.isNull():
-                return QtGui.QIcon(pix)
-        return QtGui.QIcon()
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
 
     @staticmethod
     def _call_icon() -> QtGui.QIcon:

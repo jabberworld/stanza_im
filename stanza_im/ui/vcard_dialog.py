@@ -6,7 +6,7 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
-from stanza_im.include.constants import ACTIONS_DIR_16, find_icon
+from stanza_im.include.constants import find_icon
 from stanza_im.include.utils import format_local_datetime
 from stanza_im.ui.resource_tree import resource_tree_html
 
@@ -82,14 +82,12 @@ class VCardInfoDialog(QtWidgets.QDialog):
         self._refresh_btn = btn.addButton(
             tr("vcard_refresh"),
             QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
-        self._refresh_btn.setIcon(QtGui.QIcon(
-            os.path.join(ACTIONS_DIR_16, "reload.png")))
+        self._refresh_btn.setIcon(QtGui.QIcon(find_icon("reload.png")))
         self._refresh_btn.clicked.connect(
             lambda: self.refresh_requested.emit(self._jid))
         self._edit_btn = btn.addButton(
             tr("vcard_edit"), QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
-        self._edit_btn.setIcon(QtGui.QIcon(
-            os.path.join(ACTIONS_DIR_16, "edit.png")))
+        self._edit_btn.setIcon(QtGui.QIcon(find_icon("edit.png")))
         self._edit_btn.setVisible(bool(show_edit))
         self._edit_btn.setEnabled(bool(can_edit))
         self._edit_btn.clicked.connect(

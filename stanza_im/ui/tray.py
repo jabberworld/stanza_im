@@ -36,11 +36,7 @@ def normalize_popups_mode(value) -> str:
 def _menu_icon(filename: str) -> QtGui.QIcon:
     """Load an action/category/status icon for menus from resources."""
     path = find_icon(filename)
-    if path:
-        pix = QtGui.QPixmap(path)
-        if not pix.isNull():
-            return QtGui.QIcon(pix)
-    return QtGui.QIcon()
+    return QtGui.QIcon(path) if path else QtGui.QIcon()
 
 
 def build_app_icon() -> QtGui.QIcon:

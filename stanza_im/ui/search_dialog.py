@@ -65,11 +65,7 @@ class SearchDialog(QtWidgets.QDialog):
     @staticmethod
     def _icon(filename: str) -> QtGui.QIcon:
         path = find_icon(filename)
-        if path:
-            pix = QtGui.QPixmap(path)
-            if not pix.isNull():
-                return QtGui.QIcon(pix)
-        return QtGui.QIcon()
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
 
     def _new_row_action(self, text: str, icon: str) -> QtWidgets.QToolButton:
         button = QtWidgets.QToolButton()

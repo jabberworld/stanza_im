@@ -1,5 +1,7 @@
 """Project-wide constants."""
+import functools
 import os
+import re
 
 APP_NAME = "Stanza IM"
 VERSION = "0.1.0"
@@ -68,8 +70,10 @@ STATUS_DIR_48 = os.path.join(IMAGES_DIR, "48x48", "status")
 
 ACTIONS_DIR_16 = os.path.join(IMAGES_DIR, "16x16", "actions")
 ACTIONS_DIR_22 = os.path.join(IMAGES_DIR, "22x22", "actions")
+ACTIONS_DIR_32 = os.path.join(IMAGES_DIR, "32x32", "actions")
 CATEGORIES_DIR_16 = os.path.join(IMAGES_DIR, "16x16", "categories")
 CATEGORIES_DIR_32 = os.path.join(IMAGES_DIR, "32x32", "categories")
+CATEGORIES_DIR_48 = os.path.join(IMAGES_DIR, "48x48", "categories")
 
 PLACES_DIR_16 = os.path.join(IMAGES_DIR, "16x16", "places")
 PLACES_DIR_22 = os.path.join(IMAGES_DIR, "22x22", "places")
@@ -95,13 +99,18 @@ LOGO_SVG = os.path.join(SCALABLE_DIR, "logo.svg")
 LOGO_PNG = os.path.join(IMAGES_DIR, "logo.png")
 
 # Ordered icon search paths (scalable first, then the sized directories).
-ICON_DIRS_ACTIONS = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_16, ACTIONS_DIR_22)
-ICON_DIRS_CATEGORIES = (SCALABLE_CATEGORIES_DIR, CATEGORIES_DIR_16,
+ICON_DIRS_ACTIONS = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_32, ACTIONS_DIR_16,
+                     ACTIONS_DIR_22)
+ICON_DIRS_CATEGORIES = (SCALABLE_CATEGORIES_DIR, CATEGORIES_DIR_32,
+                        CATEGORIES_DIR_48, CATEGORIES_DIR_16,
                         SCALABLE_APPS_DIR, APP_ICON_16)
-ICON_DIRS_ALL = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_16, ACTIONS_DIR_22,
-                 SCALABLE_CATEGORIES_DIR, CATEGORIES_DIR_16,
-                 SCALABLE_PLACES_DIR, PLACES_DIR_22,
-                 STATUS_DIR_32, PLACES_DIR_16, STATUS_DIR_16)
+# Larger raster sources come before the 16/22 art so legacy callers get a
+# sharper source (Qt scales it down); SVG still wins for vector art.
+ICON_DIRS_ALL = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_32, ACTIONS_DIR_16,
+                 ACTIONS_DIR_22, SCALABLE_CATEGORIES_DIR, CATEGORIES_DIR_32,
+                 CATEGORIES_DIR_48, CATEGORIES_DIR_16,
+                 SCALABLE_PLACES_DIR, PLACES_DIR_32, PLACES_DIR_22,
+                 PLACES_DIR_16, STATUS_DIR_32, STATUS_DIR_16)
 
 
 def find_icon(filename: str, directories=ICON_DIRS_ALL) -> str:
@@ -113,6 +122,64 @@ def find_icon(filename: str, directories=ICON_DIRS_ALL) -> str:
         if os.path.isfile(path):
             return path
     return ""
+
+
+@functools.lru_cache(maxsize=1)
+def _icon_index() -> tuple[dict, dict]:
+    """Map icon file name → [(size, path)] plus scalable name → path."""
+    sized: dict[str, list[tuple[int, str]]] = {}
+    scalable: dict[str, str] = {}
+    size_re = re.compile(r"^(\d+)x(\d+)$")
+    for root, _dirs, files in os.walk(IMAGES_DIR):
+        rel = os.path.relpath(root, IMAGES_DIR)
+        parts = rel.split(os.sep)
+        if parts[0] == "scalable":
+            for name in files:
+                scalable.setdefault(name, os.path.join(root, name))
+            continue
+        match = size_re.match(parts[0])
+        if not match:
+            continue
+        dimension = int(match.group(1))
+        for name in files:
+            sized.setdefault(name, []).append(
+                (dimension, os.path.join(root, name)))
+    return sized, scalable
+
+
+def _pick_icon_size(candidates: list[tuple[int, str]], target: int) -> str:
+    """Smallest source >= *target*, else the largest available."""
+    larger = sorted(item for item in candidates if item[0] >= target)
+    if larger:
+        return larger[0][1]
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def find_icon_sized(filename: str, size: int = 16, dpr: float = 1.0) -> str:
+    """Return the best icon source for a logical *size* on a *dpr* screen.
+
+    SVG wins (it renders at any size), then the smallest raster source that is
+    at least ``size * dpr`` pixels, then the largest available source.  Used
+    by the icon cache, the service browser zoom and the preferences navigation.
+    """
+    name = str(filename or "")
+    if not name:
+        return ""
+    sized, scalable = _icon_index()
+    stem, ext = os.path.splitext(name)
+    names = [name]
+    if not ext:
+        names = [stem + ".svg", stem + ".png"]
+    target = max(1, int(round(int(size or 16) * float(dpr or 1.0))))
+    for candidate in names:
+        path = scalable.get(candidate)
+        if path:
+            return path
+        sources = sized.get(candidate)
+        if sources:
+            return _pick_icon_size(sources, target)
+    # Resources outside the sized/scalable trees (clients, legacy dirs).
+    return find_icon(name)
 
 
 # ── XDG Base Directory Specification ───────────────────────────────

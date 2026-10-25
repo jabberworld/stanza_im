@@ -264,11 +264,12 @@ def local_time_from_tzo(tzo: str, now: float | None = None) -> str:
 
 def status_icon_html(show: str, size: int = 16) -> str:
     """Return an ``<img>`` tag for the presence status icon of *show*."""
-    from stanza_im.include.constants import STATUS_DIR_16
+    from stanza_im.include.constants import find_icon_sized
     from stanza_im.include.enumerators import show_to_icon_key
-    path = os.path.join(STATUS_DIR_16,
-                        f"jabber-{show_to_icon_key(show)}.png")
-    if not os.path.exists(path):
+    name = f"jabber-{show_to_icon_key(show)}.png"
+    # A 2x source stays sharp on HiDPI; width/height keep the layout size.
+    path = find_icon_sized(name, max(16, int(size or 16) * 2), 1.0)
+    if not path:
         return ""
     return f'<img src="{path}" width="{size}" height="{size}">'
 
