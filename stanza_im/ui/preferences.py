@@ -20,7 +20,7 @@ from stanza_im.include import sounds as sounds_mod
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
 from stanza_im.ui.connection_info_dialog import connection_info_lines
 from stanza_im.include import emoticons
-from stanza_im.include.constants import find_icon
+from stanza_im.include.constants import find_icon, find_icon_sized
 
 CONNECTION_FIELD_WIDTH = 300
 # Uniform widths so numeric selectors and combo boxes line up across pages.
@@ -319,8 +319,30 @@ class PreferencesDialog(QtWidgets.QDialog):
             pixmap = icons_mod.icons.get_category_icon(name, size)
             if not pixmap.isNull():
                 return QtGui.QIcon(pixmap)
-        path = find_icon(f"{name}.png")
-        return QtGui.QIcon(path) if path else QtGui.QIcon()
+        # Tests may run without the global IconCache; still resolve and scale
+        # the icon for every section.
+        app = QtWidgets.QApplication.instance()
+        screen = app.primaryScreen() if app is not None else None
+        try:
+            dpr = float(screen.devicePixelRatio()) if screen is not None else 1.0
+        except Exception:
+            dpr = 1.0
+        path = find_icon_sized(name, size, dpr)
+        if not path:
+            path = find_icon(f"{name}.png")
+        if not path:
+            return QtGui.QIcon()
+        target = max(1, int(round(int(size or 24) * dpr)))
+        pixmap = QtGui.QIcon(path).pixmap(target, target)
+        if (not pixmap.isNull()
+                and (pixmap.width() < target or pixmap.height() < target)):
+            pixmap = pixmap.scaled(
+                target, target,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
+        if dpr != 1.0 and not pixmap.isNull():
+            pixmap.setDevicePixelRatio(dpr)
+        return QtGui.QIcon(pixmap)
 
     def _apply_nav_font(self) -> None:
         """Apply the configured section font; icons keep the visual ratio."""
@@ -638,15 +660,17 @@ class PreferencesDialog(QtWidgets.QDialog):
             form.addRow(tr(label_key), self._row(*controls))
         self._camera_mode_combo = self._combo(
             "devices_camera_mode", [("prefs_camera_mode_auto", "")],
-            fixed_width=False)
+            fixed_width=True)
         self._refresh_camera_modes()
         if self._camera_combo is not None:
             self._camera_combo.currentIndexChanged.connect(
                 lambda _idx: self._refresh_camera_modes())
+        self._camera_mode_info = self._info_label(
+            tr("prefs_camera_mode_tip"))
         form.addRow(
             tr("prefs_camera_mode"),
-            self._row(self._camera_mode_combo, self._info_label(
-                tr("prefs_camera_mode_tip")), trailing_stretch=True))
+            self._row(self._camera_mode_combo, self._camera_mode_info,
+                      trailing_stretch=True))
         form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))

@@ -73,6 +73,14 @@ class IconCache:
             return QtGui.QPixmap()
         target = max(1, int(round(int(size or 16) * dpr)))
         pixmap = QtGui.QIcon(path).pixmap(target, target)
+        if (not pixmap.isNull()
+                and (pixmap.width() < target or pixmap.height() < target)):
+            # QIcon does not upscale a single small pixmap; the icon would
+            # keep its 16/22 px size while the other icons scale.
+            pixmap = pixmap.scaled(
+                target, target,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
         if dpr != 1.0 and not pixmap.isNull():
             pixmap.setDevicePixelRatio(dpr)
         return pixmap
@@ -93,6 +101,14 @@ class IconCache:
             return QtGui.QPixmap()
         target = max(1, int(round(int(size or 16) * dpr)))
         pixmap = QtGui.QIcon(path).pixmap(target, target)
+        if (not pixmap.isNull()
+                and (pixmap.width() < target or pixmap.height() < target)):
+            # QIcon does not upscale a single small pixmap; the icon would
+            # keep its 16/22 px size while the other icons scale.
+            pixmap = pixmap.scaled(
+                target, target,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
         if dpr != 1.0 and not pixmap.isNull():
             pixmap.setDevicePixelRatio(dpr)
         return pixmap

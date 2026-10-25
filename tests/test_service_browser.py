@@ -336,17 +336,22 @@ check("the service tree font follows the browser setting",
       zoom_dlg._tree.font().pointSize() == 18)
 check("the service tree icons follow the browser setting",
       zoom_dlg._tree.iconSize().width() == 32
-      and not node.icon(0).isNull())
+      and not node.icon(0).isNull()
+      and node.icon(0).pixmap(32, 32).width() == 32)
 zooms = []
 zoom_dlg.zoom_changed.connect(zooms.append)
 zoom_dlg._on_zoom_requested(24)
 check("Ctrl+wheel changes the tree font and icons",
       zoom_dlg._tree.font().pointSize() == 24
-      and zoom_dlg._tree.iconSize().width() > 32)
+      and zoom_dlg._tree.iconSize().width() > 32
+      and node.icon(0).pixmap(zoom_dlg._tree.iconSize()).width()
+      == zoom_dlg._tree.iconSize().width())
 check("Ctrl+wheel reports the zoom for persistence", zooms == [24])
 zoom_dlg.set_browser_font("", 0)
 check("the default browser setting restores the 16 px icons",
       zoom_dlg._tree.iconSize().width() == 16)
+check("the browse button carries the service-discovery icon",
+      not zoom_dlg._browse_btn.icon().isNull())
 zoom_dlg.close()
 
 print("FAILURES:", FAILURES if FAILURES else "none")

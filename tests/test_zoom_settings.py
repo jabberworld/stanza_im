@@ -49,6 +49,13 @@ check("Ctrl+wheel changes the section font",
       dlg._sections.font().pointSize() == 18)
 check("Ctrl+wheel scales the section icons",
       dlg._sections.iconSize().width() == 48)
+_section_icons = [dlg._sections.item(i).icon()
+                  for i in range(dlg._sections.count())]
+check("every section icon renders at the zoomed size (incl. raster-only)",
+      bool(_section_icons)
+      and all(not icon.isNull()
+              and icon.pixmap(48, 48).width() == 48
+              for icon in _section_icons))
 check("Ctrl+wheel persists the section size immediately",
       cfg.appearance.prefs_nav_font_size == 18)
 check("the navigator width grows with the zoom",

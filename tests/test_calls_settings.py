@@ -17,7 +17,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.core.storage import Config
 from stanza_im.i18n import load as i18n_load
@@ -194,6 +194,15 @@ check("the camera mode control is present",
 check("a stored custom camera mode stays selected",
       dlg3._controls["devices_camera_mode"].currentData()
       == "1280x720@30:mjpeg")
+dlg3.show()
+app.processEvents()
+_camera_mode = dlg3._controls["devices_camera_mode"]
+check("the camera mode selector has the shared selector width",
+      _camera_mode.width() == prefs_mod.COMBO_WIDTH)
+check("the camera mode info icon aligns with the camera test button",
+      abs(dlg3._camera_mode_info.mapTo(dlg3, QtCore.QPoint(0, 0)).x()
+          - dlg3._camera_test_button.mapTo(dlg3, QtCore.QPoint(0, 0)).x())
+      <= 1)
 dlg3._apply_settings()
 check("apply keeps the camera mode",
       cfg3.devices.camera_mode == "1280x720@30:mjpeg")

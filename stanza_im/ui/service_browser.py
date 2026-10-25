@@ -122,6 +122,9 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         self._server.addItems(self._server_values)
         top.addWidget(self._server, 1)
         ok = QtWidgets.QPushButton(tr("service_browse_action"))
+        ok.setIcon(self._icon("service-discovery.png"))
+        ok.setIconSize(QtCore.QSize(16, 16))
+        self._browse_btn = ok
         ok.clicked.connect(self._browse)
         top.addWidget(ok)
         self._info_btn = QtWidgets.QToolButton()
@@ -194,7 +197,19 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         except Exception:
             dpr = 1.0
         path = find_icon_sized(filename, size, dpr)
-        return QtGui.QIcon(path) if path else QtGui.QIcon()
+        if not path:
+            return QtGui.QIcon()
+        target = max(1, int(round(int(size or 16) * dpr)))
+        pixmap = QtGui.QIcon(path).pixmap(target, target)
+        if (not pixmap.isNull()
+                and (pixmap.width() < target or pixmap.height() < target)):
+            pixmap = pixmap.scaled(
+                target, target,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
+        if dpr != 1.0 and not pixmap.isNull():
+            pixmap.setDevicePixelRatio(dpr)
+        return QtGui.QIcon(pixmap)
 
     def set_browser_font(self, family: str = "", size: int = 0) -> None:
         """Apply the service-browser font; the icons scale proportionally."""
