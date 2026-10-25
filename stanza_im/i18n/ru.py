@@ -724,7 +724,7 @@ STRINGS = {
     "client_features_source": 'Источник',
     "client_features_source_caps": 'XEP-0115 caps',
     "client_features_source_disco": 'disco#info (живой запрос)',
-    "client_features_counts": 'Возможностей: %(features)d · идентичностей: %(identities)d',
+    "client_features_counts": "Возможностей: {features} · идентичностей: {identities}",
     "client_features_tab_features": 'Возможности',
     "client_features_tab_identities": 'Идентичности',
     "client_features_tab_raw": 'Данные',

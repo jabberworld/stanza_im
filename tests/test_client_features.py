@@ -130,6 +130,30 @@ fd._on_copy()
 check("copy includes the feature namespaces",
       "urn:xmpp:jingle:1" in QtWidgets.QApplication.clipboard().text())
 
+check("the feature/identity counters are formatted",
+      fd._counts.text().startswith("Features: 3")
+      and "identities: 1" in fd._counts.text()
+      and "%(" not in fd._counts.text())
+
+# long values must wrap instead of being clipped to their size hint
+long_block = dict(
+    BLOCK,
+    caps_node="https://psi-im.org/ver/1.5.2286/" + "a" * 64,
+    client="Psi+",
+    version="1.5.2286 (2026-10-19, 3eac61a5, webengine)",
+    os="Linux")
+long_dialog = ClientFeaturesDialog(
+    None, "alice@example.org/phone", long_block)
+long_dialog._render(info)
+long_dialog.show()
+app.processEvents()
+for key, label in long_dialog._meta_labels.items():
+    required = (label.heightForWidth(label.width())
+                if label.hasHeightForWidth() else label.height())
+    check(f"the {key} field is wide enough and not clipped",
+          label.width() > 300 and label.height() >= required)
+long_dialog.close()
+
 empty = ClientFeaturesDialog(None, "alice@example.org/phone", BLOCK)
 empty._render({"features": [], "identities": []})
 check("an empty feature list shows the notice",

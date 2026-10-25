@@ -724,7 +724,7 @@ STRINGS = {
     "client_features_source": 'Source',
     "client_features_source_caps": 'XEP-0115 caps',
     "client_features_source_disco": 'disco#info (live)',
-    "client_features_counts": 'Features: %(features)d · identities: %(identities)d',
+    "client_features_counts": "Features: {features} · identities: {identities}",
     "client_features_tab_features": 'Features',
     "client_features_tab_identities": 'Identities',
     "client_features_tab_raw": 'Data',

@@ -49,11 +49,19 @@ class ClientFeaturesDialog(QtWidgets.QDialog):
             value.setTextInteractionFlags(
                 QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
             value.setWordWrap(True)
+            # QFormLayout's ExpandingFieldsGrow only stretches fields whose
+            # horizontal policy is Expanding; a plain QLabel (Preferred) is
+            # sized to its sizeHint and clips the wrapped lines of a long
+            # caps node / client string.
+            value.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                QtWidgets.QSizePolicy.Policy.Preferred)
             self._meta_labels[key] = value
             self._meta.addRow(f"{tr('client_features_' + key)}:", value)
         self._counts = QtWidgets.QLabel("")
         self._counts.setTextInteractionFlags(
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._counts.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                   QtWidgets.QSizePolicy.Policy.Preferred)
         self._meta.addRow("", self._counts)
         layout.addLayout(self._meta)
 
