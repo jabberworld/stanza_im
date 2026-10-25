@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.core.client import JabberClient
 from stanza_im.i18n import load as i18n_load
@@ -111,6 +111,37 @@ check("directed unavailable presence",
 check("directed available presence",
       sent[1]["to"] == "gw@example" and sent[1]["type"] == "available"
       and sent[1]["priority"] == 50)
+
+# 4. enlarging the dialog grows only the message field -----------------------
+dlg3 = AddContactDialog([], None)
+dlg3.show()
+app.processEvents()
+
+
+def _top(widget):
+    return widget.mapTo(dlg3, QtCore.QPoint(0, 0)).y()
+
+
+def _center(widget):
+    return _top(widget) + widget.height() / 2
+
+
+default_gap = _top(dlg3._name) - _top(dlg3._jid)
+default_message = dlg3._message.height()
+check("the Jabber ID label is centred on its field",
+      abs(_center(dlg3._jid_label) - _center(dlg3._jid)) < 10)
+dlg3.resize(900, 700)
+app.processEvents()
+grown_gap = _top(dlg3._name) - _top(dlg3._jid)
+check("enlarging the dialog keeps the fixed rows together",
+      abs(grown_gap - default_gap) <= 5)
+check("enlarging the dialog grows the message field",
+      dlg3._message.height() > default_message + 100)
+check("the message field has no small fixed maximum",
+      dlg3._message.maximumHeight() > 1000)
+check("the Jabber ID label stays centred after resizing",
+      abs(_center(dlg3._jid_label) - _center(dlg3._jid)) < 10)
+dlg3.close()
 
 print()
 if FAILURES:

@@ -57,7 +57,13 @@ class AddContactDialog(QtWidgets.QDialog):
         self._gateway_box.setEnabled(False)
 
         layout.addWidget(self._separator())
-        form = QtWidgets.QFormLayout()
+        # A grid (not a QFormLayout): QFormLayout spreads spare height over
+        # every row when the dialog is enlarged, which pushed the labels away
+        # from their fields.  Here only the message row grows.
+        form_widget = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(form_widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setColumnStretch(1, 1)
         self._jid = JidLineEdit()
         self._name = QtWidgets.QLineEdit()
         self._group = QtWidgets.QComboBox()
@@ -67,20 +73,36 @@ class AddContactDialog(QtWidgets.QDialog):
         self._subscribe = QtWidgets.QCheckBox(tr("add_contact_subscribe"))
         self._subscribe.setChecked(True)
         self._message = QtWidgets.QPlainTextEdit()
-        self._message.setMaximumHeight(80)
+        self._message.setMinimumHeight(80)
+        self._message.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding)
         self._vcard_btn = self._icon_button("v-card.png", tr("chat_vcard"))
         self._vcard_btn.clicked.connect(self._show_entered_vcard)
         self._nick_btn = self._icon_button(
             "nick-fill.svg", tr("add_contact_fill_nick"))
         self._nick_btn.clicked.connect(self._fill_nick)
-        form.addRow(tr("add_contact_jid"),
-                    self._field_row(self._jid, self._vcard_btn))
-        form.addRow(tr("add_contact_nick"),
-                    self._field_row(self._name, self._nick_btn))
-        form.addRow(tr("add_contact_group"), self._group)
-        form.addRow(self._subscribe)
-        form.addRow(tr("add_contact_message"), self._message)
-        layout.addLayout(form)
+        self._jid_label = QtWidgets.QLabel(tr("add_contact_jid"))
+        self._name_label = QtWidgets.QLabel(tr("add_contact_nick"))
+        self._group_label = QtWidgets.QLabel(tr("add_contact_group"))
+        self._message_label = QtWidgets.QLabel(tr("add_contact_message"))
+        for label in (self._jid_label, self._name_label, self._group_label):
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft
+                               | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        self._message_label.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self._jid_label, 0, 0)
+        grid.addWidget(self._field_row(self._jid, self._vcard_btn), 0, 1)
+        grid.addWidget(self._name_label, 1, 0)
+        grid.addWidget(self._field_row(self._name, self._nick_btn), 1, 1)
+        grid.addWidget(self._group_label, 2, 0)
+        grid.addWidget(self._group, 2, 1)
+        grid.addWidget(self._subscribe, 3, 0, 1, 2)
+        grid.addWidget(self._message_label, 4, 0)
+        grid.addWidget(self._message, 4, 1)
+        grid.setRowStretch(4, 1)
+        layout.addWidget(form_widget, 1)
         self._jid.setText(jid if isinstance(jid, str) else "")
 
         buttons = QtWidgets.QDialogButtonBox(
