@@ -323,5 +323,31 @@ mw = _read("stanza_im", "ui", "main_window.py")
 check("the main window routes the browser's xmpp: links",
       "dlg.xmpp_uri_requested.connect(self._on_xmpp_uri)" in mw)
 
+# Ctrl+wheel zooms the tree text and its icons (action buttons stay put).
+from stanza_im.ui.service_browser import ServiceBrowserDialog  # noqa: E402
+from PyQt6 import QtWidgets  # noqa: E402
+
+zoom_dlg = ServiceBrowserDialog(None, [], None, gateways=[])
+node = zoom_dlg._make_node({"jid": "service@example.org", "name": "Service"},
+                           "muc.png")
+zoom_dlg._tree.addTopLevelItem(node)
+zoom_dlg.set_browser_font("", 18)
+check("the service tree font follows the browser setting",
+      zoom_dlg._tree.font().pointSize() == 18)
+check("the service tree icons follow the browser setting",
+      zoom_dlg._tree.iconSize().width() == 32
+      and not node.icon(0).isNull())
+zooms = []
+zoom_dlg.zoom_changed.connect(zooms.append)
+zoom_dlg._on_zoom_requested(24)
+check("Ctrl+wheel changes the tree font and icons",
+      zoom_dlg._tree.font().pointSize() == 24
+      and zoom_dlg._tree.iconSize().width() > 32)
+check("Ctrl+wheel reports the zoom for persistence", zooms == [24])
+zoom_dlg.set_browser_font("", 0)
+check("the default browser setting restores the 16 px icons",
+      zoom_dlg._tree.iconSize().width() == 16)
+zoom_dlg.close()
+
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

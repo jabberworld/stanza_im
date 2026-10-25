@@ -379,6 +379,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # JIDs whose *already open* vCard dialog is being refreshed in place.
         self._vcard_refreshing: set[str] = set()
         self._vcard_dialogs: dict[str, object] = {}
+        # Open service browsers (their tree font/icon zoom is a setting).
+        self._service_browsers: list = []
         # Client-capabilities windows, keyed by the full resource JID.
         self._feature_dialogs: dict[str, object] = {}
         self._history_manager: object | None = None
@@ -1758,11 +1760,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _menu_icon(filename: str) -> QtGui.QIcon:
         """Load an action/category/status icon for menus from resources."""
         path = find_icon(filename)
-        if path:
-            pix = QtGui.QPixmap(path)
-            if not pix.isNull():
-                return QtGui.QIcon(pix)
-        return QtGui.QIcon()
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
 
     def _build_menu(self):
         """Build the roster menu bar."""
@@ -1925,7 +1923,36 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.vcard_requested.connect(self._show_profile)
         dlg.servers_updated.connect(self._on_service_servers)
         dlg.xmpp_uri_requested.connect(self._on_xmpp_uri)
+        appearance = self._config.appearance
+        dlg.set_browser_font(
+            getattr(appearance, "service_browser_font", "") or "",
+            int(getattr(appearance, "service_browser_font_size", 0) or 0))
+        dlg.zoom_changed.connect(self._on_service_browser_zoom)
+        self._service_browsers.append(dlg)
+        dlg.finished.connect(
+            lambda _result, item=dlg: self._forget_service_browser(item))
         show_modeless(dlg)
+
+    def _forget_service_browser(self, dialog) -> None:
+        try:
+            self._service_browsers.remove(dialog)
+        except ValueError:
+            pass
+
+    def _on_service_browser_zoom(self, size: int) -> None:
+        self._config.appearance.service_browser_font_size = int(size)
+        self._config.save()
+
+    def _apply_service_browser_fonts(self) -> None:
+        family = (getattr(self._config.appearance,
+                          "service_browser_font", "") or "")
+        size = int(getattr(self._config.appearance,
+                           "service_browser_font_size", 0) or 0)
+        for dialog in list(self._service_browsers):
+            try:
+                dialog.set_browser_font(family, size)
+            except RuntimeError:
+                self._forget_service_browser(dialog)
 
     def _on_service_servers(self, servers: list[str]):
         self._config.connection.service_servers = list(servers)
@@ -3548,6 +3575,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_muc_names()
         self._apply_roster_font()
         self._apply_widget_fonts()
+        self._apply_service_browser_fonts()
         self._apply_avatar_radius()
         self._chat_window.set_show_unread_in_tabs(bool(
             getattr(self._config.appearance, "show_unread_in_tabs", True)))
@@ -4762,6 +4790,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _contact_clients(self, contact) -> list[dict]:
         """Per-resource client blocks for a 1:1 contact (best priority first)."""
         blocks: list[dict] = []
+        bare = str(getattr(contact, "jid", "") or "")
         resources = sorted(
             (getattr(contact, "resources", None) or {}).items(),
             key=lambda item: (-item[1].get("priority", 0), item[0].casefold()))
@@ -4771,7 +4800,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 info.get("client"), info.get("client_version"),
                 info.get("client_os"), info.get("client_tzo"),
                 info.get("caps_node"),
-                full_jid=f"{contact.jid}/{resource}",
+                full_jid=(f"{bare}/{resource}" if bare else ""),
                 caps_ver=info.get("caps_ver", ""),
                 caps_hash=info.get("caps_hash", ""),
                 priority=info.get("priority")))

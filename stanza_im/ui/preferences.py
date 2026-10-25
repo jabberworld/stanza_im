@@ -15,6 +15,7 @@ from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui import icons as icons_mod
 from stanza_im.ui.sounds import SoundPlayer
 from stanza_im.ui.tray import normalize_popups_mode
+from stanza_im.ui.font_zoom import clamp_font_size, wheel_font_size
 from stanza_im.include import sounds as sounds_mod
 from stanza_im.ui.certificate_dialog import CertificateDialog, certificate_lines
 from stanza_im.ui.connection_info_dialog import connection_info_lines
@@ -106,6 +107,20 @@ class _SnapSlider(QtWidgets.QSlider):
         super().keyReleaseEvent(event)
         if self.value() % self._grid:
             self.setValue(self._snap(self.value()))
+
+
+class _PrefsNavList(QtWidgets.QListWidget):
+    """The section navigator; Ctrl+wheel scales its text and icons."""
+
+    zoom_requested = QtCore.pyqtSignal(int)
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        size = wheel_font_size(self.font(), event)
+        if size is not None:
+            self.zoom_requested.emit(size)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class _ColorButton(QtWidgets.QPushButton):
@@ -221,9 +236,11 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _build_ui(self):
         outer = QtWidgets.QVBoxLayout(self)
         split = QtWidgets.QHBoxLayout()
-        self._sections = QtWidgets.QListWidget()
+        self._sections = _PrefsNavList()
         self._sections.setFixedWidth(190)
         self._sections.setIconSize(QtCore.QSize(24, 24))
+        self._sections.setToolTip(tr("prefs_nav_zoom_tip"))
+        self._sections.zoom_requested.connect(self._on_nav_zoom)
         self._sections.setStyleSheet(
             "QListWidget { background: white; border: 1px solid #d5d5d5; "
             "padding: 4px; } QListWidget::item { padding: 7px 4px; } "
@@ -280,7 +297,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         # the background after show.
         self._page_factories: list = []
         self._pages: list = []
+        self._section_icon_names: list[str] = []
         for key, icon_name, page_factory in sections:
+            self._section_icon_names.append(icon_name)
             icon = QtGui.QIcon()
             if icons_mod.icons:
                 pixmap = icons_mod.icons.get_category_icon(icon_name, 24)
@@ -290,8 +309,59 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._page_factories.append(page_factory)
             self._pages.append(None)
             self._stack.addWidget(QtWidgets.QWidget())  # placeholder
+        self._apply_nav_font()
         self._sections.setCurrentRow(0)
         self._ensure_page(0)
+
+    def _category_icon(self, name: str,
+                       size: int) -> QtGui.QIcon:
+        if icons_mod.icons:
+            pixmap = icons_mod.icons.get_category_icon(name, size)
+            if not pixmap.isNull():
+                return QtGui.QIcon(pixmap)
+        path = find_icon(f"{name}.png")
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
+
+    def _apply_nav_font(self) -> None:
+        """Apply the configured section font; icons keep the visual ratio."""
+        appearance = self._config.appearance
+        family = getattr(appearance, "prefs_nav_font", "") or ""
+        try:
+            size = int(getattr(appearance, "prefs_nav_font_size", 0) or 0)
+        except (TypeError, ValueError):
+            size = 0
+        app_font = QtWidgets.QApplication.font()
+        base = QtGui.QFont(app_font)
+        if family:
+            base.setFamily(family)
+        if size > 0:
+            base.setPointSize(size)
+        self._sections.setFont(base)
+        default_pt = float(app_font.pointSizeF() or 0) or 9.0
+        point = float(base.pointSizeF() or 0)
+        if point <= 0:
+            point = default_pt
+        icon_size = max(16, min(64, int(round(24 * point / default_pt))))
+        self._sections.setIconSize(QtCore.QSize(icon_size, icon_size))
+        metrics = QtGui.QFontMetrics(base)
+        longest = 0
+        for index, icon_name in enumerate(self._section_icon_names):
+            item = self._sections.item(index)
+            if item is None:
+                continue
+            item.setIcon(self._category_icon(icon_name, icon_size))
+            item.setFont(base)
+            longest = max(longest, metrics.horizontalAdvance(item.text()))
+        width = max(190, min(340, icon_size + longest + 44))
+        self._sections.setFixedWidth(width)
+
+    def _on_nav_zoom(self, size: int) -> None:
+        """Ctrl+wheel over the sections: scale and persist immediately."""
+        size = clamp_font_size(size)
+        self._config.appearance.prefs_nav_font_size = size
+        self._config.save()
+        self._apply_nav_font()
+        self.sync_font_size("prefs_nav_font", size)
 
     def _on_section_changed(self, row: int) -> None:
         row = max(0, row)
@@ -1640,6 +1710,12 @@ class PreferencesDialog(QtWidgets.QDialog):
         font_form.addRow(tr("prefs_font_tooltip"),
                          self._font_row("tooltip_font", default_family,
                                         default_size))
+        font_form.addRow(tr("prefs_font_service_browser"),
+                         self._font_row("service_browser_font", default_family,
+                                        default_size))
+        font_form.addRow(tr("prefs_font_prefs_nav"),
+                         self._font_row("prefs_nav_font", default_family,
+                                        default_size))
 
         # The nickname and input "default" follow the chat font (a real value
         # picks the chat family/size; an empty one falls through to the system
@@ -2041,6 +2117,13 @@ class PreferencesDialog(QtWidgets.QDialog):
             "selector_font_size": getattr(appearance, "selector_font_size", 0),
             "tooltip_font": getattr(appearance, "tooltip_font", ""),
             "tooltip_font_size": getattr(appearance, "tooltip_font_size", 0),
+            "service_browser_font": getattr(
+                appearance, "service_browser_font", ""),
+            "service_browser_font_size": getattr(
+                appearance, "service_browser_font_size", 0),
+            "prefs_nav_font": getattr(appearance, "prefs_nav_font", ""),
+            "prefs_nav_font_size": getattr(
+                appearance, "prefs_nav_font_size", 0),
             "avatar_radius": getattr(appearance, "avatar_radius", 20),
             "tooltip_avatar_size": getattr(
                 appearance, "tooltip_avatar_size", 64) or 64,
@@ -2240,6 +2323,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "menu_font", "menu_font_size", "tab_font", "tab_font_size",
                     "selector_font", "selector_font_size",
                     "tooltip_font", "tooltip_font_size",
+                    "service_browser_font", "service_browser_font_size",
+                    "prefs_nav_font", "prefs_nav_font_size",
                     "osd_bg_color", "osd_font_color", "osd_opacity",
                     "roster_bg_color", "roster_group_bg_color", "chat_bg_color",
                     "muc_highlight_color", "colored_muc_nicks",
@@ -2291,6 +2376,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             plugin_ids = widget.apply_checked()
         cfg.save()
         self.settings_applied.emit()
+        # The app-wide stylesheet is re-applied by the main window on the
+        # signal above; set the section navigator font after it.
+        self._apply_nav_font()
         if plugin_ids is not None:
             self.plugins_applied.emit(list(plugin_ids))
 

@@ -573,7 +573,11 @@ category grouping. A gateway whose identity `type` is `weather` gets the
 `node` attribute so node-scoped services (e.g. gateways) resolve fully, and
 items that equal their own parent (`jid`+`node`) are dropped to prevent
 self-referencing loops. `Автообзор` recursively pre-loads the tree (bounded
-depth, cycle-safe). Used servers are persisted in `connection.service_servers`.
+depth, cycle-safe). Ctrl+wheel over the tree scales its font, header and icons
+(`set_browser_font`; the action buttons stay fixed) and persists
+`appearance.service_browser_font_size` through `zoom_changed`; the family/size
+row lives in Preferences → Appearance → «Шрифты» and updates open browsers on
+Apply. Used servers are persisted in `connection.service_servers`.
 Double-clicking a conference fills both room and server in `JoinConferenceDialog`
 and runs the full join flow (server persistence, bookmark support).
 `MainWindow._join_muc(..., server=…)` accepts the room localpart and server
@@ -1863,8 +1867,13 @@ during `paintEvent()` and never persisted in `UserItem`.
 `resources/images/scalable/<category>/` (`actions`, `categories`, `places`,
 `apps`); the sized directories keep the rasterised/legacy art. All icon
 resolvers go through `include.constants.find_icon` (scalable first, then the
-sized dirs), and `IconCache.get_category_icon(name, size)` renders the scalable
-SVG at the requested size. The online / free-for-chat status icons use the
+sized dirs; the larger 32/48 raster sources are preferred over 16/22 so legacy
+callers get a sharper source), and `IconCache.get_category_icon(name, size)`
+renders the best source at the requested logical size. For HiDPI and the
+zoomable trees `find_icon_sized(name, size, dpr)` picks SVG first, then the
+smallest raster source at least `size * dpr`, else the largest available;
+`IconCache.get_icon`/`get_icon_pixmap` wrap it with the screen DPR. No icon
+resolution setting is needed. The online / free-for-chat status icons use the
 **green-bulb** variants `jabber-online-green`/`jabber-chat-green` (`.png` at 16
 and 32 px, plus the `.svg` used by the View-menu entry) —
 `IconCache.get_status_icon` maps `online`/`chat` to them; the original blue
@@ -3047,7 +3056,10 @@ Preferences use icon navigation and nested tabs. The section icons come from
 `IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
 icon, «Звонки» the headset, «Внешний вид» `draw-brush`, «Приватность» the
 shield, «Плагины» the puzzle piece, «Статус» the speech bubble and «Горячие
-клавиши» the keyboard. Pages are built **lazily** (`_ensure_page`): only the
+клавиши» the keyboard. Ctrl+wheel over the section navigator (`_PrefsNavList`)
+scales its font and icons together (24→48 px at 18 pt, width grows) and saves
+`appearance.prefs_nav_font_size` immediately; the same family/size is editable
+in «Шрифты». Pages are built **lazily** (`_ensure_page`): only the
 first (visible) section is built when the dialog opens, the rest on first
 selection and, after `showEvent`, one per event-loop turn
 (`_build_pages_deferred`); `_ensure_all_pages` runs before Apply/OK (and
@@ -3152,7 +3164,11 @@ live) and the size spin shows the real size marked with a compact
 «<size> pt (*)»; the full phrases («По умолчанию — <family>» / «<size> pt
 (по умолчанию)») live in the two tooltips — both resolved from
 `QApplication.font()` by `PreferencesDialog._default_app_font` while the stored
-value stays `""`/`0`. The size spin is **left-aligned**
+value stays `""`/`0`. The «Браузер сервисов» and «Разделы настроек» rows
+(`appearance.service_browser_font*`/`prefs_nav_font*`) use the same family+size
+editor and scale their icons proportionally; the service-browser tree zooms on
+Ctrl+wheel (and persists immediately), while the Preferences navigator zooms
+and saves through `_on_nav_zoom`. The size spin is **left-aligned**
 (`setAlignment(AlignLeft)`), and each font row's family combo + size
 spin **expand with the dialog** (the form's `ExpandingFieldsGrow` + an
 `Expanding` policy and a 3:1 stretch in `_font_row`).

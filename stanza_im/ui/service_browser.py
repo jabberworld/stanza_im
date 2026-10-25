@@ -19,8 +19,9 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
-from stanza_im.include.constants import find_icon
+from stanza_im.include.constants import find_icon_sized
 from stanza_im.ui.dialogs import show_modeless
+from stanza_im.ui.font_zoom import clamp_font_size, wheel_font_size
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,22 @@ _ACTION_TIPS = {
     "service_vcard": "vcard_tip",
 }
 _MAX_DEPTH = 8
+#: Item data role holding the icon file name (re-rendered on zoom).
+_ICON_ROLE = QtCore.Qt.ItemDataRole.UserRole + 1
+
+
+class _ServiceTree(QtWidgets.QTreeWidget):
+    """Service tree with Ctrl+wheel text/icon zoom."""
+
+    zoom_requested = QtCore.pyqtSignal(int)
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        size = wheel_font_size(self.font(), event)
+        if size is not None:
+            self.zoom_requested.emit(size)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class ServiceBrowserDialog(QtWidgets.QDialog):
@@ -76,6 +93,7 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
     vcard_requested = QtCore.pyqtSignal(str)
     servers_updated = QtCore.pyqtSignal(list)
     xmpp_uri_requested = QtCore.pyqtSignal(str)
+    zoom_changed = QtCore.pyqtSignal(int)
 
     def __init__(self, client, servers: list[str], parent=None, gateways=None):
         super().__init__(parent)
@@ -93,6 +111,8 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         self._seen: set[tuple[str, str]] = set()
         self._visited: set[tuple[str, str]] = set()
         self._roots: dict[str, QtWidgets.QTreeWidgetItem] = {}
+        self._browser_font: tuple[str, int] = ("", 0)
+        self._icon_size = 16
         self.setWindowTitle(tr("service_browser_title"))
         self.resize(650, 500)
         layout = QtWidgets.QVBoxLayout(self)
@@ -111,8 +131,10 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         self._info_btn.clicked.connect(self._open_info)
         top.addWidget(self._info_btn)
         layout.addLayout(top)
-        self._tree = QtWidgets.QTreeWidget()
+        self._tree = _ServiceTree()
+        self._tree.zoom_requested.connect(self._on_zoom_requested)
         self._tree.setHeaderLabels([tr("service_name"), tr("service_jid")])
+        self._tree.setIconSize(QtCore.QSize(16, 16))
         self._tree.setColumnWidth(0, 360)
         self._tree.itemDoubleClicked.connect(self._double_click)
         self._tree.itemClicked.connect(self._on_item_clicked)
@@ -163,13 +185,64 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
     # ── Building the tree ──────────────────────────────────────────────
 
     @staticmethod
-    def _icon(filename: str) -> QtGui.QIcon:
-        path = find_icon(filename)
-        if path:
-            pix = QtGui.QPixmap(path)
-            if not pix.isNull():
-                return QtGui.QIcon(pix)
-        return QtGui.QIcon()
+    def _icon(filename: str, size: int = 16) -> QtGui.QIcon:
+        """Icon source chosen for the logical *size* and the screen DPR."""
+        app = QtWidgets.QApplication.instance()
+        screen = app.primaryScreen() if app is not None else None
+        try:
+            dpr = float(screen.devicePixelRatio()) if screen is not None else 1.0
+        except Exception:
+            dpr = 1.0
+        path = find_icon_sized(filename, size, dpr)
+        return QtGui.QIcon(path) if path else QtGui.QIcon()
+
+    def set_browser_font(self, family: str = "", size: int = 0) -> None:
+        """Apply the service-browser font; the icons scale proportionally."""
+        size = int(size or 0)
+        self._browser_font = (family or "", size)
+        app = QtWidgets.QApplication.instance()
+        base = QtGui.QFont(app.font() if app is not None else self.font())
+        if family:
+            base.setFamily(family)
+        if size > 0:
+            base.setPointSize(size)
+        self._tree.setFont(base)
+        self._tree.header().setFont(base)
+        base_pt = 0.0
+        if app is not None:
+            base_pt = float(app.font().pointSizeF() or 0)
+        if base_pt <= 0:
+            base_pt = 9.0
+        point = float(base.pointSizeF() if base.pointSize() <= 0
+                      else base.pointSize())
+        if point <= 0:
+            point = base_pt
+        icon = max(16, min(48, int(round(16 * point / base_pt))))
+        self._icon_size = icon
+        self._tree.setIconSize(QtCore.QSize(icon, icon))
+        self._refresh_tree_icons()
+
+    def _on_zoom_requested(self, size: int) -> None:
+        family, _old = self._browser_font
+        size = clamp_font_size(size)
+        self.set_browser_font(family, size)
+        self.zoom_changed.emit(size)
+
+    def _refresh_tree_icons(self) -> None:
+        def walk(item):
+            yield item
+            for index in range(item.childCount()):
+                yield from walk(item.child(index))
+
+        for index in range(self._tree.topLevelItemCount()):
+            for item in walk(self._tree.topLevelItem(index)):
+                name = item.data(0, _ICON_ROLE)
+                if not name:
+                    data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                    if isinstance(data, dict):
+                        name = data.get("icon", "")
+                if name:
+                    item.setIcon(0, self._icon(str(name), self._icon_size))
 
     def _new_action(self, text_key: str, icon: str) -> QtWidgets.QToolButton:
         button = QtWidgets.QToolButton()
@@ -233,7 +306,8 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
             "jid": item.get("jid", ""), "node": item.get("node", ""),
             "name": name, "category": category, "type": item.get("type", ""),
             "icon": icon, "features": item.get("features", [])})
-        node.setIcon(0, self._icon(icon))
+        node.setData(0, _ICON_ROLE, icon)
+        node.setIcon(0, self._icon(icon, self._icon_size))
         node.setToolTip(0, self._node_tooltip(
             node.data(0, QtCore.Qt.ItemDataRole.UserRole)))
         node.setChildIndicatorPolicy(
@@ -306,7 +380,8 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         roots = {}
         for key, icon in _ROOT_KEYS:
             root = QtWidgets.QTreeWidgetItem([tr(key), ""])
-            root.setIcon(0, self._icon(icon))
+            root.setData(0, _ICON_ROLE, icon)
+            root.setIcon(0, self._icon(icon, self._icon_size))
             self._tree.addTopLevelItem(root)
             roots[key] = root
         self._roots = roots

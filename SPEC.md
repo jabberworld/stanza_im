@@ -254,7 +254,10 @@ With `appearance.emoticon_unicode_replace`
 semantics); the emoji are drawn with the platform font (no chat-font override).
 A code converts only when not adjacent to a letter/digit (any script), in both
 the unicode and the image substitution (`_boundary_ok`/`_sub_guarded`).
-The service browser uses XEP-0030 discovery, groups identities by category and
+The service browser tree supports Ctrl+wheel: its font, header and icons scale
+together (the action buttons stay fixed), the size is persisted in
+`appearance.service_browser_font_size` and the family/size can also be edited in
+Preferences → Appearance → «Шрифты». The service browser uses XEP-0030 discovery, groups identities by category and
 builds the tree fully lazily with no eager discovery: a node renders its direct
 children "as is" from a single `disco#items` request (with the parent's `node`
 attribute forwarded, so node-scoped gateways/services resolve fully), every
@@ -389,6 +392,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.avatar_radius` | `20` | Avatar corner rounding in %, 0 = square … 100 = circle (`include.avatars.rounded_avatar`); applied live to the roster (`RosterStyle.set_avatar_radius`), the MUC participant list (`ChatWindow.set_avatar_radius`) and the Muji window (`MujiCallWindow.set_avatar_radius`). Preferences → Appearance → «Разное». |
 | `appearance.tooltip_avatar_size` | `64` | Avatar size (px, 32–256) in the shared rich-text tooltip (`ui/tooltip.set_avatar_size`); used by the roster and MUC participant tooltips. |
 | `appearance.tooltip_font` / `tooltip_font_size` | `""` / `0` | Tooltip text font (Preferences → Appearance → «Шрифты»): the shared rich tooltip (`ui/tooltip.set_font`) and, via a `QToolTip { … }` rule in `MainWindow._apply_widget_fonts`, the native Qt tooltips. Long content can request wrapping (`tooltip.show(..., wrap=True, max_width=…)`, used by the MUC subject) and every popup is clamped to the screen width. |
+| `appearance.service_browser_font` / `service_browser_font_size` | `""` / `0` | Service-browser tree font (Preferences → Appearance → «Шрифты»); icons scale proportionally (16→32/48 px). Ctrl+wheel over the tree persists the size immediately; action buttons keep their geometry. |
+| `appearance.prefs_nav_font` / `prefs_nav_font_size` | `""` / `0` | Preferences section-navigator font; icons scale proportionally (24→48/64 px) and the list width grows. Ctrl+wheel and the «Шрифты» rows apply it; the zoom is saved immediately. |
 | `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
 | `appearance.roster_group_bg_color` | `#ececec` | Roster group header stripe color, drawn by `RosterStyle.paint_group`. |
 | `appearance.chat_bg_color` | `#ffffff` | Chat background override injected as `body { background-color: … !important; background-image: none !important }` by `ChatThemeFactory.set_chat_bg_color` (clears skin tile images); applied to both 1:1 and MUC theme factories. |
@@ -1540,7 +1545,10 @@ combo + size spin **expand with the dialog** (`ExpandingFieldsGrow` + an
 `Expanding` policy and a 3:1 stretch in `_font_row`). **Ctrl+wheel** over the
 **menu bar** or a **tab bar** changes `appearance.menu_font_size`/`tab_font_size`
 (`MainWindow._handle_widget_font_wheel`, in the app event filter; the event is
-consumed so the tabs do not switch).
+consumed so the tabs do not switch). The «Браузер сервисов» and «Разделы
+настроек» rows use the same family+size editor; their icons scale with the
+effective point size, Ctrl+wheel zooms the service-browser tree and the
+section navigator, and both values persist immediately.
 
 ### 11.5 Message Replies (XEP-0461)
 
@@ -2117,8 +2125,12 @@ LRU cache for QPixmap icons:
   cleared by `clear_pixmaps()` when an avatar changes
 - Project-authored SVG icons live under `resources/images/scalable/<category>/`
   (`actions`, `categories`, `places`, `apps`); `include.constants.find_icon`
-  resolves scalable first, then the sized dirs, and `get_category_icon`
-  renders a scalable SVG at the requested size
+  resolves scalable first, then the sized dirs (larger 32/48 rasters before
+  16/22), and `get_category_icon` renders the best source at the requested
+  size. `find_icon_sized(name, size, dpr)` picks SVG first, then the smallest
+  raster at least `size * dpr`, else the largest; `IconCache.get_icon` and
+  `get_icon_pixmap` use it with the screen DPR, so 16-logical icons are sharp
+  on 2× screens without an icon-resolution setting.
 
 ### 13.1 JID Input (`ui/jid_edit.py`)
 
