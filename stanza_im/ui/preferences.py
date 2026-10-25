@@ -1241,6 +1241,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._cert_btn.setToolTip(tr("conn_info_cert_none"))
         self._cert_btn.clicked.connect(self._on_show_certificate)
         advanced_form.addRow(tr("conn_info_cert"), self._cert_btn)
+        allow_invalid = self._check(
+            "allow_invalid_cert", tr("prefs_allow_invalid_cert"))
+        allow_invalid.setStyleSheet("color: #b00020;")
+        advanced_form.addRow(self._row(
+            allow_invalid,
+            self._info_label(tr("prefs_allow_invalid_cert_tip")),
+            trailing_stretch=True))
 
         proxy, proxy_form = self._page()
         proxy_form.addRow(self._connection_group())
@@ -2054,6 +2061,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                 connection, "csi_keep_active_for_typing_osd", False),
             "tls_mode": getattr(connection, "tls_mode", "prefer"),
             "starttls_mode": getattr(connection, "starttls_mode", "always"),
+            "allow_invalid_cert": bool(getattr(
+                connection, "allow_invalid_cert", False)),
             "host": connection.host, "port": connection.port,
             "proxy_host": connection.proxy_host, "proxy_port": connection.proxy_port,
             "send_ctrl_enter": chat.send_ctrl_enter, "show_status": chat.show_status,
@@ -2274,6 +2283,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "file_proxy_manual", "stun_turn_mode", "stun_turn_manual",
                     "tls_mode", "starttls_mode"):
             cfg.connection[key] = self._value(key)
+        cfg.connection.allow_invalid_cert = bool(
+            self._value("allow_invalid_cert"))
         cfg.connection.priority = self._value("priority")
         cfg.connection.keepalive = self._value("keepalive")
         cfg.connection.pep_sweep_interval = int(

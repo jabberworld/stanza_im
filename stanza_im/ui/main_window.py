@@ -379,6 +379,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # JIDs whose *already open* vCard dialog is being refreshed in place.
         self._vcard_refreshing: set[str] = set()
         self._vcard_dialogs: dict[str, object] = {}
+        self._certificate_dialog = None
+        self._connect_task = None
+        self._last_connect_args: tuple[str, str] | None = None
+        self._certificate_retry_connect = False
         # Open service browsers (their tree font/icon zoom is a setting).
         self._service_browsers: list = []
         # Client-capabilities windows, keyed by the full resource JID.
@@ -3576,6 +3580,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_roster_font()
         self._apply_widget_fonts()
         self._apply_service_browser_fonts()
+        if self._client is not None:
+            self._client.set_tls_verification(not bool(getattr(
+                self._config.connection, "allow_invalid_cert", False)))
         self._apply_avatar_radius()
         self._chat_window.set_show_unread_in_tabs(bool(
             getattr(self._config.appearance, "show_unread_in_tabs", True)))
@@ -4008,6 +4015,8 @@ class MainWindow(QtWidgets.QMainWindow):
             pep_sweep_interval=getattr(connection, "pep_sweep_interval", 0),
             tls_mode=getattr(connection, "tls_mode", "prefer"),
             starttls_mode=getattr(connection, "starttls_mode", "always"),
+            allow_invalid_cert=bool(getattr(
+                connection, "allow_invalid_cert", False)),
             omemo_enabled=bool(getattr(self._config.omemo, "enabled", True)),
             omemo_btbv=bool(getattr(self._config.omemo, "blind_trust", True)),
             omemo_load_mode=str(getattr(self._config.performance,
@@ -4047,7 +4056,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_self_roster()
         self._recount_groups()
         self._roster.sort_and_update()
-        self._start_task(self._connect_async(jid, show))
+        self._last_connect_args = (jid, show)
+        self._connect_task = self._start_task(self._connect_async(jid, show))
 
     def _start_task(self, coro):
         """Schedule a coroutine on the shared asyncio loop."""
@@ -4092,6 +4102,59 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             logger.exception("Connection failed")
             self._on_connect_failed(tr("login_connection_error", error=str(e)))
+        finally:
+            if self._connect_task is asyncio.current_task():
+                self._connect_task = None
+
+    def _on_certificate_error(self, host: str, reason: str):
+        """The server certificate was rejected; ask for an explicit choice."""
+        if self._certificate_dialog is not None:
+            return
+        task = self._connect_task
+        self._certificate_retry_connect = bool(
+            task is not None and not task.done())
+        if self._certificate_retry_connect:
+            task.cancel()
+        from stanza_im.ui.certificate_error_dialog import (
+            CertificateErrorDialog)
+        dialog = CertificateErrorDialog(host, reason, self)
+        self._certificate_dialog = dialog
+        dialog.finished.connect(
+            lambda _result, item=dialog: self._on_certificate_choice(item))
+        dialog.setModal(False)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_certificate_choice(self, dialog) -> None:
+        choice = getattr(dialog, "choice", "cancel")
+        self._certificate_dialog = None
+        dialog.deleteLater()
+        client = self._client
+        if client is None:
+            return
+        if choice == "cancel":
+            self._connecting = False
+            self._connect_progress_active = False
+            self._set_offline_status()
+            message = tr("login_certificate_error")
+            self._login.set_error(message)
+            if self._stack.currentIndex() == _PAGE_SPLASH:
+                self._stack.setCurrentIndex(_PAGE_LOGIN)
+            self._tray.show_message(APP_NAME, message)
+            self._start_task(client.disconnect())
+            return
+        if choice == "always":
+            self._config.connection.allow_invalid_cert = True
+            self._config.save()
+        client.set_tls_verification(False)
+        client.clear_certificate_block()
+        self._connecting = True
+        if self._certificate_retry_connect and self._last_connect_args:
+            self._connect_task = self._start_task(
+                self._connect_async(*self._last_connect_args))
+        else:
+            client.manual_reconnect()
 
     def _on_connect_failed(self, message: str) -> None:
         """A connection attempt failed: stay usable on the roster, offline."""
@@ -4126,6 +4189,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _connect_client_signals(self):
         c = self._client
         c.on("session_started", self._on_session_started)
+        c.on("certificate_error", self._on_certificate_error)
         c.on("blocklist_updated", self._on_blocklist_updated)
         c.on("roster_received", self._on_roster_received)
         c.on("roster_item_added", self._on_roster_item_added)

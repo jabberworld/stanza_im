@@ -845,6 +845,28 @@ def _message_subjects(stanza) -> list[tuple[str, str]]:
 class TLSOnlyUnavailable(Exception):
     """Raised when "TLS only" is selected but no _xmpps-client SRV record."""
 
+
+class CertificateVerificationError(Exception):
+    """The server certificate failed verification (host, reason)."""
+
+    def __init__(self, host: str, reason: str):
+        super().__init__(reason or "certificate verification failed")
+        self.host = host
+        self.reason = reason
+
+
+def build_ssl_context(verify: bool = True) -> ssl.SSLContext:
+    """TLS context used by the XMPP stream (verification on by default)."""
+    context = ssl.create_default_context()
+    if verify:
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+    else:
+        # check_hostname must be disabled before CERT_NONE.
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
     def __init__(self, domain: str):
         super().__init__(domain)
         self.domain = domain
@@ -1142,6 +1164,7 @@ class JabberClient:
                  pep_sweep_interval: int = 0,
                  tls_mode: str = "prefer",
                  starttls_mode: str = "always",
+                 allow_invalid_cert: bool = False,
                  omemo_enabled: bool = True,
                  omemo_btbv: bool = True,
                  omemo_load_mode: str = "lazy",
@@ -1172,6 +1195,9 @@ class JabberClient:
         self._csi_handler_registered = bool(csi)
         self.tls_mode = tls_mode
         self.starttls_mode = starttls_mode
+        self.allow_invalid_cert = bool(allow_invalid_cert)
+        self._cert_error_sent = False
+        self._cert_blocked = False
         self._discovered: dict | None = None
         self.auto_join_conferences = auto_join_conferences
         self.autojoin_rooms: set[str] = set()
@@ -1216,6 +1242,7 @@ class JabberClient:
         self._full_jid = f"{self.jid_str}/{resource}"
 
         self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
+        self.xmpp.ssl_context = build_ssl_context(not self.allow_invalid_cert)
         self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")
         # Our own reconnect state (slixmpp has no ``auto_reconnect`` option).
         self._reconnect_enabled = True
@@ -1236,6 +1263,10 @@ class JabberClient:
         self.xmpp._tls_first = (tls_mode == "prefer")
         self.xmpp.whitespace_keepalive = self.keepalive
         self.xmpp.add_event_handler("tls_required", self._on_tls_required)
+        self.xmpp.add_event_handler("connection_failed",
+                                    self._on_connection_failed)
+        self.xmpp.add_event_handler("ssl_invalid_chain",
+                                    self._on_ssl_invalid_chain)
 
         # Register XEP plugins
         self.xmpp.register_plugin("xep_0054")  # vCard
@@ -2083,6 +2114,9 @@ class JabberClient:
     async def connect_async(self) -> None:
         """Connect to the XMPP server and start the session."""
         self.xmpp._connected_target = None
+        self._cert_error_sent = False
+        self._cert_blocked = False
+        self.xmpp.auto_reconnect = True
         if (self.tls_mode == "direct" and not self.host):
             domain = self.jid_str.split("@")[-1]
             from stanza_im.core.discovery import resolve_client_srv
@@ -2127,6 +2161,51 @@ class JabberClient:
     def _on_tls_required(self, _event=None) -> None:
         logger.error("Required STARTTLS is not supported by the server")
         self.emit("tls_required")
+
+    @staticmethod
+    def _is_cert_error(exc) -> bool:
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            return True
+        if isinstance(exc, ssl.SSLError):
+            text = str(exc).upper()
+            return ("CERTIFICATE_VERIFY_FAILED" in text
+                    or "CERTIFICATE VERIFY FAILED" in text)
+        return False
+
+    def _report_cert_error(self, exc) -> None:
+        if self._cert_error_sent:
+            return
+        self._cert_error_sent = True
+        self._cert_blocked = True
+        self.xmpp.auto_reconnect = False
+        host = self.host or self.jid_str.split("@")[-1]
+        reason = (getattr(exc, "verify_message", "") or str(exc)
+                  or "certificate verification failed")
+        logger.warning("CERT: server certificate rejected for %s: %s",
+                       host, reason)
+        self.emit("certificate_error", host, reason)
+
+    def _on_connection_failed(self, exc=None) -> None:
+        if self._is_cert_error(exc):
+            self._report_cert_error(exc)
+
+    def _on_ssl_invalid_chain(self, exc=None) -> None:
+        if self._is_cert_error(exc):
+            self._report_cert_error(exc)
+        # Slixmpp skips its own disconnect when this event is handled.
+        try:
+            self.xmpp.disconnect()
+        except Exception:
+            pass
+
+    def set_tls_verification(self, enabled: bool) -> None:
+        self.allow_invalid_cert = not bool(enabled)
+        self.xmpp.ssl_context = build_ssl_context(bool(enabled))
+
+    def clear_certificate_block(self) -> None:
+        self._cert_blocked = False
+        self._cert_error_sent = False
+        self.xmpp.auto_reconnect = True
 
     def connection_info(self) -> dict:
         """Describe the active connection (mode, TLS, SASL, keep-alive)."""
@@ -5407,6 +5486,8 @@ class JabberClient:
 
     async def _on_session_start(self, event) -> None:
         logger.info("Session started, requesting roster...")
+        self._cert_blocked = False
+        self._cert_error_sent = False
         # Re-register our disco features under the freshly bound JID (see
         # _register_disco) and recompute caps before the first presence so the
         # advertised verification string reflects our real features.
@@ -7266,6 +7347,8 @@ class JabberClient:
 
     def _maybe_schedule_reconnect(self) -> None:
         """Wait briefly for an SM resume, then start our reconnect loop."""
+        if self._cert_blocked:
+            return
         if not self._reconnect_enabled or self._shutting_down:
             return
         if self._reconnect_handle is not None:

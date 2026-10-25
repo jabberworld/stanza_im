@@ -134,6 +134,7 @@ class Config:
                         "csi_keep_active_for_typing_osd": False,
                         "tls_mode": "prefer",
                         "starttls_mode": "always",
+                        "allow_invalid_cert": False,
                         "pep_sweep_interval": 0,
                         "message_carbons": True,
                         "offline_on_suspend": True,

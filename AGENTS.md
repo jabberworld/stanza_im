@@ -104,6 +104,7 @@ stanza_im/                      # Python package
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── service_info_dialog.py   # Service info (version/stats/caps/contacts)
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
+│   ├── certificate_error_dialog.py # Certificate verification warning/choice
 │   ├── connection_info_dialog.py # Live connection details dialog
 │   ├── server_info_dialog.py    # Server capability report (XEP support)
 │   ├── cache_dialog.py          # Cache sizes + per-cache clearing (Help)
@@ -3259,6 +3260,16 @@ text is kept. Returning activity (`eventFilter`) resumes
   `tls_required` event if the server does not offer STARTTLS),
   `opportunistic`, `never`. `tls_flags()` maps both selectors to slixmpp
   `enable_direct_tls/enable_starttls/enable_plaintext` + `_require_starttls`.
+- **Certificate verification** `connection.allow_invalid_cert` (default
+  `false`): the client builds the SSL context itself (`build_ssl_context`,
+  `CERT_REQUIRED` + hostname by default). A rejected certificate is caught from
+  `connection_failed` (direct TLS) / `ssl_invalid_chain` (STARTTLS) and emitted
+  as `certificate_error(host, reason)`; the reconnect loop pauses and
+  `MainWindow` shows the non-modal `CertificateErrorDialog` — «Отмена»,
+  «Подключиться один раз» (session-only) or «Всегда для этого профиля»
+  (writes the profile option). Preferences → Connection → Advanced has the
+  red «Не проверять сертификат сервера» checkbox to revoke it; after ignoring,
+  the tray/OSD warns and the certificate dialog says it was not verified.
 - **SASL**: no forced mechanism (slixmpp picks the strongest). On TLS 1.3
   without `tls-exporter` in `ssl.CHANNEL_BINDING_TYPES` (Python < 3.12),
   `filter_plus_mechs()` drops `*-PLUS` so SCRAM does not send an invalid

@@ -86,6 +86,7 @@ stanza_im/
 │   ├── service_browser.py   — XEP-0030 service discovery browser
 │   ├── service_info_dialog.py — service info (version/stats/caps/contacts)
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
+│   ├── certificate_error_dialog.py — Certificate warning + once/always choice
 │   ├── history_manager.py   — Per-contact history browser
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
 │   ├── client_features_dialog.py — peer client caps viewer (vCard resource click),
@@ -354,6 +355,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `proxy_host` / `proxy_port` | — / 0 | SOCKS5 proxy address (used when `proxy_mode=socks5`) |
 | `tls_mode` | `prefer` | `direct` (TLS only) / `prefer` (direct TLS then fallback) / `normal` |
 | `starttls_mode` | `always` | `always` / `opportunistic` / `never` (ignored for `tls_mode=direct`) |
+| `allow_invalid_cert` | `false` | Profile-level: skip TLS certificate verification (advanced, red warning); a failed certificate otherwise opens a prompt with once/always/cancel |
 | `keepalive` | `true` | Send whitespace keep-alive packets |
 | `stream_management` | `true` | XEP-0198 resumption/acks |
 | `csi` | `true` | XEP-0352 active/inactive |
@@ -2959,6 +2961,13 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - **STARTTLS mode** `starttls_mode`: `always` (default; refuses to connect
   without STARTTLS → `tls_required`/`login_tls_required`), `opportunistic`,
   `never`. `tls_flags()` maps both selectors to the slixmpp flags.
+- **Certificate verification** `allow_invalid_cert` (default off): SSL context
+  created by `build_ssl_context` with `CERT_REQUIRED`/hostname. Direct-TLS and
+  STARTTLS failures are caught and emitted as `certificate_error`; the
+  reconnect loop pauses and `CertificateErrorDialog` offers Cancel, a
+  session-only exception, or a persisted profile exception. The Advanced page
+  has the corresponding red checkbox; ignoring verification shows an unverified
+  certificate and a warning.
 - **Keep-alive** `keepalive` → `xmpp.whitespace_keepalive`.
 - `connection_info()` (mode, TLS version/cipher, SASL, keep-alive, SM, CSI,
   actual SRV endpoint, and `cert` — the peer certificate: subject/issuer CN+O,
