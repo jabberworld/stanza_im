@@ -27,7 +27,7 @@ class ProfileSourceDialog(QtWidgets.QDialog):
         layout.addWidget(prompt)
 
         existing = QtWidgets.QPushButton(tr("profiles_source_existing"))
-        existing.setIcon(_icon("v-card.png"))
+        existing.setIcon(_icon("v-card-48.svg"))
         existing.setIconSize(QtCore.QSize(16, 16))
         existing.clicked.connect(lambda: self._pick("existing"))
         layout.addWidget(existing)

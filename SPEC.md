@@ -138,7 +138,7 @@ Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
 and `ui/conference_dialog.py`. The add-contact dialog keeps the "Service ID
 translator" compact (description over a prompt + a fixed-size "Get XMPP address"
 button) and gives the Jabber ID and Nickname fields 16px icon buttons: a vCard
-button (`v-card.png`, `chat_vcard`) that opens the entered address's profile, and
+button (`v-card-48.svg`, `chat_vcard`) that opens the entered address's profile, and
 a fill-nickname button (`nick-fill.svg`, `add_contact_fill_nick`) that fills the
 nickname from the vCard (`nickname`, else `fn`, else the JID localpart).
 Conference discovery uses XEP-0030; used
@@ -1119,7 +1119,6 @@ notification.
 `RosterStyle` is pluggable via `set_style()`. The default renderer handles
 avatar, name, status icon, status message, unread badge.
 
-Future: hot-swappable styles from `resources/rosterstyles/`.
 
 ### 7.5 Roster Item Exchange (XEP-0144)
 

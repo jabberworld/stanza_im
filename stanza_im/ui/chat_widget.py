@@ -707,7 +707,7 @@ class ChatWidget(QtWidgets.QWidget):
         actions_row.addWidget(self._history_btn)
 
         vcard_btn = QtWidgets.QToolButton(self)
-        vcard_btn.setIcon(self._chat_icon("v-card.png"))
+        vcard_btn.setIcon(self._chat_icon("v-card-48.svg"))
         vcard_btn.setToolTip(tr("chat_vcard"))
         vcard_btn.setAutoRaise(True)
         vcard_btn.clicked.connect(lambda: self.vcard_requested.emit(self.jid))

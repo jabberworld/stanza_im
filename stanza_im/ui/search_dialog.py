@@ -44,7 +44,7 @@ class SearchDialog(QtWidgets.QDialog):
         self._btn_search.clicked.connect(self._on_search)
         self._btn_search.setEnabled(False)
         self._btn_row_vcard = self._new_row_action(tr("service_vcard"),
-                                                   "v-card.png")
+                                                   "v-card-48.svg")
         self._btn_row_vcard.clicked.connect(self._row_vcard)
         self._btn_row_add = self._new_row_action(tr("service_add_roster"),
                                                  "add-user.png")
@@ -221,7 +221,7 @@ class SearchDialog(QtWidgets.QDialog):
             QtCore.QTimer.singleShot(0, callback)
 
         self._results.setCurrentItem(item)
-        menu.addAction(self._icon("v-card.png"), tr("service_vcard"),
+        menu.addAction(self._icon("v-card-48.svg"), tr("service_vcard"),
                        lambda checked=False: defer(self._row_vcard))
         menu.addAction(self._icon("add-user.png"), tr("service_add_roster"),
                        lambda checked=False: defer(self._row_add))

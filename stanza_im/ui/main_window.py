@@ -1334,7 +1334,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "connected.svg" if online else "disconnected.svg")),
             tr("transport_disconnect") if online else tr("transport_connect"),
             lambda checked=False: defer(lambda: self._toggle_transport(jid)))
-        menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
+        menu.addAction(self._menu_icon("v-card-48.svg"), tr("ctx_view_profile"),
                        lambda checked=False: defer(
                            lambda: self._show_profile(jid)))
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
@@ -1785,7 +1785,7 @@ class MainWindow(QtWidgets.QMainWindow):
         service_discovery = actions_menu.addAction(
             self._menu_icon("service-discovery.png"), tr("menu_service_discovery"))
         service_discovery.triggered.connect(self._on_service_browser)
-        my_vcard = actions_menu.addAction(self._menu_icon("v-card.png"),
+        my_vcard = actions_menu.addAction(self._menu_icon("v-card-48.svg"),
                                           tr("menu_edit_my_vcard"))
         my_vcard.triggered.connect(self._edit_my_vcard)
         history_act = actions_menu.addAction(self._menu_icon("history.png"),
@@ -1851,7 +1851,7 @@ class MainWindow(QtWidgets.QMainWindow):
             bool(getattr(self._config.appearance, "roster_show_offline", True)))
         show_offline.toggled.connect(self._on_show_offline_toggled)
         self._show_offline_action = show_offline
-        show_self = view_menu.addAction(self._menu_icon("v-card.png"),
+        show_self = view_menu.addAction(self._menu_icon("v-card-48.svg"),
                                         tr("menu_show_self"))
         show_self.setCheckable(True)
         show_self.setChecked(
@@ -6262,7 +6262,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))
-        menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
+        menu.addAction(self._menu_icon("v-card-48.svg"), tr("ctx_view_profile"),
                        lambda checked=False: defer(lambda: self._show_profile(jid)))
         if self._client:
             send_menu = menu.addMenu(self._menu_icon("upload.svg"),
@@ -6411,7 +6411,7 @@ class MainWindow(QtWidgets.QMainWindow):
         real = self._participant_real_jid(info)
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(target))
-        menu.addAction(self._menu_icon("v-card.png"), tr("ctx_view_profile"),
+        menu.addAction(self._menu_icon("v-card-48.svg"), tr("ctx_view_profile"),
                        lambda checked=False: defer(
                            lambda: self._on_chat_vcard(target)))
         menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
@@ -9390,7 +9390,7 @@ class MainWindow(QtWidgets.QMainWindow):
                       or own.get("affiliation") in ("admin", "owner"))
 
         menu = QtWidgets.QMenu(self)
-        profile = menu.addAction(self._menu_icon("v-card.png"),
+        profile = menu.addAction(self._menu_icon("v-card-48.svg"),
                                  tr("muc_user_view_vcard"))
         profile.triggered.connect(
             lambda: self._show_muc_participant_profile(room, nick, real_jid))

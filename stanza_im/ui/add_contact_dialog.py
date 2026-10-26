@@ -77,7 +77,7 @@ class AddContactDialog(QtWidgets.QDialog):
         self._message.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding)
-        self._vcard_btn = self._icon_button("v-card.png", tr("chat_vcard"))
+        self._vcard_btn = self._icon_button("v-card-48.svg", tr("chat_vcard"))
         self._vcard_btn.clicked.connect(self._show_entered_vcard)
         self._nick_btn = self._icon_button(
             "nick-fill.svg", tr("add_contact_fill_nick"))

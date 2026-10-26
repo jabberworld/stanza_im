@@ -58,7 +58,7 @@ _ACTION_SPECS = (
     ("service_add_roster", "add-user.png"),
     ("service_commands", "exec.png"),
     ("service_version", "info.svg"),
-    ("service_vcard", "v-card.png"),
+    ("service_vcard", "v-card-48.svg"),
 )
 _ACTION_TIPS = {
     "service_register": "register_tip",

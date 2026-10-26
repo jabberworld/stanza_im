@@ -173,7 +173,7 @@ Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`,
 `ui/hats_dialog.py`. The add-contact dialog has a compact "Service ID
 translator" group (a `QVBoxLayout`: description over a `prompt` + fixed-size
 "Get XMPP address" button, so the field grows); each of the Jabber ID and
-Nickname fields carries a 16px icon button — `v-card.png` (tooltip `chat_vcard`)
+Nickname fields carries a 16px icon button — `v-card-48.svg` (tooltip `chat_vcard`)
 emits `vcard_requested(jid)` for the entered address (`MainWindow._on_add_contact`
 connects it to `_show_profile`), and `nick-fill.svg` (tooltip
 `add_contact_fill_nick`) fetches the vCard and fills the nickname from `nickname`,
