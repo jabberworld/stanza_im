@@ -34,13 +34,11 @@ class LoginWidget(QtWidgets.QWidget):
         # Logo
         logo_label = QtWidgets.QLabel()
         logo_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        from stanza_im.include.constants import LOGO_PNG
-        if os.path.isfile(LOGO_PNG):
-            logo_label.setPixmap(QtGui.QPixmap(LOGO_PNG).scaled(
-                96, 96,
-                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation,
-            ))
+        from stanza_im.include.constants import APP_ICON_SVG
+        if os.path.isfile(APP_ICON_SVG):
+            pixmap = QtGui.QIcon(APP_ICON_SVG).pixmap(96, 96)
+            if not pixmap.isNull():
+                logo_label.setPixmap(pixmap)
         layout.addWidget(logo_label)
         layout.addSpacing(16)
 

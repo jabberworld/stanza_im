@@ -6,7 +6,7 @@ import platform
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from stanza_im.include.constants import (APP_NAME, LOGO_PNG, PROJECT_ROOT,
+from stanza_im.include.constants import (APP_ICON_SVG, APP_NAME, PROJECT_ROOT,
                                          VERSION_DISPLAY)
 from stanza_im.i18n import tr
 
@@ -24,11 +24,9 @@ class AboutDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         header = QtWidgets.QHBoxLayout()
         logo = QtWidgets.QLabel()
-        pixmap = QtGui.QPixmap(LOGO_PNG)
+        pixmap = QtGui.QIcon(APP_ICON_SVG).pixmap(72, 72)
         if not pixmap.isNull():
-            logo.setPixmap(pixmap.scaled(
-                72, 72, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation))
+            logo.setPixmap(pixmap)
         header.addWidget(logo)
         title = QtWidgets.QLabel(f"<b>{APP_NAME}</b><br><span style='font-size: 16pt'>{VERSION_DISPLAY}</span>")
         title.setTextFormat(QtCore.Qt.TextFormat.RichText)

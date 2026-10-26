@@ -95,9 +95,6 @@ SCALABLE_APPS_DIR = os.path.join(SCALABLE_DIR, "apps")
 
 APP_ICON_SVG = os.path.join(SCALABLE_APPS_DIR, "stanza-im.svg")
 
-LOGO_SVG = os.path.join(SCALABLE_DIR, "logo.svg")
-LOGO_PNG = os.path.join(IMAGES_DIR, "logo.png")
-
 # Ordered icon search paths (scalable first, then the sized directories).
 ICON_DIRS_ACTIONS = (SCALABLE_ACTIONS_DIR, ACTIONS_DIR_32, ACTIONS_DIR_16,
                      ACTIONS_DIR_22)

@@ -795,7 +795,7 @@ by the Transports tab).
 ## 6. Login Form (`ui/login_widget.py`)
 
 Widgets (top to bottom):
-- Logo image (from `resources/images/logo.png`)
+- Logo image (from `resources/images/scalable/apps/stanza-im.svg`)
 - **«Выбрать профиль» group**: a header label, then a row with the profile
   selector (`QComboBox` of the stored profiles), an `ok.png` apply button
   (`_apply_profile`) that loads the selected account into the config and the
