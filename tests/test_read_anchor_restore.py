@@ -543,10 +543,10 @@ check("a newer anchored load supersedes an anchor-less one",
       and "self._history_load_seq.get(jid) != seq"
       in method_source(_mw_src, "_load_history"))
 _joined = method_source(_mw_src, "_on_muc_joined")
-check("a joined room is restored only when it has a read anchor",
+check("a joined room is restored in the background from its anchor",
       "anchor = self._restore_anchor_for(room)" in _joined
       and "if anchor:" in _joined
-      and "self._load_history(room, anchor)" in _joined)
+      and "self._load_history(room, anchor, background=True)" in _joined)
 
 reached = method_source(_mw_src, "_on_chat_reached_bottom")
 check("reaching the newest message is the one point that marks it read",

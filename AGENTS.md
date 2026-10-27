@@ -523,7 +523,14 @@ contact is moved to the conferences group before joining
 (`_classify_bookmarked_conferences`) — only when it is actually joined or its
 bookmark asks for auto-join; a plain (non-autojoin, unjoined) bookmark is not
 forced into the Conferences group, and a room that is also a roster contact
-stays in its own contact group. A **XEP-0410 self-ping** rounds this
+stays in its own contact group. A room loaded by the auto-join path is fetched
+with `_load_history(..., background=True)`: its history and separator are
+prepared, but the persisted unread counter is not reconciled/marked read until
+the user actually opens the tab (`_focus_chat` schedules
+`_apply_visible_unread`); otherwise a stale unread count would disappear
+silently before the room is shown. An unread conversation with no read/seen
+anchor uses a truthy empty sentinel, so the whole loaded suffix is treated as
+unread instead of looking read. A **XEP-0410 self-ping** rounds this
 out: `_muc_self_ping_loop` (started on `session_start`/`session_resumed`,
 stopped on disconnect) pings our own occupant JID
 (`<iq type='get' to='room/nick'><ping xmlns='urn:xmpp:ping'/></iq>`) after 15

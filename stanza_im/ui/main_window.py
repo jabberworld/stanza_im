@@ -2717,7 +2717,7 @@ class MainWindow(QtWidgets.QMainWindow):
             anchor = self._restore_anchor_for(room)
             if anchor:
                 chat.set_restore_anchor(anchor)
-            self._load_history(room, anchor)
+            self._load_history(room, anchor, background=True)
             self._request_vcard(room, force=True)
         self._apply_muji_support(room)
         self._apply_muc_admin(room)
@@ -6192,17 +6192,23 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._opening_chat = False
 
-    def _load_history(self, jid: str, anchor: dict | None = None, seen_anchor: dict | None = None, **kwargs):
+    def _load_history(self, jid: str, anchor: dict | None = None,
+                      seen_anchor: dict | None = None, **kwargs):
         """Feed previously saved messages from the SQLite history into chat.
 
         *anchor* is the persisted read state of an unread conversation.  The
         window is the ordinary tail of the conversation — the unseen messages
         are right there — and the anchor only places the "unread messages"
-        separator above the first of them.
+        separator above the first of them.  *background* loads an auto-joined
+        room without reconciling/marking its counters before the user opens it.
         """
-        self._start_task(self._load_history_async(jid, anchor, seen_anchor=seen_anchor))
+        background = bool(kwargs.pop("background", False))
+        self._start_task(self._load_history_async(
+            jid, anchor, seen_anchor=seen_anchor, background=background))
 
-    async def _load_history_async(self, jid: str, anchor: dict | None = None, seen_anchor: dict | None = None):
+    async def _load_history_async(self, jid: str, anchor: dict | None = None,
+                                  seen_anchor: dict | None = None,
+                                  background: bool = False):
         from stanza_im.core import history
         chat = self._chat_window.get_chat(jid)
         if not chat:
@@ -6248,16 +6254,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
         chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)
-        # ``set_history`` seeds the button from the loaded block.  A chat that
-        # was opened with a stale counter (or a delayed message that now
-        # belongs to history) is reconciled with the chronological block.
         entry = self._unread_chats.get(jid)
-        if entry is not None and entry.get("unread"):
-            entry["unread"] = chat.unread_total()
-            entry["mentions"] = chat.mark_visible_mentions()
+        active = (not background and self._chat_area_visible()
+                  and self._chat_window.current_jid() == jid)
+        if active and entry is not None and entry.get("unread"):
+            total = chat.unread_total()
+            if total:
+                # The loaded chronological suffix is authoritative; a stale
+                # persisted count (e.g. from an older build) is corrected here.
+                logger.debug("UNREAD[reconcile] jid=%s old=%s block=%s",
+                             jid, entry.get("unread"), total)
+                entry["unread"] = total
+            # If total == 0 leave the old value for _apply_visible_unread: it
+            # logs the reconciliation and performs the mark-read transition.
         self._push_unread_to_chat(jid)
-        QtCore.QTimer.singleShot(
-            80, lambda key=jid: self._apply_visible_unread(key))
+        if active:
+            QtCore.QTimer.singleShot(
+                80, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -6863,8 +6876,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if entry.get("seen_ref") or entry.get("seen_ts") or entry.get("seen_sid"):
             return {"ref": entry.get("seen_ref", ""), "ts": entry.get("seen_ts", ""),
                     "sid": entry.get("seen_sid", "")}
-        return {"ref": entry["read_ref"], "ts": entry["read_ts"],
-                "sid": entry["read_sid"]}
+        if (entry.get("read_ref") or entry.get("read_ts")
+                or entry.get("read_sid")):
+            return {"ref": entry["read_ref"], "ts": entry["read_ts"],
+                    "sid": entry["read_sid"]}
+        # Unread but never read to the end: there is no read point.  A truthy
+        # empty anchor makes set_history place the separator before the first
+        # loaded row instead of treating the conversation as "no unread".
+        return {"ref": "", "ts": "", "sid": ""}
 
     def _load_unread_for(self, jid: str) -> None:
         """(Re)load the persisted read state of the account *jid*.
@@ -7086,6 +7105,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # scheduled reload re-pushes it once the window is applied).
         self._push_unread_to_chat(jid)
         self._push_reaction_pending(jid)
+        # An auto-joined room may have loaded its history in the background
+        # without touching the counters.  Now that the user actually opened it,
+        # reconcile the block and (only if it is empty) clear a stale counter.
+        if self._chat_area_visible() and self._chat_window.current_jid() == jid:
+            QtCore.QTimer.singleShot(
+                80, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -7228,11 +7253,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self._chat_window is not None else None)
         if entry is None or chat is None:
             return
+        if not (self._chat_area_visible()
+                and self._chat_window.current_jid() == jid):
+            return
         remaining = chat.mark_visible_unread()
         mentions = chat.mark_visible_mentions()
         if remaining == entry.get("unread") and mentions == entry.get("mentions"):
             return
-        had_unread = bool(entry.get("unread"))
+        old_unread = entry.get("unread")
+        had_unread = bool(old_unread)
+        logger.debug("UNREAD[reconcile] jid=%s old=%s new=%s mentions=%s",
+                     jid, old_unread, remaining, mentions)
         entry["unread"] = remaining
         entry["mentions"] = mentions
         seen_anchor = chat.seen_anchor()

@@ -118,6 +118,51 @@ MainWindow._bump_unread(probe, "room@example",
 check("a delayed older message is not counted unread",
       probe._unread_chats["room@example"]["unread"] == 3)
 
+# An unread conversation with no read/seen anchor is not "already read":
+# its whole loaded suffix is unread and set_history must place the separator.
+w = _widget()
+w._unread_boundary = {"ref": "", "ts": "", "sid": ""}
+check("an unread block without an anchor is not empty",
+      w.unread_total() == 70)
+
+# The no-anchor sentinel must be truthy so set_history treats it as unread.
+main = MainWindow.__new__(MainWindow)
+main._unread_chats = {"room@example": {
+    "unread": 5, "mentions": 0, "read_ts": "", "read_ref": "",
+    "seen_ts": "", "seen_ref": "", "seen_sid": ""}}
+anchor = MainWindow._restore_anchor_for(main, "room@example")
+check("an unread room without an anchor returns a truthy sentinel",
+      bool(anchor) and not anchor.get("ref") and not anchor.get("ts"))
+
+# A background auto-joined tab must not reconcile/clear its stale counter.
+class _BackgroundChat:
+    def mark_visible_unread(self):
+        return 0
+
+    def mark_visible_mentions(self):
+        return 0
+
+    def seen_anchor(self):
+        return {}
+
+
+class _BackgroundWindow:
+    def get_chat(self, _jid):
+        return _BackgroundChat()
+
+    def current_jid(self):
+        return "other@example"
+
+
+background = MainWindow.__new__(MainWindow)
+background._unread_chats = {"room@example": {"unread": 729, "mentions": 0}}
+background._chat_window = _BackgroundWindow()
+background._chat_area_visible = lambda: False
+background._mark_chat_read = lambda _jid: None
+MainWindow._apply_visible_unread(background, "room@example")
+check("a background room keeps its counter until the user opens it",
+      background._unread_chats["room@example"]["unread"] == 729)
+
 
 class _FakeChat:
     def mark_visible_unread(self):

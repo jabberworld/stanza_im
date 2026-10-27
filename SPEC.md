@@ -1818,7 +1818,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`timeout`, `unknown`, `remote-server-timeout`, `internal-server-error`,
   `service-unavailable`) with a bounded 5/15/45 s backoff
   (`MainWindow._schedule_autojoin_retry`/`_retry_muc_join`); other permanent
-  conditions surface a failure status.
+  conditions surface a failure status. The auto-join history load is
+  `background=True`: it prepares the window/separator but does not reconcile or
+  mark the persisted unread counter until the user opens the tab. An unread
+  conversation without a read/seen anchor uses a truthy empty sentinel, so its
+  whole loaded suffix is unread.
 - `JabberClient._on_session_start` fetches the bookmark list once **before the
   initial presence** (the roster request is already in flight) and joins the
   auto-join rooms from that fresh list (a room removed on another client is
