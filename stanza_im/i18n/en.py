@@ -1567,6 +1567,7 @@ STRINGS = {
     'call_quality_low': 'Low (200 kbps)',
     'call_quality_medium': 'Medium (500 kbps)',
     'call_quality_high': 'High (1000 kbps)',
+    'call_quality_1500': 'Very high (1500 kbps)',
     'call_quality_source': 'As the source',
     'call_quality_1080': 'Up to 1080p',
     'call_quality_720': 'Up to 720p',

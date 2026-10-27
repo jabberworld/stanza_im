@@ -699,7 +699,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             tr("prefs_audio_bitrate"),
             self._row(audio_rate, self._info_label(
                 tr("prefs_audio_bitrate_tip")), trailing_stretch=True))
-        video_rate = self._spin("calls_video_bitrate_kbps", 100, 2000)
+        video_rate = self._spin("calls_video_bitrate_kbps", 100, 1500)
         codecs_form.addRow(
             tr("prefs_video_bitrate"),
             self._row(video_rate, self._info_label(
@@ -2205,7 +2205,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             "calls_audio_bitrate_kbps": int(getattr(
                 calls, "audio_bitrate_kbps", 96) or 96),
             "calls_video_bitrate_kbps": int(getattr(
-                calls, "video_bitrate_kbps", 500) or 500),
+                calls, "video_bitrate_kbps", 1000) or 1000),
             "calls_video_max_height": int(getattr(
                 calls, "video_max_height", 0) or 0),
         }
@@ -2400,7 +2400,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.calls.audio_bitrate_kbps = int(
             self._value("calls_audio_bitrate_kbps") or 96)
         cfg.calls.video_bitrate_kbps = int(
-            self._value("calls_video_bitrate_kbps") or 500)
+            self._value("calls_video_bitrate_kbps") or 1000)
         cfg.calls.video_max_height = int(
             self._value("calls_video_max_height") or 0)
         # Apply the plugin manager page (mirror of Actions → Plugins) and let

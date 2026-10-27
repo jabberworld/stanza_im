@@ -48,7 +48,8 @@ _VIDEO_MODE_TIPS = {"off": "video_mode_off", "camera": "video_mode_camera",
 
 #: Live outgoing video quality presets (value, i18n key).
 _QUALITY_BITRATES = ((200, "call_quality_low"), (500, "call_quality_medium"),
-                     (1000, "call_quality_high"))
+                     (1000, "call_quality_high"),
+                     (1500, "call_quality_1500"))
 _QUALITY_HEIGHTS = ((0, "call_quality_source"), (1080, "call_quality_1080"),
                     (720, "call_quality_720"), (480, "call_quality_480"),
                     (360, "call_quality_360"))
@@ -293,7 +294,7 @@ class CallWindow(QtWidgets.QWidget):
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
                  avatar_path: str | None = None, avatar_radius: int = 100,
-                 video_bitrate: int = 500, max_height: int = 0,
+                 video_bitrate: int = 1000, max_height: int = 0,
                  info_provider=None):
         super().__init__(parent)
         self.sid = sid
@@ -520,7 +521,7 @@ class MujiCallWindow(QtWidgets.QWidget):
     quality_requested = QtCore.pyqtSignal(str, int, int)     # room, kbps, px
 
     def __init__(self, room: str, self_nick: str = "", parent=None,
-                 video_bitrate: int = 500, max_height: int = 0,
+                 video_bitrate: int = 1000, max_height: int = 0,
                  info_provider=None):
         super().__init__(parent)
         self.room = room

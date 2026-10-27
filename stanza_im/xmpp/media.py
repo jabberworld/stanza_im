@@ -55,7 +55,7 @@ AUDIO_SAMPLES_PER_FRAME = int(AUDIO_RATE * 0.02)   # 20 ms
 
 #: Encoder defaults (bits/s); the live encoders are tracked so a quality
 #: change takes effect without renegotiating the session.
-_MEDIA_DEFAULTS = {"audio_bitrate": 96000, "video_bitrate": 500000}
+_MEDIA_DEFAULTS = {"audio_bitrate": 96000, "video_bitrate": 1000000}
 _AUDIO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
 _VIDEO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
 
@@ -1558,6 +1558,16 @@ if HAS_AIORTC:
         def set_video_bitrate(self, kbps: int) -> None:
             """Change the outgoing video bitrate live (updates live encoders)."""
             set_media_defaults(video_kbps=kbps)
+            try:
+                encoder = self._sender_encoder("video")
+                target = getattr(encoder, "target_bitrate", None)
+                logger.info("CALL video bitrate requested=%skbps default=%s "
+                            "target=%s", kbps,
+                            media_defaults()["video_bitrate"] // 1000,
+                            (int(target) // 1000) if target else "none")
+            except Exception:  # noqa: BLE001 - diagnostics only
+                logger.debug("CALL video bitrate diagnostics failed",
+                             exc_info=True)
 
         def set_video_source(self, mode: str, region=None) -> None:
             """Switch the outgoing video between the camera and a screen area."""
@@ -1627,6 +1637,12 @@ if HAS_AIORTC:
                     self._stats[key + "_bps"] = int(
                         bits / (stamp - previous[0]))
                 self._stats_prev[key] = (stamp, total)
+            if self._stats:
+                logger.debug(
+                    "CALL stats out_video=%sbps out_audio=%sbps in=%sbps",
+                    self._stats.get("out_video_bps"),
+                    self._stats.get("out_audio_bps"),
+                    self._stats.get("in_total_bps"))
 
         def quality_info(self) -> dict:
             """Codec/resolution/bitrate snapshot for the call info popup."""

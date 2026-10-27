@@ -44,7 +44,7 @@ cfg = Config.defaults()
 check("the call codec defaults are present",
       cfg.calls.audio_codec == "auto" and cfg.calls.video_codec == "auto"
       and cfg.calls.audio_bitrate_kbps == 96
-      and cfg.calls.video_bitrate_kbps == 500
+      and cfg.calls.video_bitrate_kbps == 1000
       and cfg.calls.video_max_height == 0)
 check("the screen box default is Full HD",
       cfg.devices.screen_share_max_width == 1920
@@ -128,7 +128,7 @@ check("the codec controls load the defaults",
       dlg._controls["calls_audio_codec"].currentData() == "auto"
       and dlg._controls["calls_video_codec"].currentData() == "auto"
       and dlg._controls["calls_audio_bitrate_kbps"].value() == 96
-      and dlg._controls["calls_video_bitrate_kbps"].value() == 500)
+      and dlg._controls["calls_video_bitrate_kbps"].value() == 1000)
 check("the resolution presets are offered",
       dlg._controls["calls_video_max_height"].findData(720) >= 0
       and dlg._controls["devices_screen_resolution"].findData(
@@ -278,7 +278,48 @@ check("the 1:1 call quality menu emits the live choice",
       emitted == [("sid-9", 200, 480)]
       and window._quality_bitrate_actions[200].isChecked()
       and window._quality_height_actions[480].isChecked())
+check("the live menu offers the 1500 kbps preset",
+      1500 in window._quality_bitrate_actions)
 window.close()
+
+class _QualityConfig:
+    def __init__(self):
+        self.calls = SimpleNamespace(video_bitrate_kbps=500,
+                                     video_max_height=0)
+        self.saved = False
+
+    def save(self):
+        self.saved = True
+
+
+quality_cfg = _QualityConfig()
+quality_probe = SimpleNamespace(_config=quality_cfg)
+MainWindow._save_call_quality(quality_probe, 1500, 720)
+check("a live quality choice is persisted",
+      quality_cfg.calls.video_bitrate_kbps == 1500
+      and quality_cfg.calls.video_max_height == 720
+      and quality_cfg.saved)
+
+
+class _ActiveQualityManager:
+    def __init__(self):
+        self.sessions = {"sid-a": object(), "sid-b": object()}
+        self.applied = []
+
+    def set_call_video_quality(self, key, kbps, height):
+        self.applied.append((key, kbps, height))
+
+
+active_manager = _ActiveQualityManager()
+active_probe = SimpleNamespace(
+    _client=SimpleNamespace(rtp_calls=active_manager),
+    _config=SimpleNamespace(calls=SimpleNamespace(
+        video_bitrate_kbps=1500, video_max_height=720)),
+    _call_quality_defaults=lambda: (1500, 720))
+MainWindow._apply_active_call_quality(active_probe)
+check("settings apply reaches every active call",
+      sorted(active_manager.applied)
+      == [("sid-a", 1500, 720), ("sid-b", 1500, 720)])
 
 muji = MujiCallWindow("room@conf.example", self_nick="me",
                       video_bitrate=500, max_height=0)

@@ -1568,6 +1568,7 @@ STRINGS = {
     'call_quality_low': 'Низкое (200 кбит/с)',
     'call_quality_medium': 'Среднее (500 кбит/с)',
     'call_quality_high': 'Высокое (1000 кбит/с)',
+    'call_quality_1500': 'Очень высокое (1500 кбит/с)',
     'call_quality_source': 'Как у источника',
     'call_quality_1080': 'До 1080p',
     'call_quality_720': 'До 720p',

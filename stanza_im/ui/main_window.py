@@ -3567,6 +3567,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.call_devices = self._call_device_config()
             self._client.call_auto_accept = bool(getattr(
                 getattr(self._config, "calls", None), "auto_accept", False))
+            # Apply a changed Calls preference to calls already in progress.
+            self._apply_active_call_quality()
             from stanza_im.xmpp import jet as jet_mod
             self._client.file_encryption = jet_mod.normalize_mode(
                 str(getattr(self._config.files, "encryption", "prefer")
@@ -5188,7 +5190,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "audio_bitrate_kbps": int(
                 getattr(calls, "audio_bitrate_kbps", 96) or 96),
             "video_bitrate_kbps": int(
-                getattr(calls, "video_bitrate_kbps", 500) or 500),
+                getattr(calls, "video_bitrate_kbps", 1000) or 1000),
             "video_max_height": int(
                 getattr(calls, "video_max_height", 0) or 0),
         }
@@ -5205,11 +5207,50 @@ class MainWindow(QtWidgets.QMainWindow):
     def _call_quality_defaults(self) -> tuple[int, int]:
         """The configured video bitrate/height for the live quality menu."""
         calls = getattr(self._config, "calls", None)
-        return (int(getattr(calls, "video_bitrate_kbps", 500) or 500),
+        return (int(getattr(calls, "video_bitrate_kbps", 1000) or 1000),
                 int(getattr(calls, "video_max_height", 0) or 0))
+
+    def _save_call_quality(self, bitrate: int | None,
+                           height: int | None) -> None:
+        """Persist a live quality choice so the next call starts with it."""
+        calls = getattr(self._config, "calls", None)
+        if calls is None:
+            return
+        changed = False
+        if bitrate is not None:
+            value = int(bitrate)
+            if int(getattr(calls, "video_bitrate_kbps", 0) or 0) != value:
+                calls.video_bitrate_kbps = value
+                changed = True
+        if height is not None:
+            value = int(height)
+            if int(getattr(calls, "video_max_height", 0) or 0) != value:
+                calls.video_max_height = value
+                changed = True
+        if changed:
+            try:
+                self._config.save()
+            except Exception:  # noqa: BLE001 - keep the live call usable
+                logger.debug("CALL quality save failed", exc_info=True)
+
+    def _apply_active_call_quality(self) -> None:
+        """Push the configured video quality into already-running calls."""
+        client = getattr(self, "_client", None)
+        manager = getattr(client, "rtp_calls", None) if client else None
+        sessions = getattr(manager, "sessions", {}) or {}
+        if not sessions:
+            return
+        bitrate, height = self._call_quality_defaults()
+        for sid in list(sessions):
+            try:
+                manager.set_call_video_quality(sid, bitrate, height)
+            except Exception:  # noqa: BLE001 - a closing call must not break apply
+                logger.debug("CALL quality apply failed for %s", sid,
+                             exc_info=True)
 
     def _on_call_quality_requested(self, sid: str, bitrate: int,
                                    height: int) -> None:
+        self._save_call_quality(bitrate, height)
         if self._client is not None:
             self._client.rtp_calls.set_call_video_quality(
                 sid, bitrate, height)
@@ -5697,6 +5738,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_muji_quality_requested(self, room: str, bitrate: int,
                                    height: int) -> None:
+        self._save_call_quality(bitrate, height)
         if self._client is not None:
             self._client.rtp_calls.set_call_video_quality(
                 room, bitrate, height)

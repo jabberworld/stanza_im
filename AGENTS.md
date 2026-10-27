@@ -2885,14 +2885,15 @@ translucent nickname caption over the image. Every call control is **icon-only**
 `camera`/`camera-off` (the camera is a webcam glyph), `speaker`/`speaker-off`,
 a red `call-hangup`, a green `call-accept` and a **quality** button
 (`quality.svg`, a small bars glyph). Its menu changes the outgoing video
-**bitrate** (200/500/1000 kbps) and **resolution** (source/1080/720/480/360) of
-a live call (in Muji — of every session of the room):
-`MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
+**bitrate** (200/500/1000/1500 kbps; default 1000) and **resolution**
+(source/1080/720/480/360) of a live call (in Muji — of every session of the
+room): `MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
 `rtp_calls.set_call_video_quality` → the engine call's `set_video_bitrate`
 (updates the live encoders through the weak registry; aiortc recreates its
 codec with a keyframe on the next frame) and `set_video_quality`
-(`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). The
-choice is session-only (defaults come from the Calls preferences); the codec
+(`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). A
+choice is persisted in `calls.video_bitrate_kbps`/`video_max_height` and
+Preferences changes are also pushed into already-running sessions; the codec
 cannot change during a call (that needs renegotiation) and audio is only
 changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and
