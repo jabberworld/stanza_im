@@ -724,6 +724,11 @@ if HAS_AIORTC:
             self._decode_error = ""
             self._last_grab = 0.0
             self._last_image = None
+            # The PyAV container is closed only after an in-flight decode
+            # returns (see stop/_on_decode_done).  Closing it from the GUI
+            # thread while the executor reads it crashes libavcodec.
+            self._decode_future = None
+            self._pending_close = None
             self._open_camera()
 
         def _device_path(self) -> str:
@@ -800,6 +805,9 @@ if HAS_AIORTC:
             first = self._last_size is None
             self._last_size = (frame.width, frame.height)
             if first:
+                logger.info("CALL video frame %dx%d (max_height=%s)",
+                            frame.width, frame.height,
+                            getattr(self, "_max_height", 0) or "source")
                 self._schedule_keyframe("first-video-frame")
 
         def last_size(self):
@@ -853,10 +861,17 @@ if HAS_AIORTC:
                 await asyncio.sleep(0.05)
                 return _black()
             loop = asyncio.get_event_loop()
+            future = loop.run_in_executor(None, self._next_frame)
+            self._decode_future = future
+            future.add_done_callback(self._on_decode_done)
             try:
-                frame = await loop.run_in_executor(None, self._next_frame)
+                frame = await future
             except RuntimeError:
                 self._stopped = True
+                return _black()
+            if self._stopped:
+                # stop() deferred the container close until this decode
+                # returned; do not touch the decoded frame any more.
                 return _black()
             if self._handle_decode_error():
                 await asyncio.sleep(0.05)
@@ -897,12 +912,43 @@ if HAS_AIORTC:
                 logger.debug("CALL local frame relay failed", exc_info=True)
 
         def _next_frame(self):
+            # Snapshot both attributes before the blocking decode: stop() must
+            # not clear them under the executor thread.
+            container = self._container
+            stream = self._stream
+            if container is None or stream is None:
+                return None
             try:
-                for frame in self._container.decode(self._stream):
+                for frame in container.decode(stream):
                     return frame.reformat(format="yuv420p")
             except Exception as exc:  # noqa: BLE001 - localized FFmpeg error
                 self._decode_error = decode_ffmpeg_error(exc)
             return None
+
+        def _close_container(self, container=None) -> None:
+            """Close *container* once it is no longer used by the decoder."""
+            if container is None:
+                container = self._container
+            if self._container is container:
+                self._container = None
+                self._stream = None
+            try:
+                if container is not None:
+                    container.close()
+                    logger.debug("CALL camera capture closed")
+            except Exception:
+                logger.debug("CALL camera capture close failed", exc_info=True)
+
+        def _on_decode_done(self, future) -> None:
+            """Finish a deferred stop after the executor decode returned."""
+            if getattr(self, "_decode_future", None) is future:
+                self._decode_future = None
+            if not getattr(self, "_stopped", False):
+                return
+            container = getattr(self, "_pending_close", None)
+            self._pending_close = None
+            if container is not None:
+                self._close_container(container)
 
         def _handle_decode_error(self) -> bool:
             """Drop a failing capture and reopen it (auto after a custom mode)."""
@@ -930,14 +976,15 @@ if HAS_AIORTC:
 
         def stop(self):
             self._stopped = True
+            future = getattr(self, "_decode_future", None)
             container = self._container
-            self._container = None
-            self._stream = None
-            try:
-                if container is not None:
-                    container.close()
-            except Exception:
-                pass
+            if future is not None and not future.done():
+                # The executor is inside container.decode(); closing the PyAV
+                # container here would free the decoder under it.  Let the
+                # future callback close it after the current call returns.
+                self._pending_close = container
+                return
+            self._close_container(container)
 
 
 def _silence(samples: int, channels: int = AUDIO_CHANNELS):

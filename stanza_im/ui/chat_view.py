@@ -600,6 +600,27 @@ if HAS_WEBENGINE:
         def __init__(self, view, parent=None):
             super().__init__(parent)
             self._view = view
+            try:
+                self.renderProcessTerminated.connect(
+                    self._on_render_process_terminated)
+                self.renderProcessPidChanged.connect(
+                    self._on_render_process_pid_changed)
+            except (AttributeError, TypeError, RuntimeError):
+                # Older Qt builds may not expose these diagnostics.
+                pass
+
+        def _on_render_process_terminated(self, status, exit_code):
+            try:
+                pending = len(getattr(self._view, "_pending", ()) or ())
+            except Exception:  # noqa: BLE001 - diagnostics only
+                pending = -1
+            logger.error(
+                "chat renderer terminated: status=%s code=%s pending=%d "
+                "ready=%s", status, exit_code, pending,
+                getattr(self._view, "_ready", None))
+
+        def _on_render_process_pid_changed(self, pid):
+            logger.debug("chat renderer pid=%s", pid)
 
         def acceptNavigationRequest(self, url, _type, is_main_frame):
             return self._view._accept_navigation(url)

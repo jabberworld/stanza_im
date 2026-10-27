@@ -1,0 +1,81 @@
+"""Stopping a camera capture must not close PyAV under an active decode.
+
+Run with:
+    QT_QPA_PLATFORM=offscreen python3 tests/test_call_capture_stop.py
+"""
+import os
+import sys
+import tempfile
+
+os.environ["XDG_DATA_HOME"] = os.path.join(
+    tempfile.mkdtemp(prefix="stanza_capture_stop_"), "data")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from stanza_im.xmpp import media  # noqa: E402
+
+FAILURES = []
+
+
+def check(name, cond):
+    print(("PASS" if cond else "FAIL") + ": " + name)
+    if not cond:
+        FAILURES.append(name)
+
+
+class _Container:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _Future:
+    def __init__(self, done=False):
+        self._done = done
+
+    def done(self):
+        return self._done
+
+
+def _track(container, future):
+    track = media._VideoCaptureTrack.__new__(media._VideoCaptureTrack)
+    track._container = container
+    track._stream = object()
+    track._decode_future = future
+    track._pending_close = None
+    track._stopped = False
+    return track
+
+
+if not media.HAS_AIORTC:
+    print("SKIP: aiortc is unavailable")
+    raise SystemExit(0)
+
+container = _Container()
+future = _Future(done=False)
+track = _track(container, future)
+track.stop()
+check("an in-flight decode is not closed under the executor",
+      not container.closed and track._container is container)
+future._done = True
+track._on_decode_done(future)
+check("the deferred close happens after the decode completes",
+      container.closed and track._container is None)
+check("the stopped track is marked", track._stopped)
+
+container = _Container()
+track = _track(container, _Future(done=True))
+track.stop()
+check("a completed decode closes immediately", container.closed)
+
+container = _Container()
+track = _track(container, None)
+track.stop()
+check("a capture with no decode closes immediately", container.closed)
+
+if FAILURES:
+    print("FAILURES:", FAILURES)
+    sys.exit(1)
+print("All capture-stop tests passed")

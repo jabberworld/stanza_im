@@ -3425,11 +3425,12 @@ client.leave_muji(room)
   only lower the encoder), and the outgoing camera
   `calls.video_max_height` downscale cap) and **Screen** (the screen-sharing
   output box and frame rate). A live call (and a Muji conference) additionally
-  has an icon-only quality menu: video bitrate 200/500/1000 kbps and resolution
-  source/1080/720/480/360, applied through
+  has an icon-only quality menu: video bitrate 200/500/1000/1500 kbps (default
+  1000) and resolution source/1080/720/480/360, applied through
   `JingleRtpManager.set_call_video_quality` to the live encoders
   (`target_bitrate`, aiortc recreates the codec with a keyframe) and the
-  capture track (downscale only). It is session-only; audio changes are
+  capture track (downscale only). The choice is persisted in the config and
+  Preferences changes are also applied to an active call; audio changes are
   pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio

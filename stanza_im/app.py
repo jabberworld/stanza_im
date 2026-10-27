@@ -203,6 +203,14 @@ def run() -> int:
     enter the event loop.  Returns the exit code."""
     global _loop
 
+    # Native crashes (QtWebEngine/Mesa/PyAV) otherwise leave no Python
+    # traceback at all; faulthandler prints the Python stacks on SIGSEGV.
+    try:
+        import faulthandler
+        faulthandler.enable(all_threads=True)
+    except Exception:  # noqa: BLE001 - diagnostics must never block startup
+        pass
+
     args, leftover = parse_args()
     sys.argv = prepare_qt_argv(leftover)
     debug = args.debug
