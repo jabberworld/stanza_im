@@ -1509,8 +1509,11 @@ chat name>` (in `unified` mode through the `window_title_changed` signal, since
 the title belongs to the main window); `appearance.show_unread_in_tabs` (default
 on, Preferences → Appearance → «Разное») turns it off.
 `_recount_unread` recomputes the
-aggregates (restored counters blink the tray again after a re-login,
-`_on_session_started`). It loads them at startup, applies them when building
+aggregates and owns the tray-blink state, so every path that clears/shrinks a
+count (restored counters blink the tray again after a re-login,
+`_on_session_started`; history/visible reconciliation; MDS; read actions)
+stops the blink as soon as the derived total is zero. It loads them at startup,
+applies them when building
 roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
 in `_bump_unread`/`_reset_unread` and flushes them to disk with a 1 s debounce
 plus on quit. All three conversation kinds count unread: `_on_message_received`
@@ -1625,11 +1628,12 @@ XEP-0490 displayed only when `MainWindow._chat_at_bottom(jid)`
 (`ChatWidget.at_bottom()` → the view) holds, so a message that lands while the
 user reads further up is not advertised as seen; the chat's own `bottom_reached`
 marks it read when they get there.
-The **tray only blinks while logged in**: `_sync_tray_blink`
-(called from `_on_session_started`, `_on_stream_resumed`, `_bump_unread` and
-`_reset_unread`) starts/stops it, and `_on_disconnected`/`_on_sm_failed` stop it
+The **tray only blinks while logged in**: `_sync_tray_blink` is called from
+`_recount_unread` (the single derived-total point), `_bump_unread`,
+`_on_session_started`/`_on_stream_resumed` and the settings apply;
+`_tray_blink_allowed` gates it, and `_on_disconnected`/`_on_sm_failed` stop it
 so the offline icon is visible — restored counters do not blink on the login
-screen. The blink is **smooth** (`TrayIcon._blink_step`): a ~25 fps timer fades
+screen and a zero total always stops the timer. The blink is **smooth** (`TrayIcon._blink_step`): a ~25 fps timer fades
 the icon out and back in over a 1 s period following a cosine curve (the icon is
 painted at the current opacity, so it pulses instead of toggling on/off). The
 file is a **v2 payload**:

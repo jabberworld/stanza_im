@@ -1858,11 +1858,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   contact with unread messages and marks it read, so each subsequent
   middle-click advances to the next unread contact until none remain
   (`MainWindow._on_tray_cycle_unread`)
-- Blinking: alternates between icon and blank every 500ms when unread messages
-  exist. It is active **only while logged in** (`MainWindow._sync_tray_blink`,
-  started on `session_started`/`stream_resumed` and on new unread, stopped on
-  `disconnected`/`sm_failed`), so restored counters do not blink on the login
-  screen.
+- Blinking: a smooth 1 s fade when unread messages exist. It is active **only
+  while logged in** (`MainWindow._sync_tray_blink`, driven by the derived
+  `_recount_unread` total, started on `session_started`/`stream_resumed` and on
+  new unread, stopped on `disconnected`/`sm_failed` and whenever the total
+  reaches zero), so restored counters do not blink on the login screen.
 - Unread counters are persisted (`$XDG_DATA_HOME/stanza-im/<jid>/unread.json`,
   `core/unread_state.py`) and restored on startup: the roster badges come back
   exactly as before the restart (`MainWindow._unread_chats` is the single

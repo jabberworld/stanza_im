@@ -320,6 +320,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_chats: dict[str, dict] = {}
         self._unread_jids: set[str] = set()
         self._unread_total = 0
+        # Restored counters must not blink the tray on the login screen.
+        self._tray_blink_allowed = False
         # JIDs known (from the persisted registry) to be conferences, so a room
         # with restored unread is classified correctly before it is joined.
         self._known_conferences: set[str] = set()
@@ -3565,6 +3567,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                         False)):
                     self._start_task(self._client.omemo.sync_aliases())
         self._tray.set_popups_mode(self._config.notifications.popups)
+        # Toggling the blink preference takes effect without a new message.
+        self._sync_tray_blink()
         try:
             sec = int(getattr(self._config.chat, "mds_displayed_throttle", 3) or 3)
         except (TypeError, ValueError):
@@ -4308,6 +4312,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # A live session: drop the reconnect affordance.  Keep the progress bar
         # only for the initial connect (it finishes on roster_received); a
         # reconnected/resumed session just hides it.
+        self._tray_blink_allowed = True
         self._hide_reconnect()
         if getattr(self, "_connecting", False):
             self._set_connect_progress(tr("login_roster"), 80)
@@ -4356,6 +4361,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_info_actions_enabled(False)
 
     def _on_disconnected(self):
+        self._tray_blink_allowed = False
         self._presence_sound_seen.clear()
         self._set_info_actions_enabled(False)
         # With stream management a transient drop is usually resumed, so
@@ -4493,6 +4499,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_stream_resumed(self):
         logger.info("Connection restored (stream resumed)")
         self._resume_pending = False
+        self._tray_blink_allowed = True
         # Re-seed the seen set so the resumed session's presence replay is
         # silent again (the contacts are "new" for this session).
         self._osd_status_seen.clear()
@@ -4507,6 +4514,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_sm_failed(self):
         self._resume_pending = False
+        self._tray_blink_allowed = False
         self._tray.stop_blinking()
         self._set_offline_status(tr("login_disconnected"))
         self._set_info_actions_enabled(False)
@@ -6265,6 +6273,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 logger.debug("UNREAD[reconcile] jid=%s old=%s block=%s",
                              jid, entry.get("unread"), total)
                 entry["unread"] = total
+                # The public total/tray state must follow the corrected block
+                # immediately; otherwise a smaller suffix leaves a stale
+                # ``_unread_total`` and the tray keeps blinking.
+                self._recount_unread()
+                self._refresh_unread_badge(jid)
             # If total == 0 leave the old value for _apply_visible_unread: it
             # logs the reconciliation and performs the mark-read transition.
         self._push_unread_to_chat(jid)
@@ -6847,13 +6860,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._unread_chats.pop(jid, None)
         # An anchor-only record (read state kept, nothing unread) must not
         # keep the conversation in the "has unread" set used for tray
-        # cycling and tab suspension.
-        if record["unread"] > 0:
-            self._unread_jids.add(jid)
-        else:
-            self._unread_jids.discard(jid)
-        self._unread_total = sum(item["unread"] for item in
-                                 self._unread_chats.values())
+        # cycling and tab suspension.  The shared recount also stops the tray
+        # blink when this was the last unread conversation.
+        self._recount_unread()
 
     def _restore_anchor_for(self, jid: str) -> dict:
         """The stored read anchor of *jid* when it has unread messages.
@@ -6933,11 +6942,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._known_conferences = set()
 
     def _recount_unread(self) -> None:
-        """Recompute the aggregate counters from the stored records."""
+        """Recompute the aggregate counters from the stored records.
+
+        This is the single place where ``_unread_total`` is derived from the
+        per-chat records, so it also owns the tray-blink state.  Every path
+        that clears or shrinks an unread block (history reconciliation,
+        visible-message reconciliation, MDS, read actions) goes through here;
+        a stale total must never leave the blink timer running.
+        """
         self._unread_jids = {key for key, entry in self._unread_chats.items()
                              if entry["unread"]}
         self._unread_total = sum(entry["unread"] for entry in
                                  self._unread_chats.values())
+        self._sync_tray_blink()
         self.unread_changed.emit()
 
     def _refresh_unread_badge(self, jid: str) -> None:
@@ -7075,10 +7092,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _sync_tray_blink(self):
         """Blink the tray only while logged in and unread messages exist."""
-        if self._unread_total > 0 and self._config.notifications.tray_blink:
-            self._tray.start_blinking()
+        # Use __dict__: a test may build MainWindow via __new__ without a Qt
+        # super-class init, where getattr() raises on a missing QObject attr.
+        tray = self.__dict__.get("_tray")
+        if tray is None:
+            # The unread state is loaded before the tray is built.
+            return
+        config = self.__dict__.get("_config")
+        notifications = getattr(config, "notifications", None)
+        if notifications is None:
+            return
+        enabled = bool(getattr(notifications, "tray_blink", True))
+        logged_in = bool(self.__dict__.get("_tray_blink_allowed", False))
+        should_blink = logged_in and self._unread_total > 0 and enabled
+        active = bool(getattr(tray, "_blink_active", False))
+        if should_blink != active:
+            logger.debug("TRAY[blink] total=%d enabled=%s logged_in=%s active=%s",
+                         self._unread_total, enabled, logged_in, should_blink)
+        if should_blink:
+            tray.start_blinking()
         else:
-            self._tray.stop_blinking()
+            tray.stop_blinking()
 
     def _focus_chat(self, jid: str, chat, *, is_new: bool = False) -> None:
         """Show *jid* the way the user left it.
@@ -7259,6 +7293,15 @@ class MainWindow(QtWidgets.QMainWindow):
         remaining = chat.mark_visible_unread()
         mentions = chat.mark_visible_mentions()
         if remaining == entry.get("unread") and mentions == entry.get("mentions"):
+            # The counters are unchanged, but ``_unread_total`` may still be
+            # stale after an earlier history reconciliation.  Heal it before
+            # leaving, so the tray cannot keep blinking for a zero block.
+            total = sum(int(item.get("unread") or 0)
+                        for item in self._unread_chats.values())
+            if total != self._unread_total:
+                self._recount_unread()
+            else:
+                self._sync_tray_blink()
             return
         old_unread = entry.get("unread")
         had_unread = bool(old_unread)
@@ -10552,6 +10595,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Unread counters remain on disk; clear only the live totals/blink.
         self._unread_total = 0
         self._unread_jids = set()
+        self._tray_blink_allowed = False
         self._clear_status()
         self._tray.stop_blinking()
         self._tray.set_icon(QtGui.QIcon(self._icons.get_status_icon("offline")))
