@@ -1639,10 +1639,11 @@ stanza-id (the v1 `{"count": N, "displayed": "sid"}` layout and the v0
 `_on_login` seeds it back via `client.set_displayed_state`, so the startup
 XEP-0490 catch-up cannot clear unread messages that arrived after our own last
 displayed point (a genuinely newer remote state still clears them). The
-`seen_*` fields are the **partial progress** point: the newest message that has
-scrolled into the viewport (see the partial-read paragraph below), kept next to
-the read anchor so a partially read conversation resumes where the user stopped
-looking.
+`seen_*` fields are the **partial progress** point: the topmost unread message
+that has scrolled into the viewport (see the partial-read paragraph below),
+kept next to the read anchor so a partially read conversation resumes where the
+user stopped looking. A delayed message older than the anchor is history, not
+unread.
 `unread_state.load_chats()/save_chats()` are the v2 API; `load_state()`/`save()`
 are the derived legacy views. OSD popups
 are not replayed. The file also stores the owning account JID
@@ -1990,32 +1991,22 @@ equal to the one already recorded in `_mds_local`; that map is seeded at connect
 from the persisted unread state, so the startup catch-up does not wipe restored
 unread (see the unread-counters paragraph above).
 
-**Partial read progress (`seen`)**: scrolling a conversation into view records
-the bottom-most visible message (`ChatView._find_last_visible_ref`, a WebEngine
-JS query of `#chat .stanza-message`; `_last_seen_result` reads its
-`data-stanza-id`/`data-reply-id`/`data-stanza-time`) and emits
-`last_seen_changed(ref, ts, sid)` — but only while the view is actually scrolled
-up (`ChatWidget._on_last_seen` skips a view at the bottom), so the transient
-"at the bottom" position during an anchor restore cannot jump the seen point to
-the newest message. The seen point is **monotonic**: `ChatWidget._on_last_seen`
-drops a report whose timestamp is not newer than the highest one already emitted
-(`_last_seen_ts`, never moved back) and the stored `seen_ts` is only rewritten
-when it advances (`MainWindow._on_chat_last_seen`), so scrolling back up or
-re-showing an already seen message never subtracts the same messages again.
-`ChatWindow.last_seen` relays it to
-`MainWindow._on_chat_last_seen`, which advances the persisted `seen_*` point,
-shrinks the unread badge by the messages that just became visible
-(`ChatWidget.count_seen_since`), and arms the `@`/jump state accordingly. The
-`▼ N` number is the conversation's **roster unread counter**: `MainWindow.
-_push_unread_to_chat` mirrors `_unread_chats[jid]["unread"]` onto the button
-(`ChatWidget.set_unread_count` → `ChatView.set_unseen_count`) on open, bump,
-seen and reset, so it ticks down while the user scrolls just like the badge;
-the first-click target is refreshed separately from the local block
-(`ChatWidget._sync_jump_target_from_block` → `ChatView.set_unseen_target`).
-`ChatWidget.set_seen()` moves the unread separator boundary with it, and
-`_restore_anchor_for` prefers the seen point over the read anchor, so reopening
-a partially read conversation resumes where the user stopped looking instead of
-dropping back to the old read point. The XEP-0490 `displayed` update for
+**Partial read progress (`seen`)**: the WebEngine scroll poll returns every
+visible `#chat .stanza-message` ref (not only the bottom-most one), so
+`MainWindow._on_chat_last_seen` removes exactly the unread rows that are on
+screen (`ChatWidget.mark_visible_unread`). Counts are derived from the
+**deduplicated chronological unread suffix** (`_ordered_entries` /
+`_unread_block_entries`); live and SQLite copies are counted once, and outgoing
+messages never consume unread. The seen anchor is the **topmost visible unread**
+message, so a viewport that shows only 2–3 new messages subtracts 2–3 and a
+block that fits entirely becomes zero immediately; messages above the viewport
+are never marked seen. The point is monotonic and `set_seen` no longer moves
+the unread separator boundary — `mark_visible_unread` advances it from the
+visible block. Delayed messages whose timestamp is not newer than the read/seen
+point stay in chronological history and do not increase unread (variant A).
+`ChatWindow.last_seen` relays the report; the `▼ N` number and the roster badge
+use the same block count on open, bump, seen and reset. `_restore_anchor_for`
+still prefers the seen point, so reopening resumes where the user stopped. The XEP-0490 `displayed` update for
 partial progress is published through a single-shot timer
 (`MainWindow._mds_throttle_timer`, `_flush_mds_pending`) at most once per
 `chat.mds_displayed_throttle` seconds (1–30, default 3; Preferences → Chat →

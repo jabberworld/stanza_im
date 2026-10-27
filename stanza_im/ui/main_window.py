@@ -6225,7 +6225,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 window = int(self._config.chat.history_limit)
             except (TypeError, ValueError):
                 window = _HISTORY_PAGE
+            unread = int(self._read_state(jid).get("unread") or 0)
             window = max(10, min(window, _HISTORY_WINDOW_MAX))
+            # Load the complete unread suffix (a read anchor can be older than
+            # the configured window); the extra rows prevent a partial window
+            # from decrementing the badge before the real block is rendered.
+            window = max(window, min(unread + window, _HISTORY_WINDOW_MAX))
             chat = self._chat_window.get_chat(jid)
             if chat is None:
                 return
@@ -6243,10 +6248,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
         chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)
-        # ``set_history`` seeds the button from the loaded block; the roster
-        # counter is authoritative, so mirror it (a block bigger than the
-        # window shows the full unread count, not just the loaded part).
+        # ``set_history`` seeds the button from the loaded block.  A chat that
+        # was opened with a stale counter (or a delayed message that now
+        # belongs to history) is reconciled with the chronological block.
+        entry = self._unread_chats.get(jid)
+        if entry is not None and entry.get("unread"):
+            entry["unread"] = chat.unread_total()
+            entry["mentions"] = chat.mark_visible_mentions()
         self._push_unread_to_chat(jid)
+        QtCore.QTimer.singleShot(
+            80, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -6943,8 +6954,21 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
 
     def _bump_unread(self, jid: str, mention: bool = False,
-                     important: bool = False):
-        """Count an incoming message for *jid* (roster badge + tray blink)."""
+                     important: bool = False, ts: str = "",
+                     ref: str = ""):
+        """Count an incoming message for *jid* (roster badge + tray blink).
+
+        Chronological order is authoritative: a message whose timestamp is not
+        newer than the read/seen point belongs to history (a delayed/replayed
+        item) and must not create an unread tail entry.
+        """
+        state = self._read_state(jid)
+        boundary = max(str(state.get("read_ts") or ""),
+                       str(state.get("seen_ts") or ""))
+        if ts and boundary and str(ts) <= boundary:
+            logger.debug("UNREAD[late] jid=%s ts=%r boundary=%r ignored",
+                         jid, ts, boundary)
+            return
         entry = self._unread_chats.get(jid)
         if entry is None:
             entry = unread_state.blank()
@@ -7154,31 +7178,31 @@ class MainWindow(QtWidgets.QMainWindow):
             jid, ref, ts, prev_seen, prev_unread, prev_mentions, advanced,
             entry.get("read_ts") or "")
         if advanced:
-            if sid:
-                entry["seen_sid"] = str(sid)
-            if ref:
-                entry["seen_ref"] = str(ref)
-            entry["seen_ts"] = str(ts)
             import time
             entry["seen_at"] = time.time()
-            boundary_ts = prev_seen or str(entry.get("read_ts") or "")
-            if boundary_ts and (prev_unread > 0 or prev_mentions > 0):
-                chat = self._chat_window.get_chat(jid)
-                if chat is not None:
-                    seen_now = chat.count_seen_since(boundary_ts, str(ts))
-                    seen_mentions = chat.count_mentions_since(
-                        boundary_ts, str(ts))
-                    logger.debug(
-                        "UNREAD[seen] jid=%s boundary=%r seen=%r seen_now=%d "
-                        "seen_mentions=%d unread %d->%d mentions %d->%d",
-                        jid, boundary_ts, ts, seen_now, seen_mentions,
-                        prev_unread, max(0, prev_unread - seen_now),
-                        prev_mentions, max(0, prev_mentions - seen_mentions))
-                    if seen_now > 0 or seen_mentions > 0:
-                        entry["unread"] = max(0, prev_unread - seen_now)
-                        entry["mentions"] = max(0, prev_mentions - seen_mentions)
-                        self._recount_unread()
-                        self._refresh_unread_badge(jid)
+            chat = self._chat_window.get_chat(jid)
+            if chat is not None:
+                remaining = chat.mark_visible_unread()
+                mentions = chat.mark_visible_mentions()
+                seen_anchor = chat.seen_anchor()
+                if seen_anchor.get("sid"):
+                    entry["seen_sid"] = str(seen_anchor["sid"])
+                if seen_anchor.get("ref"):
+                    entry["seen_ref"] = str(seen_anchor["ref"])
+                if seen_anchor.get("ts"):
+                    entry["seen_ts"] = str(seen_anchor["ts"])
+                logger.debug(
+                    "UNREAD[seen] jid=%s remaining=%d mentions=%d "
+                    "seen_ref=%r seen_ts=%r",
+                    jid, remaining, mentions, entry.get("seen_ref"),
+                    entry.get("seen_ts"))
+                entry["unread"] = remaining
+                entry["mentions"] = mentions
+                self._recount_unread()
+                self._refresh_unread_badge(jid)
+                if remaining == 0 and (prev_unread or prev_mentions):
+                    self._mark_chat_read(jid)
+                    return
         # Keep the jump-to-bottom number equal to the roster badge as it ticks
         # down while the user reads.
         self._push_unread_to_chat(jid)
@@ -7190,6 +7214,40 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
         self._schedule_unread_save()
+
+    def _apply_visible_unread(self, jid: str) -> None:
+        """Reconcile the counter with the unread messages now on screen.
+
+        Called after the initial window is rendered and from every visible
+        change.  Only genuinely visible messages are removed, so opening a
+        chat with 44 unread and 3 visible leaves 41 (and 0 when the whole
+        block fits).
+        """
+        entry = self._unread_chats.get(jid)
+        chat = (self._chat_window.get_chat(jid)
+                if self._chat_window is not None else None)
+        if entry is None or chat is None:
+            return
+        remaining = chat.mark_visible_unread()
+        mentions = chat.mark_visible_mentions()
+        if remaining == entry.get("unread") and mentions == entry.get("mentions"):
+            return
+        had_unread = bool(entry.get("unread"))
+        entry["unread"] = remaining
+        entry["mentions"] = mentions
+        seen_anchor = chat.seen_anchor()
+        if seen_anchor.get("sid"):
+            entry["seen_sid"] = str(seen_anchor["sid"])
+        if seen_anchor.get("ref"):
+            entry["seen_ref"] = str(seen_anchor["ref"])
+        if seen_anchor.get("ts"):
+            entry["seen_ts"] = str(seen_anchor["ts"])
+        self._recount_unread()
+        self._refresh_unread_badge(jid)
+        self._push_unread_to_chat(jid)
+        self._schedule_unread_save()
+        if remaining == 0 and had_unread:
+            self._mark_chat_read(jid)
 
     def _chat_at_bottom(self, jid: str) -> bool:
         """Whether the conversation on screen is showing its newest message.
@@ -7308,7 +7366,8 @@ class MainWindow(QtWidgets.QMainWindow):
         active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == bare_jid)
         if not active:
-            self._bump_unread(bare_jid, important=(priority == "high"))
+            self._bump_unread(bare_jid, important=(priority == "high"),
+                              ts=stamp, ref=reply_able_id)
             self._sync_tray_blink()
         if active and self._client and self._chat_at_bottom(bare_jid):
             self._client.mds_mark_displayed(bare_jid)
@@ -7453,7 +7512,8 @@ class MainWindow(QtWidgets.QMainWindow):
         active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == target)
         if not active:
-            self._bump_unread(target, important=(priority == "high"))
+            self._bump_unread(target, important=(priority == "high"),
+                              ts=stamp, ref=reply_able_id)
             self._refresh_unread_badge(target)
         if active and self._client and self._chat_at_bottom(target):
             self._client.mds_mark_displayed(target)
@@ -7601,7 +7661,8 @@ class MainWindow(QtWidgets.QMainWindow):
                   and self._chat_window.current_jid() == room)
         if not active and nick != self_nick:
             self._bump_unread(room, mention=is_mention,
-                              important=(priority == "high"))
+                              important=(priority == "high"),
+                              ts=stamp, ref=reply_ref_id or archive_id)
             self._refresh_unread_badge(room)
             if is_mention:
                 self._note_unread_mention(room, reply_ref_id or archive_id)

@@ -500,6 +500,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._unread_resolving = False
+        self._seen_unread_refs: set[str] = set()
+        self._seen_mention_refs: set[str] = set()
         self._mention_refs: list[str] = []
         self._unread_count = 0
         self._mention_count = 0
@@ -1397,16 +1399,16 @@ class ChatWidget(QtWidgets.QWidget):
                          boundary_ts, seen_ts)
             return 0
         boundary = boundary_ts or ""
-        entries = list(self._history) + list(self._messages)
+        entries = self._ordered_entries()
         stamps = [str(e.get("timestamp") or "") for e in entries]
         count = 0
-        for ts in stamps:
-            if not ts:
+        for entry in entries:
+            if entry.get("direction") != "incoming" or self._is_mine(entry):
                 continue
-            if ts <= boundary:
+            ts = str(entry.get("timestamp") or "")
+            if not ts or ts <= boundary or ts > seen_ts:
                 continue
-            if ts <= seen_ts:
-                count += 1
+            count += 1
         logger.debug(
             "SEEN[count] boundary=%r seen=%r counted=%d n=%d "
             "ts_first=%r ts_last=%r missing_ts=%d",
@@ -1426,9 +1428,11 @@ class ChatWidget(QtWidgets.QWidget):
             return 0
         boundary = boundary_ts or ""
         count = 0
-        for entry in list(self._history) + list(self._messages):
+        for entry in self._ordered_entries():
             ts = str(entry.get("timestamp") or "")
             if not ts or ts <= boundary or ts > seen_ts:
+                continue
+            if entry.get("direction") != "incoming" or self._is_mine(entry):
                 continue
             sender = str(entry.get("sender") or "")
             if sender and sender == self._self_nick:
@@ -1438,6 +1442,83 @@ class ChatWidget(QtWidgets.QWidget):
         logger.debug("SEEN[mentions] boundary=%r seen=%r counted=%d",
                      boundary_ts, seen_ts, count)
         return count
+
+    def _unread_entry_ref(self, entry: dict) -> str:
+        """Stable ref used by the unread set (falls back to the timestamp)."""
+        ref = self._reply_target_id(entry)
+        if ref:
+            return ref
+        return "ts:" + str(entry.get("timestamp") or "")
+
+    def unread_block(self) -> list[dict]:
+        """The chronological unread suffix (deduplicated, incoming only)."""
+        if not self._unread_boundary:
+            return []
+        return [
+            entry for entry in self._unread_block_entries(
+                self._ordered_entries())
+            if (entry.get("direction") != "outgoing"
+                and not self._is_mine(entry))]
+
+    def unread_total(self) -> int:
+        return len(self.unread_block())
+
+    def visible_refs(self) -> set[str]:
+        try:
+            refs = self._view.visible_refs()
+        except (AttributeError, RuntimeError, TypeError):
+            refs = []
+        if not isinstance(refs, (list, tuple, set)):
+            return set()
+        return {str(ref) for ref in refs if ref}
+
+    def mark_visible_unread(self) -> int:
+        """Remove visible unread entries from the counter; return the rest."""
+        block = self.unread_block()
+        visible = self.visible_refs()
+        topmost = None
+        for entry in block:
+            ref = self._unread_entry_ref(entry)
+            if ref in visible:
+                self._seen_unread_refs.add(ref)
+                if topmost is None:
+                    topmost = entry
+        if topmost is not None:
+            # Persist the earliest visible unread message as the partial-read
+            # point.  Using the bottom-most one marked invisible messages
+            # between the old point and the viewport as seen.
+            self._seen_ref = self._reply_target_id(topmost)
+            self._seen_ts = str(topmost.get("timestamp") or "")
+            self._seen_sid = str(topmost.get("archive_id") or "")
+            self._unread_boundary = {
+                "ref": self._seen_ref, "ts": self._seen_ts,
+                "sid": self._seen_sid}
+        remaining = [
+            entry for entry in block
+            if self._unread_entry_ref(entry) not in self._seen_unread_refs]
+        return len(remaining)
+
+    def seen_anchor(self) -> dict:
+        return {"ref": getattr(self, "_seen_ref", ""),
+                "ts": getattr(self, "_seen_ts", ""),
+                "sid": getattr(self, "_seen_sid", "")}
+
+    def mark_visible_mentions(self) -> int:
+        """The mention counterpart of :meth:`mark_visible_unread`."""
+        if not self._self_nick:
+            return 0
+        visible = self.visible_refs()
+        remaining = 0
+        for entry in self.unread_block():
+            ref = self._unread_entry_ref(entry)
+            if ref in visible:
+                self._seen_mention_refs.add(ref)
+            if entry.get("sender") == self._self_nick:
+                continue
+            if mentions_nick(str(entry.get("body") or ""), self._self_nick):
+                if ref not in self._seen_mention_refs:
+                    remaining += 1
+        return remaining
 
     def read_anchor(self) -> dict:
         """The conversation's read point: the newest message we display.
@@ -2296,6 +2377,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_marker_shown = False
         self._unread_armed = False
         self._unread_passed = False
+        self._seen_unread_refs = set()
+        self._seen_mention_refs = set()
         # A read point older than the whole window is only reachable by paging
         # back through the archive (see ``_restore_from_anchor``), so the
         # separator waits: it would otherwise open the window instead of the
@@ -2478,6 +2561,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._unread_resolving = False
+        self._seen_unread_refs = set()
+        self._seen_mention_refs = set()
         try:
             if not self._view.clear_unread_separator():
                 self._render_all()
@@ -2552,16 +2637,10 @@ class ChatWidget(QtWidgets.QWidget):
             self._seen_at = time.time()
         except Exception:
             self._seen_at = 0.0
-        # If seen is ahead of current unread boundary, move boundary to seen
-        try:
-            if self._unread_boundary:
-                bts = str(self._unread_boundary.get("ts") or "")
-                if ts and bts and ts > bts:
-                    self._unread_boundary = {"ref": ref, "ts": ts, "sid": sid}
-                elif ts and not bts:
-                    self._unread_boundary = {"ref": ref, "ts": ts, "sid": sid}
-        except Exception:
-            pass
+        # The unread boundary is advanced only by mark_visible_unread(), from
+        # the *topmost visible* unread message.  Advancing it to the bottom-most
+        # visible timestamp was what marked invisible messages as seen and made
+        # the badge jump 44 -> 35 on open.
 
     def note_unread_mention(self, ref_id: str) -> None:
         """Remember a message that named us, so ``@`` can jump to it.
@@ -4135,7 +4214,19 @@ class ChatWidget(QtWidgets.QWidget):
                 or not self._unread_marker_shown):
             return
         try:
-            _count, first = self._measure_unread_block(self._ordered_entries())
+            block = self._unread_block_entries(self._ordered_entries())
+            seen_ref = str(getattr(self, "_seen_ref", "") or "")
+            seen_ts = str(getattr(self, "_seen_ts", "") or "")
+            first = ""
+            for entry in block:
+                refs = self._entry_refs(entry)
+                ts = str(entry.get("timestamp") or "")
+                if seen_ref and seen_ref in refs:
+                    continue
+                if seen_ts and ts and ts <= seen_ts:
+                    continue
+                first = self._reply_target_id(entry)
+                break
             self._view.set_unseen_target(first)
         except (AttributeError, RuntimeError):
             pass

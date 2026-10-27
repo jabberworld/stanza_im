@@ -651,6 +651,7 @@ if HAS_WEBENGINE:
             self._overflow = False
             self._near_top_hit = False
             self._at_bottom_hit = True
+            self._visible_refs: list[str] = []
             self._bridge.scroll_fraction.connect(self._set_fraction)
             self._bridge.jump_clicked.connect(self._on_jump_clicked)
             self._bridge.mention_clicked.connect(self._on_mention_clicked)
@@ -1842,7 +1843,13 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaReactionPress ? 1 : 0,"
                 " window.__stanzaOmemoRef || '',"
                 " window.innerWidth || 0,"
-                " window.devicePixelRatio || 0]",
+                " window.devicePixelRatio || 0,"
+                " (function(){var m=document.querySelectorAll('#chat .stanza-message');"
+                "var vh=window.innerHeight||0;var out=[];"
+                "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
+                "if(r.bottom>0&&r.top<vh){var id=m[i].getAttribute('data-stanza-id')"
+                "||m[i].getAttribute('data-reply-id')||'';if(id)out.push(id);}}"
+                "return JSON.stringify(out);})()]",
                 self._on_scroll_position,
             )
 
@@ -2173,6 +2180,13 @@ window.__stanzaMentionRef = '';
             if len(value) > 24 and value[24]:
                 self.evaluate_js("window.__stanzaReactionPress = 0;")
                 self._on_reaction_clicked()
+            if len(value) > 28 and isinstance(value[28], str) and value[28]:
+                try:
+                    refs = json.loads(value[28])
+                    if isinstance(refs, list):
+                        self._visible_refs = [str(ref) for ref in refs if ref]
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
             if len(value) > 25 and isinstance(value[25], str) and value[25]:
                 self._clear_omemo_request()
                 requested = value[25]
@@ -2191,6 +2205,11 @@ window.__stanzaMentionRef = '';
             if self._overflow:
                 span = max(1.0, total - viewport)
                 self._fraction = min(1.0, offset / span)
+                # A few browsers include a footer/margin in scrollHeight; treat
+                # the last two pixels as the bottom so a normal scroll to the
+                # end still marks the chat read.
+                if offset + viewport >= total - 2:
+                    self._fraction = 1.0
             else:
                 self._fraction = 1.0
             near_top = offset <= max(24.0, viewport)
@@ -2211,6 +2230,10 @@ window.__stanzaMentionRef = '';
             # importantly, keeps it from resetting the seeded unread count
             # before the restore scroll has actually painted.
             self._release_scroll_suspend()
+
+        def visible_refs(self) -> list[str]:
+            """Stable refs of the messages currently intersecting the viewport."""
+            return list(self._visible_refs)
 
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
@@ -2798,9 +2821,14 @@ else:
             self.verticalScrollBar().valueChanged.connect(self._note_bottom)
             self._fraction = 1.0
             self._overflow = False
+            self._visible_refs: list[str] = []
             self._create_jump_button()
             self._create_mention_button()
             self._create_reaction_button()
+
+        def visible_refs(self) -> list[str]:
+            """Fallback backend: no per-message DOM refs to report."""
+            return []
 
         def _note_bottom(self, *_args) -> None:
             """Edge-triggered "at the newest message" (scrollbar driven)."""

@@ -2256,18 +2256,18 @@ Registers XEP plugins (conditionally where noted):
   `stanza-id`, the MAM archive id and the stanza `id`); an archived row without
   an id match adopts one id-less twin (same direction/sender/body) and repairs
   its timestamp instead of duplicating an older build's live copy.
-- **Partial progress**: scrolling a conversation into view records the newest
-  visible message (`ChatView._find_last_visible_ref`) and publishes it as
-  `displayed` through a single-shot throttle (`MainWindow._mds_throttle_timer`,
-  `chat.mds_displayed_throttle` seconds, 1–30, default 3), so a peer sees
-  "read up to here" without a stanza per scrolled message. It advances only while
-  the view is scrolled up (`ChatWidget._on_last_seen`), so the transient bottom of
-  an anchor restore never marks the newest message seen. It is also **monotonic**:
-  a report that is not newer than the highest seen timestamp already emitted is
-  dropped, and the stored `seen_ts` only advances, so scrolling back up or
-  re-showing an already seen message never subtracts the same messages again from
-  the unread counter. The persisted `seen_*` unread-state fields hold that point
-  and are preferred when reopening; reaching the bottom publishes at once.
+- **Partial progress**: the scroll poll returns all visible message refs;
+  `ChatWidget.mark_visible_unread` removes exactly those unread rows and the
+  count comes from the deduplicated chronological unread suffix (live+history
+  copies count once, outgoing is excluded). The seen anchor is the topmost
+  visible unread message; a fully visible block becomes zero at once, and
+  messages above the viewport are not subtracted. It advances only while the
+  view is scrolled up (`ChatWidget._on_last_seen`), so the transient bottom of
+  an anchor restore never marks the newest message seen. It is **monotonic**;
+  the persisted `seen_*` unread-state fields hold the topmost point and are
+  preferred when reopening; reaching the bottom publishes at once. A delayed
+  message older than the read/seen point belongs to chronological history and
+  does not create unread.
 
 ### 14.4 Last Message Correction (XEP-0308)
 
