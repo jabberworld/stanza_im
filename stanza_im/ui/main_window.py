@@ -373,6 +373,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pm_roster: set[str] = set()
         self._pm_targets: dict[str, tuple[str, str]] = {}
         self._bookmarks: dict[str, dict] = {}
+        # Set once the server bookmark list has been applied; only then can
+        # an inactive room's autojoin state be trusted when clearing unread.
+        self._bookmarks_loaded = False
         self._vcard_requested: set[str] = set()
         self._pending_profile: set[str] = set()
         # JIDs whose vCard was opened as a MUC participant (their Status tab
@@ -2072,8 +2075,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 # slixmpp substitutes the JID when a bookmark has no name.
                 name = ""
             self._bookmarks[jid] = {**item, "name": name}
+        self._bookmarks_loaded = True
         self._rebuild_bookmarks_view()
         self._classify_bookmarked_conferences()
+        # A bookmarked room that is not running has no visible unread badge
+        # (the Bookmarks list intentionally has none); do not let its stale
+        # counter keep the tray blinking.  Auto-join rooms are retained until
+        # their join attempt fails.
+        self._clear_inactive_conference_unread()
         self._refresh_muc_names()
         for room in self._muc_self_nicks:
             chat = self._chat_window.get_chat(room)
@@ -2655,6 +2664,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._schedule_roster_repaint()
         from stanza_im.core import history
         history.close(room)
+        self._clear_inactive_conference_unread(
+            room, clear_autojoin=True, force=True)
 
     def _on_leave_conference(self, room: str):
         if not self._confirm_muc_leave(room):
@@ -2920,6 +2931,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._schedule_autojoin_retry(room, condition):
             return
+        client = self._client
+        if (client is not None
+                and room in getattr(client, "autojoin_rooms", set())
+                and room not in self._muc_joined):
+            # The last auto-join attempt failed: the room is not running, so
+            # its restored unread must not keep the tray blinking.
+            self._clear_inactive_conference_unread(
+                room, clear_autojoin=True, force=True)
         chat = self._chat_window.get_chat(room)
         if not chat:
             return
@@ -2963,6 +2982,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._schedule_roster_repaint()
         if close_chat and self._chat_window.has_chat(room):
             self._chat_window.close_chat(room)
+        self._clear_inactive_conference_unread(
+            room, clear_autojoin=True, force=True)
 
     def _on_muc_destroyed(self, room: str, reason: str = "",
                           alternate: str = "") -> None:
@@ -6941,6 +6962,57 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:  # noqa: BLE001 - the registry is best-effort
             self._known_conferences = set()
 
+    def _clear_inactive_conference_unread(self, room: str = "",
+                                          *, clear_autojoin: bool = False,
+                                          force: bool = False) -> list[str]:
+        """Drop unread counts of conferences that are not running.
+
+        A bookmarked room that is not joined has no visible unread badge (the
+        Bookmarks list deliberately shows none), so keeping its restored
+        counter only makes the tray blink with nothing the user can act on.
+        The read/seen anchor is preserved: the next join starts from the last
+        read point instead of resurrecting the old block.
+
+        Auto-join bookmarks are kept until their join actually fails
+        (*clear_autojoin*) or the caller explicitly names the room (a leave /
+        failed join).  *force* bypasses the active-room guard for such a
+        just-failed room.
+        """
+        if not room and not self._bookmarks_loaded:
+            return []
+        active = (set(self._muc_self_nicks) | set(self._muc_joined)
+                  | set(self._conference_roster))
+        keys = [room] if room else list(self._unread_chats)
+        changed: list[str] = []
+        for key in keys:
+            entry = self._unread_chats.get(key)
+            if entry is None or not any(int(entry.get(field) or 0)
+                                        for field in ("unread", "mentions",
+                                                      "important")):
+                continue
+            if not key or "/" in key:
+                continue
+            if key not in self._bookmarks and key not in self._known_conferences:
+                continue
+            bookmark = self._bookmarks.get(key) or {}
+            if (bookmark.get("autojoin") and not clear_autojoin
+                    and not room):
+                continue
+            if key in active and not force:
+                continue
+            entry["unread"] = 0
+            entry["mentions"] = 0
+            entry["important"] = 0
+            changed.append(key)
+        if not changed:
+            return []
+        self._recount_unread()
+        for key in changed:
+            self._refresh_unread_badge(key)
+        self._schedule_unread_save()
+        logger.info("UNREAD[inactive] cleared=%s", ", ".join(changed))
+        return changed
+
     def _recount_unread(self) -> None:
         """Recompute the aggregate counters from the stored records.
 
@@ -10612,6 +10684,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_room_features.clear()
         self._mam_unsupported.clear()
         self._bookmarks = {}
+        self._bookmarks_loaded = False
         for dialog in self._whiteboards.values():
             dialog.deleteLater()
         self._whiteboards.clear()

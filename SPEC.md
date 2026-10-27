@@ -1868,7 +1868,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   exactly as before the restart (`MainWindow._unread_chats` is the single
   record store; `_unread_counts`/`_unread_mentions`/`_unread_displayed` are
   derived views, applied in `_add_roster_item`/`_sync_conference_roster`,
-  saved with a 1 s debounce and on quit).
+  saved with a 1 s debounce and on quit). A restored unread of a **not
+  running** bookmarked conference is cleared once the bookmark list is known
+  (the read/seen anchor is preserved); pending auto-join rooms survive until a
+  failed join, and leaving a room clears its count (`_clear_inactive_conference_unread`).
 - The same counter drives a Psi-style indicator on the chat tabs and the window
   title (`_push_unread_to_chat` → `ChatWindow.set_unread`): `[N] name`, painted
   `#cc0000` for a 1:1/private chat with unread (a conference only when a message

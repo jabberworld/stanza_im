@@ -1512,7 +1512,12 @@ on, Preferences → Appearance → «Разное») turns it off.
 aggregates and owns the tray-blink state, so every path that clears/shrinks a
 count (restored counters blink the tray again after a re-login,
 `_on_session_started`; history/visible reconciliation; MDS; read actions)
-stops the blink as soon as the derived total is zero. It loads them at startup,
+stops the blink as soon as the derived total is zero. A bookmarked conference
+that is **not joined** has no visible unread badge (the Bookmarks list has
+none), so `_clear_inactive_conference_unread` drops its restored unread when
+the bookmark list arrives and keeps only the read/seen anchor; pending
+auto-join rooms are retained until their join fails, and a leave/failed join
+clears the room explicitly. It loads them at startup,
 applies them when building
 roster rows (`_add_roster_item`/`_sync_conference_roster`), keeps them updated
 in `_bump_unread`/`_reset_unread` and flushes them to disk with a 1 s debounce
