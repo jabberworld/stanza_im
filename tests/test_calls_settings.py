@@ -124,6 +124,16 @@ check("a smaller camera frame is kept",
 cfg = Config.defaults()
 dlg = PreferencesDialog(cfg, ChatThemeFactory())
 dlg._ensure_all_pages()
+dlg.resize(700, 550)
+dlg.show()
+app.processEvents()
+check("the Calls codec selectors leave room for their info glyphs",
+      all(dlg._controls[key].width() <= prefs_mod.CALLS_COMBO_WIDTH
+          for key in ("calls_audio_codec", "calls_video_codec",
+                      "calls_video_max_height")))
+check("the screen FPS selector matches the resolution width",
+      dlg._controls["devices_screen_share_fps"].width()
+      == dlg._controls["devices_screen_resolution"].width())
 check("the section is called Calls",
       dlg._sections.item(2).text() == "Calls")
 page = dlg._pages[2]

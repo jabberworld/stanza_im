@@ -2910,7 +2910,7 @@ above 250 ms, because aioice's 0.5 s consent transaction cannot be answered
 while the loop is blocked. On a lossy path `_install_consent_retry` replaces
 `aiortc.rtcicetransport.Connection` with a subclass whose consent probes use
 two retransmissions (0.5 + 1 + 2 s) instead of aioice's single 0.5 s request,
-so six lost probes do not close a healthy RTP session. The codec
+so a few lost packets do not close a healthy RTP session. The codec
 cannot change during a call (that needs renegotiation) and audio is only
 changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and

@@ -26,6 +26,9 @@ CONNECTION_FIELD_WIDTH = 300
 # Uniform widths so numeric selectors and combo boxes line up across pages.
 SPIN_WIDTH = 90
 COMBO_WIDTH = 260
+#: Calls selectors are narrower than the shared width so the info glyph fits
+#: inside the form column on the default dialog width.
+CALLS_COMBO_WIDTH = 190
 
 #: Camera output height presets (0 = keep the source size).
 _CAMERA_HEIGHT_PRESETS = (0, 1080, 720, 480, 360)
@@ -498,6 +501,13 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._controls[key] = widget
         return widget
 
+    def _calls_combo(self, key: str,
+                     options: list[tuple[str, str]]) -> QtWidgets.QComboBox:
+        """A compact Calls selector that leaves room for its info glyph."""
+        widget = self._combo(key, options, fixed_width=False)
+        widget.setFixedWidth(CALLS_COMBO_WIDTH)
+        return widget
+
     def _page_application(self):
         general, form = self._page()
         form.addRow(self._check("close_to_tray", tr("prefs_close_to_tray")))
@@ -679,7 +689,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         # ── codecs / bitrate / outgoing camera resolution ──────────
         codecs_page, codecs_form = self._page()
         calls = getattr(self._config, "calls", None)
-        audio_codec = self._combo("calls_audio_codec", [
+        audio_codec = self._calls_combo("calls_audio_codec", [
             ("prefs_codec_auto", "auto"), ("prefs_codec_opus", "opus"),
             ("prefs_codec_g722", "g722"), ("prefs_codec_pcmu", "pcmu"),
             ("prefs_codec_pcma", "pcma")])
@@ -687,7 +697,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             tr("prefs_audio_codec"),
             self._row(audio_codec, self._info_label(
                 tr("prefs_audio_codec_tip")), trailing_stretch=True))
-        video_codec = self._combo("calls_video_codec", [
+        video_codec = self._calls_combo("calls_video_codec", [
             ("prefs_codec_auto", "auto"), ("prefs_codec_vp8", "vp8"),
             ("prefs_codec_h264", "h264")])
         codecs_form.addRow(
@@ -704,7 +714,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             tr("prefs_video_bitrate"),
             self._row(video_rate, self._info_label(
                 tr("prefs_video_bitrate_tip")), trailing_stretch=True))
-        height = self._combo("calls_video_max_height", [
+        height = self._calls_combo("calls_video_max_height", [
             ("prefs_resolution_auto", 0), ("prefs_resolution_1080", 1080),
             ("prefs_resolution_720", 720), ("prefs_resolution_480", 480),
             ("prefs_resolution_360", 360)])
@@ -729,11 +739,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         width, box_height = _screen_box(
             getattr(stored, "screen_share_max_width", 1920),
             getattr(stored, "screen_share_max_height", 0))
-        screen = self._combo("devices_screen_resolution", [
+        screen = self._calls_combo("devices_screen_resolution", [
             ("prefs_screen_native", "0x0"),
             ("prefs_screen_1920", "1920x1080"),
             ("prefs_screen_1280", "1280x720"),
-            ("prefs_screen_854", "854x480")], fixed_width=False)
+            ("prefs_screen_854", "854x480")])
         key = "%dx%d" % (width, box_height)
         if (width or box_height) and key not in [screen.itemData(i)
                                                  for i in range(screen.count())]:
@@ -745,7 +755,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 tr("prefs_screen_resolution_tip")), trailing_stretch=True))
         screen_form.addRow(
             tr("prefs_screen_fps"),
-            self._combo("devices_screen_share_fps", [
+            self._calls_combo("devices_screen_share_fps", [
                 ("2", 2), ("5", 5), ("10", 10), ("15", 15)]))
         screen_form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
