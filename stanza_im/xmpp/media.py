@@ -59,10 +59,35 @@ _MEDIA_DEFAULTS = {"audio_bitrate": 96000, "video_bitrate": 1000000}
 _AUDIO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
 _VIDEO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
 
+#: Adaptive video quality: REMB may lower the configured bitrate, but keep a
+#: floor while the peer reports less than *_VIDEO_LOSS_LIMIT* (RTCP fraction
+#: lost is an 8-bit value, so 13 ≈ 5 %).  A lossy link is allowed to fall all
+#: the way to aiortc's own codec minimum.
+_VIDEO_FLOOR_PCT = 70
+_VIDEO_LOSS_LIMIT = 13.0
+_VIDEO_ADAPTIVE = {"loss": 0.0}
+
 
 def media_defaults() -> dict:
     """The current encoder defaults (bits/s)."""
     return dict(_MEDIA_DEFAULTS)
+
+
+def note_video_loss(fraction_lost) -> None:
+    """Remember the latest peer-reported loss for the adaptive floor."""
+    try:
+        value = float(fraction_lost)
+    except (TypeError, ValueError):
+        return
+    _VIDEO_ADAPTIVE["loss"] = max(0.0, min(255.0, value))
+
+
+def video_floor_bps() -> int:
+    """The minimum video target while the peer reports acceptable loss."""
+    cap = int(_MEDIA_DEFAULTS.get("video_bitrate") or 0)
+    if not cap or _VIDEO_ADAPTIVE["loss"] > _VIDEO_LOSS_LIMIT:
+        return 0
+    return int(cap * _VIDEO_FLOOR_PCT / 100)
 
 
 def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
@@ -91,6 +116,9 @@ def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
             value = 0
         if value:
             _MEDIA_DEFAULTS["video_bitrate"] = value
+            # A new call/quality choice starts from a clean loss estimate;
+            # sample_stats() refreshes it from the peer's RTCP reports.
+            _VIDEO_ADAPTIVE["loss"] = 0.0
             for encoder in list(_VIDEO_ENCODERS):
                 try:
                     encoder.target_bitrate = value
@@ -1260,6 +1288,11 @@ def _patch_video_bitrate_cap(encoder_cls) -> None:
             numeric = None
         if numeric is not None and cap:
             numeric = min(numeric, cap)
+            floor = video_floor_bps()
+            if floor and numeric < floor:
+                logger.debug("CALL video floor %d -> %d (loss=%.1f)",
+                             numeric, floor, _VIDEO_ADAPTIVE["loss"])
+                numeric = floor
         original.fset(self, numeric if numeric is not None else value)
 
     encoder_cls.target_bitrate = property(getter, setter)
@@ -1630,6 +1663,8 @@ if HAS_AIORTC:
                     elif stype == "transport":
                         totals["in_total"] = (
                             now, int(getattr(stat, "bytesReceived", 0) or 0))
+                    elif stype == "remote-inbound-rtp" and kind == "video":
+                        note_video_loss(getattr(stat, "fractionLost", 0))
             for key, (stamp, total) in totals.items():
                 previous = self._stats_prev.get(key)
                 if previous is not None and stamp > previous[0]:
@@ -1638,11 +1673,16 @@ if HAS_AIORTC:
                         bits / (stamp - previous[0]))
                 self._stats_prev[key] = (stamp, total)
             if self._stats:
+                encoder = self._sender_encoder("video")
+                target = getattr(encoder, "target_bitrate", None)
                 logger.debug(
-                    "CALL stats out_video=%sbps out_audio=%sbps in=%sbps",
+                    "CALL stats out_video=%sbps out_audio=%sbps in=%sbps "
+                    "target=%sbps loss=%s",
                     self._stats.get("out_video_bps"),
                     self._stats.get("out_audio_bps"),
-                    self._stats.get("in_total_bps"))
+                    self._stats.get("in_total_bps"),
+                    int(target) if target else "none",
+                    round(_VIDEO_ADAPTIVE["loss"], 1))
 
         def quality_info(self) -> dict:
             """Codec/resolution/bitrate snapshot for the call info popup."""
