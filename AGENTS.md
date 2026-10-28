@@ -2898,9 +2898,13 @@ encoder target is capped by the selected bitrate and follows REMB through a
 loss-aware controller: a decrease below the current target is held for 5 s
 without loss and then lowered by at most 5% per 2 s, lowered by at most 15%
 per update at 1–5% loss, and followed immediately above 5% loss
-(`media.VideoRateController`/`note_video_loss`). The codec cannot change
-during a call (that needs renegotiation) and audio is only changed in the
-settings. An **info** button (`info.svg`) is a toggle: it shows
+(`media.VideoRateController`/`note_video_loss`). A cheap luma-difference
+motion detector in `_VideoCaptureTrack` boosts the target by 25% every 500 ms
+while the local scene moves and loss is low, so recovery does not wait for a
+conservative REMB; loss disables the boost. `CALL stats` carries separate
+`in_video`/`in_audio` rates, FPS, motion score, target and loss. The codec
+cannot change during a call (that needs renegotiation) and audio is only
+changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and
 resolution plus the target and measured bitrates (an audio call shows just the
 codec and bitrate) — and refreshes it once a second while visible (the call/
@@ -3560,9 +3564,12 @@ used to print a traceback in `eventFilter` and abort Qt) — the handler calls
 Ctrl+C forces `os._exit(130)`.
 
 Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
-SEND/RECV XML), `-l/--log` (full debug log to `stanza-im.log`), `-m/--memstat`
-(periodic memory statistics; repeat as `-mm` for the deep Python-heap
-breakdown), `-h/--help`. `app.prepare_qt_argv()` re-prepends the program name
+SEND/RECV XML), `-l/--log` (full debug log), `--log-suffix NAME` (log-name
+suffix; `STANZA_LOG_SUFFIX` is also honoured), `-m/--memstat` (periodic memory
+statistics; repeat as `-mm` for the deep Python-heap breakdown), `-h/--help`.
+With `-l` the log is `stanza-im.log` only when no suffix is set; normally the
+hostname is used automatically: `stanza-im.<host>.log` / `.1.log`, so two
+machines can share one project directory. `app.prepare_qt_argv()` re-prepends the program name
 before `QApplication` — QWebEngine aborts on an empty argv. `core/memstats.py`
 has two levels: `-m` is cheap (no tracing — main RSS/PSS/peak plus
 `private_dirty`/`anonymous`/`shared_clean` from `smaps_rollup` (heap vs

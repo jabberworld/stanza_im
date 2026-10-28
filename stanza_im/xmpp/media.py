@@ -67,6 +67,10 @@ _VIDEO_HOLD_S = 5.0
 _VIDEO_STEP_MEDIUM = 0.85
 _VIDEO_STEP_LOW = 0.95
 _VIDEO_STEP_INTERVAL_S = 2.0
+_VIDEO_BOOST_STEP = 1.25
+_VIDEO_BOOST_INTERVAL_S = 0.5
+_VIDEO_BOOST_MIN_STEP = 100000
+_VIDEO_MOTION_THRESHOLD = 4.0
 
 
 class VideoRateController:
@@ -91,6 +95,7 @@ class VideoRateController:
         self.last_remb = self.cap
         self._low_since: float | None = None
         self._last_decrease = now if now is not None else time.monotonic()
+        self._last_boost = self._last_decrease
 
     def user_target(self, target: int, now: float | None = None) -> None:
         """Apply an explicit user/call setting and reset adaptation state."""
@@ -107,6 +112,29 @@ class VideoRateController:
 
     def loss_pct(self) -> float:
         return self.loss * 100.0 / 255.0
+
+    def on_motion(self, now: float | None = None) -> int:
+        """Boost the target after local motion, without waiting for REMB.
+
+        Only low-loss links are boosted; a lossy link keeps the normal
+        loss-aware behaviour.  Returns the new target, or ``0`` when no boost
+        was applied (throttled or at the cap).
+        """
+        if not self.cap or self.loss >= _VIDEO_LOSS_LOW:
+            return 0
+        if now is None:
+            now = time.monotonic()
+        if now - self._last_boost < _VIDEO_BOOST_INTERVAL_S:
+            return 0
+        old = self.target
+        if old >= self.cap:
+            return 0
+        self._last_boost = now
+        self.target = min(
+            self.cap,
+            max(int(old * _VIDEO_BOOST_STEP), old + _VIDEO_BOOST_MIN_STEP))
+        self._low_since = None
+        return self.target
 
     def on_remb(self, requested, now: float | None = None) -> int:
         """Return the target to apply for one REMB value."""
@@ -155,6 +183,25 @@ def media_defaults() -> dict:
 def note_video_loss(fraction_lost) -> None:
     """Remember the latest peer-reported loss for the rate controller."""
     _VIDEO_RATE.note_loss(fraction_lost)
+
+
+def boost_video_target(now: float | None = None) -> int:
+    """Raise the video target after local motion and push it to encoders."""
+    target = _VIDEO_RATE.on_motion(now)
+    if not target:
+        return 0
+    _VIDEO_RATE.user_change = True
+    try:
+        for encoder in list(_VIDEO_ENCODERS):
+            try:
+                encoder.target_bitrate = target
+            except Exception:  # noqa: BLE001 - best effort
+                pass
+    finally:
+        _VIDEO_RATE.user_change = False
+    logger.debug("CALL motion boost target=%d loss=%.1f%%",
+                 target, _VIDEO_RATE.loss_pct())
+    return target
 
 
 def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
@@ -800,7 +847,8 @@ if HAS_AIORTC:
         """
 
         def __init__(self, device_id: str = "", on_frame=None,
-                     screen_fps: int = 5, screen_max_width: int = 1920,
+                     on_motion=None, screen_fps: int = 5,
+                     screen_max_width: int = 1920,
                      screen_max_height: int = 0, max_height: int = 0,
                      camera_mode: str = ""):
             super().__init__()
@@ -811,6 +859,9 @@ if HAS_AIORTC:
             self._enabled = True
             self._device_id = device_id or ""
             self._on_frame = on_frame
+            self._on_motion = on_motion
+            self._motion_prev = None
+            self._motion_score = 0.0
             self._source = "camera"
             self._region = None
             self._screen_fps = max(1, int(screen_fps or 5))
@@ -914,6 +965,49 @@ if HAS_AIORTC:
                             getattr(self, "_max_height", 0) or "source")
                 self._schedule_keyframe("first-video-frame")
 
+        @staticmethod
+        def _motion_sample(frame) -> bytearray:
+            """A tiny luma grid, enough to tell motion from a static scene."""
+            plane = frame.planes[0]
+            raw = bytes(plane)
+            width = max(1, int(frame.width))
+            height = max(1, int(frame.height))
+            stride = int(getattr(plane, "line_size", width) or width)
+            step_x = max(1, width // 32)
+            step_y = max(1, height // 18)
+            sample = bytearray()
+            for y in range(0, height, step_y):
+                row = y * stride
+                for x in range(0, width, step_x):
+                    pos = row + x
+                    if pos < len(raw):
+                        sample.append(raw[pos])
+            return sample
+
+        def _note_motion(self, frame) -> None:
+            """Notify the call when the local scene starts moving."""
+            if self._on_motion is None or frame is None:
+                return
+            try:
+                sample = self._motion_sample(frame)
+            except Exception:  # noqa: BLE001 - diagnostics only
+                return
+            previous = self._motion_prev
+            self._motion_prev = sample
+            if previous is None or len(previous) != len(sample):
+                return
+            delta = sum(abs(a - b) for a, b in zip(previous, sample))
+            self._motion_score = delta / max(1, len(sample))
+            if self._motion_score >= _VIDEO_MOTION_THRESHOLD:
+                try:
+                    self._on_motion()
+                except Exception:  # noqa: BLE001 - never break video
+                    logger.debug("CALL motion callback failed", exc_info=True)
+
+        def motion_score(self) -> float:
+            """The last sampled luma difference (diagnostics)."""
+            return float(getattr(self, "_motion_score", 0.0))
+
         def last_size(self):
             """The last sent frame size (width, height) or None."""
             return self._last_size
@@ -966,6 +1060,7 @@ if HAS_AIORTC:
                 frame = self._screen_frame()
                 if frame is None:
                     return _black()
+                self._note_motion(frame)
                 self._note_size(frame)
                 self._emit_local(frame)
                 return _stamp(frame)
@@ -995,6 +1090,7 @@ if HAS_AIORTC:
                 frame = _black_frame(self._last_size)
             else:
                 frame = _limit_video_frame(frame, self._max_height)
+                self._note_motion(frame)
                 self._note_size(frame)
                 # Surface the real camera frame for the local self-preview
                 # (black frames are not mirrored to the UI).
@@ -1634,6 +1730,7 @@ if HAS_AIORTC:
             self._local_video = _VideoCaptureTrack(
                 self.devices.get("video_input", ""),
                 on_frame=self._forward_local_frame,
+                on_motion=self._on_local_motion,
                 screen_fps=int(self.devices.get("screen_fps", 5) or 5),
                 screen_max_width=int(
                     self.devices.get("screen_max_width", 1920) or 0),
@@ -1645,6 +1742,13 @@ if HAS_AIORTC:
             self.pc.addTrack(self._local_video)
             self._apply_codec_preferences("video")
             logger.info("CALL added local video track")
+
+        def _on_local_motion(self):
+            """A local scene started moving: try to recover video quality."""
+            try:
+                boost_video_target()
+            except Exception:  # noqa: BLE001 - media must keep running
+                logger.debug("CALL motion boost failed", exc_info=True)
 
         def _forward_local_frame(self, frame):
             """Relay one own-camera frame to the UI (self-preview)."""
@@ -1760,6 +1864,20 @@ if HAS_AIORTC:
                             now, int(getattr(stat, "bytesReceived", 0) or 0))
                     elif stype == "remote-inbound-rtp" and kind == "video":
                         note_video_loss(getattr(stat, "fractionLost", 0))
+            try:
+                receivers = list(self.pc.getReceivers())
+            except Exception:  # noqa: BLE001
+                receivers = []
+            for receiver in receivers:
+                kind = getattr(receiver, "kind", "")
+                try:
+                    report = await receiver.getStats()
+                except Exception:  # noqa: BLE001
+                    continue
+                for stat in report.values():
+                    if getattr(stat, "type", "") == "inbound-rtp":
+                        totals["in_" + kind] = (
+                            now, int(getattr(stat, "bytesReceived", 0) or 0))
             for key, (stamp, total) in totals.items():
                 previous = self._stats_prev.get(key)
                 if previous is not None and stamp > previous[0]:
@@ -1776,14 +1894,23 @@ if HAS_AIORTC:
                         fps = self._local_video.fps()
                     except (AttributeError, RuntimeError):
                         pass
+                motion = 0.0
+                if self._local_video is not None:
+                    try:
+                        motion = self._local_video.motion_score()
+                    except (AttributeError, RuntimeError):
+                        pass
                 logger.debug(
                     "CALL stats out_video=%sbps out_audio=%sbps in=%sbps "
-                    "target=%sbps loss=%.1f%% fps=%.1f",
+                    "in_video=%sbps in_audio=%sbps target=%sbps "
+                    "loss=%.1f%% fps=%.1f motion=%.1f",
                     self._stats.get("out_video_bps"),
                     self._stats.get("out_audio_bps"),
                     self._stats.get("in_total_bps"),
+                    self._stats.get("in_video_bps"),
+                    self._stats.get("in_audio_bps"),
                     int(target) if target else "none",
-                    _VIDEO_RATE.loss_pct(), fps)
+                    _VIDEO_RATE.loss_pct(), fps, motion)
 
         def quality_info(self) -> dict:
             """Codec/resolution/bitrate snapshot for the call info popup."""
@@ -1811,6 +1938,8 @@ if HAS_AIORTC:
                                          or defaults["audio_bitrate"]) / 1000)),
                 "out_video_bps": self._stats.get("out_video_bps"),
                 "out_audio_bps": self._stats.get("out_audio_bps"),
+                "in_video_bps": self._stats.get("in_video_bps"),
+                "in_audio_bps": self._stats.get("in_audio_bps"),
                 "in_bps": self._stats.get("in_total_bps"),
             }
 

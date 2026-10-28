@@ -1,6 +1,8 @@
 """Application entry point and asyncio+Qt event loop integration (via qasync)."""
 import asyncio
 import argparse
+import re
+import socket
 import sys
 import logging
 import os
@@ -13,6 +15,28 @@ from stanza_im.include.constants import (APP_NAME, APP_LOG_FILE,
 logger = logging.getLogger(__name__)
 
 _loop: asyncio.AbstractEventLoop | None = None
+
+
+def sanitize_log_suffix(value) -> str:
+    """Return a filesystem-safe suffix for per-machine log file names."""
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._-")
+    return text[:80]
+
+
+def log_paths(suffix: str = "") -> tuple[str, str]:
+    """Return ``(current, previous)`` log paths for *suffix*.
+
+    With no suffix the historical ``stanza-im.log`` / ``stanza-im.1.log``
+    layout is kept.  Otherwise both files carry the machine/session suffix so
+    two clients can write into the same project directory without fighting
+    over one file.
+    """
+    clean = sanitize_log_suffix(suffix)
+    if not clean:
+        return APP_LOG_FILE, APP_LOG_FILE_1
+    base = os.path.dirname(APP_LOG_FILE)
+    return (os.path.join(base, f"stanza-im.{clean}.log"),
+            os.path.join(base, f"stanza-im.{clean}.1.log"))
 
 #: Chromium memory-tuning flag sets for ``QTWEBENGINE_CHROMIUM_FLAGS`` (see
 #: Preferences → «Stanza IM» → «Производительность» → «Веб-движок»).
@@ -70,6 +94,9 @@ def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
                         help="dump raw SEND/RECV XML to the console")
     parser.add_argument("-l", "--log", action="store_true",
                         help="write a full debug log (messages and XML) to a file")
+    parser.add_argument("--log-suffix", default=None, metavar="NAME",
+                        help="log file suffix (default: hostname; "
+                             "STANZA_LOG_SUFFIX is also honoured)")
     parser.add_argument("-m", "--memstat", action="count", default=0,
                         help="print periodic memory statistics (repeat: -mm "
                              "for the deep Python-heap breakdown)")
@@ -144,13 +171,17 @@ class _SlixmppNoiseFilter(logging.Filter):
         return True
 
 
-def configure_logging(debug: bool, xml_dump: bool, file_log: bool = False) -> None:
+def configure_logging(debug: bool, xml_dump: bool,
+                      file_log: bool = False,
+                      log_suffix: str | None = None) -> None:
     """Set up logging levels and destinations.
 
     ``debug`` enables slixmpp/plugin debug output to the console; ``xml_dump``
     enables the raw SEND/RECV XML stream output to the console.  ``file_log``
-    mirrors ALL debug output (messages and XML) into ``APP_LOG_FILE``,
-    regardless of ``debug``/``xml_dump``.
+    mirrors ALL debug output (messages and XML) into the per-session log path,
+    regardless of ``debug``/``xml_dump``.  ``log_suffix`` selects a
+    ``stanza-im.<suffix>.log`` name; ``None`` keeps the historical
+    ``stanza-im.log`` layout.
     """
     # What gets generated: the full debug/message width needed by the file or
     # by a console switch.  Per-logger levels gate record creation; handler
@@ -170,13 +201,16 @@ def configure_logging(debug: bool, xml_dump: bool, file_log: bool = False) -> No
     handlers.append(console)
 
     if file_log:
-        # Keep the previous session's log (rotated to stanza-im.1.log) so two
-        # sessions can be compared side by side.
+        # Keep the previous session's log (rotated to the sibling .1 name) so
+        # two sessions can be compared side by side.
+        log_path, previous_path = (
+            (APP_LOG_FILE, APP_LOG_FILE_1) if log_suffix is None
+            else log_paths(log_suffix))
         try:
-            os.replace(APP_LOG_FILE, APP_LOG_FILE_1)
+            os.replace(log_path, previous_path)
         except FileNotFoundError:
             pass
-        handlers.append(logging.FileHandler(APP_LOG_FILE, encoding="utf-8"))
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
 
     logging.basicConfig(
         level=root_level,
@@ -217,6 +251,9 @@ def run() -> int:
     xml_dump = args.xml
     file_log = args.log
     memstat = args.memstat
+    log_suffix = (args.log_suffix
+                  or os.environ.get("STANZA_LOG_SUFFIX", "")
+                  or socket.gethostname())
 
     from stanza_im.core import memstats
     # Level 1 (-m) is the cheap report; level 2 (-mm) adds tracemalloc.  The
@@ -225,7 +262,7 @@ def run() -> int:
     if memstat >= 2:
         memstats.start_tracking()
 
-    configure_logging(debug, xml_dump, file_log)
+    configure_logging(debug, xml_dump, file_log, log_suffix=log_suffix)
     # Read the [performance] tuning before Qt/WebEngine initialise (the flags
     # must be in the environment before the first QWebEngineProfile is used).
     from stanza_im.core.storage import Config
@@ -249,7 +286,8 @@ def run() -> int:
     elif memstat:
         logger.info("Memory statistics enabled (-m)")
     if file_log:
-        logger.info("Detailed file logging enabled (-l): %s", APP_LOG_FILE)
+        logger.info("Detailed file logging enabled (-l): %s",
+                    log_paths(log_suffix)[0])
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)

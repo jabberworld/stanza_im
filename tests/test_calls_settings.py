@@ -372,6 +372,19 @@ track._schedule_keyframe = lambda reason: None
 track._note_size(av.VideoFrame(1280, 720, "yuv420p"))
 check("the track remembers the sent resolution",
       track.last_size() == (1280, 720))
+
+motion_events = []
+motion_track = media._VideoCaptureTrack.__new__(media._VideoCaptureTrack)
+motion_track._on_motion = lambda: motion_events.append(True)
+motion_track._motion_prev = None
+motion_track._motion_score = 0.0
+motion_track._note_motion(av.VideoFrame(64, 64, "yuv420p"))
+still = av.VideoFrame(64, 64, "yuv420p")
+for _plane in still.planes:
+    _plane.update(b"\xff" * _plane.buffer_size)
+motion_track._note_motion(still)
+check("a changed local frame triggers motion recovery",
+      bool(motion_events) and motion_track.motion_score() > 4)
 check("media connection requests a keyframe",
       "request_video_keyframe" in inspect.getsource(
           media.AiortcCall._log_state))
@@ -609,6 +622,20 @@ check("high loss follows REMB down",
 controller.user_target(500000, now=20)
 check("the configured value remains a hard ceiling",
       controller.on_remb(900000, now=20) == 500000)
+
+motion = media.VideoRateController()
+motion.user_target(1000000, now=0)
+motion.target = 250000
+check("local motion lifts the target",
+      motion.on_motion(now=1) == 350000)
+check("the motion boost is throttled",
+      motion.on_motion(now=1.2) == 0)
+check("the next boost step is applied",
+      motion.on_motion(now=1.6) == 450000)
+motion.note_loss(80)
+motion.target = 250000
+check("a lossy link is not motion-boosted",
+      motion.on_motion(now=2) == 0)
 
 media.set_media_defaults(video_kbps=1000)
 floor_encoder = Vp8Encoder()

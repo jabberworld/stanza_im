@@ -832,7 +832,8 @@ and runs `connect_async()`:
 - "Шифровать соединение = Всегда" aborts with `login_tls_required` when the
   server does not offer STARTTLS.
 - Errors are shown on the login page and in the tray, and written to the
-  console / `stanza-im.log` (with `-l`).
+  console / the `-l` log file (`stanza-im.<host>.log` by default,
+  `--log-suffix`/`STANZA_LOG_SUFFIX` to override).
 - With XEP-0198 enabled a dropped stream is resumed (`stream_resumed`); the UI
   shows "Переподключение…" → "Соединение восстановлено" instead of
   "Disconnected" while resumption is possible.
@@ -3433,8 +3434,11 @@ client.leave_muji(room)
   (`target_bitrate`, aiortc recreates the codec with a keyframe) and the
   capture track (downscale only). The choice is persisted in the config,
   Preferences changes are also applied to an active call, and
-  `VideoRateController` applies the loss-aware REMB policy; audio changes are
-  pre-call and a codec change needs renegotiation. An info button
+  `VideoRateController` applies the loss-aware REMB policy; a local
+  luma-difference motion detector boosts the target by 25% every 500 ms on a
+  moving, low-loss scene so recovery does not wait for REMB. `CALL stats`
+  also records `in_video`/`in_audio`, FPS, motion score, target and loss.
+  Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio
   calls show the codec and bitrate only), refreshed by the duration timer

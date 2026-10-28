@@ -42,6 +42,15 @@ opts, leftover = app.parse_args(["stanza-im", "--debug", "--xml", "=extra"])
 check("parse_args: long flags + unknown positional",
       opts.debug and opts.xml and leftover == ["stanza-im", "=extra"])
 
+opts, leftover = app.parse_args(["stanza-im", "--log-suffix", "work laptop"])
+check("parse_args: log suffix is accepted",
+      opts.log_suffix == "work laptop" and leftover == ["stanza-im"])
+check("log paths carry a sanitized machine suffix",
+      app.log_paths("work laptop/1")[0].endswith(
+          "stanza-im.work_laptop_1.log")
+      and app.log_paths("work laptop/1")[1].endswith(
+          "stanza-im.work_laptop_1.1.log"))
+
 
 # ── -h / --help prints the option list and exits 0 ─────────────────
 
@@ -60,7 +69,8 @@ for flag in ("-h", "--help"):
     code, text = help_text(flag)
     check(f"{flag}: SystemExit(0)", code == 0)
     check(f"{flag}: lists all keys",
-          all(a in text for a in ("-d", "-x", "-l", "-m", "--help")))
+          all(a in text for a in ("-d", "-x", "-l", "-m", "--log-suffix",
+                                  "--help")))
 
 
 # ── configure_logging routing matrix ───────────────────────────────
@@ -184,6 +194,29 @@ check("the previous log is rotated to stanza-im.1.log",
       "PREVIOUS SESSION" in _old and "NEW SESSION" not in _old)
 check("the new session goes to stanza-im.log",
       "NEW SESSION" in _new and "PREVIOUS SESSION" not in _new)
+
+# A machine/session suffix keeps two clients' logs apart.
+fresh_logging()
+app.APP_LOG_FILE = os.path.join(_dir, "stanza-im.log")
+app.APP_LOG_FILE_1 = os.path.join(_dir, "stanza-im.1.log")
+_machine_log = os.path.join(_dir, "stanza-im.host_two.log")
+with open(_machine_log, "w", encoding="utf-8") as fh:
+    fh.write("OLD MACHINE LOG\n")
+app.configure_logging(False, False, True, log_suffix="host two")
+logging.getLogger("stanza_machine").info("NEW MACHINE LOG")
+for _h in list(logging.getLogger().handlers):
+    _h.flush()
+_machine_prev = os.path.join(_dir, "stanza-im.host_two.1.log")
+with open(_machine_prev, encoding="utf-8") as fh:
+    _old_machine = fh.read()
+with open(_machine_log, encoding="utf-8") as fh:
+    _new_machine = fh.read()
+check("a log suffix rotates the matching machine log",
+      "OLD MACHINE LOG" in _old_machine
+      and "NEW MACHINE LOG" not in _old_machine)
+check("the suffixed session goes to stanza-im.<suffix>.log",
+      "NEW MACHINE LOG" in _new_machine
+      and "OLD MACHINE LOG" not in _new_machine)
 
 # ── the noise filter trims slixmpp records ─────────────────────────
 _nf = app._SlixmppNoiseFilter()
