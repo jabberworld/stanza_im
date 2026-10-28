@@ -3419,9 +3419,10 @@ client.leave_muji(room)
   self-tests, disabled during a call and stopped by a 1 s monitor when a call
   starts; the camera preview closes with the dialog and releases `QCamera` on
   hide, so it never keeps the device busy for the call (`_VideoCaptureTrack.
-  stop()` defers closing its PyAV container until an in-flight executor
-  decode returns, and a localized `av.open` failure is decoded by
-  `decode_ffmpeg_error`), **Codecs** (`calls.audio_codec`/`video_codec` via
+  stop()` only marks the track and, while `_decode_inflight` is set, defers the
+  PyAV close; the worker's `finally` schedules the close on the event loop, so
+  a cancelled future cannot free the decoder under it; a localized `av.open`
+  failure is decoded by `decode_ffmpeg_error`), **Codecs** (`calls.audio_codec`/`video_codec` via
   `RTCRtpTransceiver.setCodecPreferences` before the offer/answer,
   `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
   `xmpp/media.py` encoder shim (the video value is a hard cap; REMB may lower
@@ -3439,7 +3440,12 @@ client.leave_muji(room)
   luma-difference motion detector boosts the target by 10% every 500 ms on a
   moving, low-loss scene so recovery does not wait for REMB; it is opt-in
   (`calls.motion_boost`, default off). `CALL stats`
-  also records `in_video`/`in_audio`, FPS, motion peak, target and loss.
+  also records `in_video`/`in_audio`, FPS, motion peak, target, loss and
+  `lag_peak`; the first sample logs the nominated ICE pair. A watchdog logs
+  GUI event-loop stalls above 250 ms (aioice's consent transaction times out at
+  0.5 s). `_install_consent_retry` replaces the `aiortc.rtcicetransport`
+  `Connection` with a subclass whose consent probes retransmit twice
+  (0.5 + 1 + 2 s), so a lossy Wi-Fi path does not close a healthy RTP call.
   Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio

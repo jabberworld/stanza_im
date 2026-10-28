@@ -82,6 +82,17 @@ check("a live video bitrate update reaches the encoder",
       vp8_encoder.target_bitrate == 900000)
 media.set_media_defaults(audio_kbps=96, video_kbps=500)
 
+# 3b. consent probes retransmit on a lossy path -----------------------------
+if media.HAS_AIORTC:
+    import aiortc.rtcicetransport as _ice_transport  # noqa: E402
+    check("aioice consent retries are enabled",
+          media._CONSENT_RETRANSMISSIONS >= 1)
+    check("the consent-compatible ICE connection is installed",
+          getattr(_ice_transport.Connection, "_stanza_consent_retry", False)
+          is True)
+    check("installing the consent shim twice is a no-op",
+          media._install_consent_retry() is False)
+
 # 4. frames are only ever downscaled ---------------------------------------
 big = QtGui.QImage(1920, 1080, QtGui.QImage.Format.Format_RGB32)
 big.fill(QtGui.QColor("#123456"))

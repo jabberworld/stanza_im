@@ -30,20 +30,24 @@ class _Container:
     def close(self):
         self.closed = True
 
-
-class _Future:
-    def __init__(self, done=False):
-        self._done = done
-
-    def done(self):
-        return self._done
+    def decode(self, stream):
+        return iter(())
 
 
-def _track(container, future):
+class _Loop:
+    def __init__(self):
+        self.callback = None
+
+    def call_soon_threadsafe(self, callback):
+        self.callback = callback
+
+
+def _track(container, inflight):
     track = media._VideoCaptureTrack.__new__(media._VideoCaptureTrack)
     track._container = container
     track._stream = object()
-    track._decode_future = future
+    track._decode_inflight = inflight
+    track._decode_loop = None
     track._pending_close = None
     track._stopped = False
     return track
@@ -54,26 +58,38 @@ if not media.HAS_AIORTC:
     raise SystemExit(0)
 
 container = _Container()
-future = _Future(done=False)
-track = _track(container, future)
+track = _track(container, inflight=True)
 track.stop()
 check("an in-flight decode is not closed under the executor",
       not container.closed and track._container is container)
-future._done = True
-track._on_decode_done(future)
-check("the deferred close happens after the decode completes",
+track._on_decode_finished()
+check("the deferred close happens after the worker finishes",
       container.closed and track._container is None)
 check("the stopped track is marked", track._stopped)
 
 container = _Container()
-track = _track(container, _Future(done=True))
+track = _track(container, inflight=False)
 track.stop()
-check("a completed decode closes immediately", container.closed)
+check("a capture with no active decode closes immediately", container.closed)
 
 container = _Container()
-track = _track(container, None)
+track = _track(container, inflight=True)
+track._on_decode_finished()
+check("a worker finishing without stop keeps the capture", not container.closed)
+
+container = _Container()
+track = _track(container, inflight=True)
+loop = _Loop()
+track._decode_loop = loop
+track._next_frame()
+check("the worker schedules its completion on the owning loop",
+      loop.callback == track._on_decode_finished)
 track.stop()
-check("a capture with no decode closes immediately", container.closed)
+check("the worker-completion callback is what closes the deferred capture",
+      not container.closed)
+track._on_decode_finished()
+check("the deferred capture is closed by the scheduled callback",
+      container.closed)
 
 if FAILURES:
     print("FAILURES:", FAILURES)

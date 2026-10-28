@@ -2903,7 +2903,14 @@ motion detector in `_VideoCaptureTrack` boosts the target by 10% every 500 ms
 while the local scene moves and loss is below 5%, so recovery does not wait for
 a conservative REMB; loss disables the boost. It is opt-in
 (`calls.motion_boost`, default off) while the network is being validated. `CALL stats` carries separate
-`in_video`/`in_audio` rates, FPS, motion peak, target and loss. The codec
+`in_video`/`in_audio` rates, FPS, motion peak, target, loss and `lag_peak`
+(the worst GUI event-loop stall since the previous sample); the call also logs
+the nominated ICE pair once it is known. A `_lag_loop` watchdog reports stalls
+above 250 ms, because aioice's 0.5 s consent transaction cannot be answered
+while the loop is blocked. On a lossy path `_install_consent_retry` replaces
+`aiortc.rtcicetransport.Connection` with a subclass whose consent probes use
+two retransmissions (0.5 + 1 + 2 s) instead of aioice's single 0.5 s request,
+so six lost probes do not close a healthy RTP session. The codec
 cannot change during a call (that needs renegotiation) and audio is only
 changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and
@@ -2988,9 +2995,14 @@ disabled while a call owns the devices. The camera preview is closed when the
 settings dialog closes and as soon as a call starts (a 1 s monitor in the
 Preferences dialog), and it releases `QCamera` on hide — a background preview
 must never keep `/dev/video*` busy for a call. `_VideoCaptureTrack.stop()`
-clears its container, and a failed `av.open` logs the real FFmpeg reason via
+only marks the track and closes immediately when no decode is in flight; a
+failed `av.open` logs the real FFmpeg reason via
 `decode_ffmpeg_error` (PyAV raises a `UnicodeDecodeError` for a localized
-error such as "Устройство занято" instead of the `FFmpegError`). The self-test controls are icon-only
+error such as "Устройство занято" instead of the `FFmpegError`). The container
+close is worker-owned: `stop()` only marks the track stopped and defers the
+container when `_decode_inflight` is set; the decode worker's `finally` schedules
+`_on_decode_finished` on the event loop, so a cancelled/done asyncio future
+cannot let the GUI thread close PyAV under the decoder. The self-test controls are icon-only
 buttons on the same row as the device selector; the mic control toggles
 (checkable) the meter, whose level bar sits on the same row. The mic meter and
 the call's capture track read the `QAudioSource` stream directly

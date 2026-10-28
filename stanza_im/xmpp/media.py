@@ -17,11 +17,18 @@ import asyncio
 import importlib
 import logging
 import math
+import random
 import time
 import weakref
 from fractions import Fraction
 
 logger = logging.getLogger("stanza_im.call.media")
+
+#: aioice's RFC 7675 consent probe has a 0.5 s transaction timeout and sends
+#: only one request.  A lossy Wi-Fi path can then expire consent while RTP is
+#: still flowing.  Retransmit the probe twice (0.5 + 1 + 2 s) before counting
+#: it as a failure; this is a compatibility shim, not a disabled consent test.
+_CONSENT_RETRANSMISSIONS = 2
 
 try:  # optional dependency
     import av  # type: ignore
@@ -35,6 +42,72 @@ except Exception as exc:  # pragma: no cover - import guard
     av = None  # type: ignore
     HAS_AIORTC = False
     logger.info("CALL aiortc unavailable: %s", exc)
+
+
+def _install_consent_retry() -> bool:
+    """Make aioice retransmit its consent probe on a lossy path.
+
+    ``aioice.ice.Connection.query_consent`` sends one STUN request with
+    ``retransmissions=0`` and a 0.5 s timeout.  One lost probe therefore counts
+    as a failure; six in a row close the call even when RTP is healthy.  The
+    ICE connection is created inside ``aiortc.rtcicetransport`` through its
+    module-global ``Connection`` symbol, so replacing that symbol with a
+    subclass is the narrowest place to add the retransmissions.
+    """
+    try:
+        import aiortc.rtcicetransport as ice_transport
+        from aioice import ice as aioice_ice
+        from aioice import stun as aioice_stun
+    except Exception:  # pragma: no cover - optional stack
+        return False
+    base = getattr(ice_transport, "Connection", None)
+    if base is None or getattr(base, "_stanza_consent_retry", False):
+        return False
+
+    class ConsentRetryConnection(base):
+        _stanza_consent_retry = True
+
+        async def query_consent(self) -> None:
+            failures = 0
+            while True:
+                delay = aioice_ice.CONSENT_INTERVAL * (
+                    0.8 + 0.4 * random.random())
+                await asyncio.sleep(delay)
+                for pair in self._nominated.values():
+                    request = self.build_request(pair, nominate=False)
+                    started = time.monotonic()
+                    try:
+                        await pair.protocol.request(
+                            request,
+                            pair.remote_addr,
+                            integrity_key=self.remote_password.encode("utf8"),
+                            retransmissions=_CONSENT_RETRANSMISSIONS,
+                        )
+                        failures = 0
+                        elapsed = time.monotonic() - started
+                        if elapsed > 0.4:
+                            logger.debug(
+                                "CALL consent probe slow: %.2f s", elapsed)
+                    except aioice_stun.TransactionError:
+                        failures += 1
+                        logger.debug(
+                            "CALL consent probe failed (%d/%d)",
+                            failures, aioice_ice.CONSENT_FAILURES)
+                    if failures >= aioice_ice.CONSENT_FAILURES:
+                        logger.warning(
+                            "CALL consent expired after %d failed probes",
+                            failures)
+                        self._query_consent_task = None
+                        return await self.close()
+
+    ice_transport.Connection = ConsentRetryConnection
+    logger.debug("CALL consent retransmission shim installed (%d retries)",
+                 _CONSENT_RETRANSMISSIONS)
+    return True
+
+
+if HAS_AIORTC:
+    _install_consent_retry()
 
 try:  # optional Qt Multimedia (needs libpulse/gstreamer on the system)
     from PyQt6 import QtCore, QtGui
@@ -896,10 +969,13 @@ if HAS_AIORTC:
             self._decode_error = ""
             self._last_grab = 0.0
             self._last_image = None
-            # The PyAV container is closed only after an in-flight decode
-            # returns (see stop/_on_decode_done).  Closing it from the GUI
-            # thread while the executor reads it crashes libavcodec.
-            self._decode_future = None
+            # The PyAV container is closed only after the executor thread has
+            # actually left container.decode(): closing it from the GUI thread
+            # while the decoder still reads it crashes libavcodec.  An
+            # asyncio future can be cancelled/done while its executor thread
+            # keeps running, so track the worker itself, not the future.
+            self._decode_inflight = False
+            self._decode_loop = None
             self._pending_close = None
             # Sent-frame counter for the call diagnostics (actual FPS).
             self._sent_frames = 0
@@ -1101,9 +1177,9 @@ if HAS_AIORTC:
                 await asyncio.sleep(0.05)
                 return _black()
             loop = asyncio.get_event_loop()
+            self._decode_loop = loop
+            self._decode_inflight = True
             future = loop.run_in_executor(None, self._next_frame)
-            self._decode_future = future
-            future.add_done_callback(self._on_decode_done)
             try:
                 frame = await future
             except RuntimeError:
@@ -1157,14 +1233,24 @@ if HAS_AIORTC:
             # not clear them under the executor thread.
             container = self._container
             stream = self._stream
-            if container is None or stream is None:
-                return None
             try:
-                for frame in container.decode(stream):
-                    return frame.reformat(format="yuv420p")
-            except Exception as exc:  # noqa: BLE001 - localized FFmpeg error
-                self._decode_error = decode_ffmpeg_error(exc)
-            return None
+                if container is None or stream is None:
+                    return None
+                try:
+                    for frame in container.decode(stream):
+                        return frame.reformat(format="yuv420p")
+                except Exception as exc:  # noqa: BLE001 - localized error
+                    self._decode_error = decode_ffmpeg_error(exc)
+                return None
+            finally:
+                loop = self._decode_loop
+                if loop is not None:
+                    try:
+                        loop.call_soon_threadsafe(self._on_decode_finished)
+                    except RuntimeError:
+                        # The application loop is gone; there is no GUI thread
+                        # left to race with at this point.
+                        pass
 
         def _close_container(self, container=None) -> None:
             """Close *container* once it is no longer used by the decoder."""
@@ -1180,10 +1266,15 @@ if HAS_AIORTC:
             except Exception:
                 logger.debug("CALL camera capture close failed", exc_info=True)
 
-        def _on_decode_done(self, future) -> None:
-            """Finish a deferred stop after the executor decode returned."""
-            if getattr(self, "_decode_future", None) is future:
-                self._decode_future = None
+        def _on_decode_finished(self) -> None:
+            """Finish a deferred stop after the executor decode returned.
+
+            This runs on the event loop, scheduled by the worker's ``finally``
+            block.  It is deliberately not tied to the asyncio future: a
+            cancelled future can be done while the thread is still decoding.
+            """
+            self._decode_inflight = False
+            self._decode_loop = None
             if not getattr(self, "_stopped", False):
                 return
             container = getattr(self, "_pending_close", None)
@@ -1217,12 +1308,11 @@ if HAS_AIORTC:
 
         def stop(self):
             self._stopped = True
-            future = getattr(self, "_decode_future", None)
             container = self._container
-            if future is not None and not future.done():
+            if getattr(self, "_decode_inflight", False):
                 # The executor is inside container.decode(); closing the PyAV
-                # container here would free the decoder under it.  Let the
-                # future callback close it after the current call returns.
+                # container here would free the decoder under it.  The worker's
+                # finally block schedules _on_decode_finished on the loop.
                 self._pending_close = container
                 return
             self._close_container(container)
@@ -1698,6 +1788,10 @@ if HAS_AIORTC:
             self._stats: dict[str, int | None] = {}
             self._stats_prev: dict[str, tuple[float, int]] = {}
             self._stats_task = None
+            self._lag_task = None
+            self._loop_lag_peak = 0.0
+            self._last_lag_log = 0.0
+            self._ice_pair = ""
             self._closed = False
             servers = _valid_ice_servers(ice_servers)
             logger.info("CALL creating RTCPeerConnection, ICE servers=%s",
@@ -1900,7 +1994,55 @@ if HAS_AIORTC:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
                 return
+            self._start_lag_monitor(loop)
             self._stats_task = loop.create_task(self._stats_loop())
+
+        def _start_lag_monitor(self, loop) -> None:
+            """Watch the GUI event loop; a >0.5 s stall breaks ICE consent."""
+            if self._lag_task is not None or self._closed:
+                return
+            self._lag_task = loop.create_task(self._lag_loop())
+
+        async def _lag_loop(self) -> None:
+            loop = asyncio.get_event_loop()
+            interval = 0.1
+            expected = loop.time() + interval
+            try:
+                while not self._closed:
+                    await asyncio.sleep(interval)
+                    now = loop.time()
+                    lag = max(0.0, now - expected)
+                    if lag > 0.25:
+                        self._loop_lag_peak = max(
+                            self._loop_lag_peak, lag * 1000.0)
+                        if now - self._last_lag_log >= 1.0:
+                            logger.warning("CALL event loop lag %.0f ms",
+                                           lag * 1000.0)
+                            self._last_lag_log = now
+                    expected = now + interval
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - diagnostics must not break calls
+                logger.debug("CALL event loop monitor stopped", exc_info=True)
+
+        def _selected_ice_pair(self) -> str:
+            """The nominated ICE pair, for the call log (diagnostics only)."""
+            for ice in self._ice_transports():
+                connection = getattr(ice, "_connection", None)
+                nominated = getattr(connection, "_nominated", {}) or {}
+                for pair in nominated.values():
+                    local = getattr(pair, "local_candidate", None)
+                    remote = getattr(pair, "remote_candidate", None)
+                    if local is None or remote is None:
+                        continue
+                    return ("%s:%s -> %s:%s (%s/%s)" % (
+                        getattr(local, "ip", "?"),
+                        getattr(local, "port", "?"),
+                        getattr(remote, "ip", "?"),
+                        getattr(remote, "port", "?"),
+                        getattr(local, "type", "?"),
+                        getattr(remote, "type", "?")))
+            return ""
 
         async def _stats_loop(self) -> None:
             try:
@@ -1958,8 +2100,14 @@ if HAS_AIORTC:
                         bits / (stamp - previous[0]))
                 self._stats_prev[key] = (stamp, total)
             if self._stats:
+                pair = self._selected_ice_pair()
+                if pair and pair != self._ice_pair:
+                    self._ice_pair = pair
+                    logger.info("CALL ICE pair: %s", pair)
                 encoder = self._sender_encoder("video")
                 target = getattr(encoder, "target_bitrate", None)
+                lag_peak = self._loop_lag_peak
+                self._loop_lag_peak = 0.0
                 fps = 0.0
                 if self._local_video is not None:
                     try:
@@ -1975,14 +2123,14 @@ if HAS_AIORTC:
                 logger.debug(
                     "CALL stats out_video=%sbps out_audio=%sbps in=%sbps "
                     "in_video=%sbps in_audio=%sbps target=%sbps "
-                    "loss=%.1f%% fps=%.1f motion_peak=%.1f",
+                    "loss=%.1f%% fps=%.1f motion_peak=%.1f lag_peak=%.0fms",
                     self._stats.get("out_video_bps"),
                     self._stats.get("out_audio_bps"),
                     self._stats.get("in_total_bps"),
                     self._stats.get("in_video_bps"),
                     self._stats.get("in_audio_bps"),
                     int(target) if target else "none",
-                    _VIDEO_RATE.loss_pct(), fps, motion)
+                    _VIDEO_RATE.loss_pct(), fps, motion, lag_peak)
 
         def quality_info(self) -> dict:
             """Codec/resolution/bitrate snapshot for the call info popup."""
@@ -2189,6 +2337,9 @@ if HAS_AIORTC:
             if self._stats_task is not None:
                 self._stats_task.cancel()
                 self._stats_task = None
+            if self._lag_task is not None:
+                self._lag_task.cancel()
+                self._lag_task = None
             for task in self._tasks:
                 task.cancel()
             self._tasks.clear()
