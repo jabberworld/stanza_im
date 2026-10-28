@@ -592,14 +592,32 @@ check("no pending decode error is a no-op",
 from aiortc.codecs.vpx import Vp8Encoder  # noqa: E402
 from aiortc.codecs.h264 import H264Encoder  # noqa: E402
 
+controller = media.VideoRateController()
+controller.user_target(1000000, now=0)
+check("a no-loss REMB drop is held back",
+      controller.on_remb(100000, now=0) == 1000000)
+check("the no-loss hold eventually decays slowly",
+      controller.on_remb(100000, now=6) == 950000)
+controller.user_target(1000000, now=10)
+controller.note_loss(5)  # ~2 %
+check("medium loss lowers the target in a step",
+      controller.on_remb(100000, now=10) == 850000)
+controller.user_target(1000000, now=12)
+controller.note_loss(80)  # ~31 %
+check("high loss follows REMB down",
+      controller.on_remb(100000, now=12) == 100000)
+controller.user_target(500000, now=20)
+check("the configured value remains a hard ceiling",
+      controller.on_remb(900000, now=20) == 500000)
+
 media.set_media_defaults(video_kbps=1000)
 floor_encoder = Vp8Encoder()
 floor_encoder.target_bitrate = 100000
-check("the adaptive floor holds without reported loss",
-      floor_encoder.target_bitrate == 700000)
+check("a new encoder starts at the configured target without loss",
+      floor_encoder.target_bitrate == 1000000)
 media.note_video_loss(80)
 floor_encoder.target_bitrate = 100000
-check("high loss lets REMB fall below the floor",
+check("high loss lets the encoder follow REMB",
       floor_encoder.target_bitrate == 250000)
 
 media.set_media_defaults(video_kbps=500)

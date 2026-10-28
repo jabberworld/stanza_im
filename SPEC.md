@@ -3423,8 +3423,8 @@ client.leave_muji(room)
   `RTCRtpTransceiver.setCodecPreferences` before the offer/answer,
   `calls.audio_bitrate_kbps`/`video_bitrate_kbps` applied by the
   `xmpp/media.py` encoder shim (the video value is a hard cap; REMB may lower
-  it but while peer RTCP `fraction_lost` is ≤ ~5% the encoder keeps a 70%
-  floor, above that it can reach the codec minimum), and the outgoing camera
+  it through a loss-aware controller: hold 5 s with no loss then 5% steps,
+  15% steps at 1–5% loss, immediate following above 5%), and the outgoing camera
   `calls.video_max_height` downscale cap) and **Screen** (the screen-sharing
   output box and frame rate). A live call (and a Muji conference) additionally
   has an icon-only quality menu: video bitrate 200/500/1000/1500 kbps (default
@@ -3432,9 +3432,9 @@ client.leave_muji(room)
   `JingleRtpManager.set_call_video_quality` to the live encoders
   (`target_bitrate`, aiortc recreates the codec with a keyframe) and the
   capture track (downscale only). The choice is persisted in the config,
-  Preferences changes are also applied to an active call, and the adaptive
-  floor (`video_floor_bps`) applies above the loss threshold; audio changes
-  are pre-call and a codec change needs renegotiation. An info button
+  Preferences changes are also applied to an active call, and
+  `VideoRateController` applies the loss-aware REMB policy; audio changes are
+  pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio
   calls show the codec and bitrate only), refreshed by the duration timer

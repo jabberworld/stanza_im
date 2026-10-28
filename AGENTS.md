@@ -2894,11 +2894,13 @@ codec with a keyframe on the next frame) and `set_video_quality`
 (`_VideoCaptureTrack.set_max_height`/`set_screen_box`, downscale only). A
 choice is persisted in `calls.video_bitrate_kbps`/`video_max_height` and
 Preferences changes are also pushed into already-running sessions. The
-encoder target is capped by the selected bitrate and has an **adaptive floor**
-at 70% of it while the peer's RTCP `fraction_lost` is at most ~5%; above that
-loss REMB may lower it to the codec minimum (`media.note_video_loss`). The
-codec cannot change during a call (that needs renegotiation) and audio is only
-changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
+encoder target is capped by the selected bitrate and follows REMB through a
+loss-aware controller: a decrease below the current target is held for 5 s
+without loss and then lowered by at most 5% per 2 s, lowered by at most 15%
+per update at 1–5% loss, and followed immediately above 5% loss
+(`media.VideoRateController`/`note_video_loss`). The codec cannot change
+during a call (that needs renegotiation) and audio is only changed in the
+settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and
 resolution plus the target and measured bitrates (an audio call shows just the
 codec and bitrate) — and refreshes it once a second while visible (the call/

@@ -59,13 +59,92 @@ _MEDIA_DEFAULTS = {"audio_bitrate": 96000, "video_bitrate": 1000000}
 _AUDIO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
 _VIDEO_ENCODERS: "weakref.WeakSet" = weakref.WeakSet()
 
-#: Adaptive video quality: REMB may lower the configured bitrate, but keep a
-#: floor while the peer reports less than *_VIDEO_LOSS_LIMIT* (RTCP fraction
-#: lost is an 8-bit value, so 13 ≈ 5 %).  A lossy link is allowed to fall all
-#: the way to aiortc's own codec minimum.
-_VIDEO_FLOOR_PCT = 70
-_VIDEO_LOSS_LIMIT = 13.0
-_VIDEO_ADAPTIVE = {"loss": 0.0}
+#: RTCP fraction_lost is an 8-bit value (0..255).  Keep the first threshold
+#: at ~1 % and trust REMB fully from ~5 %.
+_VIDEO_LOSS_LOW = 2.55
+_VIDEO_LOSS_HIGH = 12.75
+_VIDEO_HOLD_S = 5.0
+_VIDEO_STEP_MEDIUM = 0.85
+_VIDEO_STEP_LOW = 0.95
+_VIDEO_STEP_INTERVAL_S = 2.0
+
+
+class VideoRateController:
+    """Loss-aware REMB follower for the outgoing video encoder.
+
+    The configured value is a hard ceiling.  A decrease below the current
+    target is accepted immediately when the peer reports heavy loss, applied
+    in steps at medium loss, and only considered after a quiet period when
+    there is no loss.  Increases are accepted up to the configured cap.
+    This avoids aiortc's very conservative REMB cliff without forcing a fixed
+    bitrate on every frame.
+    """
+
+    def __init__(self):
+        self.user_change = False
+        self.reset(0)
+
+    def reset(self, target: int, now: float | None = None) -> None:
+        self.cap = max(0, int(target or 0))
+        self.target = self.cap
+        self.loss = 0.0
+        self.last_remb = self.cap
+        self._low_since: float | None = None
+        self._last_decrease = now if now is not None else time.monotonic()
+
+    def user_target(self, target: int, now: float | None = None) -> None:
+        """Apply an explicit user/call setting and reset adaptation state."""
+        self.reset(target, now)
+
+    def note_loss(self, fraction_lost) -> None:
+        try:
+            value = float(fraction_lost)
+        except (TypeError, ValueError):
+            return
+        self.loss = max(0.0, min(255.0, value))
+        if self.loss > _VIDEO_LOSS_LOW:
+            self._low_since = None
+
+    def loss_pct(self) -> float:
+        return self.loss * 100.0 / 255.0
+
+    def on_remb(self, requested, now: float | None = None) -> int:
+        """Return the target to apply for one REMB value."""
+        if now is None:
+            now = time.monotonic()
+        try:
+            requested = int(requested)
+        except (TypeError, ValueError):
+            return self.target
+        requested = max(0, min(requested, self.cap))
+        old = self.target
+        if not self.cap:
+            self.last_remb = requested
+            return requested
+        if requested >= old:
+            self.target = requested
+            self._low_since = None
+        elif self.loss >= _VIDEO_LOSS_HIGH:
+            self.target = requested
+            self._low_since = None
+        elif self.loss >= _VIDEO_LOSS_LOW:
+            self.target = max(requested, int(old * _VIDEO_STEP_MEDIUM))
+            self._low_since = None
+        else:
+            if self._low_since is None:
+                self._low_since = now
+            if (now - self._low_since >= _VIDEO_HOLD_S
+                    and now - self._last_decrease >= _VIDEO_STEP_INTERVAL_S):
+                self.target = max(requested, int(old * _VIDEO_STEP_LOW))
+                self._last_decrease = now
+            else:
+                self.target = old
+        self.last_remb = requested
+        return self.target
+
+
+_VIDEO_RATE = VideoRateController()
+_VIDEO_RATE.reset(_MEDIA_DEFAULTS["video_bitrate"])
 
 
 def media_defaults() -> dict:
@@ -74,20 +153,8 @@ def media_defaults() -> dict:
 
 
 def note_video_loss(fraction_lost) -> None:
-    """Remember the latest peer-reported loss for the adaptive floor."""
-    try:
-        value = float(fraction_lost)
-    except (TypeError, ValueError):
-        return
-    _VIDEO_ADAPTIVE["loss"] = max(0.0, min(255.0, value))
-
-
-def video_floor_bps() -> int:
-    """The minimum video target while the peer reports acceptable loss."""
-    cap = int(_MEDIA_DEFAULTS.get("video_bitrate") or 0)
-    if not cap or _VIDEO_ADAPTIVE["loss"] > _VIDEO_LOSS_LIMIT:
-        return 0
-    return int(cap * _VIDEO_FLOOR_PCT / 100)
+    """Remember the latest peer-reported loss for the rate controller."""
+    _VIDEO_RATE.note_loss(fraction_lost)
 
 
 def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
@@ -118,12 +185,16 @@ def set_media_defaults(audio_kbps=None, video_kbps=None) -> None:
             _MEDIA_DEFAULTS["video_bitrate"] = value
             # A new call/quality choice starts from a clean loss estimate;
             # sample_stats() refreshes it from the peer's RTCP reports.
-            _VIDEO_ADAPTIVE["loss"] = 0.0
-            for encoder in list(_VIDEO_ENCODERS):
-                try:
-                    encoder.target_bitrate = value
-                except Exception:  # noqa: BLE001 - best effort
-                    pass
+            _VIDEO_RATE.user_target(value)
+            _VIDEO_RATE.user_change = True
+            try:
+                for encoder in list(_VIDEO_ENCODERS):
+                    try:
+                        encoder.target_bitrate = value
+                    except Exception:  # noqa: BLE001 - best effort
+                        pass
+            finally:
+                _VIDEO_RATE.user_change = False
 
 
 def request_video_keyframe(reason: str = "") -> int:
@@ -757,6 +828,10 @@ if HAS_AIORTC:
             # thread while the executor reads it crashes libavcodec.
             self._decode_future = None
             self._pending_close = None
+            # Sent-frame counter for the call diagnostics (actual FPS).
+            self._sent_frames = 0
+            self._fps_started = time.monotonic()
+            self._fps_value = 0.0
             self._open_camera()
 
         def _device_path(self) -> str:
@@ -832,6 +907,7 @@ if HAS_AIORTC:
                 return
             first = self._last_size is None
             self._last_size = (frame.width, frame.height)
+            self._sent_frames = getattr(self, "_sent_frames", 0) + 1
             if first:
                 logger.info("CALL video frame %dx%d (max_height=%s)",
                             frame.width, frame.height,
@@ -841,6 +917,17 @@ if HAS_AIORTC:
         def last_size(self):
             """The last sent frame size (width, height) or None."""
             return self._last_size
+
+        def fps(self) -> float:
+            """The outgoing capture frame rate over the last sampling window."""
+            now = time.monotonic()
+            started = getattr(self, "_fps_started", now)
+            elapsed = max(0.001, now - started)
+            if elapsed >= 1.0:
+                self._fps_value = getattr(self, "_sent_frames", 0) / elapsed
+                self._sent_frames = 0
+                self._fps_started = now
+            return float(getattr(self, "_fps_value", 0.0))
 
         def set_source(self, mode: str, region=None) -> None:
             """Switch the outgoing video between the camera and a screen area.
@@ -1256,7 +1343,11 @@ def _patch_encoder_defaults(encoder_cls, kind: str) -> None:
                     codec.bit_rate = _MEDIA_DEFAULTS["audio_bitrate"]
                 _AUDIO_ENCODERS.add(self)
             else:
-                self.target_bitrate = _MEDIA_DEFAULTS["video_bitrate"]
+                _VIDEO_RATE.user_change = True
+                try:
+                    self.target_bitrate = _MEDIA_DEFAULTS["video_bitrate"]
+                finally:
+                    _VIDEO_RATE.user_change = False
                 _VIDEO_ENCODERS.add(self)
         except Exception:  # noqa: BLE001 - never break the encoder setup
             logger.debug("CALL could not apply the encoder defaults",
@@ -1267,10 +1358,11 @@ def _patch_encoder_defaults(encoder_cls, kind: str) -> None:
 
 
 def _patch_video_bitrate_cap(encoder_cls) -> None:
-    """Never let REMB raise the encoder above the configured video bitrate.
+    """Route REMB through the loss-aware video rate controller.
 
-    The settings/live menu value is a hard ceiling; the network may adapt the
-    encoder lower, but not higher.
+    The settings/live menu value is a hard ceiling; REMB may adapt below it,
+    but the controller resists abrupt drops without loss and allows only
+    stepped decreases at medium loss.
     """
     if encoder_cls is None or getattr(encoder_cls, "_stanza_cap_patched",
                                       False):
@@ -1288,11 +1380,14 @@ def _patch_video_bitrate_cap(encoder_cls) -> None:
             numeric = None
         if numeric is not None and cap:
             numeric = min(numeric, cap)
-            floor = video_floor_bps()
-            if floor and numeric < floor:
-                logger.debug("CALL video floor %d -> %d (loss=%.1f)",
-                             numeric, floor, _VIDEO_ADAPTIVE["loss"])
-                numeric = floor
+            if not _VIDEO_RATE.user_change:
+                old = _VIDEO_RATE.target
+                numeric = _VIDEO_RATE.on_remb(numeric)
+                if numeric != old:
+                    logger.debug(
+                        "CALL rate %d -> %d (loss=%.1f%%, remb=%d)",
+                        old, numeric, _VIDEO_RATE.loss_pct(),
+                        _VIDEO_RATE.last_remb)
         original.fset(self, numeric if numeric is not None else value)
 
     encoder_cls.target_bitrate = property(getter, setter)
@@ -1675,14 +1770,20 @@ if HAS_AIORTC:
             if self._stats:
                 encoder = self._sender_encoder("video")
                 target = getattr(encoder, "target_bitrate", None)
+                fps = 0.0
+                if self._local_video is not None:
+                    try:
+                        fps = self._local_video.fps()
+                    except (AttributeError, RuntimeError):
+                        pass
                 logger.debug(
                     "CALL stats out_video=%sbps out_audio=%sbps in=%sbps "
-                    "target=%sbps loss=%s",
+                    "target=%sbps loss=%.1f%% fps=%.1f",
                     self._stats.get("out_video_bps"),
                     self._stats.get("out_audio_bps"),
                     self._stats.get("in_total_bps"),
                     int(target) if target else "none",
-                    round(_VIDEO_ADAPTIVE["loss"], 1))
+                    _VIDEO_RATE.loss_pct(), fps)
 
         def quality_info(self) -> dict:
             """Codec/resolution/bitrate snapshot for the call info popup."""
