@@ -2902,7 +2902,7 @@ per update at 1–5% loss, and followed immediately above 5% loss
 motion detector in `_VideoCaptureTrack` boosts the target by 25% every 500 ms
 while the local scene moves and loss is below 5%, so recovery does not wait for a
 conservative REMB; loss disables the boost. `CALL stats` carries separate
-`in_video`/`in_audio` rates, FPS, motion score, target and loss. The codec
+`in_video`/`in_audio` rates, FPS, motion peak, target and loss. The codec
 cannot change during a call (that needs renegotiation) and audio is only
 changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and

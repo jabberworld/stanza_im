@@ -862,6 +862,7 @@ if HAS_AIORTC:
             self._on_motion = on_motion
             self._motion_prev = None
             self._motion_score = 0.0
+            self._motion_peak = 0.0
             self._source = "camera"
             self._region = None
             self._screen_fps = max(1, int(screen_fps or 5))
@@ -998,6 +999,8 @@ if HAS_AIORTC:
                 return
             delta = sum(abs(a - b) for a, b in zip(previous, sample))
             self._motion_score = delta / max(1, len(sample))
+            self._motion_peak = max(
+                getattr(self, "_motion_peak", 0.0), self._motion_score)
             if self._motion_score >= _VIDEO_MOTION_THRESHOLD:
                 try:
                     self._on_motion()
@@ -1007,6 +1010,12 @@ if HAS_AIORTC:
         def motion_score(self) -> float:
             """The last sampled luma difference (diagnostics)."""
             return float(getattr(self, "_motion_score", 0.0))
+
+        def take_motion_peak(self) -> float:
+            """The highest sample since the previous call statistics."""
+            peak = float(getattr(self, "_motion_peak", 0.0))
+            self._motion_peak = 0.0
+            return peak
 
         def last_size(self):
             """The last sent frame size (width, height) or None."""
@@ -1527,6 +1536,45 @@ def _install_encoder_defaults() -> None:
             _patch_video_encoder_keyframes(video_cls)
 
 
+def _install_inbound_byte_counter() -> None:
+    """Make aiortc keep per-stream received byte counters.
+
+    aiortc's ``RTCInboundRtpStreamStats`` exposes packets/jitter but no
+    ``bytesReceived``.  Wrapping ``StreamStatistics.add`` is the smallest
+    non-invasive way to derive the incoming video/audio bitrate for the call
+    diagnostics.
+    """
+    if not HAS_AIORTC:
+        return
+    try:
+        from aiortc.rtcrtpreceiver import StreamStatistics
+    except Exception:  # noqa: BLE001 - optional internals
+        return
+    if getattr(StreamStatistics, "_stanza_bytes_patched", False):
+        return
+    original_add = StreamStatistics.add
+
+    def add(self, packet):
+        try:
+            self.bytes_received = (
+                int(getattr(self, "bytes_received", 0) or 0)
+                + len(packet.payload)
+                + int(getattr(packet, "padding_size", 0) or 0))
+        except Exception:  # noqa: BLE001 - diagnostics only
+            pass
+        return original_add(self, packet)
+
+    StreamStatistics.add = add
+    StreamStatistics._stanza_bytes_patched = True
+
+
+def _receiver_bytes(receiver) -> int:
+    """Total RTP payload bytes received on one aiortc receiver."""
+    streams = getattr(receiver, "_RTCRtpReceiver__remote_streams", {}) or {}
+    return sum(int(getattr(stream, "bytes_received", 0) or 0)
+               for stream in streams.values())
+
+
 def _install_audio_resampler_compat() -> None:
     """Patch aiortc's audio encoders (never the immutable PyAV classes)."""
     if not HAS_AIORTC:
@@ -1553,6 +1601,7 @@ def _install_audio_resampler_compat() -> None:
 
 _install_audio_resampler_compat()
 _install_encoder_defaults()
+_install_inbound_byte_counter()
 
 
 def audio_encode_selftest() -> tuple[bool, str]:
@@ -1871,13 +1920,10 @@ if HAS_AIORTC:
             for receiver in receivers:
                 kind = getattr(receiver, "kind", "")
                 try:
-                    report = await receiver.getStats()
+                    await receiver.getStats()
                 except Exception:  # noqa: BLE001
                     continue
-                for stat in report.values():
-                    if getattr(stat, "type", "") == "inbound-rtp":
-                        totals["in_" + kind] = (
-                            now, int(getattr(stat, "bytesReceived", 0) or 0))
+                totals["in_" + kind] = (now, _receiver_bytes(receiver))
             for key, (stamp, total) in totals.items():
                 previous = self._stats_prev.get(key)
                 if previous is not None and stamp > previous[0]:
@@ -1897,13 +1943,13 @@ if HAS_AIORTC:
                 motion = 0.0
                 if self._local_video is not None:
                     try:
-                        motion = self._local_video.motion_score()
+                        motion = self._local_video.take_motion_peak()
                     except (AttributeError, RuntimeError):
                         pass
                 logger.debug(
                     "CALL stats out_video=%sbps out_audio=%sbps in=%sbps "
                     "in_video=%sbps in_audio=%sbps target=%sbps "
-                    "loss=%.1f%% fps=%.1f motion=%.1f",
+                    "loss=%.1f%% fps=%.1f motion_peak=%.1f",
                     self._stats.get("out_video_bps"),
                     self._stats.get("out_audio_bps"),
                     self._stats.get("in_total_bps"),

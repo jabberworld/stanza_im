@@ -3437,7 +3437,7 @@ client.leave_muji(room)
   `VideoRateController` applies the loss-aware REMB policy; a local
   luma-difference motion detector boosts the target by 25% every 500 ms on a
   moving, low-loss scene so recovery does not wait for REMB. `CALL stats`
-  also records `in_video`/`in_audio`, FPS, motion score, target and loss.
+  also records `in_video`/`in_audio`, FPS, motion peak, target and loss.
   Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio

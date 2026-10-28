@@ -637,6 +637,14 @@ motion.target = 250000
 check("a lossy link is not motion-boosted",
       motion.on_motion(now=2) == 0)
 
+_inbound_receiver = SimpleNamespace(
+    _RTCRtpReceiver__remote_streams={
+        "v": SimpleNamespace(bytes_received=1200),
+        "r": SimpleNamespace(bytes_received=300),
+    })
+check("incoming bytes are summed per receiver",
+      media._receiver_bytes(_inbound_receiver) == 1500)
+
 media.set_media_defaults(video_kbps=1000)
 floor_encoder = Vp8Encoder()
 floor_encoder.target_bitrate = 100000
