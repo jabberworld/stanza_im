@@ -457,6 +457,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `calls.audio_bitrate_kbps` | `96` | Opus target bitrate (16–128); applied when the encoder is created. |
 | `calls.video_bitrate_kbps` | `1000` | VP8/H264 target bitrate (100–1500) and a hard ceiling: REMB may lower it, never raise it above the setting. A live quality choice is written back here. |
 | `calls.video_max_height` | `0` | Outgoing camera height cap (0 = source size, 1080/720/480/360 presets); downscale only. |
+| `calls.motion_boost` | `false` | Opt-in fast local-motion bitrate recovery (10% every 500 ms while loss is below 5%). |
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
@@ -3435,8 +3436,9 @@ client.leave_muji(room)
   capture track (downscale only). The choice is persisted in the config,
   Preferences changes are also applied to an active call, and
   `VideoRateController` applies the loss-aware REMB policy; a local
-  luma-difference motion detector boosts the target by 25% every 500 ms on a
-  moving, low-loss scene so recovery does not wait for REMB. `CALL stats`
+  luma-difference motion detector boosts the target by 10% every 500 ms on a
+  moving, low-loss scene so recovery does not wait for REMB; it is opt-in
+  (`calls.motion_boost`, default off). `CALL stats`
   also records `in_video`/`in_audio`, FPS, motion peak, target and loss.
   Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the

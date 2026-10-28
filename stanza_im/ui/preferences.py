@@ -716,6 +716,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             tr("prefs_video_max_height"),
             self._row(height, self._info_label(
                 tr("prefs_video_max_height_tip")), trailing_stretch=True))
+        codecs_form.addRow(
+            self._check("calls_motion_boost", tr("prefs_motion_boost")),
+            self._info_label(tr("prefs_motion_boost_tip")))
         codecs_form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
@@ -2208,6 +2211,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                 calls, "video_bitrate_kbps", 1000) or 1000),
             "calls_video_max_height": int(getattr(
                 calls, "video_max_height", 0) or 0),
+            "calls_motion_boost": bool(getattr(
+                calls, "motion_boost", False)),
         }
         performance = getattr(cfg, "performance", None)
         values["defer_ui_build"] = bool(getattr(
@@ -2403,6 +2408,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._value("calls_video_bitrate_kbps") or 1000)
         cfg.calls.video_max_height = int(
             self._value("calls_video_max_height") or 0)
+        cfg.calls.motion_boost = bool(
+            self._value("calls_motion_boost", False))
         # Apply the plugin manager page (mirror of Actions → Plugins) and let
         # the main window (de)activate the affected plugins live.
         plugin_ids = None

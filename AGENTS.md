@@ -2899,9 +2899,10 @@ loss-aware controller: a decrease below the current target is held for 5 s
 without loss and then lowered by at most 5% per 2 s, lowered by at most 15%
 per update at 1–5% loss, and followed immediately above 5% loss
 (`media.VideoRateController`/`note_video_loss`). A cheap luma-difference
-motion detector in `_VideoCaptureTrack` boosts the target by 25% every 500 ms
-while the local scene moves and loss is below 5%, so recovery does not wait for a
-conservative REMB; loss disables the boost. `CALL stats` carries separate
+motion detector in `_VideoCaptureTrack` boosts the target by 10% every 500 ms
+while the local scene moves and loss is below 5%, so recovery does not wait for
+a conservative REMB; loss disables the boost. It is opt-in
+(`calls.motion_boost`, default off) while the network is being validated. `CALL stats` carries separate
 `in_video`/`in_audio` rates, FPS, motion peak, target and loss. The codec
 cannot change during a call (that needs renegotiation) and audio is only
 changed in the settings. An **info** button (`info.svg`) is a toggle: it shows

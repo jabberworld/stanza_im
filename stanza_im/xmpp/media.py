@@ -67,10 +67,12 @@ _VIDEO_HOLD_S = 5.0
 _VIDEO_STEP_MEDIUM = 0.85
 _VIDEO_STEP_LOW = 0.95
 _VIDEO_STEP_INTERVAL_S = 2.0
-_VIDEO_BOOST_STEP = 1.25
+_VIDEO_BOOST_STEP = 1.10
 _VIDEO_BOOST_INTERVAL_S = 0.5
-_VIDEO_BOOST_MIN_STEP = 100000
+_VIDEO_BOOST_MIN_STEP = 50000
 _VIDEO_MOTION_THRESHOLD = 4.0
+_VIDEO_REMB_INTERVAL_S = 0.5
+_VIDEO_LOSS_GUARD_S = 5.0
 
 
 class VideoRateController:
@@ -96,19 +98,26 @@ class VideoRateController:
         self._low_since: float | None = None
         self._last_decrease = now if now is not None else time.monotonic()
         self._last_boost = self._last_decrease
+        # Allow the first REMB decision immediately; subsequent reports are
+        # coalesced to avoid encoder churn during a burst.
+        self._last_remb_apply = self._last_decrease - _VIDEO_REMB_INTERVAL_S
+        self._loss_guard_until = 0.0
 
     def user_target(self, target: int, now: float | None = None) -> None:
         """Apply an explicit user/call setting and reset adaptation state."""
         self.reset(target, now)
 
-    def note_loss(self, fraction_lost) -> None:
+    def note_loss(self, fraction_lost, now: float | None = None) -> None:
         try:
             value = float(fraction_lost)
         except (TypeError, ValueError):
             return
+        if now is None:
+            now = time.monotonic()
         self.loss = max(0.0, min(255.0, value))
-        if self.loss > _VIDEO_LOSS_LOW:
+        if self.loss >= _VIDEO_LOSS_LOW:
             self._low_since = None
+            self._loss_guard_until = now + _VIDEO_LOSS_GUARD_S
 
     def loss_pct(self) -> float:
         return self.loss * 100.0 / 255.0
@@ -116,14 +125,15 @@ class VideoRateController:
     def on_motion(self, now: float | None = None) -> int:
         """Boost the target after local motion, without waiting for REMB.
 
-        Only low-loss links are boosted; a lossy link keeps the normal
+        Only a quiet, low-loss link is boosted; a lossy link keeps the normal
         loss-aware behaviour.  Returns the new target, or ``0`` when no boost
-        was applied (throttled or at the cap).
+        was applied (throttled, guarded or at the cap).
         """
-        if not self.cap or self.loss >= _VIDEO_LOSS_HIGH:
-            return 0
         if now is None:
             now = time.monotonic()
+        if (not self.cap or self.loss >= _VIDEO_LOSS_HIGH
+                or now < self._loss_guard_until):
+            return 0
         if now - self._last_boost < _VIDEO_BOOST_INTERVAL_S:
             return 0
         old = self.target
@@ -149,9 +159,19 @@ class VideoRateController:
         if not self.cap:
             self.last_remb = requested
             return requested
+        # A REMB burst must not recreate the encoder hundreds of times a
+        # second.  Apply at most one decision per interval; the next REMB
+        # report carries the current estimate.
+        if now - self._last_remb_apply < _VIDEO_REMB_INTERVAL_S:
+            self.last_remb = requested
+            return old
+        recent_loss = (self.loss >= _VIDEO_LOSS_LOW
+                       or now < self._loss_guard_until)
         if requested >= old:
-            self.target = requested
-            self._low_since = None
+            # Never raise the target while the link is still lossy.
+            self.target = old if recent_loss else requested
+            if not recent_loss:
+                self._low_since = None
         elif self.loss >= _VIDEO_LOSS_HIGH:
             self.target = requested
             self._low_since = None
@@ -167,6 +187,7 @@ class VideoRateController:
                 self._last_decrease = now
             else:
                 self.target = old
+        self._last_remb_apply = now
         self.last_remb = requested
         return self.target
 
@@ -180,9 +201,9 @@ def media_defaults() -> dict:
     return dict(_MEDIA_DEFAULTS)
 
 
-def note_video_loss(fraction_lost) -> None:
+def note_video_loss(fraction_lost, now: float | None = None) -> None:
     """Remember the latest peer-reported loss for the rate controller."""
-    _VIDEO_RATE.note_loss(fraction_lost)
+    _VIDEO_RATE.note_loss(fraction_lost, now=now)
 
 
 def boost_video_target(now: float | None = None) -> int:
@@ -1779,7 +1800,9 @@ if HAS_AIORTC:
             self._local_video = _VideoCaptureTrack(
                 self.devices.get("video_input", ""),
                 on_frame=self._forward_local_frame,
-                on_motion=self._on_local_motion,
+                on_motion=(self._on_local_motion
+                           if self.devices.get("motion_boost", False)
+                           else None),
                 screen_fps=int(self.devices.get("screen_fps", 5) or 5),
                 screen_max_width=int(
                     self.devices.get("screen_max_width", 1920) or 0),
@@ -1912,13 +1935,16 @@ if HAS_AIORTC:
                         totals["in_total"] = (
                             now, int(getattr(stat, "bytesReceived", 0) or 0))
                     elif stype == "remote-inbound-rtp" and kind == "video":
-                        note_video_loss(getattr(stat, "fractionLost", 0))
+                        note_video_loss(getattr(stat, "fractionLost", 0),
+                                        now=now)
             try:
                 receivers = list(self.pc.getReceivers())
             except Exception:  # noqa: BLE001
                 receivers = []
             for receiver in receivers:
-                kind = getattr(receiver, "kind", "")
+                kind = (getattr(receiver, "kind", "")
+                        or getattr(getattr(receiver, "track", None),
+                                   "kind", ""))
                 try:
                     await receiver.getStats()
                 except Exception:  # noqa: BLE001

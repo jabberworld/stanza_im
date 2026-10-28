@@ -1604,6 +1604,8 @@ STRINGS = {
     'prefs_video_bitrate': 'Video bitrate (kbps)',
     'prefs_video_bitrate_tip': 'Initial encoder bitrate; the network may lower it adaptively.',
     'prefs_video_max_height': 'Maximum camera resolution',
+    'prefs_motion_boost': 'Fast motion recovery',
+    'prefs_motion_boost_tip': 'Raise the video bitrate quickly when the local camera starts moving; disabled by default while the network is unstable.',
     'prefs_video_max_height_tip': 'Larger frames are downscaled before encoding; smaller frames are sent as is.',
     'prefs_resolution_auto': 'As the source',
     'prefs_resolution_1080': '1080p (max 1080)',

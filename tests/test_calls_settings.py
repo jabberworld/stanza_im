@@ -45,7 +45,8 @@ check("the call codec defaults are present",
       cfg.calls.audio_codec == "auto" and cfg.calls.video_codec == "auto"
       and cfg.calls.audio_bitrate_kbps == 96
       and cfg.calls.video_bitrate_kbps == 1000
-      and cfg.calls.video_max_height == 0)
+      and cfg.calls.video_max_height == 0
+      and cfg.calls.motion_boost is False)
 check("the screen box default is Full HD",
       cfg.devices.screen_share_max_width == 1920
       and cfg.devices.screen_share_max_height == 1080)
@@ -121,7 +122,8 @@ check("the Calls section has three tabs",
       == ["Devices", "Codecs", "Screen"])
 for key in ("calls_audio_codec", "calls_video_codec",
             "calls_audio_bitrate_kbps", "calls_video_bitrate_kbps",
-            "calls_video_max_height", "devices_screen_resolution",
+            "calls_video_max_height", "calls_motion_boost",
+            "devices_screen_resolution",
             "devices_screen_share_fps"):
     check(f"prefs control {key}", key in dlg._controls)
 check("the codec controls load the defaults",
@@ -612,26 +614,33 @@ check("a no-loss REMB drop is held back",
 check("the no-loss hold eventually decays slowly",
       controller.on_remb(100000, now=6) == 950000)
 controller.user_target(1000000, now=10)
-controller.note_loss(5)  # ~2 %
+controller.note_loss(5, now=10)  # ~2 %
 check("medium loss lowers the target in a step",
       controller.on_remb(100000, now=10) == 850000)
 controller.user_target(1000000, now=12)
-controller.note_loss(80)  # ~31 %
+controller.note_loss(80, now=12)  # ~31 %
 check("high loss follows REMB down",
       controller.on_remb(100000, now=12) == 100000)
 controller.user_target(500000, now=20)
 check("the configured value remains a hard ceiling",
       controller.on_remb(900000, now=20) == 500000)
+controller.user_target(1000000, now=21)
+check("the first REMB burst decision is applied",
+      controller.on_remb(300000, now=21) == 1000000)
+check("a burst is coalesced for a short interval",
+      controller.on_remb(300000, now=21.1) == 1000000)
+check("the next interval applies the latest REMB after the hold",
+      controller.on_remb(300000, now=26.6) == 950000)
 
 motion = media.VideoRateController()
 motion.user_target(1000000, now=0)
 motion.target = 250000
 check("local motion lifts the target",
-      motion.on_motion(now=1) == 350000)
+      motion.on_motion(now=1) == 300000)
 check("the motion boost is throttled",
       motion.on_motion(now=1.2) == 0)
 check("the next boost step is applied",
-      motion.on_motion(now=1.6) == 450000)
+      motion.on_motion(now=1.6) == 350000)
 motion.note_loss(80)
 motion.target = 250000
 check("a lossy link is not motion-boosted",
@@ -651,6 +660,7 @@ floor_encoder.target_bitrate = 100000
 check("a new encoder starts at the configured target without loss",
       floor_encoder.target_bitrate == 1000000)
 media.note_video_loss(80)
+media._VIDEO_RATE._last_remb_apply = 0.0
 floor_encoder.target_bitrate = 100000
 check("high loss lets the encoder follow REMB",
       floor_encoder.target_bitrate == 250000)
@@ -664,6 +674,7 @@ for _cls in (Vp8Encoder, H264Encoder):
     check(_cls.__name__ + " refuses to exceed the cap",
           _enc.target_bitrate == 500000)
     media.note_video_loss(80)
+    media._VIDEO_RATE._last_remb_apply = 0.0
     _enc.target_bitrate = 100000
     _low = 250000 if _cls is Vp8Encoder else 500000
     check(_cls.__name__ + " still adapts below the cap",

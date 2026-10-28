@@ -5193,6 +5193,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 getattr(calls, "video_bitrate_kbps", 1000) or 1000),
             "video_max_height": int(
                 getattr(calls, "video_max_height", 0) or 0),
+            "motion_boost": bool(getattr(calls, "motion_boost", False)),
         }
 
     def _call_quality_info(self, key: str):
