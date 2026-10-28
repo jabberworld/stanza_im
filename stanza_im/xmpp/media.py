@@ -120,7 +120,7 @@ class VideoRateController:
         loss-aware behaviour.  Returns the new target, or ``0`` when no boost
         was applied (throttled or at the cap).
         """
-        if not self.cap or self.loss >= _VIDEO_LOSS_LOW:
+        if not self.cap or self.loss >= _VIDEO_LOSS_HIGH:
             return 0
         if now is None:
             now = time.monotonic()
