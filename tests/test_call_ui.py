@@ -83,6 +83,26 @@ check("unmuting the peer emits receive_toggled(True)",
       heard[-1] == ("s1", True))
 cw.close()
 
+# A call window opened for an already muted session must show that state
+# without emitting a toggle signal while it is being constructed.
+mcw = CallWindow("s1m", "Bob", video=False, audio_enabled=False,
+                 remote_audio_enabled=False)
+_initial_toggles = []
+mcw.audio_toggled.connect(lambda *a: _initial_toggles.append(a))
+mcw.receive_toggled.connect(lambda *a: _initial_toggles.append(a))
+check("a pre-muted call opens with the microphone button checked",
+      mcw._mute_btn.isChecked() and mcw._muted)
+check("a pre-deafened call opens with the speaker button checked",
+      mcw._hear_btn.isChecked() and mcw._hear_muted)
+check("opening with stored mute states emits no toggle signal",
+      _initial_toggles == [])
+mcw.set_muted(False)
+mcw.set_hear_muted(False)
+check("stored states can be updated without emitting",
+      not mcw._mute_btn.isChecked() and not mcw._hear_btn.isChecked()
+      and _initial_toggles == [])
+mcw.close()
+
 
 # 4. the call dialogs show an avatar (or the placeholder) --------------------
 def _has_avatar_label(widget):

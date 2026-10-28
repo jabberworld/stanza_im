@@ -5499,11 +5499,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # A separate top-level window (never a child of the main window, which
         # would embed it over the roster).
         bitrate, max_height = self._call_quality_defaults()
+        session = (self._client.rtp_calls.sessions.get(sid)
+                   if self._client else None)
         window = CallWindow(sid, self._call_display_name(peer), video,
                             avatar_path=self._call_avatar(peer),
                             avatar_radius=self._call_avatar_radius(),
                             video_bitrate=bitrate, max_height=max_height,
-                            info_provider=self._call_quality_info)
+                            info_provider=self._call_quality_info,
+                            audio_enabled=bool(getattr(
+                                session, "audio_enabled", True)),
+                            remote_audio_enabled=bool(getattr(
+                                session, "remote_audio_enabled", True)))
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.video_mode_requested.connect(self._on_video_mode_requested)

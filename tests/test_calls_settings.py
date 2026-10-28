@@ -93,6 +93,20 @@ if media.HAS_AIORTC:
     check("installing the consent shim twice is a no-op",
           media._install_consent_retry() is False)
 
+if media.HAS_AIORTC:
+    _pair_call = media.AiortcCall.__new__(media.AiortcCall)
+    _pair_conn = SimpleNamespace(_nominated={
+        1: SimpleNamespace(
+            local_candidate=SimpleNamespace(
+                host="192.168.1.10", port=5000, type="host"),
+            remote_candidate=SimpleNamespace(
+                host="192.168.1.20", port=6000, type="host"))})
+    _pair_call._ice_transports = lambda: [
+        SimpleNamespace(_connection=_pair_conn)]
+    check("the ICE-pair diagnostic uses the candidate host",
+          _pair_call._selected_ice_pair()
+          == "192.168.1.10:5000 -> 192.168.1.20:6000 (host/host)")
+
 # 4. frames are only ever downscaled ---------------------------------------
 big = QtGui.QImage(1920, 1080, QtGui.QImage.Format.Format_RGB32)
 big.fill(QtGui.QColor("#123456"))

@@ -1785,6 +1785,12 @@ if HAS_AIORTC:
             self._remote_sdp = ""
             self._remote_kind = ""
             self._remote_size = None
+            # Desired mute states survive until the matching track exists.
+            # The UI can toggle them while the call is still ringing, before
+            # add_audio()/add_video() or the remote track has been created.
+            self._audio_enabled = True
+            self._remote_audio_enabled = True
+            self._video_enabled = True
             self._stats: dict[str, int | None] = {}
             self._stats_prev: dict[str, tuple[float, int]] = {}
             self._stats_task = None
@@ -1850,6 +1856,7 @@ if HAS_AIORTC:
             if track.kind == "audio":
                 self._audio_play = _AudioPlayback(
                     self.devices.get("audio_output", ""))
+                self._audio_play.set_enabled(self._remote_audio_enabled)
                 self._tasks.append(asyncio.ensure_future(
                     self._consume_audio(track)))
             elif track.kind == "video":
@@ -1886,6 +1893,7 @@ if HAS_AIORTC:
         def add_audio(self):
             self._local_audio = _AudioCaptureTrack(
                 self.devices.get("audio_input", ""))
+            self._local_audio.set_enabled(self._audio_enabled)
             self.pc.addTrack(self._local_audio)
             self._apply_codec_preferences("audio")
             logger.info("CALL added local audio track")
@@ -1905,6 +1913,7 @@ if HAS_AIORTC:
                 max_height=int(
                     self.devices.get("video_max_height", 0) or 0),
                 camera_mode=str(self.devices.get("camera_mode") or ""))
+            self._local_video.set_enabled(self._video_enabled)
             self.pc.addTrack(self._local_video)
             self._apply_codec_preferences("video")
             logger.info("CALL added local video track")
@@ -1934,15 +1943,18 @@ if HAS_AIORTC:
             self.local_preview_enabled = bool(enabled)
 
         def set_audio_enabled(self, enabled: bool) -> None:
+            self._audio_enabled = bool(enabled)
             if self._local_audio is not None:
                 self._local_audio.set_enabled(enabled)
 
         def set_remote_audio_enabled(self, enabled: bool) -> None:
             """Mute/unmute playback of this session's remote audio."""
+            self._remote_audio_enabled = bool(enabled)
             if self._audio_play is not None:
                 self._audio_play.set_enabled(enabled)
 
         def set_video_enabled(self, enabled: bool) -> None:
+            self._video_enabled = bool(enabled)
             if self._local_video is not None:
                 self._local_video.set_enabled(enabled)
 
@@ -2036,9 +2048,11 @@ if HAS_AIORTC:
                     if local is None or remote is None:
                         continue
                     return ("%s:%s -> %s:%s (%s/%s)" % (
-                        getattr(local, "ip", "?"),
+                        getattr(local, "host", None)
+                        or getattr(local, "ip", "?"),
                         getattr(local, "port", "?"),
-                        getattr(remote, "ip", "?"),
+                        getattr(remote, "host", None)
+                        or getattr(remote, "ip", "?"),
                         getattr(remote, "port", "?"),
                         getattr(local, "type", "?"),
                         getattr(remote, "type", "?")))

@@ -3439,7 +3439,12 @@ client.leave_muji(room)
   `VideoRateController` applies the loss-aware REMB policy; a local
   luma-difference motion detector boosts the target by 10% every 500 ms on a
   moving, low-loss scene so recovery does not wait for REMB; it is opt-in
-  (`calls.motion_boost`, default off). `CALL stats`
+  (`calls.motion_boost`, default off). A microphone, remote-audio or camera
+  toggle is stored on the `CallSession` (`audio_enabled`,
+  `remote_audio_enabled`, `video_enabled`) immediately, so a choice made while
+  ringing survives `_bind_call`; `AiortcCall` applies the stored value when
+  `add_audio()`/`add_video()` or the remote audio receiver creates the tracks,
+  and `CallWindow` opens with that state. `CALL stats`
   also records `in_video`/`in_audio`, FPS, motion peak, target, loss and
   `lag_peak`; the first sample logs the nominated ICE pair. A watchdog logs
   GUI event-loop stalls above 250 ms (aioice's consent transaction times out at

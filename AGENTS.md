@@ -2905,7 +2905,8 @@ a conservative REMB; loss disables the boost. It is opt-in
 (`calls.motion_boost`, default off) while the network is being validated. `CALL stats` carries separate
 `in_video`/`in_audio` rates, FPS, motion peak, target, loss and `lag_peak`
 (the worst GUI event-loop stall since the previous sample); the call also logs
-the nominated ICE pair once it is known. A `_lag_loop` watchdog reports stalls
+the nominated ICE pair (using the candidate `host`, not its `.ip`) once it is
+known. A `_lag_loop` watchdog reports stalls
 above 250 ms, because aioice's 0.5 s consent transaction cannot be answered
 while the loop is blocked. On a lossy path `_install_consent_retry` replaces
 `aiortc.rtcicetransport.Connection` with a subclass whose consent probes use
@@ -2945,7 +2946,13 @@ source) offers «Без видео» / «Камера» / «Область эк�
 frames), «Камера» restores the camera, the two screen modes call
 `rtp_calls.set_screen_share(key, "screen", region)` («Весь экран» = the monitor
 under the cursor). In Muji the combo gates the whole room (`_all_cam`); the
-per-party camera toggles remain a second layer. A region is picked in
+per-party camera toggles remain a second layer. Mute/deafen choices are stored
+on the `CallSession` (`audio_enabled`/`remote_audio_enabled`, plus
+`video_enabled` for the camera) as soon as they are toggled, so a choice made
+while the call is still ringing survives `_bind_call`; `AiortcCall` remembers
+the values and applies them when `add_audio()`/`add_video()` or the remote
+audio receiver creates the tracks. `CallWindow` opens with the session's
+stored button state. A region is picked in
 `ui/screen_region_dialog.py::ScreenRegionDialog` — an **opaque** full-virtual-
 desktop overlay that paints a snapshot of the screen (dimmed outside the
 selection, bright inside) so it stays visible without a compositor; drag a

@@ -588,6 +588,21 @@ class CallSession:
     propose_targeted: bool = False
     muji_room: str = ""
     local_preview: bool = False
+    #: Desired media states are stored here as soon as the user toggles a
+    #: control, even while the engine call does not exist yet (ringing).
+    audio_enabled: bool = True
+    remote_audio_enabled: bool = True
+    video_enabled: bool = True
+
+
+#: Map the engine setter to the persistent per-session attribute.
+_TRACK_STATE_ATTR = {
+    "set_audio_enabled": "audio_enabled",
+    "set_remote_audio_enabled": "remote_audio_enabled",
+    "set_video_enabled": "video_enabled",
+}
+_TRACK_STATE_SETTERS = tuple(
+    (attr, method) for method, attr in _TRACK_STATE_ATTR.items())
 
 
 class JingleRtpManager:
@@ -1021,6 +1036,17 @@ class JingleRtpManager:
             # Free the camera for this session's own capture.
             self.stop_local_preview(session.muji_room)
         session.call = call
+        # Apply early UI choices before add_audio()/add_video() create the
+        # tracks and before the remote audio receiver arrives.  The engine
+        # setters remember the values and apply them when the track exists.
+        for attr, method in _TRACK_STATE_SETTERS:
+            fn = getattr(call, method, None)
+            if not callable(fn):
+                continue
+            try:
+                fn(bool(getattr(session, attr, True)))
+            except Exception:  # noqa: BLE001 - best effort on bind
+                logger.debug("CALL %s on bind failed", method, exc_info=True)
         fn = getattr(call, "set_local_preview", None)
         if callable(fn):
             try:
@@ -1497,7 +1523,12 @@ class JingleRtpManager:
     def _set_track_enabled(self, sid: str, method: str,
                            enabled: bool) -> None:
         session = self.sessions.get(sid)
-        call = getattr(session, "call", None) if session else None
+        if session is None:
+            return
+        attr = _TRACK_STATE_ATTR.get(method)
+        if attr is not None:
+            setattr(session, attr, bool(enabled))
+        call = getattr(session, "call", None)
         fn = getattr(call, method, None)
         if callable(fn):
             try:
@@ -1505,6 +1536,9 @@ class JingleRtpManager:
                 logger.info("CALL %s(%s) sid=%s", method, enabled, sid)
             except Exception:
                 logger.exception("CALL %s failed for sid=%s", method, sid)
+        else:
+            logger.debug("CALL %s(%s) sid=%s saved for bind",
+                         method, enabled, sid)
 
     def _terminate(self, session: CallSession, reason: str,
                    send: bool = False) -> None:
