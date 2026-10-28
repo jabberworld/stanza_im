@@ -969,6 +969,11 @@ if HAS_AIORTC:
             self._decode_error = ""
             self._last_grab = 0.0
             self._last_image = None
+            # Screen sharing has its own clock: the camera's next_timestamp()
+            # always ticks at 30 fps, which used to send a grabbed screen image
+            # 30 times a second even when screen_fps was 5.
+            self._screen_clock_start = 0.0
+            self._screen_next_at = 0.0
             # The PyAV container is closed only after the executor thread has
             # actually left container.decode(): closing it from the GUI thread
             # while the decoder still reads it crashes libavcodec.  An
@@ -1133,23 +1138,36 @@ if HAS_AIORTC:
             """Switch the outgoing video between the camera and a screen area.
 
             *region* is an ``(x, y, w, h)`` rectangle in logical screen
-            coordinates; ``None`` means the primary monitor.
+            coordinates; ``None`` means the primary monitor.  ``mode`` is
+            ``"screen"`` for a whole monitor or ``"region"`` for a selected
+            rectangle; both use the screen source.
             """
-            self._source = "screen" if mode == "screen" else "camera"
+            self._source = ("screen" if mode in ("screen", "region")
+                            else "camera")
             self._region = tuple(region) if region else None
             self._last_image = None
             self._last_grab = 0.0
             self._last_size = None
-            self._schedule_keyframe("source-change")
+            self._screen_clock_start = 0.0
+            self._screen_next_at = 0.0
             if self._source == "camera":
+                # The screen clock stopped advancing while sharing; reset the
+                # camera's VideoStreamTrack clock so it does not burst.
+                for attr in ("_timestamp", "_start"):
+                    if hasattr(self, attr):
+                        delattr(self, attr)
                 self._open_camera()
+            self._schedule_keyframe("source-change")
             logger.info("CALL video source -> %s%s", self._source,
                         " %s" % (self._region,) if self._region else "")
 
         async def recv(self):
-            # aiortc >= 1.10: next_timestamp() is async and returns
-            # (pts, time_base) in the video clock rate.
-            pts, time_base = await self.next_timestamp()
+            # aiortc >= 1.10: next_timestamp() is async.  The camera uses its
+            # 30 fps clock; the screen is paced by screen_fps instead.
+            if self._source == "screen":
+                pts, time_base = await self._screen_timestamp()
+            else:
+                pts, time_base = await self.next_timestamp()
 
             def _stamp(frame):
                 frame.pts = pts
@@ -1203,12 +1221,33 @@ if HAS_AIORTC:
                 self._emit_local(frame)
             return _stamp(frame)
 
+        async def _screen_timestamp(self):
+            """Pace screen frames at ``screen_fps`` on the 90 kHz video clock."""
+            loop = asyncio.get_event_loop()
+            interval = 1.0 / self._screen_fps
+            now = loop.time()
+            if self._screen_next_at <= 0.0:
+                self._screen_clock_start = now
+                self._screen_next_at = now
+            delay = self._screen_next_at - now
+            if delay > 0.0:
+                await asyncio.sleep(delay)
+                now = loop.time()
+            # A stalled loop must not produce a catch-up burst of screen
+            # frames; drop the missed slots and continue from now.
+            if now - self._screen_next_at > interval:
+                self._screen_next_at = now
+            pts = int(round((now - self._screen_clock_start) * 90000))
+            self._screen_next_at += interval
+            return pts, Fraction(1, 90000)
+
         def _screen_frame(self):
-            """Grab the screen region at most ``screen_fps`` times a second.
+            """Grab a fresh screen frame for the current paced tick.
 
             ``grabWindow`` must run on the GUI thread (``recv`` is a coroutine
-            on the same loop), and repeated grabs of a large screen are costly,
-            so the same frame is reused between grabs.
+            on the same loop).  The tick pacing above already limits captures
+            to ``screen_fps``; the interval guard remains as a safeguard
+            against a caller invoking ``recv()`` directly.
             """
             now = time.monotonic()
             if (self._last_image is None

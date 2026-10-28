@@ -5712,7 +5712,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if screen is not None:
                 geo = screen.geometry()
                 region = (geo.x(), geo.y(), geo.width(), geo.height())
-        self._client.rtp_calls.set_screen_share(key, "screen", region)
+        self._client.rtp_calls.set_screen_share(key, mode, region)
         logger.info("CALL screen share %s for %s region=%s", mode, key, region)
 
     def _on_call_screen_share(self, key: str, mode: str,
@@ -5723,8 +5723,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if mode == "camera":
             window.set_video_mode("camera")
+        elif mode == "region":
+            window.set_video_mode("region")
         else:
-            window.set_video_mode("region" if has_region else "screen")
+            window.set_video_mode("screen")
 
     # ── Muji conference ──────────────────────────────────────────
 

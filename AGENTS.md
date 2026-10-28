@@ -2958,15 +2958,20 @@ desktop overlay that paints a snapshot of the screen (dimmed outside the
 selection, bright inside) so it stays visible without a compositor; drag a
 rectangle, `Esc`/right click cancels, clamped to the monitor under its top-left
 corner. `media._VideoCaptureTrack` switches its source
-live (`set_source("screen", region)`) — the camera opens lazily, the screen is
-grabbed with `QScreen.grabWindow` on the GUI thread, throttled to
-`devices.screen_share_fps` (default 5) and **downscaled only** to fit the
+live (`set_source("screen"|"region", region)`) — the camera opens lazily, the
+screen is grabbed with `QScreen.grabWindow` on the GUI thread and **paced** by
+its own 90 kHz clock at `devices.screen_share_fps` (default 5), so a static
+screen is not re-sent at the camera's 30 fps; returning to the camera resets
+its clock. It is **downscaled only** to fit the
 `devices.screen_share_max_width`×`screen_share_max_height` box (default
 1920×1080; `0` = no limit on that side) — a smaller region is sent unchanged,
 there is no upscale — with no renegotiation; the shared `include/screen.py` (`grab_region`/`grab_screen`,
 also used by the OSD) handles the DPR and the "region grab ignores the position"
-fallback. Wayland warns (grabs are usually blocked). `MujiCallWindow` switches
-every session of the room. [`tests/test_screen_share.py`]
+fallback. Wayland warns (grabs are usually blocked). The manager keeps the UI
+mode (`"screen"` for a whole monitor, `"region"` for a rectangle) distinct
+even though both use the screen source, so a full-monitor share does not
+select the region button. `MujiCallWindow` switches every session of the room.
+[`tests/test_screen_share.py`]
 A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS`
 past an hour) runs from the call becoming active — the media connection, not
 the session-accept (`CallWindow.start_duration`, stopped on the end) — and from

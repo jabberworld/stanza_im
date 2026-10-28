@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_ss_")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
@@ -21,6 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets  # noqa: E402
 from stanza_im.i18n import load as i18n_load  # noqa: E402
 from stanza_im.xmpp import media  # noqa: E402
 from stanza_im.ui.call_window import CallWindow, MujiCallWindow  # noqa: E402
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
 from stanza_im.ui.screen_region_dialog import ScreenRegionDialog  # noqa: E402
 
 i18n_load("en")
@@ -63,7 +65,7 @@ check("the screen source yields the grabbed frame",
 check("the track reports the screen source", _track._source == "screen")
 _track.set_source("camera")
 check("switching back selects the camera", _track._source == "camera")
-# throttle: the second recv within 1/fps reuses the same grab
+# Screen frames are paced: the source no longer emits 30 fps camera ticks.
 _grabs = []
 
 
@@ -74,9 +76,22 @@ def _counting_grab(region=None):
 
 media._grab_screen_image = _counting_grab
 _track.set_source("screen", (0, 0, 200, 100))
-asyncio.new_event_loop().run_until_complete(_track.recv())
-asyncio.new_event_loop().run_until_complete(_track.recv())
-check("the screen grab is throttled to screen_fps", len(_grabs) == 1)
+
+
+async def _two_screen_frames():
+    return await _track.recv(), await _track.recv()
+
+
+_loop = asyncio.new_event_loop()
+_started = time.monotonic()
+_shot1, _shot2 = _loop.run_until_complete(_two_screen_frames())
+_elapsed = time.monotonic() - _started
+check("the screen source grabs each paced frame", len(_grabs) == 2)
+check("screen frames are spaced by screen_fps",
+      _elapsed >= 0.15 and _shot2.pts > _shot1.pts)
+check("screen timestamps use the 90 kHz video clock",
+      _shot2.pts - _shot1.pts >= 90000 // 5 - 1000)
+_loop.close()
 _track.stop()
 
 
@@ -124,6 +139,25 @@ check("stopping switches back to the camera",
       _s1.call.calls[-1] == ("camera", None))
 check("a share emits call_screen_share",
       _mgr.client.events and _mgr.client.events[-1][0] == "call_screen_share")
+_mgr.set_screen_share("sid1", "region", (10, 20, 30, 40))
+check("a region share uses the screen source",
+      _s1.call.calls[-1] == ("screen", (10, 20, 30, 40)))
+check("the emitted UI mode keeps region distinct",
+      _mgr.client.events[-1][1][1] == "region")
+
+# The button handler must trust the mode, not whether a region rectangle
+# exists: a full-monitor share also carries the monitor geometry.
+_mw = MainWindow.__new__(MainWindow)
+_mw._call_windows = {"s": type("_W", (), {
+    "mode": "", "set_video_mode": lambda self, mode: setattr(
+        self, "mode", mode)})()}
+_mw._muji_windows = {}
+_mw._on_call_screen_share("s", "screen", True)
+check("full-screen sharing selects the screen button",
+      _mw._call_windows["s"].mode == "screen")
+_mw._on_call_screen_share("s", "region", True)
+check("region sharing selects the region button",
+      _mw._call_windows["s"].mode == "region")
 
 
 # 4. the region dialog -------------------------------------------------------

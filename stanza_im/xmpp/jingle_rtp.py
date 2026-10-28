@@ -1499,9 +1499,14 @@ class JingleRtpManager:
 
         *key* is a call ``sid`` for a 1:1 call, or the MUC room JID for a Muji
         conference (every session of that room is switched).  *mode* is
-        ``"screen"`` or ``"camera"``; *region* is an ``(x, y, w, h)`` rectangle
-        in logical screen coordinates (``None`` = the primary monitor).
+        ``"screen"``, ``"region"`` or ``"camera"``; *region* is an
+        ``(x, y, w, h)`` rectangle in logical screen coordinates (``None`` =
+        the primary monitor).  Both screen modes use the same capture source,
+        but the emitted UI mode keeps "region" and "screen" distinct.
         """
+        ui_mode = str(mode or "screen")
+        source_mode = ("screen" if ui_mode in ("screen", "region")
+                       else "camera")
         targets = [s for s in self.sessions.values()
                    if s.sid == key
                    or (s.muji_room and s.muji_room == key)]
@@ -1511,14 +1516,14 @@ class JingleRtpManager:
             if not callable(fn):
                 continue
             try:
-                fn(mode, region)
+                fn(source_mode, region)
             except Exception:
                 logger.exception("CALL set_screen_share failed for sid=%s",
                                  session.sid)
         if targets:
             logger.info("CALL screen share %s region=%s for %d session(s)",
-                        mode, region, len(targets))
-            self.client.emit("call_screen_share", key, mode, bool(region))
+                        ui_mode, region, len(targets))
+            self.client.emit("call_screen_share", key, ui_mode, bool(region))
 
     def _set_track_enabled(self, sid: str, method: str,
                            enabled: bool) -> None:

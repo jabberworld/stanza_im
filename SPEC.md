@@ -3398,14 +3398,18 @@ client.leave_muji(room)
   paints a screen snapshot (dimmed outside the selection, bright inside) so it
   works without a compositor; drag a rectangle (`Esc`/right click cancels),
   clamped to the monitor under its top-left corner.
-  `media._VideoCaptureTrack.set_source("screen", region)` switches the source
-  live with no renegotiation (the camera opens lazily); the screen is grabbed
-  with `QScreen.grabWindow` on the GUI thread, throttled to
-  `devices.screen_share_fps` (default 5) and downscaled only to fit the
+  `media._VideoCaptureTrack.set_source("screen"|"region", region)` switches the
+  source live with no renegotiation (the camera opens lazily); the screen is
+  grabbed with `QScreen.grabWindow` on the GUI thread and paced by its own
+  90 kHz clock at `devices.screen_share_fps` (default 5), so it is not re-sent
+  at the camera's 30 fps; returning to the camera resets its clock. It is
+  downscaled only to fit the
   `devices.screen_share_max_width`×`screen_share_max_height` box (default
   1920×1080; a smaller region is sent unchanged, never upscaled). The shared
   `include/screen.py` (`grab_region`/`grab_screen`, also used by the OSD) handles
   the DPR and the "region grab ignores the position" fallback. Wayland warns.
+  The UI mode stays distinct (`"screen"` for a whole monitor, `"region"` for a
+  rectangle), so a full-monitor share selects the screen button, not region.
   A duration counter (`format_duration`: `MM:SS`, `HH:MM:SS` past an hour) runs
   from the call becoming active (`start_duration`) and from the first active
   Muji session. The call state is `ringing` → `connecting` (on `session-accept`)
