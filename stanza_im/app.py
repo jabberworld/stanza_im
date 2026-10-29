@@ -100,6 +100,9 @@ def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
     parser.add_argument("-m", "--memstat", action="count", default=0,
                         help="print periodic memory statistics (repeat: -mm "
                              "for the deep Python-heap breakdown)")
+    parser.add_argument("-C", "--cpustat", action="count", default=0,
+                        help="print periodic CPU statistics (repeat: -CC "
+                             "for per-child process detail)")
     return parser
 
 
@@ -251,11 +254,14 @@ def run() -> int:
     xml_dump = args.xml
     file_log = args.log
     memstat = args.memstat
+    cpustat = args.cpustat
     log_suffix = (args.log_suffix
                   or os.environ.get("STANZA_LOG_SUFFIX", "")
                   or socket.gethostname())
 
-    from stanza_im.core import memstats
+    from stanza_im.core import memstats, cpustats
+    if cpustat:
+        cpustats.start()
     # Level 1 (-m) is the cheap report; level 2 (-mm) adds tracemalloc.  The
     # deep tracing must start early to capture the whole session's allocations,
     # but it is only enabled when explicitly requested.
@@ -285,6 +291,9 @@ def run() -> int:
         logger.info("Memory statistics enabled (-mm, deep tracemalloc)")
     elif memstat:
         logger.info("Memory statistics enabled (-m)")
+    if cpustat:
+        logger.info("CPU statistics enabled (%s)", "-CC" if cpustat >= 2
+                    else "-C")
     if file_log:
         logger.info("Detailed file logging enabled (-l): %s",
                     log_paths(log_suffix)[0])
@@ -352,6 +361,14 @@ def run() -> int:
         timer = QtCore.QTimer()
         timer.timeout.connect(lambda: memstats.report(logger))
         timer.start(60_000)
+    if cpustat:
+        # CPU reporting is independent of -m and uses the same cadence.
+        QtCore.QTimer.singleShot(
+            1000, lambda: cpustats.report(logger, detailed=cpustat >= 2))
+        cpu_timer = QtCore.QTimer()
+        cpu_timer.timeout.connect(
+            lambda: cpustats.report(logger, detailed=cpustat >= 2))
+        cpu_timer.start(60_000)
 
     logger.info("%s %s started", APP_NAME, VERSION_DISPLAY)
 

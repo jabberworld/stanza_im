@@ -20,7 +20,10 @@ Entry point: `main.py` → `stanza_im.app.run()` → creates QApplication + qasy
 event loop (`qasync.QEventLoop`), creates MainWindow, enters loop. `Ctrl+C` is
 handled with `loop.add_signal_handler(SIGINT, …)` → `MainWindow._quit` (graceful
 shutdown; a second Ctrl+C forces `os._exit(130)`), so no `KeyboardInterrupt`
-escapes the Qt loop.
+escapes the Qt loop. Command-line diagnostics: `-m`/`-mm` for periodic memory
+statistics and `-C`/`-CC` for process/thread CPU statistics (the latter also
+lists child processes with `-CC`); both use a one-second first sample and a
+60-second cadence.
 
 **Startup stays light**: the OMEMO availability probe runs in a background
 daemon thread (`app.py`); `plugins.attention` avoids importing `core.client`
@@ -48,8 +51,9 @@ stanza_im/
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
 │   ├── privacy.py      — XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py — server disco/stream capability report (XEP list)
-│   └── memstats.py     — memory stats (CLI -m/-mm; smaps, descendants, gc;
-│                          deep every 5th report, growth diff, adaptive trim)
+│   ├── memstats.py     — memory stats (CLI -m/-mm; smaps, descendants, gc;
+│   │                      deep every 5th report, growth diff, adaptive trim)
+│   └── cpustats.py     — per-thread/per-child CPU stats (CLI -C/-CC)
 ├── ui/
 │   ├── main_window.py  — Main window (3-page stack), actions and menus
 │   ├── login_widget.py — Login form + config prefill/save + profile selector

@@ -28,15 +28,20 @@ def check(name, cond):
 
 # ── parse_args: flag extraction and leftover argv ──────────────────
 
-opts, leftover = app.parse_args(["stanza-im", "-d", "-x", "-l", "-m"])
+opts, leftover = app.parse_args(
+    ["stanza-im", "-d", "-x", "-l", "-m", "-C"])
 check("parse_args: all flags recognised", all(
-    (opts.debug, opts.xml, opts.log, opts.memstat)))
+    (opts.debug, opts.xml, opts.log, opts.memstat, opts.cpustat)))
 check("parse_args: leftover keeps only prog", leftover == ["stanza-im"])
 
 opts, leftover = app.parse_args(["stanza-im"])
 check("parse_args: no flags by default", not any(
-    (opts.debug, opts.xml, opts.log, opts.memstat)))
+    (opts.debug, opts.xml, opts.log, opts.memstat, opts.cpustat)))
 check("parse_args: plain leftover", leftover == ["stanza-im"])
+
+opts, leftover = app.parse_args(["stanza-im", "-CC", "--cpustat"])
+check("parse_args: CPU detail is repeatable",
+      opts.cpustat == 3 and leftover == ["stanza-im"])
 
 opts, leftover = app.parse_args(["stanza-im", "--debug", "--xml", "=extra"])
 check("parse_args: long flags + unknown positional",
@@ -69,8 +74,8 @@ for flag in ("-h", "--help"):
     code, text = help_text(flag)
     check(f"{flag}: SystemExit(0)", code == 0)
     check(f"{flag}: lists all keys",
-          all(a in text for a in ("-d", "-x", "-l", "-m", "--log-suffix",
-                                  "--help")))
+          all(a in text for a in ("-d", "-x", "-l", "-m", "-C",
+                                  "--cpustat", "--log-suffix", "--help")))
 
 
 # ── configure_logging routing matrix ───────────────────────────────

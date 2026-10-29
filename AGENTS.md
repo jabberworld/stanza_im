@@ -61,7 +61,8 @@ stanza_im/                      # Python package
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
 │   ├── privacy.py               # XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py       # Server disco/stream capability report (XEP list)
-│   └── memstats.py              # Periodic memory statistics (CLI -m)
+│   ├── memstats.py              # Periodic memory statistics (CLI -m)
+│   └── cpustats.py              # Per-thread/per-child CPU stats (CLI -C/-CC)
 ├── ui/
 │   ├── main_window.py           # Main window: stack (login/splash/roster)
 │   ├── login_widget.py          # Login form + config prefill/save + profile selector
@@ -3619,7 +3620,9 @@ Ctrl+C forces `os._exit(130)`.
 Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
 SEND/RECV XML), `-l/--log` (full debug log), `--log-suffix NAME` (log-name
 suffix; `STANZA_LOG_SUFFIX` is also honoured), `-m/--memstat` (periodic memory
-statistics; repeat as `-mm` for the deep Python-heap breakdown), `-h/--help`.
+statistics; repeat as `-mm` for the deep Python-heap breakdown),
+`-C/--cpustat` (periodic CPU statistics; repeat as `-CC` for per-child process
+detail), `-h/--help`.
 With `-l` the log is `stanza-im.log` only when no suffix is set; normally the
 hostname is used automatically: `stanza-im.<host>.log` / `.1.log`, so two
 machines can share one project directory. `app.prepare_qt_argv()` re-prepends the program name
@@ -3638,7 +3641,13 @@ worker thread (the event loop is never blocked), logs its own RSS cost
 (`rss before -> after`) and the **growth since the previous snapshot** per
 package (only the small `package -> (bytes, count)` map is kept, not the
 snapshot), and `malloc_trim(0)` runs right after it and after the gc scan so
-the diagnostic churn does not accumulate. Chromium forks its renderer/GPU/network processes
+the diagnostic churn does not accumulate. `core/cpustats.py` (`-C`) is a
+separate 60-second report: it reads `/proc/self/stat` and each
+`/proc/self/task/<tid>/stat`, sums utime/stime and prints the process and
+busiest threads in percent of one core; `-CC` additionally lists every
+descendant process (WebEngine renderer/GPU/utility, etc.). It shares the
+one-second first report and 60-second cadence with `-m`, but never starts
+`tracemalloc` or a memory scan. Chromium forks its renderer/GPU/network processes
 from a zygote, so the whole descendant tree is walked (not just direct children)
 via `_descendants_from`/`_proc_tree`; the type comes from
 `--type=renderer|gpu-process|utility|zygote` (network = utility with
