@@ -48,8 +48,8 @@ def manager():
     mgr.terminated = []
     mgr.closed = []
     mgr._terminate = lambda s, r, send=False: mgr.terminated.append((s.sid, r))
-    mgr._close_session = lambda s, state, reason="": \
-        mgr.closed.append((s.sid, state, reason))
+    mgr._close_session = lambda s, state, reason="", notify=True: \
+        mgr.closed.append((s.sid, state, reason, notify))
     return mgr
 
 
@@ -69,13 +69,33 @@ check("a repeated connected event does not duplicate the state",
       len(mgr.client.emitted) == 1)
 
 failed = SimpleNamespace(sid="s2", peer_full="rain@example.com/phone",
-                         state="accepted")
+                         state="accepted", video=True)
 mgr._on_media_state(failed, "connection", "failed")
 check("a failed media connection reports the failure",
-      ("call_failed", "rain@example.com/phone", "connection failed")
-      in mgr.client.emitted
+      ("call_failed", "s2", "rain@example.com/phone", "connection failed",
+       True) in mgr.client.emitted
       and mgr.terminated == [("s2", "connectivity-error")]
-      and mgr.closed == [("s2", "failed", "connectivity-error")])
+      and mgr.closed == [("s2", "failed", "connectivity-error", False)])
+
+# A consent expiry closes the underlying aioice connection, which surfaces as
+# connectionState=closed (not failed).  It must still produce call_failed.
+consent = SimpleNamespace(
+    sid="s3", peer_full="rain@example.com/phone", state="active", video=False,
+    call=SimpleNamespace(_closed=False))
+mgr.client.emitted.clear()
+mgr._on_media_state(consent, "connection", "closed")
+check("an unexpected closed connection reports the failure",
+      ("call_failed", "s3", "rain@example.com/phone", "connection failed",
+       False) in mgr.client.emitted)
+
+# Our own AiortcCall.close() marks the call as closed before the peer event.
+normal = SimpleNamespace(
+    sid="s4", peer_full="rain@example.com/phone", state="active", video=True,
+    call=SimpleNamespace(_closed=True))
+mgr.client.emitted.clear()
+mgr._on_media_state(normal, "connection", "closed")
+check("our own close is not reported as a failure",
+      mgr.client.emitted == [])
 
 # The answerer emits "connecting" (not "active") on the session accept.
 accept_src = inspect.getsource(JingleRtpManager._accept)

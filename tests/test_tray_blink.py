@@ -74,11 +74,21 @@ def _probe():
         _tray_blink_allowed=True,
         _tray=_Tray(),
         _config=SimpleNamespace(
-            notifications=SimpleNamespace(tray_blink=True)),
+            notifications=SimpleNamespace(tray_blink=True,
+                                            tray_conference="mention")),
+        _conference_roster=set(),
+        _muc_self_nicks={},
+        _known_conferences=set(),
         unread_changed=_Signal(),
     )
     probe._sync_tray_blink = MethodType(MainWindow._sync_tray_blink, probe)
     probe._recount_unread = MethodType(MainWindow._recount_unread, probe)
+    probe._notification_unread_count = MethodType(
+        MainWindow._notification_unread_count, probe)
+    probe._notification_unread_total = MethodType(
+        MainWindow._notification_unread_total, probe)
+    probe._conference_chat_keys = MethodType(
+        MainWindow._conference_chat_keys, probe)
     return probe
 
 
@@ -136,6 +146,59 @@ del p._tray
 p._unread_chats = {"a@example.com": {"unread": 1, "mentions": 0}}
 MainWindow._recount_unread(p)
 check("recount before the tray exists is safe", p._unread_total == 1)
+
+# 7. conference messages follow the tray_conference policy -------------------
+p = _probe()
+p._conference_roster = {"room@conf.example"}
+p._unread_chats = {"room@conf.example": {"unread": 2, "mentions": 0}}
+MainWindow._recount_unread(p)
+check("a conference without a mention does not blink",
+      not p._tray._blink_active)
+p._unread_chats = {"room@conf.example": {"unread": 2, "mentions": 1}}
+MainWindow._recount_unread(p)
+check("a conference mention starts the blink", p._tray._blink_active)
+p._config.notifications.tray_conference = "never"
+MainWindow._recount_unread(p)
+check("tray_conference=never hides a mention", not p._tray._blink_active)
+p._config.notifications.tray_conference = "all"
+MainWindow._recount_unread(p)
+check("tray_conference=all counts ordinary conference messages",
+      p._tray._blink_active)
+p._unread_chats = {"room@conf.example": {"unread": 2, "mentions": 0}}
+MainWindow._recount_unread(p)
+check("tray_conference=all blinks without a mention", p._tray._blink_active)
+
+# 8. middle-click cycles exactly the notifications the blink represents -----
+p = _probe()
+p._conference_roster = {"room@conf.example"}
+p._roster = SimpleNamespace(_users=[
+    SimpleNamespace(jid="bob@example.com", unread_count=1,
+                    unread_mentions=0),
+    SimpleNamespace(jid="room@conf.example", unread_count=2,
+                    unread_mentions=0),
+])
+p._unread_chats = {
+    "bob@example.com": {"unread": 1, "mentions": 0},
+    "room@conf.example": {"unread": 2, "mentions": 0},
+}
+opened = []
+p._osd_click = lambda jid, nick="": opened.append(jid)
+p._on_tray_cycle_unread = MethodType(MainWindow._on_tray_cycle_unread, p)
+p._on_tray_cycle_unread()
+check("middle-click opens the 1:1 chat, not an ordinary conference",
+      opened == ["bob@example.com"])
+opened.clear()
+p._unread_chats["bob@example.com"]["unread"] = 0
+p._on_tray_cycle_unread()
+check("an ordinary conference message is not cycled", opened == [])
+p._unread_chats["room@conf.example"]["mentions"] = 1
+p._on_tray_cycle_unread()
+check("a conference mention is cycled", opened == ["room@conf.example"])
+p._config.notifications.tray_conference = "all"
+p._unread_chats["room@conf.example"]["mentions"] = 0
+p._on_tray_cycle_unread()
+check("tray_conference=all cycles ordinary conference messages",
+      opened == ["room@conf.example", "room@conf.example"])
 
 if FAILURES:
     print("FAILURES:", FAILURES)

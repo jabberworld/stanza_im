@@ -757,7 +757,8 @@ class JingleRtpManager:
                          use_message: bool = True, muji_room: str = "") -> None:
         if not self.available:
             logger.error("CALL cannot start: media engine unavailable")
-            self.client.emit("call_failed", jid, "media engine unavailable")
+            self.client.emit("call_failed", "", jid,
+                             "media engine unavailable", video)
             return
         peer_bare = str(jid).split("/")[0]
         sid = uuid.uuid4().hex
@@ -797,8 +798,11 @@ class JingleRtpManager:
             self.client._start_task(self._session_timeout(session.sid))
         except Exception as exc:
             logger.exception("CALL start failed")
-            self.client.emit("call_failed", session.peer_full, str(exc))
+            self.client.emit("call_failed", session.sid, session.peer_full,
+                             str(exc), getattr(session, "video", False))
             self._terminate(session, "connectivity-error", send=True)
+            self._close_session(session, "failed", "connectivity-error",
+                                notify=False)
 
     def set_call_video_quality(self, key: str, video_kbps=None,
                                max_height=None) -> None:
@@ -859,9 +863,10 @@ class JingleRtpManager:
         session = self.sessions.get(sid)
         if session is not None and session.state not in ("accepted", "active"):
             logger.warning("CALL no session-accept for %s, failing", sid)
-            self.client.emit("call_failed", session.peer_full, "no answer")
+            self.client.emit("call_failed", session.sid, session.peer_full,
+                             "no answer", getattr(session, "video", False))
             self._terminate(session, "timeout", send=True)
-            self._close_session(session, "ended", "timeout")
+            self._close_session(session, "failed", "timeout", notify=False)
 
     def _peer_supports_messages(self, bare: str) -> bool:
         support = getattr(self.client, "supports_feature", None)
@@ -1221,17 +1226,22 @@ class JingleRtpManager:
             await self._decline(session)
             return
         if not self.available:
-            self.client.emit("call_failed", session.peer_full,
-                             "media engine unavailable")
+            self.client.emit("call_failed", session.sid, session.peer_full,
+                             "media engine unavailable", getattr(session, "video", False))
             await self._decline(session)
+            self._close_session(session, "failed", "unavailable",
+                                notify=False)
             return
         session.video = video or session.video
         try:
             await self._accept(session)
         except Exception as exc:
             logger.exception("CALL accept failed")
-            self.client.emit("call_failed", session.peer_full, str(exc))
+            self.client.emit("call_failed", session.sid, session.peer_full,
+                             str(exc), getattr(session, "video", False))
             self._terminate(session, "connectivity-error", send=True)
+            self._close_session(session, "failed", "connectivity-error",
+                                notify=False)
 
     async def _accept(self, session: CallSession) -> None:
         # Build a remote offer SDP from the stored peer transport/descriptions.
@@ -1339,14 +1349,21 @@ class JingleRtpManager:
             logger.info("CALL media connected: %s", session.sid)
             self.client.emit("call_state", session.sid, session.peer_full,
                              "active")
-        elif state == "failed":
+        elif state in ("failed", "closed"):
             if session.state in ("ended", "failed"):
                 return
-            logger.warning("CALL media connection failed: %s", session.sid)
-            self.client.emit("call_failed", session.peer_full,
-                             "connection failed")
+            call = getattr(session, "call", None)
+            if getattr(call, "_closed", False):
+                # Our own close() can emit failed/closed while shutting down;
+                # it is a normal end, not a new call failure.
+                return
+            logger.warning("CALL media connection lost (%s): %s",
+                           state, session.sid)
+            self.client.emit("call_failed", session.sid, session.peer_full,
+                             "connection failed", getattr(session, "video", False))
             self._terminate(session, "connectivity-error", send=True)
-            self._close_session(session, "failed", "connectivity-error")
+            self._close_session(session, "failed", "connectivity-error",
+                                notify=False)
 
     async def _on_transport_info(self, jingle: ET.Element) -> None:
         session = self.sessions.get(jingle.get("sid", ""))
@@ -1670,7 +1687,7 @@ class JingleRtpManager:
         session.state = "ended"
 
     def _close_session(self, session: CallSession, state: str,
-                       reason: str = "") -> None:
+                       reason: str = "", notify: bool = True) -> None:
         if session.call is not None:
             try:
                 session.call.close()
@@ -1685,7 +1702,9 @@ class JingleRtpManager:
                                                 session.peer_full)
             except Exception:
                 logger.debug("MUJI forget_session failed", exc_info=True)
-        self.client.emit("call_ended", session.sid, session.peer_full, reason)
+        if notify:
+            self.client.emit("call_ended", session.sid, session.peer_full,
+                             reason)
 
     def close(self) -> None:
         for sid in list(getattr(self, "_call_local_previews", {})):

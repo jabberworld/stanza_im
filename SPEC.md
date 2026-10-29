@@ -128,7 +128,7 @@ stanza_im/
 │                          socks5.py = dependency-free SOCKS5 CONNECT,
 │                          omemo/ = XEP-0384 (availability/storage/plugin/manager/SCE/QR))
 ├── i18n/               — Translation dicts (en.py, ru.py)
-├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue)
+├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue), routing (default-route ICE source selection)
 └── plugins/            — Plugin registry (__init__.py) + bundled plugins
                           (notes/ = XEP-0049 tagged notes;
                            attention/ = XEP-0224 attention requests; each with
@@ -367,7 +367,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `csi_keep_active_for_typing_osd` | `false` | Keep the client active while `notifications.osd_typing` (and `osd_enabled`) are on, so servers do not buffer typing chat states |
 | `pep_sweep_interval` | `0` | Periodic XEP-0080/0107/0108/0118 sweep (s); `0` = off. Preferences presents a selector: Off / 30 s / 1 min / 2 min / 5 min |
 | `message_carbons` | `true` | XEP-0280 |
-| `connection.offline_on_suspend` | `true` | Send an `unavailable` presence (status «Компьютер перешел в спящий режим») right before the computer sleeps and restore the pre-sleep status on wake. `ui/suspend_monitor.py` listens to logind `PrepareForSleep` (UPower `Sleeping` fallback); Preferences → Connection. |
+| `connection.offline_on_suspend` | `true` | Send an `unavailable` presence (status «Компьютер перешел в спящий режим») right before the computer sleeps and restore the pre-sleep status on wake. `ui/suspend_monitor.py` listens to logind `PrepareForSleep` (UPower `Sleeping` fallback); the restore is deferred until the transport is live, and queued presence is dropped after a disconnect; Preferences → Connection. |
 | `file_proxy_mode` / `file_proxy_manual` | `auto` / — | XEP-0065 file proxy (JID) |
 | `stun_turn_mode` / `stun_turn_manual` | `auto` / — | STUN/TURN (host:port list) |
 | `conference_servers` / `service_servers` | `[]` | Used discovery servers |
@@ -464,7 +464,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `calls.video_max_height` | `0` | Outgoing camera height cap (0 = source size, 1080/720/480/360 presets); downscale only. |
 | `calls.motion_boost` | `false` | Opt-in fast local-motion bitrate recovery (10% every 500 ms while loss is below 5%); applied to active calls live. |
 | `calls.incoming_max_kbps` | `0` | Ask the peer to keep incoming video below this cap (0 = auto; 200/500/1000/1500 presets) by clamping our REMB feedback. |
-| `calls.pip` | `true` | Show a picture-in-picture view of our outgoing camera/screen in 1:1 video calls. |
+| `calls.pip` | `true` | Default for new 1:1 video calls: show a picture-in-picture view of our outgoing camera/screen. The in-call button changes only that call and is not persisted. |
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
@@ -515,6 +515,7 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
+| `notifications.tray_conference` | `mention` | Conference messages that make the tray blink / participate in middle-click cycling: `never`/`mention`/`all`. 1:1 and PM chats always count by unread. See §12. |
 | `notifications.popups` | `system` | Tray balloons: `off`/`system`/`system_messages` (a legacy bool is coerced by `tray.normalize_popups_mode`). See §12. |
 | `notifications.sound_theme` | `default` | Sound theme id from `resources/sounds/` |
 | `notifications.sound_first_message` | `false` | Play `new_message` when a 1:1/PM arrives and no tab is open |
@@ -1864,10 +1865,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
 - Context menu: Show/Hide, Quit
 - Click: toggle main window visibility
 - Middle-click: `cycle_unread_requested` → MainWindow opens the topmost roster
-  contact with unread messages and marks it read, so each subsequent
-  middle-click advances to the next unread contact until none remain
+  contact with a **notification** unread (1:1/PM unread; conferences by
+  `notifications.tray_conference`) and marks it read, so each subsequent
+  middle-click advances to the next one until none remain
   (`MainWindow._on_tray_cycle_unread`)
-- Blinking: a smooth 1 s fade when unread messages exist. It is active **only
+- Blinking: a smooth 1 s fade when notification unread messages exist (same
+  policy as middle-click; ordinary conference messages still show a badge but
+  do not blink under the default `mention`). It is active **only
   while logged in** (`MainWindow._sync_tray_blink`, driven by the derived
   `_recount_unread` total, started on `session_started`/`stream_resumed` and on
   new unread, stopped on `disconnected`/`sm_failed` and whenever the total
@@ -3476,10 +3480,12 @@ client.leave_muji(room)
   Calls → Codecs mirrors the incoming limit; the receiver's
   `RemoteBitrateEstimator` clamps the REMB it sends, asking the peer to lower
   its video (advisory only — a non-cooperative peer may ignore it). A 1:1
-  video call opens with a responsive PiP self-view (`calls.pip`, default on):
-  the frame is anchored to the displayed image rectangle, mirrored for the
-  camera and unmirrored for screen sharing, throttled to 15 fps, and paused
-  while the window is hidden. Before the engine call the same preview uses a
+  video call opens with a responsive PiP self-view (`calls.pip` is the default
+  for new calls): the frame is anchored to the displayed image rectangle,
+  mirrored for the camera and unmirrored for screen sharing, throttled to
+  15 fps, and paused while the window is hidden. The in-call PiP button is
+  local to the current window; changing the preference does not alter an open
+  call. Before the engine call the same preview uses a
   standalone capture: outgoing ringing starts it immediately; the incoming
   prompt shows a small self-view above Accept/Reject and stops it before the
   engine takes the camera. A watchdog logs
@@ -3487,6 +3493,12 @@ client.leave_muji(room)
   0.5 s). `_install_consent_retry` replaces the `aiortc.rtcicetransport`
   `Connection` with a subclass whose consent probes retransmit twice
   (0.5 + 1 + 2 s), so a lossy Wi-Fi path does not close a healthy RTP call.
+  Host candidates come from `include/routing.py`: the kernel's default-route
+  source is used (fallback to all addresses; IPv6 only with a real default
+  route), so link-down Docker/LXC/host-only addresses are not advertised.
+  An unexpected `connectionState=closed`/consent expiry keeps the window with
+  «Соединение потеряно» and a «Перезвонить» button that starts a new call in the
+  same audio/video mode; any `call_failed` with an open window uses that state.
   Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio

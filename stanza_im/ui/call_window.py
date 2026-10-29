@@ -403,6 +403,7 @@ class CallWindow(QtWidgets.QWidget):
     """Active call window with remote video and icon-only controls."""
 
     hangup = QtCore.pyqtSignal(str)          # sid
+    redial_requested = QtCore.pyqtSignal(str, str, bool)  # sid, jid, video
     audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
     video_mode_requested = QtCore.pyqtSignal(str, str)  # sid, mode
     receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
@@ -416,10 +417,12 @@ class CallWindow(QtWidgets.QWidget):
                  video_bitrate: int = 1000, max_height: int = 0,
                  info_provider=None, audio_enabled: bool = True,
                  remote_audio_enabled: bool = True, incoming_max: int = 0,
-                 pip_enabled: bool = True):
+                 pip_enabled: bool = True, peer_jid: str = ""):
         super().__init__(parent)
         self.sid = sid
         self.peer = peer
+        self.peer_jid = peer_jid or peer
+        self._failed = False
         self._quality_bitrate = int(video_bitrate or 0)
         self._quality_height = int(max_height or 0)
         self._info_provider = info_provider
@@ -558,13 +561,20 @@ class CallWindow(QtWidgets.QWidget):
         self._info_btn = _info_toggle(self)
         self._info_btn.toggled.connect(self._toggle_info)
         controls.addWidget(self._info_btn)
-        controls.addStretch(1)
+        self._redial_btn = _flat(QtWidgets.QPushButton(
+            _icon("call-accept"), tr("call_redial"), self))
+        self._redial_btn.setVisible(False)
+        self._redial_btn.clicked.connect(
+            lambda: self.redial_requested.emit(
+                self.sid, self.peer_jid, bool(self._video)))
+        controls.addWidget(self._redial_btn)
+        controls.addSpacing(12)
 
         self._hangup_btn = QtWidgets.QToolButton(self)
         self._hangup_btn.setIcon(_icon("call-hangup"))
         self._hangup_btn.setIconSize(QtCore.QSize(20, 20))
         self._hangup_btn.setToolTip(tr("call_hangup"))
-        self._hangup_btn.clicked.connect(lambda: self.hangup.emit(self.sid))
+        self._hangup_btn.clicked.connect(self._on_hangup)
         controls.addWidget(_flat(self._hangup_btn))
         # Keep the control strip on its own line: its minimum width also
         # protects the buttons from being squeezed into the video area at the
@@ -572,10 +582,35 @@ class CallWindow(QtWidgets.QWidget):
         self._controls_widget = QtWidgets.QWidget(self)
         self._controls_widget.setLayout(controls)
         self._controls_widget.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
             QtWidgets.QSizePolicy.Policy.Fixed)
         self._controls_widget.setMinimumWidth(controls.sizeHint().width())
-        layout.addWidget(self._controls_widget)
+        layout.addWidget(self._controls_widget, 0,
+                         QtCore.Qt.AlignmentFlag.AlignHCenter)
+
+    def show_failed(self, error: str = "") -> None:
+        """Keep the window open after a failed call with a redial action."""
+        self._failed = True
+        self._duration_timer.stop()
+        self._duration_label.setVisible(False)
+        self._state_text = tr("call_connection_lost")
+        self._update_header()
+        self._info_label.setText(
+            tr("call_failed", peer=self.peer,
+               error=error or tr("call_connection_lost")))
+        self._info_label.setVisible(True)
+        for button in (self._mute_btn, self._hear_btn, self._video_btn,
+                       self._pip_btn, self._network_btn, self._info_btn):
+            button.setVisible(False)
+        self._pip_view.setVisible(False)
+        self._redial_btn.setVisible(True)
+        self._hangup_btn.setToolTip(tr("dialog_close"))
+
+    def _on_hangup(self) -> None:
+        if self._failed:
+            self.close()
+            return
+        self.hangup.emit(self.sid)
 
     def _update_header(self) -> None:
         from stanza_im.include.utils import escape_html
@@ -688,8 +723,13 @@ class CallWindow(QtWidgets.QWidget):
         self._refresh_pip()
         self.pip_toggled.emit(self.sid, self._pip_enabled)
 
+    def is_pip_enabled(self) -> bool:
+        return bool(self._pip_enabled)
+
     def set_pip_enabled(self, enabled: bool) -> None:
         """Apply the PiP preference without re-emitting the toggle signal."""
+        if self._failed:
+            return
         self._pip_enabled = bool(enabled) and bool(self._video)
         self._pip_btn.blockSignals(True)
         self._pip_btn.setChecked(self._pip_enabled)
@@ -709,6 +749,9 @@ class CallWindow(QtWidgets.QWidget):
 
     def _position_pip(self) -> None:
         if not hasattr(self, "_pip_view"):
+            return
+        if self._failed:
+            self._pip_view.setVisible(False)
             return
         parent = self._video_view
         content = parent.content_rect()
@@ -774,8 +817,10 @@ class CallWindow(QtWidgets.QWidget):
             self.sid, self._quality_bitrate, self._quality_height)
 
     def closeEvent(self, event):
-        # Closing the window also ends the call.
-        self.hangup.emit(self.sid)
+        # Closing an active window also ends the call; a failed window is
+        # already detached from its media session.
+        if not self._failed:
+            self.hangup.emit(self.sid)
         super().closeEvent(event)
 
 

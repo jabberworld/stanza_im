@@ -1936,6 +1936,12 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         tray, tray_form = self._page()
         tray_form.addRow(self._check("tray_blink", tr("prefs_tray_blink")))
+        tray_form.addRow(tr("prefs_tray_conference"),
+                         self._combo("tray_conference", [
+                             ("prefs_tray_conf_never", "never"),
+                             ("prefs_tray_conf_mention", "mention"),
+                             ("prefs_tray_conf_all", "all"),
+                         ]))
         tray_form.addRow(tr("prefs_popups"), self._combo("popups", [
             ("prefs_popups_off", "off"),
             ("prefs_popups_system", "system"),
@@ -2133,6 +2139,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "muc_highlight": getattr(appearance, "muc_highlight", "both"),
             "interface_mode": getattr(appearance, "interface_mode", "separate"),
             "tray_blink": notifications.tray_blink,
+            "tray_conference": getattr(
+                notifications, "tray_conference", "mention"),
             "popups": normalize_popups_mode(notifications.popups),
             "osd_enabled": notifications.osd_enabled,
             "osd_duration": notifications.osd_duration,
@@ -2362,6 +2370,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.omemo.alias_sync = self._value("alias_sync")
             cfg.omemo.auto_enable = self._value("auto_enable")
         cfg.notifications.tray_blink = self._value("tray_blink")
+        cfg.notifications.tray_conference = (
+            self._value("tray_conference") or "mention")
         cfg.notifications.popups = self._value("popups")
         cfg.notifications.osd_enabled = self._value("osd_enabled")
         for key in ("osd_duration", "osd_max", "osd_message", "osd_file",

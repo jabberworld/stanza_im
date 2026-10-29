@@ -18,9 +18,12 @@ import importlib
 import logging
 import math
 import random
+import socket
 import time
 import weakref
 from fractions import Fraction
+
+from stanza_im.include import routing
 
 logger = logging.getLogger("stanza_im.call.media")
 
@@ -43,15 +46,66 @@ except Exception as exc:  # pragma: no cover - import guard
     HAS_AIORTC = False
     logger.info("CALL aiortc unavailable: %s", exc)
 
-if av is not None:
-    # MJPEG cameras emit repeated "unable to decode APP fields" and
-    # "deprecated pixel format" banners for every decoded frame; they are
-    # harmless and flood the console.  Keep the first occurrence and real
-    # errors, drop the duplicates.
+def _quiet_ffmpeg_logging() -> None:
+    """Hide harmless MJPEG/swscaler decoder banners from the console.
+
+    Some PyAV builds route FFmpeg through its native default callback, where
+    ``set_skip_repeated`` has no effect.  Set the native level as well as the
+    Python callback level; Python code still logs real camera failures.
+    """
+    if av is None:
+        return
     try:
+        av.logging.set_libav_level(av.logging.ERROR)
+        av.logging.set_level(av.logging.ERROR)
         av.logging.set_skip_repeated(True)
     except Exception:  # pragma: no cover - older PyAV
         pass
+
+
+_quiet_ffmpeg_logging()
+
+
+_ROUTE_HOST_ADDRESSES_INSTALLED = False
+
+
+def _install_route_selected_host_candidates() -> bool:
+    """Make aioice gather host candidates from the route-selected source.
+
+    ``aioice.ice.get_host_addresses()`` uses ifaddr and therefore returns
+    Docker/LXC/host-only addresses even when their routes are link-down.  Use
+    the kernel's default-route source instead, with a fallback to the original
+    list when no route can be determined.
+    """
+    global _ROUTE_HOST_ADDRESSES_INSTALLED
+    if _ROUTE_HOST_ADDRESSES_INSTALLED:
+        return False
+    try:
+        from aioice import ice as aioice_ice
+    except Exception:  # pragma: no cover - optional stack
+        return False
+    original = getattr(aioice_ice, "get_host_addresses", None)
+    if original is None or getattr(original, "_stanza_route_selected", False):
+        return False
+
+    def routed_host_addresses(use_ipv4: bool, use_ipv6: bool):
+        addresses = original(use_ipv4=use_ipv4, use_ipv6=use_ipv6)
+        source_v4 = (routing.route_source(socket.AF_INET)
+                     if use_ipv4 else "")
+        source_v6 = (routing.route_source(socket.AF_INET6)
+                     if use_ipv6 else "")
+        selected = routing.select_host_addresses(
+            addresses, source_v4, source_v6)
+        logger.debug("CALL ICE host addresses all=%s selected=%s "
+                     "source4=%s source6=%s", addresses, selected,
+                     source_v4 or "-", source_v6 or "-")
+        return selected
+
+    routed_host_addresses._stanza_route_selected = True
+    aioice_ice.get_host_addresses = routed_host_addresses
+    _ROUTE_HOST_ADDRESSES_INSTALLED = True
+    logger.debug("CALL route-selected ICE host candidates installed")
+    return True
 
 
 def _install_consent_retry() -> bool:
@@ -117,6 +171,7 @@ def _install_consent_retry() -> bool:
 
 
 if HAS_AIORTC:
+    _install_route_selected_host_candidates()
     _install_consent_retry()
 
 try:  # optional Qt Multimedia (needs libpulse/gstreamer on the system)
@@ -1024,6 +1079,7 @@ if HAS_AIORTC:
                 return
             self._last_open_attempt = time.monotonic()
             path = self._device_path()
+            _quiet_ffmpeg_logging()
             effective_mode = normalize_camera_mode(self._camera_mode,
                                                    self._device_id)
             options = _v4l2_open_options(effective_mode)

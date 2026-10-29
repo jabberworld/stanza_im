@@ -3571,7 +3571,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._apply_active_call_quality()
             self._apply_active_motion_boost()
             self._apply_active_call_incoming()
-            self._apply_active_call_pip()
             from stanza_im.xmpp import jet as jet_mod
             self._client.file_encryption = jet_mod.normalize_mode(
                 str(getattr(self._config.files, "encryption", "prefer")
@@ -5294,32 +5293,18 @@ class MainWindow(QtWidgets.QMainWindow):
             if callable(setter):
                 setter(value)
 
-    def _apply_active_call_pip(self) -> None:
-        """Apply the PiP preference to open 1:1 call windows."""
-        enabled = self._call_pip_default()
-        for sid, window in list(self._call_windows.items()):
-            setter = getattr(window, "set_pip_enabled", None)
-            if callable(setter):
-                setter(enabled)
-            if self._client:
-                session = self._client.rtp_calls.sessions.get(sid)
-                if enabled and session is not None and getattr(
-                        session, "call", None) is None:
-                    self._client.rtp_calls.start_call_preview(sid)
-                else:
-                    self._client.rtp_calls.stop_call_preview(sid)
-                    self._client.set_call_local_preview(sid, enabled)
-
     def _on_call_visibility(self, sid: str, visible: bool) -> None:
         """Pause the local PiP capture while its call window is hidden."""
         if not self._client:
             return
         session = self._client.rtp_calls.sessions.get(sid)
+        window = self._call_windows.get(sid)
         if not visible:
             self._client.rtp_calls.stop_call_preview(sid)
             self._client.set_call_local_preview(sid, False)
             return
-        if self._call_pip_default():
+        if (window is not None and not getattr(window, "_failed", False)
+                and window.is_pip_enabled()):
             if session is not None and getattr(session, "call", None) is None:
                 self._client.rtp_calls.start_call_preview(sid)
             else:
@@ -5334,13 +5319,6 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self._client.rtp_calls.stop_call_preview(sid)
                 self._client.set_call_local_preview(sid, enabled)
-        calls = getattr(self._config, "calls", None)
-        if calls is not None:
-            calls.pip = bool(enabled)
-            try:
-                self._config.save()
-            except Exception:  # noqa: BLE001 - keep the live call usable
-                logger.debug("CALL PiP save failed", exc_info=True)
 
     def _on_incoming_requested(self, key: str, kbps: int) -> None:
         """Persist and apply an incoming cap chosen in a call window."""
@@ -5643,7 +5621,8 @@ class MainWindow(QtWidgets.QMainWindow):
                             remote_audio_enabled=bool(getattr(
                                 session, "remote_audio_enabled", True)),
                             incoming_max=self._incoming_max_default(),
-                            pip_enabled=self._call_pip_default())
+                            pip_enabled=self._call_pip_default(),
+                            peer_jid=peer)
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.video_mode_requested.connect(self._on_video_mode_requested)
@@ -5651,6 +5630,7 @@ class MainWindow(QtWidgets.QMainWindow):
         window.quality_requested.connect(self._on_call_quality_requested)
         window.incoming_requested.connect(self._on_incoming_requested)
         window.pip_toggled.connect(self._on_call_pip_toggled)
+        window.redial_requested.connect(self._on_call_redial)
         window.visibility_changed.connect(self._on_call_visibility)
         self._place_window_near_main(window)
         if video and self._call_pip_default():
@@ -5804,10 +5784,29 @@ class MainWindow(QtWidgets.QMainWindow):
         if path:
             self._sounds.play_file(path)
 
-    def _on_call_failed(self, peer: str, error: str) -> None:
+    def _on_call_failed(self, sid: str, peer: str, error: str,
+                        video: bool = False) -> None:
         logger.warning("CALL failed for %s: %s", peer, error)
+        window = self._call_windows.get(sid) if sid else None
+        if window is not None:
+            if self._client:
+                self._client.rtp_calls.stop_call_preview(sid)
+                self._client.set_call_local_preview(sid, False)
+            window.show_failed(error)
+            return
         self._tray.show_message(
             APP_NAME, tr("call_failed", peer=peer, error=error))
+
+    def _on_call_redial(self, sid: str, peer_jid: str, video: bool) -> None:
+        """Re-dial after a failed call, using the same audio/video mode."""
+        window = self._call_windows.pop(sid, None)
+        if window is not None:
+            window._failed = True
+            window.close()
+        if self._client:
+            self._client.rtp_calls.stop_call_preview(sid)
+            self._client.set_call_local_preview(sid, False)
+        self._on_call_requested(peer_jid, video)
 
     def _on_call_hangup(self, sid: str) -> None:
         if self._client:
@@ -7300,6 +7299,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_unread_badge(jid)
         self._push_unread_to_chat(jid)
         self.unread_changed.emit()
+        self._sync_tray_blink()
 
     def _arm_unread_separator(self, jid: str, chat) -> None:
         """Tell an open but unfocused chat that its next message is unread.
@@ -7370,8 +7370,49 @@ class MainWindow(QtWidgets.QMainWindow):
                     entry["read_sid"] = sid
         unread_state.save_chats(self._unread_chats, account=self._config.jid or "")
 
+    def _conference_chat_keys(self) -> set[str]:
+        """Conversation keys that represent conferences (not PMs)."""
+        keys = set(self.__dict__.get("_conference_roster") or ())
+        keys |= set(self.__dict__.get("_muc_self_nicks") or {})
+        keys |= set(self.__dict__.get("_known_conferences") or ())
+        return keys
+
+    def _notification_unread_count(self, jid: str) -> int:
+        """Unread count that is allowed to notify through the tray."""
+        chats = self.__dict__.get("_unread_chats") or {}
+        entry = chats.get(jid)
+        fallback = None
+        if entry is None:
+            # The roster is normally mirrored from ``_unread_chats``; keep a
+            # fallback for tests and for the brief window while a restored row
+            # has not been reconciled yet.
+            fallback = next((user for user in
+                             (self.__dict__.get("_roster")._users
+                              if self.__dict__.get("_roster") else [])
+                             if user.jid == jid), None)
+            if fallback is None:
+                return 0
+        if jid in self._conference_chat_keys():
+            config = self.__dict__.get("_config")
+            notifications = getattr(config, "notifications", None)
+            mode = str(getattr(notifications, "tray_conference",
+                               "mention") or "mention")
+            if mode == "never":
+                return 0
+            if mode == "all":
+                return int((entry or {}).get(
+                    "unread", getattr(fallback, "unread_count", 0)) or 0)
+            return int((entry or {}).get(
+                "mentions", getattr(fallback, "unread_mentions", 0)) or 0)
+        return int((entry or {}).get(
+            "unread", getattr(fallback, "unread_count", 0)) or 0)
+
+    def _notification_unread_total(self) -> int:
+        chats = self.__dict__.get("_unread_chats") or {}
+        return sum(self._notification_unread_count(jid) for jid in chats)
+
     def _sync_tray_blink(self):
-        """Blink the tray only while logged in and unread messages exist."""
+        """Blink the tray only while logged in and notifying messages exist."""
         # Use __dict__: a test may build MainWindow via __new__ without a Qt
         # super-class init, where getattr() raises on a missing QObject attr.
         tray = self.__dict__.get("_tray")
@@ -7384,11 +7425,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         enabled = bool(getattr(notifications, "tray_blink", True))
         logged_in = bool(self.__dict__.get("_tray_blink_allowed", False))
-        should_blink = logged_in and self._unread_total > 0 and enabled
+        counter = getattr(self, "_notification_unread_total", None)
+        notify_total = (counter() if callable(counter)
+                        else self._unread_total)
+        should_blink = logged_in and notify_total > 0 and enabled
         active = bool(getattr(tray, "_blink_active", False))
         if should_blink != active:
-            logger.debug("TRAY[blink] total=%d enabled=%s logged_in=%s active=%s",
-                         self._unread_total, enabled, logged_in, should_blink)
+            logger.debug("TRAY[blink] total=%d notify=%d enabled=%s "
+                         "logged_in=%s active=%s",
+                         self._unread_total, notify_total, enabled, logged_in,
+                         should_blink)
         if should_blink:
             tray.start_blinking()
         else:
@@ -10476,12 +10522,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── Extended presence (mood / activity) + status message ──────
 
-    def _send_presence(self, show: str) -> None:
+    def _send_presence(self, show: str) -> bool:
         """Send presence including the stored status message."""
         if not self._client:
-            return
+            return False
         message = getattr(self._config.status, "message", "") or ""
-        self._client.send_presence(show=show, status=message)
+        # Older/fake clients return None; only an explicit False is a failure.
+        return self._client.send_presence(show=show, status=message) is not False
 
     def _pep_button_icon(self) -> QtGui.QIcon:
         path = pep.default_icon("mood")
@@ -10629,7 +10676,7 @@ class MainWindow(QtWidgets.QMainWindow):
         one until nothing is left.
         """
         unread = [user.jid for user in self._roster._users
-                  if getattr(user, "unread_count", 0) > 0]
+                  if self._notification_unread_count(user.jid) > 0]
         if not unread:
             return
         target = unread[0]
@@ -10731,24 +10778,35 @@ class MainWindow(QtWidgets.QMainWindow):
             connected = client.xmpp.is_connected()
         except Exception:  # noqa: BLE001
             connected = False
-        if not connected:
-            # The stream died during sleep: restore once the session is live.
-            self._restore_status_after_session = show
-            return
+        # Always defer the presence: immediately after wake the transport may
+        # still look connected for a few milliseconds before the reset arrives.
+        self._restore_status_after_session = show
         self._set_tray_status_icon(show)
         self._set_status_combo(show)
-        self._send_presence(show)
-        logger.info("System resume: status %s restored", show)
+        if connected:
+            QtCore.QTimer.singleShot(800, self._restore_suspended_presence)
+            logger.info("System resume: status %s restore scheduled", show)
+        else:
+            logger.info("System resume: waiting for a live session (%s)", show)
 
     def _restore_suspended_presence(self) -> None:
-        """Send the pre-sleep status after a reconnect (see _on_system_resume)."""
+        """Send the pre-sleep status once a live session can carry it."""
         show = self._restore_status_after_session
-        if not show or self._client is None:
+        client = self._client
+        if not show or client is None:
             return
-        self._restore_status_after_session = ""
+        try:
+            connected = client.xmpp.is_connected()
+        except Exception:  # noqa: BLE001
+            connected = False
+        if not connected:
+            return
         self._set_tray_status_icon(show)
         self._set_status_combo(show)
-        self._send_presence(show)
+        if not self._send_presence(show):
+            return
+        self._restore_status_after_session = ""
+        logger.info("System resume: status %s restored", show)
 
     def _check_auto_status(self):
         if self._suspend_active:

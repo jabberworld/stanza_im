@@ -178,6 +178,11 @@ check("media imports with QtMM available", imported)
 if imported:
     print("  HAS_QTMM=%s HAS_AIORTC=%s" % (media.HAS_QTMM, media.HAS_AIORTC))
     check("HAS_QTMM detected via stub", media.HAS_QTMM is True)
+    if media.av is not None:
+        check("FFmpeg warnings are suppressed below errors",
+              media.av.logging.get_level() == media.av.logging.ERROR
+              and media.av.logging.get_skip_repeated())
+        media._quiet_ffmpeg_logging()
 
     devs = media.enumerate_devices()
     check("enumerate_devices with stub", isinstance(devs, dict)

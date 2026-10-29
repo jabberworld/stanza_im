@@ -1242,6 +1242,7 @@ class JabberClient:
         self._full_jid = f"{self.jid_str}/{resource}"
 
         self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
+        self.xmpp.add_filter("out", self._drop_disconnected_presence)
         self.xmpp.ssl_context = build_ssl_context(not self.allow_invalid_cert)
         self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")
         # Our own reconnect state (slixmpp has no ``auto_reconnect`` option).
@@ -2867,9 +2868,33 @@ class JabberClient:
             fb_body.set("start", str(start))
             fb_body.set("end", str(end))
 
+    def _drop_disconnected_presence(self, stanza):
+        """Drop a queued presence after the transport has already closed.
+
+        A presence can be queued while the socket is still open and processed
+        by slixmpp after a sleep/resume has torn the connection down.  Letting
+        it reach ``send_raw`` raises ``NotConnectedError`` and logs a spurious
+        traceback; the status is restored by the next session instead.
+        """
+        try:
+            if (getattr(stanza, "tag", "") == "{jabber:client}presence"
+                    and not self.xmpp.is_connected()):
+                logger.debug("Presence dropped: stream is closed")
+                return None
+        except Exception:  # noqa: BLE001 - filters must stay passive
+            pass
+        return stanza
+
     def send_presence(self, show: str | None = None, status: str = "",
-                      priority: int | None = None) -> None:
-        """Send presence to the server."""
+                      priority: int | None = None) -> bool:
+        """Send presence to the server.
+
+        Returns ``False`` when the stream is already closed; the caller can
+        defer the presence until the session is live again.
+        """
+        if not self.xmpp.is_connected():
+            logger.debug("Presence not sent: stream is closed")
+            return False
         if show == "offline":
             p = self.xmpp.Presence()
             p["type"] = "unavailable"
@@ -2877,7 +2902,7 @@ class JabberClient:
                 p["status"] = status
             logger.debug("Sending presence: unavailable")
             p.send()
-            return
+            return True
         p = self.xmpp.Presence()
         if show and show not in ("online", "available"):
             p["type"] = "available"
@@ -2892,6 +2917,7 @@ class JabberClient:
             p["priority"] = priority
         logger.debug("Sending presence: %s", show or "available")
         p.send()
+        return True
 
     def send_directed_presence(self, to: str, ptype: str = "",
                                status: str = "",

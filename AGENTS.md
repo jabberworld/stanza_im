@@ -143,6 +143,7 @@ stanza_im/                      # Python package
 │   ├── pep.py                   # XEP-0080/0107/0108/0118 payloads + icon packs
 │   ├── geo.py                   # RFC 5870 geo: URIs, Mercator math, track, tile cache
 │   ├── network_quality.py       # UI-free call network quality levels/reasons
+│   ├── routing.py               # Route-selected local ICE source addresses
 │   ├── xmpp_uri.py              # XEP-0147 xmpp: URI parse/build (RFC 5122)
 │   ├── hats.py                  # XEP-0317 Hats + XEP-0392 HSLuv colour generation
 │   ├── clients.py               # XEP-0115 caps node → client name/icon mapping
@@ -1455,9 +1456,14 @@ corners) and no snapshot is taken. Wayland/unknown platforms always composite
 and use plain alpha. The tray icon's middle click
 (`TrayIcon.cycle_unread_requested`, `ActivationReason.MiddleClick`) lets the
 user walk unread conversations: `MainWindow._on_tray_cycle_unread` opens the
-topmost roster contact with `unread_count > 0`, then `_reset_unread` +
-`mds_mark_displayed` mark it read so each further middle click advances until
-nothing is left. Tray balloons are gated by `notifications.popups`
+topmost roster contact whose **notification** unread count is positive, then
+`_reset_unread` + `mds_mark_displayed` mark it read so each further middle
+click advances until nothing is left. `notifications.tray_conference`
+(`never`/`mention`/`all`, default `mention`) decides whether ordinary conference
+messages, only mentions, or both count for the tray blink and that cycle; 1:1
+and private chats always count by their unread total. The same policy is used
+by `_sync_tray_blink` (ordinary conference messages still stay as roster/tab
+badges). Tray balloons are gated by `notifications.popups`
 (`off`/`system`/`system_messages`, default `system`; a legacy bool is coerced by
 `tray.normalize_popups_mode`): `TrayIcon.show_message(..., kind="message")` is
 the incoming-message preview and is shown only in `system_messages`, while
@@ -2889,8 +2895,8 @@ translucent nickname caption over the image. Every call control is **icon-only**
 a red `call-hangup`, a green `call-accept` and a **quality** button
 (`quality.svg`, a small bars glyph). Every control is flat (`_flat`:
 `autoRaise` on a `QToolButton`, `setFlat` on a `QPushButton`), and the 1:1
-control strip is its own widget with a minimum width so its buttons never
-cross into the video area at the smallest window size. Its menu changes the outgoing video
+control strip is its own compact, centred widget with a minimum width so its
+buttons never cross into the video area at the smallest window size. Its menu changes the outgoing video
 **bitrate** (200/500/1000/1500 kbps; default 1000) and **resolution**
 (source/1080/720/480/360) of a live call (in Muji — of every session of the
 room): `MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
@@ -2921,7 +2927,11 @@ ignore it). A 1:1 video call shows its outgoing camera/screen in a responsive
 PiP overlay (`calls.pip`, default on, mirrored for the camera and unmirrored
 for screen sharing) anchored to the displayed image rectangle, not the widget;
 the overlay is throttled to 15 fps and its capture is paused while the call
-window is hidden. Before the engine call exists the same preview comes from a
+window is hidden. The preference is the **default for new calls only**; the
+in-call PiP button controls the current window and is never persisted, and
+changing the preference does not alter an open call. `CallWindow.is_pip_enabled`
+keeps the per-call choice when the window is hidden and shown again. Before the
+engine call exists the same preview comes from a
 standalone `_LocalPreviewCapture`: the outgoing ringing window starts one
 immediately, and the incoming prompt shows a small self-view above its buttons
 until Accept/Reject. Both are stopped before the engine opens the camera.
@@ -2930,12 +2940,22 @@ until Accept/Reject. Both are stopped before the engine opens the camera.
 target and `lag_peak` (the worst GUI event-loop stall since the previous
 sample); the call also logs
 the nominated ICE pair (using the candidate `host`, not its `.ip`) once it is
-known. A `_lag_loop` watchdog reports stalls
+known. `include/routing.py` replaces aioice's all-adapter host enumeration with
+the kernel's **default-route source address** (UDP connect, no packets) and a
+fallback to all addresses when no route is available; IPv6 is kept only when a
+real IPv6 default route exists. This stops Docker/LXC/host-only addresses from
+being advertised even when the routing table marks them `linkdown`. A
+`_lag_loop` watchdog reports stalls
 above 250 ms, because aioice's 0.5 s consent transaction cannot be answered
 while the loop is blocked. On a lossy path `_install_consent_retry` replaces
 `aiortc.rtcicetransport.Connection` with a subclass whose consent probes use
 two retransmissions (0.5 + 1 + 2 s) instead of aioice's single 0.5 s request,
-so a few lost packets do not close a healthy RTP session. The call header also
+so a few lost packets do not close a healthy RTP session. An unexpected
+`connectionState=closed` (including consent expiry) is a failure: the call
+window stays open with «Соединение потеряно» and a **«Перезвонить»** button
+that starts a new call in the same audio/video mode. Any `call_failed` with an
+existing window uses the same lost state; without a window it remains a tray
+notice. The call header also
 has a **network-quality** icon (`include/network_quality.py` levels 0–4,
 painted by `ui/network_quality.py`; updated once a second): its tooltip names
 the reason — incoming/outgoing loss, low REMB/target, or event-loop lag — with
@@ -3044,8 +3064,9 @@ failed `av.open` logs the real FFmpeg reason via
 `decode_ffmpeg_error` (PyAV raises a `UnicodeDecodeError` for a localized
 error such as "Устройство занято" instead of the `FFmpegError`). Repeated
 FFmpeg decoder banners (`unable to decode APP fields`, deprecated pixel format)
-are suppressed with `av.logging.set_skip_repeated(True)`; the first occurrence
-and real errors are kept. The container
+are suppressed by setting both PyAV and native libav levels to `ERROR` (plus
+`set_skip_repeated`); the native level matters when FFmpeg uses its default
+callback. Real camera errors still go through the Python log. The container
 close is worker-owned: `stop()` only marks the track stopped and defers the
 container when `_decode_inflight` is set; the decode worker's `finally` schedules
 `_on_decode_finished` on the event loop, so a cancelled/done asyncio future
@@ -3356,10 +3377,13 @@ text is kept. Returning activity (`eventFilter`) resumes
   `PrepareForSleep` (UPower `Sleeping` fallback) on the system bus;
   `MainWindow._on_system_suspend` sends an `unavailable` presence with the
   dedicated `status_suspend` text («Компьютер перешел в спящий режим») and
-  `_on_system_resume` restores the pre-sleep show and the user's status message
-  (combo/tray synced). A stream lost during sleep is restored by
-  `_on_session_started` (`_restore_suspended_presence`); auto-status is paused
-  while suspended. No logind delay inhibitor is taken (best-effort send).
+  `_on_system_resume` updates the combo/tray and schedules the presence restore
+  (800 ms); `_restore_suspended_presence` sends it only once the transport is
+  live, otherwise `_on_session_started` does. `JabberClient` also drops a
+  presence queued after the transport closed (an outgoing filter) and
+  `send_presence` returns false when offline, so a sleep/resume cannot log a
+  `NotConnectedError` send-queue traceback. Auto-status is paused while
+  suspended. No logind delay inhibitor is taken (best-effort send).
   [`tests/test_suspend_presence.py`]
 - **Language**: the stream advertises the UI language
   (`i18n.current_language()`) as `xml:lang` (`_StanzaXMPP(jid, password,

@@ -171,6 +171,20 @@ check("PiP stays inside the displayed video rectangle",
       _pip_rect.width() >= 64 and _pip_rect.height() >= 36
       and _content_rect.contains(_pip_rect))
 
+# A failed call keeps its window and offers a redial in the same media mode.
+rcw = CallWindow("s1r", "Bob", video=True, peer_jid="bob@example.com")
+_redial_seen = []
+rcw.redial_requested.connect(lambda *a: _redial_seen.append(a))
+rcw.show_failed("connection failed")
+check("a failed call shows the redial button",
+      rcw._redial_btn.isVisibleTo(rcw) and rcw._failed)
+check("a failed call hides the media controls",
+      not rcw._mute_btn.isVisible() and not rcw._network_btn.isVisible()
+      and not rcw._pip_view.isVisibleTo(rcw))
+rcw._redial_btn.click()
+check("redial carries the sid, peer JID and video mode",
+      _redial_seen[-1] == ("s1r", "bob@example.com", True))
+rcw.close()
 
 # 1:1 call controls are flat and the strip keeps its own width.
 fcw = CallWindow("s1f", "Bob", video=True)
@@ -183,6 +197,9 @@ check("the 1:1 control strip has its own minimum width",
       >= fcw._controls_widget.sizeHint().width())
 fcw.resize(fcw.minimumSize())
 fcw.layout().activate()
+check("the 1:1 control strip stays compact and centred",
+      fcw._controls_widget.width()
+      <= fcw._controls_widget.sizeHint().width() + 1)
 check("the 1:1 controls stay below the video at minimum size",
       fcw._controls_widget.geometry().top()
       >= fcw._video_view.geometry().bottom())

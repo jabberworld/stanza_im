@@ -26,6 +26,7 @@ from stanza_im.core.storage import Config
 from stanza_im.i18n import load as i18n_load, tr
 from stanza_im.ui import suspend_monitor as monitor_mod
 from stanza_im.ui.main_window import MainWindow
+from stanza_im.core.client import JabberClient
 
 i18n_load("en")
 
@@ -103,10 +104,11 @@ win._on_system_suspend()
 check("a repeated suspend does nothing", len(win._client.calls) == 1)
 
 win._on_system_resume()
-check("resume restores the status and the user's message",
-      win._client.calls[-1] == ("away", "working"))
-check("resume updates the tray and the combo",
+check("resume updates the tray and the combo immediately",
       win._tray_icons == ["away"] and win._combo_values == ["away"])
+win._restore_suspended_presence()
+check("the deferred resume sends the status and user's message",
+      win._client.calls[-1] == ("away", "working"))
 win._on_system_resume()
 check("a repeated resume does nothing", len(win._client.calls) == 2)
 
@@ -132,7 +134,8 @@ woke = make_window("dnd")
 woke._on_system_suspend()
 woke._client.xmpp.connected = False
 woke._on_system_resume()
-check("a lost stream defers the restore",
+woke._restore_suspended_presence()
+check("a lost stream keeps the restore pending",
       woke._client.calls == [("offline", tr("status_suspend"))]
       and woke._restore_status_after_session == "dnd")
 woke._client.xmpp.connected = True
@@ -148,6 +151,24 @@ sleeping._config.status.away_minutes = 1
 sleeping._suspend_active = True
 sleeping._check_auto_status()
 check("auto-status is paused while suspended", sleeping._client.calls == [])
+
+# 4b. a presence queued after the stream closed is dropped ------------------
+from types import MethodType, SimpleNamespace  # noqa: E402
+
+_drop = SimpleNamespace(
+    xmpp=SimpleNamespace(is_connected=lambda: False))
+_drop._drop_disconnected_presence = MethodType(
+    JabberClient._drop_disconnected_presence, _drop)
+check("queued presence is dropped after disconnect",
+      _drop._drop_disconnected_presence(
+          SimpleNamespace(tag="{jabber:client}presence")) is None)
+_check_live = SimpleNamespace(
+    xmpp=SimpleNamespace(is_connected=lambda: True))
+_check_live._drop_disconnected_presence = MethodType(
+    JabberClient._drop_disconnected_presence, _check_live)
+_stanza = SimpleNamespace(tag="{jabber:client}presence")
+check("presence is kept while connected",
+      _check_live._drop_disconnected_presence(_stanza) is _stanza)
 
 # 5. the monitor and its D-Bus sources ------------------------------------
 monitor = monitor_mod.SuspendMonitor()

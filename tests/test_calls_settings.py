@@ -49,6 +49,8 @@ check("the call codec defaults are present",
       and cfg.calls.motion_boost is False
       and cfg.calls.incoming_max_kbps == 0
       and cfg.calls.pip is True)
+check("the tray conference default is mentions only",
+      Config.defaults().notifications.tray_conference == "mention")
 check("the screen box default is Full HD",
       cfg.devices.screen_share_max_width == 1920
       and cfg.devices.screen_share_max_height == 1080)
@@ -164,6 +166,8 @@ for key in ("calls_audio_codec", "calls_video_codec",
             "devices_screen_resolution",
             "devices_screen_share_fps"):
     check(f"prefs control {key}", key in dlg._controls)
+check("the tray conference selector defaults to mentions",
+      dlg._controls["tray_conference"].currentData() == "mention")
 check("the codec controls load the defaults",
       dlg._controls["calls_audio_codec"].currentData() == "auto"
       and dlg._controls["calls_video_codec"].currentData() == "auto"
@@ -191,6 +195,15 @@ dlg._controls["devices_screen_resolution"].setCurrentIndex(
 dlg._controls["devices_screen_share_fps"].setCurrentIndex(
     dlg._controls["devices_screen_share_fps"].findData(10))
 dlg._apply_settings()
+# A PiP toggle inside a live call is local to that call: it must not rewrite
+# the preference that controls the default of the next call.
+_pip_window = MainWindow.__new__(MainWindow)
+_pip_window._client = None
+_pip_window._config = Config.defaults()
+MainWindow._on_call_pip_toggled(_pip_window, "sid", False)
+check("a per-call PiP toggle does not persist the preference",
+      _pip_window._config.calls.pip is True)
+
 check("apply writes the codec settings",
       cfg.calls.audio_codec == "opus" and cfg.calls.video_codec == "h264"
       and cfg.calls.audio_bitrate_kbps == 64
