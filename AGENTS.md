@@ -76,6 +76,7 @@ stanza_im/                      # Python package
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
 │   ├── chat_themes.py           # Adium-style theme HTML generator
 │   ├── nick_colors.py           # Session MUC nickname → color allocation
+│   ├── network_quality.py       # Signal-bar network-quality icon painter
 │   ├── font_zoom.py             # Ctrl+wheel font-size helper (input/roster/MUC)
 │   ├── resize_handle.py         # Thin draggable bar resizing a field (input/results)
 │   ├── zoom_list.py             # List with Ctrl+wheel zoom + empty-click deselect
@@ -140,6 +141,7 @@ stanza_im/                      # Python package
 │   ├── emoji_data.py            # XEP-0444 emoji catalogue (categories + search)
 │   ├── pep.py                   # XEP-0080/0107/0108/0118 payloads + icon packs
 │   ├── geo.py                   # RFC 5870 geo: URIs, Mercator math, track, tile cache
+│   ├── network_quality.py       # UI-free call network quality levels/reasons
 │   ├── xmpp_uri.py              # XEP-0147 xmpp: URI parse/build (RFC 5122)
 │   ├── hats.py                  # XEP-0317 Hats + XEP-0392 HSLuv colour generation
 │   ├── clients.py               # XEP-0115 caps node → client name/icon mapping
@@ -2906,15 +2908,20 @@ a conservative REMB; loss disables the boost. It is opt-in
 The setting is applied to already-running tracks through
 `AiortcCall.set_motion_boost`/`JingleRtpManager.set_motion_boost`, not only at
 call creation. `CALL stats` carries separate
-`in_video`/`in_audio` rates, FPS, motion peak, target, loss and `lag_peak`
-(the worst GUI event-loop stall since the previous sample); the call also logs
+`in_video`/`in_audio` rates, incoming/outgoing loss, REMB, FPS, motion peak,
+target and `lag_peak` (the worst GUI event-loop stall since the previous
+sample); the call also logs
 the nominated ICE pair (using the candidate `host`, not its `.ip`) once it is
 known. A `_lag_loop` watchdog reports stalls
 above 250 ms, because aioice's 0.5 s consent transaction cannot be answered
 while the loop is blocked. On a lossy path `_install_consent_retry` replaces
 `aiortc.rtcicetransport.Connection` with a subclass whose consent probes use
 two retransmissions (0.5 + 1 + 2 s) instead of aioice's single 0.5 s request,
-so a few lost packets do not close a healthy RTP session. The codec
+so a few lost packets do not close a healthy RTP session. The call header also
+has a **network-quality** icon (`include/network_quality.py` levels 0–4,
+painted by `ui/network_quality.py`; updated once a second): its tooltip names
+the reason — incoming/outgoing loss, low REMB/target, or event-loop lag — with
+the measured values. The codec
 cannot change during a call (that needs renegotiation) and audio is only
 changed in the settings. An **info** button (`info.svg`) is a toggle: it shows
 one compact line under the header — the outgoing and incoming codec and

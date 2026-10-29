@@ -1879,6 +1879,7 @@ if HAS_AIORTC:
                 self.devices.get("motion_boost", False))
             self._stats: dict[str, int | None] = {}
             self._stats_prev: dict[str, tuple[float, int]] = {}
+            self._stats_prev_in: dict[str, tuple[int, int]] = {}
             self._stats_task = None
             self._lag_task = None
             self._loop_lag_peak = 0.0
@@ -2197,8 +2198,15 @@ if HAS_AIORTC:
                         totals["in_total"] = (
                             now, int(getattr(stat, "bytesReceived", 0) or 0))
                     elif stype == "remote-inbound-rtp" and kind == "video":
-                        note_video_loss(getattr(stat, "fractionLost", 0),
-                                        now=now)
+                        fraction = float(
+                            getattr(stat, "fractionLost", 0) or 0)
+                        self._stats["out_loss_pct"] = max(
+                            0.0, min(100.0, fraction * 100.0 / 255.0))
+                        rtt = getattr(stat, "roundTripTime", None)
+                        if rtt is not None:
+                            self._stats["rtt_ms"] = max(
+                                0.0, float(rtt) * 1000.0)
+                        note_video_loss(fraction, now=now)
             try:
                 receivers = list(self.pc.getReceivers())
             except Exception:  # noqa: BLE001
@@ -2208,10 +2216,28 @@ if HAS_AIORTC:
                         or getattr(getattr(receiver, "track", None),
                                    "kind", ""))
                 try:
-                    await receiver.getStats()
+                    report = await receiver.getStats()
                 except Exception:  # noqa: BLE001
                     continue
                 totals["in_" + kind] = (now, _receiver_bytes(receiver))
+                for stat in report.values():
+                    if getattr(stat, "type", "") != "inbound-rtp":
+                        continue
+                    stat_kind = getattr(stat, "kind", "") or kind
+                    lost = int(getattr(stat, "packetsLost", 0) or 0)
+                    received = int(getattr(stat, "packetsReceived", 0) or 0)
+                    previous = self._stats_prev_in.get(stat_kind)
+                    self._stats_prev_in[stat_kind] = (lost, received)
+                    if previous is not None:
+                        delta_lost = max(0, lost - previous[0])
+                        delta_recv = max(0, received - previous[1])
+                        total = delta_lost + delta_recv
+                        if total:
+                            self._stats["in_loss_pct"] = max(
+                                0.0, min(100.0, delta_lost * 100.0 / total))
+                    jitter = float(getattr(stat, "jitter", 0) or 0)
+                    clock = 90000.0 if stat_kind == "video" else 48000.0
+                    self._stats["in_jitter_ms"] = jitter * 1000.0 / clock
             for key, (stamp, total) in totals.items():
                 previous = self._stats_prev.get(key)
                 if previous is not None and stamp > previous[0]:
@@ -2228,6 +2254,8 @@ if HAS_AIORTC:
                 target = getattr(encoder, "target_bitrate", None)
                 lag_peak = self._loop_lag_peak
                 self._loop_lag_peak = 0.0
+                self._stats["lag_peak_ms"] = lag_peak
+                self._stats["remb_bps"] = int(_VIDEO_RATE.last_remb or 0)
                 fps = 0.0
                 if self._local_video is not None:
                     try:
@@ -2243,14 +2271,21 @@ if HAS_AIORTC:
                 logger.debug(
                     "CALL stats out_video=%sbps out_audio=%sbps in=%sbps "
                     "in_video=%sbps in_audio=%sbps target=%sbps "
-                    "loss=%.1f%% fps=%.1f motion_peak=%.1f lag_peak=%.0fms",
+                    "loss=%.1f%% out_loss=%.1f%% in_loss=%.1f%% "
+                    "remb=%s in_jitter=%.1fms fps=%.1f motion_peak=%.1f "
+                    "lag_peak=%.0fms",
                     self._stats.get("out_video_bps"),
                     self._stats.get("out_audio_bps"),
                     self._stats.get("in_total_bps"),
                     self._stats.get("in_video_bps"),
                     self._stats.get("in_audio_bps"),
                     int(target) if target else "none",
-                    _VIDEO_RATE.loss_pct(), fps, motion, lag_peak)
+                    _VIDEO_RATE.loss_pct(),
+                    float(self._stats.get("out_loss_pct", 0) or 0),
+                    float(self._stats.get("in_loss_pct", 0) or 0),
+                    int(self._stats.get("remb_bps", 0) or 0),
+                    float(self._stats.get("in_jitter_ms", 0) or 0),
+                    fps, motion, lag_peak)
 
         def quality_info(self) -> dict:
             """Codec/resolution/bitrate snapshot for the call info popup."""
@@ -2263,6 +2298,7 @@ if HAS_AIORTC:
             video_target = getattr(video_encoder, "target_bitrate", None)
             audio_target = getattr(getattr(audio_encoder, "codec", None),
                                    "bit_rate", None)
+            cap = int(defaults.get("video_bitrate") or 0)
             return {
                 "audio_codec": codecs.get("audio", ""),
                 "video_codec": codecs.get("video", ""),
@@ -2276,6 +2312,18 @@ if HAS_AIORTC:
                                          or defaults["video_bitrate"]) / 1000)),
                 "audio_kbps": int(round((audio_target
                                          or defaults["audio_bitrate"]) / 1000)),
+                "target_bps": int(video_target or cap),
+                "cap_bps": cap,
+                "remb_bps": int(self._stats.get("remb_bps", 0) or 0),
+                "out_loss_pct": float(
+                    self._stats.get("out_loss_pct", 0) or 0),
+                "in_loss_pct": float(
+                    self._stats.get("in_loss_pct", 0) or 0),
+                "rtt_ms": self._stats.get("rtt_ms"),
+                "in_jitter_ms": float(
+                    self._stats.get("in_jitter_ms", 0) or 0),
+                "lag_peak_ms": float(
+                    self._stats.get("lag_peak_ms", 0) or 0),
                 "out_video_bps": self._stats.get("out_video_bps"),
                 "out_audio_bps": self._stats.get("out_audio_bps"),
                 "in_video_bps": self._stats.get("in_video_bps"),

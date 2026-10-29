@@ -64,6 +64,7 @@ stanza_im/
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
 │   ├── nick_colors.py  — Session MUC nickname → color allocation
+│   ├── network_quality.py — Signal-bar network-quality icon painter
 │   ├── font_zoom.py    — Ctrl+wheel font-size helper (input/roster/MUC list)
 │   ├── resize_handle.py — thin draggable bar resizing a field (input/results)
 │   ├── preferences.py  — Settings dialog (icon navigation, nested tabs, lazily built pages)
@@ -3454,8 +3455,12 @@ client.leave_muji(room)
   ringing survives `_bind_call`; `AiortcCall` applies the stored value when
   `add_audio()`/`add_video()` or the remote audio receiver creates the tracks,
   and `CallWindow` opens with that state. `CALL stats`
-  also records `in_video`/`in_audio`, FPS, motion peak, target, loss and
-  `lag_peak`; the first sample logs the nominated ICE pair. A watchdog logs
+  also records `in_video`/`in_audio`, incoming/outgoing loss, REMB, FPS,
+  motion peak, target and `lag_peak`; the first sample logs the nominated ICE
+  pair. `include/network_quality.py` classifies the snapshot into four levels
+  (plus unknown); the call header shows the `ui/network_quality.py` signal-bar
+  icon with a tooltip naming the reason (incoming/outgoing loss, REMB-limited
+  target, event-loop lag) and its values. A watchdog logs
   GUI event-loop stalls above 250 ms (aioice's consent transaction times out at
   0.5 s). `_install_consent_retry` replaces the `aiortc.rtcicetransport`
   `Connection` with a subclass whose consent probes retransmit twice

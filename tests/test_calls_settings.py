@@ -480,6 +480,29 @@ check("quality_info reports both resolutions",
 check("quality_info reports the target and actual bitrates",
       info["video_kbps"] == 500 and info["audio_kbps"] == 96
       and info["out_video_bps"] == 420000 and info["in_bps"] == 380000)
+check("quality_info exposes the network telemetry fields",
+      info["cap_bps"] == 500000 and info["target_bps"] == 500000
+      and info["out_loss_pct"] == 0.0 and info["in_loss_pct"] == 0.0)
+
+from stanza_im.include.network_quality import network_quality  # noqa: E402
+from stanza_im.ui.network_quality import network_icon  # noqa: E402
+
+check("no media has an unknown network level",
+      network_quality(None)["level"] == 0)
+check("a clean link is excellent",
+      network_quality({"out_loss_pct": 0, "in_loss_pct": 0,
+                       "target_bps": 1000000, "cap_bps": 1000000})
+      ["level"] == 4)
+check("incoming loss is the reported reason",
+      network_quality({"out_loss_pct": 0, "in_loss_pct": 7,
+                       "target_bps": 1000000, "cap_bps": 1000000})
+      ["reason"] == "in_loss")
+check("a heavily limited target is poor",
+      network_quality({"out_loss_pct": 0, "in_loss_pct": 0,
+                       "target_bps": 200000, "cap_bps": 1000000})
+      ["level"] == 1)
+check("the network icon has four levels",
+      all(not network_icon(level).isNull() for level in range(5)))
 
 
 class _InfoSession:

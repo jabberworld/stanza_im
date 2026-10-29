@@ -18,6 +18,8 @@ from stanza_im.i18n import tr
 from stanza_im.include.avatars import default_avatar
 from stanza_im.include.constants import find_icon
 from stanza_im.include.utils import format_duration
+from stanza_im.include.network_quality import network_quality
+from stanza_im.ui.network_quality import network_icon
 
 logger = logging.getLogger("stanza_im.call.ui")
 
@@ -80,6 +82,43 @@ def _info_toggle(parent) -> QtWidgets.QToolButton:
     button.setCheckable(True)
     button.setAutoRaise(True)
     return button
+
+
+_NETWORK_LABELS = {
+    4: "call_network_excellent",
+    3: "call_network_good",
+    2: "call_network_fair",
+    1: "call_network_poor",
+    0: "call_network_unknown",
+}
+_NETWORK_REASONS = {
+    "in_loss": "call_network_reason_in_loss",
+    "out_loss": "call_network_reason_out_loss",
+    "limited": "call_network_reason_limited",
+    "lag": "call_network_reason_lag",
+    "ok": "call_network_reason_ok",
+    "unknown": "call_network_unknown",
+}
+
+
+def _network_tooltip(result: dict) -> str:
+    """Human-readable network state for the indicator tooltip."""
+    level = int(result.get("level") or 0)
+    if level <= 0:
+        return tr("call_network_unknown")
+    label = tr(_NETWORK_LABELS.get(level, "call_network_unknown"))
+    reason = tr(_NETWORK_REASONS.get(
+        str(result.get("reason") or "unknown"), "call_network_unknown"))
+    details = tr(
+        "call_network_details",
+        out_loss="%.1f" % float(result.get("out_loss") or 0),
+        in_loss="%.1f" % float(result.get("in_loss") or 0),
+        remb="%d" % int((result.get("remb_bps") or 0) / 1000),
+        target="%d" % int((result.get("target_bps") or 0) / 1000),
+        cap="%d" % int((result.get("cap_bps") or 0) / 1000),
+    )
+    return "%s: %s\n%s\n%s" % (
+        tr("call_network"), label, reason, details)
 
 
 def _format_info_line(info) -> str:
@@ -397,6 +436,12 @@ class CallWindow(QtWidgets.QWidget):
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
         controls.addWidget(self._video_btn)
+        self._network_btn = QtWidgets.QToolButton(self)
+        self._network_btn.setIcon(network_icon(0))
+        self._network_btn.setIconSize(QtCore.QSize(20, 20))
+        self._network_btn.setAutoRaise(True)
+        self._network_btn.setToolTip(tr("call_network_unknown"))
+        controls.addWidget(self._network_btn)
         (self._quality_btn, self._quality_bitrate_actions,
          self._quality_height_actions) = _quality_button(
             self, self._quality_bitrate, self._quality_height,
@@ -456,8 +501,20 @@ class CallWindow(QtWidgets.QWidget):
             return
         self._duration_label.setText(
             format_duration(time.monotonic() - self._duration_start))
+        self._refresh_network()
         if self._info_label.isVisible():
             self._refresh_info()
+
+    def _refresh_network(self) -> None:
+        info = None
+        if self._info_provider is not None:
+            try:
+                info = self._info_provider(self.sid)
+            except Exception:  # noqa: BLE001 - diagnostics only
+                info = None
+        result = network_quality(info)
+        self._network_btn.setIcon(network_icon(result["level"], 20))
+        self._network_btn.setToolTip(_network_tooltip(result))
 
     def set_frame(self, image):
         self._video_view.set_frame(image)
@@ -649,6 +706,11 @@ class MujiCallWindow(QtWidgets.QWidget):
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
         self._video_btn.setVisible(False)
+        self._network_btn = QtWidgets.QToolButton(right)
+        self._network_btn.setIcon(network_icon(0))
+        self._network_btn.setIconSize(QtCore.QSize(20, 20))
+        self._network_btn.setAutoRaise(True)
+        self._network_btn.setToolTip(tr("call_network_unknown"))
         (self._quality_btn, self._quality_bitrate_actions,
          self._quality_height_actions) = _quality_button(
             self, self._quality_bitrate, self._quality_height,
@@ -656,6 +718,7 @@ class MujiCallWindow(QtWidgets.QWidget):
         controls.addWidget(self._all_mic_btn)
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._video_btn)
+        controls.addWidget(self._network_btn)
         controls.addWidget(self._quality_btn)
         self._info_btn = _info_toggle(self)
         self._info_btn.toggled.connect(self._toggle_info)
@@ -734,8 +797,20 @@ class MujiCallWindow(QtWidgets.QWidget):
             return
         self._duration_label.setText(
             format_duration(time.monotonic() - self._duration_start))
+        self._refresh_network()
         if self._info_label.isVisible():
             self._refresh_info()
+
+    def _refresh_network(self) -> None:
+        info = None
+        if self._info_provider is not None:
+            try:
+                info = self._info_provider(self.room)
+            except Exception:  # noqa: BLE001 - diagnostics only
+                info = None
+        result = network_quality(info)
+        self._network_btn.setIcon(network_icon(result["level"], 20))
+        self._network_btn.setToolTip(_network_tooltip(result))
 
     def set_self_nick(self, nick: str) -> None:
         """Update our own conference nick (labels the mirrored self tile)."""
