@@ -2902,7 +2902,10 @@ per update at 1–5% loss, and followed immediately above 5% loss
 motion detector in `_VideoCaptureTrack` boosts the target by 10% every 500 ms
 while the local scene moves and loss is below 5%, so recovery does not wait for
 a conservative REMB; loss disables the boost. It is opt-in
-(`calls.motion_boost`, default off) while the network is being validated. `CALL stats` carries separate
+(`calls.motion_boost`, default off) while the network is being validated.
+The setting is applied to already-running tracks through
+`AiortcCall.set_motion_boost`/`JingleRtpManager.set_motion_boost`, not only at
+call creation. `CALL stats` carries separate
 `in_video`/`in_audio` rates, FPS, motion peak, target, loss and `lag_peak`
 (the worst GUI event-loop stall since the previous sample); the call also logs
 the nominated ICE pair (using the candidate `host`, not its `.ip`) once it is

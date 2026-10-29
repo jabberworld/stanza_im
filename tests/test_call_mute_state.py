@@ -101,6 +101,37 @@ check("later toggles still reach the bound engine",
                           ("video", True)])
 
 if media.HAS_AIORTC:
+    class _MotionVideo:
+        def __init__(self):
+            self.callback = "unset"
+
+        def set_on_motion(self, callback):
+            self.callback = callback
+
+    engine = media.AiortcCall.__new__(media.AiortcCall)
+    engine._local_video = _MotionVideo()
+    engine._motion_boost = False
+    engine.set_motion_boost(True)
+    check("motion boost reaches an existing video track",
+          callable(engine._local_video.callback))
+    engine.set_motion_boost(False)
+    check("motion boost can be disabled on a live track",
+          engine._local_video.callback is None)
+
+    class _MotionCall:
+        def __init__(self):
+            self.motion = None
+
+        def set_motion_boost(self, enabled):
+            self.motion = enabled
+
+    mgr2, session2 = _fresh()
+    motion_call = _MotionCall()
+    session2.call = motion_call
+    mgr2.set_motion_boost(True)
+    check("the manager applies motion boost to active sessions",
+          session2.motion_boost is True and motion_call.motion is True)
+
     engine = media.AiortcCall.__new__(media.AiortcCall)
     engine._local_audio = None
     engine._audio_play = None

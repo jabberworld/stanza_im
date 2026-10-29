@@ -1041,6 +1041,10 @@ if HAS_AIORTC:
         def set_enabled(self, enabled: bool) -> None:
             self._enabled = enabled
 
+        def set_on_motion(self, callback) -> None:
+            """Enable/disable the local-motion callback on a live track."""
+            self._on_motion = callback
+
         def set_max_height(self, height: int) -> None:
             """Cap the outgoing camera height (0 = the source size)."""
             self._max_height = max(0, int(height or 0))
@@ -1871,6 +1875,8 @@ if HAS_AIORTC:
             self._audio_enabled = True
             self._remote_audio_enabled = True
             self._video_enabled = True
+            self._motion_boost = bool(
+                self.devices.get("motion_boost", False))
             self._stats: dict[str, int | None] = {}
             self._stats_prev: dict[str, tuple[float, int]] = {}
             self._stats_task = None
@@ -1983,8 +1989,7 @@ if HAS_AIORTC:
                 self.devices.get("video_input", ""),
                 on_frame=self._forward_local_frame,
                 on_motion=(self._on_local_motion
-                           if self.devices.get("motion_boost", False)
-                           else None),
+                           if self._motion_boost else None),
                 screen_fps=int(self.devices.get("screen_fps", 5) or 5),
                 screen_max_width=int(
                     self.devices.get("screen_max_width", 1920) or 0),
@@ -2037,6 +2042,13 @@ if HAS_AIORTC:
             self._video_enabled = bool(enabled)
             if self._local_video is not None:
                 self._local_video.set_enabled(enabled)
+
+        def set_motion_boost(self, enabled: bool) -> None:
+            """Apply the local-motion boost setting without restarting a call."""
+            self._motion_boost = bool(enabled)
+            if self._local_video is not None:
+                self._local_video.set_on_motion(
+                    self._on_local_motion if self._motion_boost else None)
 
         def set_video_quality(self, max_height: int) -> None:
             """Change the outgoing video resolution cap live (0 = source)."""

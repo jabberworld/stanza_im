@@ -3569,6 +3569,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 getattr(self._config, "calls", None), "auto_accept", False))
             # Apply a changed Calls preference to calls already in progress.
             self._apply_active_call_quality()
+            self._apply_active_motion_boost()
             from stanza_im.xmpp import jet as jet_mod
             self._client.file_encryption = jet_mod.normalize_mode(
                 str(getattr(self._config.files, "encryption", "prefer")
@@ -5248,6 +5249,17 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:  # noqa: BLE001 - a closing call must not break apply
                 logger.debug("CALL quality apply failed for %s", sid,
                              exc_info=True)
+
+    def _apply_active_motion_boost(self) -> None:
+        """Apply a changed motion-boost preference to running calls."""
+        client = getattr(self, "_client", None)
+        manager = getattr(client, "rtp_calls", None) if client else None
+        if manager is None:
+            return
+        fn = getattr(manager, "set_motion_boost", None)
+        if callable(fn):
+            fn(bool(getattr(getattr(self._config, "calls", None),
+                            "motion_boost", False)))
 
     def _on_call_quality_requested(self, sid: str, bitrate: int,
                                    height: int) -> None:

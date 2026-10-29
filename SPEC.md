@@ -3447,7 +3447,8 @@ client.leave_muji(room)
   `VideoRateController` applies the loss-aware REMB policy; a local
   luma-difference motion detector boosts the target by 10% every 500 ms on a
   moving, low-loss scene so recovery does not wait for REMB; it is opt-in
-  (`calls.motion_boost`, default off). A microphone, remote-audio or camera
+  (`calls.motion_boost`, default off; toggling it applies to active tracks
+  through `AiortcCall.set_motion_boost`). A microphone, remote-audio or camera
   toggle is stored on the `CallSession` (`audio_enabled`,
   `remote_audio_enabled`, `video_enabled`) immediately, so a choice made while
   ringing survives `_bind_call`; `AiortcCall` applies the stored value when

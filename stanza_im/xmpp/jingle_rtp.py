@@ -593,6 +593,7 @@ class CallSession:
     audio_enabled: bool = True
     remote_audio_enabled: bool = True
     video_enabled: bool = True
+    motion_boost: bool = False
 
 
 #: Map the engine setter to the persistent per-session attribute.
@@ -768,7 +769,8 @@ class JingleRtpManager:
                        else (self._best_call_resource(peer_bare)
                              or self._best_full_jid(peer_bare))),
             self_full=self._full_jid(), initiator=True, video=video,
-            muji_room=muji_room)
+            muji_room=muji_room,
+            motion_boost=bool(self._devices().get("motion_boost", False)))
         self.sessions[sid] = session
         logger.info("CALL start to %s (sid=%s video=%s muji=%s jmi=%s)",
                     session.peer_full, sid, video, muji_room, use_jmi)
@@ -1047,6 +1049,13 @@ class JingleRtpManager:
                 fn(bool(getattr(session, attr, True)))
             except Exception:  # noqa: BLE001 - best effort on bind
                 logger.debug("CALL %s on bind failed", method, exc_info=True)
+        motion = getattr(call, "set_motion_boost", None)
+        if callable(motion):
+            try:
+                motion(bool(getattr(session, "motion_boost", False)))
+            except Exception:  # noqa: BLE001 - best effort on bind
+                logger.debug("CALL set_motion_boost on bind failed",
+                             exc_info=True)
         fn = getattr(call, "set_local_preview", None)
         if callable(fn):
             try:
@@ -1121,7 +1130,8 @@ class JingleRtpManager:
         video = any(desc.media == "video" for _n, desc, _t in contents)
         session = CallSession(
             sid=sid, peer_bare=peer_full.split("/")[0], peer_full=peer_full,
-            self_full=self._full_jid(), initiator=False, video=video)
+            self_full=self._full_jid(), initiator=False, video=video,
+            motion_boost=bool(self._devices().get("motion_boost", False)))
         muji_el = jingle.find(_q(NS_MUJI, "muji"))
         if muji_el is not None:
             session.muji_room = muji_el.get("room", "")
@@ -1492,6 +1502,22 @@ class JingleRtpManager:
     def set_call_video(self, sid: str, enabled: bool) -> None:
         """Turn the local camera on/off (black frames, no renegotiation)."""
         self._set_track_enabled(sid, "set_video_enabled", enabled)
+
+    def set_motion_boost(self, enabled: bool) -> None:
+        """Apply the local-motion video boost to every active session."""
+        enabled = bool(enabled)
+        for session in self.sessions.values():
+            session.motion_boost = enabled
+            fn = getattr(getattr(session, "call", None),
+                         "set_motion_boost", None)
+            if callable(fn):
+                try:
+                    fn(enabled)
+                except Exception:  # noqa: BLE001 - best effort
+                    logger.debug("CALL set_motion_boost failed sid=%s",
+                                 session.sid, exc_info=True)
+        logger.debug("CALL motion_boost=%s for %d session(s)",
+                     enabled, len(self.sessions))
 
     def set_screen_share(self, key: str, mode: str = "screen",
                          region=None) -> None:
