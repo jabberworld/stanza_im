@@ -5302,11 +5302,38 @@ class MainWindow(QtWidgets.QMainWindow):
             if callable(setter):
                 setter(enabled)
             if self._client:
-                self._client.set_call_local_preview(sid, enabled)
+                session = self._client.rtp_calls.sessions.get(sid)
+                if enabled and session is not None and getattr(
+                        session, "call", None) is None:
+                    self._client.rtp_calls.start_call_preview(sid)
+                else:
+                    self._client.rtp_calls.stop_call_preview(sid)
+                    self._client.set_call_local_preview(sid, enabled)
+
+    def _on_call_visibility(self, sid: str, visible: bool) -> None:
+        """Pause the local PiP capture while its call window is hidden."""
+        if not self._client:
+            return
+        session = self._client.rtp_calls.sessions.get(sid)
+        if not visible:
+            self._client.rtp_calls.stop_call_preview(sid)
+            self._client.set_call_local_preview(sid, False)
+            return
+        if self._call_pip_default():
+            if session is not None and getattr(session, "call", None) is None:
+                self._client.rtp_calls.start_call_preview(sid)
+            else:
+                self._client.set_call_local_preview(sid, True)
 
     def _on_call_pip_toggled(self, sid: str, enabled: bool) -> None:
         if self._client:
-            self._client.set_call_local_preview(sid, enabled)
+            session = self._client.rtp_calls.sessions.get(sid)
+            if enabled and session is not None and getattr(
+                    session, "call", None) is None:
+                self._client.rtp_calls.start_call_preview(sid)
+            else:
+                self._client.rtp_calls.stop_call_preview(sid)
+                self._client.set_call_local_preview(sid, enabled)
         calls = getattr(self._config, "calls", None)
         if calls is not None:
             calls.pip = bool(enabled)
@@ -5521,11 +5548,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.answer_call(sid, True, kind == "video")
             return
         from stanza_im.ui.call_window import IncomingCallDialog
-        dlg = IncomingCallDialog(self._call_display_name(peer), kind, self,
-                                 avatar_path=self._call_avatar(peer),
-                                 avatar_radius=self._call_avatar_radius())
+        show_self = kind == "video" and self._call_pip_default()
+        dlg = IncomingCallDialog(
+            self._call_display_name(peer), kind, self,
+            avatar_path=self._call_avatar(peer),
+            avatar_radius=self._call_avatar_radius(),
+            sid=sid, show_self=show_self)
         dlg.decision.connect(
-            lambda accept, video: self._client.answer_call(sid, accept, video))
+            lambda accept, video, s=sid:
+                self._on_incoming_decision(s, accept, video, proposal=False))
+        if show_self and self._client:
+            self._client.rtp_calls.start_call_preview(sid)
         self._incoming_calls[sid] = dlg
         dlg.finished.connect(
             lambda _r, s=sid: self._on_incoming_dialog_closed(s))
@@ -5538,7 +5571,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_incoming_dialog_closed(self, sid: str) -> None:
         """An incoming-call prompt closed: drop it and stop the ringtone."""
         self._incoming_calls.pop(sid, None)
+        if self._client:
+            self._client.rtp_calls.stop_call_preview(sid)
         self._stop_call_ring()
+
+    def _on_incoming_decision(self, sid: str, accept: bool, video: bool,
+                              proposal: bool = False) -> None:
+        """Stop the prompt self-view before the real engine owns the camera."""
+        if self._client:
+            self._client.rtp_calls.stop_call_preview(sid)
+            if proposal:
+                self._client.answer_proposal(sid, accept, video)
+            else:
+                self._client.answer_call(sid, accept, video)
 
     def _on_call_proposed(self, sid: str, peer: str, kind: str) -> None:
         """An incoming XEP-0353 proposal (ring) before the Jingle session."""
@@ -5550,12 +5595,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self._client.answer_proposal(sid, True, kind == "video")
             return
         from stanza_im.ui.call_window import IncomingCallDialog
-        dlg = IncomingCallDialog(self._call_display_name(peer), kind, self,
-                                 avatar_path=self._call_avatar(peer),
-                                 avatar_radius=self._call_avatar_radius())
+        show_self = kind == "video" and self._call_pip_default()
+        dlg = IncomingCallDialog(
+            self._call_display_name(peer), kind, self,
+            avatar_path=self._call_avatar(peer),
+            avatar_radius=self._call_avatar_radius(),
+            sid=sid, show_self=show_self)
         dlg.decision.connect(
-            lambda accept, video: self._client.answer_proposal(
-                sid, accept, video))
+            lambda accept, video, s=sid:
+                self._on_incoming_decision(s, accept, video, proposal=True))
+        if show_self and self._client:
+            self._client.rtp_calls.start_call_preview(sid)
         self._incoming_calls[sid] = dlg
         dlg.finished.connect(
             lambda _r, s=sid: self._on_incoming_dialog_closed(s))
@@ -5567,6 +5617,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_call_proposal_ended(self, sid: str, reason: str) -> None:
         self._stop_call_ring()
+        if self._client:
+            self._client.rtp_calls.stop_call_preview(sid)
         dlg = self._incoming_calls.pop(sid, None)
         if dlg is not None:
             dlg.close()
@@ -5599,9 +5651,13 @@ class MainWindow(QtWidgets.QMainWindow):
         window.quality_requested.connect(self._on_call_quality_requested)
         window.incoming_requested.connect(self._on_incoming_requested)
         window.pip_toggled.connect(self._on_call_pip_toggled)
+        window.visibility_changed.connect(self._on_call_visibility)
         self._place_window_near_main(window)
         if video and self._call_pip_default():
-            self._client.set_call_local_preview(sid, True)
+            if session is not None and getattr(session, "call", None) is None:
+                self._client.rtp_calls.start_call_preview(sid)
+            else:
+                self._client.set_call_local_preview(sid, True)
         window.show()
         window.raise_()
         window.activateWindow()
@@ -5674,6 +5730,10 @@ class MainWindow(QtWidgets.QMainWindow):
             window = self._call_windows.get(sid)
             if window is not None:
                 window.set_local_frame(image)
+                return
+            dialog = self._incoming_calls.get(sid)
+            if dialog is not None:
+                dialog.set_local_frame(image)
             return
         if self._muji_preview_sids.get(room) != sid:
             return
@@ -5701,6 +5761,7 @@ class MainWindow(QtWidgets.QMainWindow):
             window.set_state(tr("call_ended"))
             window.close()
         if self._client:
+            self._client.rtp_calls.stop_call_preview(sid)
             self._client.set_call_local_preview(sid, False)
         dlg = self._incoming_calls.pop(sid, None)
         if dlg is not None:
@@ -5750,6 +5811,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_call_hangup(self, sid: str) -> None:
         if self._client:
+            self._client.rtp_calls.stop_call_preview(sid)
             self._client.end_call(sid)
 
     def _on_call_audio_toggled(self, sid: str, enabled: bool) -> None:

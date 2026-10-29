@@ -3451,7 +3451,8 @@ client.leave_muji(room)
   luma-difference motion detector boosts the target by 10% every 500 ms on a
   moving, low-loss scene so recovery does not wait for REMB; it is opt-in
   (`calls.motion_boost`, default off; toggling it applies to active tracks
-  through `AiortcCall.set_motion_boost`). A microphone, remote-audio or camera
+  through `AiortcCall.set_motion_boost`, capped by the latest REMB). A
+  microphone, remote-audio or camera
   toggle is stored on the `CallSession` (`audio_enabled`,
   `remote_audio_enabled`, `video_enabled`) immediately, so a choice made while
   ringing survives `_bind_call`; `AiortcCall` applies the stored value when
@@ -3462,13 +3463,19 @@ client.leave_muji(room)
   pair. `include/network_quality.py` classifies the snapshot into four levels
   (plus unknown); the call header shows the `ui/network_quality.py` signal-bar
   icon with a tooltip naming the reason (incoming/outgoing loss, REMB-limited
-  target, event-loop lag) and its values. The network icon's menu and
-  Preferences → Calls → Codecs expose `calls.incoming_max_kbps`; the receiver's
+  target, event-loop lag) and its values. This network button is the single
+  bitrate/quality control: its menu holds outgoing bitrate/resolution and
+  `calls.incoming_max_kbps`; the info button stays separate. Preferences →
+  Calls → Codecs mirrors the incoming limit; the receiver's
   `RemoteBitrateEstimator` clamps the REMB it sends, asking the peer to lower
   its video (advisory only — a non-cooperative peer may ignore it). A 1:1
-  video call opens with a PiP self-view (`calls.pip`, default on): the local
-  frame is delivered through `set_call_local_preview`/`call_local_video_frame`,
-  mirrored for the camera and unmirrored for screen sharing. A watchdog logs
+  video call opens with a responsive PiP self-view (`calls.pip`, default on):
+  the frame is anchored to the displayed image rectangle, mirrored for the
+  camera and unmirrored for screen sharing, throttled to 15 fps, and paused
+  while the window is hidden. Before the engine call the same preview uses a
+  standalone capture: outgoing ringing starts it immediately; the incoming
+  prompt shows a small self-view above Accept/Reject and stops it before the
+  engine takes the camera. A watchdog logs
   GUI event-loop stalls above 250 ms (aioice's consent transaction times out at
   0.5 s). `_install_consent_retry` replaces the `aiortc.rtcicetransport`
   `Connection` with a subclass whose consent probes retransmit twice

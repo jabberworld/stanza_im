@@ -131,6 +131,46 @@ check("the incoming menu emits the chosen cap",
 icw.close()
 
 
+# The incoming prompt can show a small self-view before Accept.
+iv = IncomingCallDialog("Bob", "video", sid="call-s", show_self=True)
+check("the incoming video prompt has a self-view",
+      iv._self_view is not None)
+_pip_image2 = QtGui.QImage(8, 8, QtGui.QImage.Format.Format_RGB888)
+iv.set_local_frame(_pip_image2)
+check("the incoming prompt receives the local preview frame",
+      iv._self_view._image is _pip_image2)
+iv.close()
+
+
+def _has_quality_menu(cw):
+    return (hasattr(cw, "_quality_bitrate_actions")
+            and hasattr(cw, "_quality_height_actions")
+            and 200 in cw._quality_bitrate_actions)
+
+
+qcw = CallWindow("s1q", "Bob", video=True)
+check("outgoing quality actions live in the network menu",
+      _has_quality_menu(qcw) and not hasattr(qcw, "_quality_btn"))
+qcw.close()
+
+
+def _pip_geometry(cw):
+    cw.resize(700, 500)
+    cw.show()
+    app.processEvents()
+    cw._video_view.resize(320, 240)
+    cw._position_pip()
+    return cw._pip_view.geometry(), cw._video_view.content_rect()
+
+
+_pip_rect, _content_rect = _pip_geometry(pcw if not pcw.isHidden() else
+                                         CallWindow("s1geo", "Bob",
+                                                    video=True))
+check("PiP stays inside the displayed video rectangle",
+      _pip_rect.width() >= 64 and _pip_rect.height() >= 36
+      and _content_rect.contains(_pip_rect))
+
+
 # 4. the call dialogs show an avatar (or the placeholder) --------------------
 def _has_avatar_label(widget):
     return any(not lbl.pixmap().isNull()

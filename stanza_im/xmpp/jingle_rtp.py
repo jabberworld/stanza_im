@@ -617,6 +617,7 @@ class JingleRtpManager:
         #: the heavy aiortc import stays off the startup/login path.
         self.engine = None
         self._muji_local_previews: dict[str, object] = {}   # room -> capture
+        self._call_local_previews: dict[str, object] = {}   # sid -> capture
         self._proceed_futures: dict[str, object] = {}
         self._pending_proposals: dict[str, dict] = {}
         self._proceeded: set[str] = set()
@@ -1040,6 +1041,10 @@ class JingleRtpManager:
         if session.muji_room:
             # Free the camera for this session's own capture.
             self.stop_local_preview(session.muji_room)
+        else:
+            # The ringing/prompt PiP uses a standalone camera capture.  Free
+            # it before add_video() opens the same device for the call.
+            self.stop_call_preview(session.sid)
         session.call = call
         # Apply early UI choices before add_audio()/add_video() create the
         # tracks and before the remote audio receiver arrives.  The engine
@@ -1111,6 +1116,46 @@ class JingleRtpManager:
             except Exception:
                 logger.debug("CALL local preview stop failed", exc_info=True)
             logger.info("CALL local preview capture stopped for %s", room)
+
+    def start_call_preview(self, sid: str) -> None:
+        """Start a 1:1 self-view before the Jingle engine call exists."""
+        previews = getattr(self, "_call_local_previews", None)
+        if previews is None:
+            previews = self._call_local_previews = {}
+        if sid in previews:
+            return
+        factory = getattr(self._ensure_engine(), "create_local_preview", None)
+        if not callable(factory):
+            return
+        try:
+            preview = factory(
+                self._devices(),
+                on_frame=lambda image, s=sid: self.client.emit(
+                    "call_local_video_frame", s, image))
+        except Exception:  # noqa: BLE001 - preview is best effort
+            logger.debug("CALL call preview creation failed", exc_info=True)
+            return
+        if preview is None:
+            return
+        preview.start()
+        previews[sid] = preview
+        logger.info("CALL preview capture started for %s", sid)
+
+    def stop_call_preview(self, sid: str) -> None:
+        """Stop the standalone 1:1 self-view capture for *sid*."""
+        previews = getattr(self, "_call_local_previews", None)
+        if previews is None:
+            return
+        preview = previews.pop(sid, None)
+        if preview is not None:
+            try:
+                preview.stop()
+            except Exception:
+                logger.debug("CALL call preview stop failed", exc_info=True)
+            logger.info("CALL preview capture stopped for %s", sid)
+
+    def has_call_preview(self, sid: str) -> bool:
+        return sid in getattr(self, "_call_local_previews", {})
 
     # ── incoming ──────────────────────────────────────────────────
     async def dispatch(self, action: str, jingle: ET.Element, iq) -> None:
@@ -1632,6 +1677,7 @@ class JingleRtpManager:
             except Exception:
                 logger.debug("CALL close failed", exc_info=True)
             session.call = None
+        self.stop_call_preview(session.sid)
         self.sessions.pop(session.sid, None)
         if session.muji_room:
             try:
@@ -1642,6 +1688,8 @@ class JingleRtpManager:
         self.client.emit("call_ended", session.sid, session.peer_full, reason)
 
     def close(self) -> None:
+        for sid in list(getattr(self, "_call_local_previews", {})):
+            self.stop_call_preview(sid)
         for session in list(self.sessions.values()):
             self._close_session(session, "ended", "shutdown")
 

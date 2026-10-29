@@ -205,6 +205,29 @@ def _quality_button(parent, bitrate: int, height: int, on_change):
     return button, bitrate_actions, height_actions
 
 
+def _add_quality_menus(menu, bitrate, height, on_change):
+    """Append outgoing bitrate/resolution submenus to a menu."""
+    bitrate_menu = menu.addMenu(tr("call_quality_bitrate"))
+    bitrate_actions = {}
+    for value, key in _QUALITY_BITRATES:
+        action = bitrate_menu.addAction(tr(key))
+        action.setCheckable(True)
+        action.setChecked(value == int(bitrate or 0))
+        action.triggered.connect(
+            lambda checked=False, v=value: on_change(v, None))
+        bitrate_actions[value] = action
+    height_menu = menu.addMenu(tr("call_quality_resolution"))
+    height_actions = {}
+    for value, key in _QUALITY_HEIGHTS:
+        action = height_menu.addAction(tr(key))
+        action.setCheckable(True)
+        action.setChecked(value == int(height or 0))
+        action.triggered.connect(
+            lambda checked=False, v=value: on_change(None, v))
+        height_actions[value] = action
+    return bitrate_actions, height_actions
+
+
 def _rounded_avatar(path: str, size: int = 24,
                     radius_pct: int = 100) -> QtGui.QPixmap:
     """Return a scaled avatar pixmap clipped to a rounded square.
@@ -218,9 +241,9 @@ def _rounded_avatar(path: str, size: int = 24,
 class VideoView(QtWidgets.QLabel):
     """Paints decoded video frames with an overlay nickname caption."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, min_size=(320, 240)):
         super().__init__(parent)
-        self.setMinimumSize(320, 240)
+        self.setMinimumSize(*min_size)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background:#101010; color:#888;")
         self.setText(tr("call_no_video"))
@@ -240,6 +263,16 @@ class VideoView(QtWidgets.QLabel):
             return
         self._image = image
         self.update()
+
+    def content_rect(self) -> QtCore.QRect:
+        """The rectangle actually covered by the aspect-fitted image."""
+        if self._image is None or self._image.isNull():
+            return self.rect()
+        scaled = self._image.size().scaled(
+            self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        x = (self.width() - scaled.width()) // 2
+        y = (self.height() - scaled.height()) // 2
+        return QtCore.QRect(x, y, scaled.width(), scaled.height())
 
     def set_caption(self, text: str) -> None:
         self._caption = text or ""
@@ -288,10 +321,13 @@ class IncomingCallDialog(QtWidgets.QDialog):
     decision = QtCore.pyqtSignal(bool, bool)   # accept, video
 
     def __init__(self, caller: str, media_kind: str = "audio", parent=None,
-                 avatar_path: str | None = None, avatar_radius: int = 100):
+                 avatar_path: str | None = None, avatar_radius: int = 100,
+                 sid: str = "", show_self: bool = False):
         super().__init__(parent)
+        self.sid = sid
         self.setWindowTitle(tr("call_incoming_title"))
         self._video = media_kind == "video"
+        self._self_view = None
         layout = QtWidgets.QVBoxLayout(self)
         # The contact's avatar, centered, with the name and the call message
         # below it.
@@ -313,6 +349,16 @@ class IncomingCallDialog(QtWidgets.QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
 
+        if show_self and self._video:
+            self_row = QtWidgets.QHBoxLayout()
+            self_row.addStretch(1)
+            self._self_view = VideoView(self, min_size=(1, 1))
+            self._self_view.setFixedSize(150, 84)
+            self._self_view.set_caption(tr("call_pip_self"))
+            self._self_view.set_mirrored(True)
+            self_row.addWidget(self._self_view)
+            layout.addLayout(self_row)
+
         buttons = QtWidgets.QHBoxLayout()
         self._accept = QtWidgets.QPushButton(self)
         self._accept.setIcon(_icon("call-accept"))
@@ -330,6 +376,11 @@ class IncomingCallDialog(QtWidgets.QDialog):
         layout.addLayout(buttons)
         self._accept.clicked.connect(self._on_accept)
         self._reject.clicked.connect(self._on_reject)
+
+    def set_local_frame(self, image) -> None:
+        """Feed the pre-answer PiP self-view (video calls only)."""
+        if self._self_view is not None:
+            self._self_view.set_frame(image)
 
     def _on_accept(self):
         self.decision.emit(True, self._video)
@@ -350,6 +401,7 @@ class CallWindow(QtWidgets.QWidget):
     quality_requested = QtCore.pyqtSignal(str, int, int)  # sid, kbps, height
     incoming_requested = QtCore.pyqtSignal(str, int)  # sid, kbps
     pip_toggled = QtCore.pyqtSignal(str, bool)  # sid, enabled
+    visibility_changed = QtCore.pyqtSignal(str, bool)  # sid, visible
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
                  avatar_path: str | None = None, avatar_radius: int = 100,
@@ -416,12 +468,13 @@ class CallWindow(QtWidgets.QWidget):
         layout.addWidget(self._video_view, stretch=1)
         if not video:
             self._video_view.setVisible(False)
-        self._pip_view = VideoView(self._video_view)
+        self._pip_view = VideoView(self._video_view, min_size=(1, 1))
         self._pip_view.set_caption(tr("call_pip_self"))
         self._pip_view.set_mirrored(True)
         self._pip_view.setAttribute(
             QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._pip_view.setVisible(bool(self._pip_enabled and video))
+        self._video_view.installEventFilter(self)
 
         controls = QtWidgets.QHBoxLayout()
         self._mute_btn = QtWidgets.QToolButton(self)
@@ -482,6 +535,10 @@ class CallWindow(QtWidgets.QWidget):
         self._network_btn.setPopupMode(
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         network_menu = QtWidgets.QMenu(self._network_btn)
+        (self._quality_bitrate_actions,
+         self._quality_height_actions) = _add_quality_menus(
+            network_menu, self._quality_bitrate, self._quality_height,
+            self._on_quality)
         incoming_menu, self._incoming_actions = _incoming_menu(
             self._network_btn, self._incoming_max)
         for kbps, action in self._incoming_actions.items():
@@ -490,11 +547,6 @@ class CallWindow(QtWidgets.QWidget):
         network_menu.addMenu(incoming_menu)
         self._network_btn.setMenu(network_menu)
         controls.addWidget(self._network_btn)
-        (self._quality_btn, self._quality_bitrate_actions,
-         self._quality_height_actions) = _quality_button(
-            self, self._quality_bitrate, self._quality_height,
-            self._on_quality)
-        controls.addWidget(self._quality_btn)
         self._info_btn = _info_toggle(self)
         self._info_btn.toggled.connect(self._toggle_info)
         controls.addWidget(self._info_btn)
@@ -576,6 +628,7 @@ class CallWindow(QtWidgets.QWidget):
 
     def set_frame(self, image):
         self._video_view.set_frame(image)
+        self._position_pip()
 
     def _on_mute(self, checked):
         self._muted = checked
@@ -634,9 +687,6 @@ class CallWindow(QtWidgets.QWidget):
         self._refresh_pip()
 
     def _refresh_pip(self) -> None:
-        visible = bool(self._pip_enabled and self._video
-                       and self._video_mode != "off")
-        self._pip_view.setVisible(visible)
         self._pip_view.set_mirrored(self._video_mode == "camera")
         self._position_pip()
 
@@ -644,18 +694,41 @@ class CallWindow(QtWidgets.QWidget):
         if not hasattr(self, "_pip_view"):
             return
         parent = self._video_view
-        if parent.width() <= 0 or parent.height() <= 0:
+        content = parent.content_rect()
+        if (not self._pip_enabled or not self._video
+                or self._video_mode == "off"
+                or content.width() < 200 or content.height() < 120):
+            self._pip_view.setVisible(False)
             return
-        width = max(96, int(parent.width() * 0.28))
-        height = max(54, int(round(width * 9 / 16)))
-        width = min(width, parent.width())
-        height = min(height, parent.height())
+        width = max(64, min(240, int(content.width() * 0.28)))
+        height = max(36, int(round(width * 9 / 16)))
+        if height > int(content.height() * 0.45):
+            height = max(36, int(content.height() * 0.45))
+            width = max(64, int(round(height * 16 / 9)))
+        width = min(width, content.width())
+        height = min(height, content.height())
         self._pip_view.setGeometry(
-            max(8, parent.width() - width - 12), 12, width, height)
+            content.right() - width - 12,
+            content.top() + 12, width, height)
+        self._pip_view.setVisible(True)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if obj is self._video_view and event.type() == (
+                QtCore.QEvent.Type.Resize):
+            QtCore.QTimer.singleShot(0, self._position_pip)
+        return super().eventFilter(obj, event)
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         QtCore.QTimer.singleShot(0, self._position_pip)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        self.visibility_changed.emit(self.sid, True)
+
+    def hideEvent(self, event):  # noqa: N802
+        super().hideEvent(event)
+        self.visibility_changed.emit(self.sid, False)
 
     def _request_mode(self, mode: str) -> None:
         self.video_mode_requested.emit(self.sid, mode)
@@ -819,6 +892,10 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._network_btn.setPopupMode(
             QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         _network_menu = QtWidgets.QMenu(self._network_btn)
+        (self._quality_bitrate_actions,
+         self._quality_height_actions) = _add_quality_menus(
+            _network_menu, self._quality_bitrate, self._quality_height,
+            self._on_quality)
         _inc_menu, self._incoming_actions = _incoming_menu(
             self._network_btn, self._incoming_max)
         for _kbps, _action in self._incoming_actions.items():
@@ -826,15 +903,10 @@ class MujiCallWindow(QtWidgets.QWidget):
                 lambda checked=False, value=_kbps: self._on_incoming(value))
         _network_menu.addMenu(_inc_menu)
         self._network_btn.setMenu(_network_menu)
-        (self._quality_btn, self._quality_bitrate_actions,
-         self._quality_height_actions) = _quality_button(
-            self, self._quality_bitrate, self._quality_height,
-            self._on_quality)
         controls.addWidget(self._all_mic_btn)
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._video_btn)
         controls.addWidget(self._network_btn)
-        controls.addWidget(self._quality_btn)
         self._info_btn = _info_toggle(self)
         self._info_btn.toggled.connect(self._toggle_info)
         controls.addWidget(self._info_btn)

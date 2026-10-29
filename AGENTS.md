@@ -2905,15 +2905,23 @@ motion detector in `_VideoCaptureTrack` boosts the target by 10% every 500 ms
 while the local scene moves and loss is below 5%, so recovery does not wait for
 a conservative REMB; loss disables the boost. It is opt-in
 (`calls.motion_boost`, default off) while the network is being validated.
-The setting is applied to already-running tracks through
+It is capped by the latest REMB (1.1×), so a low peer estimate cannot be
+overridden into a 1.5 Mbps burst. The setting is applied to already-running tracks through
 `AiortcCall.set_motion_boost`/`JingleRtpManager.set_motion_boost`, not only at
-call creation. The call-header network icon also opens the
-`calls.incoming_max_kbps` menu (Automatic/200/500/1000/1500); the value is
-mirrored in Preferences → Calls → «Кодеки», clamped in the receiver's
+call creation. The call-header network icon is the single bitrate/quality control: its menu
+contains outgoing bitrate/resolution and `calls.incoming_max_kbps`
+(Automatic/200/500/1000/1500), while the separate info button is unchanged.
+The value is mirrored in Preferences → Calls → «Кодеки», clamped in the receiver's
 `RemoteBitrateEstimator` before REMB is sent (advisory only — a peer may
-ignore it). A 1:1 video call shows its outgoing camera/screen in a PiP overlay
-(`calls.pip`, default on, mirrored for the camera and unmirrored for screen
-sharing); its frames use the existing `set_call_local_preview` path. `CALL stats` carries separate
+ignore it). A 1:1 video call shows its outgoing camera/screen in a responsive
+PiP overlay (`calls.pip`, default on, mirrored for the camera and unmirrored
+for screen sharing) anchored to the displayed image rectangle, not the widget;
+the overlay is throttled to 15 fps and its capture is paused while the call
+window is hidden. Before the engine call exists the same preview comes from a
+standalone `_LocalPreviewCapture`: the outgoing ringing window starts one
+immediately, and the incoming prompt shows a small self-view above its buttons
+until Accept/Reject. Both are stopped before the engine opens the camera.
+`CALL stats` carries separate
 `in_video`/`in_audio` rates, incoming/outgoing loss, REMB, FPS, motion peak,
 target and `lag_peak` (the worst GUI event-loop stall since the previous
 sample); the call also logs

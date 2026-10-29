@@ -210,11 +210,17 @@ class VideoRateController:
         if now - self._last_boost < _VIDEO_BOOST_INTERVAL_S:
             return 0
         old = self.target
-        if old >= self.cap:
+        limit = self.cap
+        # Never boost above the peer's latest estimate.  A low REMB means the
+        # path cannot carry the configured cap yet; blindly jumping to it only
+        # causes packet loss and codec churn.
+        if self.last_remb > 0:
+            limit = min(limit, int(self.last_remb * 1.10))
+        if old >= limit:
             return 0
         self._last_boost = now
         self.target = min(
-            self.cap,
+            limit,
             max(int(old * _VIDEO_BOOST_STEP), old + _VIDEO_BOOST_MIN_STEP))
         self._low_since = None
         return self.target
@@ -1898,6 +1904,7 @@ if HAS_AIORTC:
             self.on_state = on_state
             self.on_local_frame = on_local_frame
             self.local_preview_enabled = False
+            self._local_preview_last = 0.0
             self._audio_play = None
             self._video_widget = None
             self._tasks: list[asyncio.Task] = []
@@ -2056,6 +2063,10 @@ if HAS_AIORTC:
             """Relay one own-camera frame to the UI (self-preview)."""
             if self.on_local_frame is None or not self.local_preview_enabled:
                 return
+            now = time.monotonic()
+            if now - getattr(self, "_local_preview_last", 0.0) < 1.0 / 15.0:
+                return
+            self._local_preview_last = now
             try:
                 image = _frame_to_qimage(frame)
             except Exception:
@@ -2601,10 +2612,15 @@ if HAS_AIORTC:
             self._track = _VideoCaptureTrack(device_id, on_frame=self._emit)
             self._task = None
             self._closed = False
+            self._last_frame_at = 0.0
 
         def _emit(self, frame) -> None:
             if self._on_image is None:
                 return
+            now = time.monotonic()
+            if now - self._last_frame_at < 1.0 / 15.0:
+                return
+            self._last_frame_at = now
             image = _frame_to_qimage(frame)
             if image is not None:
                 self._on_image(image)

@@ -751,6 +751,17 @@ check("the next boost step is applied",
       motion.on_motion(now=1.6) == 350000)
 motion.note_loss(80)
 motion.target = 250000
+_boost = media.VideoRateController()
+_boost.reset(1000000)
+_boost.target = 500000
+_boost.last_remb = 200000
+check("motion boost does not exceed a low REMB",
+      _boost.on_motion(now=100.0) == 0)
+_boost.last_remb = 1000000
+_boost._last_boost = 0.0
+check("motion boost still works when REMB allows it",
+      _boost.on_motion(now=200.0) > 500000)
+
 check("a lossy link is not motion-boosted",
       motion.on_motion(now=2) == 0)
 
