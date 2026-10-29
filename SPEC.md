@@ -3389,7 +3389,10 @@ client.leave_muji(room)
   caption over the image, and every control is **icon-only** (tooltips, no
   labels) using `resources/images/16x16/actions/` via `call_window._icon`:
   `mic`/`mic-off`, `camera`/`camera-off` (webcam glyph), `speaker`/`speaker-off`,
-  red `call-hangup` and green `call-accept`. The call-window mute/camera buttons
+  red `call-hangup` and green `call-accept`. Every control is flat (`autoRaise`
+  on a `QToolButton`, `setFlat` on a `QPushButton`), and the 1:1 control strip
+  is its own widget with a minimum width so the buttons stay below the video.
+  The call-window mute/camera buttons
   toggle the **outgoing** capture (silence / black frames via
   `set_audio_enabled`/`set_video_enabled`, no SDP renegotiation) and never
   affect the received stream — the remote view stays visible. A

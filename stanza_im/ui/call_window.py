@@ -42,6 +42,15 @@ def _icon(name: str) -> QtGui.QIcon:
     return icon
 
 
+def _flat(button):
+    """Make a call control look like the flat toolbar buttons in chats."""
+    if isinstance(button, QtWidgets.QToolButton):
+        button.setAutoRaise(True)
+    elif isinstance(button, QtWidgets.QPushButton):
+        button.setFlat(True)
+    return button
+
+
 #: Outgoing video modes: the combo button icon + its label key.
 _VIDEO_MODE_ICONS = {"off": "camera-off", "camera": "camera",
                      "region": "wb-select", "screen": "screen-share"}
@@ -98,8 +107,7 @@ def _info_toggle(parent) -> QtWidgets.QToolButton:
     button.setIconSize(QtCore.QSize(20, 20))
     button.setToolTip(tr("call_info"))
     button.setCheckable(True)
-    button.setAutoRaise(True)
-    return button
+    return _flat(button)
 
 
 _NETWORK_LABELS = {
@@ -485,7 +493,7 @@ class CallWindow(QtWidgets.QWidget):
         self._mute_btn.setCheckable(True)
         self._mute_btn.setChecked(self._muted)
         self._mute_btn.toggled.connect(self._on_mute)
-        controls.addWidget(self._mute_btn)
+        controls.addWidget(_flat(self._mute_btn))
 
         # Mute the *remote* audio (the contact's voice), not our microphone.
         self._hear_btn = QtWidgets.QToolButton(self)
@@ -498,7 +506,7 @@ class CallWindow(QtWidgets.QWidget):
         self._hear_btn.setCheckable(True)
         self._hear_btn.setChecked(self._hear_muted)
         self._hear_btn.toggled.connect(self._on_hear)
-        controls.addWidget(self._hear_btn)
+        controls.addWidget(_flat(self._hear_btn))
 
         self._video_mode = "camera" if video else "off"
         self._video_btn = QtWidgets.QToolButton(self)
@@ -517,7 +525,7 @@ class CallWindow(QtWidgets.QWidget):
             action.setChecked(mode == self._video_mode)
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
-        controls.addWidget(self._video_btn)
+        controls.addWidget(_flat(self._video_btn))
         self._pip_btn = QtWidgets.QToolButton(self)
         self._pip_btn.setIcon(_icon("pip"))
         self._pip_btn.setIconSize(QtCore.QSize(20, 20))
@@ -526,7 +534,7 @@ class CallWindow(QtWidgets.QWidget):
         self._pip_btn.setChecked(self._pip_enabled)
         self._pip_btn.setVisible(video)
         self._pip_btn.toggled.connect(self._on_pip)
-        controls.addWidget(self._pip_btn)
+        controls.addWidget(_flat(self._pip_btn))
         self._network_btn = QtWidgets.QToolButton(self)
         self._network_btn.setIcon(network_icon(0))
         self._network_btn.setIconSize(QtCore.QSize(20, 20))
@@ -546,7 +554,7 @@ class CallWindow(QtWidgets.QWidget):
                 lambda checked=False, value=kbps: self._on_incoming(value))
         network_menu.addMenu(incoming_menu)
         self._network_btn.setMenu(network_menu)
-        controls.addWidget(self._network_btn)
+        controls.addWidget(_flat(self._network_btn))
         self._info_btn = _info_toggle(self)
         self._info_btn.toggled.connect(self._toggle_info)
         controls.addWidget(self._info_btn)
@@ -557,8 +565,17 @@ class CallWindow(QtWidgets.QWidget):
         self._hangup_btn.setIconSize(QtCore.QSize(20, 20))
         self._hangup_btn.setToolTip(tr("call_hangup"))
         self._hangup_btn.clicked.connect(lambda: self.hangup.emit(self.sid))
-        controls.addWidget(self._hangup_btn)
-        layout.addLayout(controls)
+        controls.addWidget(_flat(self._hangup_btn))
+        # Keep the control strip on its own line: its minimum width also
+        # protects the buttons from being squeezed into the video area at the
+        # smallest window size.
+        self._controls_widget = QtWidgets.QWidget(self)
+        self._controls_widget.setLayout(controls)
+        self._controls_widget.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed)
+        self._controls_widget.setMinimumWidth(controls.sizeHint().width())
+        layout.addWidget(self._controls_widget)
 
     def _update_header(self) -> None:
         from stanza_im.include.utils import escape_html
@@ -856,6 +873,7 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._leave_btn.setIconSize(QtCore.QSize(20, 20))
         self._leave_btn.setToolTip(tr("muji_leave"))
         self._leave_btn.clicked.connect(lambda: self.leave.emit(self.room))
+        _flat(self._leave_btn)
 
         controls = QtWidgets.QHBoxLayout()
         self._all_mic_btn = self._icon_toggle(
@@ -883,6 +901,7 @@ class MujiCallWindow(QtWidgets.QWidget):
             action.setChecked(mode == self._video_mode)
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
+        _flat(self._video_btn)
         self._video_btn.setVisible(False)
         self._network_btn = QtWidgets.QToolButton(right)
         self._network_btn.setIcon(network_icon(0))
@@ -903,6 +922,7 @@ class MujiCallWindow(QtWidgets.QWidget):
                 lambda checked=False, value=_kbps: self._on_incoming(value))
         _network_menu.addMenu(_inc_menu)
         self._network_btn.setMenu(_network_menu)
+        _flat(self._network_btn)
         controls.addWidget(self._all_mic_btn)
         controls.addWidget(self._all_recv_btn)
         controls.addWidget(self._video_btn)
@@ -1115,6 +1135,7 @@ class MujiCallWindow(QtWidgets.QWidget):
         button.setIcon(_icon(on_name if checked else off_name))
         button.setIconSize(QtCore.QSize(16, 16))
         button.setToolTip(tip)
+        _flat(button)
 
         def _toggled(on: bool, b=button, a=on_name, o=off_name):
             b.setIcon(_icon(a if on else o))
@@ -1225,8 +1246,8 @@ class _MosaicVideo(QtWidgets.QWidget):
         self._strip_layout.setContentsMargins(0, 0, 0, 0)
         self._strip_layout.setSpacing(2)
         zv.addWidget(self._strip)
-        self._back_btn = QtWidgets.QPushButton(tr("muji_video_back"),
-                                               zoom_page)
+        self._back_btn = _flat(QtWidgets.QPushButton(
+            tr("muji_video_back"), zoom_page))
         self._back_btn.clicked.connect(self._show_grid)
         zv.addWidget(self._back_btn)
         self._grid_holder.addWidget(grid_page)

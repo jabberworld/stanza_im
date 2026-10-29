@@ -43,6 +43,16 @@ except Exception as exc:  # pragma: no cover - import guard
     HAS_AIORTC = False
     logger.info("CALL aiortc unavailable: %s", exc)
 
+if av is not None:
+    # MJPEG cameras emit repeated "unable to decode APP fields" and
+    # "deprecated pixel format" banners for every decoded frame; they are
+    # harmless and flood the console.  Keep the first occurrence and real
+    # errors, drop the duplicates.
+    try:
+        av.logging.set_skip_repeated(True)
+    except Exception:  # pragma: no cover - older PyAV
+        pass
+
 
 def _install_consent_retry() -> bool:
     """Make aioice retransmit its consent probe on a lossy path.

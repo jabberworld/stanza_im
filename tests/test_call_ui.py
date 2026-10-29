@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtGui, QtWidgets  # noqa: E402
 
 from stanza_im.i18n import load as i18n_load  # noqa: E402
-from stanza_im.ui.call_window import CallWindow, IncomingCallDialog  # noqa: E402
+from stanza_im.ui.call_window import (  # noqa: E402
+    CallWindow, IncomingCallDialog, MujiCallWindow)
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
 i18n_load("en")
@@ -169,6 +170,30 @@ _pip_rect, _content_rect = _pip_geometry(pcw if not pcw.isHidden() else
 check("PiP stays inside the displayed video rectangle",
       _pip_rect.width() >= 64 and _pip_rect.height() >= 36
       and _content_rect.contains(_pip_rect))
+
+
+# 1:1 call controls are flat and the strip keeps its own width.
+fcw = CallWindow("s1f", "Bob", video=True)
+_flat_btns = (fcw._mute_btn, fcw._hear_btn, fcw._video_btn, fcw._pip_btn,
+              fcw._network_btn, fcw._info_btn, fcw._hangup_btn)
+check("all 1:1 call controls are flat",
+      all(b.autoRaise() for b in _flat_btns))
+check("the 1:1 control strip has its own minimum width",
+      fcw._controls_widget.minimumWidth()
+      >= fcw._controls_widget.sizeHint().width())
+fcw.resize(fcw.minimumSize())
+fcw.layout().activate()
+check("the 1:1 controls stay below the video at minimum size",
+      fcw._controls_widget.geometry().top()
+      >= fcw._video_view.geometry().bottom())
+fcw.close()
+
+# Muji controls (global and per-participant) follow the same flat style.
+mwnd = MujiCallWindow("room@example.com")
+check("Muji global controls are flat",
+      mwnd._leave_btn.autoRaise() and mwnd._all_mic_btn.isFlat()
+      and mwnd._all_recv_btn.isFlat() and mwnd._video_btn.autoRaise())
+mwnd.close()
 
 
 # 4. the call dialogs show an avatar (or the placeholder) --------------------

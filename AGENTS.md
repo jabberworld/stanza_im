@@ -2887,7 +2887,10 @@ translucent nickname caption over the image. Every call control is **icon-only**
 `resources/images/16x16/actions/` via `call_window._icon`: `mic`/`mic-off`,
 `camera`/`camera-off` (the camera is a webcam glyph), `speaker`/`speaker-off`,
 a red `call-hangup`, a green `call-accept` and a **quality** button
-(`quality.svg`, a small bars glyph). Its menu changes the outgoing video
+(`quality.svg`, a small bars glyph). Every control is flat (`_flat`:
+`autoRaise` on a `QToolButton`, `setFlat` on a `QPushButton`), and the 1:1
+control strip is its own widget with a minimum width so its buttons never
+cross into the video area at the smallest window size. Its menu changes the outgoing video
 **bitrate** (200/500/1000/1500 kbps; default 1000) and **resolution**
 (source/1080/720/480/360) of a live call (in Muji — of every session of the
 room): `MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
@@ -3039,7 +3042,10 @@ must never keep `/dev/video*` busy for a call. `_VideoCaptureTrack.stop()`
 only marks the track and closes immediately when no decode is in flight; a
 failed `av.open` logs the real FFmpeg reason via
 `decode_ffmpeg_error` (PyAV raises a `UnicodeDecodeError` for a localized
-error such as "Устройство занято" instead of the `FFmpegError`). The container
+error such as "Устройство занято" instead of the `FFmpegError`). Repeated
+FFmpeg decoder banners (`unable to decode APP fields`, deprecated pixel format)
+are suppressed with `av.logging.set_skip_repeated(True)`; the first occurrence
+and real errors are kept. The container
 close is worker-owned: `stop()` only marks the track stopped and defers the
 container when `_decode_inflight` is set; the decode worker's `finally` schedules
 `_on_decode_finished` on the event loop, so a cancelled/done asyncio future
