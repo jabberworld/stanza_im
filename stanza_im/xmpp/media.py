@@ -974,6 +974,11 @@ if HAS_AIORTC:
             # 30 times a second even when screen_fps was 5.
             self._screen_clock_start = 0.0
             self._screen_next_at = 0.0
+            # Monotonic frame clock shared across source switches.  VP8
+            # rejects a frame whose timestamp jumps backwards when the source
+            # changes resolution (screen 1920x1080 -> camera 1280x720).
+            self._clock_started = time.monotonic()
+            self._last_pts = 0
             # The PyAV container is closed only after the executor thread has
             # actually left container.decode(): closing it from the GUI thread
             # while the decoder still reads it crashes libavcodec.  An
@@ -1150,16 +1155,33 @@ if HAS_AIORTC:
             self._last_size = None
             self._screen_clock_start = 0.0
             self._screen_next_at = 0.0
-            if self._source == "camera":
-                # The screen clock stopped advancing while sharing; reset the
-                # camera's VideoStreamTrack clock so it does not burst.
-                for attr in ("_timestamp", "_start"):
-                    if hasattr(self, attr):
-                        delattr(self, attr)
+            if self._source == "screen":
+                # The screen clock starts a fresh sequence; the camera clock
+                # is rebased when/if we return to it.
+                self._last_pts = 0
+            else:
+                self._rebase_camera_clock()
                 self._open_camera()
             self._schedule_keyframe("source-change")
             logger.info("CALL video source -> %s%s", self._source,
                         " %s" % (self._region,) if self._region else "")
+
+        def _rebase_camera_clock(self) -> None:
+            """Continue camera timestamps after a screen-sharing interval.
+
+            Deleting the VideoStreamTrack clock altogether made the first
+            camera frame use pts=0, which VP8 rejects after the 1920x1080
+            screen frames.  Keep a monotonic timestamp and shift its base so
+            the next camera frame is due now.
+            """
+            now = time.time()
+            last = max(int(getattr(self, "_last_pts", 0) or 0),
+                       int(getattr(self, "_timestamp", 0) or 0))
+            if last <= 0:
+                last = max(1, int(
+                    (time.monotonic() - self._clock_started) * 90000))
+            self._timestamp = last
+            self._start = now - last / 90000.0
 
         async def recv(self):
             # aiortc >= 1.10: next_timestamp() is async.  The camera uses its
@@ -1170,6 +1192,10 @@ if HAS_AIORTC:
                 pts, time_base = await self.next_timestamp()
 
             def _stamp(frame):
+                nonlocal pts
+                if pts <= self._last_pts:
+                    pts = self._last_pts + 1
+                self._last_pts = pts
                 frame.pts = pts
                 frame.time_base = time_base
                 return frame
@@ -1660,7 +1686,22 @@ def _patch_video_encoder_keyframes(encoder_cls) -> None:
         if getattr(self, "_stanza_keyframe", False):
             force_keyframe = True
             self._stanza_keyframe = False
-        return original_encode(self, frame, force_keyframe)
+        try:
+            return original_encode(self, frame, force_keyframe)
+        except Exception as exc:  # noqa: BLE001 - recover the RTP sender
+            # libvpx can reject the first frame after a source/resolution
+            # switch (for example 1920x1080 screen -> 1280x720 camera).
+            # Reset the codec and drop this one frame; the sender must stay
+            # alive so the next frame can recreate the encoder.
+            try:
+                if hasattr(self, "codec"):
+                    self.codec = None
+                self._stanza_keyframe = True
+            except Exception:
+                pass
+            logger.warning("CALL video encode failed; encoder reset: %s",
+                           decode_ffmpeg_error(exc))
+            return [], 0
 
     encoder_cls.encode = encode
     encoder_cls._stanza_keyframe_patched = True
@@ -2022,6 +2063,20 @@ if HAS_AIORTC:
             """Switch the outgoing video between the camera and a screen area."""
             if self._local_video is not None:
                 self._local_video.set_source(mode, region)
+            self._reset_video_encoder()
+
+        def _reset_video_encoder(self) -> None:
+            """Drop the VP8/H264 encoder state after a source/size change."""
+            encoder = self._sender_encoder("video")
+            if encoder is None:
+                return
+            try:
+                if hasattr(encoder, "codec"):
+                    encoder.codec = None
+                encoder._stanza_keyframe = True
+                logger.debug("CALL video encoder reset after source change")
+            except Exception:  # noqa: BLE001 - aiortc internals
+                logger.debug("CALL video encoder reset failed", exc_info=True)
 
         def _answer_sdp(self) -> str:
             """The SDP that carries the negotiated codecs (the answer)."""

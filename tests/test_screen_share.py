@@ -91,9 +91,40 @@ check("screen frames are spaced by screen_fps",
       _elapsed >= 0.15 and _shot2.pts > _shot1.pts)
 check("screen timestamps use the 90 kHz video clock",
       _shot2.pts - _shot1.pts >= 90000 // 5 - 1000)
+_track.set_source("camera")
+check("returning to the camera keeps a monotonic timestamp",
+      _track._timestamp >= _track._last_pts and _track._timestamp > 0)
 _loop.close()
 _track.stop()
 
+
+# 2b. a source switch resets the video encoder state -----------------------
+if media.HAS_AIORTC:
+    class _Encoder:
+        def __init__(self):
+            self.codec = object()
+            self._stanza_keyframe = False
+
+    class _Sender:
+        kind = "video"
+        _RTCRtpSender__encoder = _Encoder()
+
+    class _PC:
+        def getSenders(self):
+            return [_Sender()]
+
+    class _Video:
+        def set_source(self, mode, region=None):
+            self.source = (mode, region)
+
+    call = media.AiortcCall.__new__(media.AiortcCall)
+    call._local_video = _Video()
+    call.pc = _PC()
+    call.set_video_source("camera")
+    check("switching source resets the video encoder codec",
+          call.pc.getSenders()[0]._RTCRtpSender__encoder.codec is None)
+    check("switching source requests a fresh keyframe",
+          call.pc.getSenders()[0]._RTCRtpSender__encoder._stanza_keyframe)
 
 # 3. JingleRtpManager.set_screen_share reaches the call ----------------------
 from stanza_im.xmpp.jingle_rtp import JingleRtpManager  # noqa: E402

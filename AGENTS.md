@@ -2961,8 +2961,12 @@ corner. `media._VideoCaptureTrack` switches its source
 live (`set_source("screen"|"region", region)`) — the camera opens lazily, the
 screen is grabbed with `QScreen.grabWindow` on the GUI thread and **paced** by
 its own 90 kHz clock at `devices.screen_share_fps` (default 5), so a static
-screen is not re-sent at the camera's 30 fps; returning to the camera resets
-its clock. It is **downscaled only** to fit the
+screen is not re-sent at the camera's 30 fps. A shared monotonic 90 kHz
+timestamp survives screen ↔ camera switches: returning to the camera rebases
+its clock instead of restarting at zero, and `AiortcCall.set_video_source`
+resets the VP8/H264 codec and requests a keyframe for the new resolution. A
+video encoder failure is caught, the codec reset and that one frame dropped,
+so `RTCRtpSender` keeps running. It is **downscaled only** to fit the
 `devices.screen_share_max_width`×`screen_share_max_height` box (default
 1920×1080; `0` = no limit on that side) — a smaller region is sent unchanged,
 there is no upscale — with no renegotiation; the shared `include/screen.py` (`grab_region`/`grab_screen`,

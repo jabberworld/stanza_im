@@ -396,6 +396,23 @@ check("requesting a keyframe reaches the live encoders",
       media.request_video_keyframe("test") >= 1 and live._stanza_keyframe)
 media._VIDEO_ENCODERS.discard(live)
 
+
+class _BrokenEncoder:
+    def __init__(self):
+        self.codec = object()
+        self._stanza_keyframe = False
+
+    def encode(self, frame, force_keyframe=False):
+        raise Exception("libvpx error: Invalid parameter")
+
+
+media._patch_video_encoder_keyframes(_BrokenEncoder)
+broken = _BrokenEncoder()
+check("a video encoder error is contained for the RTP sender",
+      broken.encode(object()) == ([], 0))
+check("a failed video frame resets the encoder state",
+      broken.codec is None and broken._stanza_keyframe)
+
 black = media._black_frame((640, 480))
 check("a black frame keeps the last real size",
       black.width == 640 and black.height == 480)
