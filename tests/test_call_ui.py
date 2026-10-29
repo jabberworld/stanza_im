@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets  # noqa: E402
+from PyQt6 import QtGui, QtWidgets  # noqa: E402
 
 from stanza_im.i18n import load as i18n_load  # noqa: E402
 from stanza_im.ui.call_window import CallWindow, IncomingCallDialog  # noqa: E402
@@ -102,6 +102,33 @@ check("stored states can be updated without emitting",
       not mcw._mute_btn.isChecked() and not mcw._hear_btn.isChecked()
       and _initial_toggles == [])
 mcw.close()
+
+# PiP is on by default for video calls and mirrors the camera preview.
+pcw = CallWindow("s1p", "Bob", video=True, pip_enabled=True)
+_pip_seen = []
+pcw.pip_toggled.connect(lambda *a: _pip_seen.append(a))
+check("the video call opens with PiP enabled",
+      pcw._pip_btn.isChecked() and pcw._pip_view.isVisibleTo(pcw))
+_pip_image = QtGui.QImage(8, 8, QtGui.QImage.Format.Format_RGB888)
+pcw.set_local_frame(_pip_image)
+check("the PiP view receives the local frame",
+      pcw._pip_view._image is _pip_image)
+pcw._pip_btn.setChecked(False)
+check("turning PiP off emits its state", _pip_seen[-1] == ("s1p", False))
+check("the PiP view hides when disabled", not pcw._pip_view.isVisibleTo(pcw))
+pcw.close()
+
+# The network icon menu exposes the incoming REMB cap.
+icw = CallWindow("s1c", "Bob", video=True, incoming_max=500)
+_inc_seen = []
+icw.incoming_requested.connect(lambda *a: _inc_seen.append(a))
+check("the call opens with the configured incoming cap",
+      icw._incoming_actions[500].isChecked())
+icw._incoming_actions[200].trigger()
+check("the incoming menu emits the chosen cap",
+      _inc_seen[-1] == ("s1c", 200)
+      and icw._incoming_actions[200].isChecked())
+icw.close()
 
 
 # 4. the call dialogs show an avatar (or the placeholder) --------------------

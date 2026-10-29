@@ -714,6 +714,14 @@ class PreferencesDialog(QtWidgets.QDialog):
             tr("prefs_video_bitrate"),
             self._row(video_rate, self._info_label(
                 tr("prefs_video_bitrate_tip")), trailing_stretch=True))
+        incoming = self._calls_combo("calls_incoming_max_kbps", [
+            ("prefs_incoming_auto", 0), ("prefs_incoming_200", 200),
+            ("prefs_incoming_500", 500), ("prefs_incoming_1000", 1000),
+            ("prefs_incoming_1500", 1500)])
+        codecs_form.addRow(
+            tr("prefs_incoming_max"),
+            self._row(incoming, self._info_label(
+                tr("prefs_incoming_max_tip")), trailing_stretch=True))
         height = self._calls_combo("calls_video_max_height", [
             ("prefs_resolution_auto", 0), ("prefs_resolution_1080", 1080),
             ("prefs_resolution_720", 720), ("prefs_resolution_480", 480),
@@ -729,6 +737,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         codecs_form.addRow(
             self._check("calls_motion_boost", tr("prefs_motion_boost")),
             self._info_label(tr("prefs_motion_boost_tip")))
+        codecs_form.addRow(
+            self._check("calls_pip", tr("prefs_call_pip")),
+            self._info_label(tr("prefs_call_pip_tip")))
         codecs_form.addItem(QtWidgets.QSpacerItem(
             1, 1, QtWidgets.QSizePolicy.Policy.Minimum,
             QtWidgets.QSizePolicy.Policy.Expanding))
@@ -2223,6 +2234,9 @@ class PreferencesDialog(QtWidgets.QDialog):
                 calls, "video_max_height", 0) or 0),
             "calls_motion_boost": bool(getattr(
                 calls, "motion_boost", False)),
+            "calls_incoming_max_kbps": int(getattr(
+                calls, "incoming_max_kbps", 0) or 0),
+            "calls_pip": bool(getattr(calls, "pip", True)),
         }
         performance = getattr(cfg, "performance", None)
         values["defer_ui_build"] = bool(getattr(
@@ -2420,6 +2434,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._value("calls_video_max_height") or 0)
         cfg.calls.motion_boost = bool(
             self._value("calls_motion_boost", False))
+        cfg.calls.incoming_max_kbps = int(
+            self._value("calls_incoming_max_kbps") or 0)
+        cfg.calls.pip = bool(self._value("calls_pip", True))
         # Apply the plugin manager page (mirror of Actions → Plugins) and let
         # the main window (de)activate the affected plugins live.
         plugin_ids = None

@@ -46,7 +46,9 @@ check("the call codec defaults are present",
       and cfg.calls.audio_bitrate_kbps == 96
       and cfg.calls.video_bitrate_kbps == 1000
       and cfg.calls.video_max_height == 0
-      and cfg.calls.motion_boost is False)
+      and cfg.calls.motion_boost is False
+      and cfg.calls.incoming_max_kbps == 0
+      and cfg.calls.pip is True)
 check("the screen box default is Full HD",
       cfg.devices.screen_share_max_width == 1920
       and cfg.devices.screen_share_max_height == 1080)
@@ -158,6 +160,7 @@ check("the Calls section has three tabs",
 for key in ("calls_audio_codec", "calls_video_codec",
             "calls_audio_bitrate_kbps", "calls_video_bitrate_kbps",
             "calls_video_max_height", "calls_motion_boost",
+            "calls_incoming_max_kbps", "calls_pip",
             "devices_screen_resolution",
             "devices_screen_share_fps"):
     check(f"prefs control {key}", key in dlg._controls)
@@ -165,7 +168,9 @@ check("the codec controls load the defaults",
       dlg._controls["calls_audio_codec"].currentData() == "auto"
       and dlg._controls["calls_video_codec"].currentData() == "auto"
       and dlg._controls["calls_audio_bitrate_kbps"].value() == 96
-      and dlg._controls["calls_video_bitrate_kbps"].value() == 1000)
+      and dlg._controls["calls_video_bitrate_kbps"].value() == 1000
+      and dlg._controls["calls_incoming_max_kbps"].currentData() == 0
+      and dlg._controls["calls_pip"].isChecked())
 check("the resolution presets are offered",
       dlg._controls["calls_video_max_height"].findData(720) >= 0
       and dlg._controls["devices_screen_resolution"].findData(
@@ -176,6 +181,9 @@ dlg._controls["calls_video_codec"].setCurrentIndex(
     dlg._controls["calls_video_codec"].findData("h264"))
 dlg._controls["calls_audio_bitrate_kbps"].setValue(64)
 dlg._controls["calls_video_bitrate_kbps"].setValue(800)
+dlg._controls["calls_incoming_max_kbps"].setCurrentIndex(
+    dlg._controls["calls_incoming_max_kbps"].findData(500))
+dlg._controls["calls_pip"].setChecked(False)
 dlg._controls["calls_video_max_height"].setCurrentIndex(
     dlg._controls["calls_video_max_height"].findData(720))
 dlg._controls["devices_screen_resolution"].setCurrentIndex(
@@ -187,7 +195,9 @@ check("apply writes the codec settings",
       cfg.calls.audio_codec == "opus" and cfg.calls.video_codec == "h264"
       and cfg.calls.audio_bitrate_kbps == 64
       and cfg.calls.video_bitrate_kbps == 800
-      and cfg.calls.video_max_height == 720)
+      and cfg.calls.video_max_height == 720
+      and cfg.calls.incoming_max_kbps == 500
+      and cfg.calls.pip is False)
 check("apply writes the screen box",
       cfg.devices.screen_share_max_width == 1280
       and cfg.devices.screen_share_max_height == 720
@@ -503,6 +513,29 @@ check("a heavily limited target is poor",
       ["level"] == 1)
 check("the network icon has four levels",
       all(not network_icon(level).isNull() for level in range(5)))
+check("the incoming REMB clamp keeps the peer's SSRCs",
+      media._clamp_remb_result((1000000, [7]), 500000)
+      == (500000, [7]))
+
+if media.HAS_AIORTC:
+    class _Est:
+        _stanza_max_bps = 0
+
+    class _Receiver:
+        _RTCRtpReceiver__remote_bitrate_estimator = _Est()
+
+    class _PC:
+        def getReceivers(self):
+            return [_Receiver()]
+
+    clamped = media.AiortcCall.__new__(media.AiortcCall)
+    clamped._incoming_max_bps = 0
+    clamped.pc = _PC()
+    clamped.set_incoming_max_kbps(500)
+    check("the incoming cap reaches a live receiver estimator",
+          clamped.pc.getReceivers()[0]
+          ._RTCRtpReceiver__remote_bitrate_estimator._stanza_max_bps
+          == 500000)
 
 
 class _InfoSession:

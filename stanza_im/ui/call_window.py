@@ -55,6 +55,24 @@ _QUALITY_BITRATES = ((200, "call_quality_low"), (500, "call_quality_medium"),
 _QUALITY_HEIGHTS = ((0, "call_quality_source"), (1080, "call_quality_1080"),
                     (720, "call_quality_720"), (480, "call_quality_480"),
                     (360, "call_quality_360"))
+#: Incoming REMB cap presets (kbps, i18n label key).
+_INCOMING_LIMITS = ((0, "prefs_incoming_auto"),
+                    (200, "prefs_incoming_200"),
+                    (500, "prefs_incoming_500"),
+                    (1000, "prefs_incoming_1000"),
+                    (1500, "prefs_incoming_1500"))
+
+
+def _incoming_menu(parent, value: int) -> tuple[QtWidgets.QMenu, dict]:
+    """Build the incoming-bitrate submenu and return its checkable actions."""
+    menu = QtWidgets.QMenu(tr("call_incoming_max"), parent)
+    actions = {}
+    for kbps, key in _INCOMING_LIMITS:
+        action = menu.addAction(tr(key))
+        action.setCheckable(True)
+        action.setChecked(kbps == int(value or 0))
+        actions[kbps] = action
+    return menu, actions
 
 
 def entire_unknown() -> str:
@@ -330,12 +348,15 @@ class CallWindow(QtWidgets.QWidget):
     video_mode_requested = QtCore.pyqtSignal(str, str)  # sid, mode
     receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
     quality_requested = QtCore.pyqtSignal(str, int, int)  # sid, kbps, height
+    incoming_requested = QtCore.pyqtSignal(str, int)  # sid, kbps
+    pip_toggled = QtCore.pyqtSignal(str, bool)  # sid, enabled
 
     def __init__(self, sid: str, peer: str, video: bool = False, parent=None,
                  avatar_path: str | None = None, avatar_radius: int = 100,
                  video_bitrate: int = 1000, max_height: int = 0,
                  info_provider=None, audio_enabled: bool = True,
-                 remote_audio_enabled: bool = True):
+                 remote_audio_enabled: bool = True, incoming_max: int = 0,
+                 pip_enabled: bool = True):
         super().__init__(parent)
         self.sid = sid
         self.peer = peer
@@ -347,6 +368,8 @@ class CallWindow(QtWidgets.QWidget):
         self.setMinimumSize(420, 340)
         self._muted = not bool(audio_enabled)
         self._hear_muted = not bool(remote_audio_enabled)
+        self._incoming_max = int(incoming_max or 0)
+        self._pip_enabled = bool(pip_enabled) and bool(video)
 
         layout = QtWidgets.QVBoxLayout(self)
         header = QtWidgets.QHBoxLayout()
@@ -393,6 +416,12 @@ class CallWindow(QtWidgets.QWidget):
         layout.addWidget(self._video_view, stretch=1)
         if not video:
             self._video_view.setVisible(False)
+        self._pip_view = VideoView(self._video_view)
+        self._pip_view.set_caption(tr("call_pip_self"))
+        self._pip_view.set_mirrored(True)
+        self._pip_view.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._pip_view.setVisible(bool(self._pip_enabled and video))
 
         controls = QtWidgets.QHBoxLayout()
         self._mute_btn = QtWidgets.QToolButton(self)
@@ -436,11 +465,30 @@ class CallWindow(QtWidgets.QWidget):
             self._video_actions[mode] = action
         self._video_btn.setMenu(video_menu)
         controls.addWidget(self._video_btn)
+        self._pip_btn = QtWidgets.QToolButton(self)
+        self._pip_btn.setIcon(_icon("pip"))
+        self._pip_btn.setIconSize(QtCore.QSize(20, 20))
+        self._pip_btn.setToolTip(tr("call_pip"))
+        self._pip_btn.setCheckable(True)
+        self._pip_btn.setChecked(self._pip_enabled)
+        self._pip_btn.setVisible(video)
+        self._pip_btn.toggled.connect(self._on_pip)
+        controls.addWidget(self._pip_btn)
         self._network_btn = QtWidgets.QToolButton(self)
         self._network_btn.setIcon(network_icon(0))
         self._network_btn.setIconSize(QtCore.QSize(20, 20))
         self._network_btn.setAutoRaise(True)
         self._network_btn.setToolTip(tr("call_network_unknown"))
+        self._network_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        network_menu = QtWidgets.QMenu(self._network_btn)
+        incoming_menu, self._incoming_actions = _incoming_menu(
+            self._network_btn, self._incoming_max)
+        for kbps, action in self._incoming_actions.items():
+            action.triggered.connect(
+                lambda checked=False, value=kbps: self._on_incoming(value))
+        network_menu.addMenu(incoming_menu)
+        self._network_btn.setMenu(network_menu)
         controls.addWidget(self._network_btn)
         (self._quality_btn, self._quality_bitrate_actions,
          self._quality_height_actions) = _quality_button(
@@ -516,6 +564,16 @@ class CallWindow(QtWidgets.QWidget):
         self._network_btn.setIcon(network_icon(result["level"], 20))
         self._network_btn.setToolTip(_network_tooltip(result))
 
+    def _on_incoming(self, kbps: int) -> None:
+        self.set_incoming_max(kbps)
+        self.incoming_requested.emit(self.sid, int(kbps))
+
+    def set_incoming_max(self, kbps: int) -> None:
+        """Reflect the incoming REMB cap chosen in Preferences or this menu."""
+        self._incoming_max = int(kbps or 0)
+        for value, action in self._incoming_actions.items():
+            action.setChecked(value == self._incoming_max)
+
     def set_frame(self, image):
         self._video_view.set_frame(image)
 
@@ -555,6 +613,50 @@ class CallWindow(QtWidgets.QWidget):
             tr("call_unmute_peer") if self._hear_muted
             else tr("call_mute_peer"))
 
+    def _on_pip(self, enabled: bool) -> None:
+        self._pip_enabled = bool(enabled) and bool(self._video)
+        self._refresh_pip()
+        self.pip_toggled.emit(self.sid, self._pip_enabled)
+
+    def set_pip_enabled(self, enabled: bool) -> None:
+        """Apply the PiP preference without re-emitting the toggle signal."""
+        self._pip_enabled = bool(enabled) and bool(self._video)
+        self._pip_btn.blockSignals(True)
+        self._pip_btn.setChecked(self._pip_enabled)
+        self._pip_btn.blockSignals(False)
+        self._refresh_pip()
+
+    def set_local_frame(self, image) -> None:
+        """Update the own-video overlay (camera or screen source)."""
+        if not self._pip_enabled or not self._video:
+            return
+        self._pip_view.set_frame(image)
+        self._refresh_pip()
+
+    def _refresh_pip(self) -> None:
+        visible = bool(self._pip_enabled and self._video
+                       and self._video_mode != "off")
+        self._pip_view.setVisible(visible)
+        self._pip_view.set_mirrored(self._video_mode == "camera")
+        self._position_pip()
+
+    def _position_pip(self) -> None:
+        if not hasattr(self, "_pip_view"):
+            return
+        parent = self._video_view
+        if parent.width() <= 0 or parent.height() <= 0:
+            return
+        width = max(96, int(parent.width() * 0.28))
+        height = max(54, int(round(width * 9 / 16)))
+        width = min(width, parent.width())
+        height = min(height, parent.height())
+        self._pip_view.setGeometry(
+            max(8, parent.width() - width - 12), 12, width, height)
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        QtCore.QTimer.singleShot(0, self._position_pip)
+
     def _request_mode(self, mode: str) -> None:
         self.video_mode_requested.emit(self.sid, mode)
 
@@ -567,6 +669,7 @@ class CallWindow(QtWidgets.QWidget):
         self._video_btn.setToolTip(tr(_VIDEO_MODE_TIPS[mode]))
         for m, action in self._video_actions.items():
             action.setChecked(m == mode)
+        self._refresh_pip()
 
     def _on_quality(self, bitrate, height) -> None:
         if bitrate is not None:
@@ -607,15 +710,17 @@ class MujiCallWindow(QtWidgets.QWidget):
     participant_camera = QtCore.pyqtSignal(str, str, bool)   # room, nick, video-enabled
     video_mode_requested = QtCore.pyqtSignal(str, str)       # room, mode
     quality_requested = QtCore.pyqtSignal(str, int, int)     # room, kbps, px
+    incoming_requested = QtCore.pyqtSignal(str, int)         # room, kbps
 
     def __init__(self, room: str, self_nick: str = "", parent=None,
                  video_bitrate: int = 1000, max_height: int = 0,
-                 info_provider=None):
+                 info_provider=None, incoming_max: int = 0):
         super().__init__(parent)
         self.room = room
         self._quality_bitrate = int(video_bitrate or 0)
         self._quality_height = int(max_height or 0)
         self._info_provider = info_provider
+        self._incoming_max = int(incoming_max or 0)
         self.self_nick = self_nick or ""
         self.setWindowTitle(tr("muji_window_title", room=room))
         self.setMinimumSize(560, 400)
@@ -711,6 +816,16 @@ class MujiCallWindow(QtWidgets.QWidget):
         self._network_btn.setIconSize(QtCore.QSize(20, 20))
         self._network_btn.setAutoRaise(True)
         self._network_btn.setToolTip(tr("call_network_unknown"))
+        self._network_btn.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        _network_menu = QtWidgets.QMenu(self._network_btn)
+        _inc_menu, self._incoming_actions = _incoming_menu(
+            self._network_btn, self._incoming_max)
+        for _kbps, _action in self._incoming_actions.items():
+            _action.triggered.connect(
+                lambda checked=False, value=_kbps: self._on_incoming(value))
+        _network_menu.addMenu(_inc_menu)
+        self._network_btn.setMenu(_network_menu)
         (self._quality_btn, self._quality_bitrate_actions,
          self._quality_height_actions) = _quality_button(
             self, self._quality_bitrate, self._quality_height,
@@ -811,6 +926,15 @@ class MujiCallWindow(QtWidgets.QWidget):
         result = network_quality(info)
         self._network_btn.setIcon(network_icon(result["level"], 20))
         self._network_btn.setToolTip(_network_tooltip(result))
+
+    def _on_incoming(self, kbps: int) -> None:
+        self.set_incoming_max(kbps)
+        self.incoming_requested.emit(self.room, int(kbps))
+
+    def set_incoming_max(self, kbps: int) -> None:
+        self._incoming_max = int(kbps or 0)
+        for value, action in self._incoming_actions.items():
+            action.setChecked(value == self._incoming_max)
 
     def set_self_nick(self, nick: str) -> None:
         """Update our own conference nick (labels the mirrored self tile)."""

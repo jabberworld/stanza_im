@@ -594,6 +594,7 @@ class CallSession:
     remote_audio_enabled: bool = True
     video_enabled: bool = True
     motion_boost: bool = False
+    incoming_max_kbps: int = 0
 
 
 #: Map the engine setter to the persistent per-session attribute.
@@ -770,7 +771,9 @@ class JingleRtpManager:
                              or self._best_full_jid(peer_bare))),
             self_full=self._full_jid(), initiator=True, video=video,
             muji_room=muji_room,
-            motion_boost=bool(self._devices().get("motion_boost", False)))
+            motion_boost=bool(self._devices().get("motion_boost", False)),
+            incoming_max_kbps=int(
+                self._devices().get("incoming_max_kbps", 0) or 0))
         self.sessions[sid] = session
         logger.info("CALL start to %s (sid=%s video=%s muji=%s jmi=%s)",
                     session.peer_full, sid, video, muji_room, use_jmi)
@@ -1056,6 +1059,13 @@ class JingleRtpManager:
             except Exception:  # noqa: BLE001 - best effort on bind
                 logger.debug("CALL set_motion_boost on bind failed",
                              exc_info=True)
+        incoming = getattr(call, "set_incoming_max_kbps", None)
+        if callable(incoming):
+            try:
+                incoming(int(getattr(session, "incoming_max_kbps", 0) or 0))
+            except Exception:  # noqa: BLE001 - best effort on bind
+                logger.debug("CALL set_incoming_max_kbps on bind failed",
+                             exc_info=True)
         fn = getattr(call, "set_local_preview", None)
         if callable(fn):
             try:
@@ -1131,7 +1141,9 @@ class JingleRtpManager:
         session = CallSession(
             sid=sid, peer_bare=peer_full.split("/")[0], peer_full=peer_full,
             self_full=self._full_jid(), initiator=False, video=video,
-            motion_boost=bool(self._devices().get("motion_boost", False)))
+            motion_boost=bool(self._devices().get("motion_boost", False)),
+            incoming_max_kbps=int(
+                self._devices().get("incoming_max_kbps", 0) or 0))
         muji_el = jingle.find(_q(NS_MUJI, "muji"))
         if muji_el is not None:
             session.muji_room = muji_el.get("room", "")
@@ -1502,6 +1514,31 @@ class JingleRtpManager:
     def set_call_video(self, sid: str, enabled: bool) -> None:
         """Turn the local camera on/off (black frames, no renegotiation)."""
         self._set_track_enabled(sid, "set_video_enabled", enabled)
+
+    def set_incoming_max_all(self, kbps: int) -> None:
+        """Apply one incoming cap to every active session."""
+        value = max(0, int(kbps or 0))
+        for session in list(self.sessions.values()):
+            self.set_incoming_max(session.sid, value)
+
+    def set_incoming_max(self, key: str, kbps: int) -> None:
+        """Apply an incoming video cap to a call sid or a Muji room."""
+        value = max(0, int(kbps or 0))
+        targets = [session for session in self.sessions.values()
+                   if session.sid == key
+                   or (session.muji_room and session.muji_room == key)]
+        for session in targets:
+            session.incoming_max_kbps = value
+            fn = getattr(getattr(session, "call", None),
+                         "set_incoming_max_kbps", None)
+            if callable(fn):
+                try:
+                    fn(value)
+                except Exception:  # noqa: BLE001 - best effort
+                    logger.debug("CALL set_incoming_max failed sid=%s",
+                                 session.sid, exc_info=True)
+        logger.debug("CALL incoming_max=%s kbps for %d session(s)",
+                     value, len(targets))
 
     def set_motion_boost(self, enabled: bool) -> None:
         """Apply the local-motion video boost to every active session."""

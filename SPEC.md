@@ -458,7 +458,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `calls.audio_bitrate_kbps` | `96` | Opus target bitrate (16–128); applied when the encoder is created. |
 | `calls.video_bitrate_kbps` | `1000` | VP8/H264 target bitrate (100–1500) and a hard ceiling: REMB may lower it, never raise it above the setting. A live quality choice is written back here. |
 | `calls.video_max_height` | `0` | Outgoing camera height cap (0 = source size, 1080/720/480/360 presets); downscale only. |
-| `calls.motion_boost` | `false` | Opt-in fast local-motion bitrate recovery (10% every 500 ms while loss is below 5%). |
+| `calls.motion_boost` | `false` | Opt-in fast local-motion bitrate recovery (10% every 500 ms while loss is below 5%); applied to active calls live. |
+| `calls.incoming_max_kbps` | `0` | Ask the peer to keep incoming video below this cap (0 = auto; 200/500/1000/1500 presets) by clamping our REMB feedback. |
+| `calls.pip` | `true` | Show a picture-in-picture view of our outgoing camera/screen in 1:1 video calls. |
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
@@ -3460,7 +3462,13 @@ client.leave_muji(room)
   pair. `include/network_quality.py` classifies the snapshot into four levels
   (plus unknown); the call header shows the `ui/network_quality.py` signal-bar
   icon with a tooltip naming the reason (incoming/outgoing loss, REMB-limited
-  target, event-loop lag) and its values. A watchdog logs
+  target, event-loop lag) and its values. The network icon's menu and
+  Preferences → Calls → Codecs expose `calls.incoming_max_kbps`; the receiver's
+  `RemoteBitrateEstimator` clamps the REMB it sends, asking the peer to lower
+  its video (advisory only — a non-cooperative peer may ignore it). A 1:1
+  video call opens with a PiP self-view (`calls.pip`, default on): the local
+  frame is delivered through `set_call_local_preview`/`call_local_video_frame`,
+  mirrored for the camera and unmirrored for screen sharing. A watchdog logs
   GUI event-loop stalls above 250 ms (aioice's consent transaction times out at
   0.5 s). `_install_consent_retry` replaces the `aiortc.rtcicetransport`
   `Connection` with a subclass whose consent probes retransmit twice

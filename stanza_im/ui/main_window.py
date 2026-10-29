@@ -3570,6 +3570,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # Apply a changed Calls preference to calls already in progress.
             self._apply_active_call_quality()
             self._apply_active_motion_boost()
+            self._apply_active_call_incoming()
+            self._apply_active_call_pip()
             from stanza_im.xmpp import jet as jet_mod
             self._client.file_encryption = jet_mod.normalize_mode(
                 str(getattr(self._config.files, "encryption", "prefer")
@@ -5195,6 +5197,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "video_max_height": int(
                 getattr(calls, "video_max_height", 0) or 0),
             "motion_boost": bool(getattr(calls, "motion_boost", False)),
+            "incoming_max_kbps": int(
+                getattr(calls, "incoming_max_kbps", 0) or 0),
         }
 
     def _call_quality_info(self, key: str):
@@ -5211,6 +5215,16 @@ class MainWindow(QtWidgets.QMainWindow):
         calls = getattr(self._config, "calls", None)
         return (int(getattr(calls, "video_bitrate_kbps", 1000) or 1000),
                 int(getattr(calls, "video_max_height", 0) or 0))
+
+    def _incoming_max_default(self) -> int:
+        """The configured incoming REMB cap (0 = auto)."""
+        calls = getattr(self._config, "calls", None)
+        return max(0, int(getattr(calls, "incoming_max_kbps", 0) or 0))
+
+    def _call_pip_default(self) -> bool:
+        """Whether a video call should show its own picture-in-picture view."""
+        calls = getattr(self._config, "calls", None)
+        return bool(getattr(calls, "pip", True))
 
     def _save_call_quality(self, bitrate: int | None,
                            height: int | None) -> None:
@@ -5260,6 +5274,60 @@ class MainWindow(QtWidgets.QMainWindow):
         if callable(fn):
             fn(bool(getattr(getattr(self._config, "calls", None),
                             "motion_boost", False)))
+
+    def _apply_active_call_incoming(self) -> None:
+        """Apply the incoming REMB cap to running calls and their windows."""
+        client = getattr(self, "_client", None)
+        manager = getattr(client, "rtp_calls", None) if client else None
+        if manager is None:
+            return
+        value = self._incoming_max_default()
+        fn = getattr(manager, "set_incoming_max_all", None)
+        if callable(fn):
+            fn(value)
+        for window in list(self._call_windows.values()):
+            setter = getattr(window, "set_incoming_max", None)
+            if callable(setter):
+                setter(value)
+        for window in list(self._muji_windows.values()):
+            setter = getattr(window, "set_incoming_max", None)
+            if callable(setter):
+                setter(value)
+
+    def _apply_active_call_pip(self) -> None:
+        """Apply the PiP preference to open 1:1 call windows."""
+        enabled = self._call_pip_default()
+        for sid, window in list(self._call_windows.items()):
+            setter = getattr(window, "set_pip_enabled", None)
+            if callable(setter):
+                setter(enabled)
+            if self._client:
+                self._client.set_call_local_preview(sid, enabled)
+
+    def _on_call_pip_toggled(self, sid: str, enabled: bool) -> None:
+        if self._client:
+            self._client.set_call_local_preview(sid, enabled)
+        calls = getattr(self._config, "calls", None)
+        if calls is not None:
+            calls.pip = bool(enabled)
+            try:
+                self._config.save()
+            except Exception:  # noqa: BLE001 - keep the live call usable
+                logger.debug("CALL PiP save failed", exc_info=True)
+
+    def _on_incoming_requested(self, key: str, kbps: int) -> None:
+        """Persist and apply an incoming cap chosen in a call window."""
+        value = max(0, int(kbps or 0))
+        calls = getattr(self._config, "calls", None)
+        if calls is not None:
+            calls.incoming_max_kbps = value
+            try:
+                self._config.save()
+            except Exception:  # noqa: BLE001 - keep the live call usable
+                logger.debug("CALL incoming cap save failed", exc_info=True)
+        if self._client:
+            self._client.rtp_calls.set_incoming_max(key, value)
+        self._apply_active_call_incoming()
 
     def _on_call_quality_requested(self, sid: str, bitrate: int,
                                    height: int) -> None:
@@ -5521,13 +5589,19 @@ class MainWindow(QtWidgets.QMainWindow):
                             audio_enabled=bool(getattr(
                                 session, "audio_enabled", True)),
                             remote_audio_enabled=bool(getattr(
-                                session, "remote_audio_enabled", True)))
+                                session, "remote_audio_enabled", True)),
+                            incoming_max=self._incoming_max_default(),
+                            pip_enabled=self._call_pip_default())
         window.hangup.connect(self._on_call_hangup)
         window.audio_toggled.connect(self._on_call_audio_toggled)
         window.video_mode_requested.connect(self._on_video_mode_requested)
         window.receive_toggled.connect(self._on_call_receive_toggled)
         window.quality_requested.connect(self._on_call_quality_requested)
+        window.incoming_requested.connect(self._on_incoming_requested)
+        window.pip_toggled.connect(self._on_call_pip_toggled)
         self._place_window_near_main(window)
+        if video and self._call_pip_default():
+            self._client.set_call_local_preview(sid, True)
         window.show()
         window.raise_()
         window.activateWindow()
@@ -5592,11 +5666,16 @@ class MainWindow(QtWidgets.QMainWindow):
                     muji.set_frame(nick, image)
 
     def _on_call_local_video_frame(self, sid: str, image) -> None:
-        """Own-camera frame from the conference self-preview session."""
+        """Own-camera frame for a 1:1 PiP or a conference self-preview."""
         session = (self._client.rtp_calls.sessions.get(sid)
                    if self._client else None)
         room = getattr(session, "muji_room", "")
-        if not room or self._muji_preview_sids.get(room) != sid:
+        if not room:
+            window = self._call_windows.get(sid)
+            if window is not None:
+                window.set_local_frame(image)
+            return
+        if self._muji_preview_sids.get(room) != sid:
             return
         window = self._muji_windows.get(room)
         if window is not None:
@@ -5621,6 +5700,8 @@ class MainWindow(QtWidgets.QMainWindow):
             window.stop_duration()
             window.set_state(tr("call_ended"))
             window.close()
+        if self._client:
+            self._client.set_call_local_preview(sid, False)
         dlg = self._incoming_calls.pop(sid, None)
         if dlg is not None:
             dlg.close()
@@ -5773,12 +5854,14 @@ class MainWindow(QtWidgets.QMainWindow):
             window = MujiCallWindow(room, self_nick=nick,
                                     video_bitrate=bitrate,
                                     max_height=max_height,
-                                    info_provider=self._call_quality_info)
+                                    info_provider=self._call_quality_info,
+                                    incoming_max=self._incoming_max_default())
             window.set_avatar_radius(
                 getattr(self._config.appearance, "avatar_radius", 20))
             window.leave.connect(self._client.leave_muji)
             window.quality_requested.connect(
                 self._on_muji_quality_requested)
+            window.incoming_requested.connect(self._on_incoming_requested)
             window.participant_audio.connect(
                 self._on_muji_participant_audio)
             window.participant_receive.connect(

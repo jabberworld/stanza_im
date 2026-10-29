@@ -1731,6 +1731,43 @@ def _install_encoder_defaults() -> None:
             _patch_video_encoder_keyframes(video_cls)
 
 
+def _clamp_remb_result(result, max_bps):
+    """Clamp a ``RemoteBitrateEstimator.add`` result to a cap (bps)."""
+    if not result or not max_bps:
+        return result
+    try:
+        target, ssrcs = result
+        return min(int(target), int(max_bps)), ssrcs
+    except (TypeError, ValueError):
+        return result
+
+
+def _install_remote_bitrate_cap() -> None:
+    """Clamp the REMB we send to the peer to the configured incoming cap.
+
+    aiortc's receiver already feeds a RemoteBitrateEstimator and sends REMB
+    feedback when the peer supplies ``abs-send-time``.  Wrapping ``add`` is the
+    smallest hook that lets a call request a lower incoming bitrate.
+    """
+    if not HAS_AIORTC:
+        return
+    try:
+        from aiortc.rate import RemoteBitrateEstimator
+    except Exception:  # noqa: BLE001 - optional internals
+        return
+    if getattr(RemoteBitrateEstimator, "_stanza_cap_patched", False):
+        return
+    original_add = RemoteBitrateEstimator.add
+
+    def add(self, *args, **kwargs):
+        result = original_add(self, *args, **kwargs)
+        return _clamp_remb_result(
+            result, int(getattr(self, "_stanza_max_bps", 0) or 0))
+
+    RemoteBitrateEstimator.add = add
+    RemoteBitrateEstimator._stanza_cap_patched = True
+
+
 def _install_inbound_byte_counter() -> None:
     """Make aiortc keep per-stream received byte counters.
 
@@ -1797,6 +1834,7 @@ def _install_audio_resampler_compat() -> None:
 _install_audio_resampler_compat()
 _install_encoder_defaults()
 _install_inbound_byte_counter()
+_install_remote_bitrate_cap()
 
 
 def audio_encode_selftest() -> tuple[bool, str]:
@@ -1877,6 +1915,8 @@ if HAS_AIORTC:
             self._video_enabled = True
             self._motion_boost = bool(
                 self.devices.get("motion_boost", False))
+            self._incoming_max_bps = max(
+                0, int(self.devices.get("incoming_max_kbps", 0) or 0)) * 1000
             self._stats: dict[str, int | None] = {}
             self._stats_prev: dict[str, tuple[float, int]] = {}
             self._stats_prev_in: dict[str, tuple[int, int]] = {}
@@ -1940,6 +1980,7 @@ if HAS_AIORTC:
 
         def _on_track(self, track):
             logger.info("CALL remote track: %s", track.kind)
+            self._apply_incoming_cap()
             if track.kind == "audio":
                 self._audio_play = _AudioPlayback(
                     self.devices.get("audio_output", ""))
@@ -2071,6 +2112,24 @@ if HAS_AIORTC:
             except Exception:  # noqa: BLE001 - diagnostics only
                 logger.debug("CALL video bitrate diagnostics failed",
                              exc_info=True)
+
+        def _apply_incoming_cap(self) -> None:
+            """Put the incoming REMB cap on every current receiver."""
+            try:
+                receivers = list(self.pc.getReceivers())
+            except Exception:  # noqa: BLE001
+                return
+            for receiver in receivers:
+                estimator = getattr(
+                    receiver, "_RTCRtpReceiver__remote_bitrate_estimator",
+                    None)
+                if estimator is not None:
+                    estimator._stanza_max_bps = self._incoming_max_bps
+
+        def set_incoming_max_kbps(self, kbps: int) -> None:
+            """Ask the peer to keep its video below *kbps* (0 = auto)."""
+            self._incoming_max_bps = max(0, int(kbps or 0)) * 1000
+            self._apply_incoming_cap()
 
         def set_video_source(self, mode: str, region=None) -> None:
             """Switch the outgoing video between the camera and a screen area."""
@@ -2376,6 +2435,7 @@ if HAS_AIORTC:
             self._remote_sdp = str(sdp or "")
             self._remote_kind = kind
             await self.pc.setRemoteDescription(RTCSessionDescription(sdp, kind))
+            self._apply_incoming_cap()
 
         async def add_ice(self, cand: dict, sdp_mid: str = "",
                           sdp_mline_index: int = 0) -> None:

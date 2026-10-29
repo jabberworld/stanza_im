@@ -2907,7 +2907,13 @@ a conservative REMB; loss disables the boost. It is opt-in
 (`calls.motion_boost`, default off) while the network is being validated.
 The setting is applied to already-running tracks through
 `AiortcCall.set_motion_boost`/`JingleRtpManager.set_motion_boost`, not only at
-call creation. `CALL stats` carries separate
+call creation. The call-header network icon also opens the
+`calls.incoming_max_kbps` menu (Automatic/200/500/1000/1500); the value is
+mirrored in Preferences → Calls → «Кодеки», clamped in the receiver's
+`RemoteBitrateEstimator` before REMB is sent (advisory only — a peer may
+ignore it). A 1:1 video call shows its outgoing camera/screen in a PiP overlay
+(`calls.pip`, default on, mirrored for the camera and unmirrored for screen
+sharing); its frames use the existing `set_call_local_preview` path. `CALL stats` carries separate
 `in_video`/`in_audio` rates, incoming/outgoing loss, REMB, FPS, motion peak,
 target and `lag_peak` (the worst GUI event-loop stall since the previous
 sample); the call also logs
