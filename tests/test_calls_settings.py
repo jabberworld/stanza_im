@@ -202,11 +202,30 @@ check("the screen FPS selector matches the resolution width",
       == dlg._controls["devices_screen_resolution"].width())
 check("the section is called Calls",
       dlg._sections.item(2).text() == "Calls")
+dlg._sections.setCurrentRow(2)
+app.processEvents()
 page = dlg._pages[2]
 check("the Calls section has three tabs",
       isinstance(page, QtWidgets.QTabWidget) and page.count() == 3
       and [page.tabText(i) for i in range(3)]
       == ["Devices", "Codecs", "Screen"])
+devices_page = page.widget(0)
+
+
+def devices_left(widget):
+    return widget.mapTo(devices_page, QtCore.QPoint(0, 0)).x()
+
+
+device_keys = ("devices_audio_input", "devices_audio_output",
+               "devices_video_input")
+check("the device selectors share one left edge",
+      len({devices_left(dlg._controls[key]) for key in device_keys}) == 1)
+check("the camera mode selector aligns with the device selectors",
+      devices_left(dlg._controls["devices_camera_mode"])
+      == devices_left(dlg._controls["devices_audio_input"]))
+check("a device test button follows its selector",
+      dlg._mic_test_button.x()
+      >= dlg._controls["devices_audio_input"].width())
 for key in ("calls_audio_codec", "calls_video_codec",
             "calls_audio_bitrate_kbps", "calls_video_bitrate_kbps",
             "calls_video_max_height", "calls_motion_boost",

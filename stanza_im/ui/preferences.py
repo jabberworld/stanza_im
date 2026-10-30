@@ -641,7 +641,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 level = QtWidgets.QProgressBar()
                 level.setRange(0, 100)
                 level.setTextVisible(False)
-                level.setMinimumWidth(120)
+                level.setMinimumWidth(70)
                 self._mic_level = level
                 button = QtWidgets.QToolButton()
                 button.setCheckable(True)
@@ -671,7 +671,9 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self._camera_test_button = button
                 self._camera_combo = combo
                 controls.append(button)
-            form.addRow(tr(label_key), self._row(*controls))
+            form.addRow(
+                tr(label_key),
+                self._row(*controls, trailing_stretch=True))
         self._camera_mode_combo = self._combo(
             "devices_camera_mode", [("prefs_camera_mode_auto", "")],
             fixed_width=True)
@@ -1028,22 +1030,6 @@ class PreferencesDialog(QtWidgets.QDialog):
                           QtWidgets.QSizePolicy.Policy.Fixed)
         return box
 
-    @staticmethod
-    def _info_row(control, info, *, align_right: bool = True):
-        """Put an info glyph at a consistent right edge of the field column."""
-        box = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(box)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        if control is not None:
-            layout.addWidget(control, 0)
-        if align_right:
-            layout.addStretch(1)
-        layout.addWidget(info, 0)
-        box.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
-                          QtWidgets.QSizePolicy.Policy.Fixed)
-        return box
-
     def _zoom_control(self, key: str) -> QtWidgets.QWidget:
         """Chat text-scale slider (50-300%, step 10%, stored as a factor)."""
         box = QtWidgets.QWidget()
@@ -1222,8 +1208,9 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         priority_mode.currentIndexChanged.connect(_sync_priority)
         _sync_priority()
-        advanced_form.addRow(tr("prefs_priority"),
-                             self._row(priority_mode, priority_value))
+        advanced_form.addRow(
+            tr("prefs_priority"),
+            self._row(priority_mode, priority_value, trailing_stretch=True))
         advanced_form.addRow(QtWidgets.QLabel(tr("prefs_reconnect_hint")))
 
         override = self._check("override_host", tr("prefs_override_host"))
@@ -1284,8 +1271,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         if not info_icon.isNull():
             self._conn_info.setPixmap(info_icon.pixmap(16, 16))
         self._conn_info.setToolTip(tr("conn_info_not_connected"))
-        advanced_form.addRow(tr("prefs_encryption"),
-                             self._info_row(starttls_mode, self._conn_info))
+        advanced_form.addRow(
+            tr("prefs_encryption"),
+            self._row(starttls_mode, self._conn_info, trailing_stretch=True))
 
         self._cert_data: dict = {}
         self._conn_host = ""
@@ -1297,14 +1285,17 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._cert_btn.setEnabled(False)
         self._cert_btn.setToolTip(tr("conn_info_cert_none"))
         self._cert_btn.clicked.connect(self._on_show_certificate)
-        advanced_form.addRow(tr("conn_info_cert"),
-                             self._info_row(None, self._cert_btn))
+        advanced_form.addRow(
+            tr("conn_info_cert"),
+            self._row(self._cert_btn, trailing_stretch=True))
         allow_invalid = self._check(
             "allow_invalid_cert", tr("prefs_allow_invalid_cert"))
         allow_invalid.setStyleSheet("color: #b00020;")
-        advanced_form.addRow(self._info_row(
-            allow_invalid,
-            self._info_label(tr("prefs_allow_invalid_cert_tip"))))
+        self._allow_invalid_info = self._info_label(
+            tr("prefs_allow_invalid_cert_tip"))
+        advanced_form.addRow(
+            self._row(allow_invalid, self._allow_invalid_info,
+                      trailing_stretch=True))
 
         proxy, proxy_form = self._page()
         proxy_form.addRow(self._connection_group())

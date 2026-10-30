@@ -10,7 +10,7 @@ os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
 os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets  # noqa: E402
+from PyQt6 import QtCore, QtWidgets  # noqa: E402
 
 from stanza_im.core.storage import Config  # noqa: E402
 from stanza_im.i18n import load as i18n_load  # noqa: E402
@@ -53,6 +53,27 @@ check("priority selector and value do not overlap",
       dlg._controls["priority_mode"].x()
       + dlg._controls["priority_mode"].width()
       <= dlg._controls["priority"].x())
+advanced_page = tabs.widget(1)
+
+
+def advanced_left(widget):
+    return widget.mapTo(advanced_page, QtCore.QPoint(0, 0)).x()
+
+
+check("priority selector aligns with the resource selector",
+      advanced_left(dlg._controls["priority_mode"])
+      == advanced_left(dlg._controls["resource_mode"]))
+check("priority value aligns with the resource field",
+      advanced_left(dlg._controls["priority"])
+      == advanced_left(dlg._controls["resource"]))
+check("the encryption info icon follows its selector",
+      0 < dlg._conn_info.x() <= dlg._controls["starttls_mode"].width() + 10)
+check("the certificate button starts the field column",
+      dlg._cert_btn.x() == 0)
+check("the allow-invalid info icon follows the checkbox",
+      dlg._controls["allow_invalid_cert"].width()
+      <= dlg._allow_invalid_info.x()
+      <= dlg._controls["allow_invalid_cert"].width() + 10)
 tabs.setCurrentIndex(2)
 app.processEvents()
 for prefix in ("file_proxy", "stun_turn"):
