@@ -2505,10 +2505,17 @@ if HAS_AIORTC:
                 transceivers = self.pc.getTransceivers()
             except Exception:  # noqa: BLE001 - older aiortc
                 return
+            matched = 0
             for transceiver in transceivers:
-                track = getattr(transceiver.receiver, "track", None)
-                if getattr(track, "kind", "") != kind:
+                # ``receiver.track`` is None until the remote track arrives, so
+                # it cannot identify our local transceivers before negotiation.
+                transceiver_kind = getattr(transceiver, "kind", "")
+                if not transceiver_kind:
+                    track = getattr(transceiver.receiver, "track", None)
+                    transceiver_kind = getattr(track, "kind", "")
+                if transceiver_kind != kind:
                     continue
+                matched += 1
                 try:
                     transceiver.setCodecPreferences(ordered)
                     logger.debug("CALL %s codec preference -> %s",
@@ -2516,6 +2523,9 @@ if HAS_AIORTC:
                 except Exception:  # noqa: BLE001 - optional API
                     logger.debug("CALL setCodecPreferences failed",
                                  exc_info=True)
+            if not matched:
+                logger.debug("CALL %s codec preference skipped: "
+                             "no matching transceiver", kind)
 
         # ── SDP ───────────────────────────────────────────────────
         async def create_offer(self) -> str:

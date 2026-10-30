@@ -70,6 +70,42 @@ check("PCMU is moved first", pcmu and pcmu[0].mimeType == "audio/PCMU")
 check("an unknown codec leaves the order alone",
       media._ordered_codecs("video", "bogus") == [])
 
+if media.HAS_AIORTC:
+    class _CodecTransceiver:
+        def __init__(self, kind: str, track_kind: str = ""):
+            self.kind = kind
+            self.receiver = SimpleNamespace(
+                track=(SimpleNamespace(kind=track_kind)
+                       if track_kind else None))
+            self.preferences = []
+
+        def setCodecPreferences(self, codecs):
+            self.preferences.append(codecs)
+
+    class _CodecPC:
+        def __init__(self, transceivers):
+            self._transceivers = transceivers
+
+        def getTransceivers(self):
+            return self._transceivers
+
+    video_tx = _CodecTransceiver("video")
+    audio_tx = _CodecTransceiver("audio")
+    codec_call = media.AiortcCall.__new__(media.AiortcCall)
+    codec_call._codec_choices = {"audio": "auto", "video": "h264"}
+    codec_call.pc = _CodecPC([video_tx, audio_tx])
+    codec_call._apply_codec_preferences("video")
+    check("the codec preference is applied before the remote track exists",
+          len(video_tx.preferences) == 1
+          and video_tx.preferences[0][0].mimeType == "video/H264"
+          and not audio_tx.preferences)
+
+    legacy_tx = _CodecTransceiver("", "video")
+    codec_call.pc = _CodecPC([legacy_tx])
+    codec_call._apply_codec_preferences("video")
+    check("a transceiver without kind falls back to the track kind",
+          len(legacy_tx.preferences) == 1)
+
 # 3. encoder bitrate defaults and live update -------------------------------
 from aiortc.codecs.opus import OpusEncoder  # noqa: E402
 from aiortc.codecs.vpx import Vp8Encoder  # noqa: E402
