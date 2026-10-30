@@ -538,6 +538,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mds_throttle_timer = QtCore.QTimer(self)
         self._mds_throttle_timer.setSingleShot(True)
         self._mds_throttle_timer.timeout.connect(self._flush_mds_pending)
+        #: MDS+MAM unread reconstruction: in-flight and already-resolved points.
+        self._mds_reconciling: set[str] = set()
+        self._mds_reconciled: set[tuple[str, str]] = set()
 
         self._tile_cache = None
         self._tile_prune_timer = None
@@ -2776,6 +2779,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.queue_participant_vcard(room, nick)
             self._client.get_muc_info(room)
         self._sync_conference_roster(room)
+        self._schedule_mds_reconcile(room)
 
     async def _apply_created_room_config(self, room: str, opts: dict) -> None:
         """Apply the "create conference" options to a room we just created."""
@@ -7495,6 +7499,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Mirror the unread counter now (relevant for an already-loaded tab; a
         # scheduled reload re-pushes it once the window is applied).
         self._push_unread_to_chat(jid)
+        self._schedule_mds_reconcile(jid)
         self._push_reaction_pending(jid)
         # An auto-joined room may have loaded its history in the background
         # without touching the counters.  Now that the user actually opened it,
@@ -7872,19 +7877,138 @@ class MainWindow(QtWidgets.QMainWindow):
 
         The remote state is clamped against our own position: what the other
         device read becomes read here too and the read anchor moves to it,
-        while a device that is behind us leaves our counters alone.
+        while a device that is behind us leaves our counters alone.  A state
+        for a conversation with no local unread is also the seed for the
+        MDS+MAM unread reconstruction (variant A).
         """
         key = self._resolve_mds_key(chat_jid)
-        if not key:
+        if not key or not sid:
             return
-        # A conversation without unread messages has nothing to apply.  Touching
-        # it here used to re-anchor the tab to its newest rendered message, so a
-        # remote state published for a message *we* had not seen yet (our own
-        # XEP-0490 echo after a re-login, or a device ahead of us) moved the
-        # stored read point forward and the next open started at the end.
+        self._start_task(self._clamp_read_state(key, sid))
+
+    def _set_mds_anchor(self, key: str, sid: str, ts: str = "") -> None:
+        """Remember a remote displayed point even when nothing is unread."""
         entry = self._unread_chats.get(key)
-        if sid and entry and (entry["unread"] or entry["mentions"]):
-            self._start_task(self._clamp_read_state(key, sid))
+        if entry is None:
+            entry = unread_state.blank()
+            self._unread_chats[key] = entry
+        if entry.get("read_sid") == sid and (
+                not ts or entry.get("read_ts") == ts):
+            return
+        entry["read_sid"] = sid
+        if ts:
+            entry["read_ts"] = ts
+        self._store_read_state(key, entry)
+        self._schedule_unread_save()
+
+    def _schedule_mds_reconcile(self, key: str) -> None:
+        if key:
+            self._start_task(self._reconcile_mds_unread(key))
+
+    async def _reconcile_mds_unread(self, key: str) -> None:
+        """Rebuild unread messages since the shared MDS displayed point.
+
+        MDS itself has no unread counter: a device that was offline only knows
+        the last message another device displayed.  Fetch the gap from MAM (or
+        count the locally replayed rows when MAM is unavailable) and create the
+        unread block from it, so both clients show the same messages.
+        """
+        if not self._client or not key:
+            return
+        if key in self._known_conferences and key not in self._muc_joined:
+            # A room we are not in has no usable room archive yet; its join
+            # path schedules the same reconstruction once the room is live.
+            return
+        open_chat = bool(self._chat_window is not None
+                         and self._chat_window.has_chat(key))
+        if key not in self._muc_joined and not open_chat:
+            # Do not fan out one MAM query per MDS item at login; a 1:1 chat
+            # reconstructs when it is actually opened.
+            return
+        entry = self._unread_chats.get(key)
+        if entry and int(entry.get("unread") or 0) > 0:
+            return
+        sid = (getattr(self._client, "_mds_local", {}) or {}).get(key, "")
+        if not sid and entry:
+            sid = str(entry.get("read_sid") or "")
+        if not sid or key in self._mds_reconciling:
+            return
+        if (key, sid) in self._mds_reconciled:
+            return
+        self._mds_reconciling.add(key)
+        done = False
+        try:
+            from stanza_im.core import history
+            ts = await history.timestamp_for_ref_async(key, sid)
+            if not ts and entry:
+                ts = str(entry.get("read_ts") or "")
+            local_ts = max(str((entry or {}).get("read_ts") or ""),
+                           str((entry or {}).get("seen_ts") or ""))
+            if ts and local_ts and local_ts >= ts:
+                done = True
+                return
+            incoming = 0
+            if key not in self._mam_unsupported:
+                is_muc = (key in self._muc_joined
+                          or key in self._known_conferences
+                          or key in self._muc_self_nicks)
+                incoming = await self._client.fetch_history_mam_after(
+                    key, start_ts=ts or None,
+                    after_id="" if ts else sid, limit=500,
+                    is_muc=is_muc)
+                if incoming is None:
+                    # Another MAM query owns this conversation; retry later.
+                    return
+            count = (await history.count_incoming_after_async(key, ts)
+                     if ts else int(incoming or 0))
+            current = int((self._unread_chats.get(key) or {}).get("unread") or 0)
+            count = max(count, current)
+            self._set_mds_anchor(key, sid, ts)
+            if count <= 0:
+                done = True
+                return
+            chat = (self._chat_window.get_chat(key)
+                    if self._chat_window is not None else None)
+            if (chat is not None and self._chat_area_visible()
+                    and self._chat_window.current_jid() == key
+                    and self._chat_at_bottom(key)):
+                # The user is already looking at the newest message; do not
+                # resurrect a badge for a block that is fully on screen.
+                self._client.mds_mark_displayed(key)
+                done = True
+                return
+            record = self._unread_chats.get(key) or unread_state.blank()
+            record["unread"] = count
+            record["read_sid"] = sid
+            if ts:
+                record["read_ts"] = ts
+            record["seen_ref"] = ""
+            record["seen_ts"] = ""
+            record["seen_sid"] = ""
+            self_nick = self._muc_self_nicks.get(key, "")
+            mentions = 0
+            if self_nick and ts:
+                rows = await history.load_history_async(
+                    key, limit=500, since=ts)
+                mentions = sum(
+                    1 for row in rows
+                    if row.get("direction") != "outgoing"
+                    and mentions_nick(str(row.get("body") or ""), self_nick))
+            record["mentions"] = mentions
+            self._store_read_state(key, record)
+            self._refresh_unread_badge(key)
+            self._push_unread_to_chat(key)
+            self._schedule_unread_save()
+            done = True
+            logger.debug("MDS[reconcile] jid=%s sid=%s unread=%d mentions=%d",
+                         key, sid, count, mentions)
+        except Exception:
+            logger.debug("MDS unread reconstruction failed for %s", key,
+                         exc_info=True)
+        finally:
+            self._mds_reconciling.discard(key)
+            if done:
+                self._mds_reconciled.add((key, sid))
 
     async def _clamp_read_state(self, key: str, sid: str) -> None:
         """Apply a remote displayed state to our own unread block (XEP-0490).
@@ -7892,13 +8016,25 @@ class MainWindow(QtWidgets.QMainWindow):
         The remote ``<displayed/>`` id is resolved against the local archive:
         when it points at a message newer than the newest one we know, the
         other device has seen everything and the counters are dropped with the
-        read anchor moved to it; a device behind us (or an id we have never
-        stored) leaves the unread block untouched.
+        read anchor moved to it; a device behind us leaves the unread block
+        untouched.  An id we cannot resolve is never treated as "seen
+        everything" — with separate local archives that would erase a valid
+        unread block.
         """
         from stanza_im.core import history
         remote_ts = await history.timestamp_for_ref_async(key, sid)
+        entry = self._unread_chats.get(key)
+        has_unread = bool(entry and (entry["unread"] or entry["mentions"]))
+        if not has_unread:
+            self._set_mds_anchor(key, sid, remote_ts)
+            await self._reconcile_mds_unread(key)
+            return
         newest_ts = await history.newest_timestamp_async(key)
-        if remote_ts and newest_ts and remote_ts < newest_ts:
+        if not remote_ts or not newest_ts:
+            logger.debug("MDS[clamp] jid=%s sid=%s unresolved; unread kept",
+                         key, sid)
+            return
+        if remote_ts < newest_ts:
             return
         self._reset_unread(key, anchor={"ref": sid, "ts": remote_ts,
                                         "sid": sid})
@@ -10994,6 +11130,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_avatar_paths.clear()
         self._muc_room_features.clear()
         self._mam_unsupported.clear()
+        self._mds_reconciling.clear()
+        self._mds_reconciled.clear()
         self._bookmarks = {}
         self._bookmarks_loaded = False
         for dialog in self._whiteboards.values():

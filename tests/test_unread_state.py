@@ -9,6 +9,7 @@ import os
 import stat
 import sys
 import tempfile
+from types import SimpleNamespace
 
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_unread_")
 os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
@@ -170,6 +171,12 @@ check("stale catch-up keeps restored unread",
 
 
 # the clamp reads the archive off-loop, so run the scheduled task here
+from stanza_im.core import history
+
+history.store_message(
+    "carol@example.com", "incoming", "new", "2026-10-02T12:00:00Z",
+    sender="carol", archive_id="carol-sid-new", origin_id="carol-sid-new",
+    message_id="carol-sid-new")
 _pending = []
 _start_task = win._start_task
 win._start_task = _pending.append
@@ -226,6 +233,42 @@ _remote("dave@example.com", "arc-1")
 check("a device behind us keeps the unread block",
       win._unread_counts.get("dave@example.com") == 2
       and win._unread_chats["dave@example.com"]["read_sid"] == "arc-2")
+
+win._unread_chats["erin@example.com"] = unread_state.blank()
+win._unread_chats["erin@example.com"]["unread"] = 3
+win._recount_unread()
+_remote("erin@example.com", "unknown-remote-id")
+check("an unresolved remote id never clears unread",
+      win._unread_counts.get("erin@example.com") == 3)
+
+# 5b. MDS+MAM variant A: rebuild unread after a displayed point -------------
+history.store_message("room@example", "incoming", "old", "2026-10-02T11:00:00Z",
+                      sender="bob", archive_id="arc-2", origin_id="arc-2",
+                      message_id="arc-2")
+history.store_message("room@example", "incoming", "new", "2026-10-02T12:00:00Z",
+                      sender="bob", archive_id="arc-3", origin_id="arc-3",
+                      message_id="arc-3")
+recon = MainWindow.__new__(MainWindow)
+recon._client = SimpleNamespace(_mds_local={"room@example": "arc-2"})
+recon._unread_chats = {}
+recon._mam_unsupported = {"room@example"}  # local replay is enough here
+recon._muc_joined = {"room@example"}
+recon._known_conferences = set()
+recon._muc_self_nicks = {}
+recon._chat_window = None
+recon._mds_reconciling = set()
+recon._mds_reconciled = set()
+recon._recount_unread = lambda: None
+recon._refresh_unread_badge = lambda _jid: None
+recon._push_unread_to_chat = lambda _jid: None
+recon._schedule_unread_save = lambda: None
+asyncio.get_event_loop().run_until_complete(
+    recon._reconcile_mds_unread("room@example"))
+check("variant A rebuilds unread from the displayed point",
+      recon._unread_chats["room@example"]["unread"] == 1
+      and recon._unread_chats["room@example"]["read_sid"] == "arc-2"
+      and recon._unread_chats["room@example"]["read_ts"]
+      == "2026-10-02T11:00:00Z")
 
 win._pm_targets["room@conf.example/dave"] = ("room@conf.example", "dave")
 check("a private message resolves to its own conversation",

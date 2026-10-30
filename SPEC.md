@@ -2245,7 +2245,14 @@ Registers XEP plugins (conditionally where noted):
   own key, a full address collapses to the bare JID) and the remote `sid` is
   resolved in the local archive — a device at or beyond our newest message
   clears the unread/mention counters and moves the read anchor to it, while a
-  device behind us (or an id we never stored) clears them; no chat status line
+  device behind us keeps the unread block. An id we never stored is not
+  treated as "seen everything" (with separate local archives that would erase
+  a valid block); it is logged and ignored. A remote state for a chat with no
+  local unread seeds the read anchor and starts `_reconcile_mds_unread`: on
+  join/open it resolves the displayed timestamp, fetches the gap with MAM after
+  it (or RSM `after` on the archive id for a MUC), counts the incoming rows
+  after the displayed point and creates the unread block; replay/MAM copies
+  deduplicate, so both clients show the same unread block. No chat status line
   is shown. `_mds_apply_remote` skips a state equal to `_mds_local` and any sid
   this client published itself (`_mds_own_sids`) — the server may buffer the
   echo of our own publish while the client is inactive (XEP-0352), and it must

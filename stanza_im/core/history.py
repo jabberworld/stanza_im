@@ -797,6 +797,22 @@ def count_messages(jid: str) -> int:
         return 0
 
 
+def count_incoming_after(jid: str, timestamp: str) -> int:
+    """Incoming messages stored strictly after *timestamp* (unread block)."""
+    if not timestamp:
+        return 0
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT COUNT(*) FROM messages "
+                "WHERE direction = 'incoming' AND timestamp > ?",
+                (str(timestamp),)).fetchone()
+            return int(row[0]) if row else 0
+    except sqlite3.Error:
+        return 0
+
+
 def message_exists(jid: str, stable_id: str) -> bool:
     """True when a locally stored message carries *stable_id*.
 
@@ -1083,6 +1099,10 @@ async def newest_timestamp_async(jid: str) -> str:
 
 async def timestamp_for_ref_async(jid: str, stable_id: str) -> str:
     return await asyncio.to_thread(timestamp_for_ref, jid, stable_id)
+
+
+async def count_incoming_after_async(jid: str, timestamp: str) -> int:
+    return await asyncio.to_thread(count_incoming_after, jid, timestamp)
 
 
 async def message_exists_async(jid: str, stable_id: str) -> bool:

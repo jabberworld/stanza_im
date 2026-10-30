@@ -2018,11 +2018,20 @@ verbatim, so it never clears the conference) and, when something is unread,
 `_clamp_read_state` resolves the remote `sid` in the local archive
 (`history.timestamp_for_ref`, `newest_timestamp`): a device that has seen at
 least as much as we have drops our counters and moves the read anchor to it,
-while a device that is behind us leaves the unread block untouched (an id we
-never stored is treated as "seen everything"). `_mds_apply_remote` skips a state
-equal to the one already recorded in `_mds_local`; that map is seeded at connect
-from the persisted unread state, so the startup catch-up does not wipe restored
-unread (see the unread-counters paragraph above).
+while a device that is behind us leaves the unread block untouched. An id we
+never stored is **never** treated as "seen everything": with separate local
+archives that would erase a valid unread block, so it is logged and ignored.
+A remote state for a chat with no local unread also seeds the read anchor and
+starts `_reconcile_mds_unread` (variant A): on join/open it resolves the
+displayed timestamp, fetches the gap with MAM after it (or RSM `after` on the
+archive id for a MUC), counts the incoming rows after the displayed point and
+creates the unread block; a join-time replay and the MAM page deduplicate, and
+`_mds_reconciling`/`_mds_reconciled` keep the work once per point. Both clients
+therefore show the same unread block instead of one starting from zero.
+`_mds_apply_remote` skips a state equal to the one already recorded in
+`_mds_local`; that map is seeded at connect from the persisted unread state, so
+the startup catch-up does not wipe restored unread (see the unread-counters
+paragraph above).
 
 **Partial read progress (`seen`)**: the WebEngine scroll poll returns every
 visible `#chat .stanza-message` ref (not only the bottom-most one), so

@@ -7593,6 +7593,7 @@ class JabberClient:
 
     async def _fetch_history_mam_impl(self, jid: str, since: str | None,
                                        limit: int) -> int:
+        from stanza_im.core import history
         mam = self.xmpp.plugin["xep_0313"]
         end = None
         if since:
@@ -7666,15 +7667,123 @@ class JabberClient:
             else:
                 logger.warning("MAM results for %s have no archive cursor", jid)
 
-        me = self.jid_str.split("@")[0]
+        rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+        stored = 0
+        duplicates = 0
+        if rows:
+            inserted = await history.store_many_async(jid, rows)
+            stored = inserted
+            duplicates = len(rows) - inserted
+        logger.info("MAM returned %d results for %s: parsed=%d skipped=%d "
+                    "duplicates=%d stored=%d", len(results), jid, parsed,
+                    skipped, duplicates, stored)
+        if skip_reasons:
+            logger.info("MAM skip reasons for %s: %s", jid, skip_reasons)
+        if results and parsed and not stored and not duplicates:
+            self.emit("mam_parse_error", jid, len(results), parsed, skipped)
+            return -1
+        return stored + duplicates
+
+    async def fetch_history_mam_after(self, jid: str, start_ts: str | None = None,
+                                      after_id: str = "",
+                                      limit: int = 100,
+                                      is_muc: bool | None = None) -> int | None:
+        """Fetch messages after a displayed point (MDS unread reconstruction).
+
+        Unlike :meth:`fetch_history_mam` this walks forward from *start_ts* (or
+        from the RSM ``after`` archive id when no timestamp is known) and
+        returns the number of incoming rows found.  Stored rows are deduplicated
+        by the history layer, so a join-time replay and this query can overlap.
+        """
+        if jid in self._mam_inflight:
+            return None
+        self._mam_inflight.add(jid)
+        try:
+            return await self._fetch_history_mam_after_impl(
+                jid, start_ts, after_id, limit, is_muc)
+        finally:
+            self._mam_inflight.discard(jid)
+
+    async def _fetch_history_mam_after_impl(self, jid: str,
+                                            start_ts: str | None,
+                                            after_id: str,
+                                            limit: int,
+                                            is_muc: bool | None) -> int:
+        mam = self.xmpp.plugin["xep_0313"]
+        start = None
+        if start_ts:
+            try:
+                start = datetime.datetime.fromisoformat(
+                    str(start_ts).replace("Z", "+00:00"))
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=datetime.timezone.utc)
+            except ValueError:
+                start = None
+        rsm = {"max": max(1, int(limit))}
+        if start is None:
+            if not after_id:
+                return 0
+            rsm["after"] = str(after_id)
+        results = []
+        last_error = None
+        if is_muc is None:
+            is_muc = jid in self.groupchats
+        for use_archive_jid, _query_end in self._mam_query_modes(
+                is_muc, None):
+            mode = "jid" if use_archive_jid else "with_jid"
+            logger.info("MAM after query for %s: mode=%s start=%s after=%s "
+                        "max=%s", jid, mode, start, rsm.get("after"), limit)
+            try:
+                task = (mam.retrieve(jid=jid, start=start, rsm=rsm)
+                        if use_archive_jid
+                        else mam.retrieve(with_jid=jid, start=start, rsm=rsm))
+                iq = await asyncio.wait_for(task, timeout=25.0)
+                if str(iq.get("type", "result")) == "error":
+                    last_error = iq
+                    logger.warning("MAM after IQ error for %s (%s): %s",
+                                   jid, mode, str(iq))
+                    continue
+                last_error = None
+                results = iq.get("mam", {}).get("results") or []
+                logger.info("MAM after query for %s returned %d results",
+                            jid, len(results))
+                if results:
+                    break
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+                logger.info("MAM after query timed out for %s", jid)
+            except Exception as exc:
+                last_error = exc
+                logger.debug("MAM after query for %s failed: %r", jid, exc)
+        if not results:
+            if last_error is not None:
+                logger.debug("MAM after returned no usable results for %s: %r",
+                             jid, last_error)
+            return 0
+        rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+        if start_ts:
+            rows = [row for row in rows
+                    if str(row.get("timestamp") or "") > str(start_ts)]
+        if rows:
+            from stanza_im.core import history
+            await history.store_many_async(jid, rows)
+        incoming = sum(1 for row in rows
+                       if row.get("direction") == "incoming")
+        logger.info("MAM after for %s: parsed=%d skipped=%d incoming=%d",
+                    jid, parsed, skipped, incoming)
+        if skip_reasons:
+            logger.info("MAM after skip reasons for %s: %s",
+                        jid, skip_reasons)
+        return incoming
+
+    def _mam_rows(self, jid: str, results) -> tuple[list[dict], int, int, dict]:
+        """Parse MAM results into history rows (shared by before/after queries)."""
         my_nick = ""
         gi = self.groupchats.get(jid)
         if gi:
             my_nick = gi.nick
-        stored = 0
         parsed = 0
         skipped = 0
-        duplicates = 0
         skip_reasons: dict[str, int] = {}
         rows: list[dict] = []
         for result in results:
@@ -7728,7 +7837,6 @@ class JabberClient:
                         skip_reasons["wrong_sender"] = (
                             skip_reasons.get("wrong_sender", 0) + 1)
                         continue
-                from stanza_im.core import history
                 if jid in self.groupchats:
                     stable = _stanza_id(msg, jid) or _archive_result_id(result)
                 else:
@@ -7753,19 +7861,7 @@ class JabberClient:
                 logger.debug("Could not parse MAM result for %s",
                              jid, exc_info=True)
                 continue
-        if rows:
-            inserted = await history.store_many_async(jid, rows)
-            stored = inserted
-            duplicates = len(rows) - inserted
-        logger.info("MAM returned %d results for %s: parsed=%d skipped=%d "
-                    "duplicates=%d stored=%d", len(results), jid, parsed,
-                    skipped, duplicates, stored)
-        if skip_reasons:
-            logger.info("MAM skip reasons for %s: %s", jid, skip_reasons)
-        if results and parsed and not stored and not duplicates:
-            self.emit("mam_parse_error", jid, len(results), parsed, skipped)
-            return -1
-        return stored + duplicates
+        return rows, parsed, skipped, skip_reasons
 
     def _on_chatstate(self, msg) -> None:
         # Chat states (XEP-0085) apply to 1:1 messaging only — ignore
