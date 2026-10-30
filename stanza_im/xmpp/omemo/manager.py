@@ -436,8 +436,14 @@ class OmemoManager:
         if changed:
             self._plugin.storage.set_app("device_aliases", aliases)
             self._plugin.storage.set_app("device_last_seen", seen)
-        wanted = set(self._aliases()) | set(self._names())
-        if (wanted - set(self._server_names)) and not self._publish_pending:
+        aliases = self._aliases()
+        needs_publish = any(
+            self._server_names.get(key) != name
+            for key, name in aliases.items())
+        if not needs_publish:
+            needs_publish = any(key not in self._server_names
+                                for key in self._names())
+        if needs_publish and not self._publish_pending:
             await self._publish_aliases()
 
     def _seen_map(self) -> dict:

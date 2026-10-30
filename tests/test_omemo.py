@@ -889,6 +889,23 @@ check("an empty server node is seeded from local aliases",
           for e in (_c5.published[-1] if _c5.published else [])))
 
 
+async def _run_local_alias_wins():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr.set_device_alias("bob@example.com", 2, "New name")
+    c.server_entries = [{"jid": "bob@example.com", "id": "2",
+                         "alias": "Old name"}]
+    await mgr.sync_aliases()
+    return c
+
+
+_c5b = asyncio.run(_run_local_alias_wins())
+check("a local alias differing from the server is republished",
+      any(e.get("jid") == "bob@example.com" and e.get("id") == "2"
+          and e.get("alias") == "New name"
+          for e in (_c5b.published[-1] if _c5b.published else [])))
+
+
 async def _run_fetch_failure():
     mgr, c = _make_manager()
     mgr.alias_sync = True
