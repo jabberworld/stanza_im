@@ -45,6 +45,8 @@ stanza_im/
 │   ├── history.py      — SQLite chat-history access (day/summary + async wrappers)
 │   ├── known_contacts.py — persisted JID → name/groups/conference registry
 │   ├── omemo_aliases.py — XEP-0384 device-name aliases (private PEP node)
+│   ├── notification_priorities.py — per-contact priority (private PEP node)
+│   ├── private_pep.py  — raw private-PEP publish helper (XML publish-options)
 │   ├── unread_state.py — persisted per-chat read state (unread/mentions/anchor)
 │   ├── profiles.py     — account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py  — vCard avatar download/cache coordination
@@ -137,7 +139,8 @@ stanza_im/
 
 Root-level documents: `README.md` (overview), `FEATURES.md` (user-facing feature
 list), `AGENTS.md` (architecture), `SPEC.md` (this file), `XEPs.md` (supported
-extensions) and `CHECKLIST.md` (XEP-0479 compliance).
+extensions) and `CHECKLIST.md` (XEP-0479 compliance). `docs/namespaces/` holds
+wire specifications for non-XEP namespaces used by Stanza IM.
 
 Additional dialogs include `ui/preferences.py`, `ui/add_contact_dialog.py`
 and `ui/conference_dialog.py`. The add-contact dialog keeps the "Service ID
@@ -2605,7 +2608,11 @@ Registers XEP plugins (conditionally where noted):
   publish is the union of local aliases, the node's current names (preserved)
   and learned names, and the node snapshot is fetched before the first publish
   so another client's names are not wiped. Fetched names merge into the local
-  aliases (local wins).
+  aliases (local wins). A failed fetch leaves the node state unknown (never an
+  empty overwrite), an absent node is seeded from the local aliases, and a
+  cleared alias drops its server-snapshot entry so it cannot be resurrected.
+  Publishing goes through `core/private_pep.py` (raw IQ + XML
+  `publish-options`; slixmpp's dict form is not used).
   [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)
@@ -3210,7 +3217,9 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   the private PEP node `urn:xmpp:notification-priority:0` (access `whitelist`;
   `JabberClient.get/set_notification_priorities`). On login the server values
   are merged in (the server wins for a stored contact) and a change publishes
-  the whole set.
+  the whole set. A local entry missing from the server is uploaded after the
+  sync, so a change made while an earlier publish failed is not lost. The node
+  is published by `core/private_pep.py` (raw IQ + XML `publish-options`).
 - The **effective** priority of a message is the user setting (`high`/`low`)
   over the XEP-0131 `Urgency` header (`JabberClient._shim_urgency`; `medium`
   maps to normal). Handling: `low` suppresses only the message OSD (unread /

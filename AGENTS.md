@@ -54,6 +54,8 @@ stanza_im/                      # Python package
 │   ├── history.py               # SQLite history; RLock + store_many + async wrappers
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
 │   ├── omemo_aliases.py         # XEP-0384 device-name aliases (private PEP node)
+│   ├── notification_priorities.py # Per-contact priority (private PEP node)
+│   ├── private_pep.py           # Raw private-PEP publish helper (XML publish-options)
 │   ├── unread_state.py          # Persisted per-chat read state (unread/mentions/anchor)
 │   ├── profiles.py              # Account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
@@ -170,6 +172,7 @@ AGENTS.md                        # This architecture guide (living document)
 SPEC.md                          # Detailed specification (living document)
 XEPs.md                          # Supported XEP list (living document)
 CHECKLIST.md                     # XEP-0479 Client/Advanced Client checklist
+docs/namespaces/                 # Wire specs for non-XEP namespaces used by Stanza IM
 ```
 
 Additional UI modules include `ui/preferences.py`, `ui/add_contact_dialog.py`,
@@ -848,7 +851,11 @@ in the profile (`notification_priorities.json`) and is mirrored to the private
 PEP node `urn:xmpp:notification-priority:0` (access `whitelist`;
 `JabberClient.get/set_notification_priorities`, like the OMEMO aliases); on
 login the server values are merged in (the server wins) and a change publishes
-the whole set. The **effective** priority is the user setting (`high`/`low`)
+the whole set. A local entry missing from the server is uploaded after the
+sync, so a change made while an earlier publish failed is not lost. Both
+private nodes are published by `core/private_pep.py` (raw IQ with an XML
+`publish-options` form; slixmpp's dict form is not used). The **effective**
+priority is the user setting (`high`/`low`)
 over the XEP-0131 `Urgency` header (`medium` → normal; `JabberClient.
 _shim_urgency`). Handling: `low` suppresses only the message OSD (unread /
 mentions / digest are unchanged); `high` shows the normal message OSD **and** a
@@ -2241,7 +2248,11 @@ node has no name for that device (it fills gaps, never overwrites); a publish is
 the union of local aliases, the node's current names (preserved) and learned
 names, and the node snapshot is fetched before the first publish so another
 client's names are never wiped. Fetched server names merge into the local
-aliases (local wins). The QR code is
+aliases (local wins). A failed fetch leaves the node state unknown (never an
+empty overwrite), an absent node is seeded from the local aliases, and a
+cleared alias drops its server-snapshot entry so it cannot be resurrected.
+Publishing goes through `core/private_pep.py` (raw IQ + XML
+`publish-options`; slixmpp's dict form is not used). The QR code is
 rendered by a bundled pure-Python encoder (`qr.py`). UI: the Privacy
 preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
 (per-row icon actions for trust/rename/copy/delete; only global Refresh/Close
@@ -3836,6 +3847,7 @@ that makes them stale:
   (`AGENTS.md` Directory Structure, `SPEC.md` §3);
 - architecture, UI patterns, shortcuts or dependencies → `AGENTS.md` and
   `SPEC.md` (relevant section);
+- non-XEP wire namespace added/changed → `docs/namespaces/` and its index;
 - new/removed **user-facing feature** → `FEATURES.md` (and, when it changes the
   XEP surface, `XEPs.md`).  `FEATURES.md` is the user-facing feature list: a
   Russian bulleted list of bold categories with short, jargon-free phrases

@@ -21,6 +21,8 @@ import json
 import logging
 import os
 
+from slixmpp.exceptions import IqError
+
 from stanza_im.include.constants import DATA_DIR
 
 logger = logging.getLogger("stanza_im.priority")
@@ -137,32 +139,38 @@ def parse_payload(xml) -> list[dict]:
     return entries
 
 
-async def fetch(client) -> list[dict]:
-    """Fetch the priority entries from the account's private node."""
+async def fetch(client) -> list[dict] | None:
+    """Fetch the priority entries from the account's private node.
+
+    ``[]`` means the node does not exist yet (a normal first login);
+    ``None`` means the request itself failed and the local state must not be
+    treated as the complete server state.
+    """
     try:
         iq = await client.xmpp["xep_0060"].get_items(client.jid_str, NODE)
+    except IqError as exc:
+        condition = str(getattr(exc, "condition", "") or "")
+        if condition == "item-not-found":
+            return []
+        logger.debug("Notification priorities fetch failed: %s", exc)
+        return None
     except Exception as exc:  # noqa: BLE001
         logger.debug("Notification priorities fetch failed: %s", exc)
-        return []
-    items = iq["pubsub"]["items"]
-    for item in items:
-        payload = item["payload"]
-        for child in payload:
-            if child.tag == f"{{{NS}}}notification-priorities":
-                return parse_payload(child)
+        return None
+    try:
+        items = iq["pubsub"]["items"]
+        for item in items:
+            payload = item["payload"]
+            for child in payload:
+                if child.tag == f"{{{NS}}}notification-priorities":
+                    return parse_payload(child)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Notification priorities payload parse failed: %s", exc)
+        return None
     return []
 
 
 async def publish(client, entries: list[dict]) -> bool:
     """Publish the priority entries to the account's private node."""
-    payload = build_payload(entries)
-    try:
-        await client.xmpp["xep_0060"].publish(
-            client.jid_str, NODE, id="current", payload=payload,
-            options={"pubsub#access_model": "whitelist",
-                     "pubsub#persist_items": "true",
-                     "pubsub#max_items": "1"})
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Notification priorities publish failed: %s", exc)
-        return False
+    from stanza_im.core import private_pep
+    return await private_pep.publish(client, NODE, build_payload(entries))

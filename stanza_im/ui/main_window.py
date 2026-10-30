@@ -10503,14 +10503,17 @@ class MainWindow(QtWidgets.QMainWindow):
             entries = await self._client.get_notification_priorities()
         except Exception:  # noqa: BLE001
             return
-        if not entries:
+        if entries is None:
             return
         changed = False
+        server_jids: set[str] = set()
         for entry in entries:
             jid = str(entry.get("jid") or "").split("/", 1)[0]
             priority = str(entry.get("priority") or "")
-            if jid and priority in ("high", "low") \
-                    and self._notification_priorities.get(jid) != priority:
+            if not jid or priority not in ("high", "low"):
+                continue
+            server_jids.add(jid)
+            if self._notification_priorities.get(jid) != priority:
                 self._notification_priorities[jid] = priority
                 changed = True
         if changed:
@@ -10520,6 +10523,8 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:  # noqa: BLE001
                 pass
             self._update_priority_sticky()
+        if set(self._notification_priorities) - server_jids:
+            self._schedule_priority_publish()
 
     def _build_priority_menu(self, parent_menu, jid: str = "",
                              group: str = "") -> None:

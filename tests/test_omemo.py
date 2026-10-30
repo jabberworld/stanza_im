@@ -734,6 +734,8 @@ class _MgrClient:
 
     async def get_omemo_aliases(self):
         self.get_calls += 1
+        if self.server_entries is None:
+            return None
         return list(self.server_entries)
 
     async def set_omemo_aliases(self, entries):
@@ -869,6 +871,53 @@ check("the first publish loads the node snapshot (no wipe)",
       _c4b.get_calls >= 1
       and any(e.get("jid") == "carol@x" for e in (_c4b.published[-1]
                                                   if _c4b.published else [])))
+
+
+async def _run_empty_node_seed():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr.set_device_alias("bob@example.com", 2, "My Gajim")
+    c.server_entries = []
+    await mgr.sync_aliases()
+    return c
+
+
+_c5 = asyncio.run(_run_empty_node_seed())
+check("an empty server node is seeded from local aliases",
+      any(e.get("jid") == "bob@example.com" and e.get("id") == "2"
+          and e.get("alias") == "My Gajim"
+          for e in (_c5.published[-1] if _c5.published else [])))
+
+
+async def _run_fetch_failure():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr.set_device_alias("bob@example.com", 2, "My Gajim")
+    c.server_entries = None
+    await mgr.sync_aliases()
+    return mgr, c
+
+
+_mgr6, _c6 = asyncio.run(_run_fetch_failure())
+check("a failed fetch does not publish or mark the node loaded",
+      not _c6.published and not _mgr6._server_loaded)
+
+
+async def _run_clear_alias():
+    mgr, c = _make_manager()
+    mgr.alias_sync = True
+    mgr._server_loaded = True
+    mgr._server_names = {"bob@example.com/2": "Old"}
+    mgr.set_device_alias("bob@example.com", 2, "")
+    await asyncio.sleep(0)
+    return c
+
+
+_c7 = asyncio.run(_run_clear_alias())
+_pub7 = _c7.published[-1] if _c7.published else []
+check("a cleared alias is not resurrected from the server snapshot",
+      not any(e.get("jid") == "bob@example.com" and e.get("id") == "2"
+              and e.get("alias") == "Old" for e in _pub7))
 
 # MUC guard: the device<->resource mapping is only learned for 1:1.
 _client_src = open(os.path.join(

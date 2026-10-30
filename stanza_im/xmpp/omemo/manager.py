@@ -229,6 +229,7 @@ class OmemoManager:
             aliases[key] = name
         else:
             aliases.pop(key, None)
+            self._server_names.pop(key, None)
         self._plugin.storage.set_app("device_aliases", aliases)
         if self.alias_sync:
             self._schedule_alias_publish()
@@ -384,17 +385,20 @@ class OmemoManager:
             if not self._server_loaded:
                 try:
                     entries = await self._client.get_omemo_aliases()
-                    self._server_names = {
-                        f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
-                        for e in entries
-                        if e.get("jid") and e.get("id")}
                 except Exception:  # noqa: BLE001
-                    pass
+                    entries = None
+                if entries is None:
+                    return
+                self._server_names = {
+                    f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
+                    for e in entries
+                    if e.get("jid") and e.get("id")}
                 self._server_loaded = True
             entries = self._alias_entries()
-            await self._client.set_omemo_aliases(entries)
-            self._server_names = {f"{e['jid']}/{e['id']}": e.get("alias", "")
-                                  for e in entries}
+            if await self._client.set_omemo_aliases(entries):
+                self._server_names = {
+                    f"{e['jid']}/{e['id']}": e.get("alias", "")
+                    for e in entries}
         except Exception:  # noqa: BLE001
             logger.debug("OMEMO alias publish failed", exc_info=True)
         finally:
@@ -406,12 +410,12 @@ class OmemoManager:
             entries = await self._client.get_omemo_aliases()
         except Exception:  # noqa: BLE001
             return
+        if entries is None:
+            return
         self._server_names = {
             f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
             for e in entries if e.get("jid") and e.get("id")}
         self._server_loaded = True
-        if not entries:
-            return
         aliases = self._aliases()
         seen = self._seen_map()
         changed = False
@@ -432,6 +436,9 @@ class OmemoManager:
         if changed:
             self._plugin.storage.set_app("device_aliases", aliases)
             self._plugin.storage.set_app("device_last_seen", seen)
+        wanted = set(self._aliases()) | set(self._names())
+        if (wanted - set(self._server_names)) and not self._publish_pending:
+            await self._publish_aliases()
 
     def _seen_map(self) -> dict:
         data = self._plugin.storage.get_app("device_last_seen", {})

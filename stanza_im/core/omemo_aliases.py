@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from xml.etree import ElementTree as ET
 
+from slixmpp.exceptions import IqError
+
 logger = logging.getLogger("stanza_im.omemo")
 
 NS = "urn:xmpp:omemo:aliases:0"
@@ -51,32 +53,38 @@ def parse_payload(xml) -> list[dict]:
     return entries
 
 
-async def fetch(client) -> list[dict]:
-    """Fetch the alias entries from the account's private node."""
+async def fetch(client) -> list[dict] | None:
+    """Fetch the alias entries from the account's private node.
+
+    ``[]`` means the node does not exist yet (a normal first login);
+    ``None`` means the request itself failed and the local state must not be
+    treated as the complete server state.
+    """
     try:
         iq = await client.xmpp["xep_0060"].get_items(client.jid_str, NODE)
+    except IqError as exc:
+        condition = str(getattr(exc, "condition", "") or "")
+        if condition == "item-not-found":
+            return []
+        logger.debug("OMEMO aliases fetch failed: %s", exc)
+        return None
     except Exception as exc:  # noqa: BLE001
         logger.debug("OMEMO aliases fetch failed: %s", exc)
-        return []
-    items = iq["pubsub"]["items"]
-    for item in items:
-        payload = item["payload"]
-        for child in payload:
-            if child.tag == f"{{{NS}}}omemo-aliases":
-                return parse_payload(child)
+        return None
+    try:
+        items = iq["pubsub"]["items"]
+        for item in items:
+            payload = item["payload"]
+            for child in payload:
+                if child.tag == f"{{{NS}}}omemo-aliases":
+                    return parse_payload(child)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OMEMO aliases payload parse failed: %s", exc)
+        return None
     return []
 
 
 async def publish(client, entries: list[dict]) -> bool:
     """Publish the alias entries to the account's private node."""
-    payload = build_payload(entries)
-    try:
-        await client.xmpp["xep_0060"].publish(
-            client.jid_str, NODE, id="current", payload=payload,
-            options={"pubsub#access_model": "whitelist",
-                     "pubsub#persist_items": "true",
-                     "pubsub#max_items": "1"})
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("OMEMO aliases publish failed: %s", exc)
-        return False
+    from stanza_im.core import private_pep
+    return await private_pep.publish(client, NODE, build_payload(entries))
