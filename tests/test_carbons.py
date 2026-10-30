@@ -49,8 +49,8 @@ c = JabberClient("me@example.com/res1", "pw", message_carbons=True)
 check("carbons toggle stored", c.message_carbons is True)
 got_received = []
 got_sent = []
-c.on("message_received", lambda *a: got_received.append(a))
-c.on("message_carbon_sent", lambda *a: got_sent.append(a))
+c.on("message_received", lambda *a, **k: got_received.append(a))
+c.on("message_carbon_sent", lambda *a, **k: got_sent.append(a))
 
 
 def make_received(body="hello", mid="in-1", mtype="chat"):
@@ -99,6 +99,11 @@ c._on_carbon_sent(make_sent())
 check("carbon sent emitted",
       len(got_sent) == 1 and got_sent[0][0] == "bob@example.com"
       and got_sent[0][1] == "out" and got_sent[0][3] == "out-1")
+
+c._on_carbon_sent(make_sent(body="", mid="receipt-1"))
+check("a bodyless sent carbon is ignored", len(got_sent) == 1)
+c._on_carbon_received(make_received(body="", mid="receipt-2"))
+check("a bodyless received carbon is ignored", len(got_received) == 1)
 
 # carbons disabled → no enable call on session start is driven by the flag;
 # verify the flag is honoured when constructing the client.

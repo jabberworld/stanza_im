@@ -6387,9 +6387,13 @@ class JabberClient:
         if retract_ref:
             self.emit("message_retracted", frm, retract_ref)
             return
+        media = message_media(inner)
+        if not body and not media:
+            # Receipts, chat markers and other bodyless carbon copies are not
+            # chat messages; rendering them would create empty "Me" rows.
+            return
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
-        media = message_media(inner)
         markup = message_markup(inner)
         server_sid = _stanza_id(inner, self.jid_str)
         if server_sid:
@@ -6418,9 +6422,13 @@ class JabberClient:
         if retract_ref:
             self.emit("message_retracted_own", bare, retract_ref)
             return
+        media = message_media(inner)
+        if not body and not media:
+            # A carbon copy of a receipt/chat marker has no body and is not a
+            # message; it must not render as an empty outgoing "Me" row.
+            return
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
-        media = message_media(inner)
         markup = message_markup(inner)
         self.emit("message_carbon_sent", bare, body, ts,
                   stable_id, reply_to, reply_id, media=media, markup=markup)

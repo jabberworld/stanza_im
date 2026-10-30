@@ -2216,6 +2216,9 @@ Registers XEP plugins (conditionally where noted):
   stable_id, reply_to, reply_id)`; MainWindow shows it as an outgoing "Me"
   message in the target chat and stores it in history, so every device keeps
   the same conversation view.
+- A bodyless forwarded copy (a receipt, chat marker or other non-message
+  payload) is ignored by both carbon handlers; it must not become an empty
+  outgoing "Me" row.
 - Non-`chat`/`normal` forwards (e.g. groupchat) are ignored, and nothing is
   ever re-forwarded/acknowledged in response to a carbon.
 

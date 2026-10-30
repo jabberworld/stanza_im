@@ -1995,6 +1995,8 @@ after initial presence; forwarded 1:1 copies from other of our resources are
 picked out of `<received>`/`<sent>` with `_carbon_inner` and emitted as
 `message_received(..., carbon=True)` / `message_carbon_sent(...)`, so the UI
 renders and stores multi-device activity like normal incoming/outgoing messages.
+A bodyless carbon copy (a receipt, chat marker or other non-message payload) is
+ignored: it would otherwise render as an empty outgoing "Me" row.
 
 Message Displayed Synchronization (XEP-0490, `chat.message_displayed_sync`,
 default on): the latest server `stanza-id` per chat is tracked on receive and
