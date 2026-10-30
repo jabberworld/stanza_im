@@ -322,13 +322,19 @@ check("a stored custom camera mode stays selected",
       dlg3._controls["devices_camera_mode"].currentData()
       == "1280x720@30:mjpeg")
 dlg3.show()
+for _row in range(dlg3._sections.count()):
+    if dlg3._sections.item(_row).text() == "Calls":
+        dlg3._sections.setCurrentRow(_row)
+        break
 app.processEvents()
 _camera_mode = dlg3._controls["devices_camera_mode"]
 check("the camera mode selector has the shared selector width",
       _camera_mode.width() == prefs_mod.COMBO_WIDTH)
-check("the camera mode info icon aligns with the camera test button",
-      abs(dlg3._camera_mode_info.mapTo(dlg3, QtCore.QPoint(0, 0)).x()
-          - dlg3._camera_test_button.mapTo(dlg3, QtCore.QPoint(0, 0)).x())
+check("the camera mode info icon centre aligns with the camera test button",
+      abs(dlg3._camera_mode_info.mapTo(
+              dlg3, QtCore.QPoint(dlg3._camera_mode_info.width() // 2, 0)).x()
+          - dlg3._camera_test_button.mapTo(
+              dlg3, QtCore.QPoint(dlg3._camera_test_button.width() // 2, 0)).x())
       <= 1)
 dlg3._apply_settings()
 check("apply keeps the camera mode",

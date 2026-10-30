@@ -683,6 +683,11 @@ class PreferencesDialog(QtWidgets.QDialog):
                 lambda _idx: self._refresh_camera_modes())
         self._camera_mode_info = self._info_label(
             tr("prefs_camera_mode_tip"))
+        # Match the 24 px body of the device-test QToolButtons: a 16 px QLabel
+        # would put the glyph centre 4 px left of the button icons.
+        self._camera_mode_info.setFixedSize(24, 24)
+        self._camera_mode_info.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignCenter)
         form.addRow(
             tr("prefs_camera_mode"),
             self._row(self._camera_mode_combo, self._camera_mode_info,
