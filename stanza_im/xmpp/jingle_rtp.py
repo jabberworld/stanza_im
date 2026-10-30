@@ -1446,7 +1446,14 @@ class JingleRtpManager:
             self.client.emit("call_ended", sid, "", reason)
             return
         logger.info("CALL terminated by peer: %s (%s)", session.sid, reason)
-        self._close_session(session, "ended", reason)
+        # The remote ended the call deliberately: keep the last frame visible
+        # with the "call ended" overlay until the user closes the window.
+        self.client.emit("call_ended_remote", session.sid,
+                         session.peer_full, reason)
+        # Let the UI paint the "call ended" overlay before the (possibly
+        # slow) Qt Multimedia/peer-connection teardown blocks the loop.
+        await asyncio.sleep(0.05)
+        self._close_session(session, "ended", reason, notify=False)
 
     # ── jingle-message (XEP-0353) ─────────────────────────────────
     def handle_message(self, msg) -> bool:

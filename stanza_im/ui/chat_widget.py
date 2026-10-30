@@ -416,6 +416,7 @@ class ChatWidget(QtWidgets.QWidget):
     subject_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
     text_scale_changed = QtCore.pyqtSignal(str, float)   # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)  # url, kind, fullscreen
+    image_load_requested = QtCore.pyqtSignal(str)             # gated image URL
     media_save_requested = QtCore.pyqtSignal(str)             # url
     media_copy_requested = QtCore.pyqtSignal(str)             # url
     share_requested = QtCore.pyqtSignal(str)                  # shared content
@@ -1017,6 +1018,10 @@ class ChatWidget(QtWidgets.QWidget):
             return
         if url.startswith("stanza:jump:"):
             self._jump_to_message(unquote(url[len("stanza:jump:"):]))
+            return
+        if url.startswith("stanza:image-load:"):
+            self.image_load_requested.emit(
+                unquote(url[len("stanza:image-load:"):]))
             return
         if url.startswith("stanza:view:"):
             self._handle_media_view_uri(url)

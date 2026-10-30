@@ -465,6 +465,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `calls.motion_boost` | `false` | Opt-in fast local-motion bitrate recovery (10% every 500 ms while loss is below 5%); applied to active calls live. |
 | `calls.incoming_max_kbps` | `0` | Ask the peer to keep incoming video below this cap (0 = auto; 200/500/1000/1500 presets) by clamping our REMB feedback. |
 | `calls.pip` | `true` | Default for new 1:1 video calls: show a picture-in-picture view of our outgoing camera/screen. The in-call button changes only that call and is not persisted. |
+| `chat.image_limit_chat_mb` | `5` | Maximum announced/cached image size for previews in 1:1 and private chats; larger images show a fixed placeholder with «Загрузить изображение» (0 = unlimited). |
+| `chat.image_limit_conference_mb` | `2` | Same limit for conference images. |
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
@@ -3503,9 +3505,11 @@ client.leave_muji(room)
   An unexpected `connectionState=closed`/consent expiry waits a 2 s grace: a
   `session-terminate` arriving in that window closes the call normally, while
   otherwise the window stays with «Соединение потеряно» and a «Перезвонить»
-  button that starts a new call in the same audio/video mode; a late terminate
-  for an already removed session also closes the lost window. Any `call_failed`
-  with an open window uses that state.
+  button that starts a new call in the same audio/video mode. A remote
+  `session-terminate success` keeps the last frame with a «Звонок завершён»
+  overlay until the user closes the window; a local hangup still closes it
+  immediately. A late terminate for an already removed session also closes the
+  lost window. Any `call_failed` with an open window uses that state.
   Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio

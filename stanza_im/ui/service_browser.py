@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ICON = "system-users.png"
 _CAT_ICONS = {
-    "conference": "muc.png",
+    "conference": "muc.svg",
     "gateway": "transports.png",
     "directory": "system-users.png",
     "store": "system-users.png",
@@ -43,7 +43,7 @@ _CAT_ICONS = {
     "gateway": "transports.png",
 }
 _ROOT_KEYS = (
-    ("service_conferences", "muc.png"),
+    ("service_conferences", "muc.svg"),
     ("service_transports", "transports.png"),
     ("service_services", "system-users.png"),
     ("service_management", "gtk-preferences.png"),
@@ -738,7 +738,7 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         features = self._resolve_features(data)
         menu = QtWidgets.QMenu(self)
         if conference:
-            menu.addAction(self._icon("muc.png"),
+            menu.addAction(self._icon("muc.svg"),
                            tr("service_open_conference"),
                            lambda: self._emit_conference(jid))
         for key, icon in _ACTION_SPECS:

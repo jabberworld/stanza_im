@@ -49,6 +49,9 @@ def _png_bytes():
 
 
 # 1. kind detection -----------------------------------------------------------
+check("default image limits are 5 MB chats / 2 MB conferences",
+      Config.defaults().chat.image_limit_chat_mb == 5
+      and Config.defaults().chat.image_limit_conference_mb == 2)
 check("image ext", media_kind("https://h/p/photo.JPG?x=1") == "image")
 check("audio ext", media_kind("https://h/a/song.mp3") == "audio")
 check("video ext", media_kind("https://h/v/clip.webm#t=1") == "video")
@@ -141,12 +144,35 @@ check("uncached image placeholder", placeholder
       and "stanza-media-loading" in placeholder
       and "data:image/png;base64," not in placeholder)
 
+# Per-chat image limit: known oversized images are gated; unknown sizes load.
+_gated = service.markup("https://h/p/large.png",
+                        {"size": 6 * 1024 * 1024, "width": 800,
+                         "height": 600}, limit_mb=5)
+check("an oversized image is gated without downloading",
+      _gated and "stanza-media-gated" in _gated
+      and "stanza:image-load/" in _gated
+      and 'style="width:180px;height:135px"' in _gated)
+_allowed = service.markup("https://h/p/small.png",
+                          {"size": 4 * 1024 * 1024}, limit_mb=5)
+check("an image under the limit is not gated",
+      _allowed and "stanza-media-gated" not in _allowed)
+_unknown = service.markup("https://h/p/unknown.png", limit_mb=1)
+check("an image with an unknown size is allowed",
+      _unknown and "stanza-media-gated" not in _unknown)
+
 # 7. theme integration --------------------------------------------------------
 factory = ChatThemeFactory()
 factory.set_message_styling(False)
 factory.set_media_preview(service, "images", 180)
 html = factory.render_message("Bob", f"look {url}", "12:00:00", "incoming")
 check("theme embeds preview", "stanza-media" in html and "<img" in html)
+factory.set_media_preview(service, "images", 180, 1)
+gated_html = factory.render_message(
+    "Bob", "", "12:00:00", "incoming",
+    media={"url": "https://h/p/big.png", "size": 2 * 1024 * 1024,
+           "width": 800, "height": 600})
+check("theme applies the per-chat image limit",
+      "stanza-media-gated" in gated_html)
 factory.set_media_preview(service, "none", 180)
 plain = factory.render_message("Bob", f"look {url}", "12:00:00", "incoming")
 check("theme plain link when off", 'stanza-media' not in plain

@@ -788,6 +788,20 @@ if HAS_WEBENGINE:
                             parent.classList.remove('stanza-media-loading');
                         }}
                     }});
+                document.querySelectorAll('.stanza-media-gated').forEach(
+                    function (el) {{
+                        if (el.getAttribute('data-media-url') !== target) return;
+                        var img = document.createElement('img');
+                        img.className = 'stanza-media-thumb';
+                        img.setAttribute('data-media-url', target);
+                        img.style.width = '100%';
+                        img.style.height = '100%';
+                        img.style.objectFit = 'contain';
+                        img.src = {safe_uri};
+                        el.classList.remove('stanza-media-gated');
+                        el.innerHTML = '';
+                        el.appendChild(img);
+                    }});
             }})();
             """)
 
@@ -1274,6 +1288,7 @@ if HAS_WEBENGINE:
             window.stanzaCloseMenu = closeMenu;
             window.__stanzaReplyRef = '';
             window.__stanzaMediaRef = '';
+            window.__stanzaImageLoadRef = '';
             window.__stanzaMediaFsRef = '';
 window.__stanzaMentionRef = '';
             window.__stanzaGeoRef = '';
@@ -1502,6 +1517,16 @@ window.__stanzaMentionRef = '';
                     e.preventDefault();
                     window.__stanzaLoadRef =
                         loadref.getAttribute('href') || '';
+                    return;
+                }
+                // Gated image: the explicit "load image" link bypasses the
+                // per-chat size limit and must not navigate either.
+                var image_load = t && t.closest
+                    ? t.closest('a.stanza-media-load') : null;
+                if (image_load) {
+                    e.preventDefault();
+                    window.__stanzaImageLoadRef =
+                        image_load.getAttribute('href') || '';
                     return;
                 }
                 // Media preview/player links must never navigate: a custom
@@ -1870,7 +1895,8 @@ window.__stanzaMentionRef = '';
                 "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
                 "if(r.bottom>0&&r.top<vh){var id=m[i].getAttribute('data-stanza-id')"
                 "||m[i].getAttribute('data-reply-id')||'';if(id)out.push(id);}}"
-                "return JSON.stringify(out);})()]",
+                "return JSON.stringify(out);})(),"
+                " window.__stanzaImageLoadRef || '']",
                 self._on_scroll_position,
             )
 
@@ -1889,6 +1915,12 @@ window.__stanzaMentionRef = '';
         def _clear_media_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaMediaRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_image_load_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaImageLoadRef = '';")
             except RuntimeError:
                 pass
 
@@ -2208,6 +2240,14 @@ window.__stanzaMentionRef = '';
                         self._visible_refs = [str(ref) for ref in refs if ref]
                 except (TypeError, ValueError, json.JSONDecodeError):
                     pass
+            if len(value) > 29 and isinstance(value[29], str) and value[29]:
+                self._clear_image_load_request()
+                requested = value[29]
+                if requested != getattr(self, "_last_image_load_ref", ""):
+                    self._last_image_load_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_image_load_ref = ""
             if len(value) > 25 and isinstance(value[25], str) and value[25]:
                 self._clear_omemo_request()
                 requested = value[25]

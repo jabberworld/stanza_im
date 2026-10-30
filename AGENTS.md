@@ -1708,6 +1708,12 @@ tracking) and are evicted by `appearance.media_cache_days` (TTL) and
 after startup (never blocking startup). The ready PNG data-URIs are held in a bounded
 in-memory LRU (`MediaPreviewService._thumb_uris`, 16 MB budget), so a long
 session with many images cannot grow the thumbnail cache without limit.
+`chat.image_limit_chat_mb` (default 5) and
+`chat.image_limit_conference_mb` (default 2; 0 = unlimited) gate images whose
+announced/cached size exceeds the limit: a fixed-size placeholder with a
+«Загрузить изображение» link is rendered instead, and an explicit click loads
+it (up to `MAX_DOWNLOAD`). Unknown sizes are allowed. Audio/video players are
+not downloaded for previews, so no size gate applies to them.
 The thumbnail is scaled to fit `media_preview_size` in **both** dimensions
 (KeepAspectRatio), so `set_media_thumbnail` drops the placeholder's forced
 `width` once the image loads — a portrait picture then shows at its real
@@ -2896,9 +2902,9 @@ a red `call-hangup`, a green `call-accept` and a **quality** button
 (`quality.svg`, a small bars glyph). Every control is flat (`_flat`:
 `autoRaise` on a `QToolButton`, `setFlat` on a `QPushButton`), and the 1:1
 control strip is its own compact, centred widget with a fixed width/height
-computed from its buttons, and the window's minimum height comes from the
-layout, so its buttons never cross into the video area at the smallest window
-size. Its menu changes the outgoing video
+computed from its buttons; the window's minimum height is recalculated when
+the codec-info row wraps, so its buttons never cross into the video area at
+the smallest window size. Its menu changes the outgoing video
 **bitrate** (200/500/1000/1500 kbps; default 1000) and **resolution**
 (source/1080/720/480/360) of a live call (in Muji — of every session of the
 room): `MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
@@ -2938,7 +2944,8 @@ standalone `_LocalPreviewCapture`: the outgoing ringing window starts one
 immediately, and the incoming prompt shows a small self-view above its buttons
 until Accept/Reject. Both are stopped before the engine opens the camera.
 Local preview frames are scaled to 320×180 **before** the RGB conversion and
-the view uses `FastTransformation`; incoming video is converted to the call
+the view draws the image directly into the fitted target rectangle (no
+full-size `QImage.scaled` allocation); incoming video is converted to the call
 window's current render size, so the preview/rendering cost does not scale with
 a full 720p frame. The outgoing resolution and bitrate are unchanged.
 `CALL stats` carries separate
@@ -2962,9 +2969,11 @@ a `session-terminate` arriving in that window closes the call normally (the
 remote hangup often closes ICE/DTLS a moment before the Jingle stanza), while
 otherwise the call window stays open with «Соединение потеряно» and a
 **«Перезвонить»** button that starts a new call in the same audio/video mode.
-A late terminate for an already removed session also closes its lost window.
-Any `call_failed` with an existing window uses the same lost state; without a
-window it remains a tray notice. The call header also
+A remote `session-terminate success` keeps the last frame with a
+«Звонок завершён» overlay until the user closes the window; a local hangup
+still closes it immediately. A late terminate for an already removed session
+also closes its lost window. Any `call_failed` with an existing window uses
+the same lost state; without a window it remains a tray notice. The call header also
 has a **network-quality** icon (`include/network_quality.py` levels 0–4,
 painted by `ui/network_quality.py`; updated once a second): its tooltip names
 the reason — incoming/outgoing loss, low REMB/target, or event-loop lag — with

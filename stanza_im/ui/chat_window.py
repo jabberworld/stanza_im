@@ -223,6 +223,7 @@ class ChatWindow(QtWidgets.QMainWindow):
             self.subject_font_zoom_requested)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         widget.media_view_requested.connect(self.media_view_requested)
+        widget.image_load_requested.connect(self.image_load_requested)
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
         widget.share_requested.connect(self.share_requested)
@@ -314,6 +315,7 @@ class ChatWindow(QtWidgets.QMainWindow):
             self.subject_font_zoom_requested)
         widget.text_scale_changed.connect(self._on_widget_text_scale_changed)
         widget.media_view_requested.connect(self.media_view_requested)
+        widget.image_load_requested.connect(self.image_load_requested)
         widget.media_save_requested.connect(self.media_save_requested)
         widget.media_copy_requested.connect(self.media_copy_requested)
         widget.share_requested.connect(self.share_requested)
@@ -892,6 +894,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     subject_font_zoom_requested = QtCore.pyqtSignal(int)       # new size (pt)
     text_scale_changed = QtCore.pyqtSignal(str, float)         # jid, scale factor
     media_view_requested = QtCore.pyqtSignal(str, str, bool)   # url, kind, fullscreen
+    image_load_requested = QtCore.pyqtSignal(str)              # gated image URL
     media_save_requested = QtCore.pyqtSignal(str)              # url
     media_copy_requested = QtCore.pyqtSignal(str)              # url
     share_requested = QtCore.pyqtSignal(str)                   # shared content

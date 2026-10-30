@@ -86,6 +86,8 @@ class Config:
                  "allow_moderation": True,
                  "confirm_retraction": False, "input_height": 60,
                  "text_scale": 1.0, "media_preview": "images",
+                 "image_limit_chat_mb": 5,
+                 "image_limit_conference_mb": 2,
                  "idle_unload_minutes": 10, "muc_name_source": "from_name"},
         "chat_window": {"width": 640, "height": 480,
                         "x": 0, "y": 0, "maximized": False},

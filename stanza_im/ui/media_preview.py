@@ -44,6 +44,7 @@ class MediaPreviewService(QtCore.QObject):
 
     thumbnail_ready = QtCore.pyqtSignal(str, str)  # url, png data-URI
     failed = QtCore.pyqtSignal(str)                # url
+    image_gated = QtCore.pyqtSignal(str, int, int) # url, width, height
     hash_mismatch = QtCore.pyqtSignal(str, str)    # url, algo
 
     MAX_DOWNLOAD = 64 * 1024 * 1024
@@ -126,15 +127,27 @@ class MediaPreviewService(QtCore.QObject):
             self._thumb_uris.pop(key, None)
             self._thumb_bytes -= len(value)
 
-    def markup(self, url: str, media: dict | None = None) -> str | None:
+    def markup(self, url: str, media: dict | None = None,
+               limit_mb: int = 0) -> str | None:
         """Return embed HTML for *url*, or ``None`` to keep the plain link.
 
         *media* is the XEP-0385 SIMS dict (announced media-type/dimensions),
-        used to classify URLs with no useful extension.
+        used to classify URLs with no useful extension.  *limit_mb* gates
+        images whose announced/cached size exceeds the user limit.
         """
         kind = self.previewable(url, media)
         if not kind:
             return None
+        if kind == "image":
+            size = int((media or {}).get("size", 0) or 0)
+            if not size:
+                size = int(self._cache.info(url).get("size", 0) or 0)
+            try:
+                limit = max(0, int(limit_mb or 0)) * 1024 * 1024
+            except (TypeError, ValueError):
+                limit = 0
+            if limit and size > limit:
+                return self._gated_markup(url, media)
         # Callers pass the already HTML-escaped body text, so undo that first
         # and escape exactly once below; otherwise a URL query would come out
         # as ``&amp;amp;`` and remote players would request a wrong address.
@@ -175,11 +188,34 @@ class MediaPreviewService(QtCore.QObject):
             f'<a class="stanza-media-open" href="stanza:view:video/{enc}">'
             f'{html.escape(tr("media_open_viewer"))}</a></span>')
 
+    def _gated_markup(self, url: str, media: dict | None = None) -> str:
+        """A fixed-size placeholder with an explicit load link."""
+        width = int((media or {}).get("width", 0) or 0)
+        height = int((media or {}).get("height", 0) or 0)
+        if width <= 0 or height <= 0:
+            width = self._size
+            height = max(2, int(round(width * 3 / 4)))
+        else:
+            scale = min(1.0, self._size / float(width),
+                        self._size / float(height))
+            width = max(2, int(round(width * scale)))
+            height = max(2, int(round(height * scale)))
+        enc = quote(url, safe="")
+        data = html.escape(url)
+        label = html.escape(tr("media_load_image"))
+        return (
+            f'<span class="stanza-media stanza-media-image stanza-media-gated" '
+            f'data-media-url="{data}" style="width:{width}px;height:{height}px">'
+            f'<a class="stanza-media-load" href="stanza:image-load/{enc}">'
+            f'{label}</a></span>')
+
     # ── Download / thumbnail ──────────────────────────────────────
 
-    def request(self, url: str) -> None:
+    def request(self, url: str, force: bool = False) -> None:
         """Queue a thumbnail download for an image URL (idempotent)."""
-        if url in self._pending or self._cache.has_thumb(url):
+        if url in self._pending:
+            return
+        if not force and self._cache.has_thumb(url):
             return
         self._pending.add(url)
         try:

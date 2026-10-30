@@ -51,6 +51,14 @@ _MEDIA_CSS = """
                       display: block; }
 .stanza-media-open { display: inline-block; margin-top: 2px; font-size: 11px;
                      color: #1a73e8; }
+.stanza-media-gated { position: relative; border-radius: 6px;
+                      background: rgba(0,0,0,.06); overflow: hidden; }
+.stanza-media-load { position: absolute; left: 50%; top: 50%;
+                     transform: translate(-50%, -50%);
+                     display: inline-block; padding: 5px 9px;
+                     border-radius: 5px; background: rgba(255,255,255,.92);
+                     color: #1a73e8; font-size: 11px; text-decoration: none;
+                     white-space: nowrap; }
 """
 
 _HATS_CSS = """
@@ -242,6 +250,7 @@ class ChatThemeFactory:
         self._media = None
         self._media_mode = "none"
         self._media_size = 200
+        self._media_limit_mb = 0
         self._font_family = ""
         self._font_size_pt = 0
         self._nick_font_family = ""
@@ -305,7 +314,7 @@ class ChatThemeFactory:
         self._highlight_mode = mode or "both"
 
     def set_media_preview(self, service, mode: str = "none",
-                          size: int = 200) -> None:
+                          size: int = 200, limit_mb: int = 0) -> None:
         """Attach a :class:`MediaPreviewService` and its policy.
 
         The factory is the single source of truth for the preview policy: the
@@ -318,6 +327,10 @@ class ChatThemeFactory:
             self._media_size = int(size or 200)
         except (TypeError, ValueError):
             self._media_size = 200
+        try:
+            self._media_limit_mb = max(0, int(limit_mb or 0))
+        except (TypeError, ValueError):
+            self._media_limit_mb = 0
         if service is not None:
             service.set_mode(self._media_mode)
             service.set_size(self._media_size)
@@ -482,7 +495,8 @@ class ChatThemeFactory:
         from stanza_im.include.utils import tokenize_urls
         render = None
         if self._media is not None and self._media_mode != "none":
-            render = self._media.markup
+            render = lambda url: self._media.markup(
+                url, limit_mb=self._media_limit_mb)
 
         def geo_render(uri: str) -> str:
             if not geo_ref:
@@ -506,7 +520,8 @@ class ChatThemeFactory:
         label = " \u00b7 ".join(part for part in (name, size) if part)
         html = ""
         if url and self._media is not None and self._media_mode != "none":
-            html += self._media.markup(url, media) or ""
+            html += self._media.markup(
+                url, media, limit_mb=self._media_limit_mb) or ""
         if url and not html:
             safe = escape_html(url)
             html += f'<a href="{safe}">{safe}</a>'

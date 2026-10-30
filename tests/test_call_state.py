@@ -118,7 +118,9 @@ async def _terminate_grace():
     await gmgr._on_session_terminate(SimpleNamespace(
         get=lambda key, default="": {"sid": "s5"}.get(key, default)))
     check("a terminate during the grace closes normally",
-          gmgr.closed == [("s5", "ended", "success", True)]
+          gmgr.closed == [("s5", "ended", "success", False)]
+          and ("call_ended_remote", "s5", "rain@example.com/phone",
+               "success") in gmgr.client.emitted
           and not any(e[0] == "call_failed" for e in gmgr.client.emitted))
 
     # A terminate that arrives after the session was already removed must

@@ -186,6 +186,17 @@ check("redial carries the sid, peer JID and video mode",
       _redial_seen[-1] == ("s1r", "bob@example.com", True))
 rcw.close()
 
+# A remote hangup keeps the last frame with an "ended" overlay until closed.
+ecw = CallWindow("s1e", "Bob", video=True)
+ecw.show_ended()
+check("a remote hangup shows the ended overlay",
+      ecw._ended and ecw._ended_overlay is not None
+      and ecw._ended_overlay.text())
+check("ended controls are hidden but the window stays",
+      not ecw._mute_btn.isVisible() and not ecw._pip_view.isVisibleTo(ecw))
+ecw._hangup_btn.click()
+check("the ended window closes only on request", ecw.isHidden())
+
 # 1:1 call controls are flat and the strip keeps its own width.
 fcw = CallWindow("s1f", "Bob", video=True)
 _flat_btns = (fcw._mute_btn, fcw._hear_btn, fcw._video_btn, fcw._pip_btn,
@@ -204,6 +215,21 @@ check("the 1:1 controls stay below the video at minimum size",
       fcw._controls_widget.geometry().top()
       >= fcw._video_view.geometry().bottom())
 fcw.close()
+
+# The codec-info row must not push the controls over the video at min size.
+info_cw = CallWindow("s1i", "Bob", video=True)
+info_cw.resize(420, 340)
+info_cw.show()
+app.processEvents()
+info_cw._info_btn.setChecked(True)
+info_cw._info_label.setText(
+    "VP8 · 1280×720 → 1280×720 · Opus 48 kHz · target 1500 kbps · "
+    "actual 1234 kbps · incoming 1280×720 · incoming target 1000 kbps")
+app.processEvents()
+check("codec info keeps the controls below the video",
+      info_cw._controls_widget.geometry().top()
+      >= info_cw._video_view.geometry().bottom())
+info_cw.close()
 
 # Muji controls (global and per-participant) follow the same flat style.
 mwnd = MujiCallWindow("room@example.com")

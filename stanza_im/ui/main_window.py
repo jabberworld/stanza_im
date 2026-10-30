@@ -482,14 +482,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._media_service = MediaPreviewService(self._media_cache, self)
         media_mode = self._media_preview_mode()
         media_size = self._config.appearance.media_preview_size
+        chat_limit = int(getattr(self._config.chat, "image_limit_chat_mb", 5) or 0)
+        conf_limit = int(getattr(self._config.chat,
+                                 "image_limit_conference_mb", 2) or 0)
         self._theme_factory.set_media_preview(
-            self._media_service, media_mode, media_size)
+            self._media_service, media_mode, media_size, chat_limit)
         self._muc_theme_factory.set_media_preview(
-            self._media_service, media_mode, media_size)
+            self._media_service, media_mode, media_size, conf_limit)
         self._media_service.thumbnail_ready.connect(
             self._on_media_thumbnail_ready)
         self._media_service.hash_mismatch.connect(self._on_hash_mismatch)
-        self._applied_media = (media_mode, media_size)
+        self._applied_media = (media_mode, media_size, chat_limit, conf_limit)
         self._theme_factory.set_chat_font(
             self._config.appearance.chat_font,
             self._config.appearance.chat_font_size)
@@ -613,6 +616,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.window_title_changed.connect(self.setWindowTitle)
         self._chat_window.media_view_requested.connect(
             self._on_media_view_requested)
+        self._chat_window.image_load_requested.connect(
+            self._on_image_load_requested)
         self._chat_window.media_save_requested.connect(
             self._on_media_save_requested)
         self._chat_window.media_copy_requested.connect(
@@ -1675,7 +1680,7 @@ class MainWindow(QtWidgets.QMainWindow):
             name = bookmark.get("name") or ""
             if not name or name == room:
                 name = room.split("@", 1)[0]
-            item = QtWidgets.QListWidgetItem(self._menu_icon("muc.png"), name)
+            item = QtWidgets.QListWidgetItem(self._menu_icon("muc.svg"), name)
             item.setData(QtCore.Qt.ItemDataRole.UserRole, dict(bookmark))
             item.setToolTip(room)
             self._bookmarks_list.addItem(item)
@@ -1784,7 +1789,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._menu_icon("conference-add.svg"),
             tr("menu_create_conference"))
         create_room.triggered.connect(self._on_create_conference)
-        join_room = actions_menu.addAction(self._menu_icon("muc.png"),
+        join_room = actions_menu.addAction(self._menu_icon("muc.svg"),
                                            tr("menu_join_groupchat"))
         join_room.triggered.connect(self._on_join_groupchat_dialog)
         service_discovery = actions_menu.addAction(
@@ -1856,7 +1861,7 @@ class MainWindow(QtWidgets.QMainWindow):
             bool(getattr(self._config.appearance, "roster_show_offline", True)))
         show_offline.toggled.connect(self._on_show_offline_toggled)
         self._show_offline_action = show_offline
-        show_self = view_menu.addAction(self._menu_icon("v-card-48.svg"),
+        show_self = view_menu.addAction(self._menu_icon("self-contact.svg"),
                                         tr("menu_show_self"))
         show_self.setCheckable(True)
         show_self.setChecked(
@@ -3000,7 +3005,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._drop_room_ui(room, close_chat=False)
         self._muc_autojoin_tries.pop(room, None)
         if self._config.notifications.osd_enabled:
-            self._osd.show(self._menu_icon("muc.png"),
+            self._osd.show(self._menu_icon("muc.svg"),
                            tr("muc_destroyed_title"), text)
 
     def _on_room_destroyed(self, room: str) -> None:
@@ -3017,7 +3022,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         text = tr("muc_destroyed_own", room=room)
         if self._config.notifications.osd_enabled:
-            self._osd.show(self._menu_icon("muc.png"),
+            self._osd.show(self._menu_icon("muc.svg"),
                            tr("muc_destroyed_title"), text)
 
     def _abort_muc_join(self, room: str, condition: str) -> None:
@@ -3739,12 +3744,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self._chat_window.rerender_messages()
         media_mode = self._media_preview_mode()
         media_size = self._config.appearance.media_preview_size
-        if (media_mode, media_size) != getattr(self, "_applied_media", None):
+        chat_limit = int(getattr(self._config.chat, "image_limit_chat_mb", 5) or 0)
+        conf_limit = int(getattr(self._config.chat,
+                                 "image_limit_conference_mb", 2) or 0)
+        media_state = (media_mode, media_size, chat_limit, conf_limit)
+        if media_state != getattr(self, "_applied_media", None):
             self._theme_factory.set_media_preview(
-                self._media_service, media_mode, media_size)
+                self._media_service, media_mode, media_size, chat_limit)
             self._muc_theme_factory.set_media_preview(
-                self._media_service, media_mode, media_size)
-            self._applied_media = (media_mode, media_size)
+                self._media_service, media_mode, media_size, conf_limit)
+            self._applied_media = media_state
             self._chat_window.rerender_messages()
         self._media_cache.set_limits(
             self._config.appearance.media_cache_days,
@@ -4289,6 +4298,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("muji_local_video_frame", self._on_muji_local_video_frame)
         c.on("call_screen_share", self._on_call_screen_share)
         c.on("call_ended", self._on_call_ended)
+        c.on("call_ended_remote", self._on_call_ended_remote)
         c.on("call_failed", self._on_call_failed)
         c.on("muji_joined", self._on_muji_joined)
         c.on("muji_started", self._on_muji_started)
@@ -5785,6 +5795,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if path:
             self._sounds.play_file(path)
 
+    def _on_call_ended_remote(self, sid: str, peer: str,
+                              reason: str = "") -> None:
+        """A remote hangup: keep the last frame with the ended overlay."""
+        window = self._call_windows.get(sid)
+        if window is None:
+            return
+        self._stop_call_ring()
+        self._stop_call_ringback()
+        window.stop_duration()
+        window.show_ended()
+
     def _on_call_failed(self, sid: str, peer: str, error: str,
                         video: bool = False) -> None:
         logger.warning("CALL failed for %s: %s", peer, error)
@@ -5815,6 +5836,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._on_call_requested(peer_jid, video)
 
     def _on_call_hangup(self, sid: str) -> None:
+        window = self._call_windows.get(sid)
+        if window is not None and (getattr(window, "_failed", False)
+                                   or getattr(window, "_ended", False)):
+            self._call_windows.pop(sid, None)
         if self._client:
             self._client.rtp_calls.stop_call_preview(sid)
             self._client.end_call(sid)
@@ -8436,6 +8461,11 @@ class MainWindow(QtWidgets.QMainWindow):
         timestamp = _current_timestamp()
         self._chat_window.add_status_for_url(url, text, timestamp)
 
+    def _on_image_load_requested(self, url: str) -> None:
+        """Explicitly load an image that was gated by the per-chat limit."""
+        if url:
+            self._media_service.request(url, force=True)
+
     def _on_media_copy_requested(self, url: str):
         QtWidgets.QApplication.clipboard().setText(url or "")
 
@@ -10052,7 +10082,7 @@ class MainWindow(QtWidgets.QMainWindow):
         submenu = parent.addMenu(self._menu_icon("add-user.svg"),
                                  tr("ctx_invite_to"))
         for room in rooms:
-            action = submenu.addAction(self._menu_icon("muc.png"),
+            action = submenu.addAction(self._menu_icon("muc.svg"),
                                        self._muc_display_name(room))
             action.triggered.connect(
                 lambda checked=False, r=room, t=target_jid:
@@ -10094,7 +10124,7 @@ class MainWindow(QtWidgets.QMainWindow):
             body = tr("muc_invite_received_text", inviter=label, room=room)
         else:
             body = tr("muc_invite_received_unknown", room=room)
-        self._osd.show(self._menu_icon("muc.png"),
+        self._osd.show(self._menu_icon("muc.svg"),
                        tr("muc_invite_received_title"), self._osd_body(body))
 
     def _muc_invite_inviter_label(self, room: str, inviter: str) -> str:

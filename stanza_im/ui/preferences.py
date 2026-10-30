@@ -29,6 +29,10 @@ COMBO_WIDTH = 260
 #: Calls selectors are narrower than the shared width so the info glyph fits
 #: inside the form column on the default dialog width.
 CALLS_COMBO_WIDTH = 190
+#: Compact selectors used by the Connection → Advanced tab.
+ADVANCED_COMBO_WIDTH = 140
+#: Shared selector/manual-field width in the proxy groups.
+PROXY_FIELD_WIDTH = 260
 
 #: Camera output height presets (0 = keep the source size).
 _CAMERA_HEIGHT_PRESETS = (0, 1080, 720, 480, 360)
@@ -210,7 +214,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._sound_player = (sound_player if sound_player is not None
                               else SoundPlayer())
         self.setWindowTitle(tr("prefs_title"))
-        self.setMinimumSize(760, 540)
+        self.setMinimumSize(840, 540)
         # Which page each control belongs to (for the «Reset to defaults»
         # button); ``_building_page`` is set by ``_page()`` while a page is
         # being constructed.
@@ -1001,6 +1005,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _row(*widgets: QtWidgets.QWidget, stretch_first: bool = False,
+             stretch_last: bool = False,
              trailing_stretch: bool = False) -> QtWidgets.QWidget:
         """Lay widgets out side by side inside a form field.
 
@@ -1012,11 +1017,31 @@ class PreferencesDialog(QtWidgets.QDialog):
         box = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
         for index, widget in enumerate(widgets):
-            layout.addWidget(widget, 1 if (stretch_first and index == 0) else 0)
+            stretch = ((stretch_first and index == 0)
+                       or (stretch_last and index == len(widgets) - 1))
+            layout.addWidget(widget, 1 if stretch else 0)
         if trailing_stretch:
             layout.addStretch(1)
+        box.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                          QtWidgets.QSizePolicy.Policy.Fixed)
+        return box
+
+    @staticmethod
+    def _info_row(control, info, *, align_right: bool = True):
+        """Put an info glyph at a consistent right edge of the field column."""
+        box = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        if control is not None:
+            layout.addWidget(control, 0)
+        if align_right:
+            layout.addStretch(1)
+        layout.addWidget(info, 0)
+        box.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                          QtWidgets.QSizePolicy.Policy.Fixed)
         return box
 
     def _zoom_control(self, key: str) -> QtWidgets.QWidget:
@@ -1167,10 +1192,14 @@ class PreferencesDialog(QtWidgets.QDialog):
 
         advanced, advanced_form = self._page()
         resource = self._line("resource")
+        resource.setMinimumWidth(100)
+        resource.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                               QtWidgets.QSizePolicy.Policy.Fixed)
         resource_mode = self._combo("resource_mode", [
             ("prefs_resource_hostname", "hostname"),
             ("prefs_resource_manual", "manual"),
-        ])
+        ], fixed_width=False)
+        resource_mode.setFixedWidth(ADVANCED_COMBO_WIDTH)
 
         def _sync_resource():
             resource.setEnabled(resource_mode.currentData() == "manual")
@@ -1178,12 +1207,14 @@ class PreferencesDialog(QtWidgets.QDialog):
         resource_mode.currentIndexChanged.connect(_sync_resource)
         _sync_resource()
         advanced_form.addRow(tr("prefs_resource"),
-                             self._row(resource, resource_mode))
+                             self._row(resource_mode, resource,
+                                       stretch_last=True))
 
         priority_mode = self._combo("priority_mode", [
             ("prefs_priority_status", "status"),
             ("prefs_priority_manual", "manual"),
-        ])
+        ], fixed_width=False)
+        priority_mode.setFixedWidth(ADVANCED_COMBO_WIDTH)
         priority_value = self._spin("priority", 0, 127)
 
         def _sync_priority():
@@ -1225,18 +1256,21 @@ class PreferencesDialog(QtWidgets.QDialog):
             ("prefs_pep_sweep_60", 60),
             ("prefs_pep_sweep_120", 120),
             ("prefs_pep_sweep_300", 300),
-        ])
+        ], fixed_width=False)
+        pep_interval.setFixedWidth(ADVANCED_COMBO_WIDTH)
         advanced_form.addRow(tr("prefs_pep_sweep"), pep_interval)
         tls_mode = self._combo("tls_mode", [
             ("conn_mode_direct", "direct"),
             ("conn_mode_prefer", "prefer"),
             ("conn_mode_normal", "normal"),
-        ])
+        ], fixed_width=False)
+        tls_mode.setFixedWidth(ADVANCED_COMBO_WIDTH)
         starttls_mode = self._combo("starttls_mode", [
             ("enc_always", "always"),
             ("enc_opportunistic", "opportunistic"),
             ("enc_never", "never"),
-        ])
+        ], fixed_width=False)
+        starttls_mode.setFixedWidth(ADVANCED_COMBO_WIDTH)
 
         def _sync_tls():
             starttls_mode.setEnabled(tls_mode.currentData() != "direct")
@@ -1251,8 +1285,7 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._conn_info.setPixmap(info_icon.pixmap(16, 16))
         self._conn_info.setToolTip(tr("conn_info_not_connected"))
         advanced_form.addRow(tr("prefs_encryption"),
-                             self._row(starttls_mode, self._conn_info,
-                                       trailing_stretch=True))
+                             self._info_row(starttls_mode, self._conn_info))
 
         self._cert_data: dict = {}
         self._conn_host = ""
@@ -1264,14 +1297,14 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._cert_btn.setEnabled(False)
         self._cert_btn.setToolTip(tr("conn_info_cert_none"))
         self._cert_btn.clicked.connect(self._on_show_certificate)
-        advanced_form.addRow(tr("conn_info_cert"), self._cert_btn)
+        advanced_form.addRow(tr("conn_info_cert"),
+                             self._info_row(None, self._cert_btn))
         allow_invalid = self._check(
             "allow_invalid_cert", tr("prefs_allow_invalid_cert"))
         allow_invalid.setStyleSheet("color: #b00020;")
-        advanced_form.addRow(self._row(
+        advanced_form.addRow(self._info_row(
             allow_invalid,
-            self._info_label(tr("prefs_allow_invalid_cert_tip")),
-            trailing_stretch=True))
+            self._info_label(tr("prefs_allow_invalid_cert_tip"))))
 
         proxy, proxy_form = self._page()
         proxy_form.addRow(self._connection_group())
@@ -1320,13 +1353,16 @@ class PreferencesDialog(QtWidgets.QDialog):
         mode = self._combo("file_proxy_mode", [
             ("prefs_file_proxy_auto", "auto"),
             ("prefs_file_proxy_manual", "manual"),
-        ])
+        ], fixed_width=False)
+        mode.setFixedWidth(PROXY_FIELD_WIDTH)
         self._file_proxy_auto_label = QtWidgets.QLabel("")
         form.addRow(self._row(mode, self._file_proxy_auto_label,
                               trailing_stretch=True))
         manual = self._line("file_proxy_manual")
         manual.setPlaceholderText(tr("prefs_file_proxy_manual_hint"))
-        form.addRow("", manual)
+        manual.setFixedWidth(PROXY_FIELD_WIDTH)
+        form.addRow(self._row(manual, QtWidgets.QLabel(""),
+                              trailing_stretch=True))
 
         def _sync_file():
             manual.setEnabled(mode.currentData() == "manual")
@@ -1341,7 +1377,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         mode = self._combo("stun_turn_mode", [
             ("prefs_stun_auto", "auto"),
             ("prefs_stun_manual", "manual"),
-        ])
+        ], fixed_width=False)
+        mode.setFixedWidth(PROXY_FIELD_WIDTH)
         self._stun_info = QtWidgets.QLabel()
         info_icon = self._info_icon()
         if not info_icon.isNull():
@@ -1350,7 +1387,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         form.addRow(self._row(mode, self._stun_info, trailing_stretch=True))
         manual = self._line("stun_turn_manual")
         manual.setPlaceholderText(tr("prefs_stun_manual_hint"))
-        form.addRow("", manual)
+        manual.setFixedWidth(PROXY_FIELD_WIDTH)
+        form.addRow(self._row(manual, QtWidgets.QLabel(""),
+                              trailing_stretch=True))
 
         def _sync_stun():
             manual.setEnabled(mode.currentData() == "manual")
@@ -1516,6 +1555,13 @@ class PreferencesDialog(QtWidgets.QDialog):
                                 ("media_preview_images_audio", "images_audio"),
                                 ("media_preview_all", "all"),
                             ], fixed_width=False))
+        chat_image_limit = self._spin("image_limit_chat_mb", 0, 100)
+        chat_image_limit.setSuffix(" MB")
+        general_form.addRow(tr("prefs_image_limit_chat"), chat_image_limit)
+        conf_image_limit = self._spin("image_limit_conference_mb", 0, 100)
+        conf_image_limit.setSuffix(" MB")
+        general_form.addRow(tr("prefs_image_limit_conference"),
+                            conf_image_limit)
         general_form.addRow(tr("prefs_idle_unload_minutes"),
                             self._spin("idle_unload_minutes", 0, 240))
         general_form.addRow(tr("prefs_history_limit"),
@@ -2110,6 +2156,10 @@ class PreferencesDialog(QtWidgets.QDialog):
             "show_avatars": chat.show_avatars,
             "message_styling": chat.message_styling,
             "media_preview": chat.media_preview,
+            "image_limit_chat_mb": int(getattr(
+                chat, "image_limit_chat_mb", 5) or 0),
+            "image_limit_conference_mb": int(getattr(
+                chat, "image_limit_conference_mb", 2) or 0),
             "idle_unload_minutes": int(getattr(chat, "idle_unload_minutes", 10) or 0),
             "muc_name_source": getattr(chat, "muc_name_source", "from_name"),
             "muc_show_presence": chat.muc_show_presence,
@@ -2352,6 +2402,10 @@ class PreferencesDialog(QtWidgets.QDialog):
         cfg.appearance.muc_theme = self._value("muc_theme") or ""
         cfg.appearance.emoticon_theme = self._value("emoticon_theme") or "default/smileys.cfg"
         cfg.chat.media_preview = self._value("media_preview") or "images"
+        cfg.chat.image_limit_chat_mb = int(
+            self._value("image_limit_chat_mb") or 0)
+        cfg.chat.image_limit_conference_mb = int(
+            self._value("image_limit_conference_mb") or 0)
         cfg.appearance.media_preview_size = self._value("media_preview_size")
         cfg.appearance.media_cache_days = self._value("media_cache_days")
         cfg.appearance.media_cache_mb = self._value("media_cache_mb")

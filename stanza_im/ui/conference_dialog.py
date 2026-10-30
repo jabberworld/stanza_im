@@ -8,7 +8,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.include.xmpp_uri import split_jid
 from stanza_im.i18n import tr
 from stanza_im.ui.jid_edit import RoomJidEdit
-from stanza_im.include.constants import CATEGORIES_DIR_16
+from stanza_im.include.constants import find_icon
 from stanza_im.ui.dialogs import show_modeless
 
 
@@ -113,7 +113,7 @@ class JoinConferenceDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         head = QtWidgets.QHBoxLayout()
         icon = QtWidgets.QLabel()
-        pix = QtGui.QPixmap(f"{CATEGORIES_DIR_16}/muc.png")
+        pix = QtGui.QPixmap(find_icon("muc.svg"))
         if not pix.isNull():
             icon.setPixmap(pix.scaled(48, 48))
         head.addWidget(icon)
@@ -188,7 +188,7 @@ class IncomingInviteDialog(QtWidgets.QDialog):
         self.setMinimumWidth(420)
         layout = QtWidgets.QVBoxLayout(self)
         icon = QtWidgets.QLabel()
-        pix = QtGui.QPixmap(f"{CATEGORIES_DIR_16}/muc.png")
+        pix = QtGui.QPixmap(find_icon("muc.svg"))
         if not pix.isNull():
             icon.setPixmap(pix.scaled(48, 48))
         if inviter_label:

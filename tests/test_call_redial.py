@@ -62,6 +62,15 @@ check("redial starts a new call in the same mode",
       win._call_windows.get("new") == ("bob@example.com", True))
 check("redial closes the old window", "old" not in win._call_windows and cw.isHidden())
 
+# A remote hangup keeps the window with the ended overlay until closed.
+win._stop_call_ring = lambda: None
+win._stop_call_ringback = lambda: None
+remote = CallWindow("remote", "Bob", video=True, peer_jid="bob@example.com")
+win._call_windows["remote"] = remote
+win._on_call_ended_remote("remote", "bob@example.com/desk", "success")
+check("a remote hangup keeps the window with the ended overlay",
+      remote._ended and "remote" in win._call_windows)
+
 # A failure without an existing window still reaches the tray.
 win._call_windows.clear()
 win._on_call_failed("", "bob@example.com/desk", "no answer", False)

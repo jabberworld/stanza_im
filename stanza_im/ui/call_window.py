@@ -290,20 +290,26 @@ class VideoView(QtWidgets.QLabel):
         self._mirrored = bool(mirrored)
         self.update()
 
+    def _target_rect(self) -> QtCore.QRect:
+        """Aspect-fitted destination rectangle without allocating a QImage."""
+        if self._image is None or self._image.isNull():
+            return self.rect()
+        size = self._image.size().scaled(
+            self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+        x = (self.width() - size.width()) // 2
+        y = (self.height() - size.height()) // 2
+        return QtCore.QRect(x, y, size.width(), size.height())
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = None
         if self._image is not None:
             painter = QtGui.QPainter(self)
-            scaled = self._image.scaled(
-                self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.FastTransformation)
-            x = (self.width() - scaled.width()) // 2
-            y = (self.height() - scaled.height()) // 2
+            target = self._target_rect()
             if self._mirrored:
                 painter.translate(self.width(), 0)
                 painter.scale(-1, 1)
-            painter.drawImage(x, y, scaled)
+            painter.drawImage(target, self._image)
             if self._mirrored:
                 painter.resetTransform()
         if self._caption:
@@ -424,6 +430,8 @@ class CallWindow(QtWidgets.QWidget):
         self.peer = peer
         self.peer_jid = peer_jid or peer
         self._failed = False
+        self._ended = False
+        self._ended_overlay = None
         self._last_render_size = (0, 0)
         self._quality_bitrate = int(video_bitrate or 0)
         self._quality_height = int(max_height or 0)
@@ -600,10 +608,60 @@ class CallWindow(QtWidgets.QWidget):
         hint = layout.sizeHint()
         self._controls_widget.setFixedWidth(max(1, hint.width()))
         self._controls_widget.setFixedHeight(max(1, hint.height()))
-        try:
-            self.setMinimumHeight(max(340, self.layout().minimumSize().height()))
-        except Exception:  # noqa: BLE001 - layout is being built
-            pass
+        self._fit_window_height()
+
+    def _fit_window_height(self) -> None:
+        """Reserve enough height for the video even when codec info wraps."""
+        layout = self.layout()
+        if layout is None:
+            return
+        margins = layout.contentsMargins()
+        spacing = max(0, layout.spacing())
+        info_height = (self._info_label.sizeHint().height()
+                       if self._info_label.isVisible() else 0)
+        needed = (margins.top() + margins.bottom()
+                  + self._header.sizeHint().height()
+                  + info_height
+                  + self._video_view.minimumHeight()
+                  + self._controls_widget.height()
+                  + spacing * 3 + 16)
+        self.setMinimumHeight(max(340, needed))
+
+    def show_ended(self) -> None:
+        """Keep the last frame visible after a remote hangup until the user closes."""
+        self._ended = True
+        self._duration_timer.stop()
+        self._duration_label.setVisible(False)
+        self._state_text = tr("call_ended")
+        self._update_header()
+        for button in (self._mute_btn, self._hear_btn, self._video_btn,
+                       self._pip_btn, self._network_btn, self._info_btn,
+                       self._redial_btn):
+            button.setVisible(False)
+        self._pip_view.setVisible(False)
+        self._hangup_btn.setToolTip(tr("dialog_close"))
+        if self._ended_overlay is None:
+            overlay = QtWidgets.QLabel(tr("call_ended"), self._video_view)
+            overlay.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            overlay.setStyleSheet(
+                "background: rgba(0,0,0,150); color: white; "
+                "padding: 8px 16px; border-radius: 6px;")
+            overlay.adjustSize()
+            overlay.raise_()
+            overlay.show()
+            self._ended_overlay = overlay
+        self._position_ended_overlay()
+
+    def _position_ended_overlay(self) -> None:
+        overlay = self._ended_overlay
+        if overlay is None:
+            return
+        overlay.adjustSize()
+        parent = self._video_view
+        overlay.move(
+            max(0, (parent.width() - overlay.width()) // 2),
+            max(0, (parent.height() - overlay.height()) // 2))
+        overlay.raise_()
 
     def show_failed(self, error: str = "") -> None:
         """Keep the window open after a failed call with a redial action."""
@@ -625,7 +683,9 @@ class CallWindow(QtWidgets.QWidget):
         self._fit_controls()
 
     def _on_hangup(self) -> None:
-        if self._failed:
+        if self._failed or self._ended:
+            # Let MainWindow drop the detached window from its sid map.
+            self.hangup.emit(self.sid)
             self.close()
             return
         self.hangup.emit(self.sid)
@@ -645,6 +705,8 @@ class CallWindow(QtWidgets.QWidget):
         self._info_label.setVisible(bool(checked))
         if checked:
             self._refresh_info()
+        self._fit_window_height()
+        QtCore.QTimer.singleShot(0, self._fit_window_height)
 
     def _refresh_info(self) -> None:
         info = None
@@ -654,6 +716,8 @@ class CallWindow(QtWidgets.QWidget):
             except Exception:  # noqa: BLE001 - diagnostics only
                 info = None
         self._info_label.setText(_format_info_line(info))
+        self._fit_window_height()
+        QtCore.QTimer.singleShot(0, self._fit_window_height)
 
     def start_duration(self) -> None:
         """Start (or restart) the call-duration counter."""
@@ -807,11 +871,14 @@ class CallWindow(QtWidgets.QWidget):
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         QtCore.QTimer.singleShot(0, self._position_pip)
+        QtCore.QTimer.singleShot(0, self._position_ended_overlay)
         QtCore.QTimer.singleShot(0, self._emit_render_size)
+        QtCore.QTimer.singleShot(0, self._fit_window_height)
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
         self._fit_controls()
+        self._fit_window_height()
         QtCore.QTimer.singleShot(0, self._emit_render_size)
         self.visibility_changed.emit(self.sid, True)
 
@@ -848,7 +915,7 @@ class CallWindow(QtWidgets.QWidget):
     def closeEvent(self, event):
         # Closing an active window also ends the call; a failed window is
         # already detached from its media session.
-        if not self._failed:
+        if not self._failed and not self._ended:
             self.hangup.emit(self.sid)
         super().closeEvent(event)
 
