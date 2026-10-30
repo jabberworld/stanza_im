@@ -919,8 +919,10 @@ if HAS_WEBENGINE:
     if (r.bottom > 0 && r.top < vh) { best = el; break; }
   }
   if (!best) return {ref:'', ts:'', sid:''};
-  var sid = best.getAttribute('data-stanza-id') || '';
-  var ref = sid || best.getAttribute('data-reply-id') || '';
+  var sid = best.getAttribute('data-stanza-sid')
+      || best.getAttribute('data-stanza-id') || '';
+  var ref = best.getAttribute('data-stanza-id')
+      || best.getAttribute('data-reply-id') || sid;
   var ts = best.getAttribute('data-stanza-time') || '';
   return {ref: ref, ts: ts, sid: sid};
 })();
@@ -2411,7 +2413,8 @@ window.__stanzaMentionRef = '';
                                 unread_marker: bool = False,
                                 media: dict | None = None,
                                 encrypted: bool = False,
-                                markup: dict | None = None) -> str:
+                                markup: dict | None = None,
+                                stanza_id: str = "") -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2436,7 +2439,8 @@ window.__stanzaMentionRef = '';
                                       reply_able_id, reply_author,
                                       reply_body=body, outgoing=outgoing,
                                       edited=edited, retracted=retracted,
-                                      moderatable=moderatable)
+                                      moderatable=moderatable,
+                                      stanza_id=stanza_id)
 
         def add_message(self, sender: str, body: str, timestamp: str,
                         direction: str, is_next: bool = False,
@@ -2455,7 +2459,8 @@ window.__stanzaMentionRef = '';
                         unread_marker: bool = False,
                         media: dict | None = None,
                         encrypted: bool = False,
-                        markup: dict | None = None):
+                        markup: dict | None = None,
+                        stanza_id: str = ""):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2468,7 +2473,7 @@ window.__stanzaMentionRef = '';
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
                 outgoing, edited, hats, retracted, retract_marker,
                 retract_reason, retract_by, moderatable, reactions,
-                unread_marker, media, encrypted, markup)
+                unread_marker, media, encrypted, markup, stanza_id)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -2615,7 +2620,8 @@ window.__stanzaMentionRef = '';
                 outgoing=entry.get("outgoing", False),
                 edited=entry.get("edited", False),
                 retracted=entry.get("retracted", False),
-                moderatable=entry.get("moderatable", False))
+                moderatable=entry.get("moderatable", False),
+                stanza_id=entry.get("stanza_id", ""))
                 for entry in messages)
             if not self._ready:
                 self._pending.insert(0, html)
@@ -2656,7 +2662,8 @@ window.__stanzaMentionRef = '';
                           reply_author: str = "", reply_body: str = "",
                           outgoing: bool = False, edited: bool = False,
                           retracted: bool = False,
-                          moderatable: bool = False) -> str:
+                          moderatable: bool = False,
+                          stanza_id: str = "") -> str:
             node_id = message_id or reply_able_id
             if "%REPLY_TARGET%" in content:
                 content = content.replace(
@@ -2671,6 +2678,8 @@ window.__stanzaMentionRef = '';
                     "%REACT_TARGET%", quote(node_id, safe="") if node_id else "")
             marker = (' data-stanza-id="' + html.escape(node_id, quote=True) + '"'
                       if node_id else "")
+            sid_attr = (' data-stanza-sid="' + html.escape(stanza_id, quote=True)
+                        + '"' if stanza_id else "")
             stamp = (' data-stanza-time="' + html.escape(raw_timestamp, quote=True) + '"'
                      if raw_timestamp else "")
             rid = ' data-reply-id="' + html.escape(reply_able_id, quote=True) + '"'
@@ -2679,7 +2688,7 @@ window.__stanzaMentionRef = '';
             edited_attr = ' data-edited="1"' if edited else ""
             retracted_attr = ' data-retracted="1"' if retracted else ""
             moderatable_attr = ' data-moderatable="1"' if moderatable else ""
-            return ('<div class="stanza-message"' + marker + stamp
+            return ('<div class="stanza-message"' + marker + sid_attr + stamp
                     + ' data-stanza-sender="'
                     + html.escape(sender or "Me", quote=True) + '"'
                     + rid + rauthor + outward + edited_attr + retracted_attr
@@ -3170,7 +3179,8 @@ else:
                         unread_marker: bool = False,
                         media: dict | None = None,
                         encrypted: bool = False,
-                        markup: dict | None = None):
+                        markup: dict | None = None,
+                        stanza_id: str = ""):
             # *markup* (XEP-0394) is accepted for API parity with the WebEngine
             # view but the plain fallback does not render it.
             marker_html = (ChatThemeFactory.render_unread_marker()

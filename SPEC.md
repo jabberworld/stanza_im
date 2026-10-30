@@ -2246,15 +2246,20 @@ Registers XEP plugins (conditionally where noted):
   own key, a full address collapses to the bare JID) and the remote `sid` is
   resolved in the local archive — a device at or beyond our newest message
   clears the unread/mention counters and moves the read anchor to it, while a
-  device behind us keeps the unread block. An id we never stored is not
-  treated as "seen everything" (with separate local archives that would erase
-  a valid block); it is logged and ignored. A remote state for a chat with no
-  local unread seeds the read anchor and starts `_reconcile_mds_unread`: on
+  device behind us clears only the read prefix (`_apply_mds_partial`): the
+  anchor moves to its point and unread is recounted after it, keeping newer
+  messages unread. An id we never stored is not treated as "seen everything"
+  (with separate local archives that would erase a valid block); it is logged
+  and ignored. The server XEP-0359 `stanza-id` is stored in its own
+  `stanza_id` column (live 1:1/MUC, PM, carbon, replay and MAM) and rendered as
+  `data-stanza-sid`; `data-stanza-id` remains the control ref. A remote state
+  for a chat with no local unread seeds the read anchor and starts `_reconcile_mds_unread`: on
   join/open it resolves the displayed timestamp, fetches the gap with MAM after
   it (or RSM `after` on the archive id for a MUC), counts the incoming rows
   after the displayed point and creates the unread block; replay/MAM copies
-  deduplicate, so both clients show the same unread block. No chat status line
-  is shown. `_mds_apply_remote` skips a state equal to `_mds_local` and any sid
+  deduplicate, so both clients show the same unread block. A server-assist
+  XEP-0333 marker with an embedded MDS payload is applied as MDS as well. No
+  chat status line is shown. `_mds_apply_remote` skips a state equal to `_mds_local` and any sid
   this client published itself (`_mds_own_sids`) — the server may buffer the
   echo of our own publish while the client is inactive (XEP-0352), and it must
   never be mistaken for another device;
@@ -3091,7 +3096,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
 - `core/history` pools one SQLite connection per JID (`WAL`).  An empty JID is
   refused (`_connection` raises `sqlite3.OperationalError`, `_path` maps it to
   a non-colliding name), so no nameless `<HISTORY_DIR>/.sqlite3` store is ever
-  created.
+  created.  The `messages` table stores the XEP-0359 server `stanza_id` in its
+  own column (schema version 2, unique partial index) separately from
+  `archive_id`/`origin_id`/`message_id`; `timestamp_for_ref` and
+  `entry_by_ref` resolve all of them.
 - The manager's per-contact `_dates` are read once on selection; clicking a
   calendar day that is not among them re-reads `history.dates_async` first
   (`_recheck_date_async`), so days added by a MAM backfill after the dialog
@@ -3249,7 +3257,7 @@ slixmpp event → handler → emit(event_name, *args) → UI callbacks
 | roster_item_removed | jid | Contact removed |
 | message_received | from, body, timestamp, unstyled | Incoming 1-on-1 message |
 | message_failed | jid, body, error | Message delivery failed |
-| groupchat_message | room, nick, body, ts, archived, archive_id, unstyled | Incoming MUC message |
+| groupchat_message | room, nick, body, ts, archived, archive_id, unstyled, …, stanza_id | Incoming MUC message (stanza_id = XEP-0359 id) |
 | groupchat_presence | room, nick, show, status | MUC presence |
 | auth_failed | — | Authentication error |
 | disconnected | — | Connection lost |

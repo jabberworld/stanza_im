@@ -3,6 +3,7 @@
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_mds.py
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -168,6 +169,36 @@ check("the status text is gone from the dictionaries",
       "mds_displayed_elsewhere" not in en.STRINGS
       and "mds_displayed_elsewhere" not in ru.STRINGS)
 check("en and ru dictionaries stay in sync", set(en.STRINGS) == set(ru.STRINGS))
+
+
+# 6d. server-assist marker carries the MDS payload in the same message -------
+assist = slixmpp.Message()
+assist["type"] = "chat"
+assist["from"] = c.jid_str
+assist["to"] = "room@conf.example"
+marker = ET.SubElement(assist.xml, "{urn:xmpp:chat-markers:0}displayed")
+marker.set("id", "msg-1")
+disp = ET.SubElement(assist.xml, f"{{{NS_MDS}}}displayed")
+sid_el = ET.SubElement(disp, "{urn:xmpp:sid:0}stanza-id")
+sid_el.set("by", c.jid_str)
+sid_el.set("id", "sid-assist")
+_before3 = list(mds_events)
+asyncio.get_event_loop().run_until_complete(
+    c._on_bodyless_chat_marker_stanza(assist))
+check("server-assist marker applies embedded MDS",
+      mds_events[-1:] == [("room@conf.example", "sid-assist")]
+      and len(mds_events) == len(_before3) + 1)
+
+
+# 6e. the view keeps the control ref and the MDS stanza-id separate ----------
+from stanza_im.ui.chat_view import ChatView  # noqa: E402
+
+if hasattr(ChatView, "_mark_message"):
+    _html = ChatView._mark_message(
+        "body", "Bob", message_id="msg-control", stanza_id="sid-mds")
+    check("the view renders a separate data-stanza-sid",
+          'data-stanza-id="msg-control"' in _html
+          and 'data-stanza-sid="sid-mds"' in _html)
 
 # 7. seeded displayed state suppresses stale catch-up --------------------------
 c_seed = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)

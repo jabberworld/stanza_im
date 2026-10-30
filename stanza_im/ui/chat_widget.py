@@ -1378,7 +1378,8 @@ class ChatWidget(QtWidgets.QWidget):
         for entry in self._newest_first():
             if (entry.get("origin_id") == stable_id
                     or entry.get("message_id") == stable_id
-                    or entry.get("archive_id") == stable_id):
+                    or entry.get("archive_id") == stable_id
+                    or entry.get("stanza_id") == stable_id):
                 return entry
         return None
 
@@ -1494,7 +1495,8 @@ class ChatWidget(QtWidgets.QWidget):
             # between the old point and the viewport as seen.
             self._seen_ref = self._reply_target_id(topmost)
             self._seen_ts = str(topmost.get("timestamp") or "")
-            self._seen_sid = str(topmost.get("archive_id") or "")
+            self._seen_sid = str(topmost.get("stanza_id")
+                                 or topmost.get("archive_id") or "")
             self._unread_boundary = {
                 "ref": self._seen_ref, "ts": self._seen_ts,
                 "sid": self._seen_sid}
@@ -1536,10 +1538,12 @@ class ChatWidget(QtWidgets.QWidget):
         anchor so an unread chat can be restored from this point.
         """
         for entry in self._newest_first():
-            archive_id = entry.get("archive_id") or ""
-            return {"ref": (archive_id or self._reply_target_id(entry)),
+            stanza_id = (entry.get("stanza_id") or entry.get("archive_id")
+                         or "")
+            return {"ref": (entry.get("archive_id")
+                            or self._reply_target_id(entry)),
                     "ts": entry.get("timestamp") or "",
-                    "sid": archive_id}
+                    "sid": stanza_id}
         return {}
 
     @staticmethod
@@ -1887,7 +1891,8 @@ class ChatWidget(QtWidgets.QWidget):
                     reply_able_id: str = "", reply_author: str = "",
                     reply_to: str = "", reply_id: str = "",
                     edited: bool = False, media: dict | None = None,
-                    encrypted: bool = False, markup: dict | None = None):
+                    encrypted: bool = False, markup: dict | None = None,
+                    stanza_id: str = ""):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -1905,6 +1910,7 @@ class ChatWidget(QtWidgets.QWidget):
                   "message_id": (message_id or reply_able_id
                               or (uuid.uuid4().hex if direction == "outgoing" else "")),
                   "delivered": False, "unstyled": unstyled,
+                  "stanza_id": stanza_id,
                   "origin_id": reply_able_id, "reply_author": reply_author,
                   "reply_to": reply_to, "reply_id": reply_id,
                   "edited": edited, "media": media,
@@ -1993,6 +1999,8 @@ class ChatWidget(QtWidgets.QWidget):
             "direction": entry.get("direction", "incoming"),
             "is_next": entry.get("is_next", False),
             "message_id": entry.get("message_id", ""),
+            "stanza_id": (entry.get("stanza_id")
+                          or entry.get("archive_id", "")),
             "unstyled": entry.get("unstyled", False),
             "raw_timestamp": entry.get("timestamp", ""),
             "reply_able_id": self._reply_target_id(entry),
@@ -2246,6 +2254,8 @@ class ChatWidget(QtWidgets.QWidget):
         share) over the content, so a live message and its reloaded row are the
         same entry even though their timestamps were computed separately.
         """
+        if entry.get("stanza_id"):
+            return ("stanza", entry["stanza_id"])
         if entry.get("archive_id"):
             return ("archive", entry["archive_id"])
         if entry.get("origin_id"):
@@ -2633,8 +2643,8 @@ class ChatWidget(QtWidgets.QWidget):
     def _entry_refs(self, entry: dict) -> set:
         """Every identifier *entry* can be addressed by (jump/marker anchors)."""
         return {str(entry.get(key) or "") for key in
-                ("archive_id", "origin_id", "reply_to", "reply_id",
-                 "message_id")} - {""}
+                ("stanza_id", "archive_id", "origin_id", "reply_to",
+                 "reply_id", "message_id")} - {""}
 
     def set_seen(self, ref: str = "", ts: str = "", sid: str = "") -> None:
         ref = str(ref or "")

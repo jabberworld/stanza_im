@@ -201,6 +201,16 @@ def muc_widget(jid="room@conf.example", nick="me"):
 
 ANCHOR = {"ref": "m-3", "ts": "2026-10-02T10:03:00Z", "sid": "sid-3"}
 
+# 0b. the server stanza-id reaches the rendered row and the MDS anchor ---------
+w = widget()
+w.add_message(sender="Bob", body="with sid",
+              timestamp="2026-10-02T10:01:00Z", direction="incoming",
+              reply_able_id="m-1", stanza_id="sid-1")
+check("the server stanza-id reaches the rendered row",
+      w._view.messages[-1]["stanza_id"] == "sid-1")
+check("the read anchor publishes the server stanza-id",
+      w.read_anchor()["sid"] == "sid-1")
+
 # 1. the window holds every message, the anchor only separates the block -------
 w = widget()
 w.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),

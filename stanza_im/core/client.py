@@ -1787,6 +1787,11 @@ class JabberClient:
         if displayed is None:
             return
         ref = str(displayed.get("id", "") or "")
+        sid, by = self._embedded_mds(msg)
+        if sid and (not by or by.split("/")[0] == self.jid_str):
+            target = str(msg["to"] or msg["from"] or "").split("/")[0]
+            if target:
+                self._mds_apply_remote(target, sid)
         if ref:
             self.emit("chat_marker_displayed", str(msg["from"]), ref)
 
@@ -5788,6 +5793,20 @@ class JabberClient:
             self._mds_apply_remote(item_id, sid)
 
     @staticmethod
+    def _embedded_mds(stanza) -> tuple[str, str]:
+        """Return ``(stanza-id, by)`` of an embedded XEP-0490 payload."""
+        xml = getattr(stanza, "xml", None)
+        if xml is None and hasattr(stanza, "iter"):
+            xml = stanza
+        if xml is None:
+            return "", ""
+        for disp in xml.iter("{%s}displayed" % NS_MDS):
+            sid_el = disp.find("{urn:xmpp:sid:0}stanza-id")
+            if sid_el is not None:
+                return sid_el.get("id") or "", sid_el.get("by") or ""
+        return "", ""
+
+    @staticmethod
     def _mds_payload(container):
         for child in container:
             if child.tag == "{%s}displayed" % NS_MDS:
@@ -6252,7 +6271,8 @@ class JabberClient:
             self._mds_track(frm.split("/")[0], msg, server_sid)
         self.emit("message_received", frm, body, ts, unstyled, stable_id,
                   frm, reply_to, reply_id, carbon, media=media,
-                  encrypted=self._omemo_flag(msg), markup=markup)
+                  encrypted=self._omemo_flag(msg), markup=markup,
+                  stanza_id=server_sid)
 
     @staticmethod
     def _omemo_flag(msg) -> bool:
@@ -6327,7 +6347,8 @@ class JabberClient:
                 self.emit("muc_private_message", pm_room, pm_nick, body, ts,
                           unstyled, stable_id, frm, reply_to, reply_id,
                           media=media, encrypted=self._omemo_flag(msg),
-                          markup=markup, urgency=_shim_urgency(msg))
+                          markup=markup, urgency=_shim_urgency(msg),
+                          stanza_id=server_sid)
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -6341,7 +6362,7 @@ class JabberClient:
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id, media=media,
                       encrypted=self._omemo_flag(msg), markup=markup,
-                      urgency=_shim_urgency(msg))
+                      urgency=_shim_urgency(msg), stanza_id=server_sid)
 
     @staticmethod
     def _message_fields(msg):
@@ -6400,7 +6421,8 @@ class JabberClient:
             self._mds_track(frm.split("/")[0], inner, server_sid)
         self.emit("message_received", frm, body, ts, unstyled,
                   stable_id, frm, reply_to, reply_id, True, media=media,
-                  markup=markup, urgency=_shim_urgency(inner))
+                  markup=markup, urgency=_shim_urgency(inner),
+                  stanza_id=server_sid)
 
     def _on_carbon_sent(self, msg) -> None:
         """A 1:1 message sent from another of our resources (XEP-0280)."""
@@ -6423,6 +6445,9 @@ class JabberClient:
             self.emit("message_retracted_own", bare, retract_ref)
             return
         media = message_media(inner)
+        sid, by = self._embedded_mds(inner)
+        if sid and (not by or by.split("/")[0] == self.jid_str):
+            self._mds_apply_remote(bare, sid)
         if not body and not media:
             # A carbon copy of a receipt/chat marker has no body and is not a
             # message; it must not render as an empty outgoing "Me" row.
@@ -6430,8 +6455,12 @@ class JabberClient:
         unstyled, ts, reply_to, reply_id, stable_id = \
             self._message_fields(inner)
         markup = message_markup(inner)
+        server_sid = _stanza_id(inner, self.jid_str)
+        if server_sid:
+            self._mds_track(bare, inner, server_sid)
         self.emit("message_carbon_sent", bare, body, ts,
-                  stable_id, reply_to, reply_id, media=media, markup=markup)
+                  stable_id, reply_to, reply_id, media=media, markup=markup,
+                  stanza_id=server_sid)
 
     def _on_groupchat_message(self, msg) -> None:
         frm = str(msg["from"])
@@ -6489,13 +6518,14 @@ class JabberClient:
         # Prefer the sender's origin-id: old MUC servers replay their history
         # without a <stanza-id>, and the replay/MAM/live copies of one message
         # must share a stable id so the history dedups them.
-        stable_id = _origin_id(msg) or _stanza_id(msg, room)
+        server_sid = _stanza_id(msg, room)
+        stable_id = _origin_id(msg) or server_sid
         if not stable_id and archived and archive_id:
             stable_id = archive_id
         if not stable_id:
             stable_id = str(msg.get("id") or "")
-        if stable_id:
-            self._mds_track(room, msg, stable_id)
+        if server_sid or stable_id:
+            self._mds_track(room, msg, server_sid or stable_id)
         media = message_media(msg)
         markup = message_markup(msg)
         replace_ref = _replace_reference(msg)
@@ -6510,7 +6540,7 @@ class JabberClient:
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
                   media=media, encrypted=self._omemo_flag(msg), markup=markup,
-                  urgency=_shim_urgency(msg))
+                  urgency=_shim_urgency(msg), stanza_id=server_sid)
 
     def _room_pm_occupant(self, frm: str, msg) -> tuple[str, str] | None:
         """Occupant ``(room, nick)`` of a room PM relayed from the real JID.
@@ -7838,8 +7868,10 @@ class JabberClient:
                             skip_reasons.get("wrong_sender", 0) + 1)
                         continue
                 if jid in self.groupchats:
-                    stable = _stanza_id(msg, jid) or _archive_result_id(result)
+                    server_sid = _stanza_id(msg, jid)
+                    stable = server_sid or _archive_result_id(result)
                 else:
+                    server_sid = _stanza_id(msg, self.jid_str)
                     stable = _origin_id(msg) or str(msg.get("id") or "")
                 rows.append({
                     "direction": direction,
@@ -7847,6 +7879,7 @@ class JabberClient:
                     "timestamp": ts or None,
                     "sender": sender,
                     "archive_id": _archive_result_id(result),
+                    "stanza_id": server_sid,
                     "origin_id": stable,
                     "reply_to": _reply_reference(msg)[0],
                     "reply_id": _reply_reference(msg)[1],

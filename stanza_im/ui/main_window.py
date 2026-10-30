@@ -7763,7 +7763,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              carbon: bool = False, media: dict | None = None,
                              encrypted: bool = False,
                              markup: dict | None = None,
-                             urgency: str = ""):
+                             urgency: str = "",
+                             stanza_id: str = ""):
         bare_jid = frm.split("/")[0]
         self._touch_tab_activity(bare_jid)
         priority = self._effective_priority(bare_jid, urgency)
@@ -7792,7 +7793,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id=reply_able_id,
                              reply_author=reply_author or frm,
                              reply_to=reply_to, reply_id=reply_id,
-                             media=media, encrypted=encrypted, markup=markup)
+                             media=media, encrypted=encrypted, markup=markup,
+                             stanza_id=stanza_id)
 
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -7802,7 +7804,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted, markup=markup))
+            encrypted=encrypted, markup=markup, stanza_id=stanza_id))
 
         if encrypted:
             self._maybe_auto_enable_omemo(bare_jid)
@@ -7829,7 +7831,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_message_carbon_sent(self, jid: str, body: str, ts,
                                 stable_id: str = "", reply_to: str = "",
                                 reply_id: str = "", media: dict | None = None,
-                                markup: dict | None = None):
+                                markup: dict | None = None,
+                                stanza_id: str = ""):
         """A message sent from another of our resources (XEP-0280 carbon).
 
         Shown as our own outgoing message in the target chat and stored in
@@ -7846,7 +7849,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 message_id=stable_id,
                 reply_able_id=stable_id, reply_author=jid,
                 reply_to=reply_to, reply_id=reply_id, media=media,
-                markup=markup)
+                markup=markup, stanza_id=stanza_id)
         self._remember_contact(jid)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -7854,7 +7857,7 @@ class MainWindow(QtWidgets.QMainWindow):
             timestamp=stamp, sender="Me",
             origin_id=stable_id, message_id=stable_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            markup=markup))
+            markup=markup, stanza_id=stanza_id))
 
     def _resolve_mds_key(self, chat_jid: str) -> str:
         """Map an incoming MDS chat JID onto one of our conversation keys.
@@ -8035,9 +8038,63 @@ class MainWindow(QtWidgets.QMainWindow):
                          key, sid)
             return
         if remote_ts < newest_ts:
+            await self._apply_mds_partial(key, sid, remote_ts)
             return
         self._reset_unread(key, anchor={"ref": sid, "ts": remote_ts,
                                         "sid": sid})
+
+    async def _apply_mds_partial(self, key: str, sid: str,
+                                 remote_ts: str) -> None:
+        """Move the read point to a remote device's *remote_ts*.
+
+        The remote device may be behind our newest message: everything up to
+        its displayed point is read there, while newer messages stay unread
+        here.  This is the partial counterpart of the full clamp.
+        """
+        from stanza_im.core import history
+        entry = self._unread_chats.get(key)
+        local_ts = max(str((entry or {}).get("read_ts") or ""),
+                       str((entry or {}).get("seen_ts") or ""))
+        if local_ts and remote_ts <= local_ts:
+            return
+        count = await history.count_incoming_after_async(key, remote_ts)
+        mentions = 0
+        self_nick = self._muc_self_nicks.get(key, "")
+        if self_nick:
+            rows = await history.load_history_async(
+                key, limit=500, since=remote_ts)
+            mentions = sum(
+                1 for row in rows
+                if row.get("direction") != "outgoing"
+                and mentions_nick(str(row.get("body") or ""), self_nick))
+        chat = (self._chat_window.get_chat(key)
+                if self._chat_window is not None else None)
+        if count <= 0:
+            self._reset_unread(key, anchor={"ref": sid, "ts": remote_ts,
+                                            "sid": sid})
+            if chat is not None:
+                chat.mark_read()
+            return
+        record = entry or unread_state.blank()
+        record["unread"] = count
+        record["mentions"] = mentions
+        record["read_sid"] = sid
+        record["read_ts"] = remote_ts
+        record["read_ref"] = sid
+        record["seen_sid"] = sid
+        record["seen_ts"] = remote_ts
+        record["seen_ref"] = sid
+        import time
+        record["seen_at"] = time.time()
+        self._store_read_state(key, record)
+        self._refresh_unread_badge(key)
+        self._push_unread_to_chat(key)
+        self._schedule_unread_save()
+        if chat is not None:
+            chat.set_unread_boundary({"ref": sid, "ts": remote_ts,
+                                      "sid": sid})
+        logger.debug("MDS[partial] jid=%s sid=%s ts=%s unread=%d mentions=%d",
+                     key, sid, remote_ts, count, mentions)
 
     def _on_muc_private_message(self, room: str, nick: str,
                                  body: str, ts, unstyled: bool = False,
@@ -8046,7 +8103,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                   media: dict | None = None,
                                   encrypted: bool = False,
                                   markup: dict | None = None,
-                                  urgency: str = ""):
+                                  urgency: str = "",
+                                  stanza_id: str = ""):
         info = self._participant_info(room, nick)
         # Conference PMs use the occupant identity in every room type; the real
         # JID (when the room reveals one) is metadata for status/avatar/vCard.
@@ -8072,7 +8130,8 @@ class MainWindow(QtWidgets.QMainWindow):
                          reply_able_id=reply_able_id,
                          reply_author=reply_author or f"{room}/{nick}",
                          reply_to=reply_to, reply_id=reply_id, media=media,
-                         encrypted=encrypted, markup=markup)
+                         encrypted=encrypted, markup=markup,
+                         stanza_id=stanza_id)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
@@ -8080,7 +8139,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted, markup=markup))
+            encrypted=encrypted, markup=markup, stanza_id=stanza_id))
         if priority != "low":
             self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
@@ -8165,7 +8224,8 @@ class MainWindow(QtWidgets.QMainWindow):
                               media: dict | None = None,
                               encrypted: bool = False,
                               markup: dict | None = None,
-                              urgency: str = ""):
+                              urgency: str = "",
+                              stanza_id: str = ""):
         self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
@@ -8173,7 +8233,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 room, "incoming", body,
                 timestamp=ts or _current_timestamp(),
                 sender=nick, archive_id=archive_id,
-                origin_id=reply_able_id,
+                stanza_id=stanza_id, origin_id=reply_able_id,
                 reply_to=reply_to, reply_id=reply_id, markup=markup,
                 archived=True))
             # A join-time history replay is stored, not rendered: merge it into
@@ -8214,7 +8274,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_able_id=reply_ref_id,
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id,
-                             media=media, encrypted=encrypted, markup=markup)
+                             media=media, encrypted=encrypted, markup=markup,
+                             stanza_id=stanza_id)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             room, "incoming", body,
@@ -8223,7 +8284,7 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_ref_id,
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted, markup=markup))
+            encrypted=encrypted, markup=markup, stanza_id=stanza_id))
         priority = self._effective_priority(room, urgency)
         if priority != "low":
             self._maybe_osd_groupchat(room, nick, body)

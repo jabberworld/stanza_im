@@ -228,11 +228,17 @@ check("a device that read everything clears our unread",
       == "2026-10-02T11:00:00Z")
 
 win._unread_chats["dave@example.com"]["unread"] = 2
+win._unread_chats["dave@example.com"]["read_ts"] = ""
+win._unread_chats["dave@example.com"]["seen_ts"] = ""
+win._unread_chats["dave@example.com"]["read_sid"] = ""
+win._unread_chats["dave@example.com"]["seen_sid"] = ""
 win._recount_unread()
 _remote("dave@example.com", "arc-1")
-check("a device behind us keeps the unread block",
-      win._unread_counts.get("dave@example.com") == 2
-      and win._unread_chats["dave@example.com"]["read_sid"] == "arc-2")
+check("a device behind us clears only the read prefix",
+      win._unread_counts.get("dave@example.com") == 1
+      and win._unread_chats["dave@example.com"]["read_sid"] == "arc-1"
+      and win._unread_chats["dave@example.com"]["read_ts"]
+      == "2026-10-02T10:00:00Z")
 
 win._unread_chats["erin@example.com"] = unread_state.blank()
 win._unread_chats["erin@example.com"]["unread"] = 3
