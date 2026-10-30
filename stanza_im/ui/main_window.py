@@ -5631,6 +5631,7 @@ class MainWindow(QtWidgets.QMainWindow):
         window.incoming_requested.connect(self._on_incoming_requested)
         window.pip_toggled.connect(self._on_call_pip_toggled)
         window.redial_requested.connect(self._on_call_redial)
+        window.render_size_changed.connect(self._on_call_render_size)
         window.visibility_changed.connect(self._on_call_visibility)
         self._place_window_near_main(window)
         if video and self._call_pip_default():
@@ -5796,6 +5797,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._tray.show_message(
             APP_NAME, tr("call_failed", peer=peer, error=error))
+
+    def _on_call_render_size(self, sid: str, width: int, height: int) -> None:
+        """Keep remote-frame conversion close to the visible window size."""
+        if self._client:
+            self._client.rtp_calls.set_call_render_size(sid, width, height)
 
     def _on_call_redial(self, sid: str, peer_jid: str, video: bool) -> None:
         """Re-dial after a failed call, using the same audio/video mode."""

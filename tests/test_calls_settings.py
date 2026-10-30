@@ -138,6 +138,18 @@ small_camera = av.VideoFrame(640, 480, "yuv420p")
 check("a smaller camera frame is kept",
       media._limit_video_frame(small_camera, 720) is small_camera)
 
+check("the preview box preserves the aspect ratio",
+      media._fit_frame_size(1280, 720, 320, 180) == (320, 180)
+      and media._fit_frame_size(640, 480, 320, 180) == (240, 180))
+if media.QtGui is not None:
+    large_frame = av.VideoFrame(1280, 720, "yuv420p")
+    preview = media._frame_to_qimage(large_frame, 320, 180)
+    check("the preview frame is downscaled before RGB conversion",
+          preview is not None and preview.width() == 320
+          and preview.height() == 180)
+else:
+    print("SKIP: QtGui unavailable in this test environment")
+
 # 5. the Preferences section -------------------------------------------------
 cfg = Config.defaults()
 dlg = PreferencesDialog(cfg, ChatThemeFactory())

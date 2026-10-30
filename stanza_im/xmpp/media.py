@@ -1478,13 +1478,34 @@ def _black_frame(size=None):
     return frame
 
 
-def _frame_to_qimage(frame):
-    """Convert a decoded PyAV video frame to a ``QImage``; None on failure."""
+def _fit_frame_size(width: int, height: int, max_width: int = 0,
+                    max_height: int = 0) -> tuple[int, int]:
+    """Downscale a frame to fit the box, preserving its aspect ratio."""
+    width = max(2, int(width))
+    height = max(2, int(height))
+    scale = 1.0
+    if max_width and width > max_width:
+        scale = min(scale, max_width / float(width))
+    if max_height and height > max_height:
+        scale = min(scale, max_height / float(height))
+    if scale >= 1.0:
+        return width, height
+    return max(2, int(width * scale)), max(2, int(height * scale))
+
+
+def _frame_to_qimage(frame, max_width: int = 0, max_height: int = 0):
+    """Convert a decoded PyAV video frame to a ``QImage``; None on failure.
+
+    A preview only needs display-sized pixels: passing a box lets PyAV scale
+    before the RGB conversion instead of copying a full 720p frame and then
+    scaling it again in ``paintEvent``.
+    """
     if QtGui is None:
         return None
     try:
-        rgb = frame.reformat(width=frame.width, height=frame.height,
-                             format="rgb24")
+        width, height = _fit_frame_size(
+            frame.width, frame.height, max_width, max_height)
+        rgb = frame.reformat(width=width, height=height, format="rgb24")
         data = bytes(rgb.planes[0])
         image = QtGui.QImage(data, rgb.width, rgb.height,
                              rgb.planes[0].line_size,
@@ -1980,6 +2001,8 @@ if HAS_AIORTC:
             self._remote_sdp = ""
             self._remote_kind = ""
             self._remote_size = None
+            self._render_width = 0
+            self._render_height = 0
             # Desired mute states survive until the matching track exists.
             # The UI can toggle them while the call is still ringing, before
             # add_audio()/add_video() or the remote track has been created.
@@ -2086,7 +2109,8 @@ if HAS_AIORTC:
                     logger.debug("CALL video track ended")
                     return
                 self._remote_size = (frame.width, frame.height)
-                image = _frame_to_qimage(frame)
+                image = _frame_to_qimage(frame, self._render_width,
+                                         self._render_height)
                 if image is not None and self.on_remote_track:
                     self.on_remote_track("frame", image)
 
@@ -2134,7 +2158,7 @@ if HAS_AIORTC:
                 return
             self._local_preview_last = now
             try:
-                image = _frame_to_qimage(frame)
+                image = _frame_to_qimage(frame, 320, 180)
             except Exception:
                 logger.debug("CALL local frame conversion failed",
                              exc_info=True)
@@ -2145,6 +2169,11 @@ if HAS_AIORTC:
         def set_local_preview(self, enabled: bool) -> None:
             """Toggle own-frame conversion for the UI self-preview."""
             self.local_preview_enabled = bool(enabled)
+
+        def set_render_size(self, width: int, height: int) -> None:
+            """Limit remote-frame conversion to the visible call size."""
+            self._render_width = max(0, int(width or 0))
+            self._render_height = max(0, int(height or 0))
 
         def set_audio_enabled(self, enabled: bool) -> None:
             self._audio_enabled = bool(enabled)
@@ -2687,7 +2716,7 @@ if HAS_AIORTC:
             if now - self._last_frame_at < 1.0 / 15.0:
                 return
             self._last_frame_at = now
-            image = _frame_to_qimage(frame)
+            image = _frame_to_qimage(frame, 320, 180)
             if image is not None:
                 self._on_image(image)
 

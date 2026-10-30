@@ -2895,8 +2895,10 @@ translucent nickname caption over the image. Every call control is **icon-only**
 a red `call-hangup`, a green `call-accept` and a **quality** button
 (`quality.svg`, a small bars glyph). Every control is flat (`_flat`:
 `autoRaise` on a `QToolButton`, `setFlat` on a `QPushButton`), and the 1:1
-control strip is its own compact, centred widget with a minimum width so its
-buttons never cross into the video area at the smallest window size. Its menu changes the outgoing video
+control strip is its own compact, centred widget with a fixed width/height
+computed from its buttons, and the window's minimum height comes from the
+layout, so its buttons never cross into the video area at the smallest window
+size. Its menu changes the outgoing video
 **bitrate** (200/500/1000/1500 kbps; default 1000) and **resolution**
 (source/1080/720/480/360) of a live call (in Muji — of every session of the
 room): `MainWindow._on_call_quality_requested`/`_on_muji_quality_requested` →
@@ -2935,6 +2937,10 @@ engine call exists the same preview comes from a
 standalone `_LocalPreviewCapture`: the outgoing ringing window starts one
 immediately, and the incoming prompt shows a small self-view above its buttons
 until Accept/Reject. Both are stopped before the engine opens the camera.
+Local preview frames are scaled to 320×180 **before** the RGB conversion and
+the view uses `FastTransformation`; incoming video is converted to the call
+window's current render size, so the preview/rendering cost does not scale with
+a full 720p frame. The outgoing resolution and bitrate are unchanged.
 `CALL stats` carries separate
 `in_video`/`in_audio` rates, incoming/outgoing loss, REMB, FPS, motion peak,
 target and `lag_peak` (the worst GUI event-loop stall since the previous
@@ -2951,11 +2957,14 @@ while the loop is blocked. On a lossy path `_install_consent_retry` replaces
 `aiortc.rtcicetransport.Connection` with a subclass whose consent probes use
 two retransmissions (0.5 + 1 + 2 s) instead of aioice's single 0.5 s request,
 so a few lost packets do not close a healthy RTP session. An unexpected
-`connectionState=closed` (including consent expiry) is a failure: the call
-window stays open with «Соединение потеряно» and a **«Перезвонить»** button
-that starts a new call in the same audio/video mode. Any `call_failed` with an
-existing window uses the same lost state; without a window it remains a tray
-notice. The call header also
+`connectionState=closed` (including consent expiry) waits a short 2 s grace:
+a `session-terminate` arriving in that window closes the call normally (the
+remote hangup often closes ICE/DTLS a moment before the Jingle stanza), while
+otherwise the call window stays open with «Соединение потеряно» and a
+**«Перезвонить»** button that starts a new call in the same audio/video mode.
+A late terminate for an already removed session also closes its lost window.
+Any `call_failed` with an existing window uses the same lost state; without a
+window it remains a tray notice. The call header also
 has a **network-quality** icon (`include/network_quality.py` levels 0–4,
 painted by `ui/network_quality.py`; updated once a second): its tooltip names
 the reason — incoming/outgoing loss, low REMB/target, or event-loop lag — with

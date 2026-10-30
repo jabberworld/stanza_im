@@ -3483,9 +3483,13 @@ client.leave_muji(room)
   video call opens with a responsive PiP self-view (`calls.pip` is the default
   for new calls): the frame is anchored to the displayed image rectangle,
   mirrored for the camera and unmirrored for screen sharing, throttled to
-  15 fps, and paused while the window is hidden. The in-call PiP button is
-  local to the current window; changing the preference does not alter an open
-  call. Before the engine call the same preview uses a
+  15 fps, and paused while the window is hidden. The local preview is scaled
+  to 320×180 before the RGB conversion; incoming video is converted to the
+  current window size, and the view uses `FastTransformation`, so rendering
+  does not scale a full 720p frame while the transmitted stream and bitrate
+  stay unchanged. The in-call PiP button is local to the current window;
+  changing the preference does not alter an open call. Before the engine call
+  the same preview uses a
   standalone capture: outgoing ringing starts it immediately; the incoming
   prompt shows a small self-view above Accept/Reject and stops it before the
   engine takes the camera. A watchdog logs
@@ -3496,9 +3500,12 @@ client.leave_muji(room)
   Host candidates come from `include/routing.py`: the kernel's default-route
   source is used (fallback to all addresses; IPv6 only with a real default
   route), so link-down Docker/LXC/host-only addresses are not advertised.
-  An unexpected `connectionState=closed`/consent expiry keeps the window with
-  «Соединение потеряно» and a «Перезвонить» button that starts a new call in the
-  same audio/video mode; any `call_failed` with an open window uses that state.
+  An unexpected `connectionState=closed`/consent expiry waits a 2 s grace: a
+  `session-terminate` arriving in that window closes the call normally, while
+  otherwise the window stays with «Соединение потеряно» and a «Перезвонить»
+  button that starts a new call in the same audio/video mode; a late terminate
+  for an already removed session also closes the lost window. Any `call_failed`
+  with an open window uses that state.
   Audio changes are pre-call and a codec change needs renegotiation. An info button
   (`info.svg`) is a toggle showing one compact line under the header with the
   outgoing/incoming codec and resolution and the target/actual bitrates (audio

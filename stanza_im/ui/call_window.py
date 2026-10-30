@@ -297,7 +297,7 @@ class VideoView(QtWidgets.QLabel):
             painter = QtGui.QPainter(self)
             scaled = self._image.scaled(
                 self.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation)
+                QtCore.Qt.TransformationMode.FastTransformation)
             x = (self.width() - scaled.width()) // 2
             y = (self.height() - scaled.height()) // 2
             if self._mirrored:
@@ -404,6 +404,7 @@ class CallWindow(QtWidgets.QWidget):
 
     hangup = QtCore.pyqtSignal(str)          # sid
     redial_requested = QtCore.pyqtSignal(str, str, bool)  # sid, jid, video
+    render_size_changed = QtCore.pyqtSignal(str, int, int)  # sid, width, height
     audio_toggled = QtCore.pyqtSignal(str, bool)    # outgoing audio enabled
     video_mode_requested = QtCore.pyqtSignal(str, str)  # sid, mode
     receive_toggled = QtCore.pyqtSignal(str, bool)  # remote audio playback
@@ -423,6 +424,7 @@ class CallWindow(QtWidgets.QWidget):
         self.peer = peer
         self.peer_jid = peer_jid or peer
         self._failed = False
+        self._last_render_size = (0, 0)
         self._quality_bitrate = int(video_bitrate or 0)
         self._quality_height = int(max_height or 0)
         self._info_provider = info_provider
@@ -488,6 +490,8 @@ class CallWindow(QtWidgets.QWidget):
         self._video_view.installEventFilter(self)
 
         controls = QtWidgets.QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(2)
         self._mute_btn = QtWidgets.QToolButton(self)
         self._mute_btn.setIcon(_icon("mic-off" if self._muted else "mic"))
         self._mute_btn.setIconSize(QtCore.QSize(20, 20))
@@ -568,7 +572,7 @@ class CallWindow(QtWidgets.QWidget):
             lambda: self.redial_requested.emit(
                 self.sid, self.peer_jid, bool(self._video)))
         controls.addWidget(self._redial_btn)
-        controls.addSpacing(12)
+        controls.addSpacing(4)
 
         self._hangup_btn = QtWidgets.QToolButton(self)
         self._hangup_btn.setIcon(_icon("call-hangup"))
@@ -584,9 +588,22 @@ class CallWindow(QtWidgets.QWidget):
         self._controls_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Fixed,
             QtWidgets.QSizePolicy.Policy.Fixed)
-        self._controls_widget.setMinimumWidth(controls.sizeHint().width())
         layout.addWidget(self._controls_widget, 0,
                          QtCore.Qt.AlignmentFlag.AlignHCenter)
+        self._fit_controls()
+
+    def _fit_controls(self) -> None:
+        """Keep the control strip exactly as wide/tall as its buttons."""
+        layout = self._controls_widget.layout()
+        if layout is None:
+            return
+        hint = layout.sizeHint()
+        self._controls_widget.setFixedWidth(max(1, hint.width()))
+        self._controls_widget.setFixedHeight(max(1, hint.height()))
+        try:
+            self.setMinimumHeight(max(340, self.layout().minimumSize().height()))
+        except Exception:  # noqa: BLE001 - layout is being built
+            pass
 
     def show_failed(self, error: str = "") -> None:
         """Keep the window open after a failed call with a redial action."""
@@ -605,6 +622,7 @@ class CallWindow(QtWidgets.QWidget):
         self._pip_view.setVisible(False)
         self._redial_btn.setVisible(True)
         self._hangup_btn.setToolTip(tr("dialog_close"))
+        self._fit_controls()
 
     def _on_hangup(self) -> None:
         if self._failed:
@@ -778,12 +796,23 @@ class CallWindow(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(0, self._position_pip)
         return super().eventFilter(obj, event)
 
+    def _emit_render_size(self) -> None:
+        size = (max(0, self._video_view.width()),
+                max(0, self._video_view.height()))
+        if not size[0] or not size[1] or size == self._last_render_size:
+            return
+        self._last_render_size = size
+        self.render_size_changed.emit(self.sid, size[0], size[1])
+
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         QtCore.QTimer.singleShot(0, self._position_pip)
+        QtCore.QTimer.singleShot(0, self._emit_render_size)
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
+        self._fit_controls()
+        QtCore.QTimer.singleShot(0, self._emit_render_size)
         self.visibility_changed.emit(self.sid, True)
 
     def hideEvent(self, event):  # noqa: N802

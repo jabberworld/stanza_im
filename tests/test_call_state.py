@@ -7,6 +7,7 @@ arrived, several seconds before ICE/DTLS connected.  Now the session is
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_call_state.py
 """
+import asyncio
 import inspect
 import os
 import sys
@@ -45,6 +46,7 @@ class _Client:
 def manager():
     mgr = JingleRtpManager.__new__(JingleRtpManager)
     mgr.client = _Client()
+    mgr.sessions = {}
     mgr.terminated = []
     mgr.closed = []
     mgr._terminate = lambda s, r, send=False: mgr.terminated.append((s.sid, r))
@@ -70,6 +72,7 @@ check("a repeated connected event does not duplicate the state",
 
 failed = SimpleNamespace(sid="s2", peer_full="rain@example.com/phone",
                          state="accepted", video=True)
+mgr.sessions["s2"] = failed
 mgr._on_media_state(failed, "connection", "failed")
 check("a failed media connection reports the failure",
       ("call_failed", "s2", "rain@example.com/phone", "connection failed",
@@ -82,6 +85,7 @@ check("a failed media connection reports the failure",
 consent = SimpleNamespace(
     sid="s3", peer_full="rain@example.com/phone", state="active", video=False,
     call=SimpleNamespace(_closed=False))
+mgr.sessions["s3"] = consent
 mgr.client.emitted.clear()
 mgr._on_media_state(consent, "connection", "closed")
 check("an unexpected closed connection reports the failure",
@@ -96,6 +100,36 @@ mgr.client.emitted.clear()
 mgr._on_media_state(normal, "connection", "closed")
 check("our own close is not reported as a failure",
       mgr.client.emitted == [])
+
+# A remote hangup can close ICE/DTLS a moment before session-terminate arrives;
+# the grace window must not report that normal end as a media failure.
+async def _terminate_grace():
+    gmgr = manager()
+    gmgr.sessions = {}
+    gs = SimpleNamespace(sid="s5", peer_full="rain@example.com/phone",
+                         state="active", video=True,
+                         call=SimpleNamespace(_closed=False))
+    gmgr.sessions["s5"] = gs
+    gmgr._reason = lambda _el: "success"
+    gmgr._on_media_state(gs, "connection", "closed")
+    await asyncio.sleep(0.01)
+    check("a close waits for a possible session-terminate",
+          gmgr.client.emitted == [] and not gmgr.closed)
+    await gmgr._on_session_terminate(SimpleNamespace(
+        get=lambda key, default="": {"sid": "s5"}.get(key, default)))
+    check("a terminate during the grace closes normally",
+          gmgr.closed == [("s5", "ended", "success", True)]
+          and not any(e[0] == "call_failed" for e in gmgr.client.emitted))
+
+    # A terminate that arrives after the session was already removed must
+    # still close a lost window instead of leaving the last frame frozen.
+    await gmgr._on_session_terminate(SimpleNamespace(
+        get=lambda key, default="": {"sid": "gone"}.get(key, default)))
+    check("a late terminate closes the old window",
+          ("call_ended", "gone", "", "success") in gmgr.client.emitted)
+
+
+asyncio.run(_terminate_grace())
 
 # The answerer emits "connecting" (not "active") on the session accept.
 accept_src = inspect.getsource(JingleRtpManager._accept)

@@ -622,6 +622,7 @@ class JingleRtpManager:
         self._pending_proposals: dict[str, dict] = {}
         self._proceeded: set[str] = set()
         self._proceed_timers: dict[str, object] = {}
+        self._lost_timers: dict[str, object] = {}
         logger.info("CALL manager created (engine loaded lazily)")
 
     def _ensure_engine(self):
@@ -1357,13 +1358,46 @@ class JingleRtpManager:
                 # Our own close() can emit failed/closed while shutting down;
                 # it is a normal end, not a new call failure.
                 return
-            logger.warning("CALL media connection lost (%s): %s",
-                           state, session.sid)
-            self.client.emit("call_failed", session.sid, session.peer_full,
-                             "connection failed", getattr(session, "video", False))
-            self._terminate(session, "connectivity-error", send=True)
-            self._close_session(session, "failed", "connectivity-error",
-                                notify=False)
+            if state == "closed":
+                # A remote session-terminate commonly arrives just after the
+                # ICE/DTLS close.  Keep the session for a short grace window
+                # so a correct hangup is not reported as a failure.
+                logger.debug("CALL media closed; waiting for terminate: %s",
+                             session.sid)
+                self._schedule_media_lost(session)
+            else:
+                logger.warning("CALL media connection failed: %s", session.sid)
+                self._finalize_media_lost(session)
+
+    def _schedule_media_lost(self, session: CallSession) -> None:
+        """Report a media close as lost only after the terminate grace."""
+        timers = getattr(self, "_lost_timers", None)
+        if timers is None:
+            timers = self._lost_timers = {}
+        if session.sid in timers:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._finalize_media_lost(session)
+            return
+        timers[session.sid] = loop.call_later(
+            2.0, self._finalize_media_lost, session)
+        logger.debug("CALL loss grace started: %s", session.sid)
+
+    def _finalize_media_lost(self, session: CallSession) -> None:
+        timers = getattr(self, "_lost_timers", None)
+        if timers is not None:
+            timers.pop(session.sid, None)
+        sessions = getattr(self, "sessions", {}) or {}
+        if (sessions.get(session.sid) is not session
+                or session.state in ("ended", "failed")):
+            return
+        self.client.emit("call_failed", session.sid, session.peer_full,
+                         "connection failed", getattr(session, "video", False))
+        self._terminate(session, "connectivity-error", send=True)
+        self._close_session(session, "failed", "connectivity-error",
+                            notify=False)
 
     async def _on_transport_info(self, jingle: ET.Element) -> None:
         session = self.sessions.get(jingle.get("sid", ""))
@@ -1399,10 +1433,18 @@ class JingleRtpManager:
         return content.get("name", "") or "0"
 
     async def _on_session_terminate(self, jingle: ET.Element) -> None:
-        session = self.sessions.get(jingle.get("sid", ""))
-        if session is None:
-            return
+        sid = jingle.get("sid", "")
         reason = self._reason(jingle)
+        timers = getattr(self, "_lost_timers", None)
+        handle = timers.pop(sid, None) if timers is not None else None
+        if handle is not None:
+            handle.cancel()
+        session = self.sessions.get(sid)
+        if session is None:
+            # The media may have closed a moment before this corrective
+            # terminate arrived.  Still close a window left in the lost state.
+            self.client.emit("call_ended", sid, "", reason)
+            return
         logger.info("CALL terminated by peer: %s (%s)", session.sid, reason)
         self._close_session(session, "ended", reason)
 
@@ -1577,6 +1619,14 @@ class JingleRtpManager:
         """Turn the local camera on/off (black frames, no renegotiation)."""
         self._set_track_enabled(sid, "set_video_enabled", enabled)
 
+    def set_call_render_size(self, sid: str, width: int, height: int) -> None:
+        """Limit remote-frame conversion to the visible window size."""
+        session = self.sessions.get(sid)
+        call = getattr(session, "call", None) if session is not None else None
+        setter = getattr(call, "set_render_size", None)
+        if callable(setter):
+            setter(width, height)
+
     def set_incoming_max_all(self, kbps: int) -> None:
         """Apply one incoming cap to every active session."""
         value = max(0, int(kbps or 0))
@@ -1688,6 +1738,10 @@ class JingleRtpManager:
 
     def _close_session(self, session: CallSession, state: str,
                        reason: str = "", notify: bool = True) -> None:
+        timers = getattr(self, "_lost_timers", None)
+        handle = timers.pop(session.sid, None) if timers is not None else None
+        if handle is not None:
+            handle.cancel()
         if session.call is not None:
             try:
                 session.call.close()
