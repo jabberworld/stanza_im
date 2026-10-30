@@ -196,6 +196,9 @@ class ProfilesDialog(QtWidgets.QDialog):
         jid = self._selected_jid()
         if jid:
             self.activated.emit(jid)
+            # The owner applies the profile synchronously (config.jid changes);
+            # rebuild so the bold row and tooltip follow the new active one.
+            self.reload()
 
     def _on_delete(self) -> None:
         jid = self._selected_jid()

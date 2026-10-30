@@ -986,8 +986,9 @@ asks how (`ui/profile_source_dialog.ProfileSourceDialog`): «У меня уже 
 новую» reuses `AccountRegistrationDialog` opened with `store_account=False`
 (it only returns the `Profile` via `result_profile()` and leaves the active
 config untouched); either way the profile is only **added** to the list.
-«Применить» emits `activated(jid)`; `MainWindow._activate_profile` writes the
-profile to the config (`profiles.apply_to_config`), selects its data directory
+«Применить» emits `activated(jid)` and then reloads the list, so the bold row
+and tooltip follow the newly active profile; `MainWindow._activate_profile`
+writes the profile to the config (`profiles.apply_to_config`), selects its data directory
 (`profiles.set_active`), reloads the unread counters and, while a session is
 open, asks for confirmation (`profiles_activate_question`) before logging out
 and signing in to the new account — a profile with no stored password only

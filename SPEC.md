@@ -942,7 +942,8 @@ right, with a separate «Закрыть» button at the bottom.
   proxy) or «Зарегистрировать новую учетную запись»
   (`AccountRegistrationDialog` with `store_account=False`). The resulting
   `Profile` is only **added** to the list (`profiles.upsert`).
-- «Применить» emits `activated(jid)`; `MainWindow._activate_profile` writes the
+- «Применить» emits `activated(jid)` and reloads the list (the bold row follows
+  the newly active profile); `MainWindow._activate_profile` writes the
   profile to the config, selects its data directory, reloads the unread
   counters and — while a session is open — asks for confirmation
   (`profiles_activate_question`) before logging out and signing in to the new

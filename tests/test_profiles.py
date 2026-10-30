@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.include import constants
@@ -203,6 +203,15 @@ _emitted = []
 manager.activated.connect(_emitted.append)
 manager._on_apply()
 check("apply emits the selected JID", _emitted == ["bob@example.com"])
+
+manager.activated.connect(lambda jid: setattr(cfg, "jid", jid))
+manager._on_apply()
+_bob_row = next(
+    manager._list.item(row) for row in range(manager._list.count())
+    if manager._list.item(row).data(QtCore.Qt.ItemDataRole.UserRole)
+    == "bob@example.com")
+check("apply reloads the list and bolds the new active profile",
+      _bob_row.font().bold())
 
 # registration dialog does not touch the config when store_account=False
 reg = AccountRegistrationDialog(cfg, store_account=False)
