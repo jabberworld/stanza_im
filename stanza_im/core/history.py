@@ -69,13 +69,15 @@ CREATE TABLE IF NOT EXISTS messages (
     media TEXT,
     markup TEXT,
     encrypted INTEGER NOT NULL DEFAULT 0,
-    encryption TEXT
+    encryption TEXT,
+    stanza_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 """
 
 #: SQL predicate for a row that carries no stable id at all.
 _NO_IDS_SQL = ("(archive_id IS NULL OR archive_id = '') "
+               "AND (stanza_id IS NULL OR stanza_id = '') "
                "AND (origin_id IS NULL OR origin_id = '') "
                "AND (message_id IS NULL OR message_id = '')")
 
@@ -111,30 +113,42 @@ def _migrate_dedup(conn: sqlite3.Connection) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
     except (sqlite3.Error, TypeError):
         version = 0
-    if version >= 1:
-        return
     no_ids = _NO_IDS_SQL
+    if version < 1:
+        try:
+            conn.execute(
+                "DELETE FROM messages WHERE archive_id IS NOT NULL "
+                "AND archive_id <> '' AND id NOT IN ("
+                "SELECT MIN(id) FROM messages WHERE archive_id IS NOT NULL "
+                "AND archive_id <> '' GROUP BY archive_id)")
+            conn.execute(
+                "DELETE FROM messages WHERE " + no_ids + " AND id NOT IN ("
+                "SELECT MIN(id) FROM messages WHERE " + no_ids + " "
+                "GROUP BY direction, sender, body, timestamp)")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_archive_unique "
+                "ON messages(archive_id) WHERE archive_id IS NOT NULL "
+                "AND archive_id <> ''")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_content_unique "
+                "ON messages(direction, sender, body, timestamp) WHERE " + no_ids)
+        except sqlite3.Error as exc:
+            logger.warning("History dedup migration failed: %s", exc)
+    if version < 2:
+        try:
+            conn.execute(
+                "DELETE FROM messages WHERE stanza_id IS NOT NULL "
+                "AND stanza_id <> '' AND id NOT IN ("
+                "SELECT MIN(id) FROM messages WHERE stanza_id IS NOT NULL "
+                "AND stanza_id <> '' GROUP BY stanza_id)")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_stanza_unique "
+                "ON messages(stanza_id) WHERE stanza_id IS NOT NULL "
+                "AND stanza_id <> ''")
+        except sqlite3.Error as exc:
+            logger.warning("History stanza-id migration failed: %s", exc)
     try:
-        conn.execute(
-            "DELETE FROM messages WHERE archive_id IS NOT NULL "
-            "AND archive_id <> '' AND id NOT IN ("
-            "SELECT MIN(id) FROM messages WHERE archive_id IS NOT NULL "
-            "AND archive_id <> '' GROUP BY archive_id)")
-        conn.execute(
-            "DELETE FROM messages WHERE " + no_ids + " AND id NOT IN ("
-            "SELECT MIN(id) FROM messages WHERE " + no_ids + " "
-            "GROUP BY direction, sender, body, timestamp)")
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_archive_unique "
-            "ON messages(archive_id) WHERE archive_id IS NOT NULL "
-            "AND archive_id <> ''")
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_content_unique "
-            "ON messages(direction, sender, body, timestamp) WHERE " + no_ids)
-    except sqlite3.Error as exc:
-        logger.warning("History dedup migration failed: %s", exc)
-    try:
-        conn.execute("PRAGMA user_version = 1")
+        conn.execute("PRAGMA user_version = 2")
     except sqlite3.Error:
         pass
 
@@ -191,6 +205,8 @@ def _connection(jid: str) -> sqlite3.Connection:
                              "INTEGER NOT NULL DEFAULT 0")
             if "encryption" not in columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN encryption TEXT")
+            if "stanza_id" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN stanza_id TEXT")
             _migrate_dedup(conn)
             conn.commit()
         except sqlite3.Error:
@@ -232,7 +248,7 @@ def _row_to_entry(row) -> dict:
     _id, direction, sender, body, timestamp, archive_id, origin_id, \
         reply_to, reply_id, message_id, edited, retracted, retract_marker, \
         retract_reason, retract_by, reactions, media, markup, encrypted, \
-        encryption = row
+        encryption, stanza_id = row
     return {
         "id": _id,
         "direction": direction,
@@ -254,11 +270,14 @@ def _row_to_entry(row) -> dict:
         "markup": _parse_markup(markup),
         "encrypted": bool(encrypted),
         "encryption": encryption or "",
+        "stanza_id": stanza_id or "",
     }
 
 
 def _entry_key(entry: dict) -> tuple:
     """Stable identity for a stored entry (stable ids preferred over content)."""
+    if entry.get("stanza_id"):
+        return ("stanza", entry["stanza_id"])
     if entry.get("archive_id"):
         return ("archive", entry["archive_id"])
     if entry.get("origin_id"):
@@ -283,8 +302,8 @@ def _dedup(entries: list[dict]) -> list[dict]:
 
 
 def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
-            sender: str, archive_id: str, origin_id: str, reply_to: str,
-            reply_id: str, message_id: str, edited: bool,
+            sender: str, archive_id: str, stanza_id: str, origin_id: str,
+            reply_to: str, reply_id: str, message_id: str, edited: bool,
             retracted: bool, retract_marker: bool,
             skip_existing: bool,
             retract_reason: str = "", retract_by: str = "",
@@ -303,6 +322,9 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
         if archive_id:
             clauses.append("archive_id = ?")
             params.append(archive_id)
+        if stanza_id:
+            clauses.append("stanza_id = ?")
+            params.append(stanza_id)
         if origin_id:
             clauses.append("origin_id = ?")
             params.append(origin_id)
@@ -311,21 +333,23 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             params.append(message_id)
         clauses.append(
             "((archive_id IS NULL OR archive_id = '') "
+            "AND (stanza_id IS NULL OR stanza_id = '') "
             "AND (origin_id IS NULL OR origin_id = '') "
             "AND (message_id IS NULL OR message_id = '') "
             "AND direction = ? AND sender = ? AND body = ? "
             "AND timestamp = ?)")
         params.extend([direction, sender, body, ts])
         row = conn.execute(
-            "SELECT id, archive_id, origin_id, message_id, timestamp "
+            "SELECT id, archive_id, stanza_id, origin_id, message_id, timestamp "
             "FROM messages WHERE (" + " OR ".join(clauses)
             + ") LIMIT 1", params).fetchone()
         if row is not None:
             stable = bool(
                 (archive_id and archive_id == (row[1] or ""))
-                or (origin_id and origin_id == (row[2] or ""))
-                or (message_id and message_id == (row[3] or "")))
-            if stable and ts and ts != (row[4] or ""):
+                or (stanza_id and stanza_id == (row[2] or ""))
+                or (origin_id and origin_id == (row[3] or ""))
+                or (message_id and message_id == (row[4] or "")))
+            if stable and ts and ts != (row[5] or ""):
                 # An older build may have stored this archived message with a
                 # wrong timestamp: repair it.  The body is never rewritten (an
                 # XEP-0308 correction is a separate row update).
@@ -333,7 +357,7 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
                              (ts, row[0]))
                 return True
             return False
-        if archived and (archive_id or origin_id or message_id):
+        if archived and (archive_id or stanza_id or origin_id or message_id):
             # The same message may already be stored without any stable id by
             # an older build (a join replay that was rendered as live, with the
             # receive time).  Adopt that row instead of adding a duplicate.
@@ -344,9 +368,9 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
                 (direction, sender, body)).fetchone()
             if legacy is not None:
                 conn.execute(
-                    "UPDATE messages SET archive_id = ?, origin_id = ?, "
-                    "message_id = ?, timestamp = ? WHERE id = ?",
-                    (archive_id or None, origin_id or None,
+                    "UPDATE messages SET archive_id = ?, stanza_id = ?, "
+                    "origin_id = ?, message_id = ?, timestamp = ? WHERE id = ?",
+                    (archive_id or None, stanza_id or None, origin_id or None,
                      message_id or None, ts, legacy[0]))
                 logger.debug(
                     "HISTORY[dedup] adopted legacy row id=%s sender=%r body=%r",
@@ -354,12 +378,12 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
                 return True
     conn.execute(
         "INSERT INTO messages "
-        "(direction, sender, body, timestamp, archive_id, "
+        "(direction, sender, body, timestamp, archive_id, stanza_id, "
         "origin_id, reply_to, reply_id, message_id, edited, "
         "retracted, retract_marker, retract_reason, retract_by, media, "
         "markup, encrypted, encryption) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (direction, sender, body, ts, archive_id or None,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (direction, sender, body, ts, archive_id or None, stanza_id or None,
          origin_id or None, reply_to or None, reply_id or None,
          message_id or None, 1 if edited else 0,
          1 if retracted else 0, 1 if retract_marker else 0,
@@ -373,7 +397,7 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
 def store_message(jid: str, direction: str, body: str,
                   timestamp: str | None = None, sender: str = "",
                   skip_existing: bool = True, archive_id: str = "",
-                  origin_id: str = "", reply_to: str = "",
+                  stanza_id: str = "", origin_id: str = "", reply_to: str = "",
                   reply_id: str = "", message_id: str = "",
                   edited: bool = False, retracted: bool = False,
                   retract_marker: bool = False,
@@ -396,8 +420,8 @@ def store_message(jid: str, direction: str, body: str,
             conn = _connection(jid)
             ts = timestamp or time.strftime("%Y-%m-%dT%H:%M:%S")
             inserted = _insert(conn, direction, body, ts, sender, archive_id,
-                               origin_id, reply_to, reply_id, message_id,
-                               edited, retracted, retract_marker,
+                               stanza_id, origin_id, reply_to, reply_id,
+                               message_id, edited, retracted, retract_marker,
                                skip_existing, retract_reason, retract_by,
                                json.dumps(media, ensure_ascii=False)
                                if media else "",
@@ -435,6 +459,7 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
                 if _insert(conn, direction, body, ts,
                            entry.get("sender", ""),
                            entry.get("archive_id", ""),
+                           entry.get("stanza_id", ""),
                            entry.get("origin_id", ""),
                            entry.get("reply_to", ""),
                            entry.get("reply_id", ""),
@@ -629,7 +654,8 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
                 f"SELECT id, direction, sender, body, timestamp, archive_id,"
                 f" origin_id, reply_to, reply_id, message_id, edited,"
                 f" retracted, retract_marker, retract_reason, retract_by,"
-                f" reactions, media, markup, encrypted, encryption FROM messages"
+                f" reactions, media, markup, encrypted, encryption, stanza_id"
+                f" FROM messages"
                 f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 f"ORDER BY timestamp ASC, id ASC",
                 params)
@@ -653,7 +679,8 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption FROM messages "
+                " reactions, media, markup, encrypted, encryption, stanza_id"
+                " FROM messages "
                 "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (str(int(before_id)), str(int(limit))))
             rows = cur.fetchall()
@@ -672,7 +699,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
                 "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption"
+                " reactions, media, markup, encrypted, encryption, stanza_id"
                 " FROM messages WHERE timestamp < ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
@@ -754,7 +781,7 @@ def load_day(jid: str, date: str) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption "
+                " reactions, media, markup, encrypted, encryption, stanza_id "
                 "FROM messages "
                 "WHERE substr(timestamp, 1, 10) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
@@ -826,8 +853,8 @@ def message_exists(jid: str, stable_id: str) -> bool:
             conn = _connection(jid)
             row = conn.execute(
                 "SELECT 1 FROM messages WHERE archive_id = ? "
-                "OR origin_id = ? OR message_id = ? LIMIT 1",
-                (stable_id, stable_id, stable_id)).fetchone()
+                "OR stanza_id = ? OR origin_id = ? OR message_id = ? LIMIT 1",
+                (stable_id, stable_id, stable_id, stable_id)).fetchone()
             return row is not None
     except sqlite3.Error:
         return False
@@ -858,8 +885,8 @@ def timestamp_for_ref(jid: str, stable_id: str) -> str:
             conn = _connection(jid)
             row = conn.execute(
                 "SELECT timestamp FROM messages WHERE archive_id = ? "
-                "OR origin_id = ? OR message_id = ? LIMIT 1",
-                (stable_id, stable_id, stable_id)).fetchone()
+                "OR stanza_id = ? OR origin_id = ? OR message_id = ? LIMIT 1",
+                (stable_id, stable_id, stable_id, stable_id)).fetchone()
             return str(row[0] or "") if row else ""
     except sqlite3.Error:
         return ""
@@ -879,10 +906,11 @@ def entry_by_ref(jid: str, stable_id: str) -> dict | None:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption FROM messages WHERE archive_id = ? "
-                "OR origin_id = ? OR message_id = ? "
+                " reactions, media, markup, encrypted, encryption, stanza_id"
+                " FROM messages WHERE archive_id = ? "
+                "OR stanza_id = ? OR origin_id = ? OR message_id = ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT 1",
-                (stable_id, stable_id, stable_id)).fetchone()
+                (stable_id, stable_id, stable_id, stable_id)).fetchone()
         return _row_to_entry(row) if row else None
     except sqlite3.Error:
         return None
@@ -1030,8 +1058,9 @@ def migrate_from_jsonl(jid: str) -> bool:
 async def store_message_async(jid: str, direction: str, body: str,
                               timestamp: str | None = None, sender: str = "",
                               skip_existing: bool = True,
-                              archive_id: str = "", origin_id: str = "",
-                              reply_to: str = "", reply_id: str = "",
+                              archive_id: str = "", stanza_id: str = "",
+                              origin_id: str = "", reply_to: str = "",
+                              reply_id: str = "",
                               message_id: str = "",
                               edited: bool = False,
                               media: dict | None = None,
@@ -1042,7 +1071,8 @@ async def store_message_async(jid: str, direction: str, body: str,
     return await asyncio.to_thread(
         store_message, jid, direction, body, timestamp=timestamp,
         sender=sender, skip_existing=skip_existing, archive_id=archive_id,
-        origin_id=origin_id, reply_to=reply_to, reply_id=reply_id,
+        stanza_id=stanza_id, origin_id=origin_id, reply_to=reply_to,
+        reply_id=reply_id,
         message_id=message_id, edited=edited, media=media, markup=markup,
         encrypted=encrypted, encryption=encryption, archived=archived)
 

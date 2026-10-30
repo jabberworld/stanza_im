@@ -36,6 +36,25 @@ check("archive dup: first stored", first is True)
 check("archive dup: second skipped", second is False)
 check("archive dup: count==1", history.count_messages(jid) == 1)
 
+
+# 1c. server stanza-id is stored and dedups live/MAM copies ------------------
+jid_stanza = "dedup-stanza@example.com"
+history.store_message(
+    jid_stanza, "incoming", "server id", sender="Bob",
+    timestamp="2026-01-01T10:00:00.000000Z",
+    stanza_id="server-sid-1", origin_id="origin-1")
+history.store_message(
+    jid_stanza, "incoming", "server id", sender="Bob",
+    timestamp="2026-01-01T10:00:00.000000Z",
+    stanza_id="server-sid-1", archive_id="arch-1", origin_id="origin-1")
+rows = history.load_history(jid_stanza, 10)
+check("a live/MAM copy dedups by stanza-id",
+      history.count_messages(jid_stanza) == 1
+      and rows[0]["stanza_id"] == "server-sid-1")
+check("stanza-id resolves to the stored timestamp",
+      history.timestamp_for_ref(jid_stanza, "server-sid-1")
+      == "2026-01-01T10:00:00.000000Z")
+
 # 1b. a stale archive timestamp is repaired without touching the body -------
 jid1b = "dedup-archive-repair@example.com"
 history.store_message(jid1b, "incoming", "fixed", sender="Bob",
@@ -152,8 +171,10 @@ check("archive unique index created",
       "idx_messages_archive_unique" in indexes)
 check("content unique index created",
       "idx_messages_content_unique" in indexes)
+check("stanza-id unique index created",
+      "idx_messages_stanza_unique" in indexes)
 check("user_version bumped",
-      conn.execute("PRAGMA user_version").fetchone()[0] == 1)
+      conn.execute("PRAGMA user_version").fetchone()[0] == 2)
 
 # 7. load_day returns no duplicates ------------------------------------------
 day = history.load_day(jid5, "2026-01-01")
