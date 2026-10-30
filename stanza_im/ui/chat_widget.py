@@ -2214,6 +2214,14 @@ class ChatWidget(QtWidgets.QWidget):
             self._view.scroll_to_bottom()
         else:
             self._view.set_scroll_fraction(keep)
+        if self._unread_boundary:
+            # The separator/read anchor is in this render.  A transient
+            # at-bottom position (empty page, preserved fraction, or the
+            # anchor scroll still in flight) must not mark the block read.
+            try:
+                self._view.suspend_scroll_reports()
+            except (AttributeError, RuntimeError):
+                pass
         return entries
 
     def _ordered_entries(self) -> list[dict]:

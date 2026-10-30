@@ -269,12 +269,23 @@ class _JumpButtonMixin:
         # The seen point only matters while the view is scrolled up; a view at
         # the bottom is "read" and its owner (the bottom report) handles that.
         # Skipping here avoids a needless JS round-trip and log line per poll.
+        if getattr(self, "_scroll_suspended", False):
+            return
+        if getattr(self, "_deferred_scroll", None) is not None:
+            return
         if not self.is_scrolled_up():
             return
         try:
             self._find_last_visible_ref()
         except Exception:
             pass
+
+    def suspend_scroll_reports(self) -> None:
+        """Ignore bottom/seen reports while a programmatic scroll is pending."""
+        self._scroll_suspended = True
+
+    def resume_scroll_reports(self) -> None:
+        self._scroll_suspended = False
 
     def _flush_pending_seen(self):
         pending = getattr(self, "_pending_seen", None)
@@ -922,6 +933,9 @@ if HAS_WEBENGINE:
         def _last_seen_result(self, result):
             try:
                 if not isinstance(result, dict):
+                    return
+                if (self._scroll_suspended
+                        or self._deferred_scroll is not None):
                     return
                 ref = str(result.get("ref") or "")
                 ts = str(result.get("ts") or "")
@@ -2299,7 +2313,8 @@ window.__stanzaMentionRef = '';
         def _set_fraction(self, fraction: float):
             self._fraction = float(fraction) if fraction == fraction else 1.0
             self._update_jump_button()
-            self._note_bottom()
+            if not self._scroll_suspended and self._deferred_scroll is None:
+                self._note_bottom()
             try:
                 self._maybe_emit_last_seen()
             except Exception:
@@ -2813,6 +2828,7 @@ window.__stanzaMentionRef = '';
         def scroll_to_bottom(self):
             self._near_top_hit = False
             self._fraction = 1.0
+            self._scroll_suspended = True
             self._reset_unread_indicator()
             self._update_jump_button()
             self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
@@ -2824,6 +2840,7 @@ window.__stanzaMentionRef = '';
             fraction = max(0.0, min(1.0, float(fraction)))
             self._near_top_hit = fraction <= 0.0
             self._fraction = fraction
+            self._scroll_suspended = True
             js = (
                 "requestAnimationFrame(function(){"
                 "  document.body.scrollTop;"

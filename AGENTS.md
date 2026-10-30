@@ -2038,7 +2038,10 @@ the unread separator boundary — `mark_visible_unread` advances it from the
 visible block. Delayed messages whose timestamp is not newer than the read/seen
 point stay in chronological history and do not increase unread (variant A).
 `ChatWindow.last_seen` relays the report; the `▼ N` number and the roster badge
-use the same block count on open, bump, seen and reset. `_restore_anchor_for`
+use the same block count on open, bump, seen and reset. Programmatic scrolls
+(initial render, read-anchor restore, jump-to-message) suspend both the bottom
+and last-seen reports, and `_apply_visible_unread` skips the transient viewport
+until the restore finished, so a loading page cannot mark the block read. `_restore_anchor_for`
 still prefers the seen point, so reopening resumes where the user stopped. The XEP-0490 `displayed` update for
 partial progress is published through a single-shot timer
 (`MainWindow._mds_throttle_timer`, `_flush_mds_pending`) at most once per

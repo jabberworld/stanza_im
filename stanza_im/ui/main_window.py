@@ -7647,6 +7647,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if not (self._chat_area_visible()
                 and self._chat_window.current_jid() == jid):
             return
+        if getattr(chat, "_unread_resolving", False):
+            return
+        view = getattr(chat, "_view", None)
+        if view is not None and (
+                getattr(view, "_scroll_suspended", False)
+                or getattr(view, "_deferred_scroll", None) is not None):
+            # The initial render or the read-anchor scroll is still in flight;
+            # its transient viewport is not the user's reading position.
+            return
         remaining = chat.mark_visible_unread()
         mentions = chat.mark_visible_mentions()
         if remaining == entry.get("unread") and mentions == entry.get("mentions"):
