@@ -172,6 +172,8 @@ AGENTS.md                        # This architecture guide (living document)
 SPEC.md                          # Detailed specification (living document)
 XEPs.md                          # Supported XEP list (living document)
 CHECKLIST.md                     # XEP-0479 Client/Advanced Client checklist
+doap.xml                         # XEP-0453 project description (generated)
+tools/build_doap.py              # Regenerates doap.xml from XEPs.md
 docs/namespaces/                 # Wire specs for non-XEP namespaces used by Stanza IM
 ```
 
@@ -3905,7 +3907,9 @@ documents and MUST be updated in the same logical unit of work as any change
 that makes them stale:
 
 - supported XEP added/removed or used differently → `XEPs.md` (+ `SPEC.md` §14)
-  and, when it is a XEP-0479 compliance extension, `CHECKLIST.md`;
+  and, when it is a XEP-0479 compliance extension, `CHECKLIST.md`; regenerate
+  `doap.xml` (`python3 tools/build_doap.py`) so the XEP-0453 description stays
+  in sync (`tests/test_spec_sync.py` compares the two);
 - configuration keys, defaults or persisted paths → `AGENTS.md` (XDG) and
   `SPEC.md` §4;
 - new/removed modules or files → both directory-structure blocks

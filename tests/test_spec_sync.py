@@ -12,6 +12,8 @@ _CLIENT = os.path.join(_ROOT, "stanza_im", "core", "client.py")
 _XEPS = os.path.join(_ROOT, "XEPs.md")
 _AGENTS = os.path.join(_ROOT, "AGENTS.md")
 _SPEC = os.path.join(_ROOT, "SPEC.md")
+_DOAP = os.path.join(_ROOT, "doap.xml")
+_DOAP_TOOL = os.path.join(_ROOT, "tools", "build_doap.py")
 
 FAILURES = []
 
@@ -54,6 +56,39 @@ check("all registered XEPs documented in XEPs.md (%s)"
 extra = sorted(documented - registered)
 print("INFO: documented but not a registered plugin:",
       ", ".join("XEP-%04d" % x for x in extra) or "none")
+
+
+# ── XEP-0453: doap.xml mirrors the XEP table ──────────────────────
+import importlib.util  # noqa: E402
+import xml.etree.ElementTree as ET  # noqa: E402
+
+with open(_DOAP, encoding="utf-8") as fh:
+    doap_xml = fh.read()
+try:
+    ET.fromstring(doap_xml)
+    doap_ok = True
+except ET.ParseError:
+    doap_ok = False
+check("doap.xml is well-formed RDF/XML", doap_ok)
+doap_xeps = set(int(num) for num in re.findall(
+    r"https://xmpp\.org/extensions/xep-(\d{4})\.html", doap_xml))
+missing_doap = sorted(documented - doap_xeps)
+check("every XEPs.md entry is in doap.xml (%s)"
+      % (", ".join("XEP-%04d" % x for x in missing_doap) if missing_doap
+         else "none"), not missing_doap)
+check("doap.xml gives every SupportedXep a status",
+      doap_xml.count("<xmpp:SupportedXep>")
+      == doap_xml.count("<xmpp:status>"))
+check("doap.xml describes the Stanza IM project",
+      "<name>Stanza IM</name>" in doap_xml
+      and "category-client" in doap_xml
+      and "<homepage" in doap_xml)
+
+_spec = importlib.util.spec_from_file_location("build_doap", _DOAP_TOOL)
+_build_doap = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_build_doap)
+check("doap.xml is up to date with tools/build_doap.py",
+      doap_xml == _build_doap.build())
 
 
 # ── Living-document cross-references stay in place ────────────────
