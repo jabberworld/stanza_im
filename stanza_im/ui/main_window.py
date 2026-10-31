@@ -7607,6 +7607,45 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._mark_chat_read(jid)
 
 
+    def _queue_mds_displayed(self, jid: str, sid: str) -> None:
+        """Publish a seen point through the throttled XEP-0490 timer."""
+        if not jid or not sid:
+            return
+        self._mds_pending_sid = str(sid)
+        self._mds_pending_jid = jid
+        try:
+            self._mds_throttle_timer.start(self._mds_throttle_ms)
+        except Exception:
+            pass
+
+    def _publish_mds_point(self, jid: str, sid: str) -> None:
+        """Publish a displayed point immediately (best effort)."""
+        if not jid or not sid or self._client is None:
+            return
+        try:
+            self._client.mds_mark_displayed(jid, sid)
+        except Exception:
+            logger.debug("MDS: could not publish %s for %s", sid, jid)
+
+    def _queue_seen_progress_mds(self, jid: str, chat, entry: dict,
+                                 remaining: int) -> None:
+        """Advertise partial progress made by the visibility reconciliation.
+
+        Opening/focusing a chat marks visible unread messages seen without a
+        scroll poll; that point must still reach the shared MDS node, or
+        another device rebuilds the whole gap from an older displayed point
+        (walkbook showed 40 while rbook reconstructed 90).
+        """
+        if remaining <= 0:
+            # ``_mark_chat_read`` publishes the newest message immediately.
+            return
+        seen = chat.seen_anchor()
+        seen_sid = str(seen.get("sid") or entry.get("seen_sid") or "")
+        seen_ts = str(seen.get("ts") or entry.get("seen_ts") or "")
+        read_ts = str(entry.get("read_ts") or "")
+        if seen_sid and seen_ts and (not read_ts or seen_ts > read_ts):
+            MainWindow._queue_mds_displayed(self, jid, seen_sid)
+
     def _flush_mds_pending(self):
         if not self._mds_pending_sid or self._client is None:
             return
@@ -7614,11 +7653,7 @@ class MainWindow(QtWidgets.QMainWindow):
         jid = self._mds_pending_jid
         self._mds_pending_sid = ""
         self._mds_pending_jid = ""
-        try:
-            if jid:
-                self._client.mds_mark_displayed(jid, sid)
-        except Exception:
-            pass
+        self._publish_mds_point(jid, sid)
 
     def _on_chat_last_seen(self, jid: str, ref: str, ts: str, sid: str):
         """Record the newest message the view has scrolled into sight.
@@ -7677,13 +7712,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Keep the jump-to-bottom number equal to the roster badge as it ticks
         # down while the user reads.
         self._push_unread_to_chat(jid)
-        if sid:
-            self._mds_pending_sid = str(sid)
-            self._mds_pending_jid = jid
-            try:
-                self._mds_throttle_timer.start(self._mds_throttle_ms)
-            except Exception:
-                pass
+        self._queue_mds_displayed(jid, sid)
         self._schedule_unread_save()
 
     def _apply_visible_unread(self, jid: str, attempt: int = 0) -> None:
@@ -7725,6 +7754,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         remaining = chat.mark_visible_unread()
         mentions = chat.mark_visible_mentions()
+        MainWindow._queue_seen_progress_mds(self, jid, chat, entry, remaining)
         if remaining == entry.get("unread") and mentions == entry.get("mentions"):
             # The counters are unchanged, but ``_unread_total`` may still be
             # stale after an earlier history reconciliation.  Heal it before
@@ -7972,6 +8002,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if key:
             self._start_task(self._reconcile_mds_unread(key, force=force))
 
+    async def _mds_point_sid(self, key: str, entry: dict | None,
+                             ts: str) -> str:
+        """The stanza-id of the newest locally stored message at *ts*."""
+        from stanza_im.core import history
+        sid = str((entry or {}).get("seen_sid") or "")
+        if sid and await history.timestamp_for_ref_async(key, sid) == ts:
+            return sid
+        rows = await history.load_history_async(key, limit=1, until=ts)
+        if rows:
+            row = rows[-1]
+            return str(row.get("stanza_id") or row.get("archive_id")
+                       or row.get("origin_id") or "")
+        return str((entry or {}).get("read_sid") or sid)
+
     async def _reconcile_mds_unread(self, key: str, *,
                                     force: bool = False) -> None:
         """Rebuild unread messages since the shared MDS displayed point.
@@ -8014,18 +8058,26 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             from stanza_im.core import history
             ts = await history.timestamp_for_ref_async(key, sid)
-            if not ts and entry and not force:
-                ts = str(entry.get("read_ts") or "")
             local_ts = max(str((entry or {}).get("read_ts") or ""),
                            str((entry or {}).get("seen_ts") or ""))
-            if not force and ts and local_ts and local_ts > ts:
-                # A local read point newer than the shared point is left
-                # alone; the startup forced pass below is authoritative.
+            local_wins = bool(local_ts) and (not ts or local_ts > ts)
+            if local_wins and not force:
+                # Another device's state is behind ours: republish our point
+                # and leave the local block alone.
+                local_sid = await self._mds_point_sid(key, entry, local_ts)
+                self._publish_mds_point(key, local_sid)
                 logger.debug(
                     "MDS[skip] jid=%s sid=%s reason=local-newer local_ts=%s "
                     "ts=%s unread=%s", key, sid, local_ts, ts,
                     int((entry or {}).get("unread") or 0))
                 return
+            if local_wins:
+                # A throttled publish may have been lost (or an older build
+                # never sent it).  Rebuild from our own point instead of
+                # resurrecting messages this device already displayed, and
+                # republish it so the other devices stop using the stale one.
+                ts = local_ts
+                sid = await self._mds_point_sid(key, entry, ts)
             incoming = 0
             if key not in self._mam_unsupported:
                 is_muc = (key in self._muc_joined
@@ -8045,6 +8097,10 @@ class MainWindow(QtWidgets.QMainWindow):
             current = int((self._unread_chats.get(key) or {}).get("unread") or 0)
             count = max(count, current)
             self._set_mds_anchor(key, sid, ts)
+            if local_wins:
+                # Repair the shared node: it was behind this device's own
+                # displayed point.
+                self._publish_mds_point(key, sid)
             if count <= 0:
                 done = True
                 return
@@ -8061,11 +8117,22 @@ class MainWindow(QtWidgets.QMainWindow):
             record = self._unread_chats.get(key) or unread_state.blank()
             record["unread"] = count
             record["read_sid"] = sid
+            record["read_ref"] = ""
             if ts:
                 record["read_ts"] = ts
-            record["seen_ref"] = ""
-            record["seen_ts"] = ""
-            record["seen_sid"] = ""
+            if local_wins:
+                # Keep the local partial-read point (it is the effective
+                # point) so the chat reopens there.
+                record["seen_ref"] = str((entry or {}).get("seen_ref") or "")
+                record["seen_ts"] = str(
+                    (entry or {}).get("seen_ts") or ts or "")
+                record["seen_sid"] = str(
+                    (entry or {}).get("seen_sid") or sid)
+            else:
+                # Anchor the rebuilt block at the shared displayed point.
+                record["seen_ref"] = ""
+                record["seen_ts"] = ts or ""
+                record["seen_sid"] = sid
             self_nick = self._muc_self_nicks.get(key, "")
             mentions = 0
             if self_nick and ts:
@@ -8107,6 +8174,18 @@ class MainWindow(QtWidgets.QMainWindow):
         remote_ts = await history.timestamp_for_ref_async(key, sid)
         entry = self._unread_chats.get(key)
         if force:
+            local_ts = max(str((entry or {}).get("read_ts") or ""),
+                           str((entry or {}).get("seen_ts") or ""))
+            if local_ts and (not remote_ts or local_ts > remote_ts):
+                # The shared node is behind this device (a throttled publish
+                # was lost).  Keep the newer local point and repair the node
+                # instead of resurrecting messages we already displayed.
+                local_sid = await self._mds_point_sid(key, entry, local_ts)
+                self._publish_mds_point(key, local_sid)
+                logger.debug(
+                    "MDS[skip] jid=%s sid=%s reason=local-newer local_ts=%s "
+                    "remote_ts=%s", key, sid, local_ts, remote_ts)
+                return
             self._set_mds_anchor(key, sid, remote_ts)
             await self._reconcile_mds_unread(key, force=True)
             return

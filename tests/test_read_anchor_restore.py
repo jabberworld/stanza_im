@@ -72,6 +72,7 @@ class _View:
         self.cleared = 0
         self.seeded = []
         self.separators_cleared = 0
+        self.bottom_scrolls = 0
         self.bottom = False
         self.mention_count = 0
         self.unseen_count = None
@@ -90,6 +91,9 @@ class _View:
 
     def scroll_to_message(self, message_id, highlight=True, timestamp=""):
         self.scrolled.append(message_id)
+
+    def scroll_to_bottom(self):
+        self.bottom_scrolls += 1
 
     def scroll_fraction(self):
         return 1.0
@@ -688,6 +692,23 @@ check("the anchor scroll reports the resolved node ref",
       method_source(_cv_src, "_run_scroll_to_message"))
 check("a missing anchor id falls back to its timestamp",
       "timestamp=stamp" in method_source(_cw_src, "_scroll_to_entry"))
+
+# 18. an unreachable read anchor opens at the first unread message -----------
+w = widget()
+w.set_restore_anchor({"ref": "", "ts": "2026-10-01T00:00:00Z",
+                      "sid": "old-sid"})
+w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4"),
+               row("2026-10-02T10:05:00Z", "five", "m-5")],
+              50, False, anchor=ANCHOR)
+w._restore_from_anchor()
+check("an unreachable anchor opens at the first unread message",
+      w._view.scrolled == ["m-4"])
+check("an unreachable anchor never scrolls to the bottom",
+      w._view.bottom_scrolls == 0)
+_finish = method_source(_cw_src, "_finish_unread_resolve")
+check("the deferred resolve can fall back to the unread start",
+      "_first_unread_entry()" in _finish
+      and "fallback_unread" in _finish)
 
 print()
 if FAILURES:

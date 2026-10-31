@@ -495,6 +495,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._text_scale = 1.0
         self._jump_pending = ""
         self._jump_pages = 0
+        self._jump_fallback_unread = False
         self._restore_anchor: dict = {}
         self._unread_boundary: dict = {}
         self._unread_marker_shown = False
@@ -2307,6 +2308,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._users.clear()
         self._subjects.clear()
         self._jump_pending = ""
+        self._jump_fallback_unread = False
         self._unread_boundary = {}
         self._unread_marker_shown = False
         self._unread_armed = False
@@ -2553,6 +2555,23 @@ class ChatWidget(QtWidgets.QWidget):
         if not block:
             return 0, ""
         return len(block), self._reply_target_id(block[0])
+
+    def _first_unread_entry(self):
+        """The first message of the unread block (or the window start).
+
+        Used when a stored read anchor cannot be reached (it predates the
+        loaded window and the archive could not page back to it): the chat
+        must open at the start of the unread block, never at the newest
+        message — the transient bottom would mark the whole block read.
+        """
+        block = self.unread_block()
+        if block:
+            return block[0]
+        if self._unread_boundary:
+            entries = self._ordered_entries()
+            if entries:
+                return entries[0]
+        return None
 
     def _seed_unseen(self, entries) -> None:
         """Put the already-rendered unread block on the jump-to-bottom button.
@@ -2801,12 +2820,15 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is not None and self._scroll_to_entry(entry):
             return
         if ref:
-            self._jump_to_message(ref)
+            self._jump_to_message(ref, fallback_unread=True)
             return
-        # Nothing to page back to: keep the newest message in view instead of
-        # silently leaving the reloaded page scrolled to its oldest row.
-        self._view.scroll_to_bottom()
-        self._finish_unread_resolve(None)
+        # Nothing to page back to: open at the start of the unread block
+        # instead of the newest message.  Scrolling to the bottom here marked
+        # the whole block read on open (a room whose shared MDS point predates
+        # the loaded window reset its counter on both clients).
+        self._finish_unread_resolve(None, fallback_unread=True)
+        if not self._unread_boundary:
+            self._view.scroll_to_bottom()
 
     def _scroll_to_entry(self, entry: dict) -> bool:
         """Scroll to a stored row, by stable id or (for old rows) timestamp."""
@@ -3131,12 +3153,16 @@ class ChatWidget(QtWidgets.QWidget):
             if self._server_archive_available:
                 self.load_more_from_server()
 
-    def _jump_to_message(self, ref_id: str) -> None:
+    def _jump_to_message(self, ref_id: str,
+                         fallback_unread: bool = False) -> None:
         """Scroll to a replied message, resolving it from local history.
 
         The target comes from the already loaded window when possible;
         otherwise the local SQLite archive is walked page by page (never the
         server) and the loaded pages are rendered before scrolling.
+        *fallback_unread* is used by the read-anchor resume: when the archive
+        cannot reach the anchor either, open at the first unread message
+        instead of staying at the bottom.
         """
         if not ref_id:
             return
@@ -3146,24 +3172,29 @@ class ChatWidget(QtWidgets.QWidget):
             return
         self._jump_pending = ref_id
         self._jump_pages = 0
+        self._jump_fallback_unread = bool(fallback_unread)
         self._start_task(self._load_jump_pages_async())
 
     async def _load_jump_pages_async(self) -> None:
         from stanza_im.core import history
         ref_id = self._jump_pending
+        fallback_unread = bool(getattr(self, "_jump_fallback_unread", False))
         if not ref_id or self._released:
-            self._finish_unread_resolve(None)
+            self._jump_fallback_unread = False
+            self._finish_unread_resolve(None, fallback_unread=fallback_unread)
             return
         if not await history.message_exists_async(self.jid, ref_id):
             # Not in the local archive: do not bother the server.
             self._jump_pending = ""
-            self._finish_unread_resolve(None)
+            self._jump_fallback_unread = False
+            self._finish_unread_resolve(None, fallback_unread=fallback_unread)
             return
         while (self._jump_pending and not self._released
                and self._jump_pages < _JUMP_MAX_PAGES):
             entry = self._find_message(self._jump_pending)
             if entry is not None:
                 self._jump_pending = ""
+                self._jump_fallback_unread = False
                 self._finish_unread_resolve(entry)
                 return
             before = self.oldest_ts()
@@ -3179,20 +3210,26 @@ class ChatWidget(QtWidgets.QWidget):
                 break
             self.prepend_history(rows, False, keep_position=False)
         self._jump_pending = ""
-        self._finish_unread_resolve(None)
+        self._jump_fallback_unread = False
+        self._finish_unread_resolve(None, fallback_unread=fallback_unread)
 
-    def _finish_unread_resolve(self, entry) -> None:
+    def _finish_unread_resolve(self, entry, fallback_unread: bool = False) -> None:
         """End the deferred separator placement and scroll to the read point.
 
         When the read point was outside the loaded window the archive was
         paged back to reach it; the separator could only be placed once the
         window was complete, so the whole document is re-rendered (the entries
         are already in Python) and the scroll lands on the read point.
+        With *fallback_unread* an unreachable anchor opens at the first unread
+        message rather than leaving the view at the bottom (which would mark
+        the whole block read).
         """
         if self._unread_resolving:
             self._unread_resolving = False
             self._seed_unseen(self._render_all())
             self.refresh_unread_mentions(self._ordered_entries())
+        if entry is None and fallback_unread and self._unread_boundary:
+            entry = self._first_unread_entry()
         if entry is not None:
             self._view.scroll_to_message(self._reply_target_id(entry))
 

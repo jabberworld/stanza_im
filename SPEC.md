@@ -1908,8 +1908,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   conversation can be restored from the point the user stopped reading. The
   restore finds the row by a stable id, else by its timestamp
   (`ChatView.scroll_to_time`, for legacy rows without ids), else pages the
-  archive; an unreachable anchor scrolls to the bottom instead of leaving the
-  freshly loaded page at its oldest message.
+  archive; an unreachable anchor opens at the first unread message
+  (`ChatWidget._first_unread_entry`) instead of the newest one, so the block is
+  not marked read by the transient bottom position.
 - In a conference an unread message naming our nickname also shows a floating
   `@ N` button left of the `▼ N` one (shared `#stanza-fabs` row; the WebEngine
   backend uses the in-page `#stanza-mention` div, the fallback a `QToolButton`,
@@ -2274,10 +2275,15 @@ Registers XEP plugins (conditionally where noted):
   applied as MDS as well. No chat status line is shown. `_mds_apply_remote`
   skips an equal state for live PEP events and any sid this client published
   itself (`_mds_own_sids`); the startup catch-up uses `force=True` so an equal
-  point still triggers the rebuild. A forced rebuild treats the shared point
-  as authoritative even when the local `seen_ts`/`read_ts` is newer (and covers
-  a 1:1 chat with a non-zero local block without opening it); a normal
-  join/open leaves a strictly newer local point alone. Auto-joined rooms use
+  point still triggers the rebuild. A forced rebuild uses the **newer** of the
+  shared and the local `seen_ts`/`read_ts` point: when the local point is
+  newer it rebuilds from that timestamp and republishes it (repairing a stale
+  shared node), when it is older the shared point wins (and covers a 1:1 chat
+  with a non-zero local block without opening it); a normal join/open leaves a
+  strictly newer local point alone but republishes it. Partial progress made by
+  `_apply_visible_unread` is published through the same throttled timer, so
+  opening a chat can advance the shared displayed point without a scroll poll.
+  Auto-joined rooms use
   the forced pass too. On login `MainWindow` seeds `_mds_local` from the
   persisted unread state (`client.set_displayed_state`), so the catch-up does
   not wipe restored unread while a newer remote state still clears it.

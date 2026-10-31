@@ -1559,8 +1559,8 @@ by timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`), so an unread chat opens with the unread block right below
 the last message the user read. A legacy row with no replyable id is addressed
 by its timestamp (`ChatView.scroll_to_time`, the last `.stanza-message` with
-`data-stanza-time <= ts`), and an unreachable anchor falls back to the bottom
-instead of leaving the reloaded page at its oldest row. The anchor is applied
+`data-stanza-time <= ts`), and an unreachable anchor opens at the first unread
+message instead of the newest one. The anchor is applied
 once and dropped. The
 parked scroll is **suspended** meanwhile (`ChatView._scroll_suspended`), so the
 view does not report an "at the bottom" position for a document that is still
@@ -1572,7 +1572,12 @@ the pre-scroll bottom and would mark the newest unread rows seen (the walkbook
 pravda log cleared 13 unread on open). `_apply_visible_unread` therefore
 retries while the view is suspended, and `scroll_to_message` takes the entry's
 timestamp as a fallback when its id is not rendered (a legacy row) instead of
-silently staying at the bottom. The explicit
+silently staying at the bottom. When the stored read point predates the loaded
+window and the archive cannot page back to it, the chat opens at the first
+unread message (`ChatWidget._first_unread_entry` via
+`_finish_unread_resolve(..., fallback_unread=True)`) rather than scrolling to
+the newest one — that transient bottom used to mark the whole block read and
+publish `0` to the other clients. The explicit
 **«Отметить прочитанным»** actions (a contact's context menu, before «Очистить
 историю», and «Отметить все прочитанным» in the Actions menu) share the same
 `MainWindow._mark_chat_read` helper: it clears the counters, removes the
@@ -2061,11 +2066,19 @@ so a stale 2-message block grows to the real 23. A server-assist XEP-0333
 `_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
 the startup catch-up passes `force=True`: the map is seeded at connect from the
 persisted unread state, and an equal point must still trigger the rebuild or a
-second client would keep its stale local counters. A forced rebuild treats the
-shared point as authoritative even when the local `seen_ts`/`read_ts` is newer
-(and, for a 1:1 chat with a non-zero local block, without waiting for the tab
-to be opened); a normal join/open still leaves a strictly newer local point
-alone. The forced pass is also applied to auto-joined rooms.
+second client would keep its stale local counters. A forced rebuild uses the
+**newer** of the shared and the local `seen_ts`/`read_ts` point: when the local
+point is newer (a throttled publish was lost, or an older build never sent it)
+it rebuilds from the local timestamp and republishes that point
+(`_publish_mds_point`, `_mds_point_sid` resolves the local row's stanza-id), so
+another device stops reconstructing from the stale shared point (walkbook
+showed 40 while rbook reconstructed 90); when the local point is older the
+shared point wins as before. A normal join/open leaves a strictly newer local
+point alone but also republishes it. The forced pass is also applied to
+auto-joined rooms. Partial progress made by the visibility reconciliation
+(`_apply_visible_unread`) is published too (`_queue_seen_progress_mds` →
+`_queue_mds_displayed`): opening a chat can mark visible rows seen without a
+scroll poll, and that point must reach the shared node.
 
 **Partial read progress (`seen`)**: the WebEngine scroll poll returns every
 visible `#chat .stanza-message` ref (not only the bottom-most one), so

@@ -271,6 +271,52 @@ MainWindow._apply_visible_unread(suspended, "room@example", 16)
 check("once the anchor settles only the visible rows are removed",
       suspended._unread_chats["room@example"]["unread"] == 9)
 
+
+# Opening a chat can mark visible messages seen without a scroll poll; that
+# partial progress must reach the shared XEP-0490 node (walkbook/rbook 40 vs 90).
+class _SeenChat:
+    def __init__(self, view, remaining):
+        self._view = view
+        self._remaining = remaining
+
+    def mark_visible_unread(self):
+        return self._remaining
+
+    def mark_visible_mentions(self):
+        return 0
+
+    def seen_anchor(self):
+        return {"ref": "m-1", "ts": "2026-10-02T10:05:00Z", "sid": "sid-1"}
+
+
+seen_win = MainWindow.__new__(MainWindow)
+seen_win._unread_chats = {"room@example": {
+    "unread": 70, "mentions": 0, "read_ts": "2026-10-02T09:59:59Z"}}
+seen_win._chat_window = _SuspendedWindow(
+    _SeenChat(_SuspendedView(False), 68))
+seen_win._chat_area_visible = lambda: True
+seen_win._mds_pending_sid = ""
+seen_win._mds_pending_jid = ""
+seen_win._mds_throttle_ms = 3000
+seen_win._mds_throttle_timer = SimpleNamespace(start=lambda *_a: None)
+seen_win._recount_unread = lambda: None
+seen_win._refresh_unread_badge = lambda _jid: None
+seen_win._push_unread_to_chat = lambda _jid: None
+seen_win._schedule_unread_save = lambda: None
+seen_win._mark_chat_read = lambda _jid: None
+MainWindow._apply_visible_unread(seen_win, "room@example", 16)
+check("a newer seen point is published to the shared MDS node",
+      (seen_win._mds_pending_jid, seen_win._mds_pending_sid)
+      == ("room@example", "sid-1"))
+
+seen_win._mds_pending_sid = ""
+seen_win._mds_pending_jid = ""
+seen_win._chat_window = _SuspendedWindow(
+    _SeenChat(_SuspendedView(False), 0))
+MainWindow._apply_visible_unread(seen_win, "room@example", 16)
+check("a fully seen block publishes through mark-read, not twice",
+      seen_win._mds_pending_sid == "")
+
 if FAILURES:
     print("FAILURES:", FAILURES)
     sys.exit(1)
