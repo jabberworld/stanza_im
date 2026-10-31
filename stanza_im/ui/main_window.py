@@ -1546,6 +1546,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._event_unread += 1
         self._start_event_blink()
         self.events_changed.emit()
+        MainWindow._update_tray_tooltip(self)
 
     def _start_event_blink(self) -> None:
         if self._event_blink_active:
@@ -1564,6 +1565,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._event_unread:
             self._event_unread = 0
             self.events_changed.emit()
+        MainWindow._update_tray_tooltip(self)
 
     def _show_events_tab(self) -> None:
         """Switch the roster tab bar to the Events tab (used by the digest)."""
@@ -7320,6 +7322,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                  self._unread_chats.values())
         self._sync_tray_blink()
         self.unread_changed.emit()
+        MainWindow._update_tray_tooltip(self)
 
     def _refresh_unread_badge(self, jid: str) -> None:
         """Repaint the roster badge of *jid* from its stored counters."""
@@ -7493,6 +7496,61 @@ class MainWindow(QtWidgets.QMainWindow):
             if MainWindow._is_conference_jid(self, key):
                 keys.add(key)
         return keys
+
+    def _unread_stats(self) -> tuple[int, int, int, int, int]:
+        """``(messages, contacts, mentions, conferences, events)``.
+
+        The same summary the Digest plugin and the tray tooltip show: a
+        conference counts only by its unread ``mentions`` and an invisible
+        non-conference key (no roster row) is skipped, while the stored
+        counters are kept.
+        """
+        chats = self.__dict__.get("_unread_chats") or {}
+        conferences = MainWindow._conference_chat_keys(self)
+        roster = self.__dict__.get("_roster")
+        roster_jids = {user.jid for user in
+                       (getattr(roster, "_users", None) or [])}
+        messages = contacts = mentions = confs = 0
+        for key, entry in chats.items():
+            if key in conferences:
+                count = int(entry.get("mentions", 0) or 0)
+                if count > 0:
+                    mentions += count
+                    confs += 1
+            else:
+                if roster_jids and key not in roster_jids:
+                    continue
+                count = int(entry.get("unread", 0) or 0)
+                if count > 0:
+                    messages += count
+                    contacts += 1
+        events = int(self.__dict__.get("_event_unread", 0) or 0)
+        return messages, contacts, mentions, confs, events
+
+    def _update_tray_tooltip(self) -> None:
+        """Show the account and the unread summary in the tray tooltip."""
+        tray = self.__dict__.get("_tray")
+        setter = getattr(tray, "set_tooltip", None)
+        if not callable(setter):
+            return
+        lines = [APP_NAME]
+        client = self.__dict__.get("_client")
+        account = str(getattr(client, "jid_str", "") or "")
+        if not account:
+            # The account and its unread summary are login-only; the login
+            # screen shows just the application name.
+            setter(APP_NAME)
+            return
+        lines.append(tr("tray_tooltip_account", jid=account))
+        messages, contacts, mentions, confs, events = \
+            MainWindow._unread_stats(self)
+        if messages:
+            lines.append(tr("digest_contacts", n=messages, m=contacts))
+        if mentions:
+            lines.append(tr("digest_mentions", n=mentions, m=confs))
+        if events:
+            lines.append(tr("digest_events", n=events))
+        setter("\n".join(lines))
 
     def _notification_unread_count(self, jid: str) -> int:
         """Unread count that is allowed to notify through the tray."""
@@ -10909,10 +10967,21 @@ class MainWindow(QtWidgets.QMainWindow):
                        tr("osd_typing", name=name),
                        on_click=lambda: self._osd_click(jid))
 
+    def _is_own_jid(self, jid: str) -> bool:
+        """True when *jid* belongs to the account itself (any resource)."""
+        client = self.__dict__.get("_client")
+        own = str(getattr(client, "jid_str", "") or "").split("/", 1)[0]
+        return bool(own) and str(jid or "").split("/", 1)[0] == own
+
     def _maybe_osd_status(self, jid: str, new_show: str, old_show: str):
         cfg = self._config.notifications
         mode = getattr(cfg, "osd_status", "available")
         if not cfg.osd_enabled or mode == "never" or old_show == new_show:
+            return
+        # A status change of our own other client/resource is not a contact
+        # event; notify only about other people (the roster self-row and the
+        # connection state still update normally).
+        if MainWindow._is_own_jid(self, jid):
             return
         if jid not in self._osd_status_seen:
             # First presence of this contact in the session (the server replay):
@@ -10997,7 +11066,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         The first presence per JID after login is the server's initial sync and
         is recorded silently, so a login does not fire a burst of sounds.
+        Our own other resources never produce a contact sound.
         """
+        if MainWindow._is_own_jid(self, jid):
+            return
         if jid not in self._presence_sound_seen:
             self._presence_sound_seen.add(jid)
             return
@@ -11471,6 +11543,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._schedule_roster_repaint()
         self._chat_window.close_all()
         self._deactivate_plugins()
+        MainWindow._update_tray_tooltip(self)
 
     def _deactivate_plugins(self) -> None:
         """Tear down every active plugin (logout / account switch)."""

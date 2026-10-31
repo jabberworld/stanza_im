@@ -1444,7 +1444,9 @@ initial replay stays silent — `_presence_osd_grace_until` starts at
 login/`stream_resumed` and every **newly-seen** contact pushes it out by
 `_PRESENCE_OSD_TAIL_S` (2 s), so a slow or large roster never bursts into "X
 came online" OSDs, and `_osd_status_seen` is cleared on each session
-start/resume), `osd_conference` (`never`/`mention`/`all`), plus the
+start/resume; a presence from one of **our own** resources
+(`_is_own_jid`, any resource of the account) never produces a status OSD or a
+contact online/offline sound), `osd_conference` (`never`/`mention`/`all`), plus the
 `_notify_osd_file` entry point wired for future p2p file transfers. The close
 button (`#osd-close`) is 24×24; because the frame and its children are
 mouse-transparent, a press that lands on its rectangle is routed to `_close()`
@@ -1481,7 +1483,13 @@ recognised through `_conference_chat_keys` (`_conference_roster`,
 configured-service/`conference.`/`muc.`/`rooms.` domain rules). A
 non-conference unread key with no visible roster row is excluded from
 `_notification_unread_total` (the stored counter is kept), so an old one-off
-chat or a removed contact cannot keep the tray blinking forever. The same policy
+chat or a removed contact cannot keep the tray blinking forever. The tray
+**tooltip** (`TrayIcon.set_tooltip`, `MainWindow._update_tray_tooltip`) shows
+`APP_NAME` always, «Активный аккаунт: <jid>» after login and the same unread
+summary as the Digest (`MainWindow._unread_stats` →
+`digest_contacts`/`digest_mentions`/`digest_events`); before login it is just
+`APP_NAME`. It is refreshed from `_recount_unread`, the Events-tab counters,
+`_on_session_started` and `_reset_account_ui`. The same policy
 is used by `_sync_tray_blink` (ordinary conference messages still stay as
 roster/tab badges). Tray balloons are gated by `notifications.popups`
 (`off`/`system`/`system_messages`, default `system`; a legacy bool is coerced by

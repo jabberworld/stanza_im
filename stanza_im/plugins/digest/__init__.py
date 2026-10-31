@@ -79,6 +79,9 @@ def _stats(app) -> tuple[int, int, int, int, int]:
     conference); conferences are counted only by their unread **mentions**;
     events is the Events-tab unread count.
     """
+    stats_getter = getattr(app, "_unread_stats", None)
+    if callable(stats_getter):
+        return stats_getter()
     chats = getattr(app, "_unread_chats", None) or {}
     conference_getter = getattr(app, "_conference_chat_keys", None)
     if callable(conference_getter):

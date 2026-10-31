@@ -1376,6 +1376,7 @@ STRINGS = {
     # Tray
     "tray_show": "Показать / Спрятать",
     "tray_quit": "Выход",
+    "tray_tooltip_account": "Активный аккаунт: {jid}",
     # Extended presence (XEP-0079/0080/0107/0108/0118)
     'pep_button_tooltip': 'Занятие и настроение',
     'pep_mood': 'Настроение',

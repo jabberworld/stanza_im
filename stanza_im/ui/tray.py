@@ -105,6 +105,10 @@ class TrayIcon(QtCore.QObject):
     def hide(self):
         self._tray.hide()
 
+    def set_tooltip(self, text: str) -> None:
+        """Set the tray tooltip (plain text; newlines are preserved)."""
+        self._tray.setToolTip(str(text or APP_NAME))
+
     def set_icon(self, icon: QtGui.QIcon):
         self._normal_icon = icon
         self._blink_pixmap = QtGui.QPixmap()

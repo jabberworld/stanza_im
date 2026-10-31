@@ -93,6 +93,25 @@ fake2._osd_status_seen.add("x@example.com")
 _call(fake2, "x@example.com", "offline", "online")
 check("osd_status=never shows nothing", fake2._osd.shows == [])
 
+# 6. our own account/resources never produce OSD or sound -------------------
+fake3 = _make_fake()
+fake3._client = types.SimpleNamespace(jid_str="me@example.com/walkbook")
+fake3._presence_osd_grace_until = 0.0
+fake3._osd_status_seen.update({"me@example.com", "friend@example.com"})
+fake3._presence_sound_seen = {"me@example.com", "friend@example.com"}
+played = []
+fake3._play_sound = lambda *args, **kwargs: played.append(args)
+_call(fake3, "me@example.com", "offline", "online")
+MainWindow._notify_presence_sound(
+    fake3, "me@example.com", "offline", "online")
+check("our own status change shows no OSD", fake3._osd.shows == [])
+check("our own status change plays no sound", played == [])
+_call(fake3, "friend@example.com", "offline", "online")
+check("a contact still shows an OSD", len(fake3._osd.shows) == 1)
+MainWindow._notify_presence_sound(
+    fake3, "friend@example.com", "offline", "online")
+check("a contact still plays a sound", len(played) == 1)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

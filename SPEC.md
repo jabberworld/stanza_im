@@ -1875,6 +1875,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `notifications.tray_conference`) and marks it read, so each subsequent
   middle-click advances to the next one until none remain
   (`MainWindow._on_tray_cycle_unread`)
+- The tooltip (`TrayIcon.set_tooltip`, `MainWindow._update_tray_tooltip`) is
+  `APP_NAME` before login; after login it adds «Активный аккаунт: <jid>» and the
+  Digest-style unread summary (`MainWindow._unread_stats`: contact messages,
+  conference mentions, Events), only for non-zero lines.
 - Blinking: a smooth 1 s fade when notification unread messages exist (same
   policy as middle-click; ordinary conference messages still show a badge but
   do not blink under the default `mention`). Conference keys use
@@ -2072,7 +2076,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
     the whole initial presence replay — `_presence_osd_grace_until` starts at
     login/`stream_resumed` and every newly-seen contact pushes it out by
     `_PRESENCE_OSD_TAIL_S` (2 s), and `_osd_status_seen` is cleared per session,
-    so a slow or large roster is never a burst of OSDs.
+    so a slow or large roster is never a burst of OSDs. A presence from one of
+    our own resources (the account's bare JID) never produces a status OSD or a
+    contact online/offline sound.
   - `osd_conference`: `never` / `mention` (own nick in the body) / `all`.
   - `osd_file`: `_notify_osd_file(sender, filename)` entry point reserved for
     incoming p2p file transfers.
