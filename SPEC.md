@@ -1942,8 +1942,15 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   after the history window is rendered (falling back to the anchor timestamp
   and then to paging the local archive). The parked scroll is suspended
   meanwhile (`ChatView._scroll_suspended`), so the still-loading document cannot
-  report the bottom and mark the fresh window read on its own. A conversation
-  with no unread messages opens at its newest message as before.
+  report the bottom and mark the fresh window read on its own. The suspension
+  is held until the anchor node is actually visible (`ChatView._anchor_scroll`
+  + `anchor_scroll_guard_open`, or a 2 s deadline): the first poll after the
+  scroll JavaScript ran can still report the pre-scroll bottom, which marked
+  the newest unread rows seen on open. `_apply_visible_unread` retries while the
+  view is suspended, and a missing anchor id falls back to its timestamp
+  (`ChatView.scroll_to_message(..., timestamp=...)`) instead of staying at the
+  bottom. A conversation with no unread messages opens at its newest message
+  as before.
 - An unread conversation opens with **every** new message already on screen: the
   window is the ordinary tail of the conversation (`history.load_history`), there
   is no forward pager, and older messages are reached by scrolling up or the

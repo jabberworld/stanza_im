@@ -2811,10 +2811,12 @@ class ChatWidget(QtWidgets.QWidget):
     def _scroll_to_entry(self, entry: dict) -> bool:
         """Scroll to a stored row, by stable id or (for old rows) timestamp."""
         target = self._reply_target_id(entry)
-        if target:
-            self._view.scroll_to_message(target)
-            return True
         stamp = str(entry.get("timestamp") or "")
+        if target:
+            # The timestamp is the fallback when the id is not rendered (a
+            # legacy row whose node only carries ``data-stanza-time``).
+            self._view.scroll_to_message(target, timestamp=stamp)
+            return True
         if stamp:
             self._view.scroll_to_time(stamp)
             return True

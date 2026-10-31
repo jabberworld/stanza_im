@@ -88,7 +88,7 @@ class _View:
     def add_status(self, text, ts=""):
         self.statuses.append(text)
 
-    def scroll_to_message(self, message_id, highlight=True):
+    def scroll_to_message(self, message_id, highlight=True, timestamp=""):
         self.scrolled.append(message_id)
 
     def scroll_fraction(self):
@@ -669,6 +669,25 @@ check("last-seen is not searched while the view sits at the bottom",
 check("the divider-removal JS is wrapped in an IIFE",
       '"(function () {"' in _cv_src
       and '" if (!chat) return 0;"' in _cv_src)
+
+# 17. the read-anchor scroll guard is held until the target is visible --------
+_release = method_source(_cv_src, "_release_scroll_suspend")
+check("the scroll guard waits for the anchor target",
+      "anchor_scroll_guard_open(" in _release
+      and "self._visible_refs" in _release
+      and "self._deferred_scroll is not None" in _release)
+check("a jump arms the anchor guard",
+      "_arm_anchor_scroll(" in method_source(_cv_src, "scroll_to_message"))
+_flush_start = _cv_src.index("def _flush_deferred_scroll(")
+_flush = _cv_src[_flush_start:_cv_src.index("\n        def ", _flush_start + 1)]
+check("the deferred anchor scroll keeps the guard",
+      "_run_scroll_to_message(" in _flush
+      and "_release_scroll_suspend" not in _flush)
+check("the anchor scroll reports the resolved node ref",
+      "self._anchor_scroll_resolved" in
+      method_source(_cv_src, "_run_scroll_to_message"))
+check("a missing anchor id falls back to its timestamp",
+      "timestamp=stamp" in method_source(_cw_src, "_scroll_to_entry"))
 
 print()
 if FAILURES:

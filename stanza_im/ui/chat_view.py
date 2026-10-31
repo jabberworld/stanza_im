@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import html
 import logging
+import time
 from urllib.parse import quote, unquote
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -57,6 +58,27 @@ def clamp_zoom(factor: float) -> float:
         return max(0.5, min(3.0, float(factor)))
     except (TypeError, ValueError):
         return 1.0
+
+
+def anchor_scroll_guard_open(pending: dict | None, visible_refs,
+                             now: float) -> bool:
+    """Whether the read-anchor scroll guard may release the scroll reports.
+
+    *pending* is the ``ChatView._anchor_scroll`` record while a programmatic
+    jump to the read anchor has not been confirmed yet (``None`` when no such
+    scroll is in flight).  The guard must stay until the requested message is
+    actually among the visible refs: while the document is still filling, the
+    page sits at its bottom, and trusting that transient position would mark
+    the newest unread messages as seen before the anchor scroll painted (the
+    walkbook pravda log showed 13 unread cleared on open).  A deadline bounds
+    the wait so a missing/legacy target can never wedge the scroll reports.
+    """
+    if not pending:
+        return True
+    ref = str(pending.get("ref") or "")
+    if ref and ref in (visible_refs or ()):
+        return True
+    return now >= float(pending.get("until") or 0.0)
 
 
 def avatar_css_radius(pct) -> float:
@@ -659,6 +681,8 @@ if HAS_WEBENGINE:
 
         _LOAD_RETRY_LIMIT = 5
         _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
+        #: Upper bound on waiting for a read-anchor scroll to become visible.
+        _ANCHOR_SCROLL_TIMEOUT_S = 2.0
 
         def __init__(self, theme: ChatThemeFactory, parent=None):
             super().__init__(parent)
@@ -716,6 +740,11 @@ if HAS_WEBENGINE:
             # a "sitting at the bottom" report would be the empty document and
             # would mark the freshly opened conversation as read.
             self._scroll_suspended = False
+            # The programmatic jump to the read anchor, while its target has
+            # not been confirmed visible yet (``{"kind", "target", "ref",
+            # "until"}``).  Kept until a poll sees the target in the viewport,
+            # so the page's transient bottom position cannot mark unread rows.
+            self._anchor_scroll: dict | None = None
             self._load_failures = 0
             self._last_seen_cache = ("", "", "")
             self._loading = False
@@ -746,6 +775,7 @@ if HAS_WEBENGINE:
             self._ready = False
             self._pending.clear()
             self._deferred_scroll = None
+            self._anchor_scroll = None
             self._scroll_suspended = False
 
         def wheelEvent(self, event):
@@ -2348,12 +2378,22 @@ window.__stanzaMentionRef = '';
         def _release_scroll_suspend(self) -> None:
             """Trust the scroll position again once the parked scroll ran.
 
-            Called at the top of every scroll poll: the first poll after
-            ``_flush_deferred_scroll`` is the earliest moment at which the
-            observed position can be the one the user is really looking at.
+            Called at the end of every scroll poll (after ``_visible_refs``
+            was refreshed).  A read-anchor jump additionally waits until the
+            target message is actually visible (or its deadline passes):
+            ``_flush_deferred_scroll`` only *runs* the JavaScript, and the page
+            can still report its pre-scroll bottom position on the next poll.
+            Trusting that transient viewport marked the newest unread messages
+            as seen before the anchor painted.
             """
-            if self._scroll_suspended and self._deferred_scroll is None:
-                self._scroll_suspended = False
+            if self._deferred_scroll is not None:
+                return
+            if not anchor_scroll_guard_open(
+                    self._anchor_scroll, self._visible_refs,
+                    time.monotonic()):
+                return
+            self._anchor_scroll = None
+            self._scroll_suspended = False
 
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
@@ -2383,6 +2423,7 @@ window.__stanzaMentionRef = '';
             self._pending.clear()
             self._ready = False
             self._deferred_scroll = None
+            self._anchor_scroll = None
             self._scroll_suspended = False
             self._fraction = 1.0
             self._overflow = False
@@ -2706,8 +2747,32 @@ window.__stanzaMentionRef = '';
             }}
             """)
 
+        def _arm_anchor_scroll(self, kind: str, target: str) -> None:
+            """Suspend scroll reports until a programmatic jump is confirmed.
+
+            The target message (or timestamp) is resolved by the scroll
+            JavaScript; :meth:`_anchor_scroll_resolved` stores its rendered
+            ref so the poll can tell when it is actually in the viewport.
+            """
+            self._anchor_scroll = {
+                "kind": kind,
+                "target": str(target or ""),
+                "ref": "",
+                "until": time.monotonic() + self._ANCHOR_SCROLL_TIMEOUT_S,
+            }
+            self._scroll_suspended = True
+
+        def _anchor_scroll_resolved(self, result) -> None:
+            pending = self._anchor_scroll
+            if pending is None or not isinstance(result, dict):
+                return
+            ref = str(result.get("ref") or "")
+            if ref:
+                pending["ref"] = ref
+
         def scroll_to_message(self, message_id: str,
-                              highlight: bool = True) -> None:
+                              highlight: bool = True,
+                              timestamp: str = "") -> None:
             """Scroll the ``data-stanza-id`` node into view (and flash it).
 
             While the document is empty (a ``clear()`` whose page load has not
@@ -2716,14 +2781,19 @@ window.__stanzaMentionRef = '';
             after the buffered markup has been appended.  Without it the
             read-anchor resume ran its JavaScript against a blank document and
             the conversation ended up scrolled to the newest message.
+
+            *timestamp* is the fallback for a row whose id is not rendered
+            (a legacy archive row): the last message at or before it is used
+            instead of silently staying at the bottom.
             """
-            if not message_id:
+            if not message_id and not timestamp:
                 return
+            self._arm_anchor_scroll("message", message_id or timestamp)
             if not self._ready or self._pending:
-                self._deferred_scroll = ("message", message_id, bool(highlight))
-                self._scroll_suspended = True
+                self._deferred_scroll = ("message", message_id,
+                                         bool(highlight), str(timestamp or ""))
                 return
-            self._run_scroll_to_message(message_id, highlight)
+            self._run_scroll_to_message(message_id, highlight, timestamp)
 
         def _flush_deferred_scroll(self) -> None:
             """Re-run a parked scroll request once the document is filled."""
@@ -2734,7 +2804,8 @@ window.__stanzaMentionRef = '';
                 return
             kind = pending[0]
             if kind == "message":
-                self._run_scroll_to_message(pending[1], pending[2])
+                timestamp = pending[3] if len(pending) > 3 else ""
+                self._run_scroll_to_message(pending[1], pending[2], timestamp)
             elif kind == "time":
                 self._run_scroll_to_time(pending[1])
             elif kind == "bottom":
@@ -2751,9 +2822,9 @@ window.__stanzaMentionRef = '';
             stamp = str(timestamp or "")
             if not stamp:
                 return
+            self._arm_anchor_scroll("time", stamp)
             if not self._ready or self._pending:
                 self._deferred_scroll = ("time", stamp)
-                self._scroll_suspended = True
                 return
             self._run_scroll_to_time(stamp)
 
@@ -2762,46 +2833,67 @@ window.__stanzaMentionRef = '';
             self.page().runJavaScript(f"""
             (function() {{
                 var ts = {safe};
-                if (!ts) return;
+                if (!ts) return {{ref: ''}};
                 var nodes = document.querySelectorAll('.stanza-message');
                 var target = null;
                 for (var i = 0; i < nodes.length; i++) {{
                     var t = nodes[i].getAttribute('data-stanza-time') || '';
                     if (t && t <= ts) target = nodes[i];
                 }}
-                if (target) {{ target.scrollIntoView({{block: 'center'}}); return; }}
-                if (nodes.length) {{
-                    nodes[nodes.length - 1].scrollIntoView({{block: 'end'}});
+                if (!target && nodes.length) {{
+                    target = nodes[nodes.length - 1];
                 }}
+                if (!target) return {{ref: ''}};
+                target.scrollIntoView({{block: 'center'}});
+                return {{ref: target.getAttribute('data-stanza-id')
+                    || target.getAttribute('data-reply-id') || ''}};
             }})();
-            """)
+            """, self._anchor_scroll_resolved)
 
         def _run_scroll_to_message(self, message_id: str,
-                                   highlight: bool = True) -> None:
+                                   highlight: bool = True,
+                                   timestamp: str = "") -> None:
             safe = json.dumps(message_id or "")
+            safe_ts = json.dumps(timestamp or "")
             flash = 1 if highlight else 0
             self.page().runJavaScript(f"""
             (function() {{
                 var id = {safe};
-                if (!id) return;
+                var ts = {safe_ts};
                 var flash = {flash};
                 var nodes = document.querySelectorAll('.stanza-message');
-                for (var i = 0; i < nodes.length; i++) {{
-                    if (nodes[i].getAttribute('data-stanza-id') === id
-                        || nodes[i].getAttribute('data-reply-id') === id) {{
-                        nodes[i].scrollIntoView({{block: 'center'}});
-                        if (!flash) return;
-                        nodes[i].classList.remove('stanza-jump-highlight');
-                        void nodes[i].offsetWidth;
-                        nodes[i].classList.add('stanza-jump-highlight');
-                        setTimeout(function() {{
-                            nodes[i].classList.remove('stanza-jump-highlight');
-                        }}, 1600);
-                        return;
+                var target = null;
+                var matched = false;
+                if (id) {{
+                    for (var i = 0; i < nodes.length; i++) {{
+                        if (nodes[i].getAttribute('data-stanza-id') === id
+                            || nodes[i].getAttribute('data-reply-id') === id) {{
+                            target = nodes[i];
+                            matched = true;
+                            break;
+                        }}
                     }}
                 }}
+                if (!target && ts) {{
+                    for (var j = 0; j < nodes.length; j++) {{
+                        var t = nodes[j].getAttribute('data-stanza-time') || '';
+                        if (t && t <= ts) target = nodes[j];
+                    }}
+                }}
+                if (!target) return {{ref: ''}};
+                target.scrollIntoView({{block: 'center'}});
+                if (matched && flash) {{
+                    target.classList.remove('stanza-jump-highlight');
+                    void target.offsetWidth;
+                    target.classList.add('stanza-jump-highlight');
+                    setTimeout(function() {{
+                        target.classList.remove('stanza-jump-highlight');
+                    }}, 1600);
+                }}
+                return {{ref: target.getAttribute('data-stanza-id')
+                    || target.getAttribute('data-reply-id') || ''}};
             }})();
-            """)
+            """, self._anchor_scroll_resolved)
 
         def set_typing_indicator(self, text: str):
             safe = json.dumps(text or "")
@@ -2824,6 +2916,7 @@ window.__stanzaMentionRef = '';
             """Clear all messages."""
             self._pending.clear()
             self._deferred_scroll = None
+            self._anchor_scroll = None
             self._scroll_suspended = False
             self._fraction = 1.0
             self._overflow = False
@@ -2837,6 +2930,7 @@ window.__stanzaMentionRef = '';
         def scroll_to_bottom(self):
             self._near_top_hit = False
             self._fraction = 1.0
+            self._anchor_scroll = None
             self._scroll_suspended = True
             self._reset_unread_indicator()
             self._update_jump_button()
@@ -2849,6 +2943,7 @@ window.__stanzaMentionRef = '';
             fraction = max(0.0, min(1.0, float(fraction)))
             self._near_top_hit = fraction <= 0.0
             self._fraction = fraction
+            self._anchor_scroll = None
             self._scroll_suspended = True
             js = (
                 "requestAnimationFrame(function(){"
@@ -3049,7 +3144,8 @@ else:
             return
 
         def scroll_to_message(self, message_id: str,
-                              highlight: bool = True) -> None:
+                              highlight: bool = True,
+                              timestamp: str = "") -> None:
             """No-op: the QTextBrowser fallback has no per-message nodes."""
             return
 

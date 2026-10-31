@@ -7686,13 +7686,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         self._schedule_unread_save()
 
-    def _apply_visible_unread(self, jid: str) -> None:
+    def _apply_visible_unread(self, jid: str, attempt: int = 0) -> None:
         """Reconcile the counter with the unread messages now on screen.
 
         Called after the initial window is rendered and from every visible
         change.  Only genuinely visible messages are removed, so opening a
         chat with 44 unread and 3 visible leaves 41 (and 0 when the whole
         block fits).
+
+        While the read-anchor resume is still in flight the view reports the
+        page's transient bottom position, which would mark the newest unread
+        messages as seen (walkbook cleared 13 unread on open).  The call is
+        retried until the anchor scroll has been confirmed (bounded, so a
+        missing target cannot loop forever).
         """
         entry = self._unread_chats.get(jid)
         chat = (self._chat_window.get_chat(jid)
@@ -7710,6 +7716,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 or getattr(view, "_deferred_scroll", None) is not None):
             # The initial render or the read-anchor scroll is still in flight;
             # its transient viewport is not the user's reading position.
+            if attempt == 0:
+                logger.debug("UNREAD[skip] jid=%s reason=anchor-in-flight",
+                             jid)
+            if attempt < 16:
+                QtCore.QTimer.singleShot(
+                    150, lambda: self._apply_visible_unread(jid, attempt + 1))
             return
         remaining = chat.mark_visible_unread()
         mentions = chat.mark_visible_mentions()

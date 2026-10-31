@@ -200,6 +200,77 @@ MainWindow._on_chat_last_seen(
 check("the scroll report applies the visible unread count",
       main._unread_chats["room@example"]["unread"] == 68)
 
+# While the read-anchor scroll is in flight the page still reports its
+# transient bottom position; trusting it cleared the whole unread block on
+# open (walkbook pravda: 13 -> 0 without scrolling).
+from stanza_im.ui.chat_view import anchor_scroll_guard_open  # noqa: E402
+
+check("no anchor scroll means the guard is open",
+      anchor_scroll_guard_open(None, [], 0.0))
+check("the guard opens once the anchor target is visible",
+      anchor_scroll_guard_open({"ref": "m-1", "until": 100.0},
+                               ["m-1"], 1.0))
+check("the guard stays while the anchor target is off-screen",
+      not anchor_scroll_guard_open({"ref": "m-1", "until": 100.0},
+                                   ["m-9"], 1.0))
+check("a missing anchor target cannot wedge the guard forever",
+      anchor_scroll_guard_open({"ref": "m-1", "until": 100.0},
+                               [], 101.0))
+
+
+class _SuspendedChat:
+    def __init__(self, view, remaining=0):
+        self._view = view
+        self._remaining = remaining
+
+    def mark_visible_unread(self):
+        return self._remaining
+
+    def mark_visible_mentions(self):
+        return 0
+
+    def seen_anchor(self):
+        return {}
+
+
+class _SuspendedView:
+    def __init__(self, suspended):
+        self._scroll_suspended = suspended
+        self._deferred_scroll = None
+
+
+class _SuspendedWindow:
+    def __init__(self, chat):
+        self._chat = chat
+
+    def get_chat(self, _jid):
+        return self._chat
+
+    def current_jid(self):
+        return "room@example"
+
+
+suspended = MainWindow.__new__(MainWindow)
+suspended._unread_chats = {"room@example": {"unread": 13, "mentions": 0}}
+suspended._chat_window = _SuspendedWindow(
+    _SuspendedChat(_SuspendedView(True)))
+suspended._chat_area_visible = lambda: True
+suspended._recount_unread = lambda: None
+suspended._refresh_unread_badge = lambda _jid: None
+suspended._push_unread_to_chat = lambda _jid: None
+suspended._schedule_unread_save = lambda: None
+suspended._mark_chat_read = lambda _jid: None
+# attempt=16 is the last retry: no further timer is scheduled.
+MainWindow._apply_visible_unread(suspended, "room@example", 16)
+check("an in-flight anchor scroll does not clear unread on open",
+      suspended._unread_chats["room@example"]["unread"] == 13)
+
+suspended._chat_window = _SuspendedWindow(
+    _SuspendedChat(_SuspendedView(False), remaining=9))
+MainWindow._apply_visible_unread(suspended, "room@example", 16)
+check("once the anchor settles only the visible rows are removed",
+      suspended._unread_chats["room@example"]["unread"] == 9)
+
 if FAILURES:
     print("FAILURES:", FAILURES)
     sys.exit(1)

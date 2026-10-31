@@ -1564,7 +1564,15 @@ instead of leaving the reloaded page at its oldest row. The anchor is applied
 once and dropped. The
 parked scroll is **suspended** meanwhile (`ChatView._scroll_suspended`), so the
 view does not report an "at the bottom" position for a document that is still
-loading and the fresh window cannot mark itself read on its own. The explicit
+loading and the fresh window cannot mark itself read on its own. The guard is
+held until the requested anchor node is actually visible (`_anchor_scroll` +
+`anchor_scroll_guard_open`, or a 2 s deadline): merely *running* the
+`scrollIntoView` JavaScript is not enough, because the next poll can still see
+the pre-scroll bottom and would mark the newest unread rows seen (the walkbook
+pravda log cleared 13 unread on open). `_apply_visible_unread` therefore
+retries while the view is suspended, and `scroll_to_message` takes the entry's
+timestamp as a fallback when its id is not rendered (a legacy row) instead of
+silently staying at the bottom. The explicit
 **«Отметить прочитанным»** actions (a contact's context menu, before «Очистить
 историю», and «Отметить все прочитанным» in the Actions menu) share the same
 `MainWindow._mark_chat_read` helper: it clears the counters, removes the
