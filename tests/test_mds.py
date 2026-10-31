@@ -40,7 +40,7 @@ c._mds_pubsub_options = True
 c._mds_server_assist = True
 
 mds_events = []
-c.on("mds_displayed", lambda *a: mds_events.append(a))
+c.on("mds_displayed", lambda *a: mds_events.append(a[:2]))
 
 # 1. PEP publish IQ shape ------------------------------------------------------
 iq = c._mds_build_pep("bob@example.com", "sid-123")
@@ -142,7 +142,7 @@ check("mark updates local", c._mds_local.get("eve@example.com") == "sid-track")
 # 6b. our own PEP echo is never "another device" -------------------------------
 c_own = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)
 own_events = []
-c_own.on("mds_displayed", lambda *a: own_events.append(a))
+c_own.on("mds_displayed", lambda *a: own_events.append(a[:2]))
 c_own._mds_track("eve@example.com", slixmpp.Message(), "own-old")
 c_own.mds_mark_displayed("eve@example.com")
 c_own._mds_apply_remote("eve@example.com", "own-old")
@@ -203,7 +203,7 @@ if hasattr(ChatView, "_mark_message"):
 # 7. seeded displayed state suppresses stale catch-up --------------------------
 c_seed = JabberClient("me@example.com/res", "pw", message_displayed_sync=True)
 seed_events = []
-c_seed.on("mds_displayed", lambda *a: seed_events.append(a))
+c_seed.on("mds_displayed", lambda *a: seed_events.append(a[:2]))
 c_seed.set_displayed_state({"frank@example.com": "sid-old", "": "x",
                             "g@example.com": ""})
 c_seed._mds_apply_remote("frank@example.com", "sid-old")

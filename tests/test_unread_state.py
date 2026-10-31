@@ -310,6 +310,51 @@ check("an equal read point still rebuilds a stale unread block",
       recon2._unread_chats["stale@example"]["unread"] == 3
       and recon2._unread_chats["stale@example"]["read_sid"] == "stale-1")
 
+# A forced startup pass uses the shared point even when the local seen/read
+# point is newer; the shared point is authoritative across devices.
+_force_ts = "2026-10-02T11:00:00Z"
+for _sid, _ts in (("force-1", _force_ts),
+                  ("force-2", "2026-10-02T12:00:00Z"),
+                  ("force-3", "2026-10-02T13:00:00Z"),
+                  ("force-4", "2026-10-02T14:00:00Z")):
+    history.store_message("forced@example", "incoming", f"m {_sid}", _ts,
+                          sender="bob", archive_id=_sid, origin_id=_sid,
+                          message_id=_sid)
+
+
+def _forced_recon():
+    r = MainWindow.__new__(MainWindow)
+    r._client = SimpleNamespace(_mds_local={"forced@example": "force-1"})
+    r._unread_chats = {
+        "forced@example": {**unread_state.blank(), "unread": 2,
+                           "read_sid": "force-1", "read_ts": _force_ts,
+                           "seen_ts": "2026-10-02T13:00:00Z"}}
+    r._mam_unsupported = {"forced@example"}
+    r._muc_joined = {"forced@example"}
+    r._known_conferences = set()
+    r._muc_self_nicks = {}
+    r._chat_window = None
+    r._mds_reconciling = set()
+    r._mds_reconciled = set()
+    r._recount_unread = lambda: None
+    r._refresh_unread_badge = lambda _jid: None
+    r._push_unread_to_chat = lambda _jid: None
+    r._schedule_unread_save = lambda: None
+    return r
+
+
+_force_skip = _forced_recon()
+asyncio.get_event_loop().run_until_complete(
+    _force_skip._reconcile_mds_unread("forced@example"))
+check("a newer local seen point still skips the non-forced rebuild",
+      _force_skip._unread_chats["forced@example"]["unread"] == 2)
+
+_force_go = _forced_recon()
+asyncio.get_event_loop().run_until_complete(
+    _force_go._reconcile_mds_unread("forced@example", force=True))
+check("a forced startup rebuild ignores the newer local seen point",
+      _force_go._unread_chats["forced@example"]["unread"] == 3)
+
 win._pm_targets["room@conf.example/dave"] = ("room@conf.example", "dave")
 check("a private message resolves to its own conversation",
       win._resolve_mds_key("room@conf.example/dave")

@@ -2267,10 +2267,13 @@ Registers XEP plugins (conditionally where noted):
   applied as MDS as well. No chat status line is shown. `_mds_apply_remote`
   skips an equal state for live PEP events and any sid this client published
   itself (`_mds_own_sids`); the startup catch-up uses `force=True` so an equal
-  point still triggers the rebuild. On login `MainWindow` seeds `_mds_local`
-  from the persisted unread state (`client.set_displayed_state`), so the
-  catch-up does not wipe restored unread while a newer remote state still
-  clears it.
+  point still triggers the rebuild. A forced rebuild treats the shared point
+  as authoritative even when the local `seen_ts`/`read_ts` is newer (and covers
+  a 1:1 chat with a non-zero local block without opening it); a normal
+  join/open leaves a strictly newer local point alone. Auto-joined rooms use
+  the forced pass too. On login `MainWindow` seeds `_mds_local` from the
+  persisted unread state (`client.set_displayed_state`), so the catch-up does
+  not wipe restored unread while a newer remote state still clears it.
   Config `chat.message_displayed_sync` (default on).
 - **History behind an open tab**: the join-time room replay arrives as
   **delayed** groupchat messages; a XEP-0203 `<delay/>` is the reliable history

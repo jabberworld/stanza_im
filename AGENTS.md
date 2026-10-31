@@ -2053,7 +2053,11 @@ so a stale 2-message block grows to the real 23. A server-assist XEP-0333
 `_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
 the startup catch-up passes `force=True`: the map is seeded at connect from the
 persisted unread state, and an equal point must still trigger the rebuild or a
-second client would keep its stale local counters.
+second client would keep its stale local counters. A forced rebuild treats the
+shared point as authoritative even when the local `seen_ts`/`read_ts` is newer
+(and, for a 1:1 chat with a non-zero local block, without waiting for the tab
+to be opened); a normal join/open still leaves a strictly newer local point
+alone. The forced pass is also applied to auto-joined rooms.
 
 **Partial read progress (`seen`)**: the WebEngine scroll poll returns every
 visible `#chat .stanza-message` ref (not only the bottom-most one), so

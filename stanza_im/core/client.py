@@ -5850,7 +5850,7 @@ class JabberClient:
             return
         self._mds_local[chat_jid] = sid
         logger.debug("MDS: %s displayed up to %s", chat_jid, sid)
-        self.emit("mds_displayed", chat_jid, sid)
+        self.emit("mds_displayed", chat_jid, sid, force)
 
     # ── Extended presence: XEP-0080/0107/0108/0118 ────────────────
 

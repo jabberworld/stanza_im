@@ -2781,7 +2781,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._client.queue_participant_vcard(room, nick)
             self._client.get_muc_info(room)
         self._sync_conference_roster(room)
-        self._schedule_mds_reconcile(room)
+        autojoin = (self._client is not None
+                    and room in getattr(self._client, "autojoin_rooms", set()))
+        self._schedule_mds_reconcile(room, force=autojoin)
 
     async def _apply_created_room_config(self, room: str, opts: dict) -> None:
         """Apply the "create conference" options to a room we just created."""
@@ -7923,7 +7925,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return key
         return key.split("/", 1)[0]
 
-    def _on_mds_displayed(self, chat_jid: str, sid: str = ""):
+    def _on_mds_displayed(self, chat_jid: str, sid: str = "",
+                          force: bool = False):
         """Another of our devices flagged *chat_jid* as displayed (XEP-0490).
 
         The remote state is clamped against our own position: what the other
@@ -7935,7 +7938,7 @@ class MainWindow(QtWidgets.QMainWindow):
         key = self._resolve_mds_key(chat_jid)
         if not key or not sid:
             return
-        self._start_task(self._clamp_read_state(key, sid))
+        self._start_task(self._clamp_read_state(key, sid, force=force))
 
     def _set_mds_anchor(self, key: str, sid: str, ts: str = "") -> None:
         """Remember a remote displayed point even when nothing is unread."""
@@ -7952,11 +7955,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._store_read_state(key, entry)
         self._schedule_unread_save()
 
-    def _schedule_mds_reconcile(self, key: str) -> None:
+    def _schedule_mds_reconcile(self, key: str, *,
+                                force: bool = False) -> None:
         if key:
-            self._start_task(self._reconcile_mds_unread(key))
+            self._start_task(self._reconcile_mds_unread(key, force=force))
 
-    async def _reconcile_mds_unread(self, key: str) -> None:
+    async def _reconcile_mds_unread(self, key: str, *,
+                                    force: bool = False) -> None:
         """Rebuild unread messages since the shared MDS displayed point.
 
         MDS itself has no unread counter: a device that was offline only knows
@@ -7972,29 +7977,42 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         open_chat = bool(self._chat_window is not None
                          and self._chat_window.has_chat(key))
+        entry = self._unread_chats.get(key)
         if key not in self._muc_joined and not open_chat:
             # Do not fan out one MAM query per MDS item at login; a 1:1 chat
-            # reconstructs when it is actually opened.
-            return
-        entry = self._unread_chats.get(key)
+            # reconstructs when it is actually opened.  A forced startup
+            # rebuild still covers a chat that already has a local unread
+            # block (the stale-count case).
+            if not (force and entry
+                    and int(entry.get("unread") or 0) > 0):
+                return
         sid = (getattr(self._client, "_mds_local", {}) or {}).get(key, "")
         if not sid and entry:
             sid = str(entry.get("read_sid") or "")
         if not sid or key in self._mds_reconciling:
             return
         if (key, sid) in self._mds_reconciled:
-            return
+            if not force:
+                logger.debug("MDS[skip] jid=%s sid=%s reason=reconciled",
+                             key, sid)
+                return
+            self._mds_reconciled.discard((key, sid))
         self._mds_reconciling.add(key)
         done = False
         try:
             from stanza_im.core import history
             ts = await history.timestamp_for_ref_async(key, sid)
-            if not ts and entry:
+            if not ts and entry and not force:
                 ts = str(entry.get("read_ts") or "")
             local_ts = max(str((entry or {}).get("read_ts") or ""),
                            str((entry or {}).get("seen_ts") or ""))
-            if ts and local_ts and local_ts > ts:
-                done = True
+            if not force and ts and local_ts and local_ts > ts:
+                # A local read point newer than the shared point is left
+                # alone; the startup forced pass below is authoritative.
+                logger.debug(
+                    "MDS[skip] jid=%s sid=%s reason=local-newer local_ts=%s "
+                    "ts=%s unread=%s", key, sid, local_ts, ts,
+                    int((entry or {}).get("unread") or 0))
                 return
             incoming = 0
             if key not in self._mam_unsupported:
@@ -8008,6 +8026,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if incoming is None:
                     # Another MAM query owns this conversation; retry later.
                     return
+            if not ts:
+                ts = await history.timestamp_for_ref_async(key, sid)
             count = (await history.count_incoming_after_async(key, ts)
                      if ts else int(incoming or 0))
             current = int((self._unread_chats.get(key) or {}).get("unread") or 0)
@@ -8059,7 +8079,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if done:
                 self._mds_reconciled.add((key, sid))
 
-    async def _clamp_read_state(self, key: str, sid: str) -> None:
+    async def _clamp_read_state(self, key: str, sid: str,
+                                force: bool = False) -> None:
         """Apply a remote displayed state to our own unread block (XEP-0490).
 
         The remote ``<displayed/>`` id is resolved against the local archive:
@@ -8073,6 +8094,10 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core import history
         remote_ts = await history.timestamp_for_ref_async(key, sid)
         entry = self._unread_chats.get(key)
+        if force:
+            self._set_mds_anchor(key, sid, remote_ts)
+            await self._reconcile_mds_unread(key, force=True)
+            return
         has_unread = bool(entry and (entry["unread"] or entry["mentions"]))
         if not has_unread:
             self._set_mds_anchor(key, sid, remote_ts)
