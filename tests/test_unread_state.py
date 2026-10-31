@@ -410,6 +410,15 @@ asyncio.get_event_loop().run_until_complete(
 check("a forced rebuild skips when the shared point is not newer",
       _gap_skip._unread_chats["gap@example"]["unread"] == 0)
 
+# An EQUAL point still needs a rebuild: another device displayed up to the
+# same message while new messages after it arrived only on the server (rbook
+# counted just the 5 live messages while walkbook had 24).
+_gap_equal = _gap_recon("gap@example", "gap-1", "2026-10-02T11:00:00Z")
+asyncio.get_event_loop().run_until_complete(
+    _gap_equal._reconcile_mds_unread("gap@example", force=True))
+check("an equal shared point still rebuilds the gap",
+      _gap_equal._unread_chats["gap@example"]["unread"] == 2)
+
 # The shared id is not in the local archive (the device never stored it): the
 # gap is fetched, but unread is counted from the local read point, never from
 # the raw MAM page size (an old/pruned id must not resurrect read messages).
@@ -424,6 +433,65 @@ asyncio.get_event_loop().run_until_complete(
     _prune._reconcile_mds_unread("prune@example", force=True))
 check("an unresolved shared id counts from the local read point",
       _prune._unread_chats["prune@example"]["unread"] == 1)
+
+# An old unjoined room (bimroom) is recognised as a conference from its
+# domain, is not rebuilt as a 1:1, and its restored unread is cleared.
+_conf_win = MainWindow.__new__(MainWindow)
+_conf_win._conference_roster = set()
+_conf_win._muc_self_nicks = {}
+_conf_win._known_conferences = set()
+_conf_win._bookmarks = {}
+_conf_win._unread_chats = {}
+_conf_win._config = None
+check("a conference-service domain is recognised as a room",
+      MainWindow._is_conference_jid(
+          _conf_win, "bimroom@conference.jabberworld.info"))
+check("a 1:1 contact is not a room",
+      not MainWindow._is_conference_jid(_conf_win, "rain@jabberworld.info"))
+_conf_win._bookmarks = {"saved@conf.example": {}}
+check("a bookmarked room is recognised even with a plain domain",
+      MainWindow._is_conference_jid(_conf_win, "saved@conf.example"))
+check("a MUC private message is not a room",
+      not MainWindow._is_conference_jid(
+          _conf_win, "bimroom@conference.jabberworld.info/rain"))
+
+_conf_recon = MainWindow.__new__(MainWindow)
+_conf_recon._client = SimpleNamespace(
+    _mds_local={"bimroom@conference.jabberworld.info": "old-sid"})
+_conf_recon._unread_chats = {}
+_conf_recon._muc_joined = set()
+_conf_recon._known_conferences = set()
+_conf_recon._muc_self_nicks = {}
+_conf_recon._bookmarks = {}
+_conf_recon._conference_roster = set()
+_conf_recon._config = None
+_conf_recon._chat_window = None
+_conf_recon._mds_reconciling = set()
+_conf_recon._mds_reconciled = set()
+asyncio.get_event_loop().run_until_complete(
+    _conf_recon._reconcile_mds_unread(
+        "bimroom@conference.jabberworld.info", force=True))
+check("an unjoined room is not rebuilt as a 1:1",
+      _conf_recon._unread_chats == {})
+
+_clean = MainWindow.__new__(MainWindow)
+_clean._unread_chats = {"bimroom@conference.jabberworld.info": {
+    "unread": 2, "mentions": 0, "important": 0}}
+_clean._bookmarks_loaded = True
+_clean._bookmarks = {}
+_clean._known_conferences = set()
+_clean._muc_self_nicks = {}
+_clean._muc_joined = set()
+_clean._conference_roster = set()
+_clean._config = None
+_clean._recount_unread = lambda: None
+_clean._refresh_unread_badge = lambda _jid: None
+_clean._schedule_unread_save = lambda: None
+changed = MainWindow._clear_inactive_conference_unread(_clean)
+check("an unjoined room's restored unread is cleared",
+      changed == ["bimroom@conference.jabberworld.info"]
+      and _clean._unread_chats[
+          "bimroom@conference.jabberworld.info"]["unread"] == 0)
 
 win._pm_targets["room@conf.example/dave"] = ("room@conf.example", "dave")
 check("a private message resolves to its own conversation",
@@ -455,6 +523,13 @@ check("the forced rebuild covers a chat with no local unread block",
       "shared_ahead = (not shared_ts or not local_ts" in _mw_src)
 check("an unresolved shared id counts from the local point",
       "anchor_ts = ts or local_ts" in _mw_src)
+check("an equal displayed point still triggers the forced rebuild",
+      "or shared_ts >= local_ts" in _mw_src)
+check("unjoined rooms are never rebuilt as 1:1",
+      "self._is_conference_jid(key) and key not in self._muc_joined"
+      in _mw_src)
+check("invisible non-conference keys do not notify",
+      "if roster_jids and jid not in roster_jids" in _mw_src)
 
 print()
 if FAILURES:

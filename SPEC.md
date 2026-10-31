@@ -1877,7 +1877,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`MainWindow._on_tray_cycle_unread`)
 - Blinking: a smooth 1 s fade when notification unread messages exist (same
   policy as middle-click; ordinary conference messages still show a badge but
-  do not blink under the default `mention`). It is active **only
+  do not blink under the default `mention`). Conference keys use
+  `_conference_chat_keys`; a non-conference unread key with no visible roster
+  row is excluded from `_notification_unread_total` (the counter is kept), so
+  an old one-off chat or removed contact cannot blink forever. It is active **only
   while logged in** (`MainWindow._sync_tray_blink`, driven by the derived
   `_recount_unread` total, started on `session_started`/`stream_resumed` and on
   new unread, stopped on `disconnected`/`sm_failed` and whenever the total
@@ -2278,16 +2281,22 @@ Registers XEP plugins (conditionally where noted):
   point still triggers the rebuild. A forced rebuild uses the **newer** of the
   shared and the local `seen_ts`/`read_ts` point: when the local point is
   newer it rebuilds from that timestamp and republishes it (repairing a stale
-  shared node), when it is older the shared point wins (and covers a 1:1 chat
-  with a non-zero local block without opening it). An unresolved shared id is
+  shared node), when it is older **or equal** the shared point wins (an equal
+  point still rebuilds: new messages may exist only on the server — rbook
+  showed 5 while walkbook had 24; it also covers a 1:1 chat with a non-zero
+  local block without opening it). An unresolved shared id is
   never "local newer": it is fetched with MAM `after_id`, and the unread count
   falls back to the local read point (or the MAM page when there is no local
   point), so an old/pruned id cannot resurrect read rows. The forced pass also
   rebuilds a 1:1 chat with no local unread block when the shared point is
   ahead (an offline device: rbook showed only the 5 live messages while
   walkbook/monocles showed 30), and runs for every chat with a shared point on
-  a fresh device. A normal join/open leaves a strictly newer local point alone
-  but republishes it. Partial progress made by
+  a fresh device. It skips a room that is not joined when `_is_conference_jid`
+  recognises it (active/known/bookmarked, a configured conference service or a
+  `conference.`/`muc.`/`rooms.` domain), so an old unjoined room (`bimroom`) is
+  never rebuilt as a 1:1 and does not become invisible unread; the join path
+  reconciles it once the room is live. A normal join/open leaves a strictly
+  newer local point alone but republishes it. Partial progress made by
   `_apply_visible_unread` is published through the same throttled timer, so
   opening a chat can advance the shared displayed point without a scroll poll.
   Auto-joined rooms use
@@ -3221,11 +3230,15 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   (each line only when non-zero).
 - It subscribes to `MainWindow.unread_changed` (emitted from `_bump_unread`,
   `_reset_unread`, `_recount_unread`) and recomputes the numbers from
-  `_unread_chats`: a key in `_conference_roster`/`_muc_self_nicks` **or** the
-  persisted `_known_conferences` (seeded from `known_contacts` at
-  startup/profile switch) counts only its `mentions`, every other key counts its
-  `unread` — so a room with restored unread is not counted as a contact before
-  it is joined. The sticky OSD is
+  `_unread_chats`: a key in `MainWindow._conference_chat_keys`
+  (`_conference_roster`, `_muc_self_nicks`, the persisted `_known_conferences`
+  seeded from `known_contacts` at startup/profile switch, `_bookmarks` and
+  `_is_conference_jid`'s configured-service/domain rules) counts only its
+  `mentions`, every other key counts its `unread` — so a room with restored
+  unread is not counted as a contact before it is joined. A non-conference key
+  with no visible roster row is skipped (an old one-off chat or an unjoined
+  room never inflates the "contacts" line; the stored counter is kept). The
+  sticky OSD is
   created/updated through `OsdManager.show_sticky`/`update_sticky` and dismissed
   when nothing is unread. It is **gated on being logged in** (`_refresh`
   dismisses while `app._client` is `None`), so restored pre-login counters never

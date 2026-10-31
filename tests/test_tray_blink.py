@@ -200,6 +200,22 @@ p._on_tray_cycle_unread()
 check("tray_conference=all cycles ordinary conference messages",
       opened == ["room@conf.example", "room@conf.example"])
 
+# 8. invisible non-conference unread does not keep the blink -----------------
+p = _probe()
+p._roster = SimpleNamespace(
+    _users=[SimpleNamespace(jid="a@example.com")])
+p._unread_chats = {
+    "a@example.com": {"unread": 1, "mentions": 0},
+    "old@example.com": {"unread": 2, "mentions": 0},
+}
+MainWindow._recount_unread(p)
+check("an invisible 1:1 key is left out of the notification total",
+      p._unread_total == 3 and p._tray._blink_active)
+p._unread_chats["a@example.com"]["unread"] = 0
+MainWindow._recount_unread(p)
+check("the tray stops once only invisible unread remains",
+      p._unread_total == 2 and not p._tray._blink_active)
+
 if FAILURES:
     print("FAILURES:", FAILURES)
     sys.exit(1)

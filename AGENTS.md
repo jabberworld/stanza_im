@@ -829,10 +829,13 @@ mentions in conferences, or unread Events-tab entries: the title is «У вас 
 `MainWindow.unread_changed` signal (emitted from
 `_bump_unread`/`_reset_unread`/`_recount_unread`) and the `events_changed` one
 (emitted from `_bump_event_unread`/`_stop_event_blink`), and recomputes
-the counters from `_unread_chats` (conference keys — in `_conference_roster`,
-`_muc_self_nicks` or the persisted `_known_conferences` set, seeded from
-`known_contacts` at startup/profile switch — counted only by `mentions`, so a
-room with restored unread is not miscounted as a contact before it is joined)
+the counters from `_unread_chats` (conference keys from
+`MainWindow._conference_chat_keys` — `_conference_roster`, `_muc_self_nicks`,
+the persisted `_known_conferences` set seeded from `known_contacts`, `_bookmarks`
+and `_is_conference_jid`'s configured-service/domain rules — counted only by
+`mentions`, so a room with restored unread is not miscounted as a contact before
+it is joined; a non-conference key with no visible roster row is skipped, so an
+old one-off chat or an unjoined room never inflates the "contacts" line)
 plus `_event_unread`; the sticky OSD is updated in
 place via `OsdManager.show_sticky`/`update_sticky`. It is **gated on being
 logged in** (`_refresh` dismisses when `app._client` is `None`), so the unread
@@ -1472,9 +1475,15 @@ topmost roster contact whose **notification** unread count is positive, then
 click advances until nothing is left. `notifications.tray_conference`
 (`never`/`mention`/`all`, default `mention`) decides whether ordinary conference
 messages, only mentions, or both count for the tray blink and that cycle; 1:1
-and private chats always count by their unread total. The same policy is used
-by `_sync_tray_blink` (ordinary conference messages still stay as roster/tab
-badges). Tray balloons are gated by `notifications.popups`
+and private chats always count by their unread total. Conference keys are
+recognised through `_conference_chat_keys` (`_conference_roster`,
+`_muc_self_nicks`, `_known_conferences`, `_bookmarks` and `_is_conference_jid`'s
+configured-service/`conference.`/`muc.`/`rooms.` domain rules). A
+non-conference unread key with no visible roster row is excluded from
+`_notification_unread_total` (the stored counter is kept), so an old one-off
+chat or a removed contact cannot keep the tray blinking forever. The same policy
+is used by `_sync_tray_blink` (ordinary conference messages still stay as
+roster/tab badges). Tray balloons are gated by `notifications.popups`
 (`off`/`system`/`system_messages`, default `system`; a legacy bool is coerced by
 `tray.normalize_popups_mode`): `TrayIcon.show_message(..., kind="message")` is
 the incoming-message preview and is shown only in `system_messages`, while
@@ -2072,8 +2081,10 @@ point is newer (a throttled publish was lost, or an older build never sent it)
 it rebuilds from the local timestamp and republishes that point
 (`_publish_mds_point`, `_mds_point_sid` resolves the local row's stanza-id), so
 another device stops reconstructing from the stale shared point (walkbook
-showed 40 while rbook reconstructed 90); when the local point is older the
-shared point wins as before. An **unresolved** shared id (this device never
+showed 40 while rbook reconstructed 90); when the local point is older **or
+equal** the shared point wins (an equal point still rebuilds: new messages may
+exist only on the server — rbook showed 5 while walkbook had 24). An
+**unresolved** shared id (this device never
 stored that message) is never treated as "local newer": it is fetched with MAM
 `after_id` and the count falls back to the local read point (or the MAM page
 when there is no local point), so an old/pruned id cannot resurrect already
@@ -2081,8 +2092,12 @@ read rows. The forced pass also rebuilds a 1:1 chat with **no** local unread
 block when the shared point is ahead (an offline device: rbook showed only the
 5 live messages while walkbook/monocles showed 30), and runs for every chat
 with a shared point on a fresh device. A normal join/open leaves a strictly
-newer local point alone but also republishes it. The forced pass is also
-applied to auto-joined rooms. Partial progress made by the visibility reconciliation
+newer local point alone but also republishes it. The forced pass skips a room
+that is not joined when `_is_conference_jid` recognises it (active/known/
+bookmarked, a configured conference service or a `conference.`/`muc.`/`rooms.`
+domain), so an old unjoined room (`bimroom`) is never rebuilt as a 1:1 and does
+not become invisible unread; the join path reconciles it once the room is live.
+The forced pass is also applied to auto-joined rooms. Partial progress made by the visibility reconciliation
 (`_apply_visible_unread`) is published too (`_queue_seen_progress_mds` →
 `_queue_mds_displayed`): opening a chat can mark visible rows seen without a
 scroll poll, and that point must reach the shared node.

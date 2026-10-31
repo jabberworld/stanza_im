@@ -7284,7 +7284,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             if not key or "/" in key:
                 continue
-            if key not in self._bookmarks and key not in self._known_conferences:
+            if not self._is_conference_jid(key):
                 continue
             bookmark = self._bookmarks.get(key) or {}
             if (bookmark.get("autojoin") and not clear_autojoin
@@ -7455,17 +7455,60 @@ class MainWindow(QtWidgets.QMainWindow):
                     entry["read_sid"] = sid
         unread_state.save_chats(self._unread_chats, account=self._config.jid or "")
 
+    def _is_conference_jid(self, jid: str) -> bool:
+        """True for a room conversation key (never a MUC private message).
+
+        Rooms are recognised from the live/known/bookmarked registries, the
+        configured conference services, or a conference-like domain.  The
+        last two matter for an old unjoined room (``bimroom@conference.…``)
+        that is neither a contact nor a bookmark but still has an MDS item.
+        """
+        if not jid or "/" in jid:
+            return False
+        known = set(self.__dict__.get("_conference_roster") or ())
+        known |= set(self.__dict__.get("_muc_self_nicks") or {})
+        known |= set(self.__dict__.get("_muc_joined") or ())
+        known |= set(self.__dict__.get("_known_conferences") or ())
+        known |= set(self.__dict__.get("_bookmarks") or ())
+        if jid in known:
+            return True
+        if "@" not in jid:
+            return False
+        domain = jid.rsplit("@", 1)[-1].lower()
+        config = self.__dict__.get("_config")
+        connection = getattr(config, "connection", None)
+        servers = {str(server).lower() for server in
+                   (getattr(connection, "conference_servers", None) or [])}
+        if domain in servers:
+            return True
+        return domain.startswith(("conference.", "muc.", "rooms."))
+
     def _conference_chat_keys(self) -> set[str]:
         """Conversation keys that represent conferences (not PMs)."""
         keys = set(self.__dict__.get("_conference_roster") or ())
         keys |= set(self.__dict__.get("_muc_self_nicks") or {})
         keys |= set(self.__dict__.get("_known_conferences") or ())
+        keys |= set(self.__dict__.get("_bookmarks") or ())
+        for key in (self.__dict__.get("_unread_chats") or {}):
+            if MainWindow._is_conference_jid(self, key):
+                keys.add(key)
         return keys
 
     def _notification_unread_count(self, jid: str) -> int:
         """Unread count that is allowed to notify through the tray."""
         chats = self.__dict__.get("_unread_chats") or {}
         entry = chats.get(jid)
+        if entry is not None and not MainWindow._is_conference_jid(self, jid):
+            roster = self.__dict__.get("_roster")
+            roster_jids = {user.jid for user in
+                           (getattr(roster, "_users", None) or [])}
+            if roster_jids and jid not in roster_jids:
+                # A key with no visible roster row (an old one-off chat or a
+                # removed contact) must not keep the tray blinking forever:
+                # middle-click only walks the roster and can never clear it.
+                # The stored counter is kept, so a returning contact gets its
+                # badge back.
+                return 0
         fallback = None
         if entry is None:
             # The roster is normally mirrored from ``_unread_chats``; keep a
@@ -7477,7 +7520,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              if user.jid == jid), None)
             if fallback is None:
                 return 0
-        if jid in self._conference_chat_keys():
+        if jid in MainWindow._conference_chat_keys(self):
             config = self.__dict__.get("_config")
             notifications = getattr(config, "notifications", None)
             mode = str(getattr(notifications, "tray_conference",
@@ -8027,9 +8070,11 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if not self._client or not key:
             return
-        if key in self._known_conferences and key not in self._muc_joined:
+        if self._is_conference_jid(key) and key not in self._muc_joined:
             # A room we are not in has no usable room archive yet; its join
             # path schedules the same reconstruction once the room is live.
+            # This also keeps an old unjoined room (bimroom/psi-dev) from
+            # being rebuilt as a 1:1 and becoming invisible unread.
             return
         from stanza_im.core import history
         open_chat = bool(self._chat_window is not None
@@ -8059,8 +8104,12 @@ class MainWindow(QtWidgets.QMainWindow):
             # point is ahead (rbook counted only the 5 live messages while
             # walkbook showed 30).
             local_unread = int((entry or {}).get("unread") or 0)
+            # Equality still needs a rebuild: another device may have
+            # displayed up to the same point while new messages after it
+            # arrived only on the server (rbook counted just the 5 live
+            # messages while walkbook had 24).
             shared_ahead = (not shared_ts or not local_ts
-                            or shared_ts > local_ts)
+                            or shared_ts >= local_ts)
             if not local_unread and not shared_ahead:
                 logger.debug(
                     "MDS[skip] jid=%s sid=%s reason=no-newer-shared "
@@ -8092,8 +8141,7 @@ class MainWindow(QtWidgets.QMainWindow):
             incoming = 0
             if key not in self._mam_unsupported:
                 is_muc = (key in self._muc_joined
-                          or key in self._known_conferences
-                          or key in self._muc_self_nicks)
+                          or self._is_conference_jid(key))
                 incoming = await self._client.fetch_history_mam_after(
                     key, start_ts=ts or None,
                     after_id="" if ts else sid, limit=500,

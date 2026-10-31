@@ -80,11 +80,18 @@ def _stats(app) -> tuple[int, int, int, int, int]:
     events is the Events-tab unread count.
     """
     chats = getattr(app, "_unread_chats", None) or {}
-    conferences = set(getattr(app, "_conference_roster", None) or ())
-    conferences |= set(getattr(app, "_muc_self_nicks", None) or {})
-    # A room with restored unread is not joined yet at login, so it is only
-    # recognisable from the persisted registry (`_known_conferences`).
-    conferences |= set(getattr(app, "_known_conferences", None) or ())
+    conference_getter = getattr(app, "_conference_chat_keys", None)
+    if callable(conference_getter):
+        conferences = set(conference_getter())
+    else:
+        conferences = set(getattr(app, "_conference_roster", None) or ())
+        conferences |= set(getattr(app, "_muc_self_nicks", None) or {})
+        # A room with restored unread is not joined yet at login, so it is
+        # only recognisable from the persisted registry.
+        conferences |= set(getattr(app, "_known_conferences", None) or ())
+    roster = getattr(app, "_roster", None)
+    roster_jids = {user.jid for user in
+                   (getattr(roster, "_users", None) or [])}
     messages = contacts = mentions = confs = 0
     for key, entry in chats.items():
         if key in conferences:
@@ -93,6 +100,10 @@ def _stats(app) -> tuple[int, int, int, int, int]:
                 mentions += count
                 confs += 1
         else:
+            if roster_jids and key not in roster_jids:
+                # Invisible unread (an old room/removed contact): do not
+                # report it as a contact; the stored counter is kept.
+                continue
             count = int(entry.get("unread", 0) or 0)
             if count > 0:
                 messages += count

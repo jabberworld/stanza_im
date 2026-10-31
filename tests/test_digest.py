@@ -6,6 +6,7 @@ Run with:
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_digest_")
@@ -101,6 +102,26 @@ check("a mention in a known conference is counted",
       "2 mentions in 1 conferences"
       in mgr_b._windows[0]["window"]._body_label.text())
 digest.deactivate(fake_b)
+
+# 0c. invisible/old-room unread is not reported as a contact -----------------
+mgr_c = OsdManager(_cfg())
+fake_c = _FakeApp(mgr_c)
+fake_c._roster = SimpleNamespace(
+    _users=[SimpleNamespace(jid="alice@example.com")])
+fake_c._conference_chat_keys = lambda: {"bimroom@conference.example"}
+fake_c._unread_chats = {
+    "alice@example.com": {"unread": 5, "mentions": 0},
+    "old@example.com": {"unread": 7, "mentions": 0},
+    "bimroom@conference.example": {"unread": 2, "mentions": 0},
+}
+digest.activate(fake_c)
+fake_c.unread_changed.emit()
+_body_c = mgr_c._windows[0]["window"]._body_label.text()
+check("an unjoined room is not a contact in the digest",
+      "5 new messages from 1 contacts" in _body_c)
+check("an invisible 1:1 key is not reported",
+      "7" not in _body_c and "12" not in _body_c)
+digest.deactivate(fake_c)
 
 # 1. activation shows a sticky digest ----------------------------------------
 mgr = OsdManager(_cfg())
