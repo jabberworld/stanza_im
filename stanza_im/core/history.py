@@ -609,9 +609,9 @@ def retract_message(jid: str, ref_id: str, marker: bool = False,
 def replace_message(jid: str, ref_id: str, new_body: str,
                     markup: dict | None = None) -> bool:
     """Replace the body of a stored message referenced by *ref_id* and mark
-    it as edited (XEP-0308 corrections).  Matches by ``message_id`` or
-    ``origin_id``.  The XEP-0394 *markup* replaces any stored one (``None``
-    clears it)."""
+    it as edited (XEP-0308 corrections).  Matches any stable id a peer may use
+    (``message_id``/``origin_id``/``archive_id``/``stanza_id``).  The XEP-0394
+    *markup* replaces any stored one (``None`` clears it)."""
     if not ref_id:
         return False
     try:
@@ -619,10 +619,11 @@ def replace_message(jid: str, ref_id: str, new_body: str,
             conn = _connection(jid)
             cur = conn.execute(
                 "UPDATE messages SET body = ?, markup = ?, edited = 1 "
-                "WHERE message_id = ? OR origin_id = ?",
+                "WHERE message_id = ? OR origin_id = ? "
+                "OR archive_id = ? OR stanza_id = ?",
                 (new_body,
                  json.dumps(markup, ensure_ascii=False) if markup else None,
-                 ref_id, ref_id))
+                 ref_id, ref_id, ref_id, ref_id))
             conn.commit()
             return cur.rowcount > 0
     except sqlite3.Error as exc:

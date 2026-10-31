@@ -67,8 +67,8 @@ def make_corrected(body="edited", ref="orig-9", mtype="chat"):
 c_on = JabberClient("me@example.com/r", "pw", allow_incoming_edits=True)
 corr = []
 newmsg = []
-c_on.on("message_corrected", lambda *a: corr.append(a))
-c_on.on("message_received", lambda *a: newmsg.append(a))
+c_on.on("message_corrected", lambda *a, **k: corr.append(a))
+c_on.on("message_received", lambda *a, **k: newmsg.append(a))
 c_on._on_message(make_corrected())
 check("1:1 correction replaces",
       len(corr) == 1 and corr[0][0] == "alice@example.com/res"
@@ -78,8 +78,8 @@ check("1:1 correction replaces",
 c_off = JabberClient("me@example.com/r", "pw", allow_incoming_edits=False)
 corr2 = []
 newmsg2 = []
-c_off.on("message_corrected", lambda *a: corr2.append(a))
-c_off.on("message_received", lambda *a: newmsg2.append(a))
+c_off.on("message_corrected", lambda *a, **k: corr2.append(a))
+c_off.on("message_received", lambda *a, **k: newmsg2.append(a))
 c_off._on_message(make_corrected())
 check("1:1 correction becomes new message when disabled",
       len(corr2) == 0 and len(newmsg2) == 1
@@ -99,8 +99,8 @@ def make_muc_corrected(body="edited-muc", ref="muc-1"):
 muc_corr = []
 muc_new = []
 cm = JabberClient("me@example.com/r", "pw", allow_incoming_edits=True)
-cm.on("groupchat_message_corrected", lambda *a: muc_corr.append(a))
-cm.on("groupchat_message", lambda *a: muc_new.append(a))
+cm.on("groupchat_message_corrected", lambda *a, **k: muc_corr.append(a))
+cm.on("groupchat_message", lambda *a, **k: muc_new.append(a))
 cm._on_groupchat_message(make_muc_corrected())
 check("muc correction replaces",
       len(muc_corr) == 1 and muc_corr[0][0] == "room@conf"
@@ -165,6 +165,125 @@ check("history replaced",
       rows and rows[-1]["body"] == "corrected"
       and rows[-1]["edited"] is True
       and rows[-1]["message_id"] == "hist-1")
+
+# 5b. outgoing origin-id (XEP-0359) ------------------------------------------
+_out, _mid = C._compose_message("bob@example.com", "hello")
+_oid = _out.xml.find("{urn:xmpp:sid:0}origin-id")
+check("outgoing messages carry an origin-id",
+      _oid is not None and _oid.get("id") == _mid)
+
+# 5c. corrections delivered as carbons ---------------------------------------
+def make_carbon(which="sent", body="edited-carbon", ref="orig-c",
+                frm="me@example.com/other", to="bob@example.com"):
+    outer = slixmpp.Message()
+    outer["to"] = "me@example.com/r"
+    outer["type"] = "chat"
+    carb = ET.SubElement(outer.xml, "{urn:xmpp:carbons:2}%s" % which)
+    fwd = ET.SubElement(carb, "{urn:xmpp:forward:0}forwarded")
+    inner = ET.SubElement(fwd, "{jabber:client}message")
+    inner.set("from", frm)
+    inner.set("to", to)
+    inner.set("type", "chat")
+    inner.set("id", "cor-carbon")
+    ET.SubElement(inner, "{%s}replace" % NS_CORRECT).set("id", ref)
+    ET.SubElement(inner, "{jabber:client}body").text = body
+    return outer
+
+
+c_carb = JabberClient("me@example.com/r", "pw", allow_incoming_edits=True)
+carb_corr = []
+carb_sent = []
+c_carb.on("message_corrected", lambda *a, **k: carb_corr.append((a, k)))
+c_carb.on("message_carbon_sent", lambda *a, **k: carb_sent.append((a, k)))
+c_carb._on_carbon_sent(make_carbon("sent", "edited-own", "orig-own"))
+check("a sent carbon correction is applied locally",
+      len(carb_corr) == 1
+      and carb_corr[0][0][0] == "bob@example.com"
+      and carb_corr[0][0][1] == "orig-own"
+      and carb_corr[0][0][2] == "edited-own"
+      and not carb_sent)
+carb_corr.clear()
+c_carb._on_carbon_received(make_carbon(
+    "received", "edited-foreign", "orig-f", "alice@example.com/res"))
+check("a received carbon correction is applied",
+      len(carb_corr) == 1
+      and carb_corr[0][0][0] == "alice@example.com/res"
+      and carb_corr[0][0][1] == "orig-f"
+      and carb_corr[0][0][2] == "edited-foreign")
+
+# 5d. MAM corrections are edits, not new messages ----------------------------
+def make_mam_replace(ref="orig-mam", body="edited-mam"):
+    result = ET.Element("{urn:xmpp:mam:2}result")
+    result.set("id", "arc-mam")
+    fwd = ET.SubElement(result, "{urn:xmpp:forward:0}forwarded")
+    inner = ET.SubElement(fwd, "{jabber:client}message")
+    inner.set("from", "bob@example.com/r")
+    inner.set("to", "me@example.com/r")
+    inner.set("type", "chat")
+    inner.set("id", "cor-mam")
+    ET.SubElement(inner, "{%s}replace" % NS_CORRECT).set("id", ref)
+    ET.SubElement(inner, "{jabber:client}body").text = body
+    delay = ET.SubElement(fwd, "{urn:xmpp:delay}delay")
+    delay.set("stamp", "2026-10-31T20:18:40Z")
+    return result
+
+
+mam_rows, _parsed, _skipped, _reasons = C._mam_rows(
+    "bob@example.com", [make_mam_replace()])
+check("a MAM correction row carries replace_id",
+      mam_rows and mam_rows[0]["replace_id"] == "orig-mam")
+
+import asyncio  # noqa: E402
+
+
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+mam_jid = "mam-edit@example.com"
+history.store_message(mam_jid, "incoming", "original",
+                      timestamp="2026-10-31T20:00:00Z", sender="bob",
+                      message_id="orig-mam", origin_id="orig-mam")
+_run(C._apply_mam_edits(mam_jid, [{
+    "direction": "incoming", "body": "edited", "sender": "bob",
+    "timestamp": "2026-10-31T20:18:40Z", "replace_id": "orig-mam",
+}]))
+_mam_rows = history.load_history(mam_jid)
+check("a MAM correction replaces the original",
+      len(_mam_rows) == 1 and _mam_rows[0]["body"] == "edited"
+      and _mam_rows[0]["edited"] is True)
+
+orphan_jid = "mam-edit-orphan@example.com"
+_run(C._apply_mam_edits(orphan_jid, [{
+    "direction": "incoming", "body": "orphan edit", "sender": "bob",
+    "timestamp": "2026-10-31T20:19:00Z", "replace_id": "missing",
+    "message_id": "cor-orphan", "origin_id": "cor-orphan",
+}]))
+_orphan_rows = history.load_history(orphan_jid)
+check("an orphan MAM correction is kept as a message",
+      _orphan_rows and _orphan_rows[-1]["body"] == "orphan edit"
+      and _orphan_rows[-1]["edited"] is True)
+
+# 5e. replace_message matches the other stable ids ---------------------------
+sid_jid = "stanza-edit@example.com"
+history.store_message(sid_jid, "incoming", "original",
+                      timestamp="2026-10-31T20:00:00Z", sender="bob",
+                      message_id="m-sid", origin_id="o-sid",
+                      stanza_id="sid-9", archive_id="arc-9")
+check("replace_message matches a stanza-id",
+      history.replace_message(sid_jid, "sid-9", "edited")
+      and history.load_history(sid_jid)[-1]["body"] == "edited")
+check("replace_message matches an archive-id",
+      history.replace_message(sid_jid, "arc-9", "edited-2")
+      and history.load_history(sid_jid)[-1]["body"] == "edited-2")
+
+cw_sid = ChatWidget("bob@example.com", "Bob", chat_themes.ChatThemeFactory())
+cw_sid.add_message(sender="Me", body="original", timestamp="10:00",
+                   direction="outgoing", message_id="m-sid",
+                   stanza_id="sid-widget")
+check("the widget edits by stanza-id",
+      cw_sid.edit_message_by_ref("sid-widget", "edited")
+      and cw_sid._messages[-1]["body"] == "edited")
 
 # 6. Edit menu JS routing present --------------------------------------------
 _view_src = open(os.path.join(

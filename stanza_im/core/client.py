@@ -189,6 +189,8 @@ def file_hashes_b64(path: str,
 def _replace_reference(stanza) -> str:
     """Return the ``id`` of a XEP-0308 ``<replace/>`` on *stanza* ("" if none)."""
     xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
     if xml is None:
         return ""
     for el in xml:
@@ -240,6 +242,8 @@ def _replyto_address(msg) -> str:
 def _reply_reference(stanza) -> tuple[str, str]:
     """Return ``(to, id)`` of a XEP-0461 ``<reply/>`` on *stanza* ("" if none)."""
     xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
     if xml is None:
         return ("", "")
     for el in xml:
@@ -251,6 +255,8 @@ def _reply_reference(stanza) -> tuple[str, str]:
 def _retract_reference(stanza) -> str:
     """Return the target id of a XEP-0424 ``<retract/>`` on *stanza*, else ""."""
     xml = getattr(stanza, "xml", None)
+    if xml is None and hasattr(stanza, "iter"):
+        xml = stanza
     if xml is None:
         return ""
     for el in xml:
@@ -2518,6 +2524,11 @@ class JabberClient:
         msg["body"] = body
         message_id = uuid.uuid4().hex
         msg["id"] = message_id
+        # XEP-0359: a stable origin-id lets the recipient (and other clients)
+        # reference this exact message in XEP-0308 corrections, replies and
+        # reactions even when a server rewrites or omits the stanza id.
+        ET.SubElement(msg.xml, "{%s}origin-id" % NS_SID).set(
+            "id", message_id)
         if reply_to and reply_id:
             self._attach_reply(msg, reply_to, reply_id, prefix_len=len(quote))
         if replace_id:
@@ -6444,6 +6455,17 @@ class JabberClient:
         if retract_ref:
             self.emit("message_retracted", frm, retract_ref)
             return
+        replace_ref = _replace_reference(inner)
+        if replace_ref:
+            if self.allow_incoming_edits:
+                unstyled, ts, reply_to, reply_id, stable_id = \
+                    self._message_fields(inner)
+                self.emit("message_corrected", frm, replace_ref, body, ts,
+                          unstyled, stable_id, reply_to, reply_id,
+                          media=message_media(inner),
+                          markup=message_markup(inner))
+                return
+            logger.debug("Incoming correction ignored (edits disabled)")
         media = message_media(inner)
         if not body and not media:
             # Receipts, chat markers and other bodyless carbon copies are not
@@ -6479,6 +6501,17 @@ class JabberClient:
         retract_ref = _retract_reference(inner)
         if retract_ref:
             self.emit("message_retracted_own", bare, retract_ref)
+            return
+        replace_ref = _replace_reference(inner)
+        if replace_ref:
+            # Our own correction made from another resource: apply it to the
+            # local conversation instead of rendering a second message.
+            unstyled, ts, reply_to, reply_id, stable_id = \
+                self._message_fields(inner)
+            self.emit("message_corrected", bare, replace_ref, body, ts,
+                      unstyled, stable_id, reply_to, reply_id,
+                      media=message_media(inner),
+                      markup=message_markup(inner))
             return
         media = message_media(inner)
         sid, by = self._embedded_mds(inner)
@@ -7737,15 +7770,19 @@ class JabberClient:
                 logger.warning("MAM results for %s have no archive cursor", jid)
 
         rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+        edits = [row for row in rows if row.get("replace_id")]
+        rows = [row for row in rows if not row.get("replace_id")]
         stored = 0
         duplicates = 0
         if rows:
             inserted = await history.store_many_async(jid, rows)
             stored = inserted
             duplicates = len(rows) - inserted
+        if edits:
+            stored += await self._apply_mam_edits(jid, edits)
         logger.info("MAM returned %d results for %s: parsed=%d skipped=%d "
-                    "duplicates=%d stored=%d", len(results), jid, parsed,
-                    skipped, duplicates, stored)
+                    "duplicates=%d stored=%d edits=%d", len(results), jid,
+                    parsed, skipped, duplicates, stored, len(edits))
         if skip_reasons:
             logger.info("MAM skip reasons for %s: %s", jid, skip_reasons)
         if results and parsed and not stored and not duplicates:
@@ -7833,17 +7870,46 @@ class JabberClient:
         if start_ts:
             rows = [row for row in rows
                     if str(row.get("timestamp") or "") > str(start_ts)]
+        edits = [row for row in rows if row.get("replace_id")]
+        rows = [row for row in rows if not row.get("replace_id")]
         if rows:
             from stanza_im.core import history
             await history.store_many_async(jid, rows)
+        if edits:
+            await self._apply_mam_edits(jid, edits)
         incoming = sum(1 for row in rows
                        if row.get("direction") == "incoming")
-        logger.info("MAM after for %s: parsed=%d skipped=%d incoming=%d",
-                    jid, parsed, skipped, incoming)
+        logger.info("MAM after for %s: parsed=%d skipped=%d incoming=%d "
+                    "edits=%d", jid, parsed, skipped, incoming, len(edits))
         if skip_reasons:
             logger.info("MAM after skip reasons for %s: %s",
                         jid, skip_reasons)
         return incoming
+
+    async def _apply_mam_edits(self, jid: str, edits: list[dict]) -> int:
+        """Apply XEP-0308 corrections found in a MAM page.
+
+        A correction stanza is not a new message: replace the referenced
+        original.  If the original is not in the local archive (an older page
+        has not been fetched yet), keep the corrected text as a message so it
+        is not lost.
+        """
+        from stanza_im.core import history
+        applied = 0
+        for row in edits:
+            ref = str(row.get("replace_id") or "")
+            if not ref:
+                continue
+            replaced = await history.replace_message_async(
+                jid, ref, str(row.get("body") or ""),
+                markup=row.get("markup"))
+            if not replaced:
+                extra = {key: value for key, value in row.items()
+                         if key != "replace_id"}
+                extra["edited"] = True
+                await history.store_many_async(jid, [extra])
+            applied += 1
+        return applied
 
     def _mam_rows(self, jid: str, results) -> tuple[list[dict], int, int, dict]:
         """Parse MAM results into history rows (shared by before/after queries)."""
@@ -7925,6 +7991,7 @@ class JabberClient:
                     "retracted": bool(tomb_id),
                     "retract_reason": mod_info["reason"],
                     "retract_by": mod_info["by"],
+                    "replace_id": _replace_reference(msg),
                     "markup": message_markup(msg),
                 })
             except Exception:

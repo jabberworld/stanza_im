@@ -1792,7 +1792,9 @@ class ChatWidget(QtWidgets.QWidget):
         """Replace the body of *ref_id*'s message and mark it edited."""
         for entry in list(self._messages) + list(self._history):
             if (str(entry.get("message_id") or "") == ref_id
-                    or str(self._reply_target_id(entry) or "") == ref_id):
+                    or str(self._reply_target_id(entry) or "") == ref_id
+                    or str(entry.get("stanza_id") or "") == ref_id
+                    or str(entry.get("archive_id") or "") == ref_id):
                 entry["body"] = new_body
                 entry["markup"] = markup
                 entry["edited"] = True

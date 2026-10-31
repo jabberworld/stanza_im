@@ -2155,8 +2155,16 @@ content probe (`_schedule_content_probe`/`_verify_after_click`) restores the
 window via `document_lost` if the conversation vanished. Incoming corrections
 replace (edited flag + a large bold «✎» appended right after the edited phrase
 via `render_message(edited=True)`, `chat.allow_incoming_edits` on) or arrive
-as new messages (off). History gains `message_id`/`edited` columns and
-`replace_message()`.
+as new messages (off). Corrections made from another of our resources arrive as
+XEP-0280 **carbon sent** copies and are applied as edits (never as a second
+outgoing message); a carbon **received** correction is treated like a direct
+incoming one. A MAM page is scanned for `<replace/>` rows (`_mam_rows`
+`replace_id`): the page is stored first and `_apply_mam_edits` then replaces
+the referenced original, keeping the corrected text as an edited message when
+the original is not local yet. Outgoing messages carry an XEP-0359
+`<origin-id/>` (the stanza id) so peers such as Monocles reference a stable id.
+History gains `message_id`/`edited` columns and `replace_message()` (matching
+message/origin/archive/stanza ids).
 
 Message Retraction (XEP-0424, `urn:xmpp:message-retract:1`; the legacy `:0`
 namespace is accepted on receive): our own messages can be retracted from the
