@@ -8031,17 +8031,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # A room we are not in has no usable room archive yet; its join
             # path schedules the same reconstruction once the room is live.
             return
+        from stanza_im.core import history
         open_chat = bool(self._chat_window is not None
                          and self._chat_window.has_chat(key))
         entry = self._unread_chats.get(key)
-        if key not in self._muc_joined and not open_chat:
-            # Do not fan out one MAM query per MDS item at login; a 1:1 chat
-            # reconstructs when it is actually opened.  A forced startup
-            # rebuild still covers a chat that already has a local unread
-            # block (the stale-count case).
-            if not (force and entry
-                    and int(entry.get("unread") or 0) > 0):
-                return
         sid = (getattr(self._client, "_mds_local", {}) or {}).get(key, "")
         if not sid and entry:
             sid = str(entry.get("read_sid") or "")
@@ -8053,14 +8046,32 @@ class MainWindow(QtWidgets.QMainWindow):
                              key, sid)
                 return
             self._mds_reconciled.discard((key, sid))
+        if key not in self._muc_joined and not open_chat and not force:
+            # A 1:1 chat reconstructs when it is actually opened.
+            return
+        local_ts = max(str((entry or {}).get("read_ts") or ""),
+                       str((entry or {}).get("seen_ts") or ""))
+        shared_ts = await history.timestamp_for_ref_async(key, sid)
+        if key not in self._muc_joined and not open_chat:
+            # A forced startup pass also covers a device that was offline
+            # while another client displayed new messages: an unresolved
+            # shared id means this device never stored it, so the shared
+            # point is ahead (rbook counted only the 5 live messages while
+            # walkbook showed 30).
+            local_unread = int((entry or {}).get("unread") or 0)
+            shared_ahead = (not shared_ts or not local_ts
+                            or shared_ts > local_ts)
+            if not local_unread and not shared_ahead:
+                logger.debug(
+                    "MDS[skip] jid=%s sid=%s reason=no-newer-shared "
+                    "local_ts=%s shared_ts=%s", key, sid, local_ts,
+                    shared_ts)
+                return
         self._mds_reconciling.add(key)
         done = False
         try:
-            from stanza_im.core import history
-            ts = await history.timestamp_for_ref_async(key, sid)
-            local_ts = max(str((entry or {}).get("read_ts") or ""),
-                           str((entry or {}).get("seen_ts") or ""))
-            local_wins = bool(local_ts) and (not ts or local_ts > ts)
+            ts = shared_ts
+            local_wins = bool(local_ts) and bool(ts) and local_ts > ts
             if local_wins and not force:
                 # Another device's state is behind ours: republish our point
                 # and leave the local block alone.
@@ -8092,11 +8103,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     return
             if not ts:
                 ts = await history.timestamp_for_ref_async(key, sid)
-            count = (await history.count_incoming_after_async(key, ts)
-                     if ts else int(incoming or 0))
+            # An unresolved shared id has no timestamp of its own: count from
+            # the local read point instead of the MAM page size, so an old or
+            # pruned id cannot resurrect messages the user already read.
+            anchor_ts = ts or local_ts
+            if anchor_ts:
+                count = await history.count_incoming_after_async(
+                    key, anchor_ts)
+            else:
+                count = int(incoming or 0)
+            anchor_sid = sid if ts else (
+                str((entry or {}).get("seen_sid")
+                    or (entry or {}).get("read_sid") or sid))
             current = int((self._unread_chats.get(key) or {}).get("unread") or 0)
             count = max(count, current)
-            self._set_mds_anchor(key, sid, ts)
+            self._set_mds_anchor(key, anchor_sid, anchor_ts)
             if local_wins:
                 # Repair the shared node: it was behind this device's own
                 # displayed point.
@@ -8116,28 +8137,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             record = self._unread_chats.get(key) or unread_state.blank()
             record["unread"] = count
-            record["read_sid"] = sid
+            record["read_sid"] = anchor_sid
             record["read_ref"] = ""
-            if ts:
-                record["read_ts"] = ts
+            if anchor_ts:
+                record["read_ts"] = anchor_ts
             if local_wins:
                 # Keep the local partial-read point (it is the effective
                 # point) so the chat reopens there.
                 record["seen_ref"] = str((entry or {}).get("seen_ref") or "")
                 record["seen_ts"] = str(
-                    (entry or {}).get("seen_ts") or ts or "")
+                    (entry or {}).get("seen_ts") or anchor_ts or "")
                 record["seen_sid"] = str(
-                    (entry or {}).get("seen_sid") or sid)
+                    (entry or {}).get("seen_sid") or anchor_sid)
             else:
-                # Anchor the rebuilt block at the shared displayed point.
+                # Anchor the rebuilt block at the effective point (the shared
+                # displayed point, or the local one when it cannot be
+                # resolved).
                 record["seen_ref"] = ""
-                record["seen_ts"] = ts or ""
-                record["seen_sid"] = sid
+                record["seen_ts"] = anchor_ts
+                record["seen_sid"] = anchor_sid
             self_nick = self._muc_self_nicks.get(key, "")
             mentions = 0
-            if self_nick and ts:
+            if self_nick and anchor_ts:
                 rows = await history.load_history_async(
-                    key, limit=500, since=ts)
+                    key, limit=500, since=anchor_ts)
                 mentions = sum(
                     1 for row in rows
                     if row.get("direction") != "outgoing"
@@ -8176,10 +8199,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if force:
             local_ts = max(str((entry or {}).get("read_ts") or ""),
                            str((entry or {}).get("seen_ts") or ""))
-            if local_ts and (not remote_ts or local_ts > remote_ts):
+            if local_ts and remote_ts and local_ts > remote_ts:
                 # The shared node is behind this device (a throttled publish
                 # was lost).  Keep the newer local point and repair the node
                 # instead of resurrecting messages we already displayed.
+                # An unresolved shared id is NOT "local newer": this device
+                # simply never stored that message, so the reconcile below
+                # must fetch the gap (MAM after the id).
                 local_sid = await self._mds_point_sid(key, entry, local_ts)
                 self._publish_mds_point(key, local_sid)
                 logger.debug(

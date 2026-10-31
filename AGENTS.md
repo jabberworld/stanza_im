@@ -2073,9 +2073,16 @@ it rebuilds from the local timestamp and republishes that point
 (`_publish_mds_point`, `_mds_point_sid` resolves the local row's stanza-id), so
 another device stops reconstructing from the stale shared point (walkbook
 showed 40 while rbook reconstructed 90); when the local point is older the
-shared point wins as before. A normal join/open leaves a strictly newer local
-point alone but also republishes it. The forced pass is also applied to
-auto-joined rooms. Partial progress made by the visibility reconciliation
+shared point wins as before. An **unresolved** shared id (this device never
+stored that message) is never treated as "local newer": it is fetched with MAM
+`after_id` and the count falls back to the local read point (or the MAM page
+when there is no local point), so an old/pruned id cannot resurrect already
+read rows. The forced pass also rebuilds a 1:1 chat with **no** local unread
+block when the shared point is ahead (an offline device: rbook showed only the
+5 live messages while walkbook/monocles showed 30), and runs for every chat
+with a shared point on a fresh device. A normal join/open leaves a strictly
+newer local point alone but also republishes it. The forced pass is also
+applied to auto-joined rooms. Partial progress made by the visibility reconciliation
 (`_apply_visible_unread`) is published too (`_queue_seen_progress_mds` →
 `_queue_mds_displayed`): opening a chat can mark visible rows seen without a
 scroll poll, and that point must reach the shared node.

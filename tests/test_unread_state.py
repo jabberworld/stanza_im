@@ -366,6 +366,65 @@ check("a forced startup rebuild prefers the newer local seen point",
 check("the forced rebuild repairs the stale shared point",
       _go_published == [("forced@example", "force-3")])
 
+# A forced startup pass reconstructs the gap for a chat with no local unread
+# block: the device was offline while another client displayed new messages
+# (rbook showed only the 5 live messages, walkbook/monocles showed 30).
+for _sid, _ts in (("gap-1", "2026-10-02T11:00:00Z"),
+                  ("gap-2", "2026-10-02T12:00:00Z"),
+                  ("gap-3", "2026-10-02T13:00:00Z")):
+    history.store_message("gap@example", "incoming", f"m {_sid}", _ts,
+                          sender="bob", archive_id=_sid, origin_id=_sid,
+                          message_id=_sid)
+
+
+def _gap_recon(key, shared_sid, read_ts, unread=0):
+    r = MainWindow.__new__(MainWindow)
+    r._client = SimpleNamespace(_mds_local={key: shared_sid})
+    r._unread_chats = {key: {
+        **unread_state.blank(), "unread": unread, "read_sid": "old",
+        "read_ts": read_ts}}
+    r._mam_unsupported = {key}
+    r._muc_joined = set()
+    r._known_conferences = set()
+    r._muc_self_nicks = {}
+    r._chat_window = None
+    r._mds_reconciling = set()
+    r._mds_reconciled = set()
+    r._recount_unread = lambda: None
+    r._refresh_unread_badge = lambda _jid: None
+    r._push_unread_to_chat = lambda _jid: None
+    r._schedule_unread_save = lambda: None
+    return r
+
+
+_gap = _gap_recon("gap@example", "gap-1", "2026-10-02T10:00:00Z")
+asyncio.get_event_loop().run_until_complete(
+    _gap._reconcile_mds_unread("gap@example", force=True))
+check("a forced startup rebuild covers an offline gap with no local block",
+      _gap._unread_chats["gap@example"]["unread"] == 2
+      and _gap._unread_chats["gap@example"]["read_sid"] == "gap-1")
+
+_gap_skip = _gap_recon("gap@example", "gap-1", "2026-10-02T14:00:00Z")
+asyncio.get_event_loop().run_until_complete(
+    _gap_skip._reconcile_mds_unread("gap@example", force=True))
+check("a forced rebuild skips when the shared point is not newer",
+      _gap_skip._unread_chats["gap@example"]["unread"] == 0)
+
+# The shared id is not in the local archive (the device never stored it): the
+# gap is fetched, but unread is counted from the local read point, never from
+# the raw MAM page size (an old/pruned id must not resurrect read messages).
+for _sid, _ts in (("prune-2", "2026-10-02T12:00:00Z"),
+                  ("prune-3", "2026-10-02T13:00:00Z")):
+    history.store_message("prune@example", "incoming", f"m {_sid}", _ts,
+                          sender="bob", archive_id=_sid, origin_id=_sid,
+                          message_id=_sid)
+_prune = _gap_recon("prune@example", "missing-id",
+                    "2026-10-02T12:00:00Z")
+asyncio.get_event_loop().run_until_complete(
+    _prune._reconcile_mds_unread("prune@example", force=True))
+check("an unresolved shared id counts from the local read point",
+      _prune._unread_chats["prune@example"]["unread"] == 1)
+
 win._pm_targets["room@conf.example/dave"] = ("room@conf.example", "dave")
 check("a private message resolves to its own conversation",
       win._resolve_mds_key("room@conf.example/dave")
@@ -390,6 +449,12 @@ check("flush persists the displayed sids and the account",
 check("mention counters reach the roster rows",
       "unread_mentions=self._unread_mentions.get(jid, 0)" in _mw_src
       and "unread_mentions=self._unread_mentions.get(room, 0)" in _mw_src)
+check("an unresolved shared id is not a newer local point",
+      "local_ts and remote_ts and local_ts > remote_ts" in _mw_src)
+check("the forced rebuild covers a chat with no local unread block",
+      "shared_ahead = (not shared_ts or not local_ts" in _mw_src)
+check("an unresolved shared id counts from the local point",
+      "anchor_ts = ts or local_ts" in _mw_src)
 
 print()
 if FAILURES:

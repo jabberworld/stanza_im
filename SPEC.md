@@ -2279,8 +2279,15 @@ Registers XEP plugins (conditionally where noted):
   shared and the local `seen_ts`/`read_ts` point: when the local point is
   newer it rebuilds from that timestamp and republishes it (repairing a stale
   shared node), when it is older the shared point wins (and covers a 1:1 chat
-  with a non-zero local block without opening it); a normal join/open leaves a
-  strictly newer local point alone but republishes it. Partial progress made by
+  with a non-zero local block without opening it). An unresolved shared id is
+  never "local newer": it is fetched with MAM `after_id`, and the unread count
+  falls back to the local read point (or the MAM page when there is no local
+  point), so an old/pruned id cannot resurrect read rows. The forced pass also
+  rebuilds a 1:1 chat with no local unread block when the shared point is
+  ahead (an offline device: rbook showed only the 5 live messages while
+  walkbook/monocles showed 30), and runs for every chat with a shared point on
+  a fresh device. A normal join/open leaves a strictly newer local point alone
+  but republishes it. Partial progress made by
   `_apply_visible_unread` is published through the same throttled timer, so
   opening a chat can advance the shared displayed point without a scroll poll.
   Auto-joined rooms use
