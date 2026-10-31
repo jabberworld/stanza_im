@@ -75,9 +75,9 @@ async def fetch(client) -> list[dict] | None:
         items = iq["pubsub"]["items"]
         for item in items:
             payload = item["payload"]
-            for child in payload:
-                if child.tag == f"{{{NS}}}omemo-aliases":
-                    return parse_payload(child)
+            if (payload is not None
+                    and payload.tag == f"{{{NS}}}omemo-aliases"):
+                return parse_payload(payload)
     except Exception as exc:  # noqa: BLE001
         logger.debug("OMEMO aliases payload parse failed: %s", exc)
         return None

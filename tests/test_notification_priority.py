@@ -103,21 +103,30 @@ check("publish options carry the publish-options FORM_TYPE",
 
 
 class _FetchClient:
-    def __init__(self, exc=None):
+    def __init__(self, exc=None, payload=None):
         self.jid_str = "me@example.com"
         self.xmpp = {"xep_0060": self}
         self._exc = exc
+        self._payload = payload
 
     async def get_items(self, *args, **kwargs):
         if self._exc is not None:
             raise self._exc
-        return {"pubsub": {"items": []}}
+        items = ([{"payload": self._payload}]
+                 if self._payload is not None else [])
+        return {"pubsub": {"items": items}}
 
 
 check("a missing node fetches as an empty set",
       asyncio.run(np.fetch(_FetchClient())) == [])
 check("a failed fetch is reported as unknown",
       asyncio.run(np.fetch(_FetchClient(RuntimeError("boom")))) is None)
+_server_payload = np.build_payload([
+    {"jid": "pravda.com.ua_all@rss.jabberworld.info", "priority": "high"}])
+check("the root payload is parsed, not its children",
+      asyncio.run(np.fetch(_FetchClient(payload=_server_payload)))
+      == [{"jid": "pravda.com.ua_all@rss.jabberworld.info",
+           "priority": "high"}])
 from slixmpp import Iq
 from slixmpp.exceptions import IqError
 
@@ -214,6 +223,48 @@ check("an empty server node is seeded from local priorities",
       any(e.get("jid") == "bob@example.com" and e.get("priority") == "high"
           for e in (_prio_client.published[-1]
                     if _prio_client.published else [])))
+
+# 7. a restart must adopt the server value, not overwrite it with local state
+class _PriorityServerClient:
+    def __init__(self):
+        self.published = []
+
+    async def get_notification_priorities(self):
+        return [{"jid": "pravda.com.ua_all@rss.jabberworld.info",
+                 "priority": "high"}]
+
+    async def set_notification_priorities(self, entries):
+        self.published.append(list(entries))
+        return True
+
+
+_server_client = _PriorityServerClient()
+win._client = _server_client
+win._notification_priorities = {
+    "pravda.com.ua_all@rss.jabberworld.info": "low"}
+win._priority_publish_pending = False
+
+
+async def _run_restart_sync():
+    await win._sync_notification_priorities()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+
+asyncio.run(_run_restart_sync())
+check("a restart adopts the server priority",
+      win._notification_priorities.get(
+          "pravda.com.ua_all@rss.jabberworld.info") == "high")
+check("a restart does not republish the stale local priority",
+      not _server_client.published)
+
+win._notification_priorities = {
+    "pravda.com.ua_all@rss.jabberworld.info": "low"}
+win._on_notification_priorities_updated([
+    {"jid": "pravda.com.ua_all@rss.jabberworld.info", "priority": "high"}])
+check("a live priority event updates the local map",
+      win._notification_priorities.get(
+          "pravda.com.ua_all@rss.jabberworld.info") == "high")
 win.deleteLater()
 
 print()

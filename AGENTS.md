@@ -854,8 +854,11 @@ login the server values are merged in (the server wins) and a change publishes
 the whole set. A local entry missing from the server is uploaded after the
 sync, so a change made while an earlier publish failed is not lost. Both
 private nodes are published by `core/private_pep.py` (raw IQ with an XML
-`publish-options` form; slixmpp's dict form is not used). The **effective**
-priority is the user setting (`high`/`low`)
+`publish-options` form; slixmpp's dict form is not used). The account's
+resources subscribe to the node (`_subscribe_own_pep`); a live
+`notification_priorities_updated` event replaces the local map immediately.
+A window-activation refresh is the fallback for servers without self-PEP
+notifications. The **effective** priority is the user setting (`high`/`low`)
 over the XEP-0131 `Urgency` header (`medium` → normal; `JabberClient.
 _shim_urgency`). Handling: `low` suppresses only the message OSD (unread /
 mentions / digest are unchanged); `high` shows the normal message OSD **and** a
@@ -2252,7 +2255,10 @@ aliases (local wins). A failed fetch leaves the node state unknown (never an
 empty overwrite), an absent node is seeded from the local aliases, and a
 cleared alias drops its server-snapshot entry so it cannot be resurrected.
 Publishing goes through `core/private_pep.py` (raw IQ + XML
-`publish-options`; slixmpp's dict form is not used). The QR code is
+`publish-options`; slixmpp's dict form is not used). The account's resources
+also subscribe to the node (`_subscribe_own_pep`); a live
+`omemo_aliases_updated` event replaces the local alias set (server wins) and
+refreshes open device dialogs. The QR code is
 rendered by a bundled pure-Python encoder (`qr.py`). UI: the Privacy
 preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
 (per-row icon actions for trust/rename/copy/delete; only global Refresh/Close

@@ -2612,7 +2612,10 @@ Registers XEP plugins (conditionally where noted):
   empty overwrite), an absent node is seeded from the local aliases, and a
   cleared alias drops its server-snapshot entry so it cannot be resurrected.
   Publishing goes through `core/private_pep.py` (raw IQ + XML
-  `publish-options`; slixmpp's dict form is not used).
+  `publish-options`; slixmpp's dict form is not used). The account's resources
+  subscribe to the node (`_subscribe_own_pep`); a live
+  `omemo_aliases_updated` event replaces the local alias set (server wins) and
+  refreshes open device dialogs.
   [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 ### 14.4.2 CAPTCHA Forms (XEP-0158 / XEP-0221 / XEP-0231)
@@ -3219,7 +3222,10 @@ the XEP-0479 (Compliance Suites 2023) Client / Advanced Client checklist.
   are merged in (the server wins for a stored contact) and a change publishes
   the whole set. A local entry missing from the server is uploaded after the
   sync, so a change made while an earlier publish failed is not lost. The node
-  is published by `core/private_pep.py` (raw IQ + XML `publish-options`).
+  is published by `core/private_pep.py` (raw IQ + XML `publish-options`). The
+  account's resources subscribe to the node (`_subscribe_own_pep`); a live
+  `notification_priorities_updated` event replaces the local map, and a
+  window-activation refresh is the fallback.
 - The **effective** priority of a message is the user setting (`high`/`low`)
   over the XEP-0131 `Urgency` header (`JabberClient._shim_urgency`; `medium`
   maps to normal). Handling: `low` suppresses only the message OSD (unread /

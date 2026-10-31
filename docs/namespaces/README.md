@@ -14,7 +14,9 @@ the same behaviour without reading the Python code.
 
 These documents describe the payloads and the state rules. Standard XEP
 semantics (IQ addressing, pubsub publish-options, private XML storage) apply
-unchanged.
+unchanged. The two private PEP nodes also use a self-subscription for live
+updates between the account's resources; the exact payload and merge rules are
+in each document.
 
 The following are deliberately **not** duplicated here:
 

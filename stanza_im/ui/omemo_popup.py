@@ -198,15 +198,22 @@ class OmemoPopup(QtWidgets.QFrame):
 
     # ── data ────────────────────────────────────────────────────
 
-    def _reload(self) -> None:
+    def refresh(self) -> None:
+        """Rebuild from the current stores without another alias fetch."""
+        self._reload(sync_aliases=False)
+
+    def _reload(self, *, sync_aliases: bool = True) -> None:
         try:
-            asyncio.ensure_future(self._reload_async())
+            asyncio.ensure_future(
+                self._reload_async(sync_aliases=sync_aliases))
         except RuntimeError:
             pass
 
-    async def _reload_async(self) -> None:
+    async def _reload_async(self, *, sync_aliases: bool = True) -> None:
         omemo = self._client.omemo
         try:
+            if sync_aliases and getattr(omemo, "alias_sync", False):
+                await omemo.refresh_aliases()
             await omemo.refresh_device_lists([self._jid], force=True)
             devices = await omemo.devices(self._jid)
             sorter = getattr(omemo, "sorted_devices", None)

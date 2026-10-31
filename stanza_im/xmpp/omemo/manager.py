@@ -404,6 +404,53 @@ class OmemoManager:
         finally:
             self._publish_pending = False
 
+    def apply_server_aliases(self, entries: list[dict], *,
+                             replace: bool = False) -> None:
+        """Merge server aliases into the local store.
+
+        ``replace`` makes the server set authoritative (a live PEP event);
+        otherwise local aliases win (the login merge).
+        """
+        self._server_names = {
+            f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
+            for e in entries if e.get("jid") and e.get("id")}
+        self._server_loaded = True
+        old_aliases = self._aliases()
+        aliases = ({} if replace else dict(old_aliases))
+        seen = self._seen_map()
+        changed = False
+        for entry in entries:
+            jid = str(entry.get("jid") or "")
+            device_id = str(entry.get("id") or "")
+            if not jid or not device_id:
+                continue
+            key = f"{jid}/{device_id}"
+            alias = str(entry.get("alias") or "")
+            if alias and (replace or key not in aliases):
+                aliases[key] = alias
+            if entry.get("last_seen"):
+                try:
+                    if float(entry["last_seen"]) > float(seen.get(key, 0)):
+                        seen[key] = entry["last_seen"]
+                        changed = True
+                except (TypeError, ValueError):
+                    pass
+        if aliases != old_aliases:
+            self._plugin.storage.set_app("device_aliases", aliases)
+            changed = True
+        if changed:
+            self._plugin.storage.set_app("device_last_seen", seen)
+
+    async def refresh_aliases(self) -> None:
+        """Load the server aliases as authoritative (dialog/popup refresh)."""
+        try:
+            entries = await self._client.get_omemo_aliases()
+        except Exception:  # noqa: BLE001
+            return
+        if entries is None:
+            return
+        self.apply_server_aliases(entries, replace=True)
+
     async def sync_aliases(self) -> None:
         """Merge the server-side aliases into the local store (local wins)."""
         try:
@@ -412,30 +459,7 @@ class OmemoManager:
             return
         if entries is None:
             return
-        self._server_names = {
-            f"{e.get('jid')}/{e.get('id')}": e.get("alias", "")
-            for e in entries if e.get("jid") and e.get("id")}
-        self._server_loaded = True
-        aliases = self._aliases()
-        seen = self._seen_map()
-        changed = False
-        for entry in entries:
-            key = f"{entry.get('jid', '')}/{entry.get('id', '')}"
-            if not entry.get("jid") or not entry.get("id"):
-                continue
-            if entry.get("alias") and key not in aliases:
-                aliases[key] = entry["alias"]
-                changed = True
-            if entry.get("last_seen"):
-                try:
-                    if float(entry["last_seen"]) > float(seen.get(key, 0)):
-                        seen[key] = entry["last_seen"]
-                        changed = True
-                except (TypeError, ValueError):
-                    pass
-        if changed:
-            self._plugin.storage.set_app("device_aliases", aliases)
-            self._plugin.storage.set_app("device_last_seen", seen)
+        self.apply_server_aliases(entries)
         aliases = self._aliases()
         needs_publish = any(
             self._server_names.get(key) != name

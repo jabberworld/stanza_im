@@ -79,8 +79,29 @@ Rules:
   empty replacement.
 - An empty `<items/>` also means an empty set.
 
-No `+notify` subscription is required. Clients fetch the node on login and
-after enabling alias synchronization.
+No `+notify` subscription is required for the login fetch. Clients fetch the
+node on login and after enabling alias synchronization.
+
+## Live updates
+
+A client should subscribe its own resource to the node so another of the
+account's resources receives a PEP notification after a publish:
+
+```xml
+<iq type='set'>
+  <pubsub xmlns='http://jabber.org/protocol/pubsub'>
+    <subscribe node='urn:xmpp:omemo:aliases:0'
+               jid='alice@example.com'/>
+  </pubsub>
+</iq>
+```
+
+An incoming notification is accepted only when its `from` (or XEP-0033
+`replyto` address) is the account's bare JID. For a live notification the
+server set is authoritative: the client replaces its alias set with the
+payload, so a rename and a deletion made on another client are applied. A
+client that does not support subscriptions still works after the next login
+fetch.
 
 ## Merge rules
 

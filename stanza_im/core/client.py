@@ -28,7 +28,8 @@ from slixmpp.jid import JID
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.include.vcard import parse_vcard as _parse_vcard, build_vcard as _build_vcard
 from stanza_im.core.vcard_cache import VCardCache
-from stanza_im.core import privacy, roster_cache
+from stanza_im.core import (notification_priorities, omemo_aliases,
+                            privacy, roster_cache)
 from stanza_im.include import constants
 from stanza_im.include.constants import APP_NAME, VERSION, VERSION_DISPLAY
 from stanza_im.i18n import current_language as _current_language
@@ -5566,6 +5567,7 @@ class JabberClient:
 
     async def _subscribe_pep_contacts(self) -> None:
         """Re-subscribe to the known contacts' PEP nodes (background)."""
+        self._subscribe_own_pep()
         for bare in list(self.contacts):
             self._ensure_pep_subscription(bare)
             await asyncio.sleep(0)
@@ -5861,6 +5863,23 @@ class JabberClient:
             if items is None:
                 continue
             node = items.get("node") or ""
+            if node in (omemo_aliases.NODE, notification_priorities.NODE):
+                if frm != self.jid_str:
+                    continue
+                for item in items:
+                    if item.tag != "{%s}item" % NS_PUBSUB_EVENT:
+                        continue
+                    payload = next(iter(item), None)
+                    if payload is None:
+                        continue
+                    if node == omemo_aliases.NODE:
+                        self.emit("omemo_aliases_updated",
+                                  omemo_aliases.parse_payload(payload))
+                    else:
+                        self.emit("notification_priorities_updated",
+                                  notification_priorities.parse_payload(payload))
+                    break
+                continue
             if node == NS_AVATAR_METADATA:
                 self._handle_avatar_metadata(frm, items)
                 continue
@@ -6018,6 +6037,22 @@ class JabberClient:
         logger.debug("PEP %s for %s = %r", kind, jid, data)
 
     # ── XEP-0163 subscriptions to contact PEP nodes ───────────────
+
+    def _subscribe_own_pep(self) -> None:
+        """Subscribe this resource to our own private PEP nodes."""
+        for node in (omemo_aliases.NODE, notification_priorities.NODE):
+            self._subscribe_own_pep_node(node)
+
+    def _subscribe_own_pep_node(self, node: str) -> None:
+        if not self.jid_str or not self.xmpp.is_connected():
+            return
+        key = (self.jid_str, node)
+        if key in self._pep_subscribe_inflight:
+            return
+        if node in self._pep_subscribed.get(self.jid_str, ()):
+            return
+        self._pep_subscribe_inflight.add(key)
+        self._start_task(self._pep_subscribe(key))
 
     def _ensure_pep_subscription(self, bare: str) -> None:
         """Subscribe (XEP-0163) to the PEP nodes of *bare*, best-effort.
@@ -7117,21 +7152,23 @@ class JabberClient:
                      "urn:xmpp:jingle:apps:dtls:0",
                      "urn:xmpp:jingle:apps:rtp:audio")
 
-    async def get_omemo_aliases(self) -> list[dict]:
-        from stanza_im.core import omemo_aliases
+    async def get_omemo_aliases(self) -> list[dict] | None:
         return await omemo_aliases.fetch(self)
 
     async def set_omemo_aliases(self, entries: list[dict]) -> bool:
-        from stanza_im.core import omemo_aliases
-        return await omemo_aliases.publish(self, entries)
+        ok = await omemo_aliases.publish(self, entries)
+        if ok:
+            self._subscribe_own_pep_node(omemo_aliases.NODE)
+        return ok
 
-    async def get_notification_priorities(self) -> list[dict]:
-        from stanza_im.core import notification_priorities
+    async def get_notification_priorities(self) -> list[dict] | None:
         return await notification_priorities.fetch(self)
 
     async def set_notification_priorities(self, entries: list[dict]) -> bool:
-        from stanza_im.core import notification_priorities
-        return await notification_priorities.publish(self, entries)
+        ok = await notification_priorities.publish(self, entries)
+        if ok:
+            self._subscribe_own_pep_node(notification_priorities.NODE)
+        return ok
 
     def supports_omemo(self, bare: str) -> bool:
         """Whether *bare* advertises any OMEMO namespace in its caps."""
@@ -7507,6 +7544,7 @@ class JabberClient:
         self._sm_resumed = True
         self._cancel_reconnect()
         self._sync_csi()
+        self._subscribe_own_pep()
         for bare in self.contacts:
             self._ensure_pep_subscription(bare)
         self._start_pep_sweep()

@@ -329,6 +329,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._notification_priorities: dict[str, str] = {}
         self._priority_publish_pending = False
         self._priority_sticky_closed_at: int | None = None
+        self._private_pep_refresh_at = 0.0
+        self._omemo_views: list = []
         self._load_unread_for(self._config.jid)
         # Unseen reactions on our own messages, keyed by chat-tab key then by
         # the message reference; the value is the number of reactions not yet
@@ -3374,7 +3376,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._client is None:
             return
         from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog
-        show_modeless(OmemoDevicesDialog(self._client, jid, self))
+        dialog = OmemoDevicesDialog(self._client, jid, self)
+        self._omemo_views.append(dialog)
+        dialog.finished.connect(
+            lambda *_: self._forget_omemo_view(dialog))
+        show_modeless(dialog)
 
     def _open_omemo_popup(self, jid: str) -> None:
         """Open the quick OMEMO devices popup (chat shield button)."""
@@ -3387,7 +3393,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # over the chat window, not the roster.
         popup = OmemoPopup(self._client, jid, self._chat_dialog_parent(),
                            anchor=QtGui.QCursor.pos())
+        popup.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._omemo_views.append(popup)
+        popup.destroyed.connect(lambda *_: self._forget_omemo_view(popup))
         popup.show()
+
+    def _forget_omemo_view(self, view) -> None:
+        try:
+            self._omemo_views.remove(view)
+        except ValueError:
+            pass
 
     def _confirm_profile_switch(self, jid: str) -> bool:
         reply = QtWidgets.QMessageBox.question(
@@ -4291,6 +4306,9 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("entity_info_received", self._on_entity_info_received)
         c.on("contact_client_updated", self._on_contact_client_updated)
         c.on("contact_pep_updated", self._on_contact_pep_updated)
+        c.on("omemo_aliases_updated", self._on_omemo_aliases_updated)
+        c.on("notification_priorities_updated",
+             self._on_notification_priorities_updated)
         c.on("contact_caps", self._on_contact_caps)
         c.on("call_incoming", self._on_call_incoming)
         c.on("call_proposed", self._on_call_proposed)
@@ -5185,6 +5203,36 @@ class MainWindow(QtWidgets.QMainWindow):
         for key, dialog in list(self._vcard_dialogs.items()):
             if key.split("/", 1)[0] == bare:
                 dialog.update_status({kind: value})
+
+    def _on_omemo_aliases_updated(self, entries: list[dict]) -> None:
+        """A private PEP alias event arrived from another own resource."""
+        client = self._client
+        if client is None or not getattr(client.omemo, "available", False):
+            return
+        client.omemo.apply_server_aliases(entries, replace=True)
+        for view in list(self._omemo_views):
+            try:
+                view.refresh()
+            except Exception:  # noqa: BLE001
+                logger.debug("OMEMO view refresh failed", exc_info=True)
+
+    def _on_notification_priorities_updated(self, entries: list[dict]) -> None:
+        """Apply a live private-PEP priority update from another resource."""
+        mapping: dict[str, str] = {}
+        for entry in entries or []:
+            jid = str(entry.get("jid") or "").split("/", 1)[0]
+            priority = str(entry.get("priority") or "")
+            if jid and priority in ("high", "low"):
+                mapping[jid] = priority
+        if mapping == self._notification_priorities:
+            return
+        self._notification_priorities = mapping
+        from stanza_im.core import notification_priorities
+        try:
+            notification_priorities.save(mapping)
+        except Exception:  # noqa: BLE001
+            pass
+        self._update_priority_sticky()
 
     # ── Jingle RTP calls ─────────────────────────────────────────
 
@@ -10495,6 +10543,20 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._priority_publish_pending = False
 
+    def _refresh_private_pep_state(self) -> None:
+        """Refresh own private PEP nodes when the window becomes active."""
+        client = self._client
+        if client is None:
+            return
+        now = time.monotonic()
+        if now - self._private_pep_refresh_at < 5.0:
+            return
+        self._private_pep_refresh_at = now
+        if (getattr(client.omemo, "available", False)
+                and getattr(client.omemo, "alias_sync", False)):
+            self._start_task(client.omemo.sync_aliases())
+        self._start_task(self._sync_notification_priorities())
+
     async def _sync_notification_priorities(self) -> None:
         """Merge the server-side priorities into the local map (server wins)."""
         if self._client is None:
@@ -10951,6 +11013,11 @@ class MainWindow(QtWidgets.QMainWindow):
                               QtCore.QEvent.Type.WindowActivate,
                               QtCore.QEvent.Type.WindowDeactivate):
             self._update_csi()
+            if (event.type() == QtCore.QEvent.Type.WindowActivate
+                    or (event.type() == QtCore.QEvent.Type.ApplicationStateChange
+                        and QtWidgets.QApplication.applicationState()
+                        == QtCore.Qt.ApplicationState.ApplicationActive)):
+                self._refresh_private_pep_state()
         # Ctrl+wheel over the menu bar or a tab bar resizes that font (the same
         # gesture as the roster / chat / MUC widgets).
         if event.type() == QtCore.QEvent.Type.Wheel \
@@ -11200,6 +11267,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mds_reconciled.clear()
         self._bookmarks = {}
         self._bookmarks_loaded = False
+        for view in list(self._omemo_views):
+            try:
+                view.close()
+                view.deleteLater()
+            except Exception:  # noqa: BLE001
+                pass
+        self._omemo_views.clear()
         for dialog in self._whiteboards.values():
             dialog.deleteLater()
         self._whiteboards.clear()

@@ -97,21 +97,28 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
 
     # ── data ────────────────────────────────────────────────────
 
-    def _reload(self) -> None:
+    def refresh(self) -> None:
+        """Rebuild from the current stores without another alias fetch."""
+        self._reload(sync_aliases=False)
+
+    def _reload(self, *, sync_aliases: bool = True) -> None:
         omemo = getattr(self._client, "omemo", None)
         if omemo is None or not getattr(omemo, "available", False):
             self._status.setText(tr("omemo_unavailable"))
             return
         self._status.setText(tr("omemo_loading"))
         try:
-            asyncio.ensure_future(self._reload_async())
+            asyncio.ensure_future(
+                self._reload_async(sync_aliases=sync_aliases))
         except RuntimeError:
             # No running loop (tests): leave the list empty.
             self._status.setText("")
 
-    async def _reload_async(self) -> None:
+    async def _reload_async(self, *, sync_aliases: bool = True) -> None:
         omemo = self._client.omemo
         try:
+            if sync_aliases and getattr(omemo, "alias_sync", False):
+                await omemo.refresh_aliases()
             await omemo.refresh_device_lists([self._jid], force=True)
             devices = await omemo.devices(self._jid)
         except Exception as exc:  # noqa: BLE001

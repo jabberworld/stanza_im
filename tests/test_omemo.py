@@ -381,6 +381,28 @@ check("alias payload round-trips",
 check("alias node namespace is private",
       omemo_aliases.NODE == "urn:xmpp:omemo:aliases:0")
 
+
+class _AliasFetchClient:
+    def __init__(self, payload=None):
+        self.jid_str = "me@example.com"
+        self.xmpp = {"xep_0060": self}
+        self._payload = payload
+
+    async def get_items(self, *args, **kwargs):
+        items = ([{"payload": self._payload}]
+                 if self._payload is not None else [])
+        return {"pubsub": {"items": items}}
+
+
+_alias_payload = omemo_aliases.build_payload([
+    {"jid": "jabbim-test@linuxoid.in", "id": "340583713",
+     "alias": "Звифто-планшет"}])
+check("the alias root payload is parsed, not its children",
+      asyncio.run(omemo_aliases.fetch(
+          _AliasFetchClient(_alias_payload))) == [
+              {"jid": "jabbim-test@linuxoid.in", "id": "340583713",
+               "alias": "Звифто-планшет", "last_seen": ""}])
+
 # 9. XEP-0454 OMEMO file encryption ------------------------------------------
 import io
 from slixmpp.plugins.xep_0454 import XEP_0454
@@ -935,6 +957,25 @@ _pub7 = _c7.published[-1] if _c7.published else []
 check("a cleared alias is not resurrected from the server snapshot",
       not any(e.get("jid") == "bob@example.com" and e.get("id") == "2"
               and e.get("alias") == "Old" for e in _pub7))
+
+
+async def _run_server_replace():
+    mgr, c = _make_manager()
+    c.xmpp["xep_0384"].storage.set_app(
+        "device_aliases", {"bob@example.com/2": "Old",
+                           "dave@example.com/3": "Dave"})
+    mgr.apply_server_aliases(
+        [{"jid": "bob@example.com", "id": "2", "alias": "New"},
+         {"jid": "carol@example.com", "id": "9", "alias": "Carol"}],
+        replace=True)
+    return c
+
+
+_c8 = asyncio.run(_run_server_replace())
+_aliases8 = _c8.xmpp["xep_0384"].storage.get_app("device_aliases", {})
+check("a live server event replaces the local alias set",
+      _aliases8 == {"bob@example.com/2": "New",
+                    "carol@example.com/9": "Carol"})
 
 # MUC guard: the device<->resource mapping is only learned for 1:1.
 _client_src = open(os.path.join(

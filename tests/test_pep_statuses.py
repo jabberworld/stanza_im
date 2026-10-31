@@ -143,6 +143,48 @@ check("routed PEP event stored",
 check("routed PEP event emitted",
       _events2 == [("bob@example.com", "mood",
                     {"key": "happy", "text": ""})])
+
+from stanza_im.core import notification_priorities, omemo_aliases
+
+_own = _client2
+_own_events = []
+_own.on("notification_priorities_updated",
+        lambda entries: _own_events.append(("priority", entries)))
+_own.on("omemo_aliases_updated",
+        lambda entries: _own_events.append(("aliases", entries)))
+
+
+def _own_event(node, payload):
+    msg = slixmpp.Message()
+    msg["type"] = "headline"
+    msg["from"] = "me@example.com/other"
+    event = ET.SubElement(msg.xml,
+                          "{http://jabber.org/protocol/pubsub#event}event")
+    items = ET.SubElement(
+        event, "{http://jabber.org/protocol/pubsub#event}items")
+    items.set("node", node)
+    item = ET.SubElement(
+        items, "{http://jabber.org/protocol/pubsub#event}item")
+    item.append(payload)
+    return msg
+
+
+_own._maybe_pep_event(_own_event(
+    notification_priorities.NODE,
+    notification_priorities.build_payload(
+        [{"jid": "alice@example.com", "priority": "high"}])))
+_own._maybe_pep_event(_own_event(
+    omemo_aliases.NODE,
+    omemo_aliases.build_payload(
+        [{"jid": "me@example.com", "id": "1", "alias": "Laptop"}])))
+check("a live priority event is emitted",
+      _own_events[0] == ("priority",
+                         [{"jid": "alice@example.com",
+                           "priority": "high"}]))
+check("a live alias event is emitted",
+      _own_events[1] == ("aliases",
+                         [{"jid": "me@example.com", "id": "1",
+                           "alias": "Laptop", "last_seen": ""}]))
 _mds_msg = slixmpp.Message()
 _mds_msg["type"] = "headline"
 _mds_msg["from"] = "me@example.com/other"
