@@ -7977,8 +7977,6 @@ class MainWindow(QtWidgets.QMainWindow):
             # reconstructs when it is actually opened.
             return
         entry = self._unread_chats.get(key)
-        if entry and int(entry.get("unread") or 0) > 0:
-            return
         sid = (getattr(self._client, "_mds_local", {}) or {}).get(key, "")
         if not sid and entry:
             sid = str(entry.get("read_sid") or "")
@@ -7995,7 +7993,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 ts = str(entry.get("read_ts") or "")
             local_ts = max(str((entry or {}).get("read_ts") or ""),
                            str((entry or {}).get("seen_ts") or ""))
-            if ts and local_ts and local_ts >= ts:
+            if ts and local_ts and local_ts > ts:
                 done = True
                 return
             incoming = 0
@@ -8082,8 +8080,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         newest_ts = await history.newest_timestamp_async(key)
         if not remote_ts or not newest_ts:
-            logger.debug("MDS[clamp] jid=%s sid=%s unresolved; unread kept",
+            logger.debug("MDS[clamp] jid=%s sid=%s unresolved; reconciling",
                          key, sid)
+            await self._reconcile_mds_unread(key)
             return
         if remote_ts < newest_ts:
             await self._apply_mds_partial(key, sid, remote_ts)

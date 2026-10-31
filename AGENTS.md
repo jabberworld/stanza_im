@@ -2033,23 +2033,27 @@ while a device that is behind us only clears the **read prefix**
 (`_apply_mds_partial`): the anchor moves to its displayed point and unread is
 recounted from the messages after it, so newer messages stay unread. An id we
 never stored is **never** treated as "seen everything": with separate local
-archives that would erase a valid unread block, so it is logged and ignored.
+archives that would erase a valid unread block, so it is logged and handed to
+`_reconcile_mds_unread` (MAM after the id); if the archive cannot resolve it,
+the existing block is kept.
 The server XEP-0359 `stanza-id` is stored in its own `stanza_id` column (live
 1:1/MUC, PM, carbon, replay and MAM) and the view carries it as
 `data-stanza-sid`; `data-stanza-id` stays the reply/edit/reaction control ref.
-A remote state for a chat with no local unread also seeds the read anchor and
-starts `_reconcile_mds_unread` (variant A): on join/open it resolves the
-displayed timestamp, fetches the gap with MAM after it (or RSM `after` on the
-archive id for a MUC), counts the incoming rows after the displayed point and
-creates the unread block; a join-time replay and the MAM page deduplicate, and
-`_mds_reconciling`/`_mds_reconciled` keep the work once per point. Both clients
-therefore show the same unread block instead of one starting from zero. A
-server-assist XEP-0333 `<displayed/>` that also carries an embedded MDS payload
-is applied as MDS in `_on_bodyless_chat_marker_stanza` (the bare receipt is
-still emitted). `_mds_apply_remote` skips a state equal to the one already recorded in
-`_mds_local`; that map is seeded at connect from the persisted unread state, so
-the startup catch-up does not wipe restored unread (see the unread-counters
-paragraph above).
+A remote state also seeds the read anchor and starts
+`_reconcile_mds_unread` (variant A): on join/open it resolves the displayed
+timestamp, fetches the gap with MAM after it (or RSM `after` on the archive id
+for a MUC), counts the incoming rows after the displayed point and creates the
+unread block; a join-time replay and the MAM page deduplicate, and
+`_mds_reconciling`/`_mds_reconciled` keep the work once per point. The rebuild
+also runs when the local block is non-zero and when the local read timestamp is
+**equal** to the displayed point (only a strictly newer local point skips it),
+so a stale 2-message block grows to the real 23. A server-assist XEP-0333
+`<displayed/>` that also carries an embedded MDS payload is applied as MDS in
+`_on_bodyless_chat_marker_stanza` (the bare receipt is still emitted).
+`_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
+the startup catch-up passes `force=True`: the map is seeded at connect from the
+persisted unread state, and an equal point must still trigger the rebuild or a
+second client would keep its stale local counters.
 
 **Partial read progress (`seen`)**: the WebEngine scroll poll returns every
 visible `#chat .stanza-message` ref (not only the bottom-most one), so

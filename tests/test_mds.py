@@ -211,6 +211,9 @@ check("seeded state suppresses stale apply", not seed_events)
 c_seed._mds_apply_remote("frank@example.com", "sid-new")
 check("newer state still applies after seeding",
       seed_events == [("frank@example.com", "sid-new")])
+c_seed._mds_apply_remote("frank@example.com", "sid-old", force=True)
+check("a forced catch-up re-applies an equal seeded state",
+      seed_events[-1] == ("frank@example.com", "sid-old"))
 check("seed ignores blank jids/sids",
       "" not in c_seed._mds_local and "g@example.com" not in c_seed._mds_local)
 

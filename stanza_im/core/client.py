@@ -5723,7 +5723,7 @@ class JabberClient:
         for item_id, sid, by in self._mds_scan_result(result.xml):
             if by and by.split("/")[0] != self.jid_str:
                 continue
-            self._mds_apply_remote(item_id, sid)
+            self._mds_apply_remote(item_id, sid, force=True)
 
     def _note_own_sid(self, sid: str) -> None:
         """Remember a displayed sid published by this client."""
@@ -5838,14 +5838,15 @@ class JabberClient:
                 sid, by = self._mds_payload(item)
                 yield item.get("id") or "", sid, by
 
-    def _mds_apply_remote(self, chat_jid: str, sid: str) -> None:
+    def _mds_apply_remote(self, chat_jid: str, sid: str,
+                          force: bool = False) -> None:
         if not sid or not chat_jid:
             return
         if sid in self._mds_own_sids:
             # Our own publish echoed back by the server, possibly delayed while
             # the client was inactive (CSI): this is not another device.
             return
-        if self._mds_local.get(chat_jid) == sid:
+        if not force and self._mds_local.get(chat_jid) == sid:
             return
         self._mds_local[chat_jid] = sid
         logger.debug("MDS: %s displayed up to %s", chat_jid, sid)

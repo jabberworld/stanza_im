@@ -2256,19 +2256,21 @@ Registers XEP plugins (conditionally where noted):
   and ignored. The server XEP-0359 `stanza-id` is stored in its own
   `stanza_id` column (live 1:1/MUC, PM, carbon, replay and MAM) and rendered as
   `data-stanza-sid`; `data-stanza-id` remains the control ref. A remote state
-  for a chat with no local unread seeds the read anchor and starts `_reconcile_mds_unread`: on
-  join/open it resolves the displayed timestamp, fetches the gap with MAM after
-  it (or RSM `after` on the archive id for a MUC), counts the incoming rows
-  after the displayed point and creates the unread block; replay/MAM copies
-  deduplicate, so both clients show the same unread block. A server-assist
-  XEP-0333 marker with an embedded MDS payload is applied as MDS as well. No
-  chat status line is shown. `_mds_apply_remote` skips a state equal to `_mds_local` and any sid
-  this client published itself (`_mds_own_sids`) — the server may buffer the
-  echo of our own publish while the client is inactive (XEP-0352), and it must
-  never be mistaken for another device;
-  on login `MainWindow` seeds `_mds_local` from the persisted unread state
-  (`client.set_displayed_state`), so the startup catch-up does not wipe restored
-  unread while a newer remote state still clears it.
+  also seeds the read anchor and starts `_reconcile_mds_unread`: on join/open
+  it resolves the displayed timestamp, fetches the gap with MAM after it (or
+  RSM `after` on the archive id for a MUC), counts the incoming rows after the
+  displayed point and creates the unread block; replay/MAM copies deduplicate,
+  so both clients show the same unread block. The rebuild also runs for a
+  non-zero local block and when the local read timestamp equals the displayed
+  point (only a strictly newer local point skips it), so a stale block is
+  corrected. A server-assist XEP-0333 marker with an embedded MDS payload is
+  applied as MDS as well. No chat status line is shown. `_mds_apply_remote`
+  skips an equal state for live PEP events and any sid this client published
+  itself (`_mds_own_sids`); the startup catch-up uses `force=True` so an equal
+  point still triggers the rebuild. On login `MainWindow` seeds `_mds_local`
+  from the persisted unread state (`client.set_displayed_state`), so the
+  catch-up does not wipe restored unread while a newer remote state still
+  clears it.
   Config `chat.message_displayed_sync` (default on).
 - **History behind an open tab**: the join-time room replay arrives as
   **delayed** groupchat messages; a XEP-0203 `<delay/>` is the reliable history

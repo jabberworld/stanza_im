@@ -276,6 +276,40 @@ check("variant A rebuilds unread from the displayed point",
       and recon._unread_chats["room@example"]["read_ts"]
       == "2026-10-02T11:00:00Z")
 
+# A local read point equal to the MDS point must not suppress the rebuild;
+# another device may have accumulated messages after the same point.
+_stale_ts = "2026-10-02T11:00:00Z"
+for _sid, _ts in (("stale-1", _stale_ts),
+                  ("stale-2", "2026-10-02T12:00:00Z"),
+                  ("stale-3", "2026-10-02T13:00:00Z"),
+                  ("stale-4", "2026-10-02T14:00:00Z")):
+    history.store_message("stale@example", "incoming", f"m {_sid}", _ts,
+                          sender="bob", archive_id=_sid, origin_id=_sid,
+                          message_id=_sid)
+recon2 = MainWindow.__new__(MainWindow)
+recon2._client = SimpleNamespace(
+    _mds_local={"stale@example": "stale-1"})
+recon2._unread_chats = {
+    "stale@example": {**unread_state.blank(), "unread": 2,
+                      "read_sid": "stale-1", "read_ts": _stale_ts,
+                      "seen_ts": _stale_ts}}
+recon2._mam_unsupported = {"stale@example"}
+recon2._muc_joined = {"stale@example"}
+recon2._known_conferences = set()
+recon2._muc_self_nicks = {}
+recon2._chat_window = None
+recon2._mds_reconciling = set()
+recon2._mds_reconciled = set()
+recon2._recount_unread = lambda: None
+recon2._refresh_unread_badge = lambda _jid: None
+recon2._push_unread_to_chat = lambda _jid: None
+recon2._schedule_unread_save = lambda: None
+asyncio.get_event_loop().run_until_complete(
+    recon2._reconcile_mds_unread("stale@example"))
+check("an equal read point still rebuilds a stale unread block",
+      recon2._unread_chats["stale@example"]["unread"] == 3
+      and recon2._unread_chats["stale@example"]["read_sid"] == "stale-1")
+
 win._pm_targets["room@conf.example/dave"] = ("room@conf.example", "dave")
 check("a private message resolves to its own conversation",
       win._resolve_mds_key("room@conf.example/dave")
