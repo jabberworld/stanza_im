@@ -6388,7 +6388,7 @@ class JabberClient:
                         self.emit("message_corrected", pm_key, replace_ref,
                                   body, ts, unstyled, stable_id,
                                   reply_to, reply_id, media=media,
-                                  markup=markup)
+                                  markup=markup, direction="incoming")
                         return
                     logger.debug("Incoming correction ignored (edits disabled)")
                 self.emit("muc_private_message", pm_room, pm_nick, body, ts,
@@ -6403,7 +6403,8 @@ class JabberClient:
                 if self.allow_incoming_edits:
                     self.emit("message_corrected", frm, replace_ref,
                               body, ts, unstyled, stable_id,
-                              reply_to, reply_id, media=media, markup=markup)
+                              reply_to, reply_id, media=media,
+                              markup=markup, direction="incoming")
                     return
                 logger.debug("Incoming correction ignored (edits disabled)")
             self.emit("message_received", frm, body, ts, unstyled,
@@ -6463,7 +6464,8 @@ class JabberClient:
                 self.emit("message_corrected", frm, replace_ref, body, ts,
                           unstyled, stable_id, reply_to, reply_id,
                           media=message_media(inner),
-                          markup=message_markup(inner))
+                          markup=message_markup(inner),
+                          direction="incoming")
                 return
             logger.debug("Incoming correction ignored (edits disabled)")
         media = message_media(inner)
@@ -6511,7 +6513,8 @@ class JabberClient:
             self.emit("message_corrected", bare, replace_ref, body, ts,
                       unstyled, stable_id, reply_to, reply_id,
                       media=message_media(inner),
-                      markup=message_markup(inner))
+                      markup=message_markup(inner),
+                      direction="outgoing")
             return
         media = message_media(inner)
         sid, by = self._embedded_mds(inner)
@@ -7896,6 +7899,7 @@ class JabberClient:
         """
         from stanza_im.core import history
         applied = 0
+        orphans: list[str] = []
         for row in edits:
             ref = str(row.get("replace_id") or "")
             if not ref:
@@ -7904,11 +7908,21 @@ class JabberClient:
                 jid, ref, str(row.get("body") or ""),
                 markup=row.get("markup"))
             if not replaced:
+                # Keep the corrected text rather than losing it: the original
+                # may be outside this archive/page (or a peer used a local id).
+                orphans.append(ref)
                 extra = {key: value for key, value in row.items()
                          if key != "replace_id"}
                 extra["edited"] = True
                 await history.store_many_async(jid, [extra])
             applied += 1
+        if orphans:
+            sample = ", ".join(orphans[:5])
+            if len(orphans) > 5:
+                sample += ", …"
+            logger.info(
+                "EDIT[orphan] jid=%s count=%d refs=%s -> stored as new "
+                "edited messages", jid, len(orphans), sample)
         return applied
 
     def _mam_rows(self, jid: str, results) -> tuple[list[dict], int, int, dict]:

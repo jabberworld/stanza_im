@@ -9967,19 +9967,76 @@ class MainWindow(QtWidgets.QMainWindow):
         """Show the room's own vCard (not our occupant's real JID)."""
         self._show_profile(room)
 
+    @staticmethod
+    def _correction_target(frm: str, pm_targets) -> str:
+        """Conversation key for a correction sender (PMs keep ``room/nick``)."""
+        if frm in (pm_targets or {}):
+            return frm
+        return frm.split("/")[0]
+
+    @staticmethod
+    def _correction_sender(target: str, bare: str, direction: str,
+                           roster_name) -> str:
+        if direction == "outgoing":
+            return "Me"
+        if target != bare and "/" in target:
+            return target.rsplit("/", 1)[-1]
+        return roster_name(bare) or bare.split("@")[0]
+
     def _on_message_corrected(self, frm: str, ref_id: str, body: str, ts,
                               unstyled: bool = False,
                               stable_id: str = "", reply_to: str = "",
                               reply_id: str = "", media: dict | None = None,
-                              markup: dict | None = None):
-        """A contact corrected a message they sent (XEP-0308)."""
-        bare = frm.split("/")[0]
-        chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(frm)
-        if chat:
-            chat.edit_message_by_ref(ref_id, body, markup=markup)
+                              markup: dict | None = None,
+                              direction: str = "incoming"):
+        """A 1:1/PM message correction (XEP-0308)."""
+        target = MainWindow._correction_target(frm, self._pm_targets)
+        bare = target.split("/")[0]
+        chat = (self._chat_window.get_chat(target)
+                or self._chat_window.get_chat(frm))
+        applied = bool(chat and chat.edit_message_by_ref(
+            ref_id, body, markup=markup))
+        self._start_task(self._apply_or_append_correction(
+            target, bare, frm, ref_id, body, ts, stable_id, reply_to,
+            reply_id, media, markup, direction, applied))
+
+    async def _apply_or_append_correction(self, target: str, bare: str,
+                                          frm: str, ref_id: str, body: str,
+                                          ts, stable_id: str, reply_to: str,
+                                          reply_id: str, media, markup,
+                                          direction: str, applied: bool):
+        """Apply a correction; if its target is gone, keep it as a new message."""
         from stanza_im.core import history
-        self._start_task(history.replace_message_async(
-            bare, ref_id, body, markup=markup))
+        replaced = await history.replace_message_async(
+            target, ref_id, body, markup=markup)
+        if replaced or applied:
+            return
+        if stable_id and await history.message_exists_async(target, stable_id):
+            return
+        logger.info("EDIT[orphan-live] jid=%s ref=%s direction=%s -> "
+                    "new edited message", target, ref_id, direction)
+        sender = MainWindow._correction_sender(
+            target, bare, direction, self._roster_name)
+        stamp = ts or _current_timestamp()
+        await history.store_message_async(
+            target, direction, body, timestamp=stamp, sender=sender,
+            origin_id=stable_id, message_id=stable_id,
+            reply_to=reply_to, reply_id=reply_id, media=media,
+            markup=markup, edited=True)
+        chat = self._chat_window.get_chat(target)
+        if chat is not None:
+            chat.add_message(sender=sender, body=body, timestamp=stamp,
+                             direction=direction, reply_able_id=stable_id,
+                             reply_author=frm, reply_to=reply_to,
+                             reply_id=reply_id, media=media, markup=markup,
+                             edited=True)
+        if direction == "incoming":
+            active = (self._chat_area_visible()
+                      and self._chat_window.current_jid() == target)
+            if not active:
+                self._bump_unread(target, ts=stamp, ref=stable_id)
+                self._refresh_unread_badge(target)
+                self._sync_tray_blink()
 
     def _on_groupchat_message_corrected(self, room: str, ref_id: str,
                                         body: str, ts, unstyled: bool = False,
@@ -9990,11 +10047,55 @@ class MainWindow(QtWidgets.QMainWindow):
                                         markup: dict | None = None):
         """A participant corrected their MUC message (XEP-0308)."""
         chat = self._chat_window.get_chat(room)
-        if chat:
-            chat.edit_message_by_ref(ref_id, body, markup=markup)
+        applied = bool(chat and chat.edit_message_by_ref(
+            ref_id, body, markup=markup))
+        nick = frm.split("/", 1)[1] if "/" in frm else ""
+        self._start_task(self._apply_or_append_muc_correction(
+            room, ref_id, body, ts, stable_id, frm, nick, reply_to,
+            reply_id, media, markup, applied))
+
+    async def _apply_or_append_muc_correction(self, room: str, ref_id: str,
+                                              body: str, ts, stable_id: str,
+                                              frm: str, nick: str,
+                                              reply_to: str, reply_id: str,
+                                              media, markup, applied: bool):
         from stanza_im.core import history
-        self._start_task(history.replace_message_async(
-            room, ref_id, body, markup=markup))
+        replaced = await history.replace_message_async(
+            room, ref_id, body, markup=markup)
+        if replaced or applied:
+            return
+        if stable_id and await history.message_exists_async(room, stable_id):
+            return
+        logger.info("EDIT[orphan-live] room=%s ref=%s -> new edited message",
+                    room, ref_id)
+        self_nick = self._muc_self_nicks.get(room, "")
+        own = bool(nick and self_nick and nick == self_nick)
+        direction = "outgoing" if own else "incoming"
+        sender = "Me" if own else (nick or room)
+        stamp = ts or _current_timestamp()
+        await history.store_message_async(
+            room, direction, body, timestamp=stamp, sender=sender,
+            origin_id=stable_id, message_id=stable_id,
+            reply_to=reply_to, reply_id=reply_id, media=media,
+            markup=markup, edited=True)
+        chat = self._chat_window.get_chat(room)
+        if chat is not None:
+            chat.add_message(sender=sender, body=body, timestamp=stamp,
+                             direction=direction, reply_able_id=stable_id,
+                             reply_author=frm, reply_to=reply_to,
+                             reply_id=reply_id, media=media, markup=markup,
+                             edited=True)
+        if not own and self_nick:
+            active = (self._chat_area_visible()
+                      and self._chat_window.current_jid() == room)
+            if not active:
+                mention = mentions_nick(body, self_nick)
+                self._bump_unread(room, mention=mention, ts=stamp,
+                                  ref=stable_id)
+                self._refresh_unread_badge(room)
+                if mention:
+                    self._note_unread_mention(room, stable_id)
+                self._sync_tray_blink()
 
     # ── XEP-0444 Message Reactions ────────────────────────────────
 

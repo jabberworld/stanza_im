@@ -201,6 +201,7 @@ check("a sent carbon correction is applied locally",
       and carb_corr[0][0][0] == "bob@example.com"
       and carb_corr[0][0][1] == "orig-own"
       and carb_corr[0][0][2] == "edited-own"
+      and carb_corr[0][1].get("direction") == "outgoing"
       and not carb_sent)
 carb_corr.clear()
 c_carb._on_carbon_received(make_carbon(
@@ -209,7 +210,8 @@ check("a received carbon correction is applied",
       len(carb_corr) == 1
       and carb_corr[0][0][0] == "alice@example.com/res"
       and carb_corr[0][0][1] == "orig-f"
-      and carb_corr[0][0][2] == "edited-foreign")
+      and carb_corr[0][0][2] == "edited-foreign"
+      and carb_corr[0][1].get("direction") == "incoming")
 
 # 5d. MAM corrections are edits, not new messages ----------------------------
 def make_mam_replace(ref="orig-mam", body="edited-mam"):
@@ -285,6 +287,101 @@ check("the widget edits by stanza-id",
       cw_sid.edit_message_by_ref("sid-widget", "edited")
       and cw_sid._messages[-1]["body"] == "edited")
 
+# 5f. a live correction with an unknown target is kept as a new message ------
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
+
+
+class _CorrChat:
+    def __init__(self):
+        self.added = []
+
+    def edit_message_by_ref(self, ref_id, body, markup=None):
+        return False
+
+    def add_message(self, **kwargs):
+        self.added.append(kwargs)
+
+
+class _CorrChatWindow:
+    def __init__(self, chat):
+        self.chat = chat
+
+    def get_chat(self, _jid):
+        return self.chat
+
+    def current_jid(self):
+        return "other@example.com"
+
+
+def _corr_win():
+    chat = _CorrChat()
+    win = MainWindow.__new__(MainWindow)
+    win._chat_window = _CorrChatWindow(chat)
+    win._pm_targets = {}
+    win._chat_area_visible = lambda: True
+    win._roster_name = lambda _jid: "Bob"
+    win._unread_chats = {}
+    win._unread_total = 0
+    win._bumped = []
+    win._bump_unread = lambda jid, **kw: win._bumped.append((jid, kw))
+    win._refresh_unread_badge = lambda _jid: None
+    win._sync_tray_blink = lambda: None
+    win._muc_self_nicks = {}
+    win._note_unread_mention = lambda *a: None
+    return win, chat
+
+
+win, corr_chat = _corr_win()
+orphan_jid = "correction-orphan@example.com"
+_run(win._apply_or_append_correction(
+    orphan_jid, orphan_jid, orphan_jid + "/peer",
+    "missing-ref", "new version", "2026-10-31T20:00:00Z",
+    "corr-1", "", "", None, None, "incoming", False))
+_orphan_rows = history.load_history(orphan_jid)
+check("an orphan live correction becomes a new edited message",
+      corr_chat.added and corr_chat.added[0]["body"] == "new version"
+      and corr_chat.added[0]["direction"] == "incoming"
+      and corr_chat.added[0]["edited"] is True
+      and _orphan_rows and _orphan_rows[-1]["edited"] is True)
+check("an orphan incoming correction bumps the unread counter",
+      win._bumped and win._bumped[0][0] == orphan_jid)
+
+_run(win._apply_or_append_correction(
+    orphan_jid, orphan_jid, orphan_jid + "/peer",
+    "missing-ref", "new version", "2026-10-31T20:00:00Z",
+    "corr-1", "", "", None, None, "incoming", False))
+check("a repeated orphan correction is not duplicated",
+      len(corr_chat.added) == 1)
+
+# A correction whose target is local still replaces it, no duplicate.
+win2, corr_chat2 = _corr_win()
+match_jid = "correction-match@example.com"
+history.store_message(match_jid, "incoming", "old version",
+                      timestamp="2026-10-31T20:00:00Z", sender="Bob",
+                      message_id="orig-9", origin_id="orig-9")
+_run(win2._apply_or_append_correction(
+    match_jid, match_jid, match_jid + "/peer",
+    "orig-9", "fixed version", "2026-10-31T20:00:00Z",
+    "corr-2", "", "", None, None, "incoming", False))
+_match_rows = history.load_history(match_jid)
+check("a matching live correction replaces instead of appending",
+      corr_chat2.added == []
+      and len(_match_rows) == 1
+      and _match_rows[0]["body"] == "fixed version"
+      and _match_rows[0]["edited"] is True)
+
+# MUC: an orphan correction is appended with the occupant nick/direction.
+muc_win, muc_chat = _corr_win()
+muc_win._muc_self_nicks = {"room@conf.example": "me"}
+muc_jid = "room@conf.example"
+_run(muc_win._apply_or_append_muc_correction(
+    muc_jid, "missing-muc", "muc version", "2026-10-31T20:00:00Z",
+    "corr-muc", muc_jid + "/nick", "nick", "", "", None, None, False))
+check("an orphan MUC correction is appended as an incoming message",
+      muc_chat.added and muc_chat.added[0]["sender"] == "nick"
+      and muc_chat.added[0]["direction"] == "incoming"
+      and muc_chat.added[0]["edited"] is True)
+
 # 6. Edit menu JS routing present --------------------------------------------
 _view_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -326,6 +423,13 @@ pos_plain = html_plain.index("hello world")
 pos_edit = html_edited.index("class=\"stanza-edited\"")
 check("marker after phrase", pos_edit > pos_plain)
 check("marker absent when not edited", "stanza-edited" not in html_plain)
+
+_client_src = open(os.path.join(_rootdir, "stanza_im", "core", "client.py"),
+                   encoding="utf-8").read()
+_mw_src = open(os.path.join(_rootdir, "stanza_im", "ui", "main_window.py"),
+               encoding="utf-8").read()
+check("orphan MAM edits are logged", "EDIT[orphan]" in _client_src)
+check("orphan live corrections are logged", "EDIT[orphan-live]" in _mw_src)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

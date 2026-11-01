@@ -2160,10 +2160,17 @@ XEP-0280 **carbon sent** copies and are applied as edits (never as a second
 outgoing message); a carbon **received** correction is treated like a direct
 incoming one. A MAM page is scanned for `<replace/>` rows (`_mam_rows`
 `replace_id`): the page is stored first and `_apply_mam_edits` then replaces
-the referenced original, keeping the corrected text as an edited message when
-the original is not local yet. Outgoing messages carry an XEP-0359
-`<origin-id/>` (the stanza id) so peers such as Monocles reference a stable id.
-History gains `message_id`/`edited` columns and `replace_message()` (matching
+the referenced original, keeping the corrected text as a new **edited** message
+when the original is not local (`EDIT[orphan]` logs the count/refs). A live
+correction whose target is not found behaves the same way
+(`_apply_or_append_correction`/`_apply_or_append_muc_correction`, logged
+`EDIT[orphan-live]`): the corrected text is appended as a new edited message
+(the incoming one also bumps the unread counter) instead of being dropped —
+duplicates are preferred over losing the new version. Outgoing messages carry
+an XEP-0359 `<origin-id/>` (the stanza id) so peers such as Monocles reference
+a stable id; a peer that uses its own local id (seen with Monocles) cannot be
+matched reliably, so its correction lands as a new message. History gains
+`message_id`/`edited` columns and `replace_message()` (matching
 message/origin/archive/stanza ids).
 
 Message Retraction (XEP-0424, `urn:xmpp:message-retract:1`; the legacy `:0`

@@ -2377,10 +2377,15 @@ Registers XEP plugins (conditionally where noted):
   **sent** copies and are applied as edits (a carbon **received** correction
   behaves like a direct incoming one). MAM pages are scanned for `<replace/>`
   rows and applied after the page is stored (`_mam_rows` `replace_id` →
-  `_apply_mam_edits`; an orphan correction is kept as an edited message).
-  Outgoing messages carry an XEP-0359 `<origin-id/>` equal to the stanza id so
-  peers can target them reliably; `replace_message` matches
-  message/origin/archive/stanza ids.
+  `_apply_mam_edits`; an orphan correction is kept as a new edited message and
+  logged `EDIT[orphan]`). A **live** correction whose target is not local is
+  appended the same way (`_apply_or_append_correction`/
+  `_apply_or_append_muc_correction`, logged `EDIT[orphan-live]`; an incoming
+  one also bumps unread), so a duplicate is preferred over losing the new
+  version. Outgoing messages carry an XEP-0359 `<origin-id/>` equal to the
+  stanza id so peers can target them reliably; a peer that uses its own local
+  id (Monocles) cannot be matched and its correction lands as a new message.
+  `replace_message` matches message/origin/archive/stanza ids.
 - Replaced messages render a large bold «✎» at the very end of the edited
   phrase (`render_message(edited=True)`, i18n tooltip;
   `data-stanza-outgoing`/`data-edited` on the wrapper drives the menu).
