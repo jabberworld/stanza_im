@@ -194,6 +194,61 @@ point = asyncio.run(MainWindow._mds_point_sid(
 check("_mds_point_sid never returns a local origin id", point != "origin-1")
 
 
+# 4b. End-to-end: an old invalid shared id still stores the outgoing tail -----
+def _run_broken_shared_id():
+    # Earlier asyncio.run() calls closed the default loop; slixmpp's stanza
+    # stream constructor needs one to create its ``disconnected`` future.
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    c = JabberClient("me@x/res", "pw")
+    c._mds_local["gapstore@example.com"] = "54d78060-origin"
+    mam = c.xmpp.plugin["xep_0313"]
+    page = [
+        make_result("me@x", "Сообщение 111", "o-111", "arc-111",
+                    "2026-11-01T10:54:35Z"),
+        make_result("me@x", "Сообщение 222", "o-222", "arc-222",
+                    "2026-11-01T10:54:37Z"),
+        make_result("me@x", "Сообщение 333", "o-333", "arc-333",
+                    "2026-11-01T10:54:39Z"),
+    ]
+    fake = _PagedMam([{
+        "results": page,
+        "fin": {"complete": "true", "rsm": {"last": "arc-333"}},
+    }])
+    r = MainWindow.__new__(MainWindow)
+    r._client = c
+    r._unread_chats = {"gapstore@example.com": {
+        **unread_state.blank(), "unread": 0,
+        "read_ts": "2026-10-31T22:14:59.079671Z"}}
+    r._mam_unsupported = set()
+    r._muc_joined = set()
+    r._known_conferences = set()
+    r._muc_self_nicks = {}
+    r._conference_roster = set()
+    r._bookmarks = {}
+    r._config = None
+    r._chat_window = None
+    r._mds_reconciling = set()
+    r._mds_reconciled = set()
+    r._history_gap_checked = {}
+    r._recount_unread = lambda: None
+    r._refresh_unread_badge = lambda _jid: None
+    r._push_unread_to_chat = lambda _jid: None
+    r._schedule_unread_save = lambda: None
+    with unittest.mock.patch.object(mam, "retrieve", fake):
+        asyncio.run(r._reconcile_mds_unread("gapstore@example.com",
+                                            force=True))
+    rows = history.load_history("gapstore@example.com", limit=20)
+    return [row["body"] for row in rows], fake.calls
+
+
+_broken_bodies, _broken_calls = _run_broken_shared_id()
+check("an invalid shared id still stores the outgoing tail",
+      _broken_bodies == ["Сообщение 111", "Сообщение 222", "Сообщение 333"])
+check("the broken shared id is not used as an after cursor",
+      _broken_calls and _broken_calls[0]["rsm"].get("after") is None
+      and _broken_calls[0]["start"] is not None)
+
+
 # 5. The view reports only the server stanza-id as the MDS sid --------------
 _src_path = os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "stanza_im", "ui", "chat_view.py")
