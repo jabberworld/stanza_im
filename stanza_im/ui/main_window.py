@@ -7653,6 +7653,11 @@ class MainWindow(QtWidgets.QMainWindow):
             # A tab created by an incoming message (opened with focus=False)
             # never loaded its archive; do it when it is first shown.
             self._load_history(jid)
+        else:
+            # The forward gap may have been stored while this tab was in the
+            # background; merge it into the already-rendered window.  A
+            # user-scrolled view stays where it is.
+            chat.schedule_tail_refresh(0)
         # Mirror the unread counter now (relevant for an already-loaded tab; a
         # scheduled reload re-pushes it once the window is applied).
         self._push_unread_to_chat(jid)
