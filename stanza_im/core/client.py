@@ -7796,28 +7796,72 @@ class JabberClient:
     async def fetch_history_mam_after(self, jid: str, start_ts: str | None = None,
                                       after_id: str = "",
                                       limit: int = 100,
-                                      is_muc: bool | None = None) -> int | None:
-        """Fetch messages after a displayed point (MDS unread reconstruction).
+                                      is_muc: bool | None = None,
+                                      max_pages: int = 20) -> int | None:
+        """Walk the archive forward from a displayed point or gap anchor.
 
         Unlike :meth:`fetch_history_mam` this walks forward from *start_ts* (or
         from the RSM ``after`` archive id when no timestamp is known) and
-        returns the number of incoming rows found.  Stored rows are deduplicated
-        by the history layer, so a join-time replay and this query can overlap.
+        returns the number of incoming rows found.  Pages are followed through
+        the RSM ``after`` cursor until the server reports ``complete``, the
+        cursor stops advancing or *max_pages* is reached, so a message written
+        after a long offline gap (including outgoing copies from another
+        resource) is not stranded beyond the first 250-result page.  Stored
+        rows are deduplicated by the history layer, so a join-time replay and
+        this query can overlap.
         """
         if jid in self._mam_inflight:
             return None
         self._mam_inflight.add(jid)
         try:
             return await self._fetch_history_mam_after_impl(
-                jid, start_ts, after_id, limit, is_muc)
+                jid, start_ts, after_id, limit, is_muc, max_pages)
         finally:
             self._mam_inflight.discard(jid)
+
+    @staticmethod
+    def _mam_fin_state(iq) -> tuple[bool | None, str]:
+        """Return ``(complete, last_cursor)`` from a MAM result IQ.
+
+        Reads the raw ``<fin/>`` element (XEP-0313) and accepts a dict-shaped
+        IQ (``mam_fin``) used by tests.
+        """
+        try:
+            xml = getattr(iq, "xml", None)
+            if xml is not None:
+                fin = xml.find("{urn:xmpp:mam:2}fin")
+                if fin is None:
+                    fin = xml.find("{urn:xmpp:mam:1}fin")
+                if fin is not None:
+                    complete = str(fin.get("complete") or "").lower() == "true"
+                    last_el = fin.find(
+                        "{http://jabber.org/protocol/rsm}set/"
+                        "{http://jabber.org/protocol/rsm}last")
+                    last = (last_el.text or "").strip() \
+                        if last_el is not None else ""
+                    return complete, last
+            fin_data = iq.get("mam_fin", {}) or {}
+        except (AttributeError, TypeError, ValueError):
+            return None, ""
+        if isinstance(fin_data, dict):
+            complete = str(fin_data.get("complete") or "").lower() == "true"
+            rsm = fin_data.get("rsm") or {}
+            return complete, str(rsm.get("last") or "")
+        try:
+            complete = str(fin_data.get("complete") or "").lower() == "true"
+            rsm = fin_data.get("rsm") or {}
+            last = str(rsm.get("last") or "")
+        except (AttributeError, TypeError, ValueError):
+            return None, ""
+        return complete, last
 
     async def _fetch_history_mam_after_impl(self, jid: str,
                                             start_ts: str | None,
                                             after_id: str,
                                             limit: int,
-                                            is_muc: bool | None) -> int:
+                                            is_muc: bool | None,
+                                            max_pages: int = 20) -> int:
+        from stanza_im.core import history
         mam = self.xmpp.plugin["xep_0313"]
         start = None
         if start_ts:
@@ -7828,66 +7872,88 @@ class JabberClient:
                     start = start.replace(tzinfo=datetime.timezone.utc)
             except ValueError:
                 start = None
-        rsm = {"max": max(1, int(limit))}
-        if start is None:
-            if not after_id:
-                return 0
-            rsm["after"] = str(after_id)
-        results = []
-        last_error = None
+        if start is None and not after_id:
+            return 0
         if is_muc is None:
             is_muc = jid in self.groupchats
-        for use_archive_jid, _query_end in self._mam_query_modes(
-                is_muc, None):
-            mode = "jid" if use_archive_jid else "with_jid"
-            logger.info("MAM after query for %s: mode=%s start=%s after=%s "
-                        "max=%s", jid, mode, start, rsm.get("after"), limit)
+        use_archive_jid = bool(is_muc)
+        mode = "jid" if use_archive_jid else "with_jid"
+        cursor = str(after_id or "")
+        total_incoming = 0
+        seen_ids: set[str] = set()
+        pages = 0
+        capped = False
+        max_pages = max(1, int(max_pages))
+        while pages < max_pages:
+            pages += 1
+            rsm = {"max": max(1, int(limit))}
+            if cursor:
+                rsm["after"] = cursor
+            elif start is None:
+                break
+            logger.info("MAM after page %d for %s: mode=%s start=%s after=%s "
+                        "max=%s", pages, jid, mode, start, rsm.get("after"),
+                        limit)
             try:
                 task = (mam.retrieve(jid=jid, start=start, rsm=rsm)
                         if use_archive_jid
                         else mam.retrieve(with_jid=jid, start=start, rsm=rsm))
                 iq = await asyncio.wait_for(task, timeout=25.0)
-                if str(iq.get("type", "result")) == "error":
-                    last_error = iq
-                    logger.warning("MAM after IQ error for %s (%s): %s",
-                                   jid, mode, str(iq))
-                    continue
-                last_error = None
-                results = iq.get("mam", {}).get("results") or []
-                logger.info("MAM after query for %s returned %d results",
-                            jid, len(results))
-                if results:
-                    break
             except asyncio.TimeoutError:
-                last_error = "timeout"
-                logger.info("MAM after query timed out for %s", jid)
+                logger.info("MAM after page %d timed out for %s", pages, jid)
+                break
             except Exception as exc:
-                last_error = exc
-                logger.debug("MAM after query for %s failed: %r", jid, exc)
-        if not results:
-            if last_error is not None:
-                logger.debug("MAM after returned no usable results for %s: %r",
-                             jid, last_error)
-            return 0
-        rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
-        if start_ts:
-            rows = [row for row in rows
-                    if str(row.get("timestamp") or "") > str(start_ts)]
-        edits = [row for row in rows if row.get("replace_id")]
-        rows = [row for row in rows if not row.get("replace_id")]
-        if rows:
-            from stanza_im.core import history
-            await history.store_many_async(jid, rows)
-        if edits:
-            await self._apply_mam_edits(jid, edits)
-        incoming = sum(1 for row in rows
-                       if row.get("direction") == "incoming")
-        logger.info("MAM after for %s: parsed=%d skipped=%d incoming=%d "
-                    "edits=%d", jid, parsed, skipped, incoming, len(edits))
-        if skip_reasons:
-            logger.info("MAM after skip reasons for %s: %s",
-                        jid, skip_reasons)
-        return incoming
+                logger.debug("MAM after page %d for %s failed: %r",
+                             pages, jid, exc)
+                break
+            if str(iq.get("type", "result")) == "error":
+                logger.warning("MAM after page %d IQ error for %s (%s): %s",
+                               pages, jid, mode, str(iq))
+                break
+            results = iq.get("mam", {}).get("results") or []
+            logger.info("MAM after page %d for %s returned %d results",
+                        pages, jid, len(results))
+            if not results:
+                break
+            rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+            if start_ts:
+                rows = [row for row in rows
+                        if str(row.get("timestamp") or "") > str(start_ts)]
+            edits = [row for row in rows if row.get("replace_id")]
+            rows = [row for row in rows if not row.get("replace_id")]
+            if rows:
+                await history.store_many_async(jid, rows)
+            if edits:
+                await self._apply_mam_edits(jid, edits)
+            for row in rows:
+                if row.get("direction") != "incoming":
+                    continue
+                key = str(row.get("archive_id") or row.get("origin_id")
+                          or row.get("message_id") or "")
+                if key and key in seen_ids:
+                    continue
+                if key:
+                    seen_ids.add(key)
+                total_incoming += 1
+            complete, fin_last = self._mam_fin_state(iq)
+            next_cursor = fin_last or _archive_result_id(results[-1])
+            logger.info(
+                "MAM after page %d for %s: parsed=%d skipped=%d stored=%d "
+                "edits=%d complete=%s cursor=%s", pages, jid, parsed, skipped,
+                len(rows), len(edits), complete, next_cursor)
+            if skip_reasons:
+                logger.info("MAM after page %d skip reasons for %s: %s",
+                            pages, jid, skip_reasons)
+            if complete:
+                break
+            if not next_cursor or str(next_cursor) == cursor:
+                break
+            cursor = str(next_cursor)
+        else:
+            capped = True
+        logger.info("MAM after for %s: pages=%d incoming=%d capped=%s",
+                    jid, pages, total_incoming, capped)
+        return total_incoming
 
     async def _apply_mam_edits(self, jid: str, edits: list[dict]) -> int:
         """Apply XEP-0308 corrections found in a MAM page.

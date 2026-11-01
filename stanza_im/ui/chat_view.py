@@ -949,8 +949,7 @@ if HAS_WEBENGINE:
     if (r.bottom > 0 && r.top < vh) { best = el; break; }
   }
   if (!best) return {ref:'', ts:'', sid:''};
-  var sid = best.getAttribute('data-stanza-sid')
-      || best.getAttribute('data-stanza-id') || '';
+  var sid = best.getAttribute('data-stanza-sid') || '';
   var ref = best.getAttribute('data-stanza-id')
       || best.getAttribute('data-reply-id') || sid;
   var ts = best.getAttribute('data-stanza-time') || '';

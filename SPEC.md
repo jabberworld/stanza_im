@@ -2274,12 +2274,26 @@ Registers XEP plugins (conditionally where noted):
   (with separate local archives that would erase a valid block); it is logged
   and ignored. The server XEP-0359 `stanza-id` is stored in its own
   `stanza_id` column (live 1:1/MUC, PM, carbon, replay and MAM) and rendered as
-  `data-stanza-sid`; `data-stanza-id` remains the control ref. A remote state
-  also seeds the read anchor and starts `_reconcile_mds_unread`: on join/open
-  it resolves the displayed timestamp, fetches the gap with MAM after it (or
-  RSM `after` on the archive id for a MUC), counts the incoming rows after the
-  displayed point and creates the unread block; replay/MAM copies deduplicate,
-  so both clients show the same unread block. The rebuild also runs for a
+  `data-stanza-sid`; `data-stanza-id` remains the control ref. The MDS
+  published point is always a server `stanza-id`: the scroll poll reports
+  `sid` only from `data-stanza-sid` (never the local `data-stanza-id`/
+  `origin-id`) and `_mds_point_sid` has no `origin_id` fallback. An unknown
+  RSM `after` makes a server return the first archive page, so a local id must
+  never become the shared cursor. A remote state
+  also seeds the read anchor and starts `_reconcile_mds_unread`: it walks the
+  archive forward from the shared displayed timestamp, or from the local
+  read/seen point when the shared id cannot be resolved, and from the newest
+  local row when there is no read state at all (RSM `after` only when no
+  timestamp exists), stores the ordinary gap too (including outgoing messages
+  written by another resource while this device was offline), counts the
+  incoming rows after the displayed point and creates the unread block;
+  replay/MAM copies
+  deduplicate, so both clients show the same unread block. The forward fetch
+  follows the XEP-0313 RSM cursor page by page (`<fin complete>`/`<last>`)
+  until complete or a page cap, instead of stopping at the server's first
+  250-result page. A chat with no shared/read point gets a history-only gap
+  sync on open from its newest local row (throttled by
+  `_HISTORY_GAP_INTERVAL_S`) and never invents unread. The rebuild also runs for a
   non-zero local block and when the local read timestamp equals the displayed
   point (only a strictly newer local point skips it), so a stale block is
   corrected. A server-assist XEP-0333 marker with an embedded MDS payload is
@@ -2293,9 +2307,11 @@ Registers XEP plugins (conditionally where noted):
   point still rebuilds: new messages may exist only on the server — rbook
   showed 5 while walkbook had 24; it also covers a 1:1 chat with a non-zero
   local block without opening it). An unresolved shared id is
-  never "local newer": it is fetched with MAM `after_id`, and the unread count
-  falls back to the local read point (or the MAM page when there is no local
-  point), so an old/pruned id cannot resurrect read rows. The forced pass also
+  never "local newer": the gap is fetched from the local tail (or with MAM
+  `after_id` only when there is no local point), and the unread count falls
+  back to the local read point (or the MAM page when there is no local point),
+  so an old/pruned/origin id cannot resurrect read rows or redirect the query
+  to the first archive page. The forced pass also
   rebuilds a 1:1 chat with no local unread block when the shared point is
   ahead (an offline device: rbook showed only the 5 live messages while
   walkbook/monocles showed 30), and runs for every chat with a shared point on

@@ -2675,7 +2675,11 @@ class ChatWidget(QtWidgets.QWidget):
             return
         self._seen_ref = ref
         self._seen_ts = ts
-        self._seen_sid = sid
+        if sid:
+            # ``sid`` is the XEP-0359 server id used by XEP-0490.  A 1:1
+            # outgoing message has no server id of its own; keep the last real
+            # one instead of replacing it with the local message id.
+            self._seen_sid = sid
         try:
             import time
             self._seen_at = time.time()

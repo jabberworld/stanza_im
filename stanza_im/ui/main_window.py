@@ -97,6 +97,10 @@ _SESSION_TIMEOUT_S = 30.0
 # window out by this much, so a slow/large roster is silent until the burst
 # really stops (instead of a fixed window that can expire mid-replay).
 _PRESENCE_OSD_TAIL_S = 2.0
+# Re-fetch the forward history gap of a chat without a shared MDS point at
+# most this often (seconds); carbons cover the live case, this catches copies
+# written by another resource while this device was offline.
+_HISTORY_GAP_INTERVAL_S = 60.0
 # Auto-join retry backoff (seconds) for transient join failures.
 _MUC_AUTOJOIN_RETRY_DELAYS = (5, 15, 45)
 _MUC_TRANSIENT_JOIN_ERRORS = {
@@ -543,6 +547,8 @@ class MainWindow(QtWidgets.QMainWindow):
         #: MDS+MAM unread reconstruction: in-flight and already-resolved points.
         self._mds_reconciling: set[str] = set()
         self._mds_reconciled: set[tuple[str, str]] = set()
+        #: Last forward history-gap sync per chat (no shared MDS point).
+        self._history_gap_checked: dict[str, float] = {}
 
         self._tile_cache = None
         self._tile_prune_timer = None
@@ -8113,18 +8119,24 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = await history.load_history_async(key, limit=1, until=ts)
         if rows:
             row = rows[-1]
-            return str(row.get("stanza_id") or row.get("archive_id")
-                       or row.get("origin_id") or "")
+            # Never promote a local message/origin id to the XEP-0490 point:
+            # another device uses it as a MAM archive cursor and an unknown id
+            # makes the server return the first archive page instead of the gap.
+            return str(row.get("stanza_id") or row.get("archive_id") or "")
         return str((entry or {}).get("read_sid") or sid)
 
     async def _reconcile_mds_unread(self, key: str, *,
                                     force: bool = False) -> None:
-        """Rebuild unread messages since the shared MDS displayed point.
+        """Synchronise a chat forward and rebuild its unread block.
 
         MDS itself has no unread counter: a device that was offline only knows
-        the last message another device displayed.  Fetch the gap from MAM (or
-        count the locally replayed rows when MAM is unavailable) and create the
-        unread block from it, so both clients show the same messages.
+        the last message another device displayed.  The archive is walked
+        forward from the shared displayed point, or from the local read point
+        when the shared id cannot be resolved (it may be an origin id from an
+        older build, or an id this device never stored).  The same pass also
+        fills the ordinary history gap — including outgoing copies written by
+        another resource while this device was offline — and, for a chat with
+        no read state yet, from its newest local message.
         """
         if not self._client or not key:
             return
@@ -8141,9 +8153,9 @@ class MainWindow(QtWidgets.QMainWindow):
         sid = (getattr(self._client, "_mds_local", {}) or {}).get(key, "")
         if not sid and entry:
             sid = str(entry.get("read_sid") or "")
-        if not sid or key in self._mds_reconciling:
+        if key in self._mds_reconciling:
             return
-        if (key, sid) in self._mds_reconciled:
+        if sid and (key, sid) in self._mds_reconciled:
             if not force:
                 logger.debug("MDS[skip] jid=%s sid=%s reason=reconciled",
                              key, sid)
@@ -8152,9 +8164,49 @@ class MainWindow(QtWidgets.QMainWindow):
         if key not in self._muc_joined and not open_chat and not force:
             # A 1:1 chat reconstructs when it is actually opened.
             return
+        if not sid:
+            # A chat without any shared MDS point still needs the tail gap
+            # filled when it is opened (outgoing messages from another
+            # resource never reach this device through carbons).
+            now = time.monotonic()
+            last = self._history_gap_checked.get(key, 0.0)
+            if not force and now - last < _HISTORY_GAP_INTERVAL_S:
+                logger.debug("MDS[skip] jid=%s reason=gap-throttled", key)
+                return
         local_ts = max(str((entry or {}).get("read_ts") or ""),
                        str((entry or {}).get("seen_ts") or ""))
-        shared_ts = await history.timestamp_for_ref_async(key, sid)
+        shared_ts = await history.timestamp_for_ref_async(key, sid) if sid else ""
+        # The ordinary history gap is the tail after the local point: a device
+        # that was offline misses whatever another resource wrote there
+        # (outgoing copies never come back through carbons).  Fetching from the
+        # older shared/read point (never from the newer local tail) also keeps
+        # the unread block complete when a live message arrived before this
+        # reconciliation ran.
+        local_newest = await history.newest_timestamp_async(key)
+        gap_only = False
+        local_wins = bool(local_ts) and bool(shared_ts) and local_ts > shared_ts
+        if not local_ts and not shared_ts:
+            if sid:
+                # No local read point to anchor the gap at: keep the old
+                # fallback, RSM ``after`` the shared id, and count its page.
+                start_ts = ""
+                after_id = sid
+            else:
+                # No displayed point at all: fill the tail from the newest
+                # local row; this pass is history-only, never unread.
+                start_ts = local_newest
+                after_id = ""
+                gap_only = bool(start_ts)
+                if not start_ts:
+                    return
+        elif local_wins:
+            # Everything up to the local point is already known/displayed;
+            # only the tail after it can be new.
+            start_ts = local_ts
+            after_id = ""
+        else:
+            start_ts = shared_ts or local_ts
+            after_id = ""
         if key not in self._muc_joined and not open_chat:
             # A forced startup pass also covers a device that was offline
             # while another client displayed new messages: an unresolved
@@ -8178,18 +8230,14 @@ class MainWindow(QtWidgets.QMainWindow):
         done = False
         try:
             ts = shared_ts
-            local_wins = bool(local_ts) and bool(ts) and local_ts > ts
             if local_wins and not force:
                 # Another device's state is behind ours: republish our point
-                # and leave the local block alone.
+                # and leave the local block alone.  The forward fetch still
+                # runs below, so the newest tail is present locally.
                 local_sid = await self._mds_point_sid(key, entry, local_ts)
-                self._publish_mds_point(key, local_sid)
-                logger.debug(
-                    "MDS[skip] jid=%s sid=%s reason=local-newer local_ts=%s "
-                    "ts=%s unread=%s", key, sid, local_ts, ts,
-                    int((entry or {}).get("unread") or 0))
-                return
-            if local_wins:
+            else:
+                local_sid = ""
+            if local_wins and force:
                 # A throttled publish may have been lost (or an older build
                 # never sent it).  Rebuild from our own point instead of
                 # resurrecting messages this device already displayed, and
@@ -8201,14 +8249,33 @@ class MainWindow(QtWidgets.QMainWindow):
                 is_muc = (key in self._muc_joined
                           or self._is_conference_jid(key))
                 incoming = await self._client.fetch_history_mam_after(
-                    key, start_ts=ts or None,
-                    after_id="" if ts else sid, limit=500,
-                    is_muc=is_muc)
+                    key, start_ts=start_ts or None,
+                    after_id=after_id, limit=500, is_muc=is_muc)
                 if incoming is None:
                     # Another MAM query owns this conversation; retry later.
                     return
-            if not ts:
-                ts = await history.timestamp_for_ref_async(key, sid)
+                self._history_gap_checked[key] = time.monotonic()
+            chat = (self._chat_window.get_chat(key)
+                    if self._chat_window is not None else None)
+            if (chat is not None and self._chat_area_visible()
+                    and self._chat_window.current_jid() == key):
+                # The stored gap may include outgoing copies (which do not
+                # change the unread count) or incoming ones; merge them into
+                # the open tail.  A user-scrolled view stays where it is.
+                chat.schedule_tail_refresh(200)
+            if local_wins and not force:
+                self._publish_mds_point(key, local_sid)
+                logger.debug(
+                    "MDS[skip] jid=%s sid=%s reason=local-newer local_ts=%s "
+                    "ts=%s unread=%s", key, sid, local_ts, ts,
+                    int((entry or {}).get("unread") or 0))
+                done = True
+                return
+            if gap_only:
+                # There is no read/displayed point to reconstruct unread
+                # from; the forward fetch only filled the ordinary history.
+                done = True
+                return
             # An unresolved shared id has no timestamp of its own: count from
             # the local read point instead of the MAM page size, so an old or
             # pruned id cannot resurrect messages the user already read.
@@ -8231,8 +8298,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if count <= 0:
                 done = True
                 return
-            chat = (self._chat_window.get_chat(key)
-                    if self._chat_window is not None else None)
             if (chat is not None and self._chat_area_visible()
                     and self._chat_window.current_jid() == key
                     and self._chat_at_bottom(key)):
@@ -8284,7 +8349,7 @@ class MainWindow(QtWidgets.QMainWindow):
                          exc_info=True)
         finally:
             self._mds_reconciling.discard(key)
-            if done:
+            if done and sid:
                 self._mds_reconciled.add((key, sid))
 
     async def _clamp_read_state(self, key: str, sid: str,
@@ -11627,6 +11692,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mam_unsupported.clear()
         self._mds_reconciling.clear()
         self._mds_reconciled.clear()
+        self._history_gap_checked.clear()
         self._bookmarks = {}
         self._bookmarks_loaded = False
         for view in list(self._omemo_views):

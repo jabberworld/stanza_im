@@ -2066,16 +2066,34 @@ while a device that is behind us only clears the **read prefix**
 recounted from the messages after it, so newer messages stay unread. An id we
 never stored is **never** treated as "seen everything": with separate local
 archives that would erase a valid unread block, so it is logged and handed to
-`_reconcile_mds_unread` (MAM after the id); if the archive cannot resolve it,
-the existing block is kept.
+`_reconcile_mds_unread`; if the archive cannot resolve it, the existing block is
+kept.
 The server XEP-0359 `stanza-id` is stored in its own `stanza_id` column (live
 1:1/MUC, PM, carbon, replay and MAM) and the view carries it as
 `data-stanza-sid`; `data-stanza-id` stays the reply/edit/reaction control ref.
+The MDS published point is **always a server `stanza-id`**: the scroll poll
+reports `sid` only from `data-stanza-sid` (never the local `data-stanza-id`/
+`origin-id`), and `_mds_point_sid` does not fall back to `origin_id` either. A
+local id published as the shared point is not a valid MAM archive cursor: an
+unknown `<after>` makes servers return the first archive page (rbook's 250 old
+results instead of the three new messages), so an outgoing 1:1 message without
+a server id simply does not advance the point.
 A remote state also seeds the read anchor and starts
-`_reconcile_mds_unread` (variant A): on join/open it resolves the displayed
-timestamp, fetches the gap with MAM after it (or RSM `after` on the archive id
-for a MUC), counts the incoming rows after the displayed point and creates the
-unread block; a join-time replay and the MAM page deduplicate, and
+`_reconcile_mds_unread` (variant A). It walks the archive **forward from the
+shared displayed timestamp**, or from the local read/seen point when the shared
+id cannot be resolved, and from the newest local row when there is no read
+state at all (RSM `after` only when no timestamp exists), so the ordinary
+history gap — including outgoing copies written by another resource while this
+device was offline — is stored too, then counts the incoming rows after the
+displayed point and creates the unread block. The local point is the start even
+when the shared id is a stale origin id, so it cannot redirect the query to the
+first archive page. The fetch follows the XEP-0313 RSM cursor page by page
+(`<fin complete>`/`<last>`, `_mam_fin_state`) until complete or a page cap,
+instead of stopping at the server's first 250-result page; every page is stored
+and deduplicated. A chat with **no** shared/read point still gets a
+history-only gap sync on open from its newest local row (throttled by
+`_HISTORY_GAP_INTERVAL_S`), so an open tab is not stuck on an old tail; it never
+invents unread. A join-time replay and the MAM pages deduplicate, and
 `_mds_reconciling`/`_mds_reconciled` keep the work once per point. The rebuild
 also runs when the local block is non-zero and when the local read timestamp is
 **equal** to the displayed point (only a strictly newer local point skips it),
@@ -2095,10 +2113,11 @@ showed 40 while rbook reconstructed 90); when the local point is older **or
 equal** the shared point wins (an equal point still rebuilds: new messages may
 exist only on the server — rbook showed 5 while walkbook had 24). An
 **unresolved** shared id (this device never
-stored that message) is never treated as "local newer": it is fetched with MAM
-`after_id` and the count falls back to the local read point (or the MAM page
-when there is no local point), so an old/pruned id cannot resurrect already
-read rows. The forced pass also rebuilds a 1:1 chat with **no** local unread
+stored that message) is never treated as "local newer": the gap is fetched from
+the local read point (or with MAM `after_id` only when there is no local point)
+and the count falls back to the local read point (or the MAM page when there is
+no local point), so an old/pruned/origin id cannot resurrect already read rows
+or redirect the query to the first archive page. The forced pass also rebuilds a 1:1 chat with **no** local unread
 block when the shared point is ahead (an offline device: rbook showed only the
 5 live messages while walkbook/monocles showed 30), and runs for every chat
 with a shared point on a fresh device. A normal join/open leaves a strictly
