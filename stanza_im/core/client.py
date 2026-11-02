@@ -6292,7 +6292,9 @@ class JabberClient:
             return False
         try:
             return bool(omemo.is_encrypted(msg))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("OMEMO encryption detection failed for %s: %s",
+                         type(msg).__name__, exc)
             return False
 
     async def _decrypt_and_dispatch(self, msg) -> None:
@@ -8095,7 +8097,7 @@ class JabberClient:
         for result in results:
             try:
                 fwd = _stanza_value(result, "forwarded")
-                msg = _forwarded_stanza(fwd) or result
+                msg = _as_message_stanza(_forwarded_stanza(fwd) or result)
                 if msg is None or not hasattr(msg, "get"):
                     logger.warning("MAM result %d for %s has no message stanza: %r",
                                    results.index(result), jid, result)
@@ -8194,7 +8196,7 @@ class JabberClient:
         omemo = getattr(self, "omemo", None)
         available = bool(getattr(omemo, "available", False))
         for row in rows:
-            stanza = row.pop("_omemo_stanza", None)
+            stanza = _as_message_stanza(row.pop("_omemo_stanza", None))
             if stanza is None:
                 continue
             row["encrypted"] = True
@@ -8383,6 +8385,26 @@ def _forwarded_stanza(forwarded):
         return forwarded["stanza"]
     except (KeyError, TypeError, AttributeError):
         return None
+
+
+def _as_message_stanza(stanza):
+    """Return *stanza* as a slixmpp Message when it is a raw XML element.
+
+    slixmpp's MAM plugin exposes the forwarded payload as an XML element, while
+    the OMEMO helpers (and ``message_markup``) expect a Stanza object with an
+    ``.xml`` attribute.  Normalising here keeps those helpers working for MAM
+    history without changing the shared ``_forwarded_stanza`` extractor.
+    """
+    if stanza is None or hasattr(stanza, "get_from"):
+        return stanza
+    tag = getattr(stanza, "tag", "")
+    if str(tag).rsplit("}", 1)[-1] != "message":
+        return stanza
+    try:
+        return slixmpp.Message(xml=stanza)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not convert a forwarded message element: %s", exc)
+        return stanza
 
 
 def _stanza_value(stanza, key: str, default=""):

@@ -194,6 +194,65 @@ check("the MAM parser keeps the encrypted stanza for decryption",
       len(_parsed) == 1 and _parsed[0].get("_omemo_stanza") is not None)
 
 
+# 4d. A raw XML forwarded MAM result is normalized to a Message -------------
+class _MamResult:
+    def __init__(self, xml):
+        self.xml = xml
+
+
+class _StrictOmemo(_FakeOmemo):
+    def is_encrypted(self, msg):
+        # Mimic slixmpp-omemo: it needs the stanza's .xml attribute.
+        xml = getattr(msg, "xml", None)
+        if xml is None:
+            return set()
+        return set(xml.findall(f"{{{LEGACY}}}encrypted"))
+
+
+def make_mam_result(frm="bob@example.com/res", to="me@example.com/res1",
+                    mid="mam-element-1", stamp="2026-11-02T22:35:00Z"):
+    outer = ET.Element("{urn:xmpp:mam:2}result", {"id": "archive-element-1"})
+    forwarded = ET.SubElement(outer, "{urn:xmpp:forward:0}forwarded")
+    ET.SubElement(forwarded, "{urn:xmpp:delay}delay", {"stamp": stamp})
+    inner = ET.SubElement(forwarded, "{jabber:client}message", {
+        "from": frm, "to": to, "type": "chat", "id": mid,
+    })
+    ET.SubElement(inner, "{jabber:client}body").text = \
+        "This message is OMEMO encrypted."
+    ET.SubElement(inner, f"{{{LEGACY}}}encrypted")
+    return _MamResult(outer)
+
+
+_mam_element = JabberClient("me@example.com/res1", "pw")
+_mam_element.omemo = _StrictOmemo()
+_element_rows, _ep, _es, _er = _mam_element._mam_rows(
+    "bob@example.com", [make_mam_result()])
+check("a raw XML forwarded MAM stanza is recognized as encrypted",
+      len(_element_rows) == 1
+      and _element_rows[0].get("_omemo_stanza") is not None)
+_element_rows = asyncio.get_event_loop().run_until_complete(
+    _mam_element._decrypt_mam_rows("bob@example.com", _element_rows))
+check("a raw XML forwarded MAM stanza is decrypted",
+      _element_rows[0]["body"] == "hello"
+      and _element_rows[0]["encrypted"] is True
+      and _element_rows[0]["encryption"] == "omemo")
+
+
+# 4e. An outgoing own-device MAM row is not mistaken for a self copy --------
+_mam_out = JabberClient("me@example.com/res1", "pw")
+_mam_out.omemo = _StrictOmemo()
+_out_rows, _op, _os, _or = _mam_out._mam_rows(
+    "bob@example.com",
+    [make_mam_result(frm="me@example.com/walkbook",
+                     to="bob@example.com", mid="mam-out-1")])
+_out_rows = asyncio.get_event_loop().run_until_complete(
+    _mam_out._decrypt_mam_rows("bob@example.com", _out_rows))
+check("an outgoing own-device MAM OMEMO row is decrypted",
+      _out_rows[0]["direction"] == "outgoing"
+      and _out_rows[0]["body"] == "hello"
+      and _mam_out.omemo.calls == ["bob@example.com"])
+
+
 # 5. MAM rows are decrypted before storage --------------------------------
 _mam = JabberClient("me@example.com/res1", "pw")
 _mam.omemo = _FakeOmemo()

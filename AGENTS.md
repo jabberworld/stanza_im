@@ -2371,11 +2371,14 @@ the account's bare JID; those are transport metadata, not messages, and are
 ignored silently. MAM pages are decrypted for **1:1** OMEMO rows before storing
 (`_decrypt_mam_rows`): the archived fallback body is replaced by the plaintext
 and the row is marked `encrypted`/`encryption="omemo"`; a failed/absent key
-keeps the fallback with the lock. MUC OMEMO history is left as fallback until
-occupant/real-JID context is available. When a plaintext copy later meets an
-already stored fallback row (live after MAM, or a later MAM page), `_insert`
-upgrades the fallback body in place instead of skipping it; a real plaintext
-row is never overwritten. Device names can be mirrored to a private PEP node
+keeps the fallback with the lock. The forwarded MAM payload is an XML element,
+so `_mam_rows` normalizes it to a `slixmpp.Message` (`_as_message_stanza`)
+before OMEMO detection and `message_markup`; without that normalization the
+element has no `.xml` and the row looks unencrypted. MUC OMEMO history is left
+as fallback until occupant/real-JID context is available. When a plaintext
+copy later meets an already stored fallback row (live after MAM, or a later
+MAM page), `_insert` upgrades the fallback body in place instead of skipping
+it; a real plaintext row is never overwritten. Device names can be mirrored to a private PEP node
 (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
 `omemo.alias_sync`) so they follow the user across clients: a **manual** rename
 is published (overwriting), while a **learned** name is published only when the

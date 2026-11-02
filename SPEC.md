@@ -2632,7 +2632,11 @@ Registers XEP plugins (conditionally where noted):
   transport metadata and are ignored silently. MAM pages are decrypted for
   **1:1** OMEMO rows before storing (`_decrypt_mam_rows`): the fallback body is
   replaced by the plaintext and the row is marked `encrypted`/`omemo`; a
-  failed/absent key keeps the fallback with the lock. A plaintext copy arriving
+  failed/absent key keeps the fallback with the lock. The forwarded MAM payload
+  is an XML element, so `_mam_rows` normalizes it to a `slixmpp.Message`
+  (`_as_message_stanza`) before OMEMO detection and `message_markup`; without
+  that normalization the element has no `.xml` and the row looks unencrypted.
+  A plaintext copy arriving
   after an already stored fallback (live after MAM, or a later MAM page)
   upgrades that row in place; a real plaintext row is never overwritten. MUC
   OMEMO history remains fallback until occupant/real-JID context is available.
