@@ -2597,7 +2597,8 @@ class JabberClient:
         return message_id
 
     async def send_omemo_file(self, jid: str, path: str, caption: str = "",
-                              mtype: str = "chat", recipients=None) -> None:
+                              mtype: str = "chat",
+                              recipients=None) -> str | None:
         """Encrypt *path* (XEP-0454) and share it as an OMEMO message.
 
         The file is AES-GCM encrypted in memory, the ciphertext is uploaded via
@@ -2647,9 +2648,29 @@ class JabberClient:
                               str(pct), str(path))
             await put_task
             url = XEP_0454.format_url(get_url, fragment)
-            await self.send_omemo_message(jid, url, mtype=mtype,
-                                          recipients=recipients)
+            message_id = await self.send_omemo_message(
+                jid, url, mtype=mtype, recipients=recipients)
+            if not message_id:
+                raise RuntimeError("OMEMO message was not sent")
+            media = {
+                "name": os.path.basename(str(path)),
+                "size": os.path.getsize(str(path)),
+                "media_type": (mimetypes.guess_type(str(path))[0]
+                               or "application/octet-stream"),
+                "width": 0,
+                "height": 0,
+                "url": url,
+                "hashes": await asyncio.to_thread(
+                    file_hashes_b64, str(path)),
+                "hide_body": None,
+            }
+            # The UI local echo must reuse the real OMEMO stanza id: otherwise
+            # the MAM archive copy (which the sending device cannot decrypt,
+            # because it is not an OMEMO recipient) appears as a second
+            # fallback row.
+            self._upload_results[(str(jid), str(path))] = (message_id, media)
             self.emit("file_upload_progress", jid, "done", url, str(path))
+            return message_id
         except Exception as exc:  # noqa: BLE001
             logger.warning("OMEMO file send failed for %s: %s", jid, exc)
             self.emit("file_upload_progress", jid, "error", str(exc), str(path))

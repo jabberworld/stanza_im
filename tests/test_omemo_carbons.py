@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import unittest.mock
 from xml.etree import ElementTree as ET
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -258,6 +259,74 @@ _up_rows = history.load_history(_upgrade, limit=10)
 check("a fallback row is upgraded to the plaintext without a duplicate",
       len(_up_rows) == 1 and _up_rows[0]["body"] == "plaintext"
       and bool(_up_rows[0].get("encrypted")))
+
+# 6b. A local URL echo blocks the later MAM fallback duplicate ---------------
+_echo = "echo@example.com"
+history.store_message(
+    _echo, "outgoing", "aesgcm://upload.example/file#key",
+    "2026-11-02T10:00:00Z", sender="Me",
+    origin_id="omemo-file-id", message_id="omemo-file-id",
+    encrypted=True, encryption="omemo")
+history.store_many(_echo, [{
+    "direction": "outgoing", "body": "This message is OMEMO encrypted.",
+    "timestamp": "2026-11-02T10:00:01Z", "sender": "Me",
+    "archive_id": "arc-file", "stanza_id": "arc-file",
+    "origin_id": "omemo-file-id", "reply_to": "", "reply_id": "",
+    "retracted": False, "retract_reason": "", "retract_by": "",
+    "replace_id": "", "markup": None, "encrypted": True,
+    "encryption": "omemo",
+}])
+_echo_rows = history.load_history(_echo, limit=10)
+check("a local file echo suppresses the later MAM fallback",
+      len(_echo_rows) == 1
+      and _echo_rows[0]["body"] == "aesgcm://upload.example/file#key")
+
+
+# 7. An OMEMO file echo reuses the sent stanza id --------------------------
+def _run_omemo_file():
+    from slixmpp.plugins.xep_0454 import XEP_0454
+
+    c = JabberClient("me@example.com/res1", "pw")
+    sent = []
+
+    async def _service():
+        return "upload.example.com"
+
+    async def _slot(service, name, size, ctype):
+        return ("https://upload.example.com/put",
+                "https://upload.example.com/get", {})
+
+    async def _put(url, path, headers, progress, data=None):
+        return None
+
+    async def _send(jid, url, mtype="chat", recipients=None):
+        sent.append((jid, url))
+        return "omemo-file-id"
+
+    c._http_upload_service = _service
+    c._http_upload_slot = _slot
+    c._http_upload_put = _put
+    c.send_omemo_message = _send
+    fd, path = tempfile.mkstemp(suffix=".png")
+    os.write(fd, b"png")
+    os.close(fd)
+    try:
+        with unittest.mock.patch.object(
+                XEP_0454, "encrypt",
+                return_value=(b"ciphertext", "iv+key")):
+            result = asyncio.get_event_loop().run_until_complete(
+                c.send_omemo_file("bob@example.com", path))
+    finally:
+        os.unlink(path)
+    return result, sent, c.take_upload_result("bob@example.com", path)
+
+
+_file_id, _file_sent, _file_result = _run_omemo_file()
+check("an OMEMO file returns the sent stanza id", _file_id == "omemo-file-id")
+check("the local echo stashes the real stanza id",
+      _file_result[0] == "omemo-file-id")
+check("the local echo gets aesgcm media metadata",
+      (_file_result[1] or {}).get("url", "").startswith("aesgcm://"))
 
 
 if FAILURES:

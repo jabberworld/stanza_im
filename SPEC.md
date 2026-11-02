@@ -2670,7 +2670,10 @@ Registers XEP plugins (conditionally where noted):
   HTTP Upload is encrypted the same way (`JabberClient.send_omemo_file`: the
   ciphertext is uploaded and the `aesgcm://…#iv+key` URL travels inside the
   OMEMO message; 1:1 only — a room or a non-OMEMO chat uploads it plainly,
-  and P2P transfers are not covered).
+  and P2P transfers are not covered). The sender's local echo reuses the real
+  OMEMO stanza id/media stashed in `_upload_results`, so the MAM fallback copy
+  (which the sending device cannot decrypt) deduplicates instead of adding a
+  second "This message is OMEMO encrypted." row.
 - An incoming encrypted message automatically switches its chat to OMEMO mode
   (so the reply is encrypted too) when `omemo.auto_enable` is on (default),
   with an «OMEMO enabled.» status line.

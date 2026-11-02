@@ -2442,7 +2442,11 @@ from an OMEMO chat over HTTP Upload is AES-256-GCM encrypted in memory
 is uploaded, and the `aesgcm://…#iv+key` URL is sent inside the OMEMO
 message (`MainWindow._launch_file_uploads` picks this path for a 1:1 chat
 whose OMEMO mode is on; a conference or a non-OMEMO chat uploads the file
-unencrypted, and P2P transfers are not covered).
+unencrypted, and P2P transfers are not covered). The local echo stashes the
+real sent OMEMO stanza id/media (`_upload_results`) before emitting `done`, so
+the archive/MAM fallback copy deduplicates against it; otherwise the sender's
+own copy (encrypted without a key for the sending device) appeared as a second
+"This message is OMEMO encrypted." row.
 [`tests/test_omemo.py`, `tests/test_omemo_crypto.py`]
 
 **geo: links & map window (RFC 5870, `include/geo.py` + `ui/map_widget.py`)**:
