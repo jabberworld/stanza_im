@@ -8061,7 +8061,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                 stable_id: str = "", reply_to: str = "",
                                 reply_id: str = "", media: dict | None = None,
                                 markup: dict | None = None,
-                                stanza_id: str = ""):
+                                stanza_id: str = "",
+                                encrypted: bool = False):
         """A message sent from another of our resources (XEP-0280 carbon).
 
         Shown as our own outgoing message in the target chat and stored in
@@ -8078,7 +8079,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 message_id=stable_id,
                 reply_able_id=stable_id, reply_author=jid,
                 reply_to=reply_to, reply_id=reply_id, media=media,
-                markup=markup, stanza_id=stanza_id)
+                markup=markup, stanza_id=stanza_id, encrypted=encrypted)
         self._remember_contact(jid)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -8086,7 +8087,8 @@ class MainWindow(QtWidgets.QMainWindow):
             timestamp=stamp, sender="Me",
             origin_id=stable_id, message_id=stable_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            markup=markup, stanza_id=stanza_id))
+            markup=markup, stanza_id=stanza_id, encrypted=encrypted,
+            encryption="omemo" if encrypted else ""))
 
     def _resolve_mds_key(self, chat_jid: str) -> str:
         """Map an incoming MDS chat JID onto one of our conversation keys.

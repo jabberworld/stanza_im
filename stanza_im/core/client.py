@@ -6362,7 +6362,7 @@ class JabberClient:
             self._mds_track(bare, msg, server_sid)
         self.emit("message_carbon_sent", bare, body, ts, stable_id,
                   reply_to, reply_id, media=media, markup=message_markup(msg),
-                  stanza_id=server_sid)
+                  stanza_id=server_sid, encrypted=True)
 
     @staticmethod
     def _omemo_flag(msg) -> bool:
