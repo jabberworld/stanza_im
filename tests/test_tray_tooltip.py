@@ -78,6 +78,13 @@ check("visible contact messages are counted",
 check("an invisible key is not counted", "8" not in tip)
 check("unread events are listed", tr("digest_events", n=2) in tip)
 
+# 2b. the fast incoming-message path refreshes the tooltip too ----------------
+import inspect  # noqa: E402
+
+check("a fast unread bump refreshes the tray tooltip",
+      "_update_tray_tooltip" in inspect.getsource(MainWindow._bump_unread))
+
+
 # 3. logged out ---------------------------------------------------------------
 p2 = _probe(client=False)
 p2._unread_chats = {"alice@example.com": {"unread": 5}}

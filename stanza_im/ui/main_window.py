@@ -7419,6 +7419,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._push_unread_to_chat(jid)
         self.unread_changed.emit()
         self._sync_tray_blink()
+        # The fast path does not run ``_recount_unread``; without this the
+        # tray tooltip stays at the last full recount (OSD/badge moved on).
+        MainWindow._update_tray_tooltip(self)
 
     def _arm_unread_separator(self, jid: str, chat) -> None:
         """Tell an open but unfocused chat that its next message is unread.

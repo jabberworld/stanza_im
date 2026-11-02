@@ -1880,7 +1880,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
 - The tooltip (`TrayIcon.set_tooltip`, `MainWindow._update_tray_tooltip`) is
   `APP_NAME` before login; after login it adds «Активный аккаунт: <jid>» and the
   Digest-style unread summary (`MainWindow._unread_stats`: contact messages,
-  conference mentions, Events), only for non-zero lines.
+  conference mentions, Events), only for non-zero lines. It is refreshed by
+  `_recount_unread` and by the fast per-message `_bump_unread` path, so a live
+  message burst cannot leave the tooltip at an older count than the OSD/badge.
 - Blinking: a smooth 1 s fade when notification unread messages exist (same
   policy as middle-click; ordinary conference messages still show a badge but
   do not blink under the default `mention`). Conference keys use

@@ -1490,8 +1490,9 @@ chat or a removed contact cannot keep the tray blinking forever. The tray
 `APP_NAME` always, «Активный аккаунт: <jid>» after login and the same unread
 summary as the Digest (`MainWindow._unread_stats` →
 `digest_contacts`/`digest_mentions`/`digest_events`); before login it is just
-`APP_NAME`. It is refreshed from `_recount_unread`, the Events-tab counters,
-`_on_session_started` and `_reset_account_ui`. The same policy
+`APP_NAME`. It is refreshed from `_recount_unread`, the fast `_bump_unread`
+path (so a live message burst cannot leave it behind the OSD/badge), the
+Events-tab counters, `_on_session_started` and `_reset_account_ui`. The same policy
 is used by `_sync_tray_blink` (ordinary conference messages still stay as
 roster/tab badges). Tray balloons are gated by `notifications.popups`
 (`off`/`system`/`system_messages`, default `system`; a legacy bool is coerced by
