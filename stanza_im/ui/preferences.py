@@ -1010,6 +1010,20 @@ class PreferencesDialog(QtWidgets.QDialog):
         theme_id = theme.currentData() if theme is not None else None
         self._sound_player.play(event, theme_id)
 
+    def _sync_low_priority_sounds(self) -> None:
+        """A low-priority override is usable only with its parent sound."""
+        chat = self._controls.get("sound_low_priority_message")
+        if chat is not None:
+            first = self._controls.get("sound_first_message")
+            any_msg = self._controls.get("sound_any_message")
+            chat.setEnabled(
+                bool((first is not None and first.isChecked())
+                     or (any_msg is not None and any_msg.isChecked())))
+        muc = self._controls.get("sound_low_priority_muc")
+        if muc is not None:
+            mention = self._controls.get("sound_muc_mention")
+            muc.setEnabled(bool(mention is not None and mention.isChecked()))
+
     @staticmethod
     def _row(*widgets: QtWidgets.QWidget, stretch_first: bool = False,
              stretch_last: bool = False,
@@ -1533,6 +1547,12 @@ class PreferencesDialog(QtWidgets.QDialog):
     def _page_chat(self):
         general, general_form = self._page()
         general_form.addRow(self._check("send_ctrl_enter", tr("prefs_send_ctrl_enter")))
+        general_form.addRow(tr("prefs_open_incoming_tab"), self._combo(
+            "open_incoming_tab", [
+                ("open_tab_always", "always"),
+                ("open_tab_except_low", "except_low"),
+                ("open_tab_never", "never"),
+            ], fixed_width=False))
         general_form.addRow(self._check("message_displayed_sync",
                                         tr("prefs_message_displayed_sync")))
         mds_throttle_spin = self._spin("mds_displayed_throttle", 1, 30)
@@ -1934,10 +1954,25 @@ class PreferencesDialog(QtWidgets.QDialog):
         theme_combo.setFixedWidth(COMBO_WIDTH)
         self._controls["sound_theme"] = theme_combo
         sound_form.addRow(tr("prefs_sound_theme"), theme_combo)
+        first_check = self._check(
+            "sound_first_message", tr("prefs_sound_first_message"))
+        any_check = self._check(
+            "sound_any_message", tr("prefs_sound_any_message"))
+        mention_check = self._check(
+            "sound_muc_mention", tr("prefs_sound_muc_mention"))
+        sound_form.addRow(self._row(self._sound_button("new_message"),
+                                    first_check))
+        sound_form.addRow(self._row(self._sound_button("message"),
+                                    any_check))
+        sound_form.addRow(self._check(
+            "sound_low_priority_message",
+            tr("prefs_sound_low_priority_message")))
+        sound_form.addRow(self._row(self._sound_button("message"),
+                                    mention_check))
+        sound_form.addRow(self._check(
+            "sound_low_priority_muc",
+            tr("prefs_sound_low_priority_muc")))
         for key, event in (
-                ("sound_first_message", "new_message"),
-                ("sound_any_message", "message"),
-                ("sound_muc_mention", "message"),
                 ("sound_on_send", "message_send"),
                 ("sound_ft_start", "ft_start"),
                 ("sound_ft_finish", "ft_finish"),
@@ -1949,6 +1984,9 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._sound_file_button("effects/ringtone.wav"),
             self._check("sound_call_incoming",
                         tr("prefs_sound_call_incoming"))))
+        for parent in (first_check, any_check, mention_check):
+            parent.toggled.connect(self._sync_low_priority_sounds)
+        self._sync_low_priority_sounds()
 
         osd, osd_form = self._page()
         osd_form.addRow(self._check("osd_enabled", tr("prefs_osd_enabled")))
@@ -2109,6 +2147,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             "language": getattr(cfg.ui, "language", "") or "",
             "history_limit_chat": chat.history_limit,
             "tab_title_length_chat": chat.tab_title_length,
+            "open_incoming_tab": getattr(
+                chat, "open_incoming_tab", "except_low"),
             "jid": cfg.jid, "password": cfg.password, "save_password": cfg.save_password,
             "auto_connect": cfg.auto_connect,
             "auto_join_conferences": connection.auto_join_conferences,
@@ -2308,9 +2348,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         values["sound_theme"] = getattr(notifications, "sound_theme",
                                         "default") or "default"
         for key in ("sound_first_message", "sound_any_message",
-                    "sound_muc_mention", "sound_on_send", "sound_ft_start",
-                    "sound_ft_finish", "sound_contact_online",
-                    "sound_contact_offline", "sound_call_incoming"):
+                    "sound_muc_mention", "sound_low_priority_message",
+                    "sound_low_priority_muc", "sound_on_send",
+                    "sound_ft_start", "sound_ft_finish",
+                    "sound_contact_online", "sound_contact_offline",
+                    "sound_call_incoming"):
             values[key] = bool(getattr(notifications, key, False))
         return values
 
@@ -2391,7 +2433,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     "allow_incoming_edits", "allow_incoming_deletions",
                     "allow_moderation",
                     "confirm_retraction", "idle_unload_minutes",
-                    "muc_name_source"):
+                    "muc_name_source", "open_incoming_tab"):
             cfg.chat[key] = self._value(key)
         cfg.chat.theme = self._value("chat_theme") or ""
         cfg.appearance.chat_theme = cfg.chat.theme
@@ -2430,9 +2472,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.notifications[key] = self._value(key)
         cfg.notifications.sound_theme = self._value("sound_theme") or "default"
         for key in ("sound_first_message", "sound_any_message",
-                    "sound_muc_mention", "sound_on_send", "sound_ft_start",
-                    "sound_ft_finish", "sound_contact_online",
-                    "sound_contact_offline", "sound_call_incoming"):
+                    "sound_muc_mention", "sound_low_priority_message",
+                    "sound_low_priority_muc", "sound_on_send",
+                    "sound_ft_start", "sound_ft_finish",
+                    "sound_contact_online", "sound_contact_offline",
+                    "sound_call_incoming"):
             cfg.notifications[key] = self._value(key)
         for key in ("auto_away", "away_minutes", "auto_xa", "xa_minutes"):
             cfg.status[key] = self._value(key)

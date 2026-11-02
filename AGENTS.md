@@ -1516,7 +1516,12 @@ carbons — and `_on_muc_private_message`, *before* the tab opens) plays
 `new_message` when no tab is open and `message` when the tab is open but not
 focused; `_on_groupchat_message` plays `message` on a mention of our nick
 (`chat_themes.mentions_nick`, the same rule as the highlight) when
-`sound_muc_mention` is on; the six send handlers (1:1/PM/MUC, incl. reply/edit)
+`sound_muc_mention` is on. Low-priority contacts are silent by default; the
+opt-in `sound_low_priority_message`/`sound_low_priority_muc` flags let them
+play too, still gated by their parent event (`sound_first_message`/
+`sound_any_message` or `sound_muc_mention`). The Preferences → Notifications →
+Sounds tab disables each low-priority override while its parent is off. The six
+send handlers (1:1/PM/MUC, incl. reply/edit)
 play `message_send`; `_on_file_transfer_progress` plays `ft_start` on an
 incoming `start` and `ft_finish` on `done`; `_on_presence_changed` plays
 `contact_online`/`contact_offline` on a real transition, the first presence per
@@ -1532,9 +1537,16 @@ while `call_state == "ringing"`, `_play_call_busy` on a rejection
 `decline`/`busy`/`reject`; both stopped in `_on_call_ended`).
 The Preferences → Notifications → Sounds tab
 has a «Звуковая тема» selector, nine per-event checkboxes (label without the
-old leading «Звук») and a note-icon preview button before each
-(`prefs_sound_preview_tip`). [`tests/test_sounds.py`]
+old leading «Звук»), two low-priority opt-ins and a note-icon preview button
+before each sound event (`prefs_sound_preview_tip`).
+[`tests/test_sounds.py`]
 
+An incoming 1:1 or MUC-private message only creates a chat tab according to
+`chat.open_incoming_tab` (`always`/`except_low`/`never`, default `except_low`);
+with the default, a low-priority contact's message is stored and counted but no
+tab is opened, while normal/high messages keep the old behaviour. Existing tabs
+always receive the message, and an automatically opened PM tab never steals
+focus (`focus=False`). Preferences → Chat → «Общие» selects the policy.
 Unread counters are persisted per contact (`core/unread_state.py` →
 `$XDG_DATA_HOME/stanza-im/<jid>/unread.json`) so the badges survive a restart.
 `MainWindow` keeps one record per chat key in `_unread_chats` and derives the

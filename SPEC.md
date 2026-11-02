@@ -382,6 +382,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
+| `chat.open_incoming_tab` | `except_low` | Auto-open a tab for an incoming 1:1/PM message: `always` / `except_low` (default; no tab for low-priority contacts) / `never`. The message is stored and counted regardless; an existing tab always receives it. |
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
 | `chat.mds_displayed_throttle` | `3` | Seconds (1–30) between XEP-0490 `displayed` publishes for **partial** read progress while scrolling (Preferences → Chat → «Общие»/«General»). `MainWindow._on_chat_last_seen` arms a single-shot `_mds_throttle_timer` carrying the newest seen stanza-id; reaching the bottom still publishes immediately. Applied live from `_on_settings_applied`. |
@@ -527,7 +528,9 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 | `notifications.sound_theme` | `default` | Sound theme id from `resources/sounds/` |
 | `notifications.sound_first_message` | `false` | Play `new_message` when a 1:1/PM arrives and no tab is open |
 | `notifications.sound_any_message` | `false` | Play `message` when a 1:1/PM arrives with the tab open but unfocused |
+| `notifications.sound_low_priority_message` | `false` | Also play the 1:1/PM event for a low-priority contact; enabled only while `sound_first_message` or `sound_any_message` is on |
 | `notifications.sound_muc_mention` | `false` | Play `message` on a MUC mention of our nick |
+| `notifications.sound_low_priority_muc` | `false` | Also play a conference-mention sound for a low-priority room; enabled only while `sound_muc_mention` is on |
 | `notifications.sound_on_send` | `false` | Play `message_send` when we send a message (1:1/PM/MUC) |
 | `notifications.sound_ft_start` | `false` | Play `ft_start` on an incoming Jingle file transfer |
 | `notifications.sound_ft_finish` | `false` | Play `ft_finish` when a transfer finishes |
@@ -2135,14 +2138,19 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `_on_settings_applied`.
 - Preferences → Notifications → «Звуки»: a «Звуковая тема» selector
   (`notifications.sound_theme`, default `default`), one checkbox per event
-  (all off by default) and a note-icon preview button before each option that
-  plays that event's sound from the currently selected theme.
+  (all off by default), two low-priority opt-ins and a note-icon preview button
+  before each sound event that plays that event's sound from the currently
+  selected theme. A low-priority opt-in is disabled while its parent
+  (`sound_first_message`/`sound_any_message` for chats, `sound_muc_mention`
+  for conferences) is off.
 - Triggers (each gated by its `notifications.sound_*` flag):
   `new_message`/`message` via `MainWindow._notify_incoming_message` (1:1 and
   MUC private; called before the tab opens, so "no tab" → `new_message`,
   "tab open but unfocused" → `message`; carbons and the focused conversation
-  are silent); `message` on a MUC mention of our nick
-  (`chat_themes.mentions_nick`); `message_send` from the 1:1/PM/MUC send,
+  are silent; a low-priority contact is silent unless
+  `sound_low_priority_message` is on); `message` on a MUC mention of our nick
+  (`chat_themes.mentions_nick`; a low-priority room needs
+  `sound_low_priority_muc`); `message_send` from the 1:1/PM/MUC send,
   reply and edit handlers; `ft_start` on an incoming Jingle transfer start and
   `ft_finish` on its `done`; `contact_online`/`contact_offline` on a real
   presence transition, the first presence per JID after login being recorded

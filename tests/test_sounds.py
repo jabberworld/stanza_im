@@ -6,6 +6,7 @@ Run with:
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_sounds_")
@@ -23,6 +24,7 @@ from stanza_im.i18n import tr
 from stanza_im.include import sounds
 from stanza_im.ui import icons as icons_mod
 from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
+from stanza_im.ui.main_window import MainWindow
 from stanza_im.ui.preferences import PreferencesDialog
 from stanza_im.ui.sounds import SoundPlayer
 
@@ -111,14 +113,76 @@ check("each option is preceded by a preview button",
       sum(1 for b in dlg.findChildren(QtWidgets.QToolButton)
           if b.toolTip() == tr("prefs_sound_preview_tip")) == len(sound_keys))
 
+# Low-priority overrides are opt-in and depend on their parent sounds.
+check("low-priority sound options are off by default",
+      not controls["sound_low_priority_message"].isChecked()
+      and not controls["sound_low_priority_muc"].isChecked())
+check("low-priority chat sound is disabled without a parent",
+      not controls["sound_low_priority_message"].isEnabled())
+check("low-priority conference sound is disabled without a parent",
+      not controls["sound_low_priority_muc"].isEnabled())
+controls["sound_any_message"].setChecked(True)
+check("enabling the chat parent enables its low-priority override",
+      controls["sound_low_priority_message"].isEnabled())
+controls["sound_muc_mention"].setChecked(True)
+check("enabling the mention parent enables its low-priority override",
+      controls["sound_low_priority_muc"].isEnabled())
+controls["sound_low_priority_message"].setChecked(True)
+controls["sound_low_priority_muc"].setChecked(True)
+check("the low-priority overrides persist",
+      Config().notifications.sound_low_priority_message is False
+      and Config().notifications.sound_low_priority_muc is False)
+
 controls["sound_theme"].setCurrentIndex(theme.findData("xylo"))
 controls["sound_contact_online"].setChecked(True)
 dlg._apply_settings()
 check("apply stores the theme and the option",
       cfg.notifications.sound_theme == "xylo"
-      and cfg.notifications.sound_contact_online is True)
+      and cfg.notifications.sound_contact_online is True
+      and cfg.notifications.sound_low_priority_message is True
+      and cfg.notifications.sound_low_priority_muc is True)
 
 dlg.deleteLater()
+
+# ── low-priority runtime gating ─────────────────────────────────
+class _SoundRecorder:
+    def __init__(self):
+        self.events = []
+
+    def play(self, event):
+        self.events.append(event)
+
+
+def _sound_window(low_message=False, low_muc=False):
+    win = MainWindow.__new__(MainWindow)
+    win._config = SimpleNamespace(notifications=SimpleNamespace(
+        sound_low_priority_message=low_message,
+        sound_low_priority_muc=low_muc,
+        sound_first_message=True,
+        sound_any_message=True,
+        sound_muc_mention=True))
+    win._sounds = _SoundRecorder()
+    win._chat_window = SimpleNamespace(
+        has_chat=lambda _jid: True, current_jid=lambda: "")
+    win._chat_area_visible = lambda: False
+    return win
+
+
+win = _sound_window()
+MainWindow._notify_incoming_message(win, "bob@example.com", "hi", "low")
+check("a low-priority message is silent by default", win._sounds.events == [])
+win._config.notifications.sound_low_priority_message = True
+MainWindow._notify_incoming_message(win, "bob@example.com", "hi", "low")
+check("the low-priority chat override plays the sound",
+      win._sounds.events == ["message"])
+win._sounds.events.clear()
+MainWindow._notify_incoming_message(win, "bob@example.com", "hi", "normal")
+check("normal priority still plays", win._sounds.events == ["message"])
+check("a low-priority conference mention is opt-in",
+      not win._priority_sound_allowed("low", "sound_low_priority_muc"))
+win._config.notifications.sound_low_priority_muc = True
+check("the low-priority conference override enables the mention sound",
+      win._priority_sound_allowed("low", "sound_low_priority_muc"))
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

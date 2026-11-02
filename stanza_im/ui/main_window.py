@@ -8007,9 +8007,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Sound decision must run before the tab is opened (``carbon`` copies
         # from our other devices stay silent).
         if not carbon:
-            self._notify_incoming_message(bare_jid, body)
+            self._notify_incoming_message(bare_jid, body, priority)
 
-        if not self._chat_window.has_chat(bare_jid):
+        if (not self._chat_window.has_chat(bare_jid)
+                and self._should_open_incoming_tab(priority)):
             self._chat_window.open_chat(bare_jid, sender_name, focus=False)
             self._apply_call_support(bare_jid)
 
@@ -8553,21 +8554,25 @@ class MainWindow(QtWidgets.QMainWindow):
         priority = self._effective_priority(sender_bare, urgency)
         self._remember_contact(target, name=nick, is_conference=True)
         self._sync_pm_roster(target, room, nick)
-        self._notify_incoming_message(target, body)
+        self._notify_incoming_message(target, body, priority)
         stamp = ts or _current_timestamp()
-        chat = self._chat_window.open_chat(target, nick)
-        self._apply_pm_presence(target, room, nick, chat)
-        self._apply_call_support(target)
-        self._arm_unread_separator(target, chat)
-        chat.add_message(sender=nick, body=body,
-                         timestamp=stamp, direction="incoming",
-                         unstyled=unstyled,
-                         sender_jid=info.get("avatar_jid", "") or target,
-                         reply_able_id=reply_able_id,
-                         reply_author=reply_author or f"{room}/{nick}",
-                         reply_to=reply_to, reply_id=reply_id, media=media,
-                         encrypted=encrypted, markup=markup,
-                         stanza_id=stanza_id)
+        chat = self._chat_window.get_chat(target)
+        if (chat is None
+                and self._should_open_incoming_tab(priority)):
+            chat = self._chat_window.open_chat(target, nick, focus=False)
+        if chat is not None:
+            self._apply_pm_presence(target, room, nick, chat)
+            self._apply_call_support(target)
+            self._arm_unread_separator(target, chat)
+            chat.add_message(sender=nick, body=body,
+                             timestamp=stamp, direction="incoming",
+                             unstyled=unstyled,
+                             sender_jid=info.get("avatar_jid", "") or target,
+                             reply_able_id=reply_able_id,
+                             reply_author=reply_author or f"{room}/{nick}",
+                             reply_to=reply_to, reply_id=reply_id, media=media,
+                             encrypted=encrypted, markup=markup,
+                             stanza_id=stanza_id)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
@@ -8726,7 +8731,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._maybe_osd_groupchat(room, nick, body)
         is_mention = bool(self_nick and nick != self_nick
                           and mentions_nick(body, self_nick))
-        if is_mention:
+        if (is_mention
+                and self._priority_sound_allowed(
+                    priority, "sound_low_priority_muc")):
             self._play_sound("message", "sound_muc_mention")
         # A conference counts unread too (skipped while the room is on screen);
         # mentions are counted separately for the composite roster badge.
@@ -11286,13 +11293,33 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._sounds.play(event)
 
-    def _notify_incoming_message(self, target: str, body: str) -> None:
+    def _should_open_incoming_tab(self, priority: str) -> bool:
+        """Apply ``chat.open_incoming_tab`` to an incoming 1:1/PM message."""
+        chat = getattr(self._config, "chat", None)
+        mode = getattr(chat, "open_incoming_tab", "except_low") or "except_low"
+        if mode == "never":
+            return False
+        if mode == "except_low":
+            return priority != "low"
+        return True
+
+    def _priority_sound_allowed(self, priority: str, low_key: str) -> bool:
+        """Whether *priority* may play a sound, gated by the low-priority key."""
+        return priority != "low" or self._sound_on(low_key)
+
+    def _notify_incoming_message(self, target: str, body: str,
+                                 priority: str = "normal") -> None:
         """Play the ``new_message``/``message`` sound for an incoming 1:1/PM.
 
         ``new_message`` (first message, no open tab) is preferred over
         ``message`` (tab open but not focused); a focused conversation is
-        silent.  Must be called *before* the tab is opened/focused.
+        silent.  Must be called *before* the tab is opened/focused.  A
+        low-priority contact is silent unless ``sound_low_priority_message``
+        is enabled; the actual event is still gated by its parent option.
         """
+        if not self._priority_sound_allowed(
+                priority, "sound_low_priority_message"):
+            return
         active = (self._chat_area_visible()
                   and self._chat_window.current_jid() == target)
         if active:
