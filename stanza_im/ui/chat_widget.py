@@ -2614,8 +2614,20 @@ class ChatWidget(QtWidgets.QWidget):
             self._render_all()
 
     def at_bottom(self) -> bool:
-        """True while the view shows the newest message of the conversation."""
+        """True while the view shows the newest message of the conversation.
+
+        A programmatic scroll (the read-anchor resume, a parked document
+        scroll) reports the page's transient bottom position before the jump
+        paints.  Treating it as "the user reached the newest message" published
+        a displayed point beyond the unread block (walkbook pravda advertised
+        14:12 while 31 older messages were still unread).
+        """
         try:
+            view = self._view
+            if (getattr(view, "_scroll_suspended", False)
+                    or getattr(view, "_deferred_scroll", None) is not None
+                    or getattr(view, "_anchor_scroll", None)):
+                return False
             return not self._view.is_scrolled_up()
         except (AttributeError, RuntimeError):
             return True

@@ -630,51 +630,81 @@ class OmemoManager:
         tw_elts = stanza.xml.findall(f"{{{omemo2_ns}}}encrypted")
         old_elts = stanza.xml.findall(f"{{{legacy_ns}}}encrypted")
 
-        message = None
-        if tw_elts:
-            message = twomemo.etree.parse_message(tw_elts[0], sender_bare)
-        elif old_elts:
-            sm = await self.session_manager()
-            message = await oldmemo.etree.parse_message(
-                old_elts[0], sender_bare, self._own_bare, sm)
-        if message is None:
-            raise ValueError("OMEMO: no supported encrypted content")
-
         sm = await self.session_manager()
         from omemo.session_manager import MessageNotForUs
-        try:
-            plaintext, device_information = (await sm.decrypt(message))[:2]
-        except MessageNotForUs:
-            if stanza.get_type() != "groupchat":
-                raise
-            cached = self._reflection_cache.pop(stanza["id"], None)
-            if cached is None:
-                raise
-            plaintext = cached.get(message.namespace)
-            device_information = (await sm.get_own_device_information())[0]
 
-        decrypted = copy(stanza)
-        try:
-            del decrypted["body"]
-        except (KeyError, AttributeError):
-            pass
-        for elt in list(decrypted.xml):
-            if elt.tag in (f"{{{omemo2_ns}}}encrypted",
-                           f"{{{legacy_ns}}}encrypted"):
-                decrypted.xml.remove(elt)
+        # A sender may include more than one encrypted element (OMEMO 2 SCE
+        # and legacy OMEMO 0.3).  The first one is not necessarily the one
+        # carrying a key for this device, so try every candidate instead of
+        # giving up on the first namespace.
+        candidates = []
+        for elt in tw_elts:
+            try:
+                candidates.append(twomemo.etree.parse_message(elt, sender_bare))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("OMEMO: could not parse an OMEMO 2 element: %s", exc)
+        for elt in old_elts:
+            try:
+                candidates.append(await oldmemo.etree.parse_message(
+                    elt, sender_bare, self._own_bare, sm))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("OMEMO: could not parse a legacy element: %s", exc)
+        if not candidates:
+            raise ValueError("OMEMO: no supported encrypted content")
 
-        if message.namespace == omemo2_ns:
-            if plaintext is None:
-                raise ValueError("OMEMO: empty SCE payload")
-            envelope = sce.parse(plaintext)
-            self._verify_affixes(envelope, sender_bare, stanza)
-            for child in sce.extract_content(envelope):
-                decrypted.xml.append(child)
-        else:
-            if plaintext is not None:
-                decrypted["body"] = plaintext.decode("utf-8")
+        last_exc = None
+        for message in candidates:
+            try:
+                plaintext, device_information = (await sm.decrypt(message))[:2]
+            except MessageNotForUs as exc:
+                last_exc = exc
+                if stanza.get_type() != "groupchat":
+                    continue
+                cached = self._reflection_cache.get(stanza["id"], {})
+                if message.namespace not in cached:
+                    continue
+                plaintext = cached[message.namespace]
+                device_information = (await sm.get_own_device_information())[0]
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.debug("OMEMO: candidate %s could not be decrypted: %s",
+                             message.namespace, exc)
+                continue
 
-        return decrypted, device_information
+            try:
+                decrypted = copy(stanza)
+                try:
+                    del decrypted["body"]
+                except (KeyError, AttributeError):
+                    pass
+                for elt in list(decrypted.xml):
+                    if elt.tag in (f"{{{omemo2_ns}}}encrypted",
+                                   f"{{{legacy_ns}}}encrypted"):
+                        decrypted.xml.remove(elt)
+
+                if message.namespace == omemo2_ns:
+                    if plaintext is None:
+                        raise ValueError("OMEMO: empty SCE payload")
+                    envelope = sce.parse(plaintext)
+                    self._verify_affixes(envelope, sender_bare, stanza)
+                    for child in sce.extract_content(envelope):
+                        decrypted.xml.append(child)
+                else:
+                    if plaintext is not None:
+                        decrypted["body"] = plaintext.decode("utf-8")
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.debug("OMEMO: candidate %s could not be applied: %s",
+                             message.namespace, exc)
+                continue
+
+            if stanza.get_type() == "groupchat":
+                self._reflection_cache.pop(stanza["id"], None)
+            return decrypted, device_information
+
+        if last_exc is not None:
+            raise last_exc
+        raise ValueError("OMEMO: no supported encrypted content")
 
     # ── JET key transport (XEP-0391/0396) ──────────────────────
 
@@ -723,8 +753,11 @@ class OmemoManager:
             raise ValueError("OMEMO: SCE 'from' affix mismatch")
         to_elt = sce.affix(envelope, "to")
         if to_elt is not None:
-            expected = (stanza.get_to().bare
-                        if stanza.get_type() == "groupchat"
-                        else self._own_bare)
+            # A received copy is addressed to our own bare JID, but a
+            # XEP-0280 ``sent`` carbon carries the **peer** as its ``to`` and
+            # the SCE envelope records that same peer.  Compare with the
+            # stanza's actual target; keep our own bare JID as the fallback
+            # for older envelopes.
+            expected = stanza.get_to().bare
             if to_elt.get("jid") not in (expected, self._own_bare):
                 raise ValueError("OMEMO: SCE 'to' affix mismatch")

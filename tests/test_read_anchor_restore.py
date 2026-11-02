@@ -710,6 +710,28 @@ check("the deferred resolve can fall back to the unread start",
       "_first_unread_entry()" in _finish
       and "fallback_unread" in _finish)
 
+# 19. a transient bottom during a programmatic scroll is not "read" ----------
+class _AtBottomView:
+    _scroll_suspended = False
+    _deferred_scroll = None
+    _anchor_scroll = None
+
+    def is_scrolled_up(self):
+        return False
+
+
+_bw = ChatWidget.__new__(ChatWidget)
+_bw._view = _AtBottomView()
+check("a settled view at the bottom is at bottom", _bw.at_bottom())
+_bw._view._scroll_suspended = True
+check("a suspended scroll is not at bottom", not _bw.at_bottom())
+_bw._view._scroll_suspended = False
+_bw._view._anchor_scroll = {"kind": "message", "ref": "m-1", "until": 0.0}
+check("a pending anchor scroll is not at bottom", not _bw.at_bottom())
+_bw._view._anchor_scroll = None
+_bw._view._deferred_scroll = ("message", "m-1", False, "")
+check("a parked document scroll is not at bottom", not _bw.at_bottom())
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

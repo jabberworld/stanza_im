@@ -2279,7 +2279,15 @@ Registers XEP plugins (conditionally where noted):
   `sid` only from `data-stanza-sid` (never the local `data-stanza-id`/
   `origin-id`) and `_mds_point_sid` has no `origin_id` fallback. An unknown
   RSM `after` makes a server return the first archive page, so a local id must
-  never become the shared cursor. A remote state
+  never become the shared cursor. An id that exists locally only as an
+  `origin_id`/`message_id` is invalid (`timestamp_for_server_ref` matches
+  archive/stanza ids only; `timestamp_for_ref` still resolves any ref for
+  replies/jumps), so an old origin-only point never anchors unread or becomes
+  an RSM cursor. The read anchor is the newer of `read_ts` and `seen_ts`: a
+  partial-progress point older than the displayed point cannot leave unread
+  messages before it. `ChatWidget.at_bottom` is false while a programmatic
+  scroll/anchor restore is suspended, so a transient bottom cannot publish a
+  displayed point before the anchor paints. A remote state
   also seeds the read anchor and starts `_reconcile_mds_unread`: it walks the
   archive forward from the shared displayed timestamp, or from the local
   read/seen point when the shared id cannot be resolved, and from the newest
@@ -2605,6 +2613,13 @@ Registers XEP plugins (conditionally where noted):
   decrypts 1:1/carbon/MUC stanzas and re-enters the normal paths with an
   `encrypted` flag; the flag and the namespace are stored in the new `history`
   `encrypted`/`encryption` columns and a lock is rendered before the body.
+  XEP-0280 sent carbons of encrypted messages are decrypted too
+  (`_on_carbon_sent` → `_omemo_sent_carbon` → `_emit_1to1_sent`) and shown as
+  our own outgoing message in the target chat instead of the fallback text.
+  `decrypt` tries every `<encrypted>` element (OMEMO 2 and legacy) until one
+  has a key for this device; the SCE `<to>` affix may name the peer in a sent
+  carbon. Bodyless per-device self copies from Conversations/Monocles are
+  transport metadata and are ignored silently.
 - UI: the Privacy preferences tabs («Общие» + «OMEMO» — the latter with the
   blind-trust option + info glyph, the alias-sync toggle, the own fingerprint
   with compact copy/QR icon buttons and a device-manager button), the device

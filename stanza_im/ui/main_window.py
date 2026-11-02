@@ -6601,6 +6601,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._refresh_unread_badge(jid)
             # If total == 0 leave the old value for _apply_visible_unread: it
             # logs the reconciliation and performs the mark-read transition.
+        entry = self._unread_chats.get(jid)
+        if entry:
+            read_ts = str(entry.get("read_ts") or "")
+            seen_ts = str(entry.get("seen_ts") or "")
+            if read_ts and read_ts > seen_ts:
+                # The read point is authoritative: a partial-progress point
+                # older than it cannot leave unread messages before the point
+                # we already advertised as displayed (walkbook pravda 64 vs 33).
+                entry["seen_ref"] = str(entry.get("read_ref") or "")
+                entry["seen_ts"] = read_ts
+                entry["seen_sid"] = str(entry.get("read_sid") or "")
+                self._schedule_unread_save()
         self._push_unread_to_chat(jid)
         if active:
             QtCore.QTimer.singleShot(
@@ -7202,14 +7214,27 @@ class MainWindow(QtWidgets.QMainWindow):
         entry = self._read_state(jid)
         if entry["unread"] <= 0:
             return {}
-        # Prefer seen anchor if available (partial progress)
-        if entry.get("seen_ref") or entry.get("seen_ts") or entry.get("seen_sid"):
-            return {"ref": entry.get("seen_ref", ""), "ts": entry.get("seen_ts", ""),
-                    "sid": entry.get("seen_sid", "")}
-        if (entry.get("read_ref") or entry.get("read_ts")
-                or entry.get("read_sid")):
-            return {"ref": entry["read_ref"], "ts": entry["read_ts"],
-                    "sid": entry["read_sid"]}
+        seen = {"ref": entry.get("seen_ref", ""),
+                "ts": entry.get("seen_ts", ""),
+                "sid": entry.get("seen_sid", "")}
+        read = {"ref": entry.get("read_ref", ""),
+                "ts": entry.get("read_ts", ""),
+                "sid": entry.get("read_sid", "")}
+        seen_ok = any(seen.values())
+        read_ok = any(read.values())
+        if seen_ok and read_ok:
+            # The read anchor can be newer than the partial-progress point
+            # when another device's displayed state was applied (or a stale
+            # seen point survived).  Never resume before a point we already
+            # advertised as read: unread messages before it are contradictory
+            # and made walkbook show 64 while the other clients showed 33.
+            if str(seen.get("ts") or "") >= str(read.get("ts") or ""):
+                return seen
+            return read
+        if seen_ok:
+            return seen
+        if read_ok:
+            return read
         # Unread but never read to the end: there is no read point.  A truthy
         # empty anchor makes set_history place the separator before the first
         # loaded row instead of treating the conversation as "no unread".
@@ -8169,8 +8194,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if key not in self._muc_joined and not open_chat and not force:
             # A 1:1 chat reconstructs when it is actually opened.
             return
+        shared_ts = await history.timestamp_for_server_ref_async(key, sid) \
+            if sid else ""
+        if sid and not shared_ts and await history.message_exists_async(key, sid):
+            # The id exists locally only as an origin/local message id (the
+            # old kkm4 point was our own OMEMO message's origin id).  It is not
+            # a valid XEP-0359 archive cursor: ignore it instead of anchoring
+            # unread at it or sending it as RSM ``after``.
+            logger.debug("MDS[invalid] jid=%s sid=%s is a local id", key, sid)
+            invalid_sid = sid
+            sid = ""
+            if entry:
+                # An older build persisted the invalid origin id as our read
+                # anchor; drop it (and the matching partial point) so it cannot
+                # keep recreating unread from a non-archive cursor.
+                if str(entry.get("read_sid") or "") == invalid_sid:
+                    entry["read_sid"] = ""
+                    entry["read_ts"] = ""
+                    entry["read_ref"] = ""
+                if str(entry.get("seen_sid") or "") == invalid_sid:
+                    entry["seen_sid"] = ""
+                    entry["seen_ts"] = ""
+                    entry["seen_ref"] = ""
+                self._schedule_unread_save()
+        local_ts = max(str((entry or {}).get("read_ts") or ""),
+                       str((entry or {}).get("seen_ts") or ""))
         if not sid:
-            # A chat without any shared MDS point still needs the tail gap
+            # A chat without a valid shared MDS point still needs the tail gap
             # filled when it is opened (outgoing messages from another
             # resource never reach this device through carbons).
             now = time.monotonic()
@@ -8178,9 +8228,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if not force and now - last < _HISTORY_GAP_INTERVAL_S:
                 logger.debug("MDS[skip] jid=%s reason=gap-throttled", key)
                 return
-        local_ts = max(str((entry or {}).get("read_ts") or ""),
-                       str((entry or {}).get("seen_ts") or ""))
-        shared_ts = await history.timestamp_for_ref_async(key, sid) if sid else ""
         # The ordinary history gap is the tail after the local point: a device
         # that was offline misses whatever another resource wrote there
         # (outgoing copies never come back through carbons).  Fetching from the
@@ -8370,7 +8417,16 @@ class MainWindow(QtWidgets.QMainWindow):
         unread block.
         """
         from stanza_im.core import history
-        remote_ts = await history.timestamp_for_ref_async(key, sid)
+        remote_ts = await history.timestamp_for_server_ref_async(key, sid)
+        if not remote_ts and await history.message_exists_async(key, sid):
+            # An id that only matches a local origin/message id is not a
+            # XEP-0359 displayed point; never clear or re-anchor unread from it.
+            logger.debug("MDS[invalid] jid=%s sid=%s is a local id", key, sid)
+            if force:
+                # Let the forced startup/rebuild path validate and drop the
+                # persisted invalid anchor (the kkm4 phantom unread).
+                await self._reconcile_mds_unread(key, force=True)
+            return
         entry = self._unread_chats.get(key)
         if force:
             local_ts = max(str((entry or {}).get("read_ts") or ""),

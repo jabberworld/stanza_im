@@ -2077,7 +2077,16 @@ reports `sid` only from `data-stanza-sid` (never the local `data-stanza-id`/
 local id published as the shared point is not a valid MAM archive cursor: an
 unknown `<after>` makes servers return the first archive page (rbook's 250 old
 results instead of the three new messages), so an outgoing 1:1 message without
-a server id simply does not advance the point.
+a server id simply does not advance the point. An id that exists locally only
+as an `origin_id`/`message_id` is likewise invalid (`timestamp_for_server_ref`
+matches archive/stanza ids only; `timestamp_for_ref` still resolves any ref for
+replies/jumps), so an old origin-only point (kkm4's own OMEMO message) never
+anchors unread or becomes an RSM cursor. The read anchor is the **newer** of
+`read_ts` and `seen_ts`: a partial-progress point older than the point we
+advertised as displayed cannot leave unread messages before it (walkbook
+pravda 64 vs the other clients' 33). `ChatWidget.at_bottom` is also false while
+a programmatic scroll/anchor restore is suspended, so a transient bottom cannot
+publish a displayed point before the anchor paints.
 A remote state also seeds the read anchor and starts
 `_reconcile_mds_unread` (variant A). It walks the archive **forward from the
 shared displayed timestamp**, or from the local read/seen point when the shared
@@ -2338,7 +2347,15 @@ Sending goes through `client.send_omemo_message` (the 1:1 send handlers route
 to it when `omemo.chat_mode(jid) == "omemo"`); incoming encrypted stanzas are
 decrypted in `_decrypt_and_dispatch` and re-enter the normal paths with an
 `encrypted` flag, stored in the new `history` columns and rendered as a lock
-before the body. Device names can be mirrored to a private PEP node
+before the body. XEP-0280 **sent carbons** of encrypted messages are decrypted
+too (`_on_carbon_sent` → `_omemo_sent_carbon` → `_emit_1to1_sent`): the carbon
+copy for another own device carries a key for it, so it is shown as our own
+outgoing message in the target chat instead of the fallback text. `decrypt`
+tries every `<encrypted>` element (OMEMO 2 and legacy) until one has a key for
+this device, and the SCE `<to>` affix may name the peer in a sent carbon.
+Conversations/Monocles also send one bodyless encrypted copy per own device to
+the account's bare JID; those are transport metadata, not messages, and are
+ignored silently. Device names can be mirrored to a private PEP node
 (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
 `omemo.alias_sync`) so they follow the user across clients: a **manual** rename
 is published (overwriting), while a **learned** name is published only when the

@@ -6279,6 +6279,15 @@ class JabberClient:
         try:
             decrypted, device = await self.omemo.decrypt(msg)
         except Exception as exc:  # noqa: BLE001
+            frm = str(msg.get("from", "") or "").split("/", 1)[0]
+            to = str(msg.get("to", "") or "").split("/", 1)[0]
+            if (frm and frm == self.jid_str and to == self.jid_str
+                    and "does not contain key material for us" in str(exc)):
+                # Conversations/Monocles send one encrypted copy per own
+                # device; on the other devices it correctly has no key for us
+                # and is transport metadata, not a decryptable message.
+                logger.debug("OMEMO: ignoring a per-device self copy")
+                return
             logger.warning("OMEMO decryption failed: %s", exc)
             self.emit("omemo_decrypt_failed", str(msg["from"]), str(exc))
             return
@@ -6302,6 +6311,9 @@ class JabberClient:
             pass
         if str(decrypted["type"]) == "groupchat":
             self._on_groupchat_message(decrypted)
+        elif (getattr(msg, "_omemo_sent_carbon", False)
+              or getattr(decrypted, "_omemo_sent_carbon", False)):
+            self._emit_1to1_sent(decrypted)
         elif getattr(msg, "_omemo_carbon", False):
             self._emit_1to1(decrypted, carbon=True)
         else:
@@ -6321,6 +6333,37 @@ class JabberClient:
                   encrypted=self._omemo_flag(msg), markup=markup,
                   stanza_id=server_sid)
 
+    def _emit_1to1_sent(self, msg) -> None:
+        """Emit a decrypted XEP-0280 ``sent`` carbon as our own outgoing row."""
+        target = str(msg["to"] or "")
+        bare = target.split("/", 1)[0] if "/" in target else target
+        if not bare or bare == self.jid_str:
+            # A per-device OMEMO carbon copy addressed to our own bare JID is
+            # transport metadata, not a conversation with ourselves.
+            return
+        retract_ref = _retract_reference(msg)
+        if retract_ref:
+            self.emit("message_retracted_own", bare, retract_ref)
+            return
+        body = str(msg["body"] or "")
+        unstyled, ts, reply_to, reply_id, stable_id = self._message_fields(msg)
+        replace_ref = _replace_reference(msg)
+        if replace_ref:
+            self.emit("message_corrected", bare, replace_ref, body, ts,
+                      unstyled, stable_id, reply_to, reply_id,
+                      media=message_media(msg), markup=message_markup(msg),
+                      direction="outgoing")
+            return
+        media = message_media(msg)
+        if not body and not media:
+            return
+        server_sid = _stanza_id(msg, self.jid_str)
+        if server_sid:
+            self._mds_track(bare, msg, server_sid)
+        self.emit("message_carbon_sent", bare, body, ts, stable_id,
+                  reply_to, reply_id, media=media, markup=message_markup(msg),
+                  stanza_id=server_sid)
+
     @staticmethod
     def _omemo_flag(msg) -> bool:
         return bool(getattr(msg, "_omemo_encrypted", False))
@@ -6338,6 +6381,15 @@ class JabberClient:
             self._maybe_pep_event(msg)
             return
         if self._is_omemo_encrypted(msg):
+            frm_bare = str(msg.get("from", "") or "").split("/", 1)[0]
+            to_bare = str(msg.get("to", "") or "").split("/", 1)[0]
+            if (frm_bare and frm_bare == self.jid_str and to_bare == self.jid_str
+                    and not str(msg.get("body", "") or "").strip()):
+                # Conversations/Monocles send a bodyless encrypted copy per
+                # own device to the account's bare JID; it is transport
+                # metadata, never a self-chat message.
+                logger.debug("OMEMO: ignoring a per-device self copy")
+                return
             self._start_task(self._decrypt_and_dispatch(msg))
             return
         if _is_muc_invite(msg):
@@ -6499,6 +6551,20 @@ class JabberClient:
         target = str(inner["to"] or "")
         bare = target.split("/")[0] if "/" in target else target
         if not bare:
+            return
+        if self._is_omemo_encrypted(inner):
+            if bare == self.jid_str:
+                # Conversations/Monocles send one encrypted copy per own
+                # device to the account's bare JID.  A copy encrypted for
+                # another device is not a message for this conversation.
+                logger.debug("OMEMO: ignoring per-device self carbon for %s",
+                             bare)
+                return
+            try:
+                inner._omemo_sent_carbon = True
+            except Exception:  # noqa: BLE001
+                pass
+            self._start_task(self._decrypt_and_dispatch(inner))
             return
         retract_ref = _retract_reference(inner)
         if retract_ref:

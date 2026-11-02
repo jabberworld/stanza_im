@@ -502,6 +502,67 @@ check("a bare room address stays the conference",
 check("a one-to-one chat resolves to its bare jid",
       win._resolve_mds_key("bob@example.com/stanza") == "bob@example.com")
 
+# 5c. the read point wins over an older partial-progress point ----------------
+_pravda = MainWindow.__new__(MainWindow)
+_pravda._unread_chats = {"pravda@example": {
+    **unread_state.blank(), "unread": 64,
+    "read_ref": "read-ref", "read_ts": "2026-11-01T14:12:48Z",
+    "read_sid": "read-sid",
+    "seen_ref": "seen-ref", "seen_ts": "2026-11-01T03:33:34Z",
+    "seen_sid": "seen-sid"}}
+_pravda_anchor = MainWindow._restore_anchor_for(_pravda, "pravda@example")
+check("an older seen point never resumes before the read point",
+      _pravda_anchor.get("ts") == "2026-11-01T14:12:48Z"
+      and _pravda_anchor.get("sid") == "read-sid")
+_pravda._unread_chats["pravda@example"]["seen_ts"] = \
+    "2026-11-01T15:00:00Z"
+_pravda_anchor2 = MainWindow._restore_anchor_for(_pravda, "pravda@example")
+check("a newer partial-progress point still wins",
+      _pravda_anchor2.get("ts") == "2026-11-01T15:00:00Z")
+
+# 5d. an origin-only MDS id is not a server displayed point -------------------
+_kkm = "kkm@example"
+history.store_message(
+    _kkm, "outgoing", "encrypted", "2026-10-19T13:38:00Z", sender="Me",
+    archive_id="", stanza_id="", origin_id="origin-kkm",
+    message_id="origin-kkm")
+history.store_message(
+    _kkm, "incoming", "after", "2026-10-20T10:00:00Z", sender=_kkm,
+    archive_id="arc-after", stanza_id="arc-after", origin_id="arc-after",
+    message_id="arc-after")
+check("timestamp_for_server_ref ignores a local origin id",
+      history.timestamp_for_server_ref(_kkm, "origin-kkm") == "")
+check("timestamp_for_server_ref accepts a server id",
+      history.timestamp_for_server_ref(_kkm, "arc-after")
+      .startswith("2026-10-20T10:00:00"))
+_kkm_recon = MainWindow.__new__(MainWindow)
+_kkm_recon._client = SimpleNamespace(
+    _mds_local={_kkm: "origin-kkm"})
+_kkm_recon._unread_chats = {_kkm: {
+    **unread_state.blank(), "read_ref": "origin-kkm",
+    "read_sid": "origin-kkm", "read_ts": "2026-10-19T13:38:00Z",
+    "seen_ref": "origin-kkm", "seen_sid": "origin-kkm",
+    "seen_ts": "2026-10-19T13:38:00Z"}}
+_kkm_recon._mam_unsupported = {_kkm}
+_kkm_recon._muc_joined = set()
+_kkm_recon._known_conferences = set()
+_kkm_recon._muc_self_nicks = {}
+_kkm_recon._conference_roster = set()
+_kkm_recon._bookmarks = {}
+_kkm_recon._config = None
+_kkm_recon._chat_window = None
+_kkm_recon._mds_reconciling = set()
+_kkm_recon._mds_reconciled = set()
+_kkm_recon._history_gap_checked = {}
+_kkm_recon._recount_unread = lambda: None
+_kkm_recon._refresh_unread_badge = lambda _jid: None
+_kkm_recon._push_unread_to_chat = lambda _jid: None
+_kkm_recon._schedule_unread_save = lambda: None
+asyncio.get_event_loop().run_until_complete(
+    _kkm_recon._reconcile_mds_unread(_kkm, force=True))
+check("an origin-only shared id never creates unread",
+      not (_kkm_recon._unread_chats.get(_kkm) or {}).get("unread"))
+
 # 6. static wiring ------------------------------------------------------------
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _mw_src = open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),

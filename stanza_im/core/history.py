@@ -893,6 +893,29 @@ def timestamp_for_ref(jid: str, stable_id: str) -> str:
         return ""
 
 
+def timestamp_for_server_ref(jid: str, stable_id: str) -> str:
+    """Timestamp of a message whose **server** id equals *stable_id*.
+
+    XEP-0490 ``displayed`` points must be XEP-0359 server stanza ids
+    (``archive_id``/``stanza_id``).  A local ``origin_id``/``message_id`` is
+    never a valid archive cursor: another device sending it back as an RSM
+    ``after`` makes the server return its first page.  An empty result with
+    :func:`message_exists` true means the id exists only as a local id.
+    """
+    if not stable_id:
+        return ""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT timestamp FROM messages WHERE archive_id = ? "
+                "OR stanza_id = ? ORDER BY timestamp DESC, id DESC LIMIT 1",
+                (stable_id, stable_id)).fetchone()
+            return str(row[0] or "") if row else ""
+    except sqlite3.Error:
+        return ""
+
+
 def entry_by_ref(jid: str, stable_id: str) -> dict | None:
     """The stored entry carrying *stable_id*, or ``None``.
 
@@ -1130,6 +1153,10 @@ async def newest_timestamp_async(jid: str) -> str:
 
 async def timestamp_for_ref_async(jid: str, stable_id: str) -> str:
     return await asyncio.to_thread(timestamp_for_ref, jid, stable_id)
+
+
+async def timestamp_for_server_ref_async(jid: str, stable_id: str) -> str:
+    return await asyncio.to_thread(timestamp_for_server_ref, jid, stable_id)
 
 
 async def count_incoming_after_async(jid: str, timestamp: str) -> int:
