@@ -2636,7 +2636,10 @@ Registers XEP plugins (conditionally where noted):
   is an XML element, so `_mam_rows` normalizes it to a `slixmpp.Message`
   (`_as_message_stanza`) before OMEMO detection and `message_markup`; without
   that normalization the element has no `.xml` and the row looks unencrypted.
-  A plaintext copy arriving
+  The server `<delay/>` is read from the outer MAM result first
+  (`_message_timestamp`): a normalized message answers the unregistered `delay`
+  interface with an empty placeholder, so checking it first would hide the real
+  timestamp. A plaintext copy arriving
   after an already stored fallback (live after MAM, or a later MAM page)
   upgrades that row in place; a real plaintext row is never overwritten. MUC
   OMEMO history remains fallback until occupant/real-JID context is available.

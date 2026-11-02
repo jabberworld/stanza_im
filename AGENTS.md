@@ -2374,7 +2374,10 @@ and the row is marked `encrypted`/`encryption="omemo"`; a failed/absent key
 keeps the fallback with the lock. The forwarded MAM payload is an XML element,
 so `_mam_rows` normalizes it to a `slixmpp.Message` (`_as_message_stanza`)
 before OMEMO detection and `message_markup`; without that normalization the
-element has no `.xml` and the row looks unencrypted. MUC OMEMO history is left
+element has no `.xml` and the row looks unencrypted. The server `<delay/>` is
+read from the outer MAM result first (`_message_timestamp`): a normalized
+message answers the unregistered `delay` interface with an empty placeholder,
+so checking it first would hide the real timestamp. MUC OMEMO history is left
 as fallback until occupant/real-JID context is available. When a plaintext
 copy later meets an already stored fallback row (live after MAM, or a later
 MAM page), `_insert` upgrades the fallback body in place instead of skipping

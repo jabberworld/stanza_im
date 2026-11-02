@@ -8278,16 +8278,18 @@ def _delay_stamp(message) -> str:
 
 
 def _message_timestamp(message, result=None) -> str:
-    """Extract the original server timestamp from a MAM result."""
-    for stanza in (message, result):
-        delay = _stanza_value(stanza, "delay")
-        stamp = _stanza_value(delay, "stamp")
-        if isinstance(stamp, datetime.datetime):
-            return stamp.strftime("%Y-%m-%dT%H:%M:%S")
+    """Extract the original server timestamp from a MAM result.
+
+    The MAM ``<delay/>`` is a sibling of the forwarded message inside the
+    outer result, whose ``result``/``message`` objects expose it reliably.
+    Check ``result`` first: a normalized ``slixmpp.Message`` answers the
+    unregistered ``delay`` interface with an empty placeholder, so checking it
+    first would hide the real timestamp on the wrapper.
+    """
+    for stanza in (result, message):
+        stamp = _delay_stamp(stanza)
         if stamp:
-            value = str(stamp).strip()
-            if value:
-                return value
+            return stamp
     return ""
 
 

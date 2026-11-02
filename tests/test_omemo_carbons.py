@@ -195,11 +195,6 @@ check("the MAM parser keeps the encrypted stanza for decryption",
 
 
 # 4d. A raw XML forwarded MAM result is normalized to a Message -------------
-class _MamResult:
-    def __init__(self, xml):
-        self.xml = xml
-
-
 class _StrictOmemo(_FakeOmemo):
     def is_encrypted(self, msg):
         # Mimic slixmpp-omemo: it needs the stanza's .xml attribute.
@@ -210,17 +205,25 @@ class _StrictOmemo(_FakeOmemo):
 
 
 def make_mam_result(frm="bob@example.com/res", to="me@example.com/res1",
-                    mid="mam-element-1", stamp="2026-11-02T22:35:00Z"):
-    outer = ET.Element("{urn:xmpp:mam:2}result", {"id": "archive-element-1"})
-    forwarded = ET.SubElement(outer, "{urn:xmpp:forward:0}forwarded")
+                    mid="mam-element-1", stamp="2026-11-02T22:35:00Z",
+                    omemo=True):
+    # A real slixmpp MAM result: outer <message><result><forwarded>…
+    # The inner payload is a raw XML element, as the MAM plugin delivers it.
+    outer = slixmpp.Message()
+    outer["to"] = "me@example.com/res1"
+    result = ET.SubElement(outer.xml, "{urn:xmpp:mam:2}result", {
+        "id": "archive-element-1",
+    })
+    forwarded = ET.SubElement(result, "{urn:xmpp:forward:0}forwarded")
     ET.SubElement(forwarded, "{urn:xmpp:delay}delay", {"stamp": stamp})
     inner = ET.SubElement(forwarded, "{jabber:client}message", {
         "from": frm, "to": to, "type": "chat", "id": mid,
     })
-    ET.SubElement(inner, "{jabber:client}body").text = \
-        "This message is OMEMO encrypted."
-    ET.SubElement(inner, f"{{{LEGACY}}}encrypted")
-    return _MamResult(outer)
+    ET.SubElement(inner, "{jabber:client}body").text = (
+        "This message is OMEMO encrypted." if omemo else "plain")
+    if omemo:
+        ET.SubElement(inner, f"{{{LEGACY}}}encrypted")
+    return outer
 
 
 _mam_element = JabberClient("me@example.com/res1", "pw")
@@ -230,12 +233,22 @@ _element_rows, _ep, _es, _er = _mam_element._mam_rows(
 check("a raw XML forwarded MAM stanza is recognized as encrypted",
       len(_element_rows) == 1
       and _element_rows[0].get("_omemo_stanza") is not None)
+check("a raw XML forwarded MAM stanza keeps the server timestamp",
+      len(_element_rows) == 1
+      and _element_rows[0].get("timestamp") == "2026-11-02T22:35:00.000000Z")
 _element_rows = asyncio.get_event_loop().run_until_complete(
     _mam_element._decrypt_mam_rows("bob@example.com", _element_rows))
 check("a raw XML forwarded MAM stanza is decrypted",
       _element_rows[0]["body"] == "hello"
       and _element_rows[0]["encrypted"] is True
       and _element_rows[0]["encryption"] == "omemo")
+
+_plain_rows, _pp, _ps, _pr = _mam_element._mam_rows(
+    "bob@example.com", [make_mam_result(mid="mam-plain-1", omemo=False)])
+check("a plain forwarded MAM stanza keeps the server timestamp",
+      len(_plain_rows) == 1
+      and _plain_rows[0].get("body") == "plain"
+      and _plain_rows[0].get("timestamp") == "2026-11-02T22:35:00.000000Z")
 
 
 # 4e. An outgoing own-device MAM row is not mistaken for a self copy --------
