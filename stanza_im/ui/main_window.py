@@ -8208,14 +8208,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 # An older build persisted the invalid origin id as our read
                 # anchor; drop it (and the matching partial point) so it cannot
                 # keep recreating unread from a non-archive cursor.
+                cleared = False
                 if str(entry.get("read_sid") or "") == invalid_sid:
                     entry["read_sid"] = ""
                     entry["read_ts"] = ""
                     entry["read_ref"] = ""
+                    cleared = True
                 if str(entry.get("seen_sid") or "") == invalid_sid:
                     entry["seen_sid"] = ""
                     entry["seen_ts"] = ""
                     entry["seen_ref"] = ""
+                    cleared = True
+                if cleared:
+                    entry["unread"] = 0
+                    entry["mentions"] = 0
+                    entry["important"] = 0
+                    self._refresh_unread_badge(key)
+                    self._push_unread_to_chat(key)
+                    self._recount_unread()
                 self._schedule_unread_save()
         local_ts = max(str((entry or {}).get("read_ts") or ""),
                        str((entry or {}).get("seen_ts") or ""))
