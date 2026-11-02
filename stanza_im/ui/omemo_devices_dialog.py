@@ -68,6 +68,7 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         self._client = client
         self._jid = str(jid).split("/")[0]
         self._own = bool(own)
+        self._own_device_id = 0
         self._devices: list = []
         self.setWindowTitle(tr("omemo_devices_title", jid=self._jid))
         self.resize(760, 520)
@@ -121,6 +122,9 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
                 await omemo.refresh_aliases()
             await omemo.refresh_device_lists([self._jid], force=True)
             devices = await omemo.devices(self._jid)
+            if self._own:
+                own = await omemo.own_device()
+                self._own_device_id = int(own.device_id) if own else 0
         except Exception as exc:  # noqa: BLE001
             logger.debug("OMEMO device load failed", exc_info=True)
             self._status.setText(tr("omemo_load_failed", error=str(exc)))
@@ -189,7 +193,8 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         copy_btn.clicked.connect(lambda: self._copy(device))
         box.addWidget(copy_btn)
 
-        if self._own:
+        if (self._own
+                and int(device.device_id) != self._own_device_id):
             delete_btn = _icon_button("process-stop.png",
                                       tr("omemo_delete_device"))
             delete_btn.clicked.connect(lambda: self._delete(device))
@@ -238,6 +243,10 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         asyncio.ensure_future(self._delete_async(device))
 
     async def _delete_async(self, device) -> None:
+        if (self._own
+                and int(device.device_id) == self._own_device_id):
+            self._status.setText(tr("omemo_delete_current"))
+            return
         try:
             await self._client.omemo.purge_device(device)
         except Exception as exc:  # noqa: BLE001

@@ -2355,7 +2355,14 @@ tries every `<encrypted>` element (OMEMO 2 and legacy) until one has a key for
 this device, and the SCE `<to>` affix may name the peer in a sent carbon.
 Conversations/Monocles also send one bodyless encrypted copy per own device to
 the account's bare JID; those are transport metadata, not messages, and are
-ignored silently. Device names can be mirrored to a private PEP node
+ignored silently. MAM pages are decrypted for **1:1** OMEMO rows before storing
+(`_decrypt_mam_rows`): the archived fallback body is replaced by the plaintext
+and the row is marked `encrypted`/`encryption="omemo"`; a failed/absent key
+keeps the fallback with the lock. MUC OMEMO history is left as fallback until
+occupant/real-JID context is available. When a plaintext copy later meets an
+already stored fallback row (live after MAM, or a later MAM page), `_insert`
+upgrades the fallback body in place instead of skipping it; a real plaintext
+row is never overwritten. Device names can be mirrored to a private PEP node
 (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
 `omemo.alias_sync`) so they follow the user across clients: a **manual** rename
 is published (overwriting), while a **learned** name is published only when the
@@ -2416,7 +2423,9 @@ the row widgets (the scroll area's size hint is 0 until the event loop runs).
 Deleting an own device (`purge_device`) downloads the published
 list per namespace, drops the device and re-uploads it (preserving the remaining
 devices' signed labels) — `SessionManager.update_device_list` only handles
-*incoming* updates and never publishes; `OmemoManager.devices()` filters out
+*incoming* updates and never publishes. The current device cannot be deleted;
+a device missing from both lists is reported as an error instead of a silent
+success. `OmemoManager.devices()` filters out
 devices inactive in every namespace, so a removed device (and a peer's removed
 one) disappears from the manager even though the offline cache keeps it. A new/untrusted device warning is a chat status line naming the device
 id, JID and a **short** fingerprint (first three groups + `…`) with a

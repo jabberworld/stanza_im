@@ -219,6 +219,7 @@ STRINGS = {
     "omemo_fingerprint_copied": "Fingerprint copied to the clipboard.",
     "omemo_device_name": "Device name:",
     "omemo_delete_confirm": "Delete device {device} from your account?",
+    "omemo_delete_current": "The current device cannot be deleted.",
     "omemo_delete_failed": "Could not delete the device: {error}",
     "omemo_manage": "Manage OMEMO",
     "omemo_mode_off": "No encryption",

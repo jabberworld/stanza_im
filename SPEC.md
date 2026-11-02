@@ -2619,7 +2619,13 @@ Registers XEP plugins (conditionally where noted):
   `decrypt` tries every `<encrypted>` element (OMEMO 2 and legacy) until one
   has a key for this device; the SCE `<to>` affix may name the peer in a sent
   carbon. Bodyless per-device self copies from Conversations/Monocles are
-  transport metadata and are ignored silently.
+  transport metadata and are ignored silently. MAM pages are decrypted for
+  **1:1** OMEMO rows before storing (`_decrypt_mam_rows`): the fallback body is
+  replaced by the plaintext and the row is marked `encrypted`/`omemo`; a
+  failed/absent key keeps the fallback with the lock. A plaintext copy arriving
+  after an already stored fallback (live after MAM, or a later MAM page)
+  upgrades that row in place; a real plaintext row is never overwritten. MUC
+  OMEMO history remains fallback until occupant/real-JID context is available.
 - UI: the Privacy preferences tabs («Общие» + «OMEMO» — the latter with the
   blind-trust option + info glyph, the alias-sync toggle, the own fingerprint
   with compact copy/QR icon buttons and a device-manager button), the device
@@ -2683,7 +2689,10 @@ Registers XEP plugins (conditionally where noted):
   (preserving the remaining devices' signed labels), then syncs the offline
   cache. `SessionManager.update_device_list` only processes *incoming* PEP
   updates and never publishes, so the download/pop/upload sequence (as in the
-  library's own `purge_backend`) is required. `OmemoManager.devices()` filters
+  library's own `purge_backend`) is required. The current device is refused
+  (both in the manager and the dialog), and a device absent from both
+  namespaces raises a visible error instead of reporting success.
+  `OmemoManager.devices()` filters
   out devices that are inactive in every namespace, so a removed device — own or
   a peer's — no longer appears in the manager or popup even though the offline
   cache keeps it.

@@ -219,6 +219,7 @@ STRINGS = {
     "omemo_fingerprint_copied": "Отпечаток скопирован в буфер обмена.",
     "omemo_device_name": "Имя устройства:",
     "omemo_delete_confirm": "Удалить устройство {device} из вашей учетной записи?",
+    "omemo_delete_current": "Текущее устройство нельзя удалить.",
     "omemo_delete_failed": "Не удалось удалить устройство: {error}",
     "omemo_manage": "Управление OMEMO",
     "omemo_mode_off": "Без шифрования",

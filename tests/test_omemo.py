@@ -653,6 +653,9 @@ class _FakeSM:
     async def update_device_list(self, namespace, bare, dl):
         self.updated.append((namespace, set(dl)))
 
+    async def get_own_device_information(self):
+        return (_Dev(111, frozenset({("ns", True)})),)
+
     async def get_device_information(self, bare):
         return frozenset([_Dev(111, frozenset({("ns", True)})),
                           _Dev(222, frozenset({("ns", False)}))])
@@ -684,6 +687,39 @@ check("purge uploads a list without the removed device",
       and all(222 not in dl and 111 in dl for _ns, dl in _sm.uploaded))
 check("purge clears the device alias",
       _mgr.alias_cleared == [("me@example.com", 222, "")])
+
+
+async def _run_purge_current():
+    sm = _FakeSM()
+    mgr = _Mgr(sm)
+    try:
+        await mgr.purge_device(_Dev(111, frozenset()))
+        return False
+    except RuntimeError:
+        return True
+
+
+check("the current device cannot be purged",
+      asyncio.run(_run_purge_current()))
+
+
+class _MissingSM(_FakeSM):
+    async def _download_device_list(self, namespace, bare):
+        return {111: None}
+
+
+async def _run_purge_missing():
+    sm = _MissingSM()
+    mgr = _Mgr(sm)
+    try:
+        await mgr.purge_device(_Dev(222, frozenset()))
+        return False
+    except RuntimeError:
+        return True
+
+
+check("purging an unknown device reports an error",
+      asyncio.run(_run_purge_missing()))
 
 
 async def _run_filter():

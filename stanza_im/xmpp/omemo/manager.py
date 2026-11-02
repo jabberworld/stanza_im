@@ -518,22 +518,44 @@ class OmemoManager:
         legacy_ns, omemo2_ns = _namespaces()
         sm = await self.session_manager()
         target = int(device.device_id)
+        own = await self.own_device()
+        if own is not None and int(own.device_id) == target:
+            raise RuntimeError("the current device cannot be deleted")
+        removed = 0
+        errors: list[str] = []
         for namespace in (omemo2_ns, legacy_ns):
             try:
                 device_list = dict(
                     await sm._download_device_list(namespace, self._own_bare))
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 logger.debug("OMEMO purge: device list download failed for %s",
                              namespace, exc_info=True)
+                errors.append(f"{namespace}: {exc}")
                 continue
             if target not in device_list:
                 continue
             device_list.pop(target, None)
-            await sm._upload_device_list(namespace, device_list)
-            # Sync the offline cache: marks the removed device inactive so the
-            # filtered `devices()` stops returning it.
-            await sm.update_device_list(namespace, self._own_bare, device_list)
+            try:
+                await sm._upload_device_list(namespace, device_list)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("OMEMO purge: could not publish %s: %s",
+                               namespace, exc)
+                errors.append(f"{namespace}: {exc}")
+                continue
+            removed += 1
+            try:
+                # Sync the offline cache: marks the removed device inactive so
+                # the filtered `devices()` stops returning it.
+                await sm.update_device_list(namespace, self._own_bare,
+                                            device_list)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("OMEMO purge: cache update failed for %s: %s",
+                             namespace, exc)
+        if not removed:
+            detail = "; ".join(errors) or "device not found in the published lists"
+            raise RuntimeError(detail)
         self.set_device_alias(self._own_bare, target, "")
+        return removed
 
     # ── encryption / decryption ─────────────────────────────────
 

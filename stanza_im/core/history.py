@@ -301,6 +301,13 @@ def _dedup(entries: list[dict]) -> list[dict]:
     return out
 
 
+def _is_omemo_fallback_body(body: str) -> bool:
+    """True for the placeholder text of an undecrypted OMEMO message."""
+    text = str(body or "").lower()
+    return ("omemo encrypted" in text
+            or "does not seem to support" in text)
+
+
 def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             sender: str, archive_id: str, stanza_id: str, origin_id: str,
             reply_to: str, reply_id: str, message_id: str, edited: bool,
@@ -340,8 +347,8 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             "AND timestamp = ?)")
         params.extend([direction, sender, body, ts])
         row = conn.execute(
-            "SELECT id, archive_id, stanza_id, origin_id, message_id, timestamp "
-            "FROM messages WHERE (" + " OR ".join(clauses)
+            "SELECT id, archive_id, stanza_id, origin_id, message_id, timestamp,"
+            " body, encrypted FROM messages WHERE (" + " OR ".join(clauses)
             + ") LIMIT 1", params).fetchone()
         if row is not None:
             stable = bool(
@@ -349,14 +356,33 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
                 or (stanza_id and stanza_id == (row[2] or ""))
                 or (origin_id and origin_id == (row[3] or ""))
                 or (message_id and message_id == (row[4] or "")))
+            repaired = False
             if stable and ts and ts != (row[5] or ""):
                 # An older build may have stored this archived message with a
                 # wrong timestamp: repair it.  The body is never rewritten (an
                 # XEP-0308 correction is a separate row update).
                 conn.execute("UPDATE messages SET timestamp = ? WHERE id = ?",
                              (ts, row[0]))
-                return True
-            return False
+                repaired = True
+            if stable and encrypted and _is_omemo_fallback_body(row[6]):
+                # A fallback row (old MAM sync, or a failed live decrypt) can
+                # be upgraded when the plaintext becomes available.  A real
+                # plaintext row is never overwritten by another copy.
+                if not _is_omemo_fallback_body(body):
+                    conn.execute(
+                        "UPDATE messages SET body = ?, reply_to = ?, "
+                        "reply_id = ?, media = ?, markup = ?, encrypted = 1, "
+                        "encryption = ? WHERE id = ?",
+                        (body, reply_to or None, reply_id or None,
+                         media or None, markup or None,
+                         encryption or "omemo", row[0]))
+                    return True
+                if not row[7]:
+                    conn.execute(
+                        "UPDATE messages SET encrypted = 1, encryption = ? "
+                        "WHERE id = ?",
+                        (encryption or "omemo", row[0]))
+            return repaired
         if archived and (archive_id or stanza_id or origin_id or message_id):
             # The same message may already be stored without any stable id by
             # an older build (a join replay that was rendered as live, with the

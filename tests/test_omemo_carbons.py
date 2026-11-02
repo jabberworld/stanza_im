@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import slixmpp
 
+from stanza_im.core import history
 from stanza_im.core.client import JabberClient
 from stanza_im.xmpp.omemo import sce
 from stanza_im.xmpp.omemo.manager import OmemoManager
@@ -173,6 +174,90 @@ try:
 except Exception:
     ok2 = False
 check("an envelope without <to> is still accepted", ok2)
+
+
+# 4c. The MAM parser marks encrypted rows and keeps the raw stanza ----------
+_mam_client = JabberClient("me@example.com/res1", "pw")
+_mam_client.omemo = _FakeOmemo()
+_raw = slixmpp.Message()
+_raw["from"] = "bob@example.com/res"
+_raw["to"] = "me@example.com/res1"
+_raw["type"] = "chat"
+_raw["body"] = "This message is OMEMO encrypted."
+_raw["id"] = "mam-raw-1"
+ET.SubElement(_raw.xml, "{urn:xmpp:delay}delay").set(
+    "stamp", "2026-11-02T10:00:00Z")
+ET.SubElement(_raw.xml, f"{{{LEGACY}}}encrypted")
+_parsed, _p, _s, _r = _mam_client._mam_rows("bob@example.com", [_raw])
+check("the MAM parser keeps the encrypted stanza for decryption",
+      len(_parsed) == 1 and _parsed[0].get("_omemo_stanza") is not None)
+
+
+# 5. MAM rows are decrypted before storage --------------------------------
+_mam = JabberClient("me@example.com/res1", "pw")
+_mam.omemo = _FakeOmemo()
+_mam_stanza = slixmpp.Message()
+_mam_stanza["from"] = "bob@example.com/res"
+_mam_stanza["to"] = "me@example.com/res1"
+_mam_stanza["type"] = "chat"
+_mam_stanza["body"] = "This message is OMEMO encrypted."
+_mam_stanza["id"] = "mam-1"
+ET.SubElement(_mam_stanza.xml, f"{{{LEGACY}}}encrypted")
+_mam_rows = [{
+    "direction": "incoming", "body": _mam_stanza["body"],
+    "timestamp": "2026-11-02T10:00:00Z", "sender": "bob@example.com",
+    "archive_id": "mam-1", "stanza_id": "mam-1", "origin_id": "mam-1",
+    "reply_to": "", "reply_id": "", "retracted": False,
+    "retract_reason": "", "retract_by": "", "replace_id": "",
+    "markup": None, "_omemo_stanza": _mam_stanza,
+}]
+_mam_rows = asyncio.get_event_loop().run_until_complete(
+    _mam._decrypt_mam_rows("bob@example.com", _mam_rows))
+check("a 1:1 MAM OMEMO row is decrypted",
+      _mam_rows[0]["body"] == "hello"
+      and _mam_rows[0]["encrypted"] is True
+      and _mam_rows[0]["encryption"] == "omemo")
+
+_fail = JabberClient("me@example.com/res1", "pw")
+_fail.omemo = _FakeOmemo(
+    decrypt_error="The message to decrypt does not contain key material for us.")
+_stanza2 = slixmpp.Message()
+_stanza2["from"] = "bob@example.com/res"
+_stanza2["to"] = "me@example.com/res1"
+_stanza2["type"] = "chat"
+_stanza2["body"] = "This message is OMEMO encrypted."
+ET.SubElement(_stanza2.xml, f"{{{LEGACY}}}encrypted")
+_fail_rows = [{
+    "direction": "incoming", "body": "This message is OMEMO encrypted.",
+    "timestamp": "2026-11-02T10:00:00Z", "sender": "bob@example.com",
+    "archive_id": "mam-2", "stanza_id": "mam-2", "origin_id": "mam-2",
+    "reply_to": "", "reply_id": "", "retracted": False,
+    "retract_reason": "", "retract_by": "", "replace_id": "",
+    "markup": None, "_omemo_stanza": _stanza2,
+}]
+_fail_rows = asyncio.get_event_loop().run_until_complete(
+    _fail._decrypt_mam_rows("bob@example.com", _fail_rows))
+check("an undecryptable MAM row keeps its fallback",
+      _fail_rows[0]["body"] == "This message is OMEMO encrypted."
+      and _fail_rows[0]["encrypted"] is True)
+
+
+# 6. An old fallback row is upgraded by a later plaintext copy -------------
+_upgrade = "upgrade@example.com"
+history.store_message(
+    _upgrade, "incoming", "This message is OMEMO encrypted.",
+    "2026-11-02T10:00:00Z", sender="bob@example.com",
+    archive_id="up-1", stanza_id="up-1", origin_id="up-1",
+    message_id="up-1")
+history.store_message(
+    _upgrade, "incoming", "plaintext", "2026-11-02T10:00:00Z",
+    sender="bob@example.com", archive_id="up-1", stanza_id="up-1",
+    origin_id="up-1", message_id="up-1", encrypted=True,
+    encryption="omemo")
+_up_rows = history.load_history(_upgrade, limit=10)
+check("a fallback row is upgraded to the plaintext without a duplicate",
+      len(_up_rows) == 1 and _up_rows[0]["body"] == "plaintext"
+      and bool(_up_rows[0].get("encrypted")))
 
 
 if FAILURES:

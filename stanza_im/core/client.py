@@ -7839,6 +7839,8 @@ class JabberClient:
                 logger.warning("MAM results for %s have no archive cursor", jid)
 
         rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+        rows = await self._decrypt_mam_rows(
+            jid, rows, is_muc=jid in self.groupchats)
         edits = [row for row in rows if row.get("replace_id")]
         rows = [row for row in rows if not row.get("replace_id")]
         stored = 0
@@ -7982,6 +7984,8 @@ class JabberClient:
             if not results:
                 break
             rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+            rows = await self._decrypt_mam_rows(
+                jid, rows, is_muc=bool(is_muc))
             if start_ts:
                 rows = [row for row in rows
                         if str(row.get("timestamp") or "") > str(start_ts)]
@@ -8124,6 +8128,7 @@ class JabberClient:
                 else:
                     server_sid = _stanza_id(msg, self.jid_str)
                     stable = _origin_id(msg) or str(msg.get("id") or "")
+                encrypted = self._is_omemo_encrypted(msg)
                 rows.append({
                     "direction": direction,
                     "body": body,
@@ -8139,6 +8144,11 @@ class JabberClient:
                     "retract_by": mod_info["by"],
                     "replace_id": _replace_reference(msg),
                     "markup": message_markup(msg),
+                    "encrypted": False,
+                    "encryption": "",
+                    # Kept only until the async MAM pass decrypts the row; it is
+                    # never written to the history table.
+                    "_omemo_stanza": msg if encrypted else None,
                 })
             except Exception:
                 skipped += 1
@@ -8147,6 +8157,56 @@ class JabberClient:
                              jid, exc_info=True)
                 continue
         return rows, parsed, skipped, skip_reasons
+
+    async def _decrypt_mam_rows(self, jid: str, rows: list[dict],
+                                is_muc: bool = False) -> list[dict]:
+        """Decrypt OMEMO rows in a MAM page (1:1 only).
+
+        MAM archives the fallback body of an encrypted message; it is replaced
+        with the plaintext before the row is stored so a history reload does
+        not show "This message is OMEMO encrypted." forever.  MUC OMEMO
+        history needs the occupant/real-JID context and is left as fallback
+        for now (the lock is still shown).
+        """
+        if not rows:
+            return rows
+        omemo = getattr(self, "omemo", None)
+        available = bool(getattr(omemo, "available", False))
+        for row in rows:
+            stanza = row.pop("_omemo_stanza", None)
+            if stanza is None:
+                continue
+            row["encrypted"] = True
+            row["encryption"] = "omemo"
+            if not available or is_muc:
+                continue
+            frm = str(stanza.get("from", "") or "")
+            to = str(stanza.get("to", "") or "")
+            frm_bare = frm.split("/", 1)[0]
+            to_bare = to.split("/", 1)[0]
+            if (frm_bare and frm_bare == self.jid_str
+                    and to_bare == self.jid_str):
+                # Per-device OMEMO copy, not a conversation message.
+                continue
+            try:
+                decrypted, _device = await omemo.decrypt(stanza)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("OMEMO MAM decrypt failed for %s: %s", jid, exc)
+                continue
+            body = str(decrypted.get("body", "") or "")
+            if body:
+                row["body"] = body
+            row["reply_to"], row["reply_id"] = _reply_reference(decrypted)
+            row["replace_id"] = _replace_reference(decrypted)
+            row["markup"] = message_markup(decrypted)
+            row["media"] = message_media(decrypted)
+            tomb_id, _tomb_stamp = _retracted_tombstone(decrypted)
+            if tomb_id:
+                info = _moderation_info(decrypted)
+                row["retracted"] = True
+                row["retract_reason"] = info["reason"]
+                row["retract_by"] = info["by"]
+        return rows
 
     def _on_chatstate(self, msg) -> None:
         # Chat states (XEP-0085) apply to 1:1 messaging only — ignore
