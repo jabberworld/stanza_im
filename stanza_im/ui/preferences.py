@@ -991,6 +991,15 @@ class PreferencesDialog(QtWidgets.QDialog):
         button.clicked.connect(lambda: self._play_sound(event))
         return button
 
+    def _sound_indent(self) -> QtWidgets.QWidget:
+        """Invisible spacer matching a sound preview button (for sub-options)."""
+        spacer = QtWidgets.QWidget()
+        width = self._sound_button("message").sizeHint().width()
+        spacer.setFixedWidth(max(0, width))
+        spacer.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        return spacer
+
     def _sound_file_button(self, rel: str) -> QtWidgets.QToolButton:
         """A note glyph that previews a loose effect file (e.g. the ringtone)."""
         button = QtWidgets.QToolButton()
@@ -1964,14 +1973,16 @@ class PreferencesDialog(QtWidgets.QDialog):
                                     first_check))
         sound_form.addRow(self._row(self._sound_button("message"),
                                     any_check))
-        sound_form.addRow(self._check(
-            "sound_low_priority_message",
-            tr("prefs_sound_low_priority_message")))
+        sound_form.addRow(self._row(
+            self._sound_indent(),
+            self._check("sound_low_priority_message",
+                        tr("prefs_sound_low_priority_message"))))
         sound_form.addRow(self._row(self._sound_button("message"),
                                     mention_check))
-        sound_form.addRow(self._check(
-            "sound_low_priority_muc",
-            tr("prefs_sound_low_priority_muc")))
+        sound_form.addRow(self._row(
+            self._sound_indent(),
+            self._check("sound_low_priority_muc",
+                        tr("prefs_sound_low_priority_muc"))))
         for key, event in (
                 ("sound_on_send", "message_send"),
                 ("sound_ft_start", "ft_start"),

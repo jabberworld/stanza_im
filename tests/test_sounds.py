@@ -16,7 +16,7 @@ os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.core.storage import Config
 from stanza_im.i18n import load as i18n_load
@@ -142,6 +142,24 @@ check("apply stores the theme and the option",
       and cfg.notifications.sound_low_priority_message is True
       and cfg.notifications.sound_low_priority_muc is True)
 
+# The new modifier checkboxes must line up with the existing sound rows.
+dlg.show()
+dlg._sections.setCurrentRow(7)
+dlg.adjustSize()
+app.processEvents()
+_x_any = controls["sound_any_message"].mapTo(
+    dlg, QtCore.QPoint(0, 0)).x()
+_x_low = controls["sound_low_priority_message"].mapTo(
+    dlg, QtCore.QPoint(0, 0)).x()
+_x_mention = controls["sound_muc_mention"].mapTo(
+    dlg, QtCore.QPoint(0, 0)).x()
+_x_low_muc = controls["sound_low_priority_muc"].mapTo(
+    dlg, QtCore.QPoint(0, 0)).x()
+check("the low-priority chat checkbox aligns with the other chat sounds",
+      _x_low == _x_any)
+check("the low-priority conference checkbox aligns with the mention sound",
+      _x_low_muc == _x_mention)
+dlg.hide()
 dlg.deleteLater()
 
 # ── low-priority runtime gating ─────────────────────────────────
