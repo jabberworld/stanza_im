@@ -15,6 +15,7 @@ from PyQt6 import QtWidgets  # noqa: E402
 
 from stanza_im.i18n import load as i18n_load  # noqa: E402
 from stanza_im.ui.history_manager import HistoryManagerDialog  # noqa: E402
+from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
 FAILURES = []
 
@@ -28,6 +29,7 @@ def check(name, cond):
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 JID = "bob@example.com"
+ROOM = "room@conference.example"
 calls = []
 
 
@@ -82,6 +84,29 @@ dialog2._update_server_button()
 check("an unsupported chat disables the server toggle",
       not dialog2._btn_server.isEnabled())
 dialog2.deleteLater()
+
+
+class _ServerClient:
+    def supports_mam_fulltext(self, jid, is_muc=False):
+        return is_muc and jid == ROOM
+
+
+class _ServerWindow:
+    _client = _ServerClient()
+    _conference_roster = set()
+    _muc_self_nicks = {ROOM}
+
+    @staticmethod
+    def _is_conference_jid(jid):
+        return jid == ROOM
+
+
+win = _ServerWindow()
+check("a joined room enables server history search",
+      MainWindow._history_server_supported(win, ROOM))
+win._muc_self_nicks = set()
+check("an unjoined room disables server history search",
+      not MainWindow._history_server_supported(win, ROOM))
 
 if FAILURES:
     print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))

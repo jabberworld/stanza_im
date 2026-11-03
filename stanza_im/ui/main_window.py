@@ -7124,7 +7124,15 @@ class MainWindow(QtWidgets.QMainWindow):
         is_muc = (jid in self._conference_roster
                   or jid in self._muc_self_nicks
                   or self._is_conference_jid(jid))
-        return bool(self._client.supports_mam_fulltext(jid, is_muc=is_muc))
+        if is_muc:
+            room = jid.split("/", 1)[0]
+            # Only a room we are currently in can answer a room archive
+            # query; an old history row must stay disabled.
+            if room not in self._muc_self_nicks:
+                return False
+            return bool(self._client.supports_mam_fulltext(
+                room, is_muc=True))
+        return bool(self._client.supports_mam_fulltext(jid))
 
     async def _history_server_search(self, jid: str, query: str,
                                      after: str = ""):

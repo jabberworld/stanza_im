@@ -1233,6 +1233,8 @@ class JabberClient:
         # XEP-0016/0191: cached account-domain features and blocked JIDs.
         self._server_features: set[str] | None = None
         self._blocked: set[str] = set()
+        # XEP-0431: room disco features, keyed by the bare room JID.
+        self._muc_room_features: dict[str, set[str]] = {}
         self._moderation_support: dict[str, bool] = {}
         self.send_typing_notifications = send_typing_notifications if send_chatstates else False
         self.send_activity_notifications = send_activity_notifications if send_chatstates else False
@@ -3988,6 +3990,7 @@ class JabberClient:
             features = {str(el.get("var") or "")
                         for el in iq.xml.iter()
                         if str(el.tag).endswith("feature")}
+            self._muc_room_features[str(room).split("/", 1)[0]] = features
             if name:
                 logger.info("MUC room name received for %s: %s", room, name)
             self.emit("muc_info_received", room, name, features)
@@ -4470,6 +4473,7 @@ class JabberClient:
         if task and not task.done():
             task.cancel()
         self.groupchats.pop(room, None)
+        self._muc_room_features.pop(room, None)
         self._muc_last_activity.pop(room, None)
         self._muc_self_ping_busy.discard(room)
 

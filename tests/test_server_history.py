@@ -23,6 +23,8 @@ def check(name, cond):
 
 
 client = JabberClient("me@example.com/res", "pw")
+check("a client starts with an empty room-feature cache",
+      client._muc_room_features == {})
 client._server_features = {"urn:xmpp:fulltext:0", "urn:xmpp:mam:2"}
 client._muc_room_features = {
     "room@conference.example": {"urn:xmpp:fulltext:0", "urn:xmpp:mam:2"},
