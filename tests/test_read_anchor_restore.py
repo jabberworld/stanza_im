@@ -89,8 +89,12 @@ class _View:
     def add_status(self, text, ts=""):
         self.statuses.append(text)
 
-    def scroll_to_message(self, message_id, highlight=True, timestamp=""):
+    def scroll_to_message(self, message_id, highlight=True, timestamp="",
+                          anchor_restore=False):
         self.scrolled.append(message_id)
+
+    def scroll_to_time(self, timestamp, anchor_restore=False):
+        self.scrolled.append(timestamp)
 
     def scroll_to_bottom(self):
         self.bottom_scrolls += 1
@@ -709,6 +713,42 @@ _finish = method_source(_cw_src, "_finish_unread_resolve")
 check("the deferred resolve can fall back to the unread start",
       "_first_unread_entry()" in _finish
       and "fallback_unread" in _finish)
+
+# 18b. a failed anchor scroll opens at the first unread, never the bottom -----
+w = widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4"),
+               row("2026-10-02T10:05:00Z", "five", "m-5")],
+              50, False, anchor=ANCHOR)
+w._on_anchor_scroll_failed()
+check("a failed anchor restore opens at the first unread message",
+      w._view.scrolled == ["m-4"])
+check("a failed anchor restore does not jump to the end",
+      w._view.bottom_scrolls == 0)
+check("the anchor-failure fallback is wired to the widget",
+      "view.anchor_scroll_failed.connect(self._on_anchor_scroll_failed)"
+      in _create_view)
+check("the bottom report is ignored while the anchor restore is pending",
+      "anchor_restore_pending" in reached)
+
+# 18c. an unread render does not scroll its buffered chunks to the bottom ----
+_append = method_source(_cv_src, "_append_chunk")
+check("buffered chunks do not chase the bottom during anchor restore",
+      "not self._scroll_suspended" in _append
+      and "self._deferred_scroll is None" in _append
+      and "self._anchor_scroll is None" in _append)
+_render_all = method_source(_cw_src, "_render_all")
+check("an unread render prepares the anchor restore before rendering",
+      '"prepare_anchor_restore"' in _render_all
+      and "prepare()" in _render_all
+      and "elif not self._unread_boundary:" in _render_all)
+_time_scroll = method_source(_cv_src, "_run_scroll_to_time")
+check("a missing timestamp anchor falls back to the first message",
+      "nodes[0]" in _time_scroll
+      and "nodes[nodes.length - 1]" not in _time_scroll)
+check("the restored view clears its pending-anchor flag",
+      "_anchor_restore_pending = False" in _release
+      and "anchor_scroll_failed.emit()" in _release)
 
 # 19. a transient bottom during a programmatic scroll is not "read" ----------
 class _AtBottomView:

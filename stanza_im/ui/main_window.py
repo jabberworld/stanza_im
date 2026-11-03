@@ -7719,6 +7719,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._chat_window.current_jid() != jid:
             return
+        chat = self._chat_window.get_chat(jid)
+        if chat is not None:
+            pending = getattr(chat, "anchor_restore_pending", None)
+            if callable(pending) and pending():
+                logger.debug(
+                    "UNREAD[bottom] jid=%s ignored (anchor restore pending)",
+                    jid)
+                return
         self._mark_chat_read(jid)
 
     def _mark_chat_read(self, jid: str) -> None:

@@ -75,7 +75,7 @@ class _StubView(QtWidgets.QWidget):
     def scroll_to_bottom(self):
         self.bottom_scrolls += 1
 
-    def scroll_to_time(self, timestamp):
+    def scroll_to_time(self, timestamp, anchor_restore=False):
         self.time_scrolls.append(timestamp)
 
     def set_scroll_fraction(self, fraction):

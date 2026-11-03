@@ -521,8 +521,12 @@ class _View:
         self.unseen_count = 0
         self.unseen_target = ""
 
-    def scroll_to_message(self, message_id, highlight=True, timestamp=""):
+    def scroll_to_message(self, message_id, highlight=True, timestamp="",
+                          anchor_restore=False):
         self.scrolled.append(message_id)
+
+    def scroll_to_time(self, timestamp, anchor_restore=False):
+        self.scrolled.append(timestamp)
 
     def set_mention_count(self, count):
         self.mention_count = int(count or 0)

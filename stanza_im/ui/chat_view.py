@@ -309,6 +309,30 @@ class _JumpButtonMixin:
     def resume_scroll_reports(self) -> None:
         self._scroll_suspended = False
 
+    def prepare_anchor_restore(self) -> None:
+        """Open an unread window at a neutral position until the anchor lands.
+
+        ``_render_all`` re-creates the document before the read-anchor scroll
+        is queued.  Keeping the previous bottom fraction would make every
+        buffered chunk scroll to the newest message (and the later anchor jump
+        could lose the race), so the view starts neutral and ignores bottom
+        reports until the anchor is confirmed.
+        """
+        self._fraction = 0.0
+        self._near_top_hit = False
+        self._anchor_scroll = None
+        self._anchor_restore_pending = True
+        self._scroll_suspended = True
+
+    def cancel_anchor_restore(self) -> None:
+        """Stop waiting for a read-anchor scroll (fallback is taking over)."""
+        self._anchor_scroll = None
+        self._anchor_restore_pending = False
+        self._scroll_suspended = False
+
+    def anchor_restore_pending(self) -> bool:
+        return bool(self._anchor_restore_pending)
+
     def _flush_pending_seen(self):
         pending = getattr(self, "_pending_seen", None)
         if not pending:
@@ -678,6 +702,7 @@ if HAS_WEBENGINE:
         add_contact_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
         note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
+        anchor_scroll_failed = QtCore.pyqtSignal()
 
         _LOAD_RETRY_LIMIT = 5
         _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
@@ -745,6 +770,10 @@ if HAS_WEBENGINE:
             # "until"}``).  Kept until a poll sees the target in the viewport,
             # so the page's transient bottom position cannot mark unread rows.
             self._anchor_scroll: dict | None = None
+            # True from a render with an unread boundary until the read-anchor
+            # scroll is confirmed (or its fallback runs).  A transient bottom
+            # during that window must never mark the conversation read.
+            self._anchor_restore_pending = False
             self._load_failures = 0
             self._last_seen_cache = ("", "", "")
             self._loading = False
@@ -776,6 +805,7 @@ if HAS_WEBENGINE:
             self._pending.clear()
             self._deferred_scroll = None
             self._anchor_scroll = None
+            self._anchor_restore_pending = False
             self._scroll_suspended = False
 
         def wheelEvent(self, event):
@@ -2359,7 +2389,8 @@ window.__stanzaMentionRef = '';
             every scroll poll.  A parked (deferred) scroll suspends the report:
             the document is still filling up and would look like its bottom.
             """
-            if self._scroll_suspended or self._deferred_scroll is not None:
+            if (self._scroll_suspended or self._deferred_scroll is not None
+                    or self._anchor_restore_pending):
                 self._at_bottom_hit = False
                 return
             if self._fraction < 0.999:
@@ -2387,16 +2418,42 @@ window.__stanzaMentionRef = '';
             """
             if self._deferred_scroll is not None:
                 return
-            if not anchor_scroll_guard_open(
-                    self._anchor_scroll, self._visible_refs,
-                    time.monotonic()):
+            pending = self._anchor_scroll
+            if pending is None:
+                if self._anchor_restore_pending:
+                    # The anchor scroll has not been queued yet; keep the
+                    # transient bottom from counting as "read".
+                    return
+                self._scroll_suspended = False
                 return
+            if not anchor_scroll_guard_open(
+                    pending, self._visible_refs, time.monotonic()):
+                return
+            failed = (not pending.get("ref")
+                      or pending.get("ref") not in self._visible_refs)
+            restore = bool(pending.get("restore"))
             self._anchor_scroll = None
             self._scroll_suspended = False
+            self._anchor_restore_pending = False
+            if failed and restore:
+                # The stored read point could not be reached in the rendered
+                # window.  The owner opens the first unread message instead of
+                # leaving the view at the bottom (where it would mark the
+                # whole block read).
+                self.anchor_scroll_failed.emit()
 
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
-            do_scroll = 1 if self._fraction >= 0.999 else 0
+            # Never chase the bottom while a read-anchor restore is pending:
+            # a full unread window is appended chunk by chunk, and scrolling
+            # each chunk to the end would hide the anchor and mark the block
+            # read before the restore scroll paints.
+            do_scroll = 1 if (
+                self._fraction >= 0.999
+                and not self._scroll_suspended
+                and self._deferred_scroll is None
+                and self._anchor_scroll is None
+            ) else 0
             js = f"""
             var chat = document.getElementById('chat');
             if (chat) {{
@@ -2423,6 +2480,7 @@ window.__stanzaMentionRef = '';
             self._ready = False
             self._deferred_scroll = None
             self._anchor_scroll = None
+            self._anchor_restore_pending = False
             self._scroll_suspended = False
             self._fraction = 1.0
             self._overflow = False
@@ -2746,17 +2804,21 @@ window.__stanzaMentionRef = '';
             }}
             """)
 
-        def _arm_anchor_scroll(self, kind: str, target: str) -> None:
+        def _arm_anchor_scroll(self, kind: str, target: str,
+                               restore: bool = False) -> None:
             """Suspend scroll reports until a programmatic jump is confirmed.
 
             The target message (or timestamp) is resolved by the scroll
             JavaScript; :meth:`_anchor_scroll_resolved` stores its rendered
             ref so the poll can tell when it is actually in the viewport.
+            *restore* marks the read-anchor resume (not a user jump), so a
+            failed target can fall back to the first unread message.
             """
             self._anchor_scroll = {
                 "kind": kind,
                 "target": str(target or ""),
                 "ref": "",
+                "restore": bool(restore),
                 "until": time.monotonic() + self._ANCHOR_SCROLL_TIMEOUT_S,
             }
             self._scroll_suspended = True
@@ -2771,7 +2833,8 @@ window.__stanzaMentionRef = '';
 
         def scroll_to_message(self, message_id: str,
                               highlight: bool = True,
-                              timestamp: str = "") -> None:
+                              timestamp: str = "",
+                              anchor_restore: bool = False) -> None:
             """Scroll the ``data-stanza-id`` node into view (and flash it).
 
             While the document is empty (a ``clear()`` whose page load has not
@@ -2787,10 +2850,12 @@ window.__stanzaMentionRef = '';
             """
             if not message_id and not timestamp:
                 return
-            self._arm_anchor_scroll("message", message_id or timestamp)
+            self._arm_anchor_scroll(
+                "message", message_id or timestamp, restore=anchor_restore)
             if not self._ready or self._pending:
                 self._deferred_scroll = ("message", message_id,
-                                         bool(highlight), str(timestamp or ""))
+                                         bool(highlight), str(timestamp or ""),
+                                         bool(anchor_restore))
                 return
             self._run_scroll_to_message(message_id, highlight, timestamp)
 
@@ -2810,7 +2875,8 @@ window.__stanzaMentionRef = '';
             elif kind == "bottom":
                 self.scroll_to_bottom()
 
-        def scroll_to_time(self, timestamp: str) -> None:
+        def scroll_to_time(self, timestamp: str,
+                           anchor_restore: bool = False) -> None:
             """Scroll to the newest message at or before *timestamp*.
 
             Old rows may have no ``origin-id``/``archive_id`` (a legacy
@@ -2821,7 +2887,7 @@ window.__stanzaMentionRef = '';
             stamp = str(timestamp or "")
             if not stamp:
                 return
-            self._arm_anchor_scroll("time", stamp)
+            self._arm_anchor_scroll("time", stamp, restore=anchor_restore)
             if not self._ready or self._pending:
                 self._deferred_scroll = ("time", stamp)
                 return
@@ -2840,7 +2906,9 @@ window.__stanzaMentionRef = '';
                     if (t && t <= ts) target = nodes[i];
                 }}
                 if (!target && nodes.length) {{
-                    target = nodes[nodes.length - 1];
+                    // The anchor predates this window: open at the first
+                    // unread message, never at the newest one.
+                    target = nodes[0];
                 }}
                 if (!target) return {{ref: ''}};
                 target.scrollIntoView({{block: 'center'}});
@@ -2976,6 +3044,7 @@ else:
         add_contact_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
         note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
+        anchor_scroll_failed = QtCore.pyqtSignal()
 
         #: Cap on the document's blocks (≈ messages); the oldest are trimmed on
         #: append, mirroring the WebEngine ``_MAX_DOM_MESSAGES`` DOM trim.
@@ -2994,6 +3063,7 @@ else:
             # scroll runs (render, anchor restore, prepend), so it never marks
             # a conversation read on its own — mirrors the WebEngine view.
             self._scroll_suspended = False
+            self._anchor_restore_pending = False
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -3013,7 +3083,7 @@ else:
 
         def _note_bottom(self, *_args) -> None:
             """Edge-triggered "at the newest message" (scrollbar driven)."""
-            if self._scroll_suspended:
+            if self._scroll_suspended or self._anchor_restore_pending:
                 # A render/restore/prepend is in flight: the transient bottom
                 # must not be reported as the user reaching the newest message.
                 self._at_bottom_hit = False
@@ -3033,6 +3103,19 @@ else:
         def _release_scroll_suspend(self) -> None:
             """Trust the scroll position again once a programmatic scroll ran."""
             self._scroll_suspended = False
+            self._anchor_restore_pending = False
+
+        def prepare_anchor_restore(self) -> None:
+            """The fallback has no per-message nodes; wait for the loader."""
+            self._anchor_restore_pending = True
+            self._scroll_suspended = True
+
+        def cancel_anchor_restore(self) -> None:
+            self._anchor_restore_pending = False
+            self._scroll_suspended = False
+
+        def anchor_restore_pending(self) -> bool:
+            return bool(self._anchor_restore_pending)
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""
@@ -3144,12 +3227,21 @@ else:
 
         def scroll_to_message(self, message_id: str,
                               highlight: bool = True,
-                              timestamp: str = "") -> None:
+                              timestamp: str = "",
+                              anchor_restore: bool = False) -> None:
             """No-op: the QTextBrowser fallback has no per-message nodes."""
+            if anchor_restore:
+                self.cancel_anchor_restore()
             return
 
-        def scroll_to_time(self, timestamp: str) -> None:
+        def scroll_to_time(self, timestamp: str,
+                           anchor_restore: bool = False) -> None:
             """No per-message nodes: keep the newest messages in view."""
+            if anchor_restore:
+                # There is no per-message target to open at; do not jump to
+                # the newest message and mark the unread block read.
+                self.cancel_anchor_restore()
+                return
             self.scroll_to_bottom()
 
         def clear_unread_separator(self) -> bool:

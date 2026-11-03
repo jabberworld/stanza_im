@@ -1924,7 +1924,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`ChatView.scroll_to_time`, for legacy rows without ids), else pages the
   archive; an unreachable anchor opens at the first unread message
   (`ChatWidget._first_unread_entry`) instead of the newest one, so the block is
-  not marked read by the transient bottom position.
+  not marked read by the transient bottom position. While the anchor is
+  pending, buffered chunks do not auto-scroll to the bottom, and a failed
+  anchor scroll (`anchor_scroll_failed`) falls back to the first unread; the
+  bottom report is ignored until `anchor_restore_pending()` clears.
 - In a conference an unread message naming our nickname also shows a floating
   `@ N` button left of the `▼ N` one (shared `#stanza-fabs` row; the WebEngine
   backend uses the in-page `#stanza-mention` div, the fallback a `QToolButton`,

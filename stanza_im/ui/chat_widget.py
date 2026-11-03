@@ -550,6 +550,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.near_top.connect(self._on_near_top)
         view.bottom_reached.connect(self._on_view_bottom)
         view.bottom_reached.connect(self.bottom_reached)
+        view.anchor_scroll_failed.connect(self._on_anchor_scroll_failed)
         view.last_seen_changed.connect(self._on_last_seen)
         view.mention_jump_requested.connect(self._jump_to_next_mention)
         view.reaction_jump_requested.connect(self._jump_to_next_reaction)
@@ -2205,6 +2206,16 @@ class ChatWidget(QtWidgets.QWidget):
         keep = self._preserve_fraction if self._preserve_fraction is not None \
             else self._view.scroll_fraction()
         self._view.clear()
+        # An unread window is rendered before the read-anchor scroll is
+        # queued.  Do not preserve the previous bottom fraction: every chunk
+        # would otherwise scroll to the end and the anchor restore could lose
+        # the race, marking the whole block read.
+        if self._unread_boundary and self._restore_anchor:
+            prepare = getattr(self._view, "prepare_anchor_restore", None)
+            if callable(prepare):
+                prepare()
+            else:
+                self._view.suspend_scroll_reports()
         if self._cleared:
             marker = (f'<a class="stanza-load" href="stanza:load:" '
                       f'style="color:#1a73e8;text-decoration:underline;">'
@@ -2223,7 +2234,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._preserve_fraction = None
         if self._anchor_bottom:
             self._view.scroll_to_bottom()
-        else:
+        elif not self._unread_boundary:
             self._view.set_scroll_fraction(keep)
         if self._unread_boundary:
             # The separator/read anchor is in this render.  A transient
@@ -2414,19 +2425,22 @@ class ChatWidget(QtWidgets.QWidget):
             self._boundary_reachable(entries)
         self._anchor_bottom = not self._unread_boundary
         self._preserve_fraction = None
+        # A never-read conversation has no anchor to scroll to; open at the
+        # start of the unread block so the separator and the jump button are in
+        # view instead of the oldest unread scrolling off the top.  Resolve it
+        # before the render so the anchor guard suppresses chunk scrolling.
+        if (not self._restore_anchor and self._unread_boundary
+                and not (self._unread_boundary.get("ref")
+                         or self._unread_boundary.get("ts"))):
+            ordered = self._ordered_entries()
+            if ordered:
+                first = ordered[0]
+                self._restore_anchor = {
+                    "ref": self._reply_target_id(first),
+                    "ts": first.get("timestamp") or ""}
         entries = self._render_all()
         self._seed_unseen(entries)
         self.refresh_unread_mentions(entries)
-        # A never-read conversation has no anchor to scroll to; open at the
-        # start of the unread block so the separator and the jump button are in
-        # view instead of the oldest unread scrolling off the top.
-        if (not self._restore_anchor and self._unread_boundary
-                and not (self._unread_boundary.get("ref")
-                         or self._unread_boundary.get("ts")) and entries):
-            first = entries[0]
-            self._restore_anchor = {
-                "ref": self._reply_target_id(first),
-                "ts": first.get("timestamp") or ""}
         if self._restore_anchor:
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
@@ -2830,12 +2844,14 @@ class ChatWidget(QtWidgets.QWidget):
             return
         ref = str(anchor.get("ref") or "")
         entry = self._find_message(ref) if ref else None
-        if entry is not None and self._scroll_to_entry(entry):
+        if entry is not None and self._scroll_to_entry(
+                entry, anchor_restore=True):
             return
         # The anchor message is outside the loaded window: fall back to its
         # timestamp, and only then walk the local archive page by page.
         entry = self._entry_before_or_at(str(anchor.get("ts") or ""))
-        if entry is not None and self._scroll_to_entry(entry):
+        if entry is not None and self._scroll_to_entry(
+                entry, anchor_restore=True):
             return
         if ref:
             self._jump_to_message(ref, fallback_unread=True)
@@ -2848,17 +2864,45 @@ class ChatWidget(QtWidgets.QWidget):
         if not self._unread_boundary:
             self._view.scroll_to_bottom()
 
-    def _scroll_to_entry(self, entry: dict) -> bool:
+    def _on_anchor_scroll_failed(self) -> None:
+        """The stored read point could not be reached in the rendered window.
+
+        Open at the first unread message instead of leaving the transient
+        bottom in place; the latter would mark the whole unread block read.
+        """
+        if self._released or not self._unread_boundary:
+            return
+        logger.info("ANCHOR[fallback] jid=%s first unread", self.jid)
+        self._finish_unread_resolve(None, fallback_unread=True)
+        cancel = getattr(self._view, "cancel_anchor_restore", None)
+        if callable(cancel):
+            cancel()
+
+    def anchor_restore_pending(self) -> bool:
+        """Whether a read-anchor resume has not been confirmed yet."""
+        if self._restore_anchor:
+            return True
+        view = self._view
+        if getattr(view, "_anchor_restore_pending", False):
+            return True
+        if getattr(view, "_anchor_scroll", None) is not None:
+            return True
+        return bool(getattr(view, "_scroll_suspended", False))
+
+    def _scroll_to_entry(self, entry: dict,
+                         anchor_restore: bool = False) -> bool:
         """Scroll to a stored row, by stable id or (for old rows) timestamp."""
         target = self._reply_target_id(entry)
         stamp = str(entry.get("timestamp") or "")
         if target:
             # The timestamp is the fallback when the id is not rendered (a
             # legacy row whose node only carries ``data-stanza-time``).
-            self._view.scroll_to_message(target, timestamp=stamp)
+            self._view.scroll_to_message(
+                target, timestamp=stamp, anchor_restore=anchor_restore)
             return True
         if stamp:
-            self._view.scroll_to_time(stamp)
+            self._view.scroll_to_time(
+                stamp, anchor_restore=anchor_restore)
             return True
         return False
 

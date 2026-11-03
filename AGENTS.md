@@ -1682,7 +1682,13 @@ transient "at the bottom" position during the anchor restore.
 (`clear()` loads a fresh page asynchronously), replaying it in
 `_on_load_finished`/`_probe_chat_alive` after the pending markup is appended —
 otherwise the anchor resume ran against a blank document and the chat stayed
-scrolled to the newest message.
+scrolled to the newest message. While the read anchor is pending, buffered
+chunks never chase the bottom (`_append_chunk` checks `_scroll_suspended`,
+`_deferred_scroll` and `_anchor_scroll`): a large unread window is appended
+chunk by chunk, and scrolling each one to the end used to hide the anchor and
+let the transient bottom mark the whole block read. A failed anchor scroll
+emits `anchor_scroll_failed`, and `ChatWidget` opens the first unread message
+instead; the bottom report is ignored while `anchor_restore_pending()` holds.
 [`tests/test_read_anchor_restore.py`]
 
 A conversation is marked read when its view **reaches the newest
