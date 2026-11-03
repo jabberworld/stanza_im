@@ -84,7 +84,8 @@ stanza_im/                      # Python package
 │   ├── resize_handle.py         # Thin draggable bar resizing a field (input/results)
 │   ├── zoom_list.py             # List with Ctrl+wheel zoom + empty-click deselect
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
-│   ├── spellcheck.py            # Optional pyenchant spell-check service/highlighter
+│   ├── spellcheck.py            # Optional enchant spell-check service/highlighter
+│   ├── spellcheck_dialog.py     # Spell-check language picker
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── whiteboard_dialog.py     # Whiteboard dialog (tool palette + canvas)
@@ -681,7 +682,14 @@ manager opened is highlighted and loads its messages instead of showing the
 empty-day notice. `core/history._connection` refuses an empty JID (raises a
 `sqlite3.OperationalError`, caught by every handler) and `_path` maps one to a
 non-colliding name, so no nameless `<HISTORY_DIR>/.sqlite3` store is ever
-created. The roster context menu's
+created. The **«Искать на сервере»** toggle (`_btn_server`) uses XEP-0431
+when the selected contact's account domain or room advertises
+`urn:xmpp:fulltext:0`: it searches only that conversation, loads the first 100
+matches, stores them locally with `archived=True` and shows «Загрузить ещё»
+for the RSM `after` page. `JabberClient.search_mam_fulltext` builds the MAM
+form with `{urn:xmpp:fulltext:0}fulltext` and uses a separate collector, so
+ordinary history sync cursors are untouched; the toggle is disabled when the
+server does not advertise the feature. The roster context menu's
 «Очистить историю» and the chat toolbar's clear button both run
 `MainWindow._on_clear_history`: after a confirmation it calls `history.clear`
 (wipes the SQLite messages **and** the legacy JSONL file) and resets the open
@@ -3358,9 +3366,10 @@ emitted as `muji_local_video_frame`; `_bind_call` stops it before a session's
 own capture opens the device. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
 without it the engine is a `NullMediaEngine` and calling is disabled. The
-optional `spellcheck` extra (`pip install .[spellcheck]`) installs `pyenchant`;
-system `libenchant-2-2` and `hunspell-*` dictionaries still decide which
-languages are checked.
+optional `spellcheck` extra (`pip install .[spellcheck]`) installs `pyenchant`
+for venvs/other systems; Debian's `python3-enchant` provides the same
+`enchant` module and pulls `libenchant-2-2`. System `hunspell-*` dictionaries
+still decide which languages are checked.
 
 Preferences use icon navigation and nested tabs. The section icons come from
 `IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
@@ -3488,9 +3497,9 @@ The message input gets `ChatWidget.set_input_font` (hosted by
 (`set_placeholder`), because Qt's built-in placeholder is painted with the
 style-resolved font — a non-empty application stylesheet resets that to the
 application default while the typed text keeps the document font.
-Spell checking is an optional `pyenchant` feature
-(`pip install stanza-im[spellcheck]`, system `libenchant-2-2` and
-`hunspell-*`); `ui/spellcheck.py` keeps the import lazy, loads the selected
+Spell checking is an optional `enchant` feature (Debian `python3-enchant`, or
+the pip extra `stanza-im[spellcheck]`; `libenchant-2-2`/`hunspell-*` are system
+packages); `ui/spellcheck.py` keeps the import lazy, loads the selected
 dictionaries in a worker thread and exposes `SpellCheckService` +
 `SpellCheckHighlighter`. The input underlines unknown words with Qt's red
 `SpellCheckUnderline`; the context menu offers merged suggestions and

@@ -7110,11 +7110,44 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.history_manager import HistoryManagerDialog
         if self._history_manager is None:
             self._history_manager = HistoryManagerDialog(
-                self._history_catalog, parent=self)
+                self._history_catalog, parent=self,
+                server_search=self._history_server_search,
+                server_supported=self._history_server_supported)
         self._history_manager.open_for(jid)
         self._history_manager.show()
         self._history_manager.raise_()
         self._history_manager.activateWindow()
+
+    def _history_server_supported(self, jid: str) -> bool:
+        if self._client is None or not jid:
+            return False
+        is_muc = (jid in self._conference_roster
+                  or jid in self._muc_self_nicks
+                  or self._is_conference_jid(jid))
+        return bool(self._client.supports_mam_fulltext(jid, is_muc=is_muc))
+
+    async def _history_server_search(self, jid: str, query: str,
+                                     after: str = ""):
+        if self._client is None:
+            return None
+        is_muc = (jid in self._conference_roster
+                  or jid in self._muc_self_nicks
+                  or self._is_conference_jid(jid))
+        result = await self._client.search_mam_fulltext(
+            jid, query, is_muc=is_muc, after=after, limit=100)
+        if result is None:
+            return None
+        rows, complete, cursor = result
+        if rows:
+            from stanza_im.core import history
+            for row in rows:
+                row["archived"] = True
+            try:
+                await history.store_many_async(jid, rows)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Could not store server search rows for %s: %s",
+                             jid, exc)
+        return rows, complete, cursor
 
     def _on_server_history(self, jid: str, since: str = ""):
         """Load the whole server-side conversation into the chat window."""

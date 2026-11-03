@@ -1,0 +1,89 @@
+"""Offscreen tests for the History Manager XEP-0431 mode."""
+import asyncio
+import os
+import sys
+import tempfile
+
+_SCRATCH = tempfile.mkdtemp(prefix="stanza_server_ui_")
+os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
+os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from PyQt6 import QtWidgets  # noqa: E402
+
+from stanza_im.i18n import load as i18n_load  # noqa: E402
+from stanza_im.ui.history_manager import HistoryManagerDialog  # noqa: E402
+
+FAILURES = []
+
+
+def check(name, cond):
+    print(("PASS" if cond else "FAIL") + ": " + name)
+    if not cond:
+        FAILURES.append(name)
+
+
+i18n_load("en")
+app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+JID = "bob@example.com"
+calls = []
+
+
+def row(ref, body, stamp):
+    return {
+        "direction": "incoming", "body": body, "timestamp": stamp,
+        "sender": JID, "archive_id": ref, "stanza_id": ref,
+        "origin_id": ref, "reply_to": "", "reply_id": "",
+        "retracted": False, "retract_reason": "", "retract_by": "",
+        "replace_id": "", "markup": None, "media": None,
+        "encrypted": False, "encryption": "",
+    }
+
+
+async def search(jid, query, after=""):
+    calls.append((jid, query, after))
+    if after:
+        return [row("a2", "second", "2026-11-02T10:00:00.000000Z")], True, ""
+    return [row("a1", "first", "2026-11-01T10:00:00.000000Z")], False, "a1"
+
+
+dialog = HistoryManagerDialog(
+    lambda: [], server_search=search, server_supported=lambda _jid: True)
+dialog._jid = JID
+dialog._name = "Bob"
+dialog._update_server_button()
+dialog._search.setText("hello")
+dialog._btn_server.setChecked(True)
+check("the server toggle is enabled for a supported chat",
+      dialog._btn_server.isEnabled() and dialog._btn_server.isChecked())
+asyncio.get_event_loop().run_until_complete(dialog._run_server_search_async())
+check("the first server page is requested without an RSM cursor",
+      calls == [(JID, "hello", "")])
+check("the first page is displayed and stored in the calendar model",
+      dialog._all_days == ["2026-11-01"] and dialog._server_days
+      == {"2026-11-01": 1} and dialog._results.count() == 1)
+check("an incomplete page shows Load more",
+      not dialog._btn_server_more.isHidden())
+asyncio.get_event_loop().run_until_complete(
+    dialog._run_server_search_async(more=True))
+check("Load more sends the previous RSM cursor",
+      calls[-1] == (JID, "hello", "a1"))
+check("the next page is appended and Complete hides Load more",
+      dialog._server_days == {"2026-11-01": 1, "2026-11-02": 1}
+      and dialog._btn_server_more.isHidden())
+dialog.deleteLater()
+
+dialog2 = HistoryManagerDialog(
+    lambda: [], server_search=search, server_supported=lambda _jid: False)
+dialog2._jid = JID
+dialog2._update_server_button()
+check("an unsupported chat disables the server toggle",
+      not dialog2._btn_server.isEnabled())
+dialog2.deleteLater()
+
+if FAILURES:
+    print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))
+    sys.exit(1)
+print("\nAll history server-UI tests passed.")

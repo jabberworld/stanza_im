@@ -70,6 +70,7 @@ _EXTRA_FEATURE_XEPS: tuple[tuple[str, str, str], ...] = (
     ("urn:xmpp:jingle:jet:*", "XEP-0272", "Multiparty Jingle (Muji)"),
     ("urn:xmpp:jingle:1", "XEP-0166", "Jingle"),
     ("urn:xmpp:mam:*", "XEP-0313", "Message Archive Management"),
+    ("urn:xmpp:fulltext:*", "XEP-0431", "Full Text Search in MAM"),
     ("urn:xmpp:hats:*", "XEP-0317", "Hats"),
     ("urn:xmpp:occupant-id:0", "XEP-0421", "Occupant IDs"),
     ("urn:xmpp:styling:0", "XEP-0393", "Message Styling"),
@@ -202,6 +203,8 @@ SERVER_XEPS: tuple[ServerXep, ...] = (
                "urn:xmpp:bookmarks:1#compat-pep")),
     ServerXep("XEP-0411", "Bookmarks Conversion", "disco",
               ("urn:xmpp:bookmarks-conversion:0",)),
+    ServerXep("XEP-0431", "Full Text Search in MAM", "disco",
+              ("urn:xmpp:fulltext:0",)),
     ServerXep("XEP-0490", "Message Displayed Synchronization (server assist)",
               "account", ("urn:xmpp:mds:server-assist:0",)),
 )

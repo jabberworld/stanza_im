@@ -73,6 +73,9 @@ NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
 NS_ROSTERX = "http://jabber.org/protocol/rosterx"  # XEP-0144 Roster Item Exchange
 NS_MUC_USER = "http://jabber.org/protocol/muc#user"  # XEP-0045 MUC user data
+NS_MAM = "urn:xmpp:mam:2"                # XEP-0313 Message Archive Management
+NS_RSM = "http://jabber.org/protocol/rsm" # XEP-0059 Result Set Management
+NS_FULLTEXT = "urn:xmpp:fulltext:0"      # XEP-0431 Full Text Search in MAM
 
 
 def _muc_destroy_info(pres) -> dict | None:
@@ -1450,6 +1453,7 @@ class JabberClient:
         self._caps_verified: set[str] = set()
         self._muc_subjects: dict[str, list[tuple[str, str]]] = {}
         self._mam_inflight: set[str] = set()  # JIDs with an active MAM query
+        self._mam_search_inflight: set[str] = set()
         self._mam_cursors: dict[str, str] = {}
         self._vcard_cache = VCardCache()
         self._vcard_inflight: set[str] = set()
@@ -3760,6 +3764,16 @@ class JabberClient:
         ``urn:xmpp:reporting:1``.
         """
         return self.supports_blocking()
+
+    def supports_mam_fulltext(self, jid: str, is_muc: bool = False) -> bool:
+        """Whether *jid*'s archive advertises XEP-0431 full-text search."""
+        feature = NS_FULLTEXT
+        if is_muc:
+            room = str(jid or "").split("/", 1)[0]
+            features = self._muc_room_features.get(room)
+            return bool(features and feature in features)
+        features = getattr(self, "_server_features", None)
+        return bool(features and feature in features)
 
     async def refresh_server_features(self) -> None:
         """Cache the account domain's disco#info features for the gates."""
@@ -7910,6 +7924,105 @@ class JabberClient:
         finally:
             self._mam_inflight.discard(jid)
 
+    def _mam_fulltext_query(self, archive_jid, with_jid, query: str,
+                            limit: int = 100, after: str = ""):
+        """Build a XEP-0431 MAM IQ and its result collector mask."""
+        mam = self.xmpp.plugin["xep_0313"]
+        iq, mask = mam._pre_mam_retrieve(
+            jid=JID(archive_jid) if archive_jid else None,
+            with_jid=JID(with_jid) if with_jid else None)
+        query_el = iq.xml.find("{%s}query" % NS_MAM)
+        if query_el is None:
+            return None, None
+        form = query_el.find("{%s}x" % NS_DATA)
+        if form is None:
+            form = ET.SubElement(
+                query_el, "{%s}x" % NS_DATA, {"type": "submit"})
+        fields = {node.get("var"): node for node in form.findall(
+            "{%s}field" % NS_DATA)}
+        if "FORM_TYPE" not in fields:
+            field = ET.SubElement(
+                form, "{%s}field" % NS_DATA,
+                {"var": "FORM_TYPE", "type": "hidden"})
+            ET.SubElement(field, "{%s}value" % NS_DATA).text = NS_MAM
+        field = fields.get("{%s}fulltext" % NS_FULLTEXT)
+        if field is None:
+            field = ET.SubElement(
+                form, "{%s}field" % NS_DATA,
+                {"var": "{%s}fulltext" % NS_FULLTEXT,
+                 "type": "text-single"})
+        else:
+            for value in list(field.findall("{%s}value" % NS_DATA)):
+                field.remove(value)
+        ET.SubElement(field, "{%s}value" % NS_DATA).text = str(query)
+        rsm = iq["mam"]["rsm"]
+        rsm["max"] = str(max(1, int(limit)))
+        if after:
+            rsm["after"] = str(after)
+        return iq, mask
+
+    async def search_mam_fulltext(self, jid: str, query: str,
+                                  is_muc: bool = False, after: str = "",
+                                  limit: int = 100,
+                                  timeout: float = 25.0):
+        """Run one XEP-0431 full-text MAM page for *jid*.
+
+        Returns ``(rows, complete, cursor)``; ``None`` means the query failed
+        (unsupported server, timeout, IQ error).  The method is deliberately
+        separate from the ordinary MAM cursors: a search must never advance
+        the history sync point.
+        """
+        query = str(query or "").strip()
+        if not query or jid in self._mam_search_inflight:
+            return None
+        archive = jid if is_muc else self.jid_str
+        with_jid = None if is_muc else jid
+        self._mam_search_inflight.add(jid)
+        from slixmpp.xmlstream.handler import Collector
+        from slixmpp.xmlstream.matcher import MatchXMLMask
+
+        collector = None
+        try:
+            iq, mask = self._mam_fulltext_query(
+                archive, with_jid, query, limit, after)
+            if iq is None or mask is None:
+                return None
+            collector = Collector(
+                "MAMFulltext_%s" % iq["id"],
+                MatchXMLMask(str(mask)))
+            self.xmpp.register_handler(collector)
+            try:
+                result = await asyncio.wait_for(
+                    iq.send(timeout=timeout), timeout=timeout + 5)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Fulltext MAM query failed for %s: %s", jid, exc)
+                return None
+            if str(result.get("type", "result")) == "error":
+                logger.debug("Fulltext MAM query returned an error for %s: %s",
+                             jid, result)
+                return None
+            messages = collector.stop()
+            collector = None
+            rows, _parsed, _skipped, _reasons = self._mam_rows(
+                jid, messages, is_muc=is_muc)
+            rows = await self._decrypt_mam_rows(jid, rows, is_muc=is_muc)
+            complete, cursor = self._mam_fin_state(result)
+            if complete is None or (not cursor and not complete):
+                # No usable <fin/>/RSM cursor: never trap the UI in a
+                # "Load more" loop that repeats the first page.
+                complete = True
+            return rows, bool(complete), cursor
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Fulltext MAM search failed for %s: %s", jid, exc)
+            return None
+        finally:
+            if collector is not None:
+                try:
+                    collector.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._mam_search_inflight.discard(jid)
+
     @staticmethod
     def _mam_fin_state(iq) -> tuple[bool | None, str]:
         """Return ``(complete, last_cursor)`` from a MAM result IQ.
@@ -8084,8 +8197,11 @@ class JabberClient:
                 "edited messages", jid, len(orphans), sample)
         return applied
 
-    def _mam_rows(self, jid: str, results) -> tuple[list[dict], int, int, dict]:
+    def _mam_rows(self, jid: str, results, is_muc: bool | None = None
+                  ) -> tuple[list[dict], int, int, dict]:
         """Parse MAM results into history rows (shared by before/after queries)."""
+        if is_muc is None:
+            is_muc = jid in self.groupchats
         my_nick = ""
         gi = self.groupchats.get(jid)
         if gi:
@@ -8124,7 +8240,7 @@ class JabberClient:
                 ts = _normalize_ts(stamp)
                 direction = "incoming"
                 sender = ""
-                if jid in self.groupchats:
+                if is_muc:
                     sender = frm.split("/", 1)[1] if "/" in frm else frm
                     if sender == my_nick:
                         direction = "outgoing"
@@ -8134,7 +8250,7 @@ class JabberClient:
                     if sender == self.jid_str:
                         direction = "outgoing"
                         sender = "Me"
-                    elif not self._mam_belongs_to(jid, frm, False,
+                    elif not self._mam_belongs_to(jid, frm, is_muc,
                                                   self.jid_str):
                         # A misbehaving server (e.g. one that ignores the
                         # <with> filter and returns another account's whole
@@ -8145,7 +8261,7 @@ class JabberClient:
                         skip_reasons["wrong_sender"] = (
                             skip_reasons.get("wrong_sender", 0) + 1)
                         continue
-                if jid in self.groupchats:
+                if is_muc:
                     server_sid = _stanza_id(msg, jid)
                     stable = server_sid or _archive_result_id(result)
                 else:

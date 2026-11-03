@@ -31,16 +31,16 @@ python main.py
 - **PyQt6**, **PyQt6-WebEngine**, **PyQt6-Multimedia**, **PyQt6-WebChannel**
 - **slixmpp**, **qasync**, **defusedxml**, **aiodns**
 - Опционально, для звонков: **aiortc** (`pip install stanza-im[calls]`)
-- Опционально, для проверки орфографии: **pyenchant**
-  (`pip install stanza-im[spellcheck]`) и системные словари `hunspell-*`
-  (например, `hunspell-ru`, `hunspell-en-us`) с `libenchant-2-2`
+- Опционально, для проверки орфографии: системный **python3-enchant** или
+  pip-пакет **pyenchant** (`pip install stanza-im[spellcheck]`) плюс
+  системные словари `hunspell-*` (например, `hunspell-ru`, `hunspell-en-us`)
 - Системные библиотеки Qt/веб-движка: `libglib-2.0`, `libGL`, `libgl1`,
   `libx11`, `libfontconfig`
 
 В Debian 13 нужные для работы пакеты можно установить следующей командой:
 
 ```
-sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine python3-defusedxml python3-qasync python3-aiodns python3-aiortc python3-pyqt6.qtmultimedia fonts-noto-color-emoji
+sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine python3-defusedxml python3-qasync python3-aiodns python3-aiortc python3-pyqt6.qtmultimedia python3-enchant fonts-noto-color-emoji
 ```
 
 Для работы шифрования OMEMO дополнительно нужны такие пакеты:
@@ -49,12 +49,15 @@ sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine pyt
 sudo apt-get install python3-omemo python3-oldmemo python3-twomemo python3-omemo-dr python3-slixmpp-omemo python3-xmlschema
 ```
 
-Для проверки орфографии нужны `libenchant-2-2` и словари нужных языков,
-например:
+Для проверки орфографии на Debian нужен `python3-enchant` (он сам подтягивает
+`libenchant-2-2`) и словари нужных языков, например:
 
 ```
-sudo apt-get install libenchant-2-2 hunspell-ru hunspell-en-us
+sudo apt-get install python3-enchant hunspell-ru hunspell-en-us
 ```
+
+Для venv или других систем можно поставить `pip install stanza-im[spellcheck]`
+и отдельно `libenchant-2-2`/`hunspell-*` средствами ОС.
 
 ## Документация проекта
 

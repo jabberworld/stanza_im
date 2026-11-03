@@ -54,9 +54,11 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     """Browser over locally stored per-contact chat history."""
 
     def __init__(self, catalog_provider, initial_jid: str = "",
-                 parent=None):
+                 parent=None, server_search=None, server_supported=None):
         super().__init__(parent)
         self._catalog_provider = catalog_provider
+        self._server_search = server_search
+        self._server_supported = server_supported
         self._catalog: list[dict] = []
         self._jid: str = ""
         self._name: str = ""
@@ -82,6 +84,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         #: result open so the pinned day is applied deterministically).
         self._dates_task = None
         self._released = False
+        #: XEP-0431 server search (selected contact only, first page + more).
+        self._server_jid = ""
+        self._server_query = ""
+        self._server_cursor = ""
+        self._server_complete = True
+        self._server_rows: list[dict] = []
+        self._server_days: dict[str, int] = {}
 
         self.setWindowTitle(tr("history_manager"))
         self.resize(920, 620)
@@ -194,6 +203,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_all_contacts.setToolTip(tr("history_all_contacts_tip"))
         self._btn_all_contacts.toggled.connect(self._on_all_contacts_toggled)
         search_row.addWidget(self._btn_all_contacts)
+        self._btn_server = QtWidgets.QPushButton(tr("history_search_server"))
+        self._btn_server.setCheckable(True)
+        self._btn_server.setAutoDefault(False)
+        self._btn_server.setDefault(False)
+        self._btn_server.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._btn_server.setToolTip(tr("history_search_server_tip"))
+        self._btn_server.toggled.connect(self._on_server_toggled)
+        self._btn_server.setEnabled(False)
+        search_row.addWidget(self._btn_server)
         right_layout.addLayout(search_row)
 
         self._results = QtWidgets.QListWidget()
@@ -208,6 +226,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             get_height=lambda: self._results_height, invert=True)
         self._results_handle.height_changed.connect(self._set_results_height)
         right_layout.addWidget(self._results_handle)
+        self._btn_server_more = QtWidgets.QPushButton(
+            tr("history_search_server_more"))
+        self._btn_server_more.setAutoDefault(False)
+        self._btn_server_more.setDefault(False)
+        self._btn_server_more.setFocusPolicy(
+            QtCore.Qt.FocusPolicy.NoFocus)
+        self._btn_server_more.clicked.connect(
+            lambda: self._run_server_search(more=True))
+        self._btn_server_more.setVisible(False)
+        right_layout.addWidget(self._btn_server_more)
         self._set_results_visible(False)
 
         self._status = QtWidgets.QLabel()
@@ -384,6 +412,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._jid = jid
         self._name = name
         self._btn_export.setEnabled(bool(jid))
+        self._reset_server_search()
+        self._update_server_button()
         self._search.setText("")
         self._all_days = []
         self._clear_search_state()
@@ -658,6 +688,9 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if not self._query:
             self._clear_search_state()
             return
+        if self._btn_server.isChecked():
+            self._run_server_search()
+            return
         if self._btn_all_contacts.isChecked():
             self._run_global_search()
             return
@@ -772,7 +805,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         date = data
         if date in self._all_days:
             self._go_to_day(self._all_days.index(date))
-        if self._btn_all_time.isChecked():
+        if self._btn_all_time.isChecked() or self._btn_server.isChecked():
             self._set_results_visible(True)
         self._search.setFocus()
 
@@ -812,10 +845,12 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _multi_mode(self) -> bool:
         """True when the results list drives the navigation."""
         return (self._btn_all_time.isChecked()
-                or self._btn_all_contacts.isChecked())
+                or self._btn_all_contacts.isChecked()
+                or self._btn_server.isChecked())
 
     def _on_match_prev(self) -> None:
-        if self._btn_all_contacts.isChecked():
+        if (self._btn_all_contacts.isChecked()
+                or self._btn_server.isChecked()):
             self._step_results(-1)
             return
         if self._btn_all_time.isChecked():
@@ -827,7 +862,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._jump_to_match(self._match_index)
 
     def _on_match_next(self) -> None:
-        if self._btn_all_contacts.isChecked():
+        if (self._btn_all_contacts.isChecked()
+                or self._btn_server.isChecked()):
             self._step_results(1)
             return
         if self._btn_all_time.isChecked():
@@ -948,6 +984,118 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         except RuntimeError:  # pragma: no cover - the widget was destroyed
             pass
 
+    def _reset_server_search(self) -> None:
+        self._server_jid = ""
+        self._server_query = ""
+        self._server_cursor = ""
+        self._server_complete = True
+        self._server_rows = []
+        self._server_days = {}
+        self._btn_server_more.setVisible(False)
+
+    def _update_server_button(self) -> None:
+        supported = False
+        if (self._server_supported is not None and self._jid):
+            try:
+                supported = bool(self._server_supported(self._jid))
+            except Exception:  # noqa: BLE001 - never break the browser
+                supported = False
+        self._btn_server.setEnabled(supported)
+        if not supported and self._btn_server.isChecked():
+            self._btn_server.setChecked(False)
+        self._btn_server.setToolTip(
+            tr("history_search_server_tip") if supported
+            else tr("history_search_server_unavailable"))
+
+    def _on_server_toggled(self, checked: bool) -> None:
+        if checked:
+            self._btn_all_contacts.setChecked(False)
+            self._btn_all_contacts.setEnabled(False)
+            self._btn_all_time.setChecked(False)
+            self._btn_all_time.setEnabled(False)
+        else:
+            self._btn_all_contacts.setEnabled(True)
+            self._btn_all_time.setEnabled(True)
+            self._reset_server_search()
+            self._clear_search_state()
+            self._all_days = []
+            self._set_results_visible(False)
+
+    def _run_server_search(self, more: bool = False) -> None:
+        self._start_task(self._run_server_search_async(more))
+
+    async def _run_server_search_async(self, more: bool = False) -> None:
+        if self._released or not self._jid or self._server_search is None:
+            return
+        query = self._search.text().strip()
+        if not query:
+            self._clear_search_state()
+            return
+        if not more:
+            self._reset_server_search()
+            self._server_jid = self._jid
+            self._server_query = query
+        elif self._server_jid != self._jid or self._server_query != query:
+            return
+        self._status.setText(tr("history_search_server_running"))
+        after = self._server_cursor if more else ""
+        try:
+            result = await self._server_search(
+                self._jid, query, after)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Server history search failed: %s", exc)
+            result = None
+        if self._released or self._jid != self._server_jid:
+            return
+        if result is None:
+            self._status.setText(tr("history_search_server_error"))
+            return
+        rows, complete, cursor = result
+        rows = list(rows or [])
+        if more:
+            known = {str(row.get("archive_id") or row.get("stanza_id") or "")
+                     for row in self._server_rows}
+            for row in rows:
+                ref = str(row.get("archive_id") or row.get("stanza_id") or "")
+                if not ref or ref not in known:
+                    self._server_rows.append(row)
+                    if ref:
+                        known.add(ref)
+        else:
+            self._server_rows = rows
+        self._server_days = {}
+        for row in self._server_rows:
+            day = str(row.get("timestamp") or "")[:10]
+            if day:
+                self._server_days[day] = self._server_days.get(day, 0) + 1
+        self._server_cursor = cursor or ""
+        self._server_complete = bool(complete)
+        self._query = query
+        self._all_days = sorted(self._server_days, reverse=True)
+        self._dates = await history.dates_async(self._jid)
+        if self._released or self._jid != self._server_jid:
+            return
+        self._mark_calendar_dates()
+        self._results.clear()
+        for day in self._all_days:
+            item = QtWidgets.QListWidgetItem(
+                f"{day} · {self._server_days[day]}")
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, day)
+            self._results.addItem(item)
+        self._set_results_visible(bool(self._all_days))
+        self._btn_server_more.setVisible(
+            bool(self._all_days) and not self._server_complete)
+        if self._all_days:
+            self._status.setText(tr(
+                "history_search_server_results", n=len(self._server_rows)))
+        else:
+            self._status.setText(tr("history_search_server_no_results"))
+        self._update_match_buttons()
+        if self._all_days:
+            self._results.setCurrentRow(0)
+            self._go_to_day(0)
+        self._search.setFocus()
+
     def _on_mode_toggled(self, checked: bool) -> None:
         self._clear_search_state()
         self._all_days = []
@@ -955,6 +1103,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _on_all_contacts_toggled(self, checked: bool) -> None:
         """Switch between the per-contact and the all-contacts search."""
+        if checked and self._btn_server.isChecked():
+            self._btn_server.setChecked(False)
         self._clear_search_state()
         self._global_days = {}
         self._all_days = []

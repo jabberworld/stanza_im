@@ -165,44 +165,23 @@ class _ColorButton(QtWidgets.QPushButton):
             self.set_color(color.name())
 
 
-class _SpellLanguagesList(QtWidgets.QListWidget):
-    """Checkable list of installed spell-check dictionaries."""
+class _SpellLanguagesButton(QtWidgets.QToolButton):
+    """A compact ``...`` button opening the spell-check language picker."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setSelectionMode(
-            QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
-        self.setUniformItemSizes(True)
-        self.setMaximumHeight(140)
+        self._languages: list[str] = []
+        self.setText("...")
+        self.setAutoRaise(True)
+        self.setFixedSize(24, 24)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.setToolTip(tr("prefs_spellcheck_languages_tip"))
+
+    def languages(self) -> list[str]:
+        return list(self._languages)
 
     def set_languages(self, tags) -> None:
-        from stanza_im.ui.spellcheck import language_name
-        self.clear()
-        for tag in tags:
-            item = QtWidgets.QListWidgetItem(language_name(tag))
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, tag)
-            item.setToolTip(tag)
-            item.setFlags(item.flags()
-                          | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(QtCore.Qt.CheckState.Unchecked)
-            self.addItem(item)
-
-    def selected(self) -> list[str]:
-        out = []
-        for row in range(self.count()):
-            item = self.item(row)
-            if item.checkState() == QtCore.Qt.CheckState.Checked:
-                out.append(str(item.data(QtCore.Qt.ItemDataRole.UserRole)))
-        return out
-
-    def set_selected(self, tags) -> None:
-        wanted = {str(tag) for tag in (tags or [])}
-        for row in range(self.count()):
-            item = self.item(row)
-            tag = str(item.data(QtCore.Qt.ItemDataRole.UserRole))
-            item.setCheckState(
-                QtCore.Qt.CheckState.Checked if tag in wanted
-                else QtCore.Qt.CheckState.Unchecked)
+        self._languages = [str(tag) for tag in (tags or [])]
 
 
 class _LazyControls(dict):
@@ -1598,35 +1577,33 @@ class PreferencesDialog(QtWidgets.QDialog):
         general_form.addRow(self._check("send_ctrl_enter", tr("prefs_send_ctrl_enter")))
         spell_enabled = self._check(
             "spellcheck_enabled", tr("prefs_spellcheck_enabled"))
-        spell_auto = self._check(
-            "spellcheck_auto", tr("prefs_spellcheck_auto"))
-        spell_languages = _SpellLanguagesList()
+        spell_languages = _SpellLanguagesButton()
         self._controls["spellcheck_languages"] = spell_languages
         from stanza_im.ui import spellcheck as spellcheck_mod
+        from stanza_im.ui.spellcheck_dialog import SpellCheckLanguagesDialog
         spell_ok = spellcheck_mod.available()
+        available_tags = spellcheck_mod.languages() if spell_ok else []
         if spell_ok:
-            spell_languages.set_languages(spellcheck_mod.languages())
+            def _pick_spell_languages():
+                dialog = SpellCheckLanguagesDialog(
+                    spell_languages.languages(), available_tags, self)
+                if dialog.exec():
+                    spell_languages.set_languages(dialog.languages())
+            spell_languages.clicked.connect(_pick_spell_languages)
+        tip = tr("prefs_spellcheck_tip")
+        if not spell_ok:
+            tip = tr("prefs_spellcheck_unavailable") + "\n" + tip
         general_form.addRow(self._row(
-            spell_enabled, self._info_label(tr("prefs_spellcheck_tip")),
+            spell_enabled, spell_languages, self._info_label(tip),
             trailing_stretch=True))
-        general_form.addRow(spell_auto)
-        general_form.addRow(tr("prefs_spellcheck_languages"), spell_languages)
         if spell_ok:
             def _sync_spell_controls(*_args):
-                active = spell_enabled.isChecked()
-                spell_auto.setEnabled(active)
-                spell_languages.setEnabled(
-                    active and not spell_auto.isChecked())
+                spell_languages.setEnabled(spell_enabled.isChecked())
             spell_enabled.toggled.connect(_sync_spell_controls)
-            spell_auto.toggled.connect(_sync_spell_controls)
             _sync_spell_controls()
         else:
             spell_enabled.setEnabled(False)
-            spell_auto.setEnabled(False)
             spell_languages.setEnabled(False)
-            note = QtWidgets.QLabel(tr("prefs_spellcheck_unavailable"))
-            note.setWordWrap(True)
-            general_form.addRow(note)
         general_form.addRow(tr("prefs_open_incoming_tab"), self._combo(
             "open_incoming_tab", [
                 ("open_tab_always", "always"),
@@ -2168,8 +2145,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             return widget.value() / 100.0
         if isinstance(widget, QtWidgets.QComboBox):
             return widget.currentData()
-        if isinstance(widget, _SpellLanguagesList):
-            return widget.selected()
+        if isinstance(widget, _SpellLanguagesButton):
+            return widget.languages()
         if isinstance(widget, QtWidgets.QPlainTextEdit):
             return widget.toPlainText()
         if isinstance(widget, _ColorButton):
@@ -2187,8 +2164,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         elif isinstance(widget, QtWidgets.QComboBox):
             index = widget.findData(value)
             widget.setCurrentIndex(index if index >= 0 else 0)
-        elif isinstance(widget, _SpellLanguagesList):
-            widget.set_selected(value or [])
+        elif isinstance(widget, _SpellLanguagesButton):
+            widget.set_languages(value or [])
         elif isinstance(widget, QtWidgets.QPlainTextEdit):
             widget.setPlainText(str(value or ""))
         elif isinstance(widget, _ColorButton):
@@ -2237,8 +2214,6 @@ class PreferencesDialog(QtWidgets.QDialog):
                 chat, "open_incoming_tab", "except_low"),
             "spellcheck_enabled": bool(getattr(
                 chat, "spellcheck_enabled", True)),
-            "spellcheck_auto": not bool(getattr(
-                chat, "spellcheck_languages", []) or []),
             "spellcheck_languages": list(getattr(
                 chat, "spellcheck_languages", []) or []),
             "jid": cfg.jid, "password": cfg.password, "save_password": cfg.save_password,
@@ -2529,9 +2504,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             cfg.chat[key] = self._value(key)
         cfg.chat.spellcheck_enabled = bool(
             self._value("spellcheck_enabled"))
-        cfg.chat.spellcheck_languages = (
-            [] if self._value("spellcheck_auto")
-            else list(self._value("spellcheck_languages") or []))
+        cfg.chat.spellcheck_languages = list(
+            self._value("spellcheck_languages") or [])
         cfg.chat.theme = self._value("chat_theme") or ""
         cfg.appearance.chat_theme = cfg.chat.theme
         cfg.appearance.muc_theme = self._value("muc_theme") or ""
