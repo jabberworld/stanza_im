@@ -75,6 +75,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._avatar_radius = 20
         self._notes_enabled = False
         self._mds_throttle = 3
+        self._spellcheck_service = None
         self._muc_participant_options = (True, True)  # avatars, client icons
         self._muc_hats_visible = True                 # XEP-0317 chips in chat
         self._muc_participant_width = 0               # 0 = default width
@@ -182,6 +183,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_own_jid(self._own_jid)
         widget.set_own_avatar(self._own_avatar)
         widget.set_input_font(*self._input_font)
+        widget.set_spellcheck(self._spellcheck_service)
         widget.set_mds_throttle(self._mds_throttle)
         widget.message_sent.connect(self._on_message_sent)
         widget.message_reply_sent.connect(self._on_message_reply_sent)
@@ -264,6 +266,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_own_jid(self._own_jid)
         widget.set_own_avatar(self._own_avatar)
         widget.set_input_font(*self._input_font)
+        widget.set_spellcheck(self._spellcheck_service)
         widget.set_mds_throttle(self._mds_throttle)
         widget.set_participant_font(*self._participant_font)
         widget.set_subject_font(*self._subject_font)
@@ -626,6 +629,12 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._chat_options = dict(options)
         for widget in self._tabs.values():
             widget.set_chat_options(options)
+
+    def set_spellcheck(self, service) -> None:
+        """Apply the optional spell-check service to every open tab."""
+        self._spellcheck_service = service
+        for widget in self._tabs.values():
+            widget.set_spellcheck(service)
 
     def _on_widget_input_height_changed(self, jid: str, height: int):
         """Keep the shared options snapshot fresh so new tabs apply it."""

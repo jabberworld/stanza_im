@@ -84,6 +84,7 @@ stanza_im/                      # Python package
 │   ├── resize_handle.py         # Thin draggable bar resizing a field (input/results)
 │   ├── zoom_list.py             # List with Ctrl+wheel zoom + empty-click deselect
 │   ├── preferences.py           # Settings dialog (icon nav, nested tabs)
+│   ├── spellcheck.py            # Optional pyenchant spell-check service/highlighter
 │   ├── media_preview.py         # Inline image/audio/video previews
 │   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
 │   ├── whiteboard_dialog.py     # Whiteboard dialog (tool palette + canvas)
@@ -3356,7 +3357,10 @@ alone) `_sync_muji_preview` instead starts a standalone camera capture
 emitted as `muji_local_video_frame`; `_bind_call` stops it before a session's
 own capture opens the device. Debug logging uses `stanza_im.call*` with `CALL[…]`/`MUJI[…]`
 markers. The optional `calls` extra (`pip install .[calls]`) installs `aiortc`;
-without it the engine is a `NullMediaEngine` and calling is disabled.
+without it the engine is a `NullMediaEngine` and calling is disabled. The
+optional `spellcheck` extra (`pip install .[spellcheck]`) installs `pyenchant`;
+system `libenchant-2-2` and `hunspell-*` dictionaries still decide which
+languages are checked.
 
 Preferences use icon navigation and nested tabs. The section icons come from
 `IconCache.get_category_icon` (scalable SVG first): «Stanza IM» uses the app
@@ -3484,7 +3488,19 @@ The message input gets `ChatWidget.set_input_font` (hosted by
 (`set_placeholder`), because Qt's built-in placeholder is painted with the
 style-resolved font — a non-empty application stylesheet resets that to the
 application default while the typed text keeps the document font.
-**Ctrl+wheel** over
+Spell checking is an optional `pyenchant` feature
+(`pip install stanza-im[spellcheck]`, system `libenchant-2-2` and
+`hunspell-*`); `ui/spellcheck.py` keeps the import lazy, loads the selected
+dictionaries in a worker thread and exposes `SpellCheckService` +
+`SpellCheckHighlighter`. The input underlines unknown words with Qt's red
+`SpellCheckUnderline`; the context menu offers merged suggestions and
+«Добавить в словарь» (`add_to_personal`). Several dictionaries are active at
+once and a word is accepted by any of them. Script routing is conservative:
+a word is checked only when every script in it has an active dictionary, so a
+missing `hunspell-ru` skips Cyrillic instead of marking every Russian word.
+The auto list is UI language + system locale + English, limited to installed
+tags. `chat.spellcheck_enabled` defaults to `true`; without pyenchant /
+dictionaries the feature is a no-op. **Ctrl+wheel** over
 the input, the roster or the MUC participant list (including over a participant
 **row**, whose child labels forward wheel events) changes only that widget's
 **font size** (`ui/font_zoom.py` `FontZoomMixin`/`wheel_font_size`, 6–48 pt,

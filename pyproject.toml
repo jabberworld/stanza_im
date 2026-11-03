@@ -17,6 +17,9 @@ dependencies = [
 # A/V calling (XEP-0167/0176 + DTLS-SRTP).  Pulls PyAV (FFmpeg), pylibsrtp,
 # pyopenssl and aioice.  Without it the call UI stays disabled.
 calls = ["aiortc>=1.9"]
+# Spell checking in the message input.  pyenchant is the Python binding; the
+# actual dictionaries are system packages (hunspell-* / libenchant).
+spellcheck = ["pyenchant>=3.2"]
 
 [project.scripts]
 stanza-im = "stanza_im.app:run"

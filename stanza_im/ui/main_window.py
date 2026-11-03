@@ -35,6 +35,7 @@ from stanza_im.include import sounds as sounds_mod
 from stanza_im.core.storage import Config
 from stanza_im.core import profiles, unread_state
 from stanza_im.ui import icons as icons_mod
+from stanza_im.ui import spellcheck as spellcheck_mod
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.zoom_list import ZoomListWidget as _ZoomListWidget
 from stanza_im.ui.login_widget import LoginWidget
@@ -544,6 +545,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mds_throttle_timer = QtCore.QTimer(self)
         self._mds_throttle_timer.setSingleShot(True)
         self._mds_throttle_timer.timeout.connect(self._flush_mds_pending)
+        #: Optional spell checking: one shared service for every chat input.
+        self._spellcheck_request = 0
+        self._spellcheck_service = None
+        self._spellcheck_tags: list[str] = []
+        self._spellcheck_loader = spellcheck_mod.SpellCheckLoader(self)
+        self._spellcheck_loader.ready.connect(self._on_spellcheck_ready)
         #: MDS+MAM unread reconstruction: in-flight and already-resolved points.
         self._mds_reconciling: set[str] = set()
         self._mds_reconciled: set[tuple[str, str]] = set()
@@ -3788,6 +3795,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._config.appearance.media_cache_days,
             int(self._config.appearance.media_cache_mb) * 1024 * 1024)
         self._chat_window.set_chat_options(self._config.chat)
+        self._apply_spellcheck_settings()
         if self._client:
             self._client.send_typing_notifications = self._config.privacy.send_typing_notifications
             self._client.send_activity_notifications = self._config.privacy.send_activity_notifications
@@ -3821,6 +3829,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.set_tab_title_length(
             self._config.chat.tab_title_length)
         self._set_tray_status_icon(self._config.last_status)
+
+    def _apply_spellcheck_settings(self) -> None:
+        """(Re)load the optional spell-check dictionaries in the background."""
+        self._spellcheck_request += 1
+        request = self._spellcheck_request
+        enabled = bool(getattr(self._config.chat, "spellcheck_enabled", True))
+        if not enabled or not spellcheck_mod.module_available():
+            self._spellcheck_service = None
+            self._spellcheck_tags = []
+            self._chat_window.set_spellcheck(None)
+            return
+        selected = list(getattr(
+            self._config.chat, "spellcheck_languages", []) or [])
+        from stanza_im.i18n import current_language
+        self._spellcheck_loader.load(
+            request, selected, ui_language=current_language(),
+            system_language=QtCore.QLocale.system().name())
+
+    def _on_spellcheck_ready(self, request: int, service, tags) -> None:
+        if request != self._spellcheck_request:
+            return
+        if not bool(getattr(self._config.chat, "spellcheck_enabled", True)):
+            return
+        self._spellcheck_service = service
+        self._spellcheck_tags = list(tags or [])
+        self._chat_window.set_spellcheck(service)
+        logger.debug("SPELL[ready] tags=%s available=%s",
+                     self._spellcheck_tags, bool(service))
 
     def _on_about(self):
         from stanza_im.ui.about_dialog import AboutDialog

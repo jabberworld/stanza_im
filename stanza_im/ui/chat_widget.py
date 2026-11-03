@@ -31,6 +31,7 @@ from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
 from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
 from stanza_im.ui.resize_handle import VerticalResizeHandle as _InputHandle
+from stanza_im.ui import spellcheck as spellcheck_mod
 from stanza_im.ui import tooltip as tooltip_mod
 
 logger = logging.getLogger(__name__)
@@ -214,6 +215,71 @@ class _ChatInput(FontZoomMixin, QtWidgets.QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._placeholder = ""
+        self._spellcheck = spellcheck_mod.SpellCheckHighlighter(
+            self.document())
+
+    def set_spellcheck(self, service) -> None:
+        """Apply (or clear) the optional spell-check service."""
+        self._spellcheck.set_service(service)
+
+    def _replace_spelling(self, start: int, end: int, replacement: str) -> None:
+        cursor = QtGui.QTextCursor(self.document())
+        cursor.beginEditBlock()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QtGui.QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(replacement)
+        cursor.endEditBlock()
+        self._spellcheck.rehighlight()
+
+    def contextMenuEvent(self, event) -> None:
+        menu = self.createStandardContextMenu()
+        service = self._spellcheck.service()
+        text = self.toPlainText()
+        span = None
+        if service is not None:
+            cursor = self.textCursor()
+            if cursor.hasSelection():
+                start, end = cursor.selectionStart(), cursor.selectionEnd()
+                candidate = spellcheck_mod.word_span_at(text, start)
+                if (candidate is not None and candidate[1] == start
+                        and candidate[2] == end):
+                    span = candidate
+            else:
+                span = spellcheck_mod.word_span_at(text, cursor.position())
+        if span is not None:
+            word, start, end = span
+            if service.should_check(word) and not service.check(word):
+                suggestions = service.suggest(word)
+                icon = QtGui.QIcon(find_icon("edit.png"))
+                submenu = QtWidgets.QMenu(
+                    icon, tr("spellcheck_menu"), menu)
+                for suggestion in suggestions:
+                    action = submenu.addAction(icon, suggestion)
+                    action.triggered.connect(
+                        lambda _checked=False, s=start, e=end, value=suggestion:
+                        self._replace_spelling(s, e, value))
+                if not suggestions:
+                    empty = submenu.addAction(tr("spellcheck_no_suggestions"))
+                    empty.setEnabled(False)
+                submenu.addSeparator()
+                add = submenu.addAction(
+                    QtGui.QIcon(find_icon("ok.png")),
+                    tr("spellcheck_add_word"))
+                add.triggered.connect(
+                    lambda _checked=False, value=word:
+                    self._add_spelling(value))
+                first = menu.actions()[0] if menu.actions() else None
+                if first is not None:
+                    menu.insertMenu(first, submenu)
+                    menu.insertSeparator(first)
+                else:
+                    menu.addMenu(submenu)
+        menu.exec(event.globalPos())
+
+    def _add_spelling(self, word: str) -> None:
+        service = self._spellcheck.service()
+        if service is not None and service.add_to_personal(word):
+            self._spellcheck.rehighlight()
 
     def set_placeholder(self, text: str) -> None:
         """Set the placeholder text (drawn with the widget font)."""
@@ -449,6 +515,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._peer_avatar = ""
         self._participant_font: tuple[str, int] = ("", 0)
         self._input_font: tuple[str, int] = ("", 0)
+        self._spellcheck_service = None
         self._subject_font: tuple[str, int] = ("", 0)
         self._send_ctrl_enter = False
         self._confirm_retraction = False
@@ -4002,6 +4069,11 @@ class ChatWidget(QtWidgets.QWidget):
         if size > 0:
             base.setPointSize(int(size))
         self._input.setFont(base)
+
+    def set_spellcheck(self, service) -> None:
+        """Apply the optional spell-check service to the input."""
+        self._spellcheck_service = service
+        self._input.set_spellcheck(service)
 
     def _on_input_font_zoom(self, size: int) -> None:
         """Ctrl+wheel over the input: change only the size."""

@@ -31,6 +31,9 @@ python main.py
 - **PyQt6**, **PyQt6-WebEngine**, **PyQt6-Multimedia**, **PyQt6-WebChannel**
 - **slixmpp**, **qasync**, **defusedxml**, **aiodns**
 - Опционально, для звонков: **aiortc** (`pip install stanza-im[calls]`)
+- Опционально, для проверки орфографии: **pyenchant**
+  (`pip install stanza-im[spellcheck]`) и системные словари `hunspell-*`
+  (например, `hunspell-ru`, `hunspell-en-us`) с `libenchant-2-2`
 - Системные библиотеки Qt/веб-движка: `libglib-2.0`, `libGL`, `libgl1`,
   `libx11`, `libfontconfig`
 
@@ -44,6 +47,13 @@ sudo apt-get install python3-slixmpp python3-pyqt6 python3-pyqt6.qtwebengine pyt
 
 ```
 sudo apt-get install python3-omemo python3-oldmemo python3-twomemo python3-omemo-dr python3-slixmpp-omemo python3-xmlschema
+```
+
+Для проверки орфографии нужны `libenchant-2-2` и словари нужных языков,
+например:
+
+```
+sudo apt-get install libenchant-2-2 hunspell-ru hunspell-en-us
 ```
 
 ## Документация проекта

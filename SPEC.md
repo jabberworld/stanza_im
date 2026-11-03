@@ -385,6 +385,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.open_incoming_tab` | `except_low` | Auto-open a tab for an incoming 1:1/PM message: `always` / `except_low` (default; no tab for low-priority contacts) / `never`. The message is stored and counted regardless; an existing tab always receives it. |
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
 | `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
+| `chat.spellcheck_enabled` | `true` | Optional pyenchant spell checking in the message input. Without `pyenchant`, `libenchant` or installed dictionaries it is a silent no-op. |
+| `chat.spellcheck_languages` | `[]` | Enchant dictionary tags to use. Empty = automatic: UI language + system locale + English, limited to installed dictionaries. Several tags may be selected; a word is accepted by any active dictionary. Words whose script has no active dictionary are skipped. |
 | `chat.mds_displayed_throttle` | `3` | Seconds (1–30) between XEP-0490 `displayed` publishes for **partial** read progress while scrolling (Preferences → Chat → «Общие»/«General»). `MainWindow._on_chat_last_seen` arms a single-shot `_mds_throttle_timer` carrying the newest seen stanza-id; reaching the bottom still publishes immediately. Applied live from `_on_settings_applied`. |
 | `chat.allow_incoming_deletions` | `true` | Apply a peer's XEP-0424 retraction (Preferences → Chat → «Общие»/«General»). On: the message becomes a tombstone; off: it keeps its body and gains a "✕" marker. Applied live to the client from `_on_settings_applied`. |
 | `chat.allow_moderation` | `true` | Apply a moderator's XEP-0425 retraction (Preferences → Chat → «Конференции»/«Conferences»). On: the message becomes a "Retracted by a moderator" tombstone with the reason; off: it keeps its body and gains a "✕" marker. It only governs the receive side — the moderator action in the message menu is unaffected. |
@@ -473,6 +475,10 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `calls.pip` | `true` | Default for new 1:1 video calls: show a picture-in-picture view of our outgoing camera/screen. The in-call button changes only that call and is not persisted. |
 | `chat.image_limit_chat_mb` | `5` | Maximum announced/cached image size for previews in 1:1 and private chats; larger images show a fixed placeholder with «Загрузить изображение» (0 = unlimited). |
 | `chat.image_limit_conference_mb` | `2` | Same limit for conference images. |
+
+Spell checking requires the optional `spellcheck` extra (`pyenchant`) plus
+system `libenchant-2-2` and `hunspell-*` dictionaries; without them the input
+feature is a silent no-op.
 
 Calling requires the optional `calls` extra (`aiortc`); without it the call
 menus stay disabled (`NullMediaEngine`). STUN/TURN are resolved by
@@ -1529,6 +1535,19 @@ applies it to every new MUC tab (so the sidebar keeps the stored typeface
 across reconnects). Re-renders the participant list (`_render_muc_users`) so
 section headers pick up the family too. Ctrl+wheel changes only the size
 (`_ParticipantList.wheelEvent` → `participant_font_zoom_requested`).
+
+**Spell checking**: `ui/spellcheck.py` provides an optional `pyenchant`
+backend (`pip install stanza-im[spellcheck]`; system `libenchant-2-2` +
+`hunspell-*` dictionaries). `SpellCheckService` loads selected dictionaries in
+a worker thread, accepts a word if any dictionary knows it, and fills an LRU
+cache. `SpellCheckHighlighter` applies Qt's red `SpellCheckUnderline`; URLs,
+e-mail, `xmpp:`/`geo:`/`aesgcm:` links, `@nick`, `#tag` and `/commands` are
+ignored. Script routing only checks words whose scripts all have an active
+dictionary (no `hunspell-ru` → Cyrillic is skipped, not marked wholesale).
+`_ChatInput` adds a context submenu with merged suggestions and «Добавить в
+словарь» (`add_to_personal`). `MainWindow._apply_spellcheck_settings` reloads
+in the background on settings apply; new and open tabs receive the shared
+service via `ChatWindow.set_spellcheck`. Without pyenchant the feature is off.
 
 **Message input font**: `ChatWidget.set_input_font(family, size)` (from
 `appearance.input_font` / `input_font_size`, defaulting to the chat font) sets
