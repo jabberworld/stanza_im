@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtGui, QtWidgets  # noqa: E402
 
 from stanza_im.core.storage import Config  # noqa: E402
+from stanza_im.i18n import tr  # noqa: E402
 from stanza_im.ui import spellcheck  # noqa: E402
 from stanza_im.ui.chat_widget import _ChatInput  # noqa: E402
 
@@ -120,6 +121,34 @@ editor.setPlainText("hello helo")
 editor._replace_spelling(6, 10, "hello")
 check("a suggestion replaces only the misspelled token",
       editor.toPlainText() == "hello hello")
+
+editor.set_spellcheck(
+    spellcheck.SpellCheckService(["en_US"], [FakeDict({"hello"}, ["hello"])]))
+menu = QtWidgets.QMenu()
+ok = editor._build_spell_submenu(menu, "helo", 0, 4)
+submenu = menu.actions()[0].menu() if menu.actions() else None
+check("the spell submenu is created without the invalid icon constructor",
+      ok and submenu is not None
+      and submenu.title() == tr("spellcheck_menu")
+      and not submenu.icon().isNull())
+check("the submenu carries a suggestion and add-to-dictionary",
+      submenu is not None and submenu.actions()[0].text() == "hello"
+      and submenu.actions()[-1].text() == tr("spellcheck_add_word"))
+
+
+class _FailingSuggest(FakeDict):
+    def suggest(self, word):
+        raise RuntimeError("broken enchant provider")
+
+
+editor.set_spellcheck(
+    spellcheck.SpellCheckService(["en_US"], [_FailingSuggest({"hello"})]))
+broken_menu = QtWidgets.QMenu()
+broken_ok = editor._build_spell_submenu(broken_menu, "helo", 0, 4)
+broken_sub = broken_menu.actions()[0].menu() if broken_menu.actions() else None
+check("a backend failure keeps the standard menu usable",
+      broken_ok and broken_sub is not None
+      and broken_sub.actions()[0].text() == tr("spellcheck_no_suggestions"))
 
 
 # 5b. automatic and explicit language resolution ----------------------------

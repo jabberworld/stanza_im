@@ -249,32 +249,51 @@ class _ChatInput(FontZoomMixin, QtWidgets.QPlainTextEdit):
         if span is not None:
             word, start, end = span
             if service.should_check(word) and not service.check(word):
-                suggestions = service.suggest(word)
-                icon = QtGui.QIcon(find_icon("edit.png"))
-                submenu = QtWidgets.QMenu(
-                    icon, tr("spellcheck_menu"), menu)
-                for suggestion in suggestions:
-                    action = submenu.addAction(icon, suggestion)
-                    action.triggered.connect(
-                        lambda _checked=False, s=start, e=end, value=suggestion:
-                        self._replace_spelling(s, e, value))
-                if not suggestions:
-                    empty = submenu.addAction(tr("spellcheck_no_suggestions"))
-                    empty.setEnabled(False)
-                submenu.addSeparator()
-                add = submenu.addAction(
-                    QtGui.QIcon(find_icon("ok.png")),
-                    tr("spellcheck_add_word"))
-                add.triggered.connect(
-                    lambda _checked=False, value=word:
-                    self._add_spelling(value))
-                first = menu.actions()[0] if menu.actions() else None
-                if first is not None:
-                    menu.insertMenu(first, submenu)
-                    menu.insertSeparator(first)
-                else:
-                    menu.addMenu(submenu)
+                self._build_spell_submenu(menu, word, start, end)
         menu.exec(event.globalPos())
+
+    def _build_spell_submenu(self, menu, word: str, start: int,
+                             end: int) -> bool:
+        """Insert spelling suggestions into *menu*.
+
+        Optional spell-check backends are allowed to fail (a broken enchant
+        provider, an unavailable personal dictionary, ...).  Such a failure
+        must never abort the client from inside the Qt virtual method: the
+        standard context menu is still shown.
+        """
+        service = self._spellcheck.service()
+        if service is None:
+            return False
+        try:
+            suggestions = service.suggest(word)
+            icon = QtGui.QIcon(find_icon("edit.png"))
+            submenu = QtWidgets.QMenu(tr("spellcheck_menu"), menu)
+            submenu.setIcon(icon)
+            for suggestion in suggestions:
+                action = submenu.addAction(icon, suggestion)
+                action.triggered.connect(
+                    lambda _checked=False, s=start, e=end, value=suggestion:
+                    self._replace_spelling(s, e, value))
+            if not suggestions:
+                empty = submenu.addAction(tr("spellcheck_no_suggestions"))
+                empty.setEnabled(False)
+            submenu.addSeparator()
+            add = submenu.addAction(
+                QtGui.QIcon(find_icon("ok.png")),
+                tr("spellcheck_add_word"))
+            add.triggered.connect(
+                lambda _checked=False, value=word:
+                self._add_spelling(value))
+            first = menu.actions()[0] if menu.actions() else None
+            if first is not None:
+                menu.insertMenu(first, submenu)
+                menu.insertSeparator(first)
+            else:
+                menu.addMenu(submenu)
+            return True
+        except Exception:  # noqa: BLE001 - optional backend, never abort Qt
+            logger.exception("Could not build the spell-check context menu")
+            return False
 
     def _add_spelling(self, word: str) -> None:
         service = self._spellcheck.service()
