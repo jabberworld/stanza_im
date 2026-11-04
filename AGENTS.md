@@ -697,18 +697,22 @@ messages/day-navigation/export controls; each media tab has its own live
 filename filter and the same three icon-only mode buttons (the text tab has
 its own copies and state). Media rows come from `history.media_entries` /
 `media_items_from_entry` (SIMS URL or a body URL, including OMEMO
-`aesgcm://`), are grouped by month (`---- YYYY Month ----`) and rendered by
-`ui/history_media.HistoryMediaView` as fixed cards. Images use the shared
-preview cache; `ui/media_meta.MediaMetadataService` fills video thumbnails and
-audio/video duration in the background (PyAV when available) and caches them
-in `MediaCache` (`duration` field). A click opens `MediaViewer` immediately;
-the viewer resolves/decrypts the original itself (audio has its own Qt
-Multimedia mode) and reports a dead URL through `load_failed`, which the media
-view shows as «Файл не найден». «Все контакты» builds one local
-media catalog across all histories, «За все время» groups every month, and the
-media «Искать на сервере» button (enabled by MAM, not fulltext) walks the
-ordinary XEP-0313 archive backwards (`JabberClient.fetch_mam_media_page`,
-RSM `before`): newest media first, older pages appended while scrolling down.
+`aesgcm://`), are grouped by month (a bold `YYYY Month` header with horizontal
+rules) and rendered by `ui/history_media.HistoryMediaView` as fixed cards.
+Media tabs default to «За все время»; with it off the view shows a «За
+сегодня»/«За YYYY-MM-DD» context line. The filename filter is debounced, and
+images use the shared preview cache; `ui/media_meta.MediaMetadataService`
+fills video thumbnails and audio/video duration in the background (PyAV when
+available) and caches them in `MediaCache` (`duration` field). A click opens
+`MediaViewer` immediately; the viewer resolves/decrypts the original itself
+(audio has its own Qt Multimedia mode) and reports a dead URL through
+`load_failed`, which the media view shows as «Файл не найден». «Все контакты»
+builds one local media catalog across all histories. The media «Искать на
+сервере» button (enabled by MAM, not fulltext) walks the ordinary XEP-0313
+archive backwards (`JabberClient.fetch_mam_media_page`, RSM `before`): newest
+media first, older pages appended while scrolling down. Sparse archive pages
+(one media among 100 messages) are fetched automatically until the active grid
+becomes scrollable, bounded to avoid an endless scan of a media-less tab.
 The roster context menu's
 «Очистить историю» and the chat toolbar's clear button both run
 `MainWindow._on_clear_history`: after a confirmation it calls `history.clear`

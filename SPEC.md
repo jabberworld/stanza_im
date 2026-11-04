@@ -3289,18 +3289,23 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   media states are independent). Media rows come from
   `history.media_entries`/`include.media.media_items_from_entry` (SIMS URL or
   a body URL, including OMEMO `aesgcm://`), are grouped by month and drawn by
-  `ui/history_media.HistoryMediaView` as fixed cards. «Все контакты» builds a
-  local catalog across all histories; «За все время» groups every month.
-  Images use `MediaPreviewService`; `ui/media_meta.MediaMetadataService`
-  fills video thumbnails and audio/video duration in the background (PyAV
-  when available) and caches them in `MediaCache` (new `duration` field).
-  A click opens `MediaViewer` immediately; the viewer resolves/decrypts the
-  original itself (audio has an in-app Qt Multimedia mode) and reports a dead
-  URL through `load_failed`, shown as «Файл не найден» in the tab.
+  `ui/history_media.HistoryMediaView` as fixed cards. Media tabs default to
+  «За все время»; with it off a «За сегодня»/«За YYYY-MM-DD» context line is
+  shown. The filename filter is debounced. «Все контакты» builds a local
+  catalog across all histories; «За все время» groups every month with a bold
+  header and horizontal rules. Images use `MediaPreviewService`;
+  `ui/media_meta.MediaMetadataService` fills video thumbnails and audio/video
+  duration in the background (PyAV when available) and caches them in
+  `MediaCache` (new `duration` field). A click opens `MediaViewer`
+  immediately; the viewer resolves/decrypts the original itself (audio has an
+  in-app Qt Multimedia mode) and reports a dead URL through `load_failed`,
+  shown as «Файл не найден» in the tab.
 - Media server mode uses ordinary XEP-0313 MAM, not a XEP-0431 `http*` query:
   `JabberClient.fetch_mam_media_page` walks backwards with RSM `before`, so
   the newest media is shown first and older pages are appended when the grid
-  is scrolled down. Text server search still requires `urn:xmpp:fulltext:0`;
+  is scrolled down. Sparse pages (one media among 100 messages) are fetched
+  automatically until the active grid becomes scrollable (bounded); text
+  server search still requires `urn:xmpp:fulltext:0`;
   media server mode requires MAM. MAM rows now retain `media` (and bodyless
   media rows are kept), and 1:1 OMEMO MAM rows are decrypted before media
   extraction.

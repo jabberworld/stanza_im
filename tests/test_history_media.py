@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_history_media_")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
@@ -86,12 +87,23 @@ try:
           HistoryMediaView._month_label("2026-10") == "2026 октябрь")
 finally:
     QtCore.QLocale.setDefault(_saved_locale)
+def settle_filter() -> None:
+    deadline = time.time() + 1
+    while view._filter_timer.isActive() and time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.02)
+    view._apply_filter()
+
+
 view.set_filter("photo")
+settle_filter()
 check("the filename filter is live",
       len(view._visible()) == 1)
 view.set_filter("missing")
+settle_filter()
 check("a missing filter result is empty", view._visible() == [])
 view.set_filter("")
+settle_filter()
 _extra = dict(items[0])
 _extra["url"] = "https://files.example/photo2.jpg"
 _extra["name"] = "photo2.jpg"
@@ -101,6 +113,9 @@ view.show()
 app.processEvents()
 _cards = view.findChildren(MediaCard)
 check("both images are rendered", len(_cards) == 2)
+check("the media tooltip uses the interface timestamp format",
+      any("2026-" in card.toolTip() and "T" not in card.toolTip()
+          and ":" in card.toolTip() for card in _cards))
 _seen = []
 view.open_requested.connect(lambda url, kind: _seen.append((url, kind)))
 if _cards:
@@ -121,6 +136,9 @@ check("resize reflows the grid without stale cards",
 catalog = [{"jid": JID, "name": "Bob", "groups": ["G"],
             "is_conference": False}]
 dialog = HistoryManagerDialog(lambda: catalog)
+check("media all-time is on by default",
+      dialog._media_mode["all_time"]
+      and dialog._media_buttons["image"]["all_time"].isChecked())
 check("four history tabs are present", dialog._tabs.count() == 4)
 check("the media tabs are photo/video/audio",
       [dialog._tabs.tabText(i) for i in range(1, 4)]
@@ -148,6 +166,11 @@ check("the video tab has its own catalog",
       == ["video"]
       and [item["kind"] for item in dialog._media_views["audio"]._items]
       == ["audio"])
+dialog._on_media_mode_toggled("all_time", False)
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.15))
+check("turning all-time off shows the selected-day context",
+      not dialog._media_views["image"]._context.isHidden()
+      and dialog._media_views["image"]._context.text())
 
 # Server media pages use ordinary MAM rows and append older pages.
 server_pages = []
@@ -191,6 +214,45 @@ asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.15))
 check("server media pagination stops at complete",
       dialog2._media_server_complete
       and server_pages[-1][1] == "cursor-1")
+
+# Sparse archive pages (1 media per 100 messages) must auto-fill the grid
+# until it becomes scrollable; otherwise only the newest image is visible.
+auto_pages = []
+
+
+async def auto_server_media(jid, before=""):
+    auto_pages.append(before)
+    if len(auto_pages) <= 3:
+        return [{"direction": "incoming", "sender": "bob",
+                 "timestamp": "2026-05-01T10:00:00Z",
+                 "body": "sparse photo", "media": {
+                     "url": "https://files.example/sparse%d.png" % len(auto_pages),
+                     "name": "sparse%d.png" % len(auto_pages),
+                     "media_type": "image/png"}}], False, "c%d" % len(auto_pages)
+    return [], True, ""
+
+
+dialog4 = HistoryManagerDialog(
+    lambda: catalog, server_media=auto_server_media,
+    server_media_supported=lambda _jid: True)
+dialog4.resize(900, 620)
+dialog4.show()
+dialog4._tabs.setCurrentIndex(1)
+
+
+async def auto_load():
+    await dialog4._select_jid_async(JID, "Bob")
+    await asyncio.sleep(0.1)
+    dialog4._on_media_mode_toggled("server", True)
+    for _ in range(20):
+        app.processEvents()
+        await asyncio.sleep(0.05)
+
+
+asyncio.get_event_loop().run_until_complete(auto_load())
+check("sparse server pages auto-fill until scrollable",
+      len(auto_pages) > 1
+      and len(dialog4._media_views["image"]._items) > 1)
 
 # Switching contacts on a media tab must reload that contact's catalog even
 # when both contacts share the newest date.

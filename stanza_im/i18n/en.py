@@ -419,6 +419,8 @@ STRINGS = {
     "history_media_loading": "Loading media...",
     "history_media_empty": "No media found.",
     "history_media_missing": "File not found",
+    "history_media_today": "Today",
+    "history_media_for_day": "For {date}",
     "history_media_play": "Play",
     "history_manager": "History Manager",
     "history_search_placeholder": "Search...",

@@ -11,7 +11,7 @@ import base64
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import find_icon
-from stanza_im.include.utils import format_duration
+from stanza_im.include.utils import format_duration, format_local_datetime
 from stanza_im.i18n import tr
 
 _CARD_WIDTH = 172
@@ -115,7 +115,8 @@ class MediaCard(QtWidgets.QFrame):
         if self._item.get("jid"):
             parts.append(str(self._item["jid"]))
         if self._item.get("timestamp"):
-            parts.append(str(self._item["timestamp"]))
+            stamp = str(self._item["timestamp"])
+            parts.append(format_local_datetime(stamp) or stamp)
         return "\n".join(parts)
 
     def _update_caption(self) -> None:
@@ -183,11 +184,15 @@ class HistoryMediaView(QtWidgets.QWidget):
         self._layout.setContentsMargins(4, 4, 4, 4)
         self._layout.setSpacing(6)
         self._scroll.setWidget(self._body)
+        self._context = QtWidgets.QLabel("", self)
+        self._context.setStyleSheet("color: palette(mid); padding: 0 4px;")
+        self._context.setVisible(False)
         self._status = QtWidgets.QLabel("", self)
         self._status.setWordWrap(True)
         self._status.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._context)
         layout.addWidget(self._scroll, 1)
         layout.addWidget(self._status)
         self._scroll.verticalScrollBar().valueChanged.connect(
@@ -198,6 +203,11 @@ class HistoryMediaView(QtWidgets.QWidget):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(80)
         self._resize_timer.timeout.connect(self._reflow)
+        self._pending_filter = ""
+        self._filter_timer = QtCore.QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(400)
+        self._filter_timer.timeout.connect(self._apply_filter)
         if self._preview is not None:
             self._preview.thumbnail_ready.connect(self._on_thumb)
         if self._meta is not None:
@@ -228,8 +238,29 @@ class HistoryMediaView(QtWidgets.QWidget):
             0, lambda b=bar, v=value: b.setValue(min(v, b.maximum())))
 
     def set_filter(self, text: str) -> None:
-        self._filter = str(text or "").strip().casefold()
+        text = str(text or "").strip().casefold()
+        self._pending_filter = text
+        if not text:
+            self._filter_timer.stop()
+            if self._filter:
+                self._filter = ""
+                self._render()
+            return
+        self._filter_timer.start()
+
+    def _apply_filter(self) -> None:
+        if self._pending_filter == self._filter:
+            return
+        self._filter = self._pending_filter
         self._render()
+
+    def set_context(self, text: str) -> None:
+        self._context.setText(str(text or ""))
+        self._context.setVisible(bool(text))
+
+    def can_scroll(self) -> bool:
+        """Whether the current card grid is taller than the viewport."""
+        return self._scroll.verticalScrollBar().maximum() > 0
 
     def set_loading(self, loading: bool, status: str = "") -> None:
         self._loading = bool(loading)

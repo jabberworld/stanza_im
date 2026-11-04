@@ -419,6 +419,8 @@ STRINGS = {
     "history_media_loading": "Загрузка медиа…",
     "history_media_empty": "Медиафайлы не найдены.",
     "history_media_missing": "Файл не найден",
+    "history_media_today": "За сегодня",
+    "history_media_for_day": "За {date}",
     "history_media_play": "Воспроизвести",
     "history_manager": "Менеджер истории",
     "history_search_placeholder": "Поиск...",

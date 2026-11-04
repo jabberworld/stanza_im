@@ -96,7 +96,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_buttons: dict[str, dict] = {}
         self._media_items: list[dict] = []
         self._media_local_key = None
-        self._media_mode = {"all_time": False, "all_contacts": False,
+        self._media_mode = {"all_time": True, "all_contacts": False,
                             "server": False}
         self._media_server_jid = ""
         self._media_server_cursor = ""
@@ -105,6 +105,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_server_ok = False
         self._media_request_id = 0
         self._media_empty_pages = 0
+        self._media_auto_pages = 0
         self._catalog: list[dict] = []
         self._jid: str = ""
         self._name: str = ""
@@ -217,7 +218,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
         text_page = QtWidgets.QWidget()
         text_layout = QtWidgets.QVBoxLayout(text_page)
-        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setContentsMargins(8, 8, 8, 8)
 
         search_row = QtWidgets.QHBoxLayout()
         self._search = QtWidgets.QLineEdit()
@@ -336,6 +337,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                             ("audio", "history_tab_audio")):
             self._tabs.addTab(self._build_media_tab(kind), tr(label))
         self._tabs.currentChanged.connect(self._on_tab_changed)
+        self._sync_media_buttons()
 
         splitter.addWidget(right)
         splitter.setSizes([280, 640])
@@ -345,7 +347,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _build_media_tab(self, kind: str) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 8, 8, 8)
         row = QtWidgets.QHBoxLayout()
         filter_edit = QtWidgets.QLineEdit()
         filter_edit.setPlaceholderText(tr("history_media_filter"))
@@ -788,10 +790,25 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_server_complete = True
         self._media_server_loading = False
         self._media_empty_pages = 0
+        self._media_auto_pages = 0
         for view in self._media_views.values():
             view.clear()
+        self._update_media_context()
+
+    def _update_media_context(self) -> None:
+        if self._media_mode.get("all_time") or self._media_mode.get("server"):
+            text = ""
+        elif not self._date:
+            text = ""
+        elif (self._date == QtCore.QDate.currentDate().toString("yyyy-MM-dd")):
+            text = tr("history_media_today")
+        else:
+            text = tr("history_media_for_day", date=self._date)
+        for view in self._media_views.values():
+            view.set_context(text)
 
     def _refresh_media(self) -> None:
+        self._update_media_context()
         if self._media_mode.get("server"):
             if self._media_server_jid == self._jid:
                 return
@@ -837,6 +854,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_items = items
         self._media_local_key = (
             self._jid, date, all_time, all_contacts)
+        self._update_media_context()
         for view in self._media_views.values():
             view.set_loading(False)
             view.set_items(items)
@@ -854,6 +872,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_empty_pages = 0
         self._media_items = []
         self._media_local_key = None
+        self._update_media_context()
         for view in self._media_views.values():
             view.clear()
             view.set_loading(True, tr("history_search_server_running"))
@@ -910,6 +929,27 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if self._media_server_complete and not self._media_items:
             for view in self._media_views.values():
                 view.set_status(tr("history_media_empty"))
+        if not self._media_server_complete:
+            QtCore.QTimer.singleShot(50, self._continue_server_if_short)
+
+    def _continue_server_if_short(self) -> None:
+        """Load more pages while the active media grid has no scrollbar.
+
+        A media-bearing archive page can hold one file among 100 messages;
+        with a single card the grid cannot scroll, so the normal scroll
+        trigger never asks for the next (older) page.
+        """
+        if (self._released or not self._media_mode.get("server")
+                or self._media_server_loading or self._media_server_complete):
+            return
+        kind = self._current_media_kind()
+        view = self._media_views.get(kind) if kind else None
+        if view is None or view.can_scroll():
+            return
+        if self._media_auto_pages >= 20:
+            return
+        self._media_auto_pages += 1
+        self._start_task(self._load_server_media_page())
 
     def _start_task_media_page(self) -> None:
         self._start_task(self._load_server_media_page())
