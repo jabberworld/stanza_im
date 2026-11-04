@@ -137,6 +137,16 @@ _URL_RE = re.compile(
 _URL_TRAILING_PUNCT = re.compile(r"[.,;:!?]+$")
 
 
+def extract_urls(text: str) -> list[str]:
+    """Return the cleaned http(s)/ftp/aesgcm URLs found in *text*."""
+    urls: list[str] = []
+    for match in _URL_RE.finditer(str(text or "")):
+        url = _URL_TRAILING_PUNCT.sub("", match.group(0))
+        if url:
+            urls.append(url)
+    return urls
+
+
 def tokenize_urls(text: str, media_render=None, geo_render=None
                   ) -> tuple[str, list[str]]:
     """Replace URL and geo: regions with NUL-byte tokens, return anchor HTML.

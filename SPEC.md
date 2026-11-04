@@ -77,7 +77,8 @@ stanza_im/
 │   ├── spellcheck.py — optional enchant service + red spell-check highlighter
 │   ├── spellcheck_dialog.py — spell-check language picker
 │   ├── media_preview.py — Inline image/audio/video previews
-│   ├── media_viewer.py — Fullscreen image/video viewer (Ctrl+wheel zoom, floating Download/Copy/Share overlay)
+│   ├── media_meta.py — background video thumbnails + media duration
+│   ├── media_viewer.py — Fullscreen image/video/audio viewer (Ctrl+wheel zoom, Download/Copy/Share overlay)
 │   ├── map_widget.py   — In-app map window (OSM tiles, geo: URIs, live track)
 │   ├── emoji_picker_dialog.py — XEP-0444 reaction picker (search/categories/recent)
 │   ├── omemo_devices_dialog.py — XEP-0384 device/trust manager
@@ -96,7 +97,8 @@ stanza_im/
 │   ├── service_info_dialog.py — service info (version/stats/caps/contacts)
 │   ├── certificate_dialog.py — Server TLS certificate details dialog
 │   ├── certificate_error_dialog.py — Certificate warning + once/always choice
-│   ├── history_manager.py   — Per-contact history browser
+│   ├── history_manager.py   — Per-contact history browser (text + media tabs)
+│   ├── history_media.py     — Month-grouped media calendar grid
 │   ├── vcard_dialog.py, search_dialog.py, registration_dialog.py,
 │   ├── client_features_dialog.py — peer client caps viewer (vCard resource click),
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
@@ -3280,6 +3282,27 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   contact's matched day (via `_pending_date`) and highlights the match. A
   draggable `ui/resize_handle.VerticalResizeHandle` under the results resizes
   them (session-only, 40–400 px).
+- The right pane is a `QTabWidget`: «Текст» keeps the existing search,
+  results, messages, day navigation and export; «Фото», «Видео» and «Аудио»
+  each have a live filename filter and the same icon-only
+  «За все время»/«Все контакты»/«Искать на сервере» mode buttons (text and
+  media states are independent). Media rows come from
+  `history.media_entries`/`include.media.media_items_from_entry` (SIMS URL or
+  a body URL, including OMEMO `aesgcm://`), are grouped by month and drawn by
+  `ui/history_media.HistoryMediaView` as fixed cards. «Все контакты» builds a
+  local catalog across all histories; «За все время» groups every month.
+  Images use `MediaPreviewService`; `ui/media_meta.MediaMetadataService`
+  fills video thumbnails and audio/video duration in the background (PyAV
+  when available) and caches them in `MediaCache` (new `duration` field).
+  A click resolves/decrypts the original, then opens `MediaViewer` (audio has
+  an in-app Qt Multimedia mode); a missing file is reported in the tab.
+- Media server mode uses ordinary XEP-0313 MAM, not a XEP-0431 `http*` query:
+  `JabberClient.fetch_mam_media_page` walks backwards with RSM `before`, so
+  the newest media is shown first and older pages are appended when the grid
+  is scrolled down. Text server search still requires `urn:xmpp:fulltext:0`;
+  media server mode requires MAM. MAM rows now retain `media` (and bodyless
+  media rows are kept), and 1:1 OMEMO MAM rows are decrypted before media
+  extraction.
 
 ### 14.8.2 Notes (Notes plugin, `stanza_im/plugins/notes/`)
 

@@ -7112,27 +7112,75 @@ class MainWindow(QtWidgets.QMainWindow):
             self._history_manager = HistoryManagerDialog(
                 self._history_catalog, parent=self,
                 server_search=self._history_server_search,
-                server_supported=self._history_server_supported)
+                server_supported=self._history_server_supported,
+                server_media=self._history_server_media_page,
+                server_media_supported=self._history_server_media_supported,
+                media_service=self._media_service)
+            self._history_manager.media_open_requested.connect(
+                self._on_history_media_open)
         self._history_manager.open_for(jid)
         self._history_manager.show()
         self._history_manager.raise_()
         self._history_manager.activateWindow()
 
-    def _history_server_supported(self, jid: str) -> bool:
-        if self._client is None or not jid:
-            return False
+    def _history_server_archive_jid(self, jid: str) -> tuple[str, bool, bool]:
+        """The archive target, MUC flag and whether that room is joined."""
         is_muc = (jid in self._conference_roster
                   or jid in self._muc_self_nicks
                   or self._is_conference_jid(jid))
-        if is_muc:
-            room = jid.split("/", 1)[0]
-            # Only a room we are currently in can answer a room archive
-            # query; an old history row must stay disabled.
-            if room not in self._muc_self_nicks:
-                return False
-            return bool(self._client.supports_mam_fulltext(
-                room, is_muc=True))
-        return bool(self._client.supports_mam_fulltext(jid))
+        if not is_muc:
+            return jid, False, False
+        room = jid.split("/", 1)[0]
+        return room, True, room in self._muc_self_nicks
+
+    def _history_server_supported(self, jid: str) -> bool:
+        if self._client is None or not jid:
+            return False
+        archive, is_muc, joined = self._history_server_archive_jid(jid)
+        if is_muc and not joined:
+            return False
+        return bool(self._client.supports_mam_fulltext(
+            archive, is_muc=is_muc))
+
+    def _history_server_media_supported(self, jid: str) -> bool:
+        if self._client is None or not jid:
+            return False
+        archive, is_muc, joined = self._history_server_archive_jid(jid)
+        if is_muc and not joined:
+            return False
+        return bool(self._client.supports_mam_archive(
+            archive, is_muc=is_muc))
+
+    async def _history_server_media_page(self, jid: str, before: str = ""):
+        if self._client is None:
+            return None
+        archive, is_muc, joined = self._history_server_archive_jid(jid)
+        if is_muc and not joined:
+            return None
+        result = await self._client.fetch_mam_media_page(
+            archive, before=before, limit=100, is_muc=is_muc)
+        if result is None:
+            return None
+        rows, complete, cursor = result
+        if rows:
+            from stanza_im.core import history
+            try:
+                await history.store_many_async(jid, rows)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Could not store media rows for %s: %s", jid, exc)
+        return rows, complete, cursor
+
+    def _on_history_media_open(self, url: str, kind: str) -> None:
+        if not url or self._history_manager is None:
+            return
+        def _ready(path):
+            if path:
+                self._on_media_view_requested(url, kind or "image")
+            else:
+                self._history_manager.media_error(url)
+        def _error(_exc):
+            self._history_manager.media_error(url)
+        self._media_service.ensure_original_async(url, _ready, _error)
 
     async def _history_server_search(self, jid: str, query: str,
                                      after: str = ""):
@@ -9779,9 +9827,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_media_view_requested(self, url: str, kind: str,
                                  fullscreen: bool = False):
         if not url:
-            return
-        if url.startswith("aesgcm://") and str(kind).startswith("audio"):
-            self._start_task(self._open_encrypted_audio(url))
             return
         # Imported lazily so startup never pulls in QtWebEngine.
         from stanza_im.ui.media_viewer import MediaViewer

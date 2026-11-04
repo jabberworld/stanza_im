@@ -820,6 +820,36 @@ def load_day(jid: str, date: str) -> list[dict]:
         return []
 
 
+def media_entries(jid: str, date: str = "") -> list[dict]:
+    """Read messages that may carry media (SIMS or a URL in the body).
+
+    With *date* (``YYYY-MM-DD``) only that day is returned; otherwise every
+    media message of the conversation is returned.  Retracted rows are left
+    out: their media must not reappear in the calendar.
+    """
+    try:
+        with _lock:
+            conn = _connection(jid)
+            sql = (
+                "SELECT id, direction, sender, body, timestamp, archive_id,"
+                " origin_id, reply_to, reply_id, message_id, edited,"
+                " retracted, retract_marker, retract_reason, retract_by,"
+                " reactions, media, markup, encrypted, encryption, stanza_id "
+                "FROM messages WHERE retracted = 0 "
+                "AND ((media IS NOT NULL AND media != '') "
+                "     OR body LIKE '%://%')")
+            params: list[str] = []
+            if date:
+                sql += " AND substr(timestamp, 1, 10) = ?"
+                params.append(date)
+            sql += " ORDER BY timestamp ASC, id ASC"
+            rows = conn.execute(sql, params).fetchall()
+        return _dedup([_row_to_entry(r) for r in rows])
+    except sqlite3.Error as exc:
+        logger.warning("Could not read media history for %s: %s", jid, exc)
+        return []
+
+
 def search_dates(jid: str, query: str) -> list[tuple[str, int]]:
     """Return ``[(date, count)]`` of days containing a case-insensitive
     substring match of *query* in the message body, newest first."""
@@ -1199,6 +1229,10 @@ async def load_day_async(jid: str, date: str) -> list[dict]:
 
 async def search_dates_async(jid: str, query: str) -> list[tuple[str, int]]:
     return await asyncio.to_thread(search_dates, jid, query)
+
+
+async def media_entries_async(jid: str, date: str = "") -> list[dict]:
+    return await asyncio.to_thread(media_entries, jid, date)
 
 
 async def dates_async(jid: str) -> list[str]:

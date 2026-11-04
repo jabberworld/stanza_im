@@ -100,6 +100,9 @@ class _ServerClient:
     def supports_mam_fulltext(self, jid, is_muc=False):
         return is_muc and jid == ROOM
 
+    def supports_mam_archive(self, jid, is_muc=False):
+        return is_muc and jid == ROOM
+
 
 class _ServerWindow:
     _client = _ServerClient()
@@ -110,6 +113,9 @@ class _ServerWindow:
     def _is_conference_jid(jid):
         return jid == ROOM
 
+    def _history_server_archive_jid(self, jid):
+        return jid, True, jid in self._muc_self_nicks
+
 
 win = _ServerWindow()
 check("a joined room enables server history search",
@@ -117,6 +123,11 @@ check("a joined room enables server history search",
 win._muc_self_nicks = set()
 check("an unjoined room disables server history search",
       not MainWindow._history_server_supported(win, ROOM))
+check("an unjoined room disables server media search",
+      not MainWindow._history_server_media_supported(win, ROOM))
+win._muc_self_nicks = {ROOM}
+check("a joined room enables server media search",
+      MainWindow._history_server_media_supported(win, ROOM))
 
 if FAILURES:
     print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))

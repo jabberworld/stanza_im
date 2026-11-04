@@ -25,6 +25,7 @@ from stanza_im.include.utils import tokenize_urls, restore_url_tokens
 from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.media_preview import MediaPreviewService, mode_allows
+from stanza_im.ui.media_meta import MediaMetadataService
 from stanza_im.core.storage import Config
 
 i18n_load("en")
@@ -78,6 +79,33 @@ cache.store(url, original_bytes=b"ORIGINAL", thumb_bytes=_png_bytes(),
 check("thumb cached", cache.has_thumb(url))
 check("thumb path exists", os.path.isfile(cache.thumb_path(url) or ""))
 check("original path exists", os.path.isfile(cache.original_path(url) or ""))
+cache.store("https://h/v/clip.mp4", thumb_bytes=_png_bytes(),
+            kind="video", duration=12.5)
+check("media duration is cached",
+      cache.info("https://h/v/clip.mp4").get("duration") == 12.5)
+
+try:
+    import av  # noqa: F401 - optional calls extra
+except ImportError:
+    av = None
+if av is not None:
+    wav = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "resources", "sounds", "effects",
+        "door_bell.wav")
+    wav_url = "https://h/a/door_bell.wav"
+    with open(wav, "rb") as handle:
+        cache.store(wav_url, original_bytes=handle.read(), kind="audio")
+    meta_service = MediaMetadataService(cache)
+    meta_seen = []
+    meta_service.meta_ready.connect(
+        lambda url, duration, uri: meta_seen.append((url, duration, uri)))
+    meta_service.request(wav_url, "audio")
+    deadline = time.time() + 10
+    while not meta_seen and time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.05)
+    check("audio duration is extracted in the background",
+          bool(meta_seen) and meta_seen[0][1] > 0)
 
 # 4. TTL pruning --------------------------------------------------------------
 old_url = "https://h/old.png"

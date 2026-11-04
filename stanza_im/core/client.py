@@ -3777,6 +3777,15 @@ class JabberClient:
         features = getattr(self, "_server_features", None)
         return bool(features and feature in features)
 
+    def supports_mam_archive(self, jid: str, is_muc: bool = False) -> bool:
+        """Whether *jid*'s archive is available for ordinary MAM paging."""
+        if is_muc:
+            room = str(jid or "").split("/", 1)[0]
+            features = self._muc_room_features.get(room) or set()
+        else:
+            features = getattr(self, "_server_features", None) or set()
+        return bool({"urn:xmpp:mam:2", "urn:xmpp:mam:1"} & set(features))
+
     async def refresh_server_features(self) -> None:
         """Cache the account domain's disco#info features for the gates."""
         domain = self.jid_str.split("@")[-1]
@@ -8027,6 +8036,84 @@ class JabberClient:
                     pass
             self._mam_search_inflight.discard(jid)
 
+    async def fetch_mam_media_page(self, jid: str, before: str = "",
+                                   limit: int = 100, is_muc: bool = False,
+                                   timeout: float = 25.0):
+        """Fetch one backwards MAM page and return its media-bearing rows.
+
+        The first call (``before=""``) asks for the newest page; each later
+        call passes the oldest archive id of the previous page as ``before``.
+        The result is ``(rows, complete, next_before)`` or ``None`` on error.
+        Ordinary history MAM cursors are never touched.
+        """
+        archive = jid if is_muc else self.jid_str
+        with_jid = None if is_muc else jid
+        mam = self.xmpp.plugin["xep_0313"]
+        rsm = {"max": max(1, int(limit))}
+        if before:
+            rsm["before"] = str(before)
+        else:
+            # slixmpp serialises True as an empty <before/> (newest page).
+            rsm["before"] = True
+        try:
+            task = (mam.retrieve(jid=archive, rsm=rsm) if is_muc
+                    else mam.retrieve(with_jid=with_jid, rsm=rsm))
+            iq = await asyncio.wait_for(task, timeout=timeout)
+            if str(iq.get("type", "result")) == "error":
+                logger.debug("MAM media page error for %s: %s", jid, iq)
+                return None
+            results = iq.get("mam", {}).get("results") or []
+            rows, _parsed, _skipped, _reasons = self._mam_rows(
+                jid, results, is_muc=is_muc)
+            rows = await self._decrypt_mam_rows(jid, rows, is_muc=is_muc)
+            from stanza_im.include.media import media_items_from_entry
+            media_rows = [row for row in rows
+                          if media_items_from_entry(row, jid=jid)]
+            complete, _last = self._mam_fin_state(iq)
+            next_before = self._mam_fin_first(iq)
+            if not next_before and results:
+                next_before = str(_archive_result_id(results[0]) or "")
+            if not results:
+                complete = True
+            if complete is None or (not next_before and not complete):
+                complete = True
+            logger.info(
+                "MAM media page for %s: results=%d media=%d complete=%s "
+                "next=%s", jid, len(results), len(media_rows), complete,
+                next_before)
+            return media_rows, bool(complete), next_before
+        except asyncio.TimeoutError:
+            logger.info("MAM media page timed out for %s", jid)
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("MAM media page failed for %s: %r", jid, exc)
+            return None
+
+    @staticmethod
+    def _mam_fin_first(iq) -> str:
+        """Return the RSM ``<first>`` cursor of a MAM result IQ."""
+        try:
+            xml = getattr(iq, "xml", None)
+            if xml is not None:
+                fin = xml.find("{urn:xmpp:mam:2}fin")
+                if fin is None:
+                    fin = xml.find("{urn:xmpp:mam:1}fin")
+                if fin is not None:
+                    first_el = fin.find(
+                        "{http://jabber.org/protocol/rsm}set/"
+                        "{http://jabber.org/protocol/rsm}first")
+                    return (first_el.text or "").strip() \
+                        if first_el is not None else ""
+            fin_data = iq.get("mam_fin", {}) or {}
+        except (AttributeError, TypeError, ValueError):
+            return ""
+        if isinstance(fin_data, dict):
+            return str((fin_data.get("rsm") or {}).get("first") or "")
+        try:
+            return str((fin_data.get("rsm") or {}).get("first") or "")
+        except (AttributeError, TypeError, ValueError):
+            return ""
+
     @staticmethod
     def _mam_fin_state(iq) -> tuple[bool | None, str]:
         """Return ``(complete, last_cursor)`` from a MAM result IQ.
@@ -8227,7 +8314,8 @@ class JabberClient:
                 tomb_id, _tomb_stamp = _retracted_tombstone(msg)
                 mod_info = _moderation_info(msg)
                 body = str(_stanza_value(msg, "body") or "")
-                if not body and not tomb_id:
+                media = message_media(msg)
+                if not body and not media and not tomb_id:
                     skipped += 1
                     skip_reasons["empty_body"] = skip_reasons.get("empty_body", 0) + 1
                     continue
@@ -8287,6 +8375,7 @@ class JabberClient:
                     "retract_by": mod_info["by"],
                     "replace_id": _replace_reference(msg),
                     "markup": message_markup(msg),
+                    "media": media,
                     "encrypted": False,
                     "encryption": "",
                     # Kept only until the async MAM pass decrypts the row; it is

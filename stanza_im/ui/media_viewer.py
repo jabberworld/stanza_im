@@ -1,9 +1,9 @@
-"""Standalone media viewer: fit-to-window images and video with fullscreen.
+"""Standalone media viewer: images, video and audio.
 
 Images are shown from the on-disk original cache (downloaded on demand).
 Videos use an embedded HTML5 ``<video>`` inside a dedicated QWebEngineView
-window; ``F11`` toggles window fullscreen.  Without QWebEngine only images
-are viewable (video falls back to a short notice).
+window; ``F11`` toggles window fullscreen.  Audio uses Qt Multimedia when it
+is available.  Without QWebEngine videos fall back to a short notice.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
 from stanza_im.include.constants import find_icon
+from stanza_im.include.utils import format_duration
 
 try:
     from PyQt6 import QtWebChannel
@@ -100,7 +101,9 @@ class MediaViewer(QtWidgets.QMainWindow):
                  geometry_cfg=None):
         super().__init__(parent)
         self._url = url
-        self._kind = "video" if str(kind).startswith("video") else "image"
+        kind = str(kind)
+        self._kind = ("video" if kind.startswith("video")
+                      else "audio" if kind.startswith("audio") else "image")
         self._service = service
         self._geometry_cfg = geometry_cfg
         self._pixmap = QtGui.QPixmap()
@@ -117,6 +120,8 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._overlay = None
         if self._kind == "video":
             self._build_video()
+        elif self._kind == "audio":
+            self._build_audio()
         else:
             self._build_image()
         if self._fullscreen_hint:
@@ -356,7 +361,13 @@ class MediaViewer(QtWidgets.QMainWindow):
                     QtCore.QUrl.fromLocalFile(path).toString()),
                 lambda _exc: self._render_video_unsupported())
             return
-        self._render_video(self._url)
+        cached = (self._service.cache.original_path(self._url)
+                  if self._service is not None
+                  and hasattr(self._service, "cache") else None)
+        if cached:
+            self._render_video(QtCore.QUrl.fromLocalFile(cached).toString())
+        else:
+            self._render_video(self._url)
 
     def _render_video_unsupported(self) -> None:
         label = QtWidgets.QLabel(tr("media_viewer_unsupported"))
@@ -445,6 +456,134 @@ class MediaViewer(QtWidgets.QMainWindow):
         view.setHtml(page, QtCore.QUrl("about:blank"))
         self.setCentralWidget(view)
 
+    # ── Audio ─────────────────────────────────────────────────────
+
+    def _build_audio(self) -> None:
+        try:
+            from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+        except Exception as exc:  # pragma: no cover - optional Qt Multimedia
+            label = QtWidgets.QLabel(tr("media_viewer_unsupported"))
+            label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            self.setCentralWidget(label)
+            logger.info("Audio playback unavailable: %s", exc)
+            return
+        page = QtWidgets.QWidget(self)
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
+        title = QtWidgets.QLabel(self._url.rsplit("/", 1)[-1], page)
+        title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        title.setWordWrap(True)
+        title.setStyleSheet("font-weight: bold;")
+        layout.addWidget(title)
+        self._audio_status = QtWidgets.QLabel("", page)
+        self._audio_status.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._audio_status.setWordWrap(True)
+        layout.addWidget(self._audio_status)
+        self._audio_slider = QtWidgets.QSlider(
+            QtCore.Qt.Orientation.Horizontal, page)
+        self._audio_slider.setRange(0, 0)
+        layout.addWidget(self._audio_slider)
+        row = QtWidgets.QHBoxLayout()
+        self._audio_play = QtWidgets.QToolButton(page)
+        self._audio_play.setText("▶")
+        self._audio_play.setToolTip(tr("history_media_play"))
+        self._audio_play.clicked.connect(self._toggle_audio)
+        row.addWidget(self._audio_play)
+        self._audio_time = QtWidgets.QLabel("0:00 / 0:00", page)
+        row.addWidget(self._audio_time)
+        row.addStretch(1)
+        for icon_name, label, signal in (
+                ("arrow-down.svg", tr("media_save"), self.save_requested),
+                ("copy.svg", tr("media_copy_link"), self.copy_requested),
+                ("send-arrow.svg", tr("ctx_share"), self.share_requested)):
+            button = QtWidgets.QToolButton(page)
+            button.setIcon(QtGui.QIcon(find_icon(icon_name)))
+            button.setToolTip(label)
+            button.setAutoRaise(True)
+            button.clicked.connect(
+                lambda _checked=False, sig=signal: sig.emit(self._url))
+            row.addWidget(button)
+        layout.addLayout(row)
+        layout.addStretch(1)
+        self._player = QMediaPlayer(self)
+        self._audio_output = QAudioOutput(self)
+        self._player.setAudioOutput(self._audio_output)
+        self._player.durationChanged.connect(self._on_audio_duration)
+        self._player.positionChanged.connect(self._on_audio_position)
+        self._player.playbackStateChanged.connect(self._on_audio_state)
+        self._player.mediaStatusChanged.connect(self._on_audio_status)
+        if hasattr(self._player, "errorOccurred"):
+            self._player.errorOccurred.connect(self._on_audio_error)
+        self._audio_slider.sliderMoved.connect(self._player.setPosition)
+        self.setCentralWidget(page)
+        self._set_audio_source()
+
+    def _set_audio_source(self) -> None:
+        cached = self._service.cache.original_path(self._url) \
+            if self._service is not None and hasattr(self._service, "cache") \
+            else None
+        if cached:
+            self._player.setSource(QtCore.QUrl.fromLocalFile(cached))
+            self._player.play()
+            return
+        if self._url.startswith("aesgcm://"):
+            self._audio_status.setText(tr("history_media_loading"))
+            self._service.ensure_original_async(
+                self._url, self._audio_ready, self._audio_failed)
+            return
+        self._player.setSource(QtCore.QUrl(self._url))
+        self._player.play()
+
+    def _audio_ready(self, path: str) -> None:
+        if not path:
+            self._audio_failed(None)
+            return
+        self._audio_status.setText("")
+        self._player.setSource(QtCore.QUrl.fromLocalFile(path))
+        self._player.play()
+
+    def _audio_failed(self, _exc) -> None:
+        self._audio_status.setText(tr("history_media_missing"))
+
+    def _toggle_audio(self) -> None:
+        player = getattr(self, "_player", None)
+        if player is None:
+            return
+        if player.playbackState() == player.PlaybackState.PlayingState:
+            player.pause()
+        else:
+            player.play()
+
+    def _on_audio_duration(self, duration: int) -> None:
+        self._audio_slider.setRange(0, max(0, int(duration)))
+        self._update_audio_time()
+
+    def _on_audio_position(self, position: int) -> None:
+        if not self._audio_slider.isSliderDown():
+            self._audio_slider.setValue(max(0, int(position)))
+        self._update_audio_time()
+
+    def _on_audio_state(self, _state) -> None:
+        playing = (self._player.playbackState()
+                   == self._player.PlaybackState.PlayingState)
+        self._audio_play.setText("❚❚" if playing else "▶")
+
+    def _on_audio_status(self, status) -> None:
+        if status == self._player.MediaStatus.InvalidMedia:
+            self._audio_status.setText(tr("history_media_missing"))
+
+    def _on_audio_error(self, _error, _text: str = "") -> None:
+        self._audio_status.setText(tr("history_media_missing"))
+
+    def _update_audio_time(self) -> None:
+        position = max(0, int(self._player.position()))
+        duration = max(0, int(self._player.duration()))
+        self._audio_time.setText(
+            f"{format_duration(position / 1000)} / "
+            f"{format_duration(duration / 1000)}")
+
     # ── Fullscreen ────────────────────────────────────────────────
 
     def keyPressEvent(self, event):
@@ -452,7 +591,8 @@ class MediaViewer(QtWidgets.QMainWindow):
             self._toggle_fullscreen()
             return
         if (event.key() == QtCore.Qt.Key.Key_0
-                and event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier):
+                and event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+                and self._kind == "image"):
             self._reset_zoom()
             return
         super().keyPressEvent(event)
@@ -465,15 +605,17 @@ class MediaViewer(QtWidgets.QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._kind != "video":
+        if self._kind == "image":
             self._fit_image()
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self._kind != "video":
+        if self._kind == "image":
             QtCore.QTimer.singleShot(0, self._fit_image)
 
     def closeEvent(self, event):
+        if getattr(self, "_player", None) is not None:
+            self._player.stop()
         self.save_geometry()
         self.closed.emit()
         event.accept()

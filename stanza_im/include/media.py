@@ -117,6 +117,55 @@ def filename_from_url(url: str, default: str = "file") -> str:
     return name or default
 
 
+def media_items_from_entry(entry: dict, jid: str = "",
+                           sender_name: str = "") -> list[dict]:
+    """Return one item per media URL carried by a history row.
+
+    SIMS metadata wins; a bare URL in the message body is still accepted so
+    old/bridged history and OMEMO XEP-0454 plaintext links are not lost.
+    """
+    from stanza_im.include.utils import extract_urls
+
+    media = entry.get("media") if isinstance(entry.get("media"), dict) else {}
+    media_url = str((media or {}).get("url") or "")
+    media_type = str((media or {}).get("media_type") or "")
+    timestamp = str(entry.get("timestamp") or "")
+    direction = str(entry.get("direction") or "")
+    sender = sender_name or str(entry.get("sender") or "")
+    found: list[dict] = []
+    seen: set[str] = set()
+
+    def add(url: str, meta: dict) -> None:
+        url = str(url or "").strip()
+        if not url or url in seen:
+            return
+        kind = media_kind(url, str(meta.get("media_type") or "") or None)
+        if not kind:
+            return
+        seen.add(url)
+        name = str(meta.get("name") or "").strip() or filename_from_url(url)
+        found.append({
+            "url": url,
+            "kind": kind,
+            "name": name,
+            "jid": jid,
+            "timestamp": timestamp,
+            "sender": sender,
+            "direction": direction,
+            "size": int(meta.get("size") or 0),
+            "width": int(meta.get("width") or 0),
+            "height": int(meta.get("height") or 0),
+            "media_type": str(meta.get("media_type") or media_type),
+            "duration": float(meta.get("duration") or 0.0),
+        })
+
+    if media_url:
+        add(media_url, media)
+    for url in extract_urls(entry.get("body") or ""):
+        add(url, media if media_url and url == media_url else {})
+    return found
+
+
 class MediaCache:
     """Disk-backed cache for media originals and thumbnails."""
 
@@ -227,6 +276,8 @@ class MediaCache:
             out["size"] = int(entry["size"])
         if entry.get("kind"):
             out["kind"] = str(entry["kind"])
+        if entry.get("duration"):
+            out["duration"] = float(entry["duration"])
         return out
 
     def _touch(self, key: str) -> None:
@@ -242,7 +293,7 @@ class MediaCache:
 
     def store(self, url: str, original_bytes: bytes | None = None,
               thumb_bytes: bytes | None = None, mime: str = "",
-              kind: str = "") -> str | None:
+              kind: str = "", duration: float = 0.0) -> str | None:
         """Persist originals/thumbnails for *url*; returns the written path."""
         try:
             os.makedirs(self._dir, exist_ok=True)
@@ -256,6 +307,8 @@ class MediaCache:
             entry["kind"] = kind
         if mime:
             entry["mime"] = mime
+        if duration:
+            entry["duration"] = float(duration)
         written = None
         if original_bytes is not None:
             path = self._original_path(key)

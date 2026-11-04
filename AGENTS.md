@@ -87,7 +87,8 @@ stanza_im/                      # Python package
 │   ├── spellcheck.py            # Optional enchant spell-check service/highlighter
 │   ├── spellcheck_dialog.py     # Spell-check language picker
 │   ├── media_preview.py         # Inline image/audio/video previews
-│   ├── media_viewer.py          # Fullscreen image/video viewer (Ctrl+wheel zoom)
+│   ├── media_meta.py            # Background video thumbnails + media duration
+│   ├── media_viewer.py          # Fullscreen image/video/audio viewer
 │   ├── whiteboard_dialog.py     # Whiteboard dialog (tool palette + canvas)
 │   ├── whiteboard_canvas.py     # QPainter whiteboard canvas + SVG export
 │   ├── map_widget.py            # In-app OSM map window (geo: URIs, live track)
@@ -106,7 +107,8 @@ stanza_im/                      # Python package
 │   ├── captcha_dialog.py        # XEP-0158 CAPTCHA challenge prompt
 │   ├── account_registration_dialog.py  # XEP-0077 account creation wizard
 │   ├── registration_result_dialog.py   # Created-account summary (apply/copy)
-│   ├── history_manager.py       # Per-contact history browser
+│   ├── history_manager.py       # Per-contact history browser (text + media tabs)
+│   ├── history_media.py         # Month-grouped media calendar grid
 │   ├── service_browser.py       # XEP-0030 service discovery browser
 │   ├── service_info_dialog.py   # Service info (version/stats/caps/contacts)
 │   ├── certificate_dialog.py    # Server TLS certificate details dialog
@@ -689,12 +691,29 @@ matches, stores them locally with `archived=True` and shows «Загрузить
 for the RSM `after` page. `JabberClient.search_mam_fulltext` builds the MAM
 form with `{urn:xmpp:fulltext:0}fulltext` and uses a separate collector, so
 ordinary history sync cursors are untouched; the toggle is disabled when the
-server does not advertise the feature. The roster context menu's
+server does not advertise the feature. The right pane is a `QTabWidget` with
+«Текст», «Фото», «Видео» и «Аудио»: the text tab keeps the search/results/
+messages/day-navigation/export controls; each media tab has its own live
+filename filter and the same three icon-only mode buttons (the text tab has
+its own copies and state). Media rows come from `history.media_entries` /
+`media_items_from_entry` (SIMS URL or a body URL, including OMEMO
+`aesgcm://`), are grouped by month (`---- YYYY Month ----`) and rendered by
+`ui/history_media.HistoryMediaView` as fixed cards. Images use the shared
+preview cache; `ui/media_meta.MediaMetadataService` fills video thumbnails and
+audio/video duration in the background (PyAV when available) and caches them
+in `MediaCache` (`duration` field). A click first resolves/decrypts the
+original and then opens `MediaViewer` (audio has its own Qt Multimedia mode);
+a missing file is reported in the media view. «Все контакты» builds one local
+media catalog across all histories, «За все время» groups every month, and the
+media «Искать на сервере» button (enabled by MAM, not fulltext) walks the
+ordinary XEP-0313 archive backwards (`JabberClient.fetch_mam_media_page`,
+RSM `before`): newest media first, older pages appended while scrolling down.
+The roster context menu's
 «Очистить историю» and the chat toolbar's clear button both run
 `MainWindow._on_clear_history`: after a confirmation it calls `history.clear`
 (wipes the SQLite messages **and** the legacy JSONL file) and resets the open
 tab; the server archive (MAM) is untouched, so a reopened chat may refill from
-it. [`tests/test_history_manager.py`]
+it. [`tests/test_history_manager.py`, `tests/test_history_media.py`]
 
 **Plugin system** (`stanza_im/plugins/__init__.py`, `ui/plugin_manager_dialog.py`):
 plugins are self-contained sub-packages of `stanza_im.plugins`, each exposing a
@@ -1832,8 +1851,10 @@ off when QtWebEngine is unavailable. Settings changes re-render open chats via
 `ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
 `showEvent` (a cached original returns before layout, so the initial fit is
 deferred) and persists its geometry/position in the shared `media_viewer`
-config section (image and video viewers share it). Three actions float over the
-media **without a panel** — Download (`save_requested`), Copy link
+config section (image, video and audio viewers share it). Video/audio media
+open the cached/decrypted original first; the audio mode uses Qt Multimedia and
+reports a missing file instead of opening a dead URL. Three actions float over
+the media **without a panel** — Download (`save_requested`), Copy link
 (`copy_requested`) and Share (`share_requested`) — as a Qt overlay frame for
 images and as an HTML overlay (wired through the `_VideoBridge`) for videos;
 `MainWindow._on_media_view_requested` connects them to the existing

@@ -19,6 +19,9 @@ from stanza_im.include.constants import ACTIONS_DIR_16, APP_ICON_16, \
 from stanza_im.include.utils import escape_html
 from stanza_im.i18n import tr
 from stanza_im.ui.resize_handle import VerticalResizeHandle
+from stanza_im.ui.history_media import HistoryMediaView
+from stanza_im.ui.media_meta import MediaMetadataService
+from stanza_im.include.media import media_items_from_entry
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +74,37 @@ def _mode_button(icon_name: str, tooltip: str) -> QtWidgets.QToolButton:
 class HistoryManagerDialog(QtWidgets.QDialog):
     """Browser over locally stored per-contact chat history."""
 
+    media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
+
     def __init__(self, catalog_provider, initial_jid: str = "",
-                 parent=None, server_search=None, server_supported=None):
+                 parent=None, server_search=None, server_supported=None,
+                 server_media=None, server_media_supported=None,
+                 media_service=None):
         super().__init__(parent)
         self._catalog_provider = catalog_provider
         self._server_search = server_search
         self._server_supported = server_supported
+        self._server_media = server_media
+        self._server_media_supported = server_media_supported
+        self._media_service = media_service
+        self._meta_service = None
+        if media_service is not None and getattr(media_service, "cache", None):
+            self._meta_service = MediaMetadataService(
+                media_service.cache, downloader=media_service, parent=self)
+        self._media_views: dict[str, HistoryMediaView] = {}
+        self._media_filters: dict[str, QtWidgets.QLineEdit] = {}
+        self._media_buttons: dict[str, dict] = {}
+        self._media_items: list[dict] = []
+        self._media_local_key = None
+        self._media_mode = {"all_time": False, "all_contacts": False,
+                            "server": False}
+        self._media_server_jid = ""
+        self._media_server_cursor = ""
+        self._media_server_complete = True
+        self._media_server_loading = False
+        self._media_server_ok = False
+        self._media_request_id = 0
+        self._media_empty_pages = 0
         self._catalog: list[dict] = []
         self._jid: str = ""
         self._name: str = ""
@@ -180,10 +208,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         left_layout.addWidget(self._calendar)
         splitter.addWidget(left)
 
-        # ── Right pane: search + messages + navigation ────────────
+        # ── Right pane: tabs with the text browser and media grids ─
         right = QtWidgets.QWidget()
         right_layout = QtWidgets.QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        self._tabs = QtWidgets.QTabWidget()
+        right_layout.addWidget(self._tabs, 1)
+
+        text_page = QtWidgets.QWidget()
+        text_layout = QtWidgets.QVBoxLayout(text_page)
+        text_layout.setContentsMargins(0, 0, 0, 0)
 
         search_row = QtWidgets.QHBoxLayout()
         self._search = QtWidgets.QLineEdit()
@@ -217,20 +251,20 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_server.toggled.connect(self._on_server_toggled)
         self._btn_server.setEnabled(False)
         search_row.addWidget(self._btn_server)
-        right_layout.addLayout(search_row)
+        text_layout.addLayout(search_row)
 
         self._results = QtWidgets.QListWidget()
         self._results_height = 140
         self._results.setFixedHeight(self._results_height)
         self._results.itemActivated.connect(self._on_result_picked)
-        right_layout.addWidget(self._results)
+        text_layout.addWidget(self._results)
 
         # A thin bar under the results resizes them (and the messages below);
         # session-only, like the chat input's own handle.
         self._results_handle = VerticalResizeHandle(
             get_height=lambda: self._results_height, invert=True)
         self._results_handle.height_changed.connect(self._set_results_height)
-        right_layout.addWidget(self._results_handle)
+        text_layout.addWidget(self._results_handle)
         self._btn_server_more = QtWidgets.QPushButton(
             tr("history_search_server_more"))
         self._btn_server_more.setAutoDefault(False)
@@ -240,16 +274,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_server_more.clicked.connect(
             lambda: self._run_server_search(more=True))
         self._btn_server_more.setVisible(False)
-        right_layout.addWidget(self._btn_server_more)
+        text_layout.addWidget(self._btn_server_more)
         self._set_results_visible(False)
 
         self._status = QtWidgets.QLabel()
         self._status.setWordWrap(True)
-        right_layout.addWidget(self._status)
+        text_layout.addWidget(self._status)
 
         self._messages = QtWidgets.QTextBrowser()
         self._messages.setOpenExternalLinks(True)
-        right_layout.addWidget(self._messages, 1)
+        text_layout.addWidget(self._messages, 1)
 
         nav_row = QtWidgets.QHBoxLayout()
         self._btn_refresh = QtWidgets.QToolButton()
@@ -294,12 +328,54 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         close_btn.setDefault(False)
         close_btn.clicked.connect(self.accept)
         nav_row.addWidget(close_btn)
-        right_layout.addLayout(nav_row)
+        text_layout.addLayout(nav_row)
+
+        self._tabs.addTab(text_page, tr("history_tab_text"))
+        for kind, label in (("image", "history_tab_photos"),
+                            ("video", "history_tab_videos"),
+                            ("audio", "history_tab_audio")):
+            self._tabs.addTab(self._build_media_tab(kind), tr(label))
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         splitter.addWidget(right)
         splitter.setSizes([280, 640])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+
+    def _build_media_tab(self, kind: str) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        row = QtWidgets.QHBoxLayout()
+        filter_edit = QtWidgets.QLineEdit()
+        filter_edit.setPlaceholderText(tr("history_media_filter"))
+        filter_edit.textChanged.connect(
+            lambda text, k=kind: self._on_media_filter_changed(k, text))
+        row.addWidget(filter_edit, 1)
+        buttons = {}
+        specs = (
+            ("all_time", "history.png", "history_all_time"),
+            ("all_contacts", "system-users.png", "history_all_contacts_tip"),
+            ("server", "globe.svg", "history_search_server_tip"),
+        )
+        for name, icon_name, tip_key in specs:
+            button = _mode_button(icon_name, tr(tip_key))
+            button.toggled.connect(
+                lambda checked, n=name: self._on_media_mode_toggled(n, checked))
+            row.addWidget(button)
+            buttons[name] = button
+        buttons["server"].setEnabled(False)
+        layout.addLayout(row)
+        view = HistoryMediaView(
+            kind, self._media_service, self._meta_service, page)
+        view.open_requested.connect(self.media_open_requested)
+        view.load_more.connect(
+            lambda k=kind: self._on_media_load_more(k))
+        layout.addWidget(view, 1)
+        self._media_views[kind] = view
+        self._media_filters[kind] = filter_edit
+        self._media_buttons[kind] = buttons
+        return page
 
     # ── Catalog / contacts ───────────────────────────────────────
 
@@ -419,6 +495,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_export.setEnabled(bool(jid))
         self._reset_server_search()
         self._update_server_button()
+        self._update_media_server_buttons()
+        self._reset_media_state()
         self._search.setText("")
         self._all_days = []
         self._clear_search_state()
@@ -525,6 +603,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._update_nav_state()
         if not self._multi_mode():
             self._set_results_visible(False)
+        if self._tabs.currentIndex() > 0:
+            self._refresh_media()
 
     def _show_empty_day(self, value: str) -> None:
         self._date = value
@@ -535,6 +615,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._status.setText(tr("history_no_messages"))
         if not self._multi_mode():
             self._set_results_visible(False)
+        if self._tabs.currentIndex() > 0:
+            self._refresh_media()
 
     def _jump_day(self, delta: int = 0, first: bool = False,
                   last: bool = False) -> None:
@@ -625,6 +707,217 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 self._message_blocks.append(block.position())
                 entry_index += 1
             block = block.next()
+
+    # ── Media calendar ────────────────────────────────────────────
+
+    def _current_media_kind(self) -> str:
+        index = self._tabs.currentIndex() if hasattr(self, "_tabs") else 0
+        return {1: "image", 2: "video", 3: "audio"}.get(index, "")
+
+    def _on_tab_changed(self, index: int) -> None:
+        if index <= 0:
+            self._search.setFocus()
+            return
+        self._update_media_server_buttons()
+        if self._media_mode["server"]:
+            if self._media_server_jid != self._jid:
+                self._start_server_media()
+        else:
+            self._refresh_media()
+        kind = self._current_media_kind()
+        filter_edit = self._media_filters.get(kind)
+        if filter_edit is not None:
+            filter_edit.setFocus()
+
+    def _on_media_filter_changed(self, kind: str, text: str) -> None:
+        view = self._media_views.get(kind)
+        if view is not None:
+            view.set_filter(text)
+
+    def _on_media_mode_toggled(self, name: str, checked: bool) -> None:
+        if name not in self._media_mode:
+            return
+        if checked and name == "server":
+            self._media_mode["all_time"] = False
+            self._media_mode["all_contacts"] = False
+        elif checked:
+            self._media_mode["server"] = False
+        self._media_mode[name] = bool(checked)
+        self._sync_media_buttons()
+        self._refresh_media()
+
+    def _sync_media_buttons(self) -> None:
+        server = bool(self._media_mode.get("server"))
+        for buttons in self._media_buttons.values():
+            for name, button in buttons.items():
+                button.blockSignals(True)
+                button.setChecked(bool(self._media_mode.get(name)))
+                button.blockSignals(False)
+            buttons["all_time"].setEnabled(not server)
+            buttons["all_contacts"].setEnabled(not server)
+            buttons["server"].setEnabled(bool(self._media_server_ok))
+
+    def _update_media_server_buttons(self) -> None:
+        supported = False
+        if self._server_media_supported is not None and self._jid:
+            try:
+                supported = bool(self._server_media_supported(self._jid))
+            except Exception:  # noqa: BLE001 - never break the browser
+                supported = False
+        elif self._server_media is not None and self._jid:
+            supported = True
+        self._media_server_ok = supported
+        if not supported and self._media_mode.get("server"):
+            self._media_mode["server"] = False
+        for buttons in self._media_buttons.values():
+            buttons["server"].setToolTip(
+                tr("history_search_server_tip") if supported
+                else tr("history_search_server_unavailable"))
+        self._sync_media_buttons()
+
+    def _reset_media_state(self) -> None:
+        self._media_request_id += 1
+        self._media_items = []
+        self._media_local_key = None
+        self._media_server_jid = ""
+        self._media_server_cursor = ""
+        self._media_server_complete = True
+        self._media_server_loading = False
+        self._media_empty_pages = 0
+        for view in self._media_views.values():
+            view.clear()
+
+    def _refresh_media(self) -> None:
+        if self._media_mode.get("server"):
+            self._start_server_media()
+            return
+        key = (self._jid, self._date if not self._media_mode.get("all_time")
+               else "", bool(self._media_mode.get("all_time")),
+               bool(self._media_mode.get("all_contacts")))
+        if key == self._media_local_key:
+            return
+        self._media_local_key = key
+        self._media_request_id += 1
+        self._start_task(self._load_local_media(self._media_request_id))
+
+    async def _load_local_media(self, request_id: int) -> None:
+        if self._released:
+            return
+        for view in self._media_views.values():
+            view.set_loading(True, tr("history_media_loading"))
+        all_time = bool(self._media_mode.get("all_time"))
+        all_contacts = bool(self._media_mode.get("all_contacts"))
+        date = "" if all_time else self._date
+        if not all_contacts and not self._jid:
+            items: list[dict] = []
+        elif not all_time and not date:
+            items = []
+        else:
+            jids = ([self._jid] if not all_contacts
+                    else await asyncio.to_thread(history.list_history_jids))
+            names = {c["jid"]: c["name"] for c in self._catalog}
+            items = []
+            for jid in sorted(jids):
+                if self._released or request_id != self._media_request_id:
+                    return
+                entries = await history.media_entries_async(jid, date)
+                for entry in entries:
+                    for item in media_items_from_entry(entry, jid=jid):
+                        item["contact"] = names.get(jid, jid)
+                        items.append(item)
+        if (self._released or request_id != self._media_request_id
+                or self._media_mode.get("server")):
+            return
+        self._media_items = items
+        self._media_local_key = (
+            self._jid, date, all_time, all_contacts)
+        for view in self._media_views.values():
+            view.set_loading(False)
+            view.set_items(items)
+
+    def _start_server_media(self) -> None:
+        if self._server_media is None or not self._jid:
+            for view in self._media_views.values():
+                view.clear()
+                view.set_status(tr("history_search_server_unavailable"))
+            return
+        self._media_server_jid = self._jid
+        self._media_server_cursor = ""
+        self._media_server_complete = False
+        self._media_server_loading = False
+        self._media_empty_pages = 0
+        self._media_items = []
+        self._media_local_key = None
+        for view in self._media_views.values():
+            view.clear()
+            view.set_loading(True, tr("history_search_server_running"))
+        self._start_task(self._load_server_media_page())
+
+    async def _load_server_media_page(self) -> None:
+        if (self._released or self._media_server_loading
+                or not self._media_mode.get("server")
+                or self._server_media is None
+                or self._media_server_jid != self._jid):
+            return
+        self._media_server_loading = True
+        if not self._media_items:
+            for view in self._media_views.values():
+                view.set_loading(True, tr("history_search_server_running"))
+        jid = self._jid
+        before = self._media_server_cursor
+        try:
+            result = await self._server_media(jid, before)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Server media search failed: %s", exc)
+            result = None
+        if (self._released or not self._media_mode.get("server")
+                or self._media_server_jid != self._jid):
+            self._media_server_loading = False
+            return
+        self._media_server_loading = False
+        if result is None:
+            for view in self._media_views.values():
+                view.set_loading(False, tr("history_search_server_error"))
+            return
+        rows, complete, cursor = result
+        items = []
+        for row in rows or []:
+            items.extend(media_items_from_entry(row, jid=jid))
+        known = {(item.get("url", ""), item.get("timestamp", ""))
+                 for item in self._media_items}
+        fresh = [item for item in items
+                 if (item.get("url", ""), item.get("timestamp", ""))
+                 not in known]
+        self._media_items.extend(fresh)
+        self._media_server_cursor = str(cursor or "")
+        self._media_server_complete = bool(complete)
+        for view in self._media_views.values():
+            if fresh:
+                view.append_items(fresh)
+            view.set_loading(False)
+        if not fresh and not self._media_server_complete \
+                and self._media_empty_pages < 20:
+            self._media_empty_pages += 1
+            QtCore.QTimer.singleShot(0, self._start_task_media_page)
+            return
+        self._media_empty_pages = 0 if fresh else self._media_empty_pages
+        if self._media_server_complete and not self._media_items:
+            for view in self._media_views.values():
+                view.set_status(tr("history_media_empty"))
+
+    def _start_task_media_page(self) -> None:
+        self._start_task(self._load_server_media_page())
+
+    def _on_media_load_more(self, _kind: str) -> None:
+        if (self._media_mode.get("server")
+                and not self._media_server_complete):
+            self._start_task(self._load_server_media_page())
+
+    def media_error(self, _url: str = "") -> None:
+        kind = self._current_media_kind()
+        view = self._media_views.get(kind)
+        if view is not None:
+            view.set_status(tr("history_media_missing"))
 
     # ── Export ────────────────────────────────────────────────────
 
