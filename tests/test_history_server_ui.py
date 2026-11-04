@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets  # noqa: E402
 
 from stanza_im.i18n import load as i18n_load  # noqa: E402
+from stanza_im.include.constants import find_icon  # noqa: E402
 from stanza_im.ui.history_manager import HistoryManagerDialog  # noqa: E402
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
@@ -53,6 +54,15 @@ async def search(jid, query, after=""):
 
 dialog = HistoryManagerDialog(
     lambda: [], server_search=search, server_supported=lambda _jid: True)
+check("the globe icon exists", bool(find_icon("globe.svg")))
+for _button in (dialog._btn_all_time, dialog._btn_all_contacts,
+                dialog._btn_server):
+    check("a mode button is icon-only",
+          _button.text() == "" and not _button.icon().isNull())
+check("mode buttons keep their tooltips",
+      dialog._btn_all_time.toolTip() == "All time"
+      and dialog._btn_all_contacts.toolTip()
+      and dialog._btn_server.toolTip())
 dialog._jid = JID
 dialog._name = "Bob"
 dialog._update_server_button()

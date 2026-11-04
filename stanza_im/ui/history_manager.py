@@ -42,12 +42,30 @@ def _stamp(ts: str) -> str:
 
 
 def _icon(filename: str) -> QtGui.QIcon:
+    path = find_icon(filename)
+    if path:
+        return QtGui.QIcon(path)
     for directory in (ACTIONS_DIR_16, CATEGORIES_DIR_16, STATUS_DIR_32,
                       APP_ICON_16):
         pix = QtGui.QPixmap(os.path.join(directory, filename))
         if not pix.isNull():
             return QtGui.QIcon(pix)
     return QtGui.QIcon()
+
+
+def _mode_button(icon_name: str, tooltip: str) -> QtWidgets.QToolButton:
+    """A compact, checkable, icon-only history-mode button."""
+    button = QtWidgets.QToolButton()
+    button.setIcon(_icon(icon_name))
+    button.setIconSize(QtCore.QSize(16, 16))
+    button.setToolButtonStyle(
+        QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
+    button.setCheckable(True)
+    button.setAutoRaise(True)
+    button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+    button.setToolTip(tooltip)
+    button.setAccessibleName(tooltip)
+    return button
 
 
 class HistoryManagerDialog(QtWidgets.QDialog):
@@ -186,29 +204,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._btn_next_match.clicked.connect(self._on_match_next)
         self._btn_next_match.setEnabled(False)
         search_row.addWidget(self._btn_next_match)
-        self._btn_all_time = QtWidgets.QPushButton(tr("history_all_time"))
-        self._btn_all_time.setCheckable(True)
-        self._btn_all_time.setAutoDefault(False)
-        self._btn_all_time.setDefault(False)
-        self._btn_all_time.setFocusPolicy(
-            QtCore.Qt.FocusPolicy.NoFocus)
+        self._btn_all_time = _mode_button(
+            "history.png", tr("history_all_time"))
         self._btn_all_time.toggled.connect(self._on_mode_toggled)
         search_row.addWidget(self._btn_all_time)
-        self._btn_all_contacts = QtWidgets.QPushButton(
-            tr("history_all_contacts"))
-        self._btn_all_contacts.setCheckable(True)
-        self._btn_all_contacts.setAutoDefault(False)
-        self._btn_all_contacts.setDefault(False)
-        self._btn_all_contacts.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._btn_all_contacts.setToolTip(tr("history_all_contacts_tip"))
+        self._btn_all_contacts = _mode_button(
+            "system-users.png", tr("history_all_contacts_tip"))
         self._btn_all_contacts.toggled.connect(self._on_all_contacts_toggled)
         search_row.addWidget(self._btn_all_contacts)
-        self._btn_server = QtWidgets.QPushButton(tr("history_search_server"))
-        self._btn_server.setCheckable(True)
-        self._btn_server.setAutoDefault(False)
-        self._btn_server.setDefault(False)
-        self._btn_server.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._btn_server.setToolTip(tr("history_search_server_tip"))
+        self._btn_server = _mode_button(
+            "globe.svg", tr("history_search_server_tip"))
         self._btn_server.toggled.connect(self._on_server_toggled)
         self._btn_server.setEnabled(False)
         search_row.addWidget(self._btn_server)
