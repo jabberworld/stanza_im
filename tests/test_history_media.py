@@ -76,6 +76,11 @@ check("the photo tab keeps only images",
 check("media is grouped under a standalone month header",
       any(label.text().startswith("2026 ")
           for label in view.findChildren(QtWidgets.QLabel)))
+_before = len(view._items)
+view.append_items([dict(items[0], origin_id="another-id")])
+check("same media with a different id is not duplicated",
+      len(view._items) == _before)
+view.set_items(items)
 check("month headers carry a horizontal separator",
       any(frame.frameShape() == QtWidgets.QFrame.Shape.HLine
           for frame in view.findChildren(QtWidgets.QFrame)))
@@ -113,6 +118,8 @@ view.show()
 app.processEvents()
 _cards = view.findChildren(MediaCard)
 check("both images are rendered", len(_cards) == 2)
+check("media cards are flush with the left edge",
+      min(card.geometry().x() for card in _cards) <= 10)
 check("the media tooltip uses the interface timestamp format",
       any("2026-" in card.toolTip() and "T" not in card.toolTip()
           and ":" in card.toolTip() for card in _cards))
@@ -291,6 +298,23 @@ asyncio.get_event_loop().run_until_complete(switch_contacts())
 check("switching contacts refreshes the photo tab",
       [item["name"] for item in dialog3._media_views["image"]._items]
       == ["carol.jpg"])
+
+# Context-menu "go to message" selects the Text tab/contact/day and highlights
+# the matching entry.
+photo_item = items[0]
+
+
+async def jump_to_text():
+    await dialog._jump_to_media_message_async(photo_item)
+
+
+asyncio.get_event_loop().run_until_complete(jump_to_text())
+check("go-to-message switches to the Text tab",
+      dialog._tabs.currentIndex() == 0)
+check("go-to-message opens the media date", dialog._date == "2026-03-12")
+check("go-to-message highlights the target entry",
+      dialog._messages.textCursor().hasSelection()
+      and "photo" in dialog._messages.textCursor().selectedText())
 
 # A persisted continuous marker makes the next server run start below it and
 # signing off a page advances the low bound.

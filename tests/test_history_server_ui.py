@@ -128,6 +128,11 @@ check("an unjoined room disables server media search",
 win._muc_self_nicks = {ROOM}
 check("a joined room enables server media search",
       MainWindow._history_server_media_supported(win, ROOM))
+check("a joined room allows jumping to its chat",
+      MainWindow._history_chat_jump_available(win, ROOM))
+win._muc_self_nicks = set()
+check("an unjoined room forbids jumping to its chat",
+      not MainWindow._history_chat_jump_available(win, ROOM))
 
 if FAILURES:
     print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))

@@ -421,6 +421,8 @@ STRINGS = {
     "history_media_missing": "Файл не найден",
     "history_media_today": "За сегодня",
     "history_media_for_day": "За {date}",
+    "history_media_goto_chat": "Перейти в чат",
+    "history_media_goto_message": "Перейти к сообщению",
     "history_media_play": "Воспроизвести",
     "history_manager": "Менеджер истории",
     "history_search_placeholder": "Поиск...",

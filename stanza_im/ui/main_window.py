@@ -1777,6 +1777,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.raise_()
             self.activateWindow()
         else:
+            if self._chat_window.isMinimized():
+                self._chat_window.showNormal()
             self._chat_window.show()
             self._chat_window.raise_()
             self._chat_window.activateWindow()
@@ -7116,9 +7118,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 server_media=self._history_server_media_page,
                 server_media_supported=self._history_server_media_supported,
                 server_gap_sync=self._history_server_gap_sync,
+                chat_jump_available=self._history_chat_jump_available,
                 media_service=self._media_service)
             self._history_manager.media_open_requested.connect(
                 self._on_history_media_open)
+            self._history_manager.chat_jump_requested.connect(
+                self._on_history_media_chat_jump)
         self._history_manager.open_for(jid)
         self._history_manager.show()
         self._history_manager.raise_()
@@ -7181,6 +7186,25 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Could not store media rows for %s: %s", jid, exc)
         return rows, complete, cursor
+
+    def _history_chat_jump_available(self, jid: str) -> bool:
+        if not jid:
+            return False
+        if "/" in jid:
+            return jid.split("/", 1)[0] in self._muc_self_nicks
+        if self._is_conference_jid(jid):
+            return jid in self._muc_self_nicks
+        return True
+
+    def _on_history_media_chat_jump(self, jid: str, ref: str,
+                                    timestamp: str = "") -> None:
+        if not jid or not self._history_chat_jump_available(jid):
+            return
+        self._on_contact_open(jid)
+        self._raise_chat_area()
+        chat = self._chat_window.get_chat(jid)
+        if chat is not None:
+            chat.jump_to_message(ref, timestamp)
 
     def _on_history_media_open(self, url: str, kind: str) -> None:
         if not url:

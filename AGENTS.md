@@ -718,7 +718,8 @@ pages appended while scrolling down. A per-history `mam_sync` row stores the
 continuous `low`/`high` archive range and `complete_down`; new gaps above
 `high` are closed with `fetch_history_mam_after_bounds`, after which the range
 is reused without re-querying it. Every MAM page is stored in SQLite (all
-rows, not just media), and local/server items are deduplicated by archive id.
+rows, not just media), and local/server items are deduplicated by any matching
+archive/stanza/origin/message id, with URL/timestamp fallback.
 Sparse archive pages (one media among 100 messages) are fetched automatically
 while the active grid is near its bottom, bounded to avoid an endless scan of
 a media-less tab.

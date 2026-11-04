@@ -170,15 +170,22 @@ def media_items_from_entry(entry: dict, jid: str = "",
     return found
 
 
-def media_item_key(item: dict) -> tuple:
-    """Stable dedup key for a media calendar item."""
+def media_item_tokens(item: dict) -> set[tuple]:
+    """Identity tokens for local/server media deduplication.
+
+    The same message can carry different id fields in a live row and in its
+    MAM copy, so intersection of *any* token (or the URL/timestamp fallback)
+    is used instead of one privileged id.
+    """
+    item = item or {}
+    tokens = {("url", str(item.get("url") or ""),
+               str(item.get("timestamp") or ""),
+               str(item.get("jid") or ""))}
     for name in ("archive_id", "stanza_id", "origin_id", "message_id"):
-        value = str((item or {}).get(name) or "")
+        value = str(item.get(name) or "")
         if value:
-            return (name, value)
-    return ("url", str((item or {}).get("url") or ""),
-            str((item or {}).get("timestamp") or ""),
-            str((item or {}).get("jid") or ""))
+            tokens.add((name, value))
+    return tokens
 
 
 class MediaCache:

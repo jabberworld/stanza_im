@@ -22,7 +22,7 @@ from stanza_im.i18n import tr
 from stanza_im.ui.resize_handle import VerticalResizeHandle
 from stanza_im.ui.history_media import HistoryMediaView
 from stanza_im.ui.media_meta import MediaMetadataService
-from stanza_im.include.media import media_item_key, media_items_from_entry
+from stanza_im.include.media import media_item_tokens, media_items_from_entry
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     """Browser over locally stored per-contact chat history."""
 
     media_open_requested = QtCore.pyqtSignal(str, str)  # url, kind
+    chat_jump_requested = QtCore.pyqtSignal(str, str, str)  # jid, ref, ts
 
     def __init__(self, catalog_provider, initial_jid: str = "",
                  parent=None, server_search=None, server_supported=None,
                  server_media=None, server_media_supported=None,
-                 server_gap_sync=None, media_service=None):
+                 server_gap_sync=None, chat_jump_available=None,
+                 media_service=None):
         super().__init__(parent)
         self._catalog_provider = catalog_provider
         self._server_search = server_search
@@ -88,6 +90,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._server_media = server_media
         self._server_media_supported = server_media_supported
         self._server_gap_sync = server_gap_sync
+        self._chat_jump_available = chat_jump_available
         self._media_service = media_service
         self._meta_service = None
         if media_service is not None and getattr(media_service, "cache", None):
@@ -377,6 +380,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         view = HistoryMediaView(
             kind, self._media_service, self._meta_service, page)
         view.open_requested.connect(self.media_open_requested)
+        view.context_requested.connect(self._on_media_context)
         view.load_more.connect(
             lambda k=kind: self._on_media_load_more(k))
         layout.addWidget(view, 1)
@@ -1082,9 +1086,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         items = []
         for row in rows or []:
             items.extend(media_items_from_entry(row, jid=jid))
-        known = {media_item_key(item) for item in self._media_items}
-        fresh = [item for item in items
-                 if media_item_key(item) not in known]
+        known: set[tuple] = set()
+        for item in self._media_items:
+            known.update(media_item_tokens(item))
+        fresh = []
+        for item in items:
+            tokens = media_item_tokens(item)
+            if tokens & known:
+                continue
+            known.update(tokens)
+            fresh.append(item)
         self._media_items.extend(fresh)
         self._media_server_cursor = str(cursor or "")
         self._media_server_complete = bool(complete)
@@ -1155,6 +1166,107 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 and not self._media_server_complete):
             self._media_auto_pages = 0
             self._start_task(self._load_server_media_page())
+
+    @staticmethod
+    def _media_ref(item: dict) -> str:
+        for key in ("archive_id", "stanza_id", "origin_id", "message_id"):
+            value = str((item or {}).get(key) or "")
+            if value:
+                return value
+        return ""
+
+    def _on_media_context(self, item: dict, pos: QtCore.QPoint) -> None:
+        menu = QtWidgets.QMenu(self)
+        url = str((item or {}).get("url") or "")
+        jid = str((item or {}).get("jid") or self._jid or "")
+        ref = self._media_ref(item)
+        timestamp = str((item or {}).get("timestamp") or "")
+        copy_act = menu.addAction(_icon("copy.svg"), tr("media_copy_link"))
+        copy_act.setEnabled(bool(url))
+        copy_act.triggered.connect(
+            lambda _checked=False: QtWidgets.QApplication.clipboard().setText(url))
+        available = True
+        if self._chat_jump_available is not None and jid:
+            try:
+                available = bool(self._chat_jump_available(jid))
+            except Exception:  # noqa: BLE001 - never break the menu
+                available = False
+        chat_act = menu.addAction(
+            _icon("message.png"), tr("history_media_goto_chat"))
+        chat_act.setEnabled(bool(jid and (ref or timestamp) and available))
+        chat_act.triggered.connect(
+            lambda _checked=False: self.chat_jump_requested.emit(
+                jid, ref, timestamp))
+        msg_act = menu.addAction(
+            _icon("history.png"), tr("history_media_goto_message"))
+        msg_act.setEnabled(bool(jid and (ref or timestamp)))
+        msg_act.triggered.connect(
+            lambda _checked=False: self._start_task(
+                self._jump_to_media_message_async(item)))
+        menu.exec(pos)
+
+    def _find_entry_for_item(self, item: dict) -> int:
+        refs = {self._media_ref(item)}
+        refs.discard("")
+        timestamp = str((item or {}).get("timestamp") or "").rstrip("Z")
+        url = str((item or {}).get("url") or "")
+        for index, entry in enumerate(self._entries):
+            if any(str(entry.get(key) or "") in refs
+                   for key in ("archive_id", "stanza_id", "origin_id",
+                               "message_id")):
+                return index
+            if (timestamp
+                    and str(entry.get("timestamp") or "").rstrip("Z")
+                    == timestamp):
+                body = str(entry.get("body") or "")
+                media = entry.get("media") or {}
+                if (not url or url in body or url == media.get("url")):
+                    return index
+        return -1
+
+    def _highlight_entry(self, index: int) -> None:
+        if not (0 <= index < len(self._message_blocks)):
+            return
+        doc = self._messages.document()
+        cursor = QtGui.QTextCursor(doc)
+        cursor.setPosition(self._message_blocks[index])
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.EndOfBlock,
+                            QtGui.QTextCursor.MoveMode.KeepAnchor)
+        self._messages.setTextCursor(cursor)
+        self._messages.ensureCursorVisible()
+        QtCore.QTimer.singleShot(0, lambda c=cursor: self._reveal_cursor(c))
+
+    async def _jump_to_media_message_async(self, item: dict) -> None:
+        if self._released:
+            return
+        jid = str((item or {}).get("jid") or self._jid or "")
+        timestamp = str((item or {}).get("timestamp") or "")
+        if not jid:
+            return
+        day = timestamp[:10]
+        contact = next((c for c in self._catalog if c["jid"] == jid), None)
+        name = contact["name"] if contact else jid
+        self._tabs.setCurrentIndex(0)
+        self._pending_date = day
+        await self._select_jid_async(jid, name)
+        task = self._dates_task
+        if task is not None:
+            try:
+                await task
+            except Exception:  # noqa: BLE001
+                pass
+        if self._released or self._jid != jid:
+            self._pending_date = ""
+            return
+        if day and self._date != day:
+            await self._select_date_async(day)
+        if self._released or self._jid != jid:
+            return
+        index = self._find_entry_for_item(item)
+        if index >= 0:
+            self._highlight_entry(index)
+        else:
+            self._status.setText(tr("history_no_results"))
 
     def media_error(self, _url: str = "") -> None:
         kind = self._current_media_kind()

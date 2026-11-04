@@ -421,6 +421,8 @@ STRINGS = {
     "history_media_missing": "File not found",
     "history_media_today": "Today",
     "history_media_for_day": "For {date}",
+    "history_media_goto_chat": "Go to chat",
+    "history_media_goto_message": "Go to message",
     "history_media_play": "Play",
     "history_manager": "History Manager",
     "history_search_placeholder": "Search...",

@@ -3314,7 +3314,8 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   gaps above `high` with `fetch_history_mam_after_bounds`; the continuous
   old range is then reused without re-querying it. All MAM page rows (text and
   media) are stored via `store_many_async`, and local/server media items are
-  deduplicated by archive/stanza/origin ids.
+  deduplicated by any matching archive/stanza/origin/message id (URL/time
+  fallback).
 
 ### 14.8.2 Notes (Notes plugin, `stanza_im/plugins/notes/`)
 

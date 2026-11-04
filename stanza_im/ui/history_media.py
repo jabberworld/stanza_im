@@ -11,7 +11,7 @@ import base64
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import find_icon
-from stanza_im.include.media import media_item_key
+from stanza_im.include.media import media_item_tokens
 from stanza_im.include.utils import format_duration, format_local_datetime
 from stanza_im.i18n import tr
 
@@ -47,6 +47,7 @@ class MediaCard(QtWidgets.QFrame):
     """One fixed-size media tile."""
 
     clicked = QtCore.pyqtSignal(dict)
+    context_requested = QtCore.pyqtSignal(dict, QtCore.QPoint)
 
     def __init__(self, item: dict, parent=None):
         super().__init__(parent)
@@ -159,11 +160,16 @@ class MediaCard(QtWidgets.QFrame):
             self.clicked.emit(self._item)
         super().mousePressEvent(event)
 
+    def contextMenuEvent(self, event):  # noqa: N802
+        self.context_requested.emit(self._item, event.globalPos())
+        event.accept()
+
 
 class HistoryMediaView(QtWidgets.QWidget):
     """Scrollable month-grouped media grid for one media kind."""
 
     open_requested = QtCore.pyqtSignal(str, str)   # url, kind
+    context_requested = QtCore.pyqtSignal(dict, QtCore.QPoint)
     load_more = QtCore.pyqtSignal()
 
     def __init__(self, kind: str, preview_service=None, meta_service=None,
@@ -221,14 +227,16 @@ class HistoryMediaView(QtWidgets.QWidget):
         self._render()
 
     def append_items(self, items: list[dict]) -> None:
-        known = {media_item_key(item) for item in self._items}
+        known: set[tuple] = set()
+        for item in self._items:
+            known.update(media_item_tokens(item))
         for item in items or []:
             if item.get("kind") != self._kind:
                 continue
-            key = media_item_key(item)
-            if key in known:
+            tokens = media_item_tokens(item)
+            if tokens & known:
                 continue
-            known.add(key)
+            known.update(tokens)
             self._items.append(item)
         bar = self._scroll.verticalScrollBar()
         value = bar.value()
@@ -344,15 +352,22 @@ class HistoryMediaView(QtWidgets.QWidget):
             grid.setContentsMargins(0, 0, 0, 4)
             grid.setHorizontalSpacing(8)
             grid.setVerticalSpacing(8)
+            grid.setAlignment(
+                QtCore.Qt.AlignmentFlag.AlignLeft
+                | QtCore.Qt.AlignmentFlag.AlignTop)
             columns = max(1, (self._scroll.viewport().width() - 12)
                           // (_CARD_WIDTH + 8))
             self._columns = columns
             for index, item in enumerate(groups[key]):
                 card = MediaCard(item, self._body)
                 card.clicked.connect(self._open_item)
+                card.context_requested.connect(self.context_requested)
                 grid.addWidget(card, index // columns, index % columns)
                 self._cards.setdefault(str(item.get("url", "")), []).append(card)
                 self._prepare_preview(card, item)
+            # Send all spare width to an empty column at the right so the
+            # fixed cards stay flush with the left edge.
+            grid.setColumnStretch(columns, 1)
             self._layout.addLayout(grid)
         self._layout.addStretch(1)
         self._update_status()

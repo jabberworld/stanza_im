@@ -3301,6 +3301,18 @@ class ChatWidget(QtWidgets.QWidget):
             if self._server_archive_available:
                 self.load_more_from_server()
 
+    def jump_to_message(self, ref_id: str, timestamp: str = "") -> None:
+        """Public jump used by the History Manager media context menu."""
+        if ref_id:
+            entry = self._find_message(ref_id)
+            if entry is not None:
+                target = self._reply_target_id(entry) or ref_id
+                self._view.scroll_to_message(target)
+            else:
+                self._jump_to_message(ref_id)
+        elif timestamp:
+            self._view.scroll_to_time(timestamp)
+
     def _jump_to_message(self, ref_id: str,
                          fallback_unread: bool = False) -> None:
         """Scroll to a replied message, resolving it from local history.
