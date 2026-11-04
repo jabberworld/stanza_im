@@ -53,6 +53,7 @@ if _HAS_WEBENGINE:
         save_requested = QtCore.pyqtSignal()
         copy_requested = QtCore.pyqtSignal()
         share_requested = QtCore.pyqtSignal()
+        load_failed = QtCore.pyqtSignal()
 
         @QtCore.pyqtSlot()
         def toggle_fullscreen(self):
@@ -69,6 +70,10 @@ if _HAS_WEBENGINE:
         @QtCore.pyqtSlot()
         def share(self):
             self.share_requested.emit()
+
+        @QtCore.pyqtSlot()
+        def fail(self):
+            self.load_failed.emit()
 
     class _VideoPage(QtWebEngineCore.QWebEnginePage):
         """Video page that turns a ``stanza:viewer-fs`` navigation into a
@@ -93,6 +98,7 @@ class MediaViewer(QtWidgets.QMainWindow):
     """Non-modal viewer window for an image or video URL."""
 
     closed = QtCore.pyqtSignal()
+    load_failed = QtCore.pyqtSignal(str)      # url
     save_requested = QtCore.pyqtSignal(str)   # url
     copy_requested = QtCore.pyqtSignal(str)   # url
     share_requested = QtCore.pyqtSignal(str)  # url
@@ -107,6 +113,7 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._service = service
         self._geometry_cfg = geometry_cfg
         self._pixmap = QtGui.QPixmap()
+        self._load_failed_sent = False
         self._fullscreen_hint = str(kind) == "video_fs"
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(tr("media_viewer_title"))
@@ -200,10 +207,17 @@ class MediaViewer(QtWidgets.QMainWindow):
             # and the image only appears on the next resize).
             QtCore.QTimer.singleShot(0, self._fit_image)
 
-        def _error(exc):
-            self._label.setText(str(exc))
+        def _error(_exc):
+            self._fail_once()
+            self._label.setText(tr("history_media_missing"))
 
         self._service.ensure_original_async(self._url, _ready, _error)
+
+    def _fail_once(self) -> None:
+        if self._load_failed_sent:
+            return
+        self._load_failed_sent = True
+        self.load_failed.emit(self._url)
 
     def _on_zoom_step(self, step: int) -> None:
         factor = 1.1 if step > 0 else (1.0 / 1.1)
@@ -359,7 +373,7 @@ class MediaViewer(QtWidgets.QMainWindow):
                 self._url,
                 lambda path: self._render_video(
                     QtCore.QUrl.fromLocalFile(path).toString()),
-                lambda _exc: self._render_video_unsupported())
+                lambda _exc: self._video_failed())
             return
         cached = (self._service.cache.original_path(self._url)
                   if self._service is not None
@@ -371,6 +385,13 @@ class MediaViewer(QtWidgets.QMainWindow):
 
     def _render_video_unsupported(self) -> None:
         label = QtWidgets.QLabel(tr("media_viewer_unsupported"))
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        self.setCentralWidget(label)
+
+    def _video_failed(self) -> None:
+        self._fail_once()
+        label = QtWidgets.QLabel(tr("history_media_missing"))
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
         self.setCentralWidget(label)
@@ -397,6 +418,7 @@ class MediaViewer(QtWidgets.QMainWindow):
         # (reliable); ``stanza:viewer-fs`` navigation stays a harmless fallback.
         bridge = _VideoBridge(self)
         bridge.fullscreen_requested.connect(self._toggle_fullscreen)
+        bridge.load_failed.connect(self._video_failed)
         bridge.save_requested.connect(
             lambda: self.save_requested.emit(self._url))
         bridge.copy_requested.connect(
@@ -448,7 +470,9 @@ class MediaViewer(QtWidgets.QMainWindow):
             'u.href="stanza:viewer-fs";u.click();}};'
             'var v=document.querySelector("video");'
             'if(v){v.addEventListener("click",clk);'
-            'v.addEventListener("dblclick",dbl);}'
+            'v.addEventListener("dblclick",dbl);'
+            'v.addEventListener("error",function(){'
+            'if(window.bridge&&window.bridge.fail){window.bridge.fail();}},true);}'
             'if(window.QWebChannel&&window.qt&&window.qt.webChannelTransport)'
             '{new QWebChannel(qt.webChannelTransport,function(ch){'
             'window.bridge=ch.objects.bridge;});}'
@@ -546,6 +570,7 @@ class MediaViewer(QtWidgets.QMainWindow):
 
     def _audio_failed(self, _exc) -> None:
         self._audio_status.setText(tr("history_media_missing"))
+        self._fail_once()
 
     def _toggle_audio(self) -> None:
         player = getattr(self, "_player", None)
@@ -573,9 +598,11 @@ class MediaViewer(QtWidgets.QMainWindow):
     def _on_audio_status(self, status) -> None:
         if status == self._player.MediaStatus.InvalidMedia:
             self._audio_status.setText(tr("history_media_missing"))
+            self._fail_once()
 
     def _on_audio_error(self, _error, _text: str = "") -> None:
         self._audio_status.setText(tr("history_media_missing"))
+        self._fail_once()
 
     def _update_audio_time(self) -> None:
         position = max(0, int(self._player.position()))

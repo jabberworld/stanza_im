@@ -10,13 +10,13 @@ os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets  # noqa: E402
+from PyQt6 import QtCore, QtWidgets, QtTest  # noqa: E402
 
 from stanza_im.core import history  # noqa: E402
 from stanza_im.i18n import load as i18n_load  # noqa: E402
 from stanza_im.include.media import media_items_from_entry  # noqa: E402
 from stanza_im.ui.history_manager import HistoryManagerDialog  # noqa: E402
-from stanza_im.ui.history_media import HistoryMediaView  # noqa: E402
+from stanza_im.ui.history_media import HistoryMediaView, MediaCard  # noqa: E402
 
 FAILURES = []
 
@@ -72,15 +72,51 @@ view = HistoryMediaView("image")
 view.set_items(items)
 check("the photo tab keeps only images",
       len(view._items) == 1 and view._items[0]["kind"] == "image")
-check("media is grouped under a month header",
-      any(label.text().startswith("---- 2026")
+check("media is grouped under a standalone month header",
+      any(label.text().startswith("2026 ")
           for label in view.findChildren(QtWidgets.QLabel)))
+check("month headers carry a horizontal separator",
+      any(frame.frameShape() == QtWidgets.QFrame.Shape.HLine
+          for frame in view.findChildren(QtWidgets.QFrame)))
+_russian = QtCore.QLocale(QtCore.QLocale.Language.Russian)
+_saved_locale = QtCore.QLocale()
+QtCore.QLocale.setDefault(_russian)
+try:
+    check("the month is in the standalone form",
+          HistoryMediaView._month_label("2026-10") == "2026 октябрь")
+finally:
+    QtCore.QLocale.setDefault(_saved_locale)
 view.set_filter("photo")
 check("the filename filter is live",
       len(view._visible()) == 1)
 view.set_filter("missing")
 check("a missing filter result is empty", view._visible() == [])
 view.set_filter("")
+_extra = dict(items[0])
+_extra["url"] = "https://files.example/photo2.jpg"
+_extra["name"] = "photo2.jpg"
+view.set_items([items[0], _extra])
+view.resize(600, 420)
+view.show()
+app.processEvents()
+_cards = view.findChildren(MediaCard)
+check("both images are rendered", len(_cards) == 2)
+_seen = []
+view.open_requested.connect(lambda url, kind: _seen.append((url, kind)))
+if _cards:
+    QtTest.QTest.mouseClick(
+        _cards[0], QtCore.Qt.MouseButton.LeftButton)
+    app.processEvents()
+check("clicking a media card emits the open request",
+      _seen == [("https://files.example/photo.jpg", "image")])
+# Resizing must not leave old cards behind.
+view.resize(360, 420)
+_deadline = __import__("time").time() + 1
+while __import__("time").time() < _deadline:
+    app.processEvents()
+    __import__("time").sleep(0.02)
+check("resize reflows the grid without stale cards",
+      len(view.findChildren(MediaCard)) == 2)
 
 catalog = [{"jid": JID, "name": "Bob", "groups": ["G"],
             "is_conference": False}]
@@ -155,6 +191,33 @@ asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.15))
 check("server media pagination stops at complete",
       dialog2._media_server_complete
       and server_pages[-1][1] == "cursor-1")
+
+# Switching contacts on a media tab must reload that contact's catalog even
+# when both contacts share the newest date.
+history.store_message(
+    "carol@example.com", "incoming", "carol photo",
+    timestamp="2026-11-03T10:00:00", sender="carol", origin_id="cp1",
+    media={"url": "https://files.example/carol.jpg", "name": "carol.jpg",
+           "media_type": "image/jpeg"})
+catalog2 = [{"jid": JID, "name": "Bob", "groups": ["G"],
+             "is_conference": False},
+            {"jid": "carol@example.com", "name": "Carol", "groups": ["G"],
+             "is_conference": False}]
+dialog3 = HistoryManagerDialog(lambda: catalog2)
+dialog3._tabs.setCurrentIndex(1)
+
+
+async def switch_contacts():
+    await dialog3._select_jid_async(JID, "Bob")
+    await asyncio.sleep(0.1)
+    await dialog3._select_jid_async("carol@example.com", "Carol")
+    await asyncio.sleep(0.1)
+
+
+asyncio.get_event_loop().run_until_complete(switch_contacts())
+check("switching contacts refreshes the photo tab",
+      [item["name"] for item in dialog3._media_views["image"]._items]
+      == ["carol.jpg"])
 
 if FAILURES:
     print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))

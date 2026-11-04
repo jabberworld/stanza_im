@@ -7171,16 +7171,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return rows, complete, cursor
 
     def _on_history_media_open(self, url: str, kind: str) -> None:
-        if not url or self._history_manager is None:
+        if not url:
             return
-        def _ready(path):
-            if path:
-                self._on_media_view_requested(url, kind or "image")
-            else:
-                self._history_manager.media_error(url)
-        def _error(_exc):
-            self._history_manager.media_error(url)
-        self._media_service.ensure_original_async(url, _ready, _error)
+        # Open immediately: prefetching a whole video/audio file made a click
+        # look dead until the download finished.  MediaViewer itself resolves
+        # the cache/original and reports a dead URL through ``load_failed``.
+        viewer = self._on_media_view_requested(url, kind or "image")
+        manager = self._history_manager
+        if viewer is not None and manager is not None:
+            viewer.load_failed.connect(
+                lambda _url, m=manager, u=url: m.media_error(u))
 
     async def _history_server_search(self, jid: str, query: str,
                                      after: str = ""):
@@ -9848,6 +9848,7 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             viewer.show()
         viewer.raise_()
+        return viewer
 
     async def _open_encrypted_audio(self, url: str) -> None:
         """Decrypt an aesgcm:// audio file and open it with the OS player."""

@@ -3294,8 +3294,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   Images use `MediaPreviewService`; `ui/media_meta.MediaMetadataService`
   fills video thumbnails and audio/video duration in the background (PyAV
   when available) and caches them in `MediaCache` (new `duration` field).
-  A click resolves/decrypts the original, then opens `MediaViewer` (audio has
-  an in-app Qt Multimedia mode); a missing file is reported in the tab.
+  A click opens `MediaViewer` immediately; the viewer resolves/decrypts the
+  original itself (audio has an in-app Qt Multimedia mode) and reports a dead
+  URL through `load_failed`, shown as «Файл не найден» in the tab.
 - Media server mode uses ordinary XEP-0313 MAM, not a XEP-0431 `http*` query:
   `JabberClient.fetch_mam_media_page` walks backwards with RSM `before`, so
   the newest media is shown first and older pages are appended when the grid

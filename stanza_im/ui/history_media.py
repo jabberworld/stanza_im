@@ -192,6 +192,12 @@ class HistoryMediaView(QtWidgets.QWidget):
         layout.addWidget(self._status)
         self._scroll.verticalScrollBar().valueChanged.connect(
             self._on_scroll)
+        self._columns = 0
+        self._rendering = False
+        self._resize_timer = QtCore.QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.setInterval(80)
+        self._resize_timer.timeout.connect(self._reflow)
         if self._preview is not None:
             self._preview.thumbnail_ready.connect(self._on_thumb)
         if self._meta is not None:
@@ -250,14 +256,33 @@ class HistoryMediaView(QtWidgets.QWidget):
                 if self._filter in str(item.get("name", "")).casefold()
                 or self._filter in str(item.get("url", "")).casefold()]
 
+    def _clear_item(self, item) -> None:
+        widget = item.widget()
+        if widget is not None:
+            widget.hide()
+            widget.setParent(None)
+            widget.deleteLater()
+            return
+        child = item.layout()
+        if child is not None:
+            while child.count():
+                self._clear_item(child.takeAt(0))
+            child.deleteLater()
+
     def _clear_layout(self) -> None:
         while self._layout.count():
-            item = self._layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+            self._clear_item(self._layout.takeAt(0))
 
     def _render(self) -> None:
+        if self._rendering:
+            return
+        self._rendering = True
+        try:
+            self._render_now()
+        finally:
+            self._rendering = False
+
+    def _render_now(self) -> None:
         self._clear_layout()
         self._cards = {}
         items = sorted(self._visible(),
@@ -272,17 +297,14 @@ class HistoryMediaView(QtWidgets.QWidget):
             key = str(item.get("timestamp") or "")[:7] or "????-??"
             groups.setdefault(key, []).append(item)
         for key in sorted(groups, reverse=True):
-            header = QtWidgets.QLabel(self._month_label(key), self._body)
-            header.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            header.setStyleSheet(
-                "color: palette(mid); font-weight: bold; padding: 4px;")
-            self._layout.addWidget(header)
+            self._layout.addWidget(self._month_header(key))
             grid = QtWidgets.QGridLayout()
             grid.setContentsMargins(0, 0, 0, 4)
             grid.setHorizontalSpacing(8)
             grid.setVerticalSpacing(8)
             columns = max(1, (self._scroll.viewport().width() - 12)
                           // (_CARD_WIDTH + 8))
+            self._columns = columns
             for index, item in enumerate(groups[key]):
                 card = MediaCard(item, self._body)
                 card.clicked.connect(self._open_item)
@@ -356,16 +378,40 @@ class HistoryMediaView(QtWidgets.QWidget):
             year, month = key.split("-", 1)
             year_i, month_i = int(year), int(month)
         except (TypeError, ValueError):
-            return f"---- {key} ----"
-        name = QtCore.QLocale().monthName(
+            return key
+        locale = QtCore.QLocale()
+        # ``monthName`` is the genitive form in Russian ("октября"); the
+        # standalone form is the month name users expect in a heading.
+        name = locale.standaloneMonthName(
             month_i, QtCore.QLocale.FormatType.LongFormat)
-        return f"---- {year_i} {name} ----"
+        return f"{year_i} {name}"
+
+    def _month_header(self, key: str) -> QtWidgets.QWidget:
+        header = QtWidgets.QWidget(self._body)
+        row = QtWidgets.QHBoxLayout(header)
+        row.setContentsMargins(0, 6, 0, 2)
+        row.setSpacing(8)
+        left = QtWidgets.QFrame(header)
+        left.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        left.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        label = QtWidgets.QLabel(self._month_label(key), header)
+        label.setStyleSheet("font-weight: bold; padding: 0 6px;")
+        right = QtWidgets.QFrame(header)
+        right.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        right.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        row.addWidget(left, 1)
+        row.addWidget(label)
+        row.addWidget(right, 1)
+        return header
+
+    def _reflow(self) -> None:
+        columns = max(1, (self._scroll.viewport().width() - 12)
+                      // (_CARD_WIDTH + 8))
+        if columns != self._columns:
+            self._render()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        # Re-flow the grid when the viewport crosses a column boundary.
-        columns = max(1, (self._scroll.viewport().width() - 12)
-                      // (_CARD_WIDTH + 8))
-        if getattr(self, "_columns", None) != columns:
-            self._columns = columns
-            self._render()
+        # Rebuild after the user stops dragging: destroying cards on every
+        # pixel produced visible stale widgets and flicker.
+        self._resize_timer.start()

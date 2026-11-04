@@ -368,6 +368,9 @@ check("viewer toggles play/pause on a single click",
 check("viewer cancels the click toggle on a double click",
       "clearTimeout(clickTimer)" in _mv_src
       and "clickTimer=setTimeout" in _mv_src)
+check("viewer reports dead media to the history manager",
+      "load_failed" in _mv_src and "_fail_once" in _mv_src
+      and 'addEventListener("error"' in _mv_src)
 
 # The scheme check must fire for the URL Chromium actually delivers.
 from stanza_im.ui import media_viewer as _mv_mod

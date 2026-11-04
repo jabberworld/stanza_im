@@ -497,10 +497,13 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._update_server_button()
         self._update_media_server_buttons()
         self._reset_media_state()
+        self._date = ""
         self._search.setText("")
         self._all_days = []
         self._clear_search_state()
         self._set_results_visible(False)
+        if self._tabs.currentIndex() > 0:
+            self._refresh_media()
         if not jid:
             self._dates = []
             self._show_empty_day("")
@@ -740,6 +743,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if checked and name == "server":
             self._media_mode["all_time"] = False
             self._media_mode["all_contacts"] = False
+            self._media_server_jid = ""
         elif checked:
             self._media_mode["server"] = False
         self._media_mode[name] = bool(checked)
@@ -789,6 +793,8 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _refresh_media(self) -> None:
         if self._media_mode.get("server"):
+            if self._media_server_jid == self._jid:
+                return
             self._start_server_media()
             return
         key = (self._jid, self._date if not self._media_mode.get("all_time")

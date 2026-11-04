@@ -701,9 +701,10 @@ its own copies and state). Media rows come from `history.media_entries` /
 `ui/history_media.HistoryMediaView` as fixed cards. Images use the shared
 preview cache; `ui/media_meta.MediaMetadataService` fills video thumbnails and
 audio/video duration in the background (PyAV when available) and caches them
-in `MediaCache` (`duration` field). A click first resolves/decrypts the
-original and then opens `MediaViewer` (audio has its own Qt Multimedia mode);
-a missing file is reported in the media view. «Все контакты» builds one local
+in `MediaCache` (`duration` field). A click opens `MediaViewer` immediately;
+the viewer resolves/decrypts the original itself (audio has its own Qt
+Multimedia mode) and reports a dead URL through `load_failed`, which the media
+view shows as «Файл не найден». «Все контакты» builds one local
 media catalog across all histories, «За все время» groups every month, and the
 media «Искать на сервере» button (enabled by MAM, not fulltext) walks the
 ordinary XEP-0313 archive backwards (`JabberClient.fetch_mam_media_page`,
