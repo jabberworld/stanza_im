@@ -3304,11 +3304,17 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   `JabberClient.fetch_mam_media_page` walks backwards with RSM `before`, so
   the newest media is shown first and older pages are appended when the grid
   is scrolled down. Sparse pages (one media among 100 messages) are fetched
-  automatically until the active grid becomes scrollable (bounded); text
-  server search still requires `urn:xmpp:fulltext:0`;
-  media server mode requires MAM. MAM rows now retain `media` (and bodyless
-  media rows are kept), and 1:1 OMEMO MAM rows are decrypted before media
-  extraction.
+  automatically while the active grid is near its bottom (bounded); text
+  server search still requires `urn:xmpp:fulltext:0`; media server mode
+  requires MAM. MAM rows now retain `media` (and bodyless media rows are
+  kept), and 1:1 OMEMO MAM rows are decrypted before media extraction.
+- A per-conversation `mam_sync` row in the SQLite store keeps the continuous
+  `low`/`high` archive range and `complete_down`. The server media mode seeds
+  the local catalog first, starts older MAM pages from `low`, and closes new
+  gaps above `high` with `fetch_history_mam_after_bounds`; the continuous
+  old range is then reused without re-querying it. All MAM page rows (text and
+  media) are stored via `store_many_async`, and local/server media items are
+  deduplicated by archive/stanza/origin ids.
 
 ### 14.8.2 Notes (Notes plugin, `stanza_im/plugins/notes/`)
 

@@ -7932,6 +7932,30 @@ class JabberClient:
             return None
         self._mam_inflight.add(jid)
         try:
+            result = await self._fetch_history_mam_after_impl(
+                jid, start_ts, after_id, limit, is_muc, max_pages)
+            return result[0]
+        finally:
+            self._mam_inflight.discard(jid)
+
+    async def fetch_history_mam_after_bounds(self, jid: str,
+                                             start_ts: str | None = None,
+                                             after_id: str = "",
+                                             limit: int = 100,
+                                             is_muc: bool | None = None,
+                                             max_pages: int = 20):
+        """Like :meth:`fetch_history_mam_after` but also returns the boundary.
+
+        Returns ``(incoming, last_timestamp, last_archive_id, complete)`` or
+        ``None`` when another MAM operation for the same JID is in flight.
+        ``last_timestamp`` is the newest timestamp actually covered by this
+        forward walk, so a caller can persist a continuous MAM range without
+        accidentally advancing it past a capped page.
+        """
+        if jid in self._mam_inflight:
+            return None
+        self._mam_inflight.add(jid)
+        try:
             return await self._fetch_history_mam_after_impl(
                 jid, start_ts, after_id, limit, is_muc, max_pages)
         finally:
@@ -8039,12 +8063,13 @@ class JabberClient:
     async def fetch_mam_media_page(self, jid: str, before: str = "",
                                    limit: int = 100, is_muc: bool = False,
                                    timeout: float = 25.0):
-        """Fetch one backwards MAM page and return its media-bearing rows.
+        """Fetch one backwards MAM page and return all parsed history rows.
 
         The first call (``before=""``) asks for the newest page; each later
         call passes the oldest archive id of the previous page as ``before``.
         The result is ``(rows, complete, next_before)`` or ``None`` on error.
-        Ordinary history MAM cursors are never touched.
+        All rows (not just media) are returned so callers can store the text
+        history too; ordinary history MAM cursors are never touched.
         """
         archive = jid if is_muc else self.jid_str
         with_jid = None if is_muc else jid
@@ -8066,9 +8091,6 @@ class JabberClient:
             rows, _parsed, _skipped, _reasons = self._mam_rows(
                 jid, results, is_muc=is_muc)
             rows = await self._decrypt_mam_rows(jid, rows, is_muc=is_muc)
-            from stanza_im.include.media import media_items_from_entry
-            media_rows = [row for row in rows
-                          if media_items_from_entry(row, jid=jid)]
             complete, _last = self._mam_fin_state(iq)
             next_before = self._mam_fin_first(iq)
             if not next_before and results:
@@ -8078,10 +8100,10 @@ class JabberClient:
             if complete is None or (not next_before and not complete):
                 complete = True
             logger.info(
-                "MAM media page for %s: results=%d media=%d complete=%s "
-                "next=%s", jid, len(results), len(media_rows), complete,
+                "MAM media page for %s: results=%d parsed=%d complete=%s "
+                "next=%s", jid, len(results), len(rows), complete,
                 next_before)
-            return media_rows, bool(complete), next_before
+            return rows, bool(complete), next_before
         except asyncio.TimeoutError:
             logger.info("MAM media page timed out for %s", jid)
             return None
@@ -8155,7 +8177,8 @@ class JabberClient:
                                             after_id: str,
                                             limit: int,
                                             is_muc: bool | None,
-                                            max_pages: int = 20) -> int:
+                                            max_pages: int = 20
+                                            ) -> tuple[int, str, str, bool]:
         from stanza_im.core import history
         mam = self.xmpp.plugin["xep_0313"]
         start = None
@@ -8168,13 +8191,16 @@ class JabberClient:
             except ValueError:
                 start = None
         if start is None and not after_id:
-            return 0
+            return (0, "", "", True)
         if is_muc is None:
             is_muc = jid in self.groupchats
         use_archive_jid = bool(is_muc)
         mode = "jid" if use_archive_jid else "with_jid"
         cursor = str(after_id or "")
         total_incoming = 0
+        last_timestamp = ""
+        last_archive_id = ""
+        complete_seen = False
         seen_ids: set[str] = set()
         pages = 0
         capped = False
@@ -8209,6 +8235,7 @@ class JabberClient:
             logger.info("MAM after page %d for %s returned %d results",
                         pages, jid, len(results))
             if not results:
+                complete_seen = True
                 break
             rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
             rows = await self._decrypt_mam_rows(
@@ -8223,6 +8250,9 @@ class JabberClient:
             if edits:
                 await self._apply_mam_edits(jid, edits)
             for row in rows:
+                stamp = str(row.get("timestamp") or "")
+                if stamp > last_timestamp:
+                    last_timestamp = stamp
                 if row.get("direction") != "incoming":
                     continue
                 key = str(row.get("archive_id") or row.get("origin_id")
@@ -8234,6 +8264,8 @@ class JabberClient:
                 total_incoming += 1
             complete, fin_last = self._mam_fin_state(iq)
             next_cursor = fin_last or _archive_result_id(results[-1])
+            if next_cursor:
+                last_archive_id = str(next_cursor)
             logger.info(
                 "MAM after page %d for %s: parsed=%d skipped=%d stored=%d "
                 "edits=%d complete=%s cursor=%s", pages, jid, parsed, skipped,
@@ -8242,15 +8274,18 @@ class JabberClient:
                 logger.info("MAM after page %d skip reasons for %s: %s",
                             pages, jid, skip_reasons)
             if complete:
+                complete_seen = True
                 break
             if not next_cursor or str(next_cursor) == cursor:
+                complete_seen = True
                 break
             cursor = str(next_cursor)
         else:
             capped = True
-        logger.info("MAM after for %s: pages=%d incoming=%d capped=%s",
-                    jid, pages, total_incoming, capped)
-        return total_incoming
+        logger.info("MAM after for %s: pages=%d incoming=%d capped=%s "
+                    "last_ts=%s", jid, pages, total_incoming, capped,
+                    last_timestamp)
+        return total_incoming, last_timestamp, last_archive_id, complete_seen
 
     async def _apply_mam_edits(self, jid: str, edits: list[dict]) -> int:
         """Apply XEP-0308 corrections found in a MAM page.

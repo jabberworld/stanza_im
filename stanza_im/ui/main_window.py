@@ -7115,6 +7115,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 server_supported=self._history_server_supported,
                 server_media=self._history_server_media_page,
                 server_media_supported=self._history_server_media_supported,
+                server_gap_sync=self._history_server_gap_sync,
                 media_service=self._media_service)
             self._history_manager.media_open_requested.connect(
                 self._on_history_media_open)
@@ -7150,6 +7151,17 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return bool(self._client.supports_mam_archive(
             archive, is_muc=is_muc))
+
+    async def _history_server_gap_sync(self, jid: str, high_ts: str,
+                                       high_id: str = ""):
+        if self._client is None or not jid or not high_ts:
+            return None
+        archive, is_muc, joined = self._history_server_archive_jid(jid)
+        if is_muc and not joined:
+            return None
+        return await self._client.fetch_history_mam_after_bounds(
+            archive, start_ts=high_ts, after_id=high_id, limit=100,
+            is_muc=is_muc, max_pages=20)
 
     async def _history_server_media_page(self, jid: str, before: str = ""):
         if self._client is None:

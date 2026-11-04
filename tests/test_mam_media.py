@@ -68,8 +68,8 @@ with unittest.mock.patch.object(mam, "retrieve", recorder):
     second = asyncio.run(client.fetch_mam_media_page(
         "bob@example.com", before=first[2]))
 
-check("only the media-bearing row is returned",
-      first is not None and len(first[0]) == 1)
+check("the whole MAM page is returned (text rows are stored too)",
+      first is not None and len(first[0]) == 2)
 check("the first backward page has no before cursor at first",
       recorder.calls[0][2].get("before") is True)
 check("the next cursor is the oldest archive id",

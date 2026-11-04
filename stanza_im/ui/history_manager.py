@@ -8,6 +8,7 @@ and day-navigation buttons.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
 
@@ -21,7 +22,7 @@ from stanza_im.i18n import tr
 from stanza_im.ui.resize_handle import VerticalResizeHandle
 from stanza_im.ui.history_media import HistoryMediaView
 from stanza_im.ui.media_meta import MediaMetadataService
-from stanza_im.include.media import media_items_from_entry
+from stanza_im.include.media import media_item_key, media_items_from_entry
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +80,14 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def __init__(self, catalog_provider, initial_jid: str = "",
                  parent=None, server_search=None, server_supported=None,
                  server_media=None, server_media_supported=None,
-                 media_service=None):
+                 server_gap_sync=None, media_service=None):
         super().__init__(parent)
         self._catalog_provider = catalog_provider
         self._server_search = server_search
         self._server_supported = server_supported
         self._server_media = server_media
         self._server_media_supported = server_media_supported
+        self._server_gap_sync = server_gap_sync
         self._media_service = media_service
         self._meta_service = None
         if media_service is not None and getattr(media_service, "cache", None):
@@ -103,6 +105,10 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_server_complete = True
         self._media_server_loading = False
         self._media_server_ok = False
+        self._mam_high_id = ""
+        self._mam_high_ts = ""
+        self._mam_low_ts = ""
+        self._media_calendar_dates: list[str] = []
         self._media_request_id = 0
         self._media_empty_pages = 0
         self._media_auto_pages = 0
@@ -523,7 +529,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._dates = await history.dates_async(jid)
         if self._released or jid != self._jid:
             return
-        self._mark_calendar_dates()
+        self._refresh_calendar_highlight()
         self._date = ""
         # A global-search result pins the day to open (not the newest one).
         target = self._pending_date or (self._dates[-1] if self._dates else "")
@@ -535,7 +541,9 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     # ── Calendar ─────────────────────────────────────────────────
 
-    def _mark_calendar_dates(self) -> None:
+    def _mark_calendar_dates(self, dates=None) -> None:
+        if dates is None:
+            dates = self._dates
         fmt = QtGui.QTextCharFormat()
         self._calendar.setDateTextFormat(QtCore.QDate(), fmt)
         bold = QtGui.QTextCharFormat()
@@ -544,13 +552,36 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         bold.setFont(font)
         bold.setForeground(QtGui.QBrush(QtGui.QColor(0x0d, 0x4f, 0x8b)))
         bold.setBackground(QtGui.QBrush(QtGui.QColor(0xd8, 0xe6, 0xf5)))
-        for date in self._dates:
+        for date in dates or ():
             try:
-                y, m, d = (int(p) for p in date.split("-"))
+                y, m, d = (int(p) for p in str(date).split("-"))
             except ValueError:
                 continue
             self._calendar.setDateTextFormat(
                 QtCore.QDate(y, m, d), bold)
+
+    def _refresh_calendar_highlight(self) -> None:
+        if self._tabs.currentIndex() <= 0:
+            self._mark_calendar_dates(self._dates)
+        else:
+            self._mark_calendar_dates(self._media_calendar_dates)
+
+    def _set_media_calendar_dates(self, dates) -> None:
+        self._media_calendar_dates = sorted({
+            str(date)[:10] for date in (dates or ()) if date})
+        if self._tabs.currentIndex() > 0:
+            self._mark_calendar_dates(self._media_calendar_dates)
+
+    def _set_media_calendar_from_items(self, items=None) -> None:
+        kind = self._current_media_kind()
+        dates = []
+        for item in (self._media_items if items is None else items):
+            if item.get("kind") != kind:
+                continue
+            stamp = str(item.get("timestamp") or "")[:10]
+            if stamp:
+                dates.append(stamp)
+        self._set_media_calendar_dates(dates)
 
     def _on_calendar_clicked(self) -> None:
         if self._syncing_calendar:
@@ -573,7 +604,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 self._calendar.selectedDate().toString("yyyy-MM-dd"):
             return
         self._dates = dates
-        self._mark_calendar_dates()
+        self._refresh_calendar_highlight()
         if value in self._dates:
             self._select_date(value)
         else:
@@ -721,9 +752,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
 
     def _on_tab_changed(self, index: int) -> None:
         if index <= 0:
+            self._refresh_calendar_highlight()
             self._search.setFocus()
             return
         self._update_media_server_buttons()
+        if self._media_mode.get("server") or self._media_mode.get("all_time"):
+            self._set_media_calendar_from_items()
+        else:
+            self._start_task(self._load_media_calendar_dates())
+        self._refresh_calendar_highlight()
         if self._media_mode["server"]:
             if self._media_server_jid != self._jid:
                 self._start_server_media()
@@ -785,14 +822,19 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_request_id += 1
         self._media_items = []
         self._media_local_key = None
+        self._media_calendar_dates = []
         self._media_server_jid = ""
         self._media_server_cursor = ""
         self._media_server_complete = True
         self._media_server_loading = False
         self._media_empty_pages = 0
         self._media_auto_pages = 0
+        self._mam_high_id = ""
+        self._mam_high_ts = ""
+        self._mam_low_ts = ""
         for view in self._media_views.values():
             view.clear()
+        self._refresh_calendar_highlight()
         self._update_media_context()
 
     def _update_media_context(self) -> None:
@@ -823,6 +865,24 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._media_request_id += 1
         self._start_task(self._load_local_media(self._media_request_id))
 
+    async def _load_media_calendar_dates(self) -> None:
+        """Refresh calendar highlights for the active media kind (day mode)."""
+        if (self._released or self._media_mode.get("server")
+                or self._media_mode.get("all_time")):
+            return
+        all_contacts = bool(self._media_mode.get("all_contacts"))
+        jids = ([self._jid] if not all_contacts
+                else await asyncio.to_thread(history.list_history_jids))
+        kind = self._current_media_kind()
+        dates: set[str] = set()
+        for jid in sorted(jids):
+            if self._released or self._tabs.currentIndex() <= 0:
+                return
+            dates.update(await history.media_dates_async(jid, kind))
+        if self._released or self._media_mode.get("server"):
+            return
+        self._set_media_calendar_dates(dates)
+
     async def _load_local_media(self, request_id: int) -> None:
         if self._released:
             return
@@ -831,6 +891,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         all_time = bool(self._media_mode.get("all_time"))
         all_contacts = bool(self._media_mode.get("all_contacts"))
         date = "" if all_time else self._date
+        jids: list[str] = []
         if not all_contacts and not self._jid:
             items: list[dict] = []
         elif not all_time and not date:
@@ -851,6 +912,16 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if (self._released or request_id != self._media_request_id
                 or self._media_mode.get("server")):
             return
+        active_kind = self._current_media_kind()
+        if all_time:
+            self._set_media_calendar_from_items(items)
+        else:
+            dates: set[str] = set()
+            for jid in sorted(jids):
+                if self._released or request_id != self._media_request_id:
+                    return
+                dates.update(await history.media_dates_async(jid, active_kind))
+            self._set_media_calendar_dates(dates)
         self._media_items = items
         self._media_local_key = (
             self._jid, date, all_time, all_contacts)
@@ -865,18 +936,121 @@ class HistoryManagerDialog(QtWidgets.QDialog):
                 view.clear()
                 view.set_status(tr("history_search_server_unavailable"))
             return
+        self._media_request_id += 1
         self._media_server_jid = self._jid
         self._media_server_cursor = ""
         self._media_server_complete = False
         self._media_server_loading = False
         self._media_empty_pages = 0
+        self._media_auto_pages = 0
         self._media_items = []
         self._media_local_key = None
+        self._mam_high_id = ""
+        self._mam_high_ts = ""
+        self._mam_low_ts = ""
+        self._media_calendar_dates = []
         self._update_media_context()
         for view in self._media_views.values():
             view.clear()
             view.set_loading(True, tr("history_search_server_running"))
-        self._start_task(self._load_server_media_page())
+        self._start_task(self._prepare_server_media(self._jid))
+
+    async def _prepare_server_media(self, jid: str) -> None:
+        """Seed from local history, then decide where MAM paging starts."""
+        if self._released or jid != self._jid or not self._media_mode.get("server"):
+            return
+        entries = await history.media_entries_async(jid)
+        local_items: list[dict] = []
+        for entry in entries:
+            local_items.extend(media_items_from_entry(entry, jid=jid))
+        if (self._released or jid != self._jid
+                or not self._media_mode.get("server")):
+            return
+        self._media_items = local_items
+        self._set_media_calendar_from_items()
+        for view in self._media_views.values():
+            view.set_loading(False)
+            view.set_items(local_items)
+
+        marker = await history.load_mam_sync_async(jid)
+        local_newest = await history.newest_timestamp_async(jid)
+        high_ts = str(marker.get("high_ts") or "")
+        high_id = str(marker.get("high_archive_id") or "")
+        low_ts = str(marker.get("low_ts") or "")
+        complete = bool(marker.get("complete_down"))
+        gap_result = None
+        if marker:
+            cursor = str(marker.get("low_archive_id") or "")
+            if (local_newest and high_ts and local_newest > high_ts
+                    and self._server_gap_sync is not None):
+                try:
+                    gap_result = await self._server_gap_sync(
+                        jid, high_ts, high_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("MAM gap sync failed for %s: %s", jid, exc)
+                    gap_result = None
+                if (self._released or jid != self._jid
+                        or not self._media_mode.get("server")):
+                    return
+                if gap_result:
+                    _count, new_ts, new_id, gap_complete = gap_result
+                    if new_ts and new_ts > high_ts:
+                        high_ts = new_ts
+                    if new_id:
+                        high_id = new_id
+                    if gap_complete and not new_ts:
+                        high_ts = self._utc_now()
+                    await history.save_mam_sync_async(
+                        jid, low_archive_id=cursor, low_ts=low_ts,
+                        high_archive_id=high_id, high_ts=high_ts,
+                        complete_down=complete)
+        else:
+            cursor = (await history.oldest_archive_id_async(jid)
+                      if local_items else "")
+            high_ts = local_newest or high_ts
+            high_id = await history.newest_archive_id_async(jid)
+            complete = False
+            if local_items and (cursor or high_ts):
+                await history.save_mam_sync_async(
+                    jid, low_archive_id=cursor, low_ts="",
+                    high_archive_id=high_id, high_ts=high_ts,
+                    complete_down=False)
+        if gap_result is not None:
+            # The gap sync stores new rows; refresh the local seed so media
+            # from the newly closed range appears without reopening the dialog.
+            entries = await history.media_entries_async(jid)
+            local_items = []
+            for entry in entries:
+                local_items.extend(media_items_from_entry(entry, jid=jid))
+            self._media_items = local_items
+            self._set_media_calendar_from_items()
+            for view in self._media_views.values():
+                view.set_items(local_items)
+        if (self._released or jid != self._jid
+                or not self._media_mode.get("server")):
+            return
+        self._mam_high_id = high_id
+        self._mam_high_ts = high_ts
+        self._mam_low_ts = low_ts
+        self._media_server_cursor = cursor
+        self._media_server_complete = complete
+        self._media_server_loading = False
+        active = self._media_views.get(self._current_media_kind())
+        should_load = (not complete
+                       and (not local_items
+                            or (active is not None and not active.can_scroll())))
+        if should_load:
+            for view in self._media_views.values():
+                view.set_loading(True, tr("history_search_server_running"))
+            self._start_task(self._load_server_media_page())
+        else:
+            for view in self._media_views.values():
+                view.set_loading(False)
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="microseconds").replace("+00:00", "Z")
 
     async def _load_server_media_page(self) -> None:
         if (self._released or self._media_server_loading
@@ -908,14 +1082,34 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         items = []
         for row in rows or []:
             items.extend(media_items_from_entry(row, jid=jid))
-        known = {(item.get("url", ""), item.get("timestamp", ""))
-                 for item in self._media_items}
+        known = {media_item_key(item) for item in self._media_items}
         fresh = [item for item in items
-                 if (item.get("url", ""), item.get("timestamp", ""))
-                 not in known]
+                 if media_item_key(item) not in known]
         self._media_items.extend(fresh)
         self._media_server_cursor = str(cursor or "")
         self._media_server_complete = bool(complete)
+        stamps = [str(row.get("timestamp") or "") for row in (rows or [])]
+        stamps = [stamp for stamp in stamps if stamp]
+        if stamps:
+            self._mam_low_ts = min(stamps)
+            if not self._mam_high_ts:
+                latest = max(stamps)
+                self._mam_high_ts = latest
+                latest_row = next((row for row in (rows or [])
+                                   if str(row.get("timestamp") or "") == latest),
+                                  {})
+                self._mam_high_id = str(
+                    latest_row.get("archive_id")
+                    or latest_row.get("stanza_id") or "")
+        elif self._media_server_complete and not self._mam_high_ts:
+            self._mam_high_ts = self._utc_now()
+        await history.save_mam_sync_async(
+            jid, low_archive_id="" if self._media_server_complete
+            else self._media_server_cursor,
+            low_ts=self._mam_low_ts, high_archive_id=self._mam_high_id,
+            high_ts=self._mam_high_ts,
+            complete_down=self._media_server_complete)
+        self._set_media_calendar_from_items()
         for view in self._media_views.values():
             if fresh:
                 view.append_items(fresh)
@@ -944,7 +1138,9 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             return
         kind = self._current_media_kind()
         view = self._media_views.get(kind) if kind else None
-        if view is None or view.can_scroll():
+        if view is None:
+            return
+        if view.can_scroll() and not view.near_bottom():
             return
         if self._media_auto_pages >= 20:
             return
@@ -957,6 +1153,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
     def _on_media_load_more(self, _kind: str) -> None:
         if (self._media_mode.get("server")
                 and not self._media_server_complete):
+            self._media_auto_pages = 0
             self._start_task(self._load_server_media_page())
 
     def media_error(self, _url: str = "") -> None:
@@ -1439,7 +1636,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         self._dates = await history.dates_async(self._jid)
         if self._released or self._jid != self._server_jid:
             return
-        self._mark_calendar_dates()
+        self._refresh_calendar_highlight()
         self._results.clear()
         for day in self._all_days:
             item = QtWidgets.QListWidgetItem(

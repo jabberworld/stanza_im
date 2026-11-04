@@ -157,6 +157,10 @@ def media_items_from_entry(entry: dict, jid: str = "",
             "height": int(meta.get("height") or 0),
             "media_type": str(meta.get("media_type") or media_type),
             "duration": float(meta.get("duration") or 0.0),
+            "archive_id": str(entry.get("archive_id") or ""),
+            "stanza_id": str(entry.get("stanza_id") or ""),
+            "origin_id": str(entry.get("origin_id") or ""),
+            "message_id": str(entry.get("message_id") or ""),
         })
 
     if media_url:
@@ -164,6 +168,17 @@ def media_items_from_entry(entry: dict, jid: str = "",
     for url in extract_urls(entry.get("body") or ""):
         add(url, media if media_url and url == media_url else {})
     return found
+
+
+def media_item_key(item: dict) -> tuple:
+    """Stable dedup key for a media calendar item."""
+    for name in ("archive_id", "stanza_id", "origin_id", "message_id"):
+        value = str((item or {}).get(name) or "")
+        if value:
+            return (name, value)
+    return ("url", str((item or {}).get("url") or ""),
+            str((item or {}).get("timestamp") or ""),
+            str((item or {}).get("jid") or ""))
 
 
 class MediaCache:

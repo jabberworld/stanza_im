@@ -700,7 +700,10 @@ its own copies and state). Media rows come from `history.media_entries` /
 `aesgcm://`), are grouped by month (a bold `YYYY Month` header with horizontal
 rules) and rendered by `ui/history_media.HistoryMediaView` as fixed cards.
 Media tabs default to «За все время»; with it off the view shows a «За
-сегодня»/«За YYYY-MM-DD» context line. The filename filter is debounced, and
+сегодня»/«За YYYY-MM-DD» context line. The calendar highlight is tab-aware:
+`_media_calendar_dates` contains dates of the active media kind (server and
+local combined), while the text tab uses `_dates`. The filename filter is
+debounced, and
 images use the shared preview cache; `ui/media_meta.MediaMetadataService`
 fills video thumbnails and audio/video duration in the background (PyAV when
 available) and caches them in `MediaCache` (`duration` field). A click opens
@@ -708,11 +711,17 @@ available) and caches them in `MediaCache` (`duration` field). A click opens
 (audio has its own Qt Multimedia mode) and reports a dead URL through
 `load_failed`, which the media view shows as «Файл не найден». «Все контакты»
 builds one local media catalog across all histories. The media «Искать на
-сервере» button (enabled by MAM, not fulltext) walks the ordinary XEP-0313
-archive backwards (`JabberClient.fetch_mam_media_page`, RSM `before`): newest
-media first, older pages appended while scrolling down. Sparse archive pages
-(one media among 100 messages) are fetched automatically until the active grid
-becomes scrollable, bounded to avoid an endless scan of a media-less tab.
+сервере» button (enabled by MAM, not fulltext) first shows the local media
+catalog, then walks the ordinary XEP-0313 archive backwards
+(`JabberClient.fetch_mam_media_page`, RSM `before`): newest media first, older
+pages appended while scrolling down. A per-history `mam_sync` row stores the
+continuous `low`/`high` archive range and `complete_down`; new gaps above
+`high` are closed with `fetch_history_mam_after_bounds`, after which the range
+is reused without re-querying it. Every MAM page is stored in SQLite (all
+rows, not just media), and local/server items are deduplicated by archive id.
+Sparse archive pages (one media among 100 messages) are fetched automatically
+while the active grid is near its bottom, bounded to avoid an endless scan of
+a media-less tab.
 The roster context menu's
 «Очистить историю» and the chat toolbar's clear button both run
 `MainWindow._on_clear_history`: after a confirmation it calls `history.clear`

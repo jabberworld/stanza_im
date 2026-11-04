@@ -11,6 +11,7 @@ import base64
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import find_icon
+from stanza_im.include.media import media_item_key
 from stanza_im.include.utils import format_duration, format_local_datetime
 from stanza_im.i18n import tr
 
@@ -220,13 +221,11 @@ class HistoryMediaView(QtWidgets.QWidget):
         self._render()
 
     def append_items(self, items: list[dict]) -> None:
-        known = {(item.get("url", ""), item.get("timestamp", ""),
-                  item.get("jid", "")) for item in self._items}
+        known = {media_item_key(item) for item in self._items}
         for item in items or []:
             if item.get("kind") != self._kind:
                 continue
-            key = (item.get("url", ""), item.get("timestamp", ""),
-                   item.get("jid", ""))
+            key = media_item_key(item)
             if key in known:
                 continue
             known.add(key)
@@ -261,6 +260,18 @@ class HistoryMediaView(QtWidgets.QWidget):
     def can_scroll(self) -> bool:
         """Whether the current card grid is taller than the viewport."""
         return self._scroll.verticalScrollBar().maximum() > 0
+
+    def viewport_height(self) -> int:
+        return max(1, self._scroll.viewport().height())
+
+    def near_bottom(self, margin: int | None = None) -> bool:
+        """Whether the scroll is within *margin* pixels of the bottom."""
+        bar = self._scroll.verticalScrollBar()
+        if bar.maximum() <= 0:
+            return True
+        if margin is None:
+            margin = max(200, self.viewport_height())
+        return bar.value() >= bar.maximum() - margin
 
     def set_loading(self, loading: bool, status: str = "") -> None:
         self._loading = bool(loading)
@@ -400,7 +411,10 @@ class HistoryMediaView(QtWidgets.QWidget):
         if self._loading:
             return
         bar = self._scroll.verticalScrollBar()
-        if bar.maximum() > 0 and value >= bar.maximum() - 80:
+        # Preload before the user hits the exact bottom; sparse archive pages
+        # then continue filling while the scroll stays near the edge.
+        margin = max(200, self.viewport_height())
+        if bar.maximum() > 0 and value >= bar.maximum() - margin:
             self.load_more.emit()
 
     @staticmethod

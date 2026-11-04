@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS messages (
     stanza_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+CREATE TABLE IF NOT EXISTS mam_sync (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    low_archive_id TEXT NOT NULL DEFAULT '',
+    low_ts TEXT NOT NULL DEFAULT '',
+    high_archive_id TEXT NOT NULL DEFAULT '',
+    high_ts TEXT NOT NULL DEFAULT '',
+    complete_down INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 #: SQL predicate for a row that carries no stable id at all.
@@ -850,6 +859,109 @@ def media_entries(jid: str, date: str = "") -> list[dict]:
         return []
 
 
+def media_dates(jid: str, kind: str = "") -> list[str]:
+    """Dates with media (optionally only *kind*) for the calendar."""
+    from stanza_im.include.media import media_items_from_entry
+    dates: set[str] = set()
+    for entry in media_entries(jid):
+        timestamp = str(entry.get("timestamp") or "")
+        if len(timestamp) < 10:
+            continue
+        if kind and not any(item.get("kind") == kind
+                           for item in media_items_from_entry(entry)):
+            continue
+        dates.add(timestamp[:10])
+    return sorted(dates)
+
+
+def oldest_archive_id(jid: str) -> str:
+    """Archive id of the oldest stored MAM row, or ``""``."""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT archive_id FROM messages "
+                "WHERE archive_id IS NOT NULL AND archive_id != '' "
+                "ORDER BY timestamp ASC, id ASC LIMIT 1").fetchone()
+            return str(row[0] or "") if row else ""
+    except sqlite3.Error as exc:
+        logger.warning("Could not read oldest archive id for %s: %s", jid, exc)
+        return ""
+
+
+def newest_archive_id(jid: str) -> str:
+    """Archive id of the newest stored MAM row, or ``""``."""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT archive_id FROM messages "
+                "WHERE archive_id IS NOT NULL AND archive_id != '' "
+                "ORDER BY timestamp DESC, id DESC LIMIT 1").fetchone()
+            return str(row[0] or "") if row else ""
+    except sqlite3.Error as exc:
+        logger.warning("Could not read newest archive id for %s: %s", jid, exc)
+        return ""
+
+
+def load_mam_sync(jid: str) -> dict:
+    """Return the persisted continuous MAM interval (empty when absent)."""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT low_archive_id, low_ts, high_archive_id, high_ts, "
+                "complete_down FROM mam_sync WHERE id = 1").fetchone()
+        if not row:
+            return {}
+        return {
+            "low_archive_id": str(row[0] or ""),
+            "low_ts": str(row[1] or ""),
+            "high_archive_id": str(row[2] or ""),
+            "high_ts": str(row[3] or ""),
+            "complete_down": bool(row[4]),
+        }
+    except sqlite3.Error as exc:
+        logger.warning("Could not read MAM sync state for %s: %s", jid, exc)
+        return {}
+
+
+def save_mam_sync(jid: str, *, low_archive_id: str = "", low_ts: str = "",
+                 high_archive_id: str = "", high_ts: str = "",
+                 complete_down: bool = False) -> None:
+    """Persist the continuous MAM interval for *jid*."""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            conn.execute(
+                "INSERT INTO mam_sync (id, low_archive_id, low_ts, "
+                "high_archive_id, high_ts, complete_down, updated_at) "
+                "VALUES (1, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "low_archive_id=excluded.low_archive_id, "
+                "low_ts=excluded.low_ts, "
+                "high_archive_id=excluded.high_archive_id, "
+                "high_ts=excluded.high_ts, "
+                "complete_down=excluded.complete_down, "
+                "updated_at=excluded.updated_at",
+                (str(low_archive_id or ""), str(low_ts or ""),
+                 str(high_archive_id or ""), str(high_ts or ""),
+                 int(bool(complete_down)), time.time()))
+            conn.commit()
+    except sqlite3.Error as exc:
+        logger.warning("Could not save MAM sync state for %s: %s", jid, exc)
+
+
+def clear_mam_sync(jid: str) -> None:
+    try:
+        with _lock:
+            conn = _connection(jid)
+            conn.execute("DELETE FROM mam_sync")
+            conn.commit()
+    except sqlite3.Error as exc:
+        logger.warning("Could not clear MAM sync state for %s: %s", jid, exc)
+
+
 def search_dates(jid: str, query: str) -> list[tuple[str, int]]:
     """Return ``[(date, count)]`` of days containing a case-insensitive
     substring match of *query* in the message body, newest first."""
@@ -1035,6 +1147,7 @@ def clear(jid: str) -> None:
         with _lock:
             conn = _connection(jid)
             conn.execute("DELETE FROM messages")
+            conn.execute("DELETE FROM mam_sync")
             conn.commit()
     except sqlite3.Error as exc:
         logger.warning("Could not clear history for %s: %s", jid, exc)
@@ -1233,6 +1346,30 @@ async def search_dates_async(jid: str, query: str) -> list[tuple[str, int]]:
 
 async def media_entries_async(jid: str, date: str = "") -> list[dict]:
     return await asyncio.to_thread(media_entries, jid, date)
+
+
+async def media_dates_async(jid: str, kind: str = "") -> list[str]:
+    return await asyncio.to_thread(media_dates, jid, kind)
+
+
+async def oldest_archive_id_async(jid: str) -> str:
+    return await asyncio.to_thread(oldest_archive_id, jid)
+
+
+async def newest_archive_id_async(jid: str) -> str:
+    return await asyncio.to_thread(newest_archive_id, jid)
+
+
+async def load_mam_sync_async(jid: str) -> dict:
+    return await asyncio.to_thread(load_mam_sync, jid)
+
+
+async def save_mam_sync_async(jid: str, **kwargs) -> None:
+    await asyncio.to_thread(save_mam_sync, jid, **kwargs)
+
+
+async def clear_mam_sync_async(jid: str) -> None:
+    await asyncio.to_thread(clear_mam_sync, jid)
 
 
 async def dates_async(jid: str) -> list[str]:

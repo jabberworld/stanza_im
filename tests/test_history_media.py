@@ -171,6 +171,14 @@ asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.15))
 check("turning all-time off shows the selected-day context",
       not dialog._media_views["image"]._context.isHidden()
       and dialog._media_views["image"]._context.text())
+check("the photo tab highlights dates with photos",
+      "2026-03-12" in dialog._media_calendar_dates)
+dialog._tabs.setCurrentIndex(2)
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
+check("the video tab highlights dates with videos",
+      "2026-04-02" in dialog._media_calendar_dates)
+dialog._tabs.setCurrentIndex(1)
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
 
 # Server media pages use ordinary MAM rows and append older pages.
 server_pages = []
@@ -218,6 +226,7 @@ check("server media pagination stops at complete",
 # Sparse archive pages (1 media per 100 messages) must auto-fill the grid
 # until it becomes scrollable; otherwise only the newest image is visible.
 auto_pages = []
+EMPTY = "empty@example.com"
 
 
 async def auto_server_media(jid, before=""):
@@ -233,7 +242,9 @@ async def auto_server_media(jid, before=""):
 
 
 dialog4 = HistoryManagerDialog(
-    lambda: catalog, server_media=auto_server_media,
+    lambda: [{"jid": EMPTY, "name": "Empty", "groups": ["G"],
+              "is_conference": False}],
+    server_media=auto_server_media,
     server_media_supported=lambda _jid: True)
 dialog4.resize(900, 620)
 dialog4.show()
@@ -241,7 +252,7 @@ dialog4._tabs.setCurrentIndex(1)
 
 
 async def auto_load():
-    await dialog4._select_jid_async(JID, "Bob")
+    await dialog4._select_jid_async(EMPTY, "Empty")
     await asyncio.sleep(0.1)
     dialog4._on_media_mode_toggled("server", True)
     for _ in range(20):
@@ -280,6 +291,83 @@ asyncio.get_event_loop().run_until_complete(switch_contacts())
 check("switching contacts refreshes the photo tab",
       [item["name"] for item in dialog3._media_views["image"]._items]
       == ["carol.jpg"])
+
+# A persisted continuous marker makes the next server run start below it and
+# signing off a page advances the low bound.
+marker_jid = "marker@example.com"
+history.save_mam_sync(
+    marker_jid, low_archive_id="low1", low_ts="2026-01-01T00:00:00Z",
+    high_archive_id="high1", high_ts="2099-01-01T00:00:00Z",
+    complete_down=False)
+marker = history.load_mam_sync(marker_jid)
+check("continuous MAM marker round-trips",
+      marker.get("low_archive_id") == "low1"
+      and marker.get("high_ts") == "2099-01-01T00:00:00Z")
+marker_pages = []
+
+
+async def marker_server(jid, before=""):
+    marker_pages.append((jid, before))
+    return [], True, ""
+
+
+marker_dialog = HistoryManagerDialog(
+    lambda: [{"jid": marker_jid, "name": "Marker", "groups": ["G"],
+              "is_conference": False}],
+    server_media=marker_server, server_media_supported=lambda _jid: True)
+marker_dialog._tabs.setCurrentIndex(1)
+
+
+async def marker_run():
+    await marker_dialog._select_jid_async(marker_jid, "Marker")
+    await asyncio.sleep(0.1)
+    marker_dialog._on_media_mode_toggled("server", True)
+    await asyncio.sleep(0.1)
+
+
+asyncio.get_event_loop().run_until_complete(marker_run())
+check("server paging starts at the stored low cursor",
+      marker_pages and marker_pages[0][1] == "low1")
+
+# A newer local message above the marker's high opens a gap; the forward sync
+# closes it before older server pages are requested.
+gap_jid = "gap@example.com"
+history.store_message(gap_jid, "incoming", "new", sender="bob",
+                      timestamp="2026-06-01T10:00:00Z", origin_id="g1")
+history.save_mam_sync(
+    gap_jid, low_archive_id="", low_ts="",
+    high_archive_id="", high_ts="2026-01-01T00:00:00Z",
+    complete_down=False)
+gap_calls = []
+
+
+async def gap_sync(jid, high_ts, high_id=""):
+    gap_calls.append((jid, high_ts))
+    return 1, "2026-06-01T10:00:00Z", "g1", True
+
+
+async def gap_server(jid, before=""):
+    return [], True, ""
+
+
+gap_dialog = HistoryManagerDialog(
+    lambda: [{"jid": gap_jid, "name": "Gap", "groups": ["G"],
+              "is_conference": False}],
+    server_media=gap_server, server_media_supported=lambda _jid: True,
+    server_gap_sync=gap_sync)
+gap_dialog._tabs.setCurrentIndex(1)
+
+
+async def gap_run():
+    await gap_dialog._select_jid_async(gap_jid, "Gap")
+    await asyncio.sleep(0.1)
+    gap_dialog._on_media_mode_toggled("server", True)
+    await asyncio.sleep(0.1)
+
+
+asyncio.get_event_loop().run_until_complete(gap_run())
+check("a gap above the marker is closed before older paging",
+      gap_calls and gap_calls[0][1] == "2026-01-01T00:00:00Z")
 
 if FAILURES:
     print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))
