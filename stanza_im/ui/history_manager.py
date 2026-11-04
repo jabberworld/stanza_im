@@ -949,6 +949,28 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         scroll = self._messages.verticalScrollBar()
         scroll.setValue(scroll.maximum())
 
+    def _all_match_selections(self) -> list:
+        """Yellow backgrounds for every occurrence of the search query."""
+        if not self._query:
+            return []
+        doc = self._messages.document()
+        selections = []
+        cursor = QtGui.QTextCursor(doc)
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+        while True:
+            found = doc.find(self._query, cursor)
+            if found.isNull():
+                break
+            selection = QtWidgets.QTextEdit.ExtraSelection()
+            selection.cursor = found
+            selection.format.setBackground(QtGui.QColor("#fff59d"))
+            selections.append(selection)
+            end = found.selectionEnd()
+            if end <= cursor.position():
+                break
+            cursor.setPosition(end)
+        return selections
+
     def _jump_to_match(self, index: int) -> None:
         if not self._matches or not (0 <= index < len(self._matches)):
             return
@@ -959,17 +981,15 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         cursor = QtGui.QTextCursor(doc)
         cursor.setPosition(self._message_blocks[entry_index])
         found = doc.find(self._query, cursor)
+        # Highlight every occurrence, not just the active entry.  The active
+        # one keeps the normal text-cursor selection (blue), as before.
+        self._messages.setExtraSelections(self._all_match_selections())
         if found.isNull():
             anchor = QtGui.QTextCursor(doc)
             anchor.setPosition(self._message_blocks[entry_index])
             self._messages.setTextCursor(anchor)
             self._messages.ensureCursorVisible()
-            self._messages.setExtraSelections([])
             return
-        selection = QtWidgets.QTextEdit.ExtraSelection()
-        selection.cursor = found
-        selection.format.setBackground(QtGui.QColor("#fff59d"))
-        self._messages.setExtraSelections([selection])
         self._messages.setTextCursor(found)
         self._messages.ensureCursorVisible()
         # ``setHtml`` defers the layout, so a match near the end of the day

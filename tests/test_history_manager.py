@@ -64,6 +64,19 @@ check("the day's messages are rendered",
       "hi" in dlg._messages.toPlainText()
       and "yo" in dlg._messages.toPlainText())
 
+# 1a. Every query occurrence, including repeats in one message, is yellow;
+#     the active match keeps the normal (blue) text-cursor selection.
+history.store_message("bob@example.com", "incoming", "needle needle",
+                      sender="bob", timestamp="2026-01-02T10:06:00",
+                      message_id="m3", origin_id="m3")
+dlg._search.setText("needle")
+dlg._query = "needle"
+asyncio.get_event_loop().run_until_complete(dlg._run_day_search_async())
+check("all matches get a highlight",
+      len(dlg._messages.extraSelections()) == 2)
+check("the active match keeps a text-cursor selection",
+      dlg._messages.textCursor().hasSelection())
+
 # 1b. Global (all-contacts) search: only matching contacts stay in the tree.
 history.store_message("carol@example.com", "incoming", "hello world",
                       sender="carol", timestamp="2026-02-03T09:00:00",
