@@ -8657,9 +8657,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             if (chat is not None and self._chat_area_visible()
                     and self._chat_window.current_jid() == key
+                    and not history_changed
                     and self._chat_at_bottom(key)):
                 # The user is already looking at the newest message; do not
-                # resurrect a badge for a block that is fully on screen.
+                # resurrect a badge for a block that is fully on screen.  A
+                # MAM pass that just stored rows must not trust the old
+                # window's bottom: the final reload below places the real tail.
                 self._client.mds_mark_displayed(key)
                 done = True
                 return
