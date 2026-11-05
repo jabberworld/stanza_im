@@ -144,7 +144,6 @@ check("resize reflows the grid without stale cards",
 # grows the window instead of creating thousands of widgets in one pass.
 _page_view = HistoryMediaView("image")
 _page_view.resize(600, 420)
-_page_view.show()
 _page_items = [{
     "url": f"https://files.example/page-{i}.jpg",
     "kind": "image", "name": f"page-{i}.jpg",
@@ -152,11 +151,9 @@ _page_items = [{
     "media_type": "image/jpeg",
 } for i in range(200)]
 _page_view.set_items(_page_items)
-app.processEvents()
 check("the media grid creates only the first 80 cards",
       len(_page_view.findChildren(MediaCard)) == 80)
 _page_view._on_scroll(10**9)
-app.processEvents()
 check("scrolling grows the local media page",
       len(_page_view.findChildren(MediaCard)) == 160)
 

@@ -223,11 +223,29 @@ class HistoryMediaView(QtWidgets.QWidget):
             self._meta.meta_ready.connect(self._on_meta)
         self._render()
 
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        QtCore.QTimer.singleShot(250, self._fill_viewport)
+
+    def _fill_viewport(self) -> None:
+        """Grow the first page until the grid actually has a scrollbar."""
+        if (not self.isVisible() or self._loading
+                or self._render_limit >= len(self._visible())):
+            return
+        if self._scroll.verticalScrollBar().maximum() > 0:
+            return
+        self._render_limit = min(
+            len(self._visible()), self._render_limit + _PAGE_SIZE)
+        self._render()
+        QtCore.QTimer.singleShot(250, self._fill_viewport)
+
     def set_items(self, items: list[dict]) -> None:
         self._items = [item for item in (items or [])
                        if item.get("kind") == self._kind]
         self._render_limit = _PAGE_SIZE
         self._render()
+        if self.isVisible():
+            QtCore.QTimer.singleShot(250, self._fill_viewport)
 
     def append_items(self, items: list[dict]) -> None:
         known: set[tuple] = set()
