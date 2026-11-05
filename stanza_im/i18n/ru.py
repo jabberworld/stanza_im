@@ -1365,6 +1365,8 @@ STRINGS = {
     "media_fullscreen": "Во весь экран",
     "media_viewer_title": "Просмотр медиафайла",
     "media_viewer_unsupported": "Встроенное воспроизведение недоступно (QtWebEngine не установлен).",
+    "media_playback_failed": "Не удалось воспроизвести видео: формат не поддерживается.",
+    "media_open_external": "Открыть в браузере",
     "prefs_theme": "Тема чата:",
     "prefs_theme_default": "По умолчанию",
     "prefs_history_limit": "Загружать сообщений истории:",

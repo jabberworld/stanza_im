@@ -859,6 +859,11 @@ if HAS_WEBENGINE:
                             parent.classList.remove('stanza-media-loading');
                         }}
                     }});
+                document.querySelectorAll('video[data-media-url]').forEach(
+                    function (vid) {{
+                        if (vid.getAttribute('data-media-url') !== target) return;
+                        vid.poster = {safe_uri};
+                    }});
                 document.querySelectorAll('.stanza-media-gated').forEach(
                     function (el) {{
                         if (el.getAttribute('data-media-url') !== target) return;
@@ -1797,6 +1802,62 @@ window.__stanzaMentionRef = '';
                         + encodeURIComponent(vsrc);
                 }
             });
+            // Video hybrid: keep the native <video> when its video track is
+            // decodable.  QtWebEngine cannot decode HEVC/H.265 (the audio
+            // track may still play); replace that player with the PyAV poster
+            // card so the chat never offers an audio-only "video".
+            function stanzaVideoFallback(v) {
+                if (!v || v.__stanzaVideoFallback) return;
+                if (v.videoWidth > 0) {
+                    v.__stanzaVideoFallback = true;
+                    return;
+                }
+                var wrap = v.closest ? v.closest('.stanza-media-video') : null;
+                if (!wrap) return;
+                v.__stanzaVideoFallback = true;
+                try { v.pause(); } catch (e) {}
+                var src = v.getAttribute('data-media-url') || '';
+                var poster = v.getAttribute('poster') || '';
+                var link = wrap.querySelector('a.stanza-media:not(.stanza-media-open)');
+                if (!link) {
+                    link = document.createElement('a');
+                    link.className = 'stanza-media';
+                    if (src) {
+                        link.setAttribute('href', 'stanza:view:video/'
+                            + encodeURIComponent(src));
+                    }
+                    wrap.insertBefore(link, v);
+                }
+                var img = link.querySelector('img.stanza-media-thumb');
+                if (!img) {
+                    img = document.createElement('img');
+                    img.className = 'stanza-media-thumb';
+                    img.setAttribute('data-media-url', src);
+                    img.setAttribute('width', '200');
+                    link.appendChild(img);
+                }
+                if (poster && !img.getAttribute('src')) img.src = poster;
+                wrap.querySelectorAll('a.stanza-media-open').forEach(
+                    function (a) { a.style.display = 'none'; });
+                try {
+                    v.removeAttribute('src');
+                    v.load();
+                } catch (e) {}
+                v.style.display = 'none';
+                wrap.classList.add('stanza-media-video-fallback');
+            }
+            document.addEventListener('loadedmetadata', function (e) {
+                var t = e.target;
+                if (t && t.nodeName === 'VIDEO') stanzaVideoFallback(t);
+            }, true);
+            document.addEventListener('error', function (e) {
+                var t = e.target;
+                if (t && t.nodeName === 'VIDEO') stanzaVideoFallback(t);
+            }, true);
+            document.querySelectorAll('.stanza-media-video video').forEach(
+                function (v) {
+                    if (v.readyState >= 1) stanzaVideoFallback(v);
+                });
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') closeMenu();
             });

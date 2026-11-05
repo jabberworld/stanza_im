@@ -2383,10 +2383,14 @@ Registers XEP plugins (conditionally where noted):
   `_apply_visible_unread` is published through the same throttled timer, so
   opening a chat can advance the shared displayed point without a scroll poll.
   Auto-joined rooms use
-  the forced pass too. On login `MainWindow` seeds `_mds_local` from the
-  persisted unread state (`client.set_displayed_state`), so the catch-up does
-  not wipe restored unread while a newer remote state still clears it.
-  Config `chat.message_displayed_sync` (default on).
+  the forced pass too. A MAM gap sync owns the chat until the stored rows are
+  complete: `_history_sync_pending`/`_history_reload_pending` pause
+  unread/seen/bottom reconciliation on the stale first window, and
+  `_reload_chat_after_sync` force-reloads the open chat with the refreshed read
+  anchor afterwards (the pravda 113-unread race). On login `MainWindow` seeds
+  `_mds_local` from the persisted unread state (`client.set_displayed_state`),
+  so the catch-up does not wipe restored unread while a newer remote state still
+  clears it. Config `chat.message_displayed_sync` (default on).
 - **History behind an open tab**: the join-time room replay arrives as
   **delayed** groupchat messages; a XEP-0203 `<delay/>` is the reliable history
   signal (old servers send it without `<archived/>`, and it is read from the
@@ -3296,10 +3300,17 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   header and horizontal rules. Images use `MediaPreviewService`;
   `ui/media_meta.MediaMetadataService` fills video thumbnails and audio/video
   duration in the background (PyAV when available) and caches them in
-  `MediaCache` (new `duration` field). A click pauses inline chat media and opens
-  `MediaViewer` immediately; the viewer resolves/decrypts the original itself (audio has an
-  in-app Qt Multimedia mode) and reports a dead URL through `load_failed`,
-  shown as «Файл не найден» in the tab. The media context menu offers copy
+  `MediaCache` (new `duration` field). Chat video previews use that PyAV frame
+  as the `<video poster>` and keep inline playback for decodable codecs; when
+  QtWebEngine reports `videoWidth === 0`/an error (HEVC/H.265), `_ACTION_JS`
+  replaces the player with a clickable poster card. A click pauses inline chat
+  media and opens `MediaViewer` immediately; the viewer resolves/decrypts the
+  original itself (audio has an
+  in-app Qt Multimedia mode) and reports a real download failure through
+  `load_failed`, shown as «Файл не найден» in the tab. A video codec/decode
+  error retries with a downloaded local file in Qt Multimedia and otherwise
+  shows «Не удалось воспроизвести видео» with an external-browser fallback.
+  The media context menu offers copy
   link, «Перейти в чат» (joined conferences only) and «Перейти к сообщению»;
   the chat jump waits for the history window and focuses an existing tab
   without re-applying its read anchor.

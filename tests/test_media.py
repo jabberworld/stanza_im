@@ -147,6 +147,8 @@ check("inline video wrapped in .stanza-media-video",
       'class="stanza-media stanza-media-video"' in video_html)
 check("inline video keeps native controls",
       "<video controls" in video_html)
+check("a cached video frame becomes the poster",
+      'poster="data:image/png;base64,' in video_html)
 
 # Inline-video click handling: the class is on the wrapper, so the JS branch
 # must look the video up from .stanza-media-video (regression: it used
@@ -157,6 +159,11 @@ _cv_src = open(os.path.join(os.path.dirname(os.path.dirname(
 check("action JS matches the video wrapper", ".stanza-media-video" in _cv_src)
 check("action JS toggles play/pause",
       "vid.paused" in _cv_src and "vid.play()" in _cv_src)
+check("an undecodable video falls back to the thumbnail card",
+      "stanzaVideoFallback" in _cv_src and "videoWidth" in _cv_src
+      and "loadedmetadata" in _cv_src)
+check("the fallback preview updates its video poster",
+      "vid.poster = " in _cv_src and "data-media-url" in _cv_src)
 check("action JS relays fullscreen", "__stanzaMediaFsRef" in _cv_src)
 check("action JS defers the inline toggle and cancels it on dblclick",
       "__stanzaVideoClickTimer" in _cv_src
@@ -371,6 +378,13 @@ check("viewer cancels the click toggle on a double click",
 check("viewer reports dead media to the history manager",
       "load_failed" in _mv_src and "_fail_once" in _mv_src
       and 'addEventListener("error"' in _mv_src)
+check("viewer retries an undecodable video with Qt Multimedia",
+      "_try_multimedia_video" in _mv_src and "QVideoWidget" in _mv_src
+      and "ensure_original_async" in _mv_src)
+check("viewer separates playback errors from missing files",
+      "media_playback_failed" in _mv_src
+      and "media_open_external" in _mv_src
+      and "_show_video_error(missing=False)" in _mv_src)
 
 # The scheme check must fire for the URL Chromium actually delivers.
 from stanza_im.ui import media_viewer as _mv_mod

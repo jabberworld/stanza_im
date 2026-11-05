@@ -260,6 +260,72 @@ check("the JS seen point has no local message-id fallback",
       not in _src)
 
 
+# 6. A MAM gap sync owns the conversation until its forced reload ------------
+_KEY = "pravda@example"
+
+
+class _SyncChat:
+    def __init__(self):
+        self.marked = 0
+
+    def mark_visible_unread(self):
+        self.marked += 1
+        return 0
+
+    def mark_visible_mentions(self):
+        return 0
+
+
+def _sync_probe():
+    calls = []
+    chat = _SyncChat()
+    probe = SimpleNamespace(
+        _unread_chats={_KEY: {**unread_state.blank(), "unread": 113}},
+        _chat_window=SimpleNamespace(
+            get_chat=lambda _jid: chat, current_jid=lambda: _KEY),
+        _history_sync_pending={_KEY},
+        _history_reload_pending=set(),
+        _mds_reconciling=set(),
+        _chat_area_visible=lambda: True,
+        _chat_area_active=lambda: True,
+        _mark_chat_read=lambda jid: calls.append(("read", jid)),
+        _mds_throttle_timer=SimpleNamespace(start=lambda *_a: None),
+    )
+    return probe, chat, calls
+
+
+_probe, _chat, _calls = _sync_probe()
+MainWindow._apply_visible_unread(_probe, _KEY, 32)
+check("a MAM-sync window does not clear unread",
+      _probe._unread_chats[_KEY]["unread"] == 113 and _chat.marked == 0)
+
+MainWindow._on_chat_last_seen(
+    _probe, _KEY, "m-1", "2026-11-04T10:00:00Z", "sid-1")
+check("a MAM-sync view does not advance the seen point",
+      _probe._unread_chats[_KEY]["unread"] == 113)
+
+MainWindow._on_chat_reached_bottom(_probe, _KEY)
+check("a MAM-sync transient bottom does not mark the chat read",
+      _calls == [])
+
+_reload_calls = []
+_reload_probe = SimpleNamespace(
+    _chat_window=SimpleNamespace(
+        get_chat=lambda _jid: SimpleNamespace(
+            set_restore_anchor=lambda _anchor: None),
+        current_jid=lambda: _KEY),
+    _chat_area_visible=lambda: True,
+    _history_reload_pending=set(),
+    _restore_anchor_for=lambda _jid: {"ts": "2026-11-04T09:00:00Z"},
+    _load_history=lambda jid, anchor, force=False: _reload_calls.append(
+        (jid, anchor, force)),
+)
+MainWindow._reload_chat_after_sync(_reload_probe, _KEY)
+check("the post-MAM reload is forced and carries the fresh anchor",
+      _reload_calls == [(_KEY, {"ts": "2026-11-04T09:00:00Z"}, True)]
+      and _KEY in _reload_probe._history_reload_pending)
+
+
 if FAILURES:
     print("\n%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))
     sys.exit(1)

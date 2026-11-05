@@ -1808,7 +1808,11 @@ href="stanza:view:image/<urlenc>">` wrapping an `<img>` (cached thumbnail as a
 PNG data-URI), or a native HTML5 `<audio>`/`<video controls>` (the class sits on
 a `.stanza-media-video` wrapper span — a single click on the video toggles
 play/pause through a 250 ms timer that the document-level double-click handler
-cancels, and the double click opens it fullscreen in the `MediaViewer`). Image originals
+cancels, and the double click opens it fullscreen in the `MediaViewer`). A
+video's first frame is decoded by PyAV (also for HEVC/H.265, which QtWebEngine
+cannot decode) and used as its `poster`; `_ACTION_JS` replaces a `<video>` whose
+`loadedmetadata` reports `videoWidth === 0` or that errors with a clickable
+poster card, while decodable codecs keep inline playback. Image originals
 are downloaded in a worker (`asyncio.to_thread`/thread) and resized to
 `appearance.media_preview_size`; thumbnails and originals live in
 `MediaCache` (`$XDG_CACHE_HOME/stanza-im/media/`, `index.json`, last-access
@@ -1832,7 +1836,9 @@ grows, so the view scrolls back to the end when it was already there (the same
 `thumbnail_ready` is pushed into every open
 view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
-to the window; video in a WebEngine `<video>` window with native `controls`
+to the window; video in a WebEngine `<video>` window with native `controls`,
+falling back to a downloaded local file played by Qt Multimedia
+`QMediaPlayer`/`QVideoWidget` when WebEngine rejects the codec
 (a single click on the video toggles play/pause via a 250 ms timer that the
 double click cancels, so the pair never fights), `F11`/double-click fullscreen —
 the double-click asks Python through a QWebChannel `bridge.toggle_fullscreen()`
@@ -1873,7 +1879,10 @@ off when QtWebEngine is unavailable. Settings changes re-render open chats via
 deferred) and persists its geometry/position in the shared `media_viewer`
 config section (image, video and audio viewers share it). Video/audio media
 open the cached/decrypted original first; the audio mode uses Qt Multimedia and
-reports a missing file instead of opening a dead URL. Three actions float over
+reports a missing file instead of opening a dead URL. A video decode/codec
+failure is shown as «Не удалось воспроизвести видео» with an external-browser
+fallback; `history_media_missing` is reserved for a real download/404 failure
+(so HEVC is no longer falsely reported as a missing file). Three actions float over
 the media **without a panel** — Download (`save_requested`), Copy link
 (`copy_requested`) and Share (`share_requested`) — as a Qt overlay frame for
 images and as an HTML overlay (wired through the `_VideoBridge`) for videos;
@@ -2204,7 +2213,14 @@ that is not joined when `_is_conference_jid` recognises it (active/known/
 bookmarked, a configured conference service or a `conference.`/`muc.`/`rooms.`
 domain), so an old unjoined room (`bimroom`) is never rebuilt as a 1:1 and does
 not become invisible unread; the join path reconciles it once the room is live.
-The forced pass is also applied to auto-joined rooms. Partial progress made by the visibility reconciliation
+The forced pass is also applied to auto-joined rooms. A MAM gap sync owns its
+chat until the rows are stored: `_history_sync_pending`/`_history_reload_pending`
+make `_apply_visible_unread`, `_on_chat_last_seen` and
+`_on_chat_reached_bottom` ignore the stale first window, and
+`_reconcile_mds_unread` then calls `_reload_chat_after_sync`, which force-reloads
+the open chat with the refreshed read anchor. This closes the pravda race where
+a pre-sync `load_history` cleared 113 unread and never fetched the newest page.
+Partial progress made by the visibility reconciliation
 (`_apply_visible_unread`) is published too (`_queue_seen_progress_mds` →
 `_queue_mds_displayed`): opening a chat can mark visible rows seen without a
 scroll poll, and that point must reach the shared node.

@@ -51,6 +51,12 @@ _MEDIA_CSS = """
                       display: block; }
 .stanza-media-open { display: inline-block; margin-top: 2px; font-size: 11px;
                      color: #1a73e8; }
+.stanza-media-video-fallback { position: relative; }
+.stanza-media-video-fallback::after { content: "\\25B6"; position: absolute;
+                     left: 50%; top: 50%; transform: translate(-50%, -50%);
+                     width: 34px; height: 34px; border-radius: 50%;
+                     background: rgba(0,0,0,.58); color: #fff; font-size: 15px;
+                     line-height: 34px; text-align: center; pointer-events: none; }
 .stanza-media-gated { position: relative; border-radius: 6px;
                       background: rgba(0,0,0,.06); overflow: hidden; }
 .stanza-media-load { position: absolute; left: 50%; top: 50%;

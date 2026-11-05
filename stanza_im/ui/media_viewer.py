@@ -114,6 +114,8 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._geometry_cfg = geometry_cfg
         self._pixmap = QtGui.QPixmap()
         self._load_failed_sent = False
+        self._video_retry_started = False
+        self._video_error_shown = False
         self._fullscreen_hint = str(kind) == "video_fs"
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(tr("media_viewer_title"))
@@ -299,6 +301,10 @@ class MediaViewer(QtWidgets.QMainWindow):
             self._label.unsetCursor()
 
     def eventFilter(self, obj, event):
+        if obj is getattr(self, "_video_widget", None):
+            if event.type() == QtCore.QEvent.Type.MouseButtonDblClick:
+                self._toggle_fullscreen()
+                return True
         if obj is getattr(self, "_label", None):
             etype = event.type()
             if etype == QtCore.QEvent.Type.MouseButtonDblClick:
@@ -361,6 +367,8 @@ class MediaViewer(QtWidgets.QMainWindow):
 
     def _build_video(self) -> None:
         if not _HAS_WEBENGINE:
+            if self._try_multimedia_video():
+                return
             label = QtWidgets.QLabel(tr("media_viewer_unsupported"))
             label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             label.setWordWrap(True)
@@ -390,11 +398,177 @@ class MediaViewer(QtWidgets.QMainWindow):
         self.setCentralWidget(label)
 
     def _video_failed(self) -> None:
-        self._fail_once()
-        label = QtWidgets.QLabel(tr("history_media_missing"))
+        """A WebEngine video error is usually a codec problem, not a 404.
+
+        QtWebEngine cannot decode HEVC/H.265; the audio track may still play.
+        Retry with the system multimedia backend (which uses FFmpeg/GStreamer)
+        before reporting a real failure.
+        """
+        if self._video_error_shown:
+            return
+        if not self._video_retry_started:
+            self._video_retry_started = True
+            if self._try_multimedia_video():
+                return
+        self._show_video_error(missing=False)
+
+    def _try_multimedia_video(self) -> bool:
+        """Try Qt Multimedia for a video WebEngine cannot decode."""
+        try:
+            from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer  # noqa: F401
+            from PyQt6.QtMultimediaWidgets import QVideoWidget  # noqa: F401
+        except Exception:
+            return False
+        self._show_video_loading()
+
+        def _ready(path):
+            if not path:
+                self._show_video_error(missing=True)
+                return
+            try:
+                self._render_multimedia_video(path)
+            except Exception as exc:  # noqa: BLE001 - optional backend
+                logger.info("Qt Multimedia video failed for %s: %s",
+                            self._url, exc)
+                self._show_video_error(missing=False)
+
+        def _error(_exc):
+            self._show_video_error(missing=True)
+
+        if self._service is None or not hasattr(
+                self._service, "ensure_original_async"):
+            return False
+        self._service.ensure_original_async(self._url, _ready, _error)
+        return True
+
+    def _show_video_loading(self) -> None:
+        label = QtWidgets.QLabel(tr("history_media_loading"))
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
         self.setCentralWidget(label)
+
+    def _show_video_error(self, *, missing: bool) -> None:
+        if self._video_error_shown:
+            return
+        self._video_error_shown = True
+        if missing:
+            self._fail_once()
+        page = QtWidgets.QWidget(self)
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
+        label = QtWidgets.QLabel(
+            tr("history_media_missing") if missing
+            else tr("media_playback_failed"))
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        button = QtWidgets.QPushButton(tr("media_open_external"), page)
+        button.setFlat(True)
+        button.clicked.connect(self._open_external)
+        layout.addWidget(button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(1)
+        self.setCentralWidget(page)
+
+    def _open_external(self) -> None:
+        """Open the media in the desktop browser/player as a last resort."""
+        if not self._url:
+            return
+        cached = (self._service.cache.original_path(self._url)
+                  if self._service is not None
+                  and hasattr(self._service, "cache") else None)
+        target = (QtCore.QUrl.fromLocalFile(cached) if cached
+                  else QtCore.QUrl(self._url))
+        QtGui.QDesktopServices.openUrl(target)
+
+    def _render_multimedia_video(self, path: str) -> None:
+        from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+        from PyQt6.QtMultimediaWidgets import QVideoWidget
+
+        page = QtWidgets.QWidget(self)
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        video = QVideoWidget(page)
+        video.setMinimumSize(320, 240)
+        video.installEventFilter(self)
+        layout.addWidget(video, 1)
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(8, 4, 8, 4)
+        play = QtWidgets.QToolButton(page)
+        play.setText("\u25b6")
+        play.setToolTip(tr("history_media_play"))
+        play.setAutoRaise(True)
+        row.addWidget(play)
+        slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal, page)
+        slider.setRange(0, 0)
+        row.addWidget(slider, 1)
+        time_label = QtWidgets.QLabel("0:00 / 0:00", page)
+        row.addWidget(time_label)
+        for icon_name, label, signal in (
+                ("arrow-down.svg", tr("media_save"), self.save_requested),
+                ("copy.svg", tr("media_copy_link"), self.copy_requested),
+                ("send-arrow.svg", tr("ctx_share"), self.share_requested)):
+            button = QtWidgets.QToolButton(page)
+            button.setIcon(QtGui.QIcon(find_icon(icon_name)))
+            button.setToolTip(label)
+            button.setAutoRaise(True)
+            button.clicked.connect(
+                lambda _checked=False, sig=signal: sig.emit(self._url))
+            row.addWidget(button)
+        layout.addLayout(row)
+
+        player = QMediaPlayer(self)
+        audio = QAudioOutput(self)
+        player.setAudioOutput(audio)
+        player.setVideoOutput(video)
+        self._player = player
+        self._audio_output = audio
+        self._video_widget = video
+        self._video_play = play
+        self._video_slider = slider
+        self._video_time = time_label
+
+        def toggle():
+            if player.playbackState() == player.PlaybackState.PlayingState:
+                player.pause()
+            else:
+                player.play()
+
+        play.clicked.connect(toggle)
+        slider.sliderMoved.connect(player.setPosition)
+
+        def duration_changed(duration):
+            slider.setRange(0, max(0, int(duration)))
+            update_time()
+
+        def position_changed(position):
+            if not slider.isSliderDown():
+                slider.setValue(max(0, int(position)))
+            update_time()
+
+        def update_time():
+            time_label.setText(
+                f"{format_duration(max(0, player.position()) / 1000)} / "
+                f"{format_duration(max(0, player.duration()) / 1000)}")
+
+        def state_changed(_state):
+            playing = (player.playbackState()
+                       == player.PlaybackState.PlayingState)
+            play.setText("\u275a\u275a" if playing else "\u25b6")
+
+        player.durationChanged.connect(duration_changed)
+        player.positionChanged.connect(position_changed)
+        player.playbackStateChanged.connect(state_changed)
+        player.errorOccurred.connect(
+            lambda _err, _text="": self._show_video_error(missing=False))
+        player.mediaStatusChanged.connect(
+            lambda status: self._show_video_error(missing=False)
+            if status == player.MediaStatus.InvalidMedia else None)
+        self.setCentralWidget(page)
+        player.setSource(QtCore.QUrl.fromLocalFile(path))
+        player.play()
+        video.setFocus()
 
     @staticmethod
     def _svg_data_uri(name: str) -> str:

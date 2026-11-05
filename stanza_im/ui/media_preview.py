@@ -56,6 +56,8 @@ class MediaPreviewService(QtCore.QObject):
         self._mode = "images"
         self._size = 200
         self._pending: set[str] = set()
+        self._video_pending: set[str] = set()
+        self._meta_service = None
         self._thumb_uris: dict[str, str] = {}
         self._thumb_bytes = 0
         self._hashes: dict[str, dict[str, str]] = {}
@@ -181,12 +183,47 @@ class MediaPreviewService(QtCore.QObject):
                 f'<audio controls preload="metadata" src="{data}" '
                 f'data-media-url="{data}"></audio></span>')
         width = min(max(self._size, 160), 480)
+        poster = self.cached_thumb_uri(url)
+        if not poster:
+            # The first frame is decoded by PyAV, which handles HEVC/H.265 even
+            # when QtWebEngine cannot.  It becomes the poster (and the fallback
+            # card when only the audio track is playable inline).
+            self.request_video(url)
+            poster_attr = ""
+        else:
+            poster_attr = f' poster="{poster}"'
         return (
             f'<span class="stanza-media stanza-media-video">'
             f'<video controls preload="metadata" src="{data}" '
-            f'data-media-url="{data}" width="{width}"></video>'
+            f'data-media-url="{data}" width="{width}"{poster_attr}></video>'
             f'<a class="stanza-media-open" href="stanza:view:video/{enc}">'
             f'{html.escape(tr("media_open_viewer"))}</a></span>')
+
+    def request_video(self, url: str) -> None:
+        """Queue a PyAV first-frame thumbnail for a video URL."""
+        if not url or url in self._video_pending:
+            return
+        self._video_pending.add(url)
+        self._ensure_meta().request(url, "video")
+
+    def _ensure_meta(self):
+        if self._meta_service is None:
+            from stanza_im.ui.media_meta import MediaMetadataService
+            self._meta_service = MediaMetadataService(
+                self._cache, downloader=self, parent=self)
+            self._meta_service.meta_ready.connect(self._on_video_meta)
+            self._meta_service.failed.connect(self._on_video_meta_failed)
+        return self._meta_service
+
+    def _on_video_meta(self, url: str, _duration: float, uri: str) -> None:
+        self._video_pending.discard(url)
+        if not uri:
+            return
+        self._remember_thumb(url, uri)
+        self.thumbnail_ready.emit(url, uri)
+
+    def _on_video_meta_failed(self, url: str) -> None:
+        self._video_pending.discard(url)
 
     def _gated_markup(self, url: str, media: dict | None = None) -> str:
         """A fixed-size placeholder with an explicit load link."""

@@ -94,6 +94,20 @@ _PRESENCE_OSD_GRACE_S = 5.0
 # attempt before treating it as failed (connect_async() resolves even when
 # every attempt failed, since slixmpp reschedules internally).
 _SESSION_TIMEOUT_S = 30.0
+
+
+def _history_sync_state(win, jid: str) -> bool:
+    """Whether *win* still owes *jid* a complete post-MAM history window.
+
+    Reads the bare instance dictionary so test doubles built with
+    ``MainWindow.__new__`` or ``SimpleNamespace`` do not trip Qt's
+    ``__getattr__`` on an uninitialised QObject.
+    """
+    state = getattr(win, "__dict__", {})
+    return bool(
+        jid in state.get("_mds_reconciling", ())
+        or jid in state.get("_history_sync_pending", ())
+        or jid in state.get("_history_reload_pending", ()))
 # While the replay is still arriving every new contact pushes the silence
 # window out by this much, so a slow/large roster is silent until the burst
 # really stops (instead of a fixed window that can expire mid-replay).
@@ -431,6 +445,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # Monotonic token per history load so a superseded (anchor-less) load
         # cannot apply its stale window over a newer anchored one.
         self._history_load_seq: dict[str, int] = {}
+        # A MAM gap sync owns the conversation until it finishes: the first
+        # window may predate the rows it stores, so unread/read transitions
+        # must wait for the final reload.
+        self._history_sync_pending: set[str] = set()
+        self._history_reload_pending: set[str] = set()
 
         # Unload the WebEngine page of tabs that stay cold (see P7).
         self._tab_activity: dict[str, float] = {}
@@ -4039,6 +4058,8 @@ class MainWindow(QtWidgets.QMainWindow):
         history_mod.clear_all()
         self._history_loading.clear()
         self._history_load_seq.clear()
+        self._history_sync_pending.clear()
+        self._history_reload_pending.clear()
         self._unread_chats = {}
         if self._client is not None:
             for attr in ("_mds_local", "_mds_own_sids"):
@@ -6559,8 +6580,13 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._opening_chat = False
 
+    def _history_sync_in_progress(self, jid: str) -> bool:
+        """True while a MAM sync or a forced post-sync reload owns *jid*."""
+        return _history_sync_state(self, jid)
+
     def _load_history(self, jid: str, anchor: dict | None = None,
-                      seen_anchor: dict | None = None, **kwargs):
+                      seen_anchor: dict | None = None, force: bool = False,
+                      **kwargs):
         """Feed previously saved messages from the SQLite history into chat.
 
         *anchor* is the persisted read state of an unread conversation.  The
@@ -6568,17 +6594,22 @@ class MainWindow(QtWidgets.QMainWindow):
         are right there — and the anchor only places the "unread messages"
         separator above the first of them.  *background* loads an auto-joined
         room without reconciling/marking its counters before the user opens it.
+        *force* supersedes an in-flight load; the post-MAM reload uses it so a
+        stale pre-sync window can never win.
         """
         background = bool(kwargs.pop("background", False))
         self._start_task(self._load_history_async(
-            jid, anchor, seen_anchor=seen_anchor, background=background))
+            jid, anchor, seen_anchor=seen_anchor, background=background,
+            force=force))
 
     async def _load_history_async(self, jid: str, anchor: dict | None = None,
                                   seen_anchor: dict | None = None,
-                                  background: bool = False):
+                                  background: bool = False,
+                                  force: bool = False):
         from stanza_im.core import history
         chat = self._chat_window.get_chat(jid)
         if not chat:
+            self._history_reload_pending.discard(jid)
             return
         anchor_ts = str((anchor or {}).get("ts") or "")
         if jid in self._history_loading:
@@ -6586,7 +6617,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # duplicate unless the newer call carries a read anchor that the
             # in-flight one lacks (otherwise an anchor-less join-time load
             # would swallow the boundary and the unread separator / @ list).
-            if not anchor_ts or anchor_ts == self._history_loading.get(jid, ""):
+            # A forced post-sync reload supersedes it even with the same anchor.
+            if not force and (
+                    not anchor_ts
+                    or anchor_ts == self._history_loading.get(jid, "")):
                 return
         self._history_loading[jid] = anchor_ts
         seq = self._history_load_seq.get(jid, 0) + 1
@@ -6612,8 +6646,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 history.older_available_timestamp_async(
                     jid, entries[0].get("timestamp", ""))
         finally:
-            if self._history_loading.get(jid, "") == anchor_ts:
+            if self._history_load_seq.get(jid) == seq:
                 self._history_loading.pop(jid, None)
+                self._history_reload_pending.discard(jid)
         # A newer load superseded this one: never apply a stale, anchor-less
         # window over it.
         if self._history_load_seq.get(jid) != seq:
@@ -7891,6 +7926,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._chat_window.current_jid() != jid:
             return
+        if _history_sync_state(self, jid):
+            logger.debug("UNREAD[bottom] jid=%s ignored (history sync)", jid)
+            return
         chat = self._chat_window.get_chat(jid)
         if chat is not None:
             pending = getattr(chat, "anchor_restore_pending", None)
@@ -7987,6 +8025,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if not jid:
             return
+        if _history_sync_state(self, jid):
+            logger.debug("UNREAD[seen] jid=%s ignored (history sync)", jid)
+            return
         entry = self._unread_chats.get(jid)
         if not entry:
             logger.debug("UNREAD[seen] jid=%s ref=%r ts=%r no-entry", jid, ref, ts)
@@ -8056,6 +8097,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not (self._chat_area_visible()
                 and self._chat_window.current_jid() == jid):
+            return
+        if _history_sync_state(self, jid):
+            # The first window can predate the rows a MAM gap sync is storing.
+            # Its viewport is not the user's reading position; wait for the
+            # final forced reload instead of clearing the badge (pravda 113->0).
+            if attempt == 0:
+                logger.debug("UNREAD[skip] jid=%s reason=history-sync", jid)
+            if attempt < 32:
+                QtCore.QTimer.singleShot(
+                    150, lambda: self._apply_visible_unread(jid, attempt + 1))
             return
         if getattr(chat, "_unread_resolving", False):
             return
@@ -8322,8 +8373,58 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _schedule_mds_reconcile(self, key: str, *,
                                 force: bool = False) -> None:
-        if key:
-            self._start_task(self._reconcile_mds_unread(key, force=force))
+        if not key:
+            return
+        self._history_sync_pending.add(key)
+        self._start_task(self._run_mds_reconcile(key, force=force))
+
+    async def _run_mds_reconcile(self, key: str, *,
+                                 force: bool = False) -> None:
+        """Run the MAM/MDS pass and release the history-sync guard.
+
+        Another request may arrive while the first pass is still inside
+        ``_reconcile_mds_unread``; that pass owns the guard and releases it.
+        """
+        try:
+            await self._reconcile_mds_unread(key, force=force)
+        finally:
+            if key not in self._mds_reconciling:
+                self._history_sync_pending.discard(key)
+                if (not _history_sync_state(self, key)
+                        and self._chat_window is not None
+                        and self._chat_area_visible()
+                        and self._chat_window.current_jid() == key):
+                    # A long MAM query may have outlived the bounded retries of
+                    # the initial visible-unread reconciliation.
+                    QtCore.QTimer.singleShot(
+                        80, lambda: self._apply_visible_unread(key))
+
+    def _reload_chat_after_sync(self, key: str) -> None:
+        """Re-read the now-complete history window of the active chat.
+
+        ``load_history`` may have read the archive before the MAM gap sync
+        stored the unread tail.  Reloading with the refreshed anchor is what
+        places the separator and shows the newest page; the guards in
+        ``_apply_visible_unread`` keep the stale first window from clearing
+        the badge meanwhile.
+        """
+        if key in self._history_reload_pending:
+            return
+        if self._chat_window is None:
+            return
+        chat = self._chat_window.get_chat(key)
+        if chat is None:
+            return
+        if not (self._chat_area_visible()
+                and self._chat_window.current_jid() == key):
+            return
+        self._history_reload_pending.add(key)
+        anchor = self._restore_anchor_for(key)
+        if anchor:
+            chat.set_restore_anchor(anchor)
+        logger.debug("MDS[reload] jid=%s anchor=%s", key,
+                     bool(anchor))
+        self._load_history(key, anchor, force=True)
 
     async def _mds_point_sid(self, key: str, entry: dict | None,
                              ts: str) -> str:
@@ -8476,6 +8577,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
         self._mds_reconciling.add(key)
         done = False
+        history_changed = False
         try:
             ts = shared_ts
             if local_wins and not force:
@@ -8503,14 +8605,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     # Another MAM query owns this conversation; retry later.
                     return
                 self._history_gap_checked[key] = time.monotonic()
+                history_changed = bool(incoming)
             chat = (self._chat_window.get_chat(key)
                     if self._chat_window is not None else None)
-            if (chat is not None and self._chat_area_visible()
-                    and self._chat_window.current_jid() == key):
-                # The stored gap may include outgoing copies (which do not
-                # change the unread count) or incoming ones; merge them into
-                # the open tail.  A user-scrolled view stays where it is.
-                chat.schedule_tail_refresh(200)
+            if chat is not None and not history_changed:
+                # The forward MAM page may contain only outgoing carbon
+                # copies (not counted by ``incoming``).  Those still belong in
+                # the open window, so compare the stored tail with what is on
+                # screen.
+                try:
+                    stored_newest = await history.newest_timestamp_async(key)
+                    history_changed = bool(
+                        stored_newest and stored_newest > chat.newest_ts())
+                except Exception:
+                    history_changed = False
+
             if local_wins and not force:
                 self._publish_mds_point(key, local_sid)
                 logger.debug(
@@ -8599,6 +8708,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mds_reconciling.discard(key)
             if done and sid:
                 self._mds_reconciled.add((key, sid))
+            if history_changed:
+                self._reload_chat_after_sync(key)
 
     async def _clamp_read_state(self, key: str, sid: str,
                                 force: bool = False) -> None:
@@ -11976,6 +12087,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mam_unsupported.clear()
         self._mds_reconciling.clear()
         self._mds_reconciled.clear()
+        self._history_sync_pending.clear()
+        self._history_reload_pending.clear()
         self._history_gap_checked.clear()
         self._bookmarks = {}
         self._bookmarks_loaded = False

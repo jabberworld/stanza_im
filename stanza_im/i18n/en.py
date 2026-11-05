@@ -1364,6 +1364,8 @@ STRINGS = {
     "media_fullscreen": "Full screen",
     "media_viewer_title": "Media viewer",
     "media_viewer_unsupported": "Inline playback is unavailable (QtWebEngine is not installed).",
+    "media_playback_failed": "Could not play this video: the format is not supported.",
+    "media_open_external": "Open in browser",
     "prefs_theme": "Chat theme:",
     "prefs_theme_default": "Default",
     "prefs_history_limit": "History messages to load:",
