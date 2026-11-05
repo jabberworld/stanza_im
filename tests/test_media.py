@@ -395,6 +395,11 @@ check("viewer separates playback errors from missing files",
       "media_playback_failed" in _mv_src
       and "media_open_external" in _mv_src
       and "_show_video_error(missing=False)" in _mv_src)
+check("viewer queues seeks until the media is seekable",
+      "_video_pending_seek" in _mv_src and "isSeekable()" in _mv_src
+      and "apply_pending_seek" in _mv_src)
+check("viewer seeks on release and keyboard actions",
+      "sliderReleased" in _mv_src and "actionTriggered" in _mv_src)
 
 # The scheme check must fire for the URL Chromium actually delivers.
 from stanza_im.ui import media_viewer as _mv_mod

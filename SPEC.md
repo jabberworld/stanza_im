@@ -500,6 +500,7 @@ endpoint, then DNS SRV.
 | `performance.webengine_mode` | `full` | `full` = WebEngine + previews (per `chat.media_preview`); `no_preview` = WebEngine but previews forced off; `off` = `constants.set_webengine_enabled(False)` — `ui/chat_view.py` skips the WebEngine import (all chats use the `QTextBrowser` fallback, no Chromium stack). Applied before the window. |
 | `performance.webengine_memory_mode` | `moderate` | `QTWEBENGINE_CHROMIUM_FLAGS` set before `QApplication`: `off` / `moderate` (`--renderer-process-limit=1`, `--js-flags=--max-old-space-size=128` and background-service disables) / `aggressive` (+ `--disable-gpu`). A user-set env value is respected. |
 | `performance.webengine_cache_mb` | `50` | HTTP cache cap of the default `QWebEngineProfile` (`ui/url_schemes.configure_default_profile`; cookies in memory only, plugins/popups disabled); `0` = no cap. |
+| `performance.qtmm_hw_decode` | `false` | Qt Multimedia FFmpeg hardware video decoding. `false` sets `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=,` before `QApplication` (software HEVC/H.265; avoids the `AVHWFramesContext` seek segfault). `true` leaves hardware enabled; a user-set env value wins. Takes effect after a restart. |
 
 Deferred loads and the Chromium flags/cache apply on the next restart.
 
@@ -3315,6 +3316,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   `load_failed`, shown as «Файл не найден» in the tab. A video codec/decode
   error retries with a downloaded local file in Qt Multimedia and otherwise
   shows «Не удалось воспроизвести видео» with an external-browser fallback.
+  Qt Multimedia uses software HEVC/H.265 decoding by default (the hardware
+  VAAPI path segfaults on seek); a seek made before `LoadedMedia` is queued,
+  and the slider seeks on drag, release and keyboard actions.
   The media context menu offers copy
   link, «Перейти в чат» (joined conferences only) and «Перейти к сообщению»;
   the chat jump waits for the history window and focuses an existing tab

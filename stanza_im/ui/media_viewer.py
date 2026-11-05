@@ -528,6 +528,8 @@ class MediaViewer(QtWidgets.QMainWindow):
         self._video_play = play
         self._video_slider = slider
         self._video_time = time_label
+        self._video_pending_seek = None
+        self._video_updating_slider = False
 
         def toggle():
             if player.playbackState() == player.PlaybackState.PlayingState:
@@ -536,16 +538,57 @@ class MediaViewer(QtWidgets.QMainWindow):
                 player.play()
 
         play.clicked.connect(toggle)
-        slider.sliderMoved.connect(player.setPosition)
+
+        def seek_to(position):
+            try:
+                position = max(0, int(position))
+            except (TypeError, ValueError):
+                return
+            duration = int(player.duration() or 0)
+            if duration > 0:
+                position = min(position, duration)
+            if (player.mediaStatus() in (
+                    player.MediaStatus.NoMedia,
+                    player.MediaStatus.LoadingMedia)
+                    or not player.isSeekable()):
+                # Forward seek used to run before FFmpeg exposed a seekable
+                # stream; keep it and apply it when the file is loaded.
+                self._video_pending_seek = position
+                return
+            player.setPosition(position)
+
+        def apply_pending_seek(status=None):
+            pending = getattr(self, "_video_pending_seek", None)
+            if pending is None:
+                return
+            if status is not None and status not in (
+                    player.MediaStatus.LoadedMedia,
+                    player.MediaStatus.BufferedMedia,
+                    player.MediaStatus.EndOfMedia):
+                return
+            if not player.isSeekable():
+                return
+            self._video_pending_seek = None
+            player.setPosition(pending)
 
         def duration_changed(duration):
             slider.setRange(0, max(0, int(duration)))
+            apply_pending_seek()
             update_time()
 
         def position_changed(position):
             if not slider.isSliderDown():
-                slider.setValue(max(0, int(position)))
+                self._video_updating_slider = True
+                try:
+                    slider.setValue(max(0, int(position)))
+                finally:
+                    self._video_updating_slider = False
             update_time()
+
+        def slider_value_changed(value):
+            if self._video_updating_slider or slider.isSliderDown():
+                return
+            seek_to(value)
 
         def update_time():
             time_label.setText(
@@ -557,14 +600,24 @@ class MediaViewer(QtWidgets.QMainWindow):
                        == player.PlaybackState.PlayingState)
             play.setText("\u275a\u275a" if playing else "\u25b6")
 
+        def status_changed(status):
+            if status == player.MediaStatus.InvalidMedia:
+                self._show_video_error(missing=False)
+                return
+            apply_pending_seek(status)
+
+        slider.sliderMoved.connect(seek_to)
+        slider.sliderReleased.connect(lambda: seek_to(slider.value()))
+        slider.valueChanged.connect(slider_value_changed)
+        slider.actionTriggered.connect(
+            lambda _action: QtCore.QTimer.singleShot(
+                0, lambda: seek_to(slider.value())))
         player.durationChanged.connect(duration_changed)
         player.positionChanged.connect(position_changed)
         player.playbackStateChanged.connect(state_changed)
         player.errorOccurred.connect(
             lambda _err, _text="": self._show_video_error(missing=False))
-        player.mediaStatusChanged.connect(
-            lambda status: self._show_video_error(missing=False)
-            if status == player.MediaStatus.InvalidMedia else None)
+        player.mediaStatusChanged.connect(status_changed)
         self.setCentralWidget(page)
         player.setSource(QtCore.QUrl.fromLocalFile(path))
         player.play()

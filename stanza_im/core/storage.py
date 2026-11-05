@@ -123,6 +123,10 @@ class Config:
             "webengine_memory_mode": "moderate",
             # HTTP cache cap of the default WebEngine profile (MB, 0 = off).
             "webengine_cache_mb": 50,
+            # Qt Multimedia FFmpeg hardware video decoding.  Off by default:
+            # the VAAPI HEVC path crashes on seek (AVHWFramesContext mapping).
+            # Applied before QApplication, so changing it needs a restart.
+            "qtmm_hw_decode": False,
         },
         "connection": {"auto_join_conferences": True,
                         "save_status_message": True, "resource": "jabbim",

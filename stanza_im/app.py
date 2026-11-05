@@ -82,6 +82,26 @@ def apply_chromium_flags(mode: str) -> None:
         logger.info("WebEngine flags (%s): %s", mode, " ".join(flags))
 
 
+def apply_media_flags(hw_decode: bool) -> None:
+    """Select Qt Multimedia FFmpeg software/hardware video decoding.
+
+    ``QT_FFMPEG_DECODING_HW_DEVICE_TYPES=,`` is Qt's documented empty list:
+    it disables every hardware decoding backend.  This avoids the VAAPI HEVC
+    seek crash (AVHWFramesContext mapping) in the media viewer.  An explicit
+    environment override wins, so power users can still test hardware decode.
+    Must be called before QApplication loads the multimedia plugin.
+    """
+    env = os.environ.get("QT_FFMPEG_DECODING_HW_DEVICE_TYPES")
+    if env is not None:
+        logger.info("Qt Multimedia decoding: hardware (env override: %s)", env)
+        return
+    if hw_decode:
+        logger.info("Qt Multimedia decoding: hardware (config)")
+        return
+    os.environ["QT_FFMPEG_DECODING_HW_DEVICE_TYPES"] = ","
+    logger.info("Qt Multimedia decoding: software (hardware disabled)")
+
+
 def build_parser(argv: list[str] | None = None) -> argparse.ArgumentParser:
     prog = os.path.basename((argv or sys.argv)[0] or "stanza-im")
     parser = argparse.ArgumentParser(
@@ -274,6 +294,7 @@ def run() -> int:
     from stanza_im.core.storage import Config
     perf = Config().performance
     apply_chromium_flags(getattr(perf, "webengine_memory_mode", "moderate"))
+    apply_media_flags(bool(getattr(perf, "qtmm_hw_decode", False)))
     defer_build = bool(getattr(perf, "defer_ui_build", True))
     omemo_mode = str(getattr(perf, "omemo_load_mode", "lazy") or "lazy")
     # Turn the heavy subsystems off entirely before anything imports them.

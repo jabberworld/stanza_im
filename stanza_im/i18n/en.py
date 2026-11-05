@@ -925,6 +925,8 @@ STRINGS = {
     "prefs_performance": "Performance",
     "prefs_defer_ui_build": "Show the login window before building the interface",
     "prefs_defer_ui_build_tip": "Build the heavy parts (chat window, tray, roster) only after the login window is on screen, so it appears sooner. Disable it if the interface fails to come up.",
+    "prefs_qtmm_hw_decode": "Hardware video decoding (Qt Multimedia)",
+    "prefs_qtmm_hw_decode_tip": "Off uses software decoding for HEVC/H.265 in the viewer; it is safer and fixes seek crashes on some drivers. Enabling it may speed video up but restores the problematic AVHWFramesContext path. Takes effect after a restart.",
     "prefs_omemo_load": "OMEMO load",
     "prefs_omemo_load_tip": "When to load the OMEMO libraries. “On first use” only checks that they are installed (without importing them) and loads them at login, saving memory on the login screen; “At startup” imports them right after the window appears; “Off” never loads them (encryption is unavailable). Takes effect after a restart.",
     "prefs_calls_load": "Call engine load",

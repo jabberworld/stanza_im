@@ -579,6 +579,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         perf_form.addRow(self._row(
             defer, self._info_label(tr("prefs_defer_ui_build_tip")),
             trailing_stretch=True))
+        hw_decode = self._check("qtmm_hw_decode",
+                                tr("prefs_qtmm_hw_decode"))
+        perf_form.addRow(self._row(
+            hw_decode, self._info_label(tr("prefs_qtmm_hw_decode_tip")),
+            trailing_stretch=True))
 
         def _select(label_key: str, key: str, options, tip: str):
             combo = self._combo(key, options)
@@ -2412,6 +2417,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             performance, "webengine_memory_mode", "moderate")
         values["webengine_cache_mb"] = int(
             getattr(performance, "webengine_cache_mb", 50) or 0)
+        values["qtmm_hw_decode"] = bool(getattr(
+            performance, "qtmm_hw_decode", False))
         values["sound_theme"] = getattr(notifications, "sound_theme",
                                         "default") or "default"
         for key in ("sound_first_message", "sound_any_message",
@@ -2462,6 +2469,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._value("webengine_memory_mode") or "moderate")
         cfg.performance.webengine_cache_mb = int(
             self._value("webengine_cache_mb") or 0)
+        cfg.performance.qtmm_hw_decode = bool(
+            self._value("qtmm_hw_decode"))
         cfg.chat.history_limit = self._value("history_limit_chat")
         cfg.chat.tab_title_length = self._value("tab_title_length_chat")
         cfg.jid = self._value("jid")

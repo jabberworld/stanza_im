@@ -1846,9 +1846,11 @@ view via `ChatView.set_media_thumbnail` (in-place `src` swap, no document
 reset). Clicking the preview emits `stanza:view:` → `MediaViewer` (image fitted
 to the window; video in a WebEngine `<video>` window with native `controls`,
 falling back to a downloaded local file played by Qt Multimedia
-`QMediaPlayer`/`QVideoWidget` when WebEngine rejects the codec
-(a single click on the video toggles play/pause via a 250 ms timer that the
-double click cancels, so the pair never fights), `F11`/double-click fullscreen —
+`QMediaPlayer`/`QVideoWidget` when WebEngine rejects the codec (a seek before
+the file is seekable is queued and applied on `LoadedMedia`; the slider seeks
+on drag, release and keyboard actions), (a single click on the video toggles
+play/pause via a 250 ms timer that the double click cancels, so the pair never
+fights), `F11`/double-click fullscreen —
 the double-click asks Python through a QWebChannel `bridge.toggle_fullscreen()`
 (a `stanza:viewer-fs` navigation, matched by its whole URL, is a fallback);
 `Esc`
@@ -1890,7 +1892,11 @@ open the cached/decrypted original first; the audio mode uses Qt Multimedia and
 reports a missing file instead of opening a dead URL. A video decode/codec
 failure is shown as «Не удалось воспроизвести видео» with an external-browser
 fallback; `history_media_missing` is reserved for a real download/404 failure
-(so HEVC is no longer falsely reported as a missing file). Three actions float over
+(so HEVC is no longer falsely reported as a missing file). Qt Multimedia
+software decoding is the default (`performance.qtmm_hw_decode = false`,
+`QT_FFMPEG_DECODING_HW_DEVICE_TYPES=,`), because the VAAPI HEVC hardware path
+segfaults while seeking; the hardware option applies after a restart. Three
+actions float over
 the media **without a panel** — Download (`save_requested`), Copy link
 (`copy_requested`) and Share (`share_requested`) — as a Qt overlay frame for
 images and as an HTML overlay (wired through the `_VideoBridge`) for videos;
@@ -4027,6 +4033,12 @@ tunable via Preferences → «Stanza IM» → «Производительнос
   `QWebEngineProfile` HTTP cache (`ui/url_schemes.configure_default_profile`,
   also sets in-memory cookies and disables plugins/popups; a no-op without a
   live `QApplication`).
+- `qtmm_hw_decode` (default `false`): `app.apply_media_flags` runs before
+  `QApplication` and, unless the user set
+  `QT_FFMPEG_DECODING_HW_DEVICE_TYPES`, exports it as `,` (Qt's empty hardware
+  backend list), so Qt Multimedia plays HEVC/H.265 with the software FFmpeg
+  decoder. This avoids the `AVHWFramesContext` seek segfault; enabling the
+  option restores hardware decoding but needs a restart.
 The OMEMO startup probe runs in a background thread started only **after** the
 window is shown (`app.py`, ~200 ms), so it never starves the login window; the
 `plugins.attention` manifest does not import `core.client` (so plugin discovery
