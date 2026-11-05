@@ -3001,7 +3001,18 @@ window.__stanzaMentionRef = '';
             self._scroll_suspended = True
             self._reset_unread_indicator()
             self._update_jump_button()
+            if not self._ready or self._pending:
+                # The page may still be loading (a newly opened conference):
+                # replay this after the buffered markup is in the DOM.
+                self._deferred_scroll = ("bottom",)
+                return
             self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
+
+        def pause_media(self) -> None:
+            """Pause inline audio/video when a media viewer opens."""
+            self.evaluate_js(
+                "document.querySelectorAll('video,audio').forEach("
+                "function(m){try{m.pause();}catch(e){}});")
 
         def scroll_fraction(self) -> float:
             return self._fraction
@@ -3546,6 +3557,10 @@ else:
 
         def load_theme(self, variant: str = ""):
             pass
+
+        def pause_media(self) -> None:
+            """The QTextBrowser fallback has no playing media nodes."""
+            return
 
         def scroll_to_bottom(self):
             self._fraction = 1.0

@@ -7200,7 +7200,18 @@ class MainWindow(QtWidgets.QMainWindow):
                                     timestamp: str = "") -> None:
         if not jid or not self._history_chat_jump_available(jid):
             return
-        self._on_contact_open(jid)
+        if self._chat_window.has_chat(jid):
+            # Focus the existing tab without re-running the read-anchor load;
+            # that used to reset the position before the jump.
+            if jid in self._muc_self_nicks:
+                self._chat_window.open_groupchat(
+                    jid, self._muc_self_nicks[jid],
+                    self._muc_display_name(jid))
+            else:
+                self._chat_window.open_chat(
+                    jid, self._roster_name(jid) or jid.split("@")[0])
+        else:
+            self._on_contact_open(jid)
         self._raise_chat_area()
         chat = self._chat_window.get_chat(jid)
         if chat is not None:
@@ -9864,6 +9875,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                  fullscreen: bool = False):
         if not url:
             return
+        # Opening the external viewer takes over playback from the inline chat
+        # players; pause them first.
+        self._chat_window.pause_media()
         # Imported lazily so startup never pulls in QtWebEngine.
         from stanza_im.ui.media_viewer import MediaViewer
         viewer = MediaViewer(url, kind, self._media_service, self,

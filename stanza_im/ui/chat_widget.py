@@ -582,6 +582,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._jump_pending = ""
         self._jump_pages = 0
         self._jump_fallback_unread = False
+        self._pending_jump: dict = {}
+        self._pending_bottom = False
         self._restore_anchor: dict = {}
         self._unread_boundary: dict = {}
         self._unread_marker_shown = False
@@ -2273,7 +2275,17 @@ class ChatWidget(QtWidgets.QWidget):
         self._render_all()
 
     def _render_after_resume(self) -> None:
+        pending = bool(self.__dict__.get("_pending_jump")
+                        or self.__dict__.get("_pending_bottom", False))
+        if (not self._unread_boundary and not self._restore_anchor
+                and not pending and not self._user_scrolled_up):
+            # Reopening a read conversation must land at the newest message;
+            # a stale suspended fraction used to leave it around the middle.
+            self._preserve_fraction = 1.0
+            self._anchor_bottom = True
         self._render_all()
+        if pending:
+            QtCore.QTimer.singleShot(0, self._apply_pending_navigation)
         if self._tail_refresh_on_resume:
             self._tail_refresh_on_resume = False
             force = bool(self.__dict__.pop("_tail_refresh_force", False))
@@ -2407,6 +2419,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._users.clear()
         self._subjects.clear()
         self._jump_pending = ""
+        self._pending_jump = {}
+        self._pending_bottom = False
         self._jump_fallback_unread = False
         self._unread_boundary = {}
         self._unread_marker_shown = False
@@ -2524,10 +2538,16 @@ class ChatWidget(QtWidgets.QWidget):
                 self._restore_anchor = {
                     "ref": self._reply_target_id(first),
                     "ts": first.get("timestamp") or ""}
+        pending = bool(self.__dict__.get("_pending_jump")
+                        or self.__dict__.get("_pending_bottom", False))
+        if pending:
+            self._cancel_anchor_restore()
         entries = self._render_all()
         self._seed_unseen(entries)
         self.refresh_unread_mentions(entries)
-        if self._restore_anchor:
+        if pending:
+            QtCore.QTimer.singleShot(0, self._apply_pending_navigation)
+        elif self._restore_anchor:
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
@@ -2541,6 +2561,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._history = []
         self._messages = []
         self._status_lines = []
+        self._pending_jump = {}
+        self._pending_bottom = False
         self._unread_boundary = {}
         self._restore_anchor = {}
         self._cleared = False
@@ -3301,17 +3323,62 @@ class ChatWidget(QtWidgets.QWidget):
             if self._server_archive_available:
                 self.load_more_from_server()
 
+    def _cancel_anchor_restore(self) -> None:
+        self._restore_anchor = {}
+        cancel = getattr(self._view, "cancel_anchor_restore", None)
+        if callable(cancel):
+            cancel()
+
     def jump_to_message(self, ref_id: str, timestamp: str = "") -> None:
         """Public jump used by the History Manager media context menu."""
+        self._pending_bottom = False
+        if (self._suspended or not self._initial_load_done
+                or (not self._history and not self._messages)):
+            self._pending_jump = {"ref": str(ref_id or ""),
+                                  "ts": str(timestamp or "")}
+            self._cancel_anchor_restore()
+            return
+        self._pending_jump = {}
+        self._cancel_anchor_restore()
         if ref_id:
             entry = self._find_message(ref_id)
             if entry is not None:
-                target = self._reply_target_id(entry) or ref_id
-                self._view.scroll_to_message(target)
+                self._scroll_to_entry(entry)
             else:
                 self._jump_to_message(ref_id)
         elif timestamp:
             self._view.scroll_to_time(timestamp)
+
+    def pause_media(self) -> None:
+        """Pause inline media when the external viewer takes over."""
+        try:
+            self._view.pause_media()
+        except (AttributeError, RuntimeError):
+            pass
+
+    def jump_to_bottom(self) -> None:
+        """Public bottom jump (conference opened from the roster/xmpp link)."""
+        self._pending_jump = {}
+        if (self._suspended or not self._initial_load_done
+                or (not self._history and not self._messages)):
+            self._pending_bottom = True
+            self._cancel_anchor_restore()
+            return
+        self._pending_bottom = False
+        self._cancel_anchor_restore()
+        self._view.scroll_to_bottom()
+
+    def _apply_pending_navigation(self) -> None:
+        if self._released:
+            return
+        if self._pending_bottom:
+            self._pending_bottom = False
+            self.jump_to_bottom()
+        elif self._pending_jump:
+            pending = self._pending_jump
+            self._pending_jump = {}
+            self.jump_to_message(pending.get("ref", ""),
+                                 pending.get("ts", ""))
 
     def _jump_to_message(self, ref_id: str,
                          fallback_unread: bool = False) -> None:

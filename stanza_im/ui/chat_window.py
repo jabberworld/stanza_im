@@ -439,6 +439,13 @@ class ChatWindow(QtWidgets.QMainWindow):
         for widget in self._tabs.values():
             widget.reload_theme()
 
+    def pause_media(self) -> None:
+        """Stop inline audio/video in every open chat tab."""
+        for widget in self._tabs.values():
+            pause = getattr(widget, "pause_media", None)
+            if callable(pause):
+                pause()
+
     def set_show_avatars(self, show: bool):
         for widget in self._tabs.values():
             widget.set_show_avatars(show)

@@ -750,6 +750,54 @@ check("the restored view clears its pending-anchor flag",
       "_anchor_restore_pending = False" in _release
       and "anchor_scroll_failed.emit()" in _release)
 
+# 18d. explicit History Manager jumps survive the initial history load -------
+w = widget()
+w._initial_load_done = False
+w._suspended = False
+w._pending_jump = {}
+w._pending_bottom = False
+w.jump_to_message("m-2", "2026-10-02T10:02:00Z")
+check("a jump before history load is parked",
+      w._pending_jump.get("ref") == "m-2" and not w._view.scrolled)
+w._history = [row("2026-10-02T10:01:00Z", "one", "m-1"),
+              row("2026-10-02T10:02:00Z", "two", "m-2")]
+w._initial_load_done = True
+w._apply_pending_navigation()
+check("the parked jump is applied after history loads",
+      w._view.scrolled == ["m-2"])
+
+w2 = widget()
+w2._initial_load_done = False
+w2._suspended = False
+w2._pending_jump = {}
+w2._pending_bottom = False
+w2.jump_to_bottom()
+check("a bottom request before load is parked", w2._pending_bottom)
+w2._history = [row("2026-10-02T10:02:00Z", "two", "m-2")]
+w2._initial_load_done = True
+w2._apply_pending_navigation()
+check("the parked bottom request reaches the end",
+      w2._view.bottom_scrolls == 1)
+
+# 18e. reopening a read conversation does not restore a stale mid position --
+w3 = widget()
+w3._preserve_fraction = 0.5
+w3._anchor_bottom = False
+w3._user_scrolled_up = False
+w3._pending_jump = {}
+w3._pending_bottom = False
+w3._tail_refresh_on_resume = False
+w3._render_after_resume()
+check("a resumed read conversation opens at the bottom",
+      w3._anchor_bottom and w3._view.bottom_scrolls == 1)
+
+_sb = method_source(_cv_src, "scroll_to_bottom")
+check("bottom scroll waits for the page to become ready",
+      'self._deferred_scroll = ("bottom",)' in _sb)
+check("opening the media viewer pauses inline chat media",
+      "self._chat_window.pause_media()" in _mw_src
+      and "def pause_media" in _cv_src and "def pause_media" in _cw_src)
+
 # 19. a transient bottom during a programmatic scroll is not "read" ----------
 class _AtBottomView:
     _scroll_suspended = False

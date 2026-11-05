@@ -706,10 +706,14 @@ local combined), while the text tab uses `_dates`. The filename filter is
 debounced, and
 images use the shared preview cache; `ui/media_meta.MediaMetadataService`
 fills video thumbnails and audio/video duration in the background (PyAV when
-available) and caches them in `MediaCache` (`duration` field). A click opens
-`MediaViewer` immediately; the viewer resolves/decrypts the original itself
-(audio has its own Qt Multimedia mode) and reports a dead URL through
-`load_failed`, which the media view shows as «Файл не найден». «Все контакты»
+available) and caches them in `MediaCache` (`duration` field). A click pauses
+inline chat media and opens `MediaViewer` immediately; the viewer
+resolves/decrypts the original itself (audio has its own Qt Multimedia mode)
+and reports a dead URL through `load_failed`, which the media view shows as
+«Файл не найден». A media-card context menu offers copy link, «Перейти в чат»
+(disabled for a conference we are not joined to) and «Перейти к сообщению»;
+the chat jump waits for the history window and focuses an already open tab
+without re-applying its read anchor. «Все контакты»
 builds one local media catalog across all histories. The media «Искать на
 сервере» button (enabled by MAM, not fulltext) first shows the local media
 catalog, then walks the ordinary XEP-0313 archive backwards
@@ -1863,7 +1867,8 @@ media cache (`MediaCache.info`), else a URL-only descriptor (name/media-type
 from the extension); `_send_share` passes it as `media=` to
 `send_message`/`send_muc_message`. Previews are
 off when QtWebEngine is unavailable. Settings changes re-render open chats via
-`ChatWindow.rerender_messages()`. The `MediaViewer` window fits the image after
+`ChatWindow.rerender_messages()`. The `MediaViewer` window pauses every inline chat/video/audio player
+(`ChatWindow.pause_media`) before it opens, and fits the image after
 `showEvent` (a cached original returns before layout, so the initial fit is
 deferred) and persists its geometry/position in the shared `media_viewer`
 config section (image, video and audio viewers share it). Video/audio media
