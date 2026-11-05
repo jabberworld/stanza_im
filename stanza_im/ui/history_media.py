@@ -17,6 +17,7 @@ from stanza_im.i18n import tr
 
 _CARD_WIDTH = 172
 _THUMB_HEIGHT = 104
+_PAGE_SIZE = 80
 
 
 def _pixmap_from_uri(uri: str) -> QtGui.QPixmap:
@@ -183,6 +184,7 @@ class HistoryMediaView(QtWidgets.QWidget):
         self._loading = False
         self._status_text = ""
         self._cards: dict[str, list[MediaCard]] = {}
+        self._render_limit = _PAGE_SIZE
         self._scroll = QtWidgets.QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
@@ -224,6 +226,7 @@ class HistoryMediaView(QtWidgets.QWidget):
     def set_items(self, items: list[dict]) -> None:
         self._items = [item for item in (items or [])
                        if item.get("kind") == self._kind]
+        self._render_limit = _PAGE_SIZE
         self._render()
 
     def append_items(self, items: list[dict]) -> None:
@@ -240,6 +243,8 @@ class HistoryMediaView(QtWidgets.QWidget):
             self._items.append(item)
         bar = self._scroll.verticalScrollBar()
         value = bar.value()
+        self._render_limit = min(
+            len(self._visible()), self._render_limit + _PAGE_SIZE)
         self._render()
         QtCore.QTimer.singleShot(
             0, lambda b=bar, v=value: b.setValue(min(v, b.maximum())))
@@ -251,6 +256,7 @@ class HistoryMediaView(QtWidgets.QWidget):
             self._filter_timer.stop()
             if self._filter:
                 self._filter = ""
+                self._render_limit = _PAGE_SIZE
                 self._render()
             return
         self._filter_timer.start()
@@ -259,6 +265,7 @@ class HistoryMediaView(QtWidgets.QWidget):
         if self._pending_filter == self._filter:
             return
         self._filter = self._pending_filter
+        self._render_limit = _PAGE_SIZE
         self._render()
 
     def set_context(self, text: str) -> None:
@@ -295,6 +302,7 @@ class HistoryMediaView(QtWidgets.QWidget):
 
     def clear(self) -> None:
         self._items = []
+        self._render_limit = _PAGE_SIZE
         self._status_text = ""
         self._loading = False
         self._render()
@@ -337,7 +345,7 @@ class HistoryMediaView(QtWidgets.QWidget):
         self._cards = {}
         items = sorted(self._visible(),
                        key=lambda item: str(item.get("timestamp") or ""),
-                       reverse=True)
+                       reverse=True)[:self._render_limit]
         if not items:
             self._update_status()
             self._layout.addStretch(1)
@@ -426,10 +434,24 @@ class HistoryMediaView(QtWidgets.QWidget):
         if self._loading:
             return
         bar = self._scroll.verticalScrollBar()
-        # Preload before the user hits the exact bottom; sparse archive pages
-        # then continue filling while the scroll stays near the edge.
         margin = max(200, self.viewport_height())
-        if bar.maximum() > 0 and value >= bar.maximum() - margin:
+        near_bottom = bar.maximum() <= 0 or value >= bar.maximum() - margin
+        if near_bottom and self._render_limit < len(self._visible()):
+            # Render the next local page only once the user approaches the
+            # current end; this keeps all-time catalogs from building hundreds
+            # of QWidget cards on the UI thread at once.
+            old_value = bar.value()
+            self._render_limit = min(
+                len(self._visible()), self._render_limit + _PAGE_SIZE)
+            self._render()
+            QtCore.QTimer.singleShot(
+                0, lambda b=bar, v=old_value:
+                    b.setValue(min(v, b.maximum())))
+            # Server mode still needs its next MAM page; local mode has no
+            # listener for this signal.
+            self.load_more.emit()
+            return
+        if near_bottom:
             self.load_more.emit()
 
     @staticmethod

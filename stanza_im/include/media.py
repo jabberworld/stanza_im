@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import time
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from stanza_im.include.constants import CACHE_DIR
 
@@ -34,6 +34,25 @@ def url_path(url: str) -> str:
         return urlsplit(url).path or ""
     except ValueError:
         return url or ""
+
+
+def quote_http_url(url: str) -> str:
+    """Percent-encode non-ASCII HTTP path/query characters.
+
+    ``urllib`` and some FFmpeg/PyAV paths encode the whole URL as ASCII and fail
+    on Cyrillic filenames.  Existing ``%XX`` escapes are preserved (``%`` is in
+    the safe set), so an already encoded URL is returned unchanged.
+    """
+    try:
+        parts = urlsplit(str(url or ""))
+    except ValueError:
+        return str(url or "")
+    if parts.scheme.lower() not in ("http", "https"):
+        return str(url or "")
+    path = quote(parts.path, safe="/%:@!$&'()*+,;=-._~")
+    query = quote(parts.query, safe="=&?/:@%+,;!$'()*.-_~")
+    fragment = quote(parts.fragment, safe="/%:@!$&'()*+,;=-._~")
+    return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
 
 
 def url_extension(url: str) -> str:

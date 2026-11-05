@@ -1244,22 +1244,32 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         if not jid:
             return
         day = timestamp[:10]
-        contact = next((c for c in self._catalog if c["jid"] == jid), None)
-        name = contact["name"] if contact else jid
         self._tabs.setCurrentIndex(0)
-        self._pending_date = day
-        await self._select_jid_async(jid, name)
-        task = self._dates_task
-        if task is not None:
-            try:
-                await task
-            except Exception:  # noqa: BLE001
-                pass
-        if self._released or self._jid != jid:
+        if self._jid == jid:
+            # The contact is already selected: do not reset its dates/tree and
+            # do not rebuild every media tab just to highlight a message.
             self._pending_date = ""
-            return
-        if day and self._date != day:
-            await self._select_date_async(day)
+            if day and self._date != day:
+                await self._select_date_async(day)
+            elif day and not self._entries:
+                await self._load_date_async(day)
+        else:
+            contact = next((c for c in self._catalog if c["jid"] == jid),
+                           None)
+            name = contact["name"] if contact else jid
+            self._pending_date = day
+            await self._select_jid_async(jid, name)
+            task = self._dates_task
+            if task is not None:
+                try:
+                    await task
+                except Exception:  # noqa: BLE001
+                    pass
+            if self._released or self._jid != jid:
+                self._pending_date = ""
+                return
+            if day and self._date != day:
+                await self._select_date_async(day)
         if self._released or self._jid != jid:
             return
         index = self._find_entry_for_item(item)

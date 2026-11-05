@@ -699,21 +699,29 @@ its own copies and state). Media rows come from `history.media_entries` /
 `media_items_from_entry` (SIMS URL or a body URL, including OMEMO
 `aesgcm://`), are grouped by month (a bold `YYYY Month` header with horizontal
 rules) and rendered by `ui/history_media.HistoryMediaView` as fixed cards.
-Media tabs default to «За все время»; with it off the view shows a «За
-сегодня»/«За YYYY-MM-DD» context line. The calendar highlight is tab-aware:
+The grid renders at most 80 cards at once (one page); scrolling near its end
+grows the local page instead of building thousands of `QWidget`s, which keeps
+large all-time/all-contacts catalogs responsive. Media tabs default to «За все
+время»; with it off the view shows a «За сегодня»/«За YYYY-MM-DD» context line.
+The calendar highlight is tab-aware:
 `_media_calendar_dates` contains dates of the active media kind (server and
 local combined), while the text tab uses `_dates`. The filename filter is
 debounced, and
 images use the shared preview cache; `ui/media_meta.MediaMetadataService`
 fills video thumbnails and audio/video duration in the background (PyAV when
-available) and caches them in `MediaCache` (`duration` field). A click pauses
+available) and caches them in `MediaCache` (`duration` field). Failed preview
+or metadata URLs (403/404/timeouts) are negatively cached for 10 minutes and
+are not retried on every re-render; remote PyAV probes use a timeout and
+non-ASCII HTTP paths are percent-encoded before `urlopen`/PyAV. A click pauses
 inline chat media and opens `MediaViewer` immediately; the viewer
 resolves/decrypts the original itself (audio has its own Qt Multimedia mode)
 and reports a dead URL through `load_failed`, which the media view shows as
 «Файл не найден». A media-card context menu offers copy link, «Перейти в чат»
 (disabled for a conference we are not joined to) and «Перейти к сообщению»;
 the chat jump waits for the history window and focuses an already open tab
-without re-applying its read anchor. «Все контакты»
+without re-applying its read anchor. «Перейти к сообщению» within the already
+open contact/day only selects the matching block; it does not reset the media
+tabs or rebuild the text day. «Все контакты»
 builds one local media catalog across all histories. The media «Искать на
 сервере» button (enabled by MAM, not fulltext) first shows the local media
 catalog, then walks the ordinary XEP-0313 archive backwards

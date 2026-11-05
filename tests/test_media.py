@@ -20,7 +20,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import load as i18n_load
 from stanza_im.include import media as media_mod
-from stanza_im.include.media import MediaCache, media_kind
+from stanza_im.include.media import MediaCache, media_kind, quote_http_url
 from stanza_im.include.utils import tokenize_urls, restore_url_tokens
 from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_themes import ChatThemeFactory
@@ -58,6 +58,11 @@ check("audio ext", media_kind("https://h/a/song.mp3") == "audio")
 check("video ext", media_kind("https://h/v/clip.webm#t=1") == "video")
 check("non-media url", media_kind("https://h/doc/report.pdf") is None)
 check("encoded name", media_kind("https://h/a/my%20photo.png") == "image")
+_cyr = quote_http_url("https://h/a/Снимок.png")
+check("non-ASCII URL paths are percent-encoded",
+      "Снимок" not in _cyr and "%D0%A1" in _cyr)
+check("existing percent escapes are preserved",
+      quote_http_url("https://h/a/%D0%A1.png") == "https://h/a/%D0%A1.png")
 
 # 2. mode gating --------------------------------------------------------------
 check("none gates all", not any(mode_allows("none", k)
@@ -149,6 +154,11 @@ check("inline video keeps native controls",
       "<video controls" in video_html)
 check("a cached video frame becomes the poster",
       'poster="data:image/png;base64,' in video_html)
+_bad_url = "https://h/a/missing-preview.png"
+service._remember_failure(_bad_url)
+service.request(_bad_url)
+check("a failed preview URL is not re-queued",
+      _bad_url not in service._pending)
 
 # Inline-video click handling: the class is on the wrapper, so the JS branch
 # must look the video up from .stanza-media-video (regression: it used

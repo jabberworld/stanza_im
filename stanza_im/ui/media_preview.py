@@ -12,6 +12,7 @@ import asyncio
 import base64
 import html
 import logging
+import time
 from urllib.parse import quote
 
 from PyQt6 import QtCore, QtGui
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 MODES = ("none", "images", "images_audio", "all")
 
 _THUMB_CACHE_BYTES = 16 << 20   # in-memory thumbnail data-URI LRU budget
+_FAILED_TTL_S = 600.0            # do not retry a dead URL for 10 minutes
+_DOWNLOAD_TIMEOUT_S = 15.0       # a preview must not pin a worker for 30 s
 
 __all__ = ["MODES", "mode_allows", "MediaPreviewService"]
 
@@ -56,6 +59,7 @@ class MediaPreviewService(QtCore.QObject):
         self._mode = "images"
         self._size = 200
         self._pending: set[str] = set()
+        self._failed: dict[str, float] = {}
         self._video_pending: set[str] = set()
         self._meta_service = None
         self._thumb_uris: dict[str, str] = {}
@@ -72,6 +76,20 @@ class MediaPreviewService(QtCore.QObject):
         """Drop the in-memory thumbnail LRU (the disk cache was cleared)."""
         self._thumb_uris.clear()
         self._thumb_bytes = 0
+        self._failed.clear()
+
+    def _is_failed(self, url: str) -> bool:
+        stamp = self._failed.get(url)
+        if stamp is None:
+            return False
+        if time.monotonic() - stamp > _FAILED_TTL_S:
+            self._failed.pop(url, None)
+            return False
+        return True
+
+    def _remember_failure(self, url: str) -> None:
+        if url:
+            self._failed[url] = time.monotonic()
 
     def set_size(self, size) -> None:
         try:
@@ -250,6 +268,12 @@ class MediaPreviewService(QtCore.QObject):
 
     def request(self, url: str, force: bool = False) -> None:
         """Queue a thumbnail download for an image URL (idempotent)."""
+        if not url:
+            return
+        if force:
+            self._failed.pop(url, None)
+        elif self._is_failed(url):
+            return
         if url in self._pending:
             return
         if not force and self._cache.has_thumb(url):
@@ -276,6 +300,7 @@ class MediaPreviewService(QtCore.QObject):
             self._remember_thumb(url, uri)
             self.thumbnail_ready.emit(url, uri)
         except Exception as exc:  # noqa: BLE001 - reported via signal
+            self._remember_failure(url)
             logger.debug("media preview failed for %s: %s", url, exc)
             self.failed.emit(url)
         finally:
@@ -292,6 +317,7 @@ class MediaPreviewService(QtCore.QObject):
             QtCore.QTimer.singleShot(
                 0, lambda: self.thumbnail_ready.emit(url, uri))
         except Exception as exc:  # noqa: BLE001
+            self._remember_failure(url)
             logger.debug("media preview failed for %s: %s", url, exc)
             QtCore.QTimer.singleShot(0, lambda: self.failed.emit(url))
         finally:
@@ -318,8 +344,11 @@ class MediaPreviewService(QtCore.QObject):
         if url.startswith("aesgcm://"):
             return self._download_aesgcm(url)
         import urllib.request
-        request = urllib.request.Request(url, headers={"User-Agent": self._UA})
-        with urllib.request.urlopen(request, timeout=30) as response:
+        request_url = media_mod.quote_http_url(url)
+        request = urllib.request.Request(request_url,
+                                         headers={"User-Agent": self._UA})
+        with urllib.request.urlopen(
+                request, timeout=_DOWNLOAD_TIMEOUT_S) as response:
             length = response.headers.get("Content-Length")
             if length:
                 try:
@@ -348,9 +377,12 @@ class MediaPreviewService(QtCore.QObject):
         from urllib.parse import urlsplit
         from slixmpp.plugins.xep_0454 import XEP_0454
         parts = urlsplit(url)
-        https = "https://" + parts.netloc + parts.path
-        request = urllib.request.Request(https, headers={"User-Agent": self._UA})
-        with urllib.request.urlopen(request, timeout=30) as response:
+        https = media_mod.quote_http_url(
+            "https://" + parts.netloc + parts.path)
+        request = urllib.request.Request(https,
+                                         headers={"User-Agent": self._UA})
+        with urllib.request.urlopen(
+                request, timeout=_DOWNLOAD_TIMEOUT_S) as response:
             length = response.headers.get("Content-Length")
             if length:
                 try:

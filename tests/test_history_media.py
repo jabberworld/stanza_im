@@ -140,6 +140,26 @@ while __import__("time").time() < _deadline:
 check("resize reflows the grid without stale cards",
       len(view.findChildren(MediaCard)) == 2)
 
+# Large local catalogs are rendered one page at a time (80 cards); scrolling
+# grows the window instead of creating thousands of widgets in one pass.
+_page_view = HistoryMediaView("image")
+_page_view.resize(600, 420)
+_page_view.show()
+_page_items = [{
+    "url": f"https://files.example/page-{i}.jpg",
+    "kind": "image", "name": f"page-{i}.jpg",
+    "timestamp": "2026-05-01T10:00:00Z", "jid": JID,
+    "media_type": "image/jpeg",
+} for i in range(200)]
+_page_view.set_items(_page_items)
+app.processEvents()
+check("the media grid creates only the first 80 cards",
+      len(_page_view.findChildren(MediaCard)) == 80)
+_page_view._on_scroll(10**9)
+app.processEvents()
+check("scrolling grows the local media page",
+      len(_page_view.findChildren(MediaCard)) == 160)
+
 catalog = [{"jid": JID, "name": "Bob", "groups": ["G"],
             "is_conference": False}]
 dialog = HistoryManagerDialog(lambda: catalog)
@@ -315,6 +335,34 @@ check("go-to-message opens the media date", dialog._date == "2026-03-12")
 check("go-to-message highlights the target entry",
       dialog._messages.textCursor().hasSelection()
       and "photo" in dialog._messages.textCursor().selectedText())
+
+# Jumping within the already-open contact/day must not rebuild the day or the
+# media tabs; only the target entry is selected.
+_jump_calls = []
+_orig_select_jid = dialog._select_jid_async
+_orig_select_date = dialog._select_date_async
+
+
+async def _no_select_jid(*_args, **_kwargs):
+    _jump_calls.append("jid")
+
+
+async def _no_select_date(*_args, **_kwargs):
+    _jump_calls.append("date")
+
+
+dialog._select_jid_async = _no_select_jid
+dialog._select_date_async = _no_select_date
+try:
+    asyncio.get_event_loop().run_until_complete(
+        dialog._jump_to_media_message_async(photo_item))
+finally:
+    dialog._select_jid_async = _orig_select_jid
+    dialog._select_date_async = _orig_select_date
+check("same contact/day jump does not reload the text day",
+      _jump_calls == [])
+check("same contact/day jump still selects the target entry",
+      dialog._messages.textCursor().hasSelection())
 
 # A persisted continuous marker makes the next server run start below it and
 # signing off a page advances the low bound.

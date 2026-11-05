@@ -12,12 +12,16 @@ import base64
 import logging
 import queue
 import threading
+import time
 
 from PyQt6 import QtCore, QtGui
 
 from stanza_im.include import media as media_mod
 
 logger = logging.getLogger(__name__)
+
+_FAILED_TTL_S = 600.0
+_REMOTE_TIMEOUT_S = 10.0
 
 
 class MediaMetadataService(QtCore.QObject):
@@ -33,6 +37,7 @@ class MediaMetadataService(QtCore.QObject):
         self._downloader = downloader
         self._queue: queue.Queue[tuple[str, str] | None] = queue.Queue()
         self._pending: set[str] = set()
+        self._failed: dict[str, float] = {}
         self._thread: threading.Thread | None = None
         self._available: bool | None = None
 
@@ -40,6 +45,11 @@ class MediaMetadataService(QtCore.QObject):
         """Queue metadata extraction for *url* (idempotent)."""
         if not url or kind not in ("audio", "video") or url in self._pending:
             return
+        stamp = self._failed.get(url)
+        if stamp is not None:
+            if time.monotonic() - stamp <= _FAILED_TTL_S:
+                return
+            self._failed.pop(url, None)
         info = self._cache.info(url)
         thumb = self._cache.thumb_path(url) if kind == "video" else None
         duration = float(info.get("duration") or 0.0)
@@ -76,6 +86,7 @@ class MediaMetadataService(QtCore.QObject):
                 uri = self._thumb_uri(self._cache.thumb_path(url))
                 self.meta_ready.emit(url, float(duration or 0.0), uri)
             except Exception as exc:  # noqa: BLE001
+                self._failed[url] = time.monotonic()
                 logger.debug("Media metadata failed for %s: %s", url, exc)
                 self.failed.emit(url)
             finally:
@@ -90,6 +101,8 @@ class MediaMetadataService(QtCore.QObject):
             path = self._cache.store(url, original_bytes=raw, kind="file")
             if path:
                 return path
+        if url.startswith(("http://", "https://")):
+            return media_mod.quote_http_url(url)
         return url
 
     def _probe(self, url: str, kind: str) -> tuple[float, bytes]:
@@ -99,7 +112,13 @@ class MediaMetadataService(QtCore.QObject):
             logger.info("Video metadata unavailable (PyAV missing): %s", exc)
             return 0.0, b""
         source = self._local_source(url)
-        container = av.open(source)
+        if source.startswith(("http://", "https://")):
+            try:
+                container = av.open(source, timeout=_REMOTE_TIMEOUT_S)
+            except TypeError:
+                container = av.open(source)
+        else:
+            container = av.open(source)
         try:
             duration = 0.0
             if container.duration:

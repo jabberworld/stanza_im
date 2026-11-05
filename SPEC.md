@@ -3293,14 +3293,19 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   media states are independent). Media rows come from
   `history.media_entries`/`include.media.media_items_from_entry` (SIMS URL or
   a body URL, including OMEMO `aesgcm://`), are grouped by month and drawn by
-  `ui/history_media.HistoryMediaView` as fixed cards. Media tabs default to
+  `ui/history_media.HistoryMediaView` as fixed cards. The grid renders at most
+  80 cards at once and grows the page when the scroll approaches its end, so
+  all-time/all-contacts catalogs do not build thousands of widgets on the UI
+  thread. Media tabs default to
   «За все время»; with it off a «За сегодня»/«За YYYY-MM-DD» context line is
   shown. The filename filter is debounced. «Все контакты» builds a local
   catalog across all histories; «За все время» groups every month with a bold
   header and horizontal rules. Images use `MediaPreviewService`;
   `ui/media_meta.MediaMetadataService` fills video thumbnails and audio/video
   duration in the background (PyAV when available) and caches them in
-  `MediaCache` (new `duration` field). Chat video previews use that PyAV frame
+  `MediaCache` (new `duration` field). Failed preview/metadata URLs are
+  negatively cached for 10 minutes; remote PyAV opens time out and non-ASCII
+  HTTP paths are percent-encoded. Chat video previews use that PyAV frame
   as the `<video poster>` and keep inline playback for decodable codecs; when
   QtWebEngine reports `videoWidth === 0`/an error (HEVC/H.265), `_ACTION_JS`
   replaces the player with a clickable poster card. A click pauses inline chat
@@ -3313,7 +3318,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   The media context menu offers copy
   link, «Перейти в чат» (joined conferences only) and «Перейти к сообщению»;
   the chat jump waits for the history window and focuses an existing tab
-  without re-applying its read anchor.
+  without re-applying its read anchor. «Перейти к сообщению» in the already
+  open contact/day only highlights the matching block (no media reset or day
+  rebuild); a different day/contact takes the normal load path.
 - Media server mode uses ordinary XEP-0313 MAM, not a XEP-0431 `http*` query:
   `JabberClient.fetch_mam_media_page` walks backwards with RSM `before`, so
   the newest media is shown first and older pages are appended when the grid
