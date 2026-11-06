@@ -219,6 +219,14 @@ def restore_url_tokens(text: str, anchors: list[str]) -> str:
     return text
 
 
+def local_date(value) -> str:
+    """Return the local ``YYYY-MM-DD`` date of an ISO/unix timestamp."""
+    text = format_local_datetime(value)
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    return ""
+
+
 def format_local_datetime(value) -> str:
     """Format a unix timestamp or ISO string as local ``YYYY-MM-DD HH:MM:SS``."""
     dt = None

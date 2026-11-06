@@ -3279,7 +3279,11 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
 - The manager's per-contact `_dates` are read once on selection; clicking a
   calendar day that is not among them re-reads `history.dates_async` first
   (`_recheck_date_async`), so days added by a MAM backfill after the dialog
-  opened are highlighted and load their messages.
+  opened are highlighted and load their messages. Days, search buckets and
+  media calendar dates are **local** (the SQLite `local_day` function shares
+  `local_date` with the UI; legacy timezone-less rows stay local wall-clock),
+  and message timestamps are shown via `format_local_datetime`; SQLite storage
+  and XMPP/MAM/read cursors remain UTC.
 - The «Все контакты» toggle (`_btn_all_contacts`) searches every JID with a
   local store (`history.list_history_jids`, in a worker thread), filters the
   left tree to the contacts with matches (`_catalog_filter`, groups expanded
@@ -3301,7 +3305,8 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   «За все время»; with it off a «За сегодня»/«За YYYY-MM-DD» context line is
   shown. The filename filter is debounced. «Все контакты» builds a local
   catalog across all histories; «За все время» groups every month with a bold
-  header and horizontal rules. Images use `MediaPreviewService`;
+  header and horizontal rules. Media months and day filters use local dates;
+  a UTC timestamp near midnight belongs to the corresponding local day. Images use `MediaPreviewService`;
   `ui/media_meta.MediaMetadataService` fills video thumbnails and audio/video
   duration in the background (PyAV when available) and caches them in
   `MediaCache` (new `duration` field). Failed preview/metadata URLs are

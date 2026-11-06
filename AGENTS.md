@@ -659,7 +659,15 @@ contacts with history by their roster groups or the
 `core/known_contacts.py` registry (persisted JID → name/groups/conference flag
 so removed contacts keep their names), shows per-day bold dates in a
 `QCalendarWidget`, and supports day-scoped, all-time and **all-contacts**
-substring search (`core/history.dates/load_day/search_dates`). The «Все
+substring search (`core/history.dates/load_day/search_dates`). History Manager
+uses **local** calendar days and displays every timestamp through
+`format_local_datetime`; the SQLite rows and XMPP comparison/read/MAM cursors
+stay in UTC. `history.dates/load_day/search_dates/media_dates/media_entries`
+translate the selected local day with the shared `local_day`/`local_date`
+helpers (the SQLite `local_day` function uses the same conversion as the UI),
+so 00:30 local belongs to the next local day even when its stored UTC is the
+previous date. Legacy rows without a timezone suffix stay local wall-clock
+values instead of being shifted as UTC. The «Все
 контакты» toggle (`_btn_all_contacts`) searches every JID with a local store
 (`history.list_history_jids`) in a worker thread, filters the left tree to the
 contacts with matches (`_catalog_filter` → `_rebuild_tree`, whose groups are
@@ -704,8 +712,8 @@ grows the local page instead of building thousands of `QWidget`s, which keeps
 large all-time/all-contacts catalogs responsive. Media tabs default to «За все
 время»; with it off the view shows a «За сегодня»/«За YYYY-MM-DD» context line.
 The calendar highlight is tab-aware:
-`_media_calendar_dates` contains dates of the active media kind (server and
-local combined), while the text tab uses `_dates`. The filename filter is
+`_media_calendar_dates` contains local dates of the active media kind (server
+and local combined), while the text tab uses `_dates`. The filename filter is
 debounced, and
 images use the shared preview cache; `ui/media_meta.MediaMetadataService`
 fills video thumbnails and audio/video duration in the background (PyAV when

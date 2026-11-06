@@ -26,6 +26,7 @@ import time
 from collections import OrderedDict
 
 from stanza_im.include.constants import HISTORY_DIR
+from stanza_im.include.utils import local_date
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,14 @@ _NO_IDS_SQL = ("(archive_id IS NULL OR archive_id = '') "
 
 # jid -> (connection, last_use_monotonic)
 _pool: OrderedDict[str, tuple[sqlite3.Connection, float]] = OrderedDict()
+
+
+def _local_day_sql(value) -> str:
+    """SQLite ``local_day`` function shared with the UI's local_date()."""
+    try:
+        return local_date(value) or ""
+    except Exception:  # noqa: BLE001 - malformed legacy timestamp
+        return ""
 
 
 def _path(jid: str) -> str:
@@ -180,6 +189,10 @@ def _connection(jid: str) -> sqlite3.Connection:
         os.makedirs(HISTORY_DIR, exist_ok=True)
         conn = sqlite3.connect(_path(jid), timeout=5,
                                check_same_thread=False)
+        # ``localtime`` would treat legacy naive timestamps (stored as local
+        # wall-clock strings) as UTC.  Use the same Python conversion as the
+        # UI instead, so aware and legacy rows agree on their local day.
+        conn.create_function("local_day", 1, _local_day_sql)
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
@@ -795,12 +808,12 @@ def list_history_jids() -> set[str]:
 
 
 def dates(jid: str) -> list[str]:
-    """Return the sorted list of ``YYYY-MM-DD`` dates that have messages."""
+    """Return the sorted list of local ``YYYY-MM-DD`` dates with messages."""
     try:
         with _lock:
             conn = _connection(jid)
             rows = conn.execute(
-                "SELECT DISTINCT substr(timestamp, 1, 10) AS d "
+                "SELECT DISTINCT local_day(timestamp) AS d "
                 "FROM messages WHERE d != '' ORDER BY d").fetchall()
             return [row[0] for row in rows if row[0]]
     except sqlite3.Error as exc:
@@ -819,7 +832,7 @@ def load_day(jid: str, date: str) -> list[dict]:
                 " retracted, retract_marker, retract_reason, retract_by,"
                 " reactions, media, markup, encrypted, encryption, stanza_id "
                 "FROM messages "
-                "WHERE substr(timestamp, 1, 10) = ? "
+                "WHERE local_day(timestamp) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
             rows = cur.fetchall()
         return _dedup([_row_to_entry(r) for r in rows])
@@ -849,7 +862,7 @@ def media_entries(jid: str, date: str = "") -> list[dict]:
                 "     OR body LIKE '%://%')")
             params: list[str] = []
             if date:
-                sql += " AND substr(timestamp, 1, 10) = ?"
+                sql += " AND local_day(timestamp) = ?"
                 params.append(date)
             sql += " ORDER BY timestamp ASC, id ASC"
             rows = conn.execute(sql, params).fetchall()
@@ -870,7 +883,9 @@ def media_dates(jid: str, kind: str = "") -> list[str]:
         if kind and not any(item.get("kind") == kind
                            for item in media_items_from_entry(entry)):
             continue
-        dates.add(timestamp[:10])
+        day = local_date(timestamp)
+        if day:
+            dates.add(day)
     return sorted(dates)
 
 
@@ -969,7 +984,7 @@ def search_dates(jid: str, query: str) -> list[tuple[str, int]]:
         with _lock:
             conn = _connection(jid)
             cur = conn.execute(
-                "SELECT substr(timestamp, 1, 10) AS d, COUNT(*) "
+                "SELECT local_day(timestamp) AS d, COUNT(*) "
                 "FROM messages WHERE body LIKE ? ESCAPE '\\' GROUP BY d "
                 "ORDER BY d DESC", (f"%{_like_escape(query)}%",))
             rows = cur.fetchall()

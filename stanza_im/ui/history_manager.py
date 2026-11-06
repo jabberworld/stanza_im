@@ -17,7 +17,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.core import history
 from stanza_im.include.constants import ACTIONS_DIR_16, APP_ICON_16, \
     CATEGORIES_DIR_16, STATUS_DIR_32, find_icon
-from stanza_im.include.utils import escape_html
+from stanza_im.include.utils import escape_html, format_local_datetime, local_date
 from stanza_im.i18n import tr
 from stanza_im.ui.resize_handle import VerticalResizeHandle
 from stanza_im.ui.history_media import HistoryMediaView
@@ -28,21 +28,21 @@ logger = logging.getLogger(__name__)
 
 
 def _time_of(ts: str) -> str:
-    """Return ``HH:MM:SS`` from a stored timestamp string."""
-    if not ts:
-        return ""
-    if len(ts) >= 19 and ts[10] == "T":
-        return ts[11:19]
+    """Return local ``HH:MM:SS`` for a stored (UTC) timestamp."""
+    text = format_local_datetime(ts)
+    if len(text) >= 19 and text[10] in (" ", "T"):
+        return text[11:19]
     return ts
 
 
 def _stamp(ts: str) -> str:
-    """Return ``YYYY-MM-DD HH:MM:SS`` from a stored timestamp string."""
-    if not ts:
-        return ""
-    if len(ts) >= 19 and ts[10] == "T":
-        return ts[:10] + " " + ts[11:19]
-    return ts
+    """Return local ``YYYY-MM-DD HH:MM:SS`` for a stored timestamp."""
+    text = format_local_datetime(ts) if ts else ""
+    if len(text) >= 19 and text[10] == "T":
+        # Legacy timezone-less rows keep their local wall-clock value, but
+        # format_local_datetime returns the raw ISO string for them.
+        return text[:10] + " " + text[11:19]
+    return text
 
 
 def _icon(filename: str) -> QtGui.QIcon:
@@ -582,7 +582,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         for item in (self._media_items if items is None else items):
             if item.get("kind") != kind:
                 continue
-            stamp = str(item.get("timestamp") or "")[:10]
+            stamp = local_date(item.get("timestamp"))
             if stamp:
                 dates.append(stamp)
         self._set_media_calendar_dates(dates)
@@ -716,8 +716,10 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         parts = ["<html><body>"]
         for entry in self._entries:
             ts = entry.get("timestamp", "")
-            date = ts[:10] if len(ts) >= 10 else ""
-            time_s = _time_of(ts)
+            stamp = _stamp(ts)
+            date = stamp[:10] if len(stamp) >= 10 else ""
+            time_s = (stamp[11:19]
+                      if len(stamp) >= 19 and stamp[10] == " " else "")
             sender = self._sender_of(entry)
             body = escape_html(entry.get("body", ""))
             body = body.replace("\r\n", "\n").replace("\r", "\n").replace(
@@ -1243,7 +1245,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         timestamp = str((item or {}).get("timestamp") or "")
         if not jid:
             return
-        day = timestamp[:10]
+        day = local_date(timestamp)
         self._tabs.setCurrentIndex(0)
         if self._jid == jid:
             # The contact is already selected: do not reset its dates/tree and
@@ -1748,7 +1750,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             self._server_rows = rows
         self._server_days = {}
         for row in self._server_rows:
-            day = str(row.get("timestamp") or "")[:10]
+            day = local_date(row.get("timestamp"))
             if day:
                 self._server_days[day] = self._server_days.get(day, 0) + 1
         self._server_cursor = cursor or ""

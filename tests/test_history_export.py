@@ -8,6 +8,15 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
+
+# The export format is a local-time view of UTC rows; keep the expectation
+# stable regardless of the developer's timezone.
+os.environ["TZ"] = "UTC"
+try:
+    time.tzset()
+except AttributeError:
+    pass
 
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_histexp_")
 os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")

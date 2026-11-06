@@ -12,7 +12,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.include.constants import find_icon
 from stanza_im.include.media import media_item_tokens
-from stanza_im.include.utils import format_duration, format_local_datetime
+from stanza_im.include.utils import (format_duration, format_local_datetime,
+                                     local_date)
 from stanza_im.i18n import tr
 
 _CARD_WIDTH = 172
@@ -370,7 +371,7 @@ class HistoryMediaView(QtWidgets.QWidget):
             return
         groups: dict[str, list[dict]] = {}
         for item in items:
-            key = str(item.get("timestamp") or "")[:7] or "????-??"
+            key = local_date(item.get("timestamp"))[:7] or "????-??"
             groups.setdefault(key, []).append(item)
         for key in sorted(groups, reverse=True):
             self._layout.addWidget(self._month_header(key))
