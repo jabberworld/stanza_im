@@ -2416,9 +2416,15 @@ Registers XEP plugins (conditionally where noted):
   repairs a stale timestamp on an archive/origin/message-id match (never the
   body), so a row stored with a wrong timestamp cannot keep the tail hidden.
   A groupchat message's stable id is its `origin-id` (then the room
-  `stanza-id`, the MAM archive id and the stanza `id`); an archived row without
-  an id match adopts one id-less twin (same direction/sender/body) and repairs
-  its timestamp instead of duplicating an older build's live copy.
+  `stanza-id`, the MAM archive id and the stanza `id`); the MUC MAM parser and
+  join-replay writer use the same priority, so live and MAM copies share the
+  sender's origin id when present. `_insert` matches an incoming id against all
+  four stored id columns, and merges a live row with its MAM twin when no id
+  overlaps but exactly one side is archived/live; distinct archive ids are
+  never collapsed. An archived row without an id match adopts one id-less twin
+  (same direction/sender/body) and repairs its timestamp instead of
+  duplicating an older build's live copy. The one-time `user_version = 3`
+  migration merges existing live/MAM duplicate pairs and combines their ids.
 - **Partial progress**: the scroll poll returns all visible message refs;
   `ChatWidget.mark_visible_unread` removes exactly those unread rows and the
   count comes from the deduplicated chronological unread suffix (live+history

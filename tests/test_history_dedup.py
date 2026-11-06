@@ -174,7 +174,87 @@ check("content unique index created",
 check("stanza-id unique index created",
       "idx_messages_stanza_unique" in indexes)
 check("user_version bumped",
-      conn.execute("PRAGMA user_version").fetchone()[0] == 2)
+      conn.execute("PRAGMA user_version").fetchone()[0] == 3)
+
+# 6b. live UUID + MAM server numbers are one message --------------------------
+jid7 = "dedup-live-uuid-mam@example.com"
+history.store_message(
+    jid7, "incoming", "uuid live", sender="Gus",
+    timestamp="2026-01-01T14:00:00.000000Z",
+    origin_id="uuid-origin-1", message_id="uuid-origin-1")
+history.store_message(
+    jid7, "incoming", "uuid live", sender="Gus",
+    timestamp="2026-01-01T14:00:00.000000Z",
+    archive_id="server-1", stanza_id="server-1", origin_id="server-1")
+rows7 = history.load_history(jid7, 10)
+check("live UUID and MAM server numbers dedup",
+      len(rows7) == 1
+      and rows7[0]["archive_id"] == "server-1"
+      and rows7[0]["origin_id"] == "uuid-origin-1"
+      and rows7[0]["message_id"] == "uuid-origin-1")
+
+# 6c. MAM first, live copy later ---------------------------------------------
+jid8 = "dedup-mam-then-live@example.com"
+history.store_message(
+    jid8, "incoming", "uuid live", sender="Gus",
+    timestamp="2026-01-01T15:00:00.000000Z",
+    archive_id="server-2", stanza_id="server-2", origin_id="server-2")
+history.store_message(
+    jid8, "incoming", "uuid live", sender="Gus",
+    timestamp="2026-01-01T15:00:00.000000Z",
+    origin_id="uuid-origin-2", message_id="uuid-origin-2")
+rows8 = history.load_history(jid8, 10)
+check("a later live copy merges into the MAM row",
+      len(rows8) == 1
+      and rows8[0]["archive_id"] == "server-2"
+      and rows8[0]["origin_id"] == "uuid-origin-2")
+
+# 6d. the same numeric id in different columns -------------------------------
+jid9 = "dedup-cross-column@example.com"
+history.store_message(
+    jid9, "incoming", "cross", sender="Gus",
+    timestamp="2026-01-01T16:00:00.000000Z",
+    origin_id="server-3", message_id="server-3")
+history.store_message(
+    jid9, "incoming", "cross", sender="Gus",
+    timestamp="2026-01-01T16:00:00.000000Z",
+    archive_id="server-3", origin_id="uuid-origin-3")
+rows9 = history.load_history(jid9, 10)
+check("ids are matched across all four columns",
+      len(rows9) == 1 and rows9[0]["archive_id"] == "server-3")
+
+# 6e. migration merges a pre-existing live/MAM duplicate ---------------------
+jid10 = "dedup-migrate-live-mam@example.com"
+path10 = history._path(jid10)
+raw10 = sqlite3.connect(path10)
+raw10.execute(
+    "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+    "direction TEXT NOT NULL, sender TEXT NOT NULL DEFAULT '', "
+    "body TEXT NOT NULL DEFAULT '', timestamp TEXT NOT NULL, "
+    "archive_id TEXT, stanza_id TEXT, origin_id TEXT, reply_to TEXT, "
+    "reply_id TEXT, message_id TEXT, edited INTEGER NOT NULL DEFAULT 0, "
+    "retracted INTEGER NOT NULL DEFAULT 0, "
+    "retract_marker INTEGER NOT NULL DEFAULT 0, retract_reason TEXT, "
+    "retract_by TEXT, reactions TEXT, media TEXT, "
+    "encrypted INTEGER NOT NULL DEFAULT 0, encryption TEXT, markup TEXT)")
+raw10.execute(
+    "INSERT INTO messages (direction,sender,body,timestamp,archive_id,"
+    "stanza_id,origin_id,message_id) VALUES "
+    "('incoming','Gus','migrate live','2026-01-01T17:00:00.000000Z',"
+    "NULL,NULL,'uuid-migrate','uuid-migrate')")
+raw10.execute(
+    "INSERT INTO messages (direction,sender,body,timestamp,archive_id,"
+    "stanza_id,origin_id,message_id) VALUES "
+    "('incoming','Gus','migrate live','2026-01-01T17:00:00.000000Z',"
+    "'server-migrate','server-migrate','server-migrate',NULL)")
+raw10.execute("PRAGMA user_version = 2")
+raw10.commit()
+raw10.close()
+rows10 = history.load_history(jid10, 10)
+check("v3 migration merges the live/MAM copy",
+      len(rows10) == 1
+      and rows10[0]["archive_id"] == "server-migrate"
+      and rows10[0]["origin_id"] == "uuid-migrate")
 
 # 7. load_day returns no duplicates ------------------------------------------
 day = history.load_day(jid5, "2026-01-01")

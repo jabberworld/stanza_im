@@ -481,12 +481,18 @@ already on screen; a MAM page does not. The refresh keeps the unread boundary
 and stays at the bottom; a suspended tab defers it to `resume`, a
 background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
 merge. A groupchat message's stable id is its `origin-id` (falling back to the
-room `stanza-id`, the MAM archive id and the stanza `id`), so the replay, MAM
-and live copies of one message dedup; an archived row that finds no id match
+room `stanza-id`, the MAM archive id and the stanza `id`); the MAM parser and
+the join-replay writer now use the same priority, so the replay, MAM and live
+copies of one message share an id even when the server only provides numbers.
+`history._insert` compares any incoming id with **all four** id columns
+(archive/stanza/origin/message); if no id matches but one row is a live copy
+(no archive/stanza) and the other is its MAM copy, it merges the ids/metadata
+instead of adding a duplicate. An archived row that finds no id match still
 **adopts** one id-less twin with the same direction/sender/body (an older build
 stored the replay as live with the receive time): the ids are written onto that
-row and its timestamp repaired, instead of adding a duplicate. Live rows never
-adopt. Local paging is independent of the server archive: a room without MAM
+row and its timestamp repaired. Distinct archived rows with different archive
+ids are never collapsed. Local paging is independent of the server archive: a
+room without MAM
 (or a failed query, `mam_unavailable`) gets
 `ChatWidget.set_server_archive_available(False)`, which only stops server
 requests — scrolling up keeps loading the SQLite pages (`_on_near_top` no
@@ -494,10 +500,14 @@ longer treats `_server_exhausted` as "no history at all"). A near-top event
 before the first local window is applied (`_initial_load_done`, set by
 `set_history`) does nothing, so opening a room never fires a premature MAM
 query or flashes the "loading from server" status. `history._insert` also
-**repairs a stale timestamp** when an archive/origin/message id already exists with a
-different one (the body is never rewritten — an edit is a separate update), so
-an old malformed row cannot hide the new messages forever.
-[`tests/test_history_tail_refresh.py`, `tests/test_history_dedup.py`]
+**repairs a stale timestamp** when any id already exists with a different one
+(the body is never rewritten — an edit is a separate update), so an old
+malformed row cannot hide the new messages forever. The one-time
+`user_version = 3` migration merges legacy live/MAM duplicate pairs in an
+existing database (exact direction/sender/body/timestamp, one live row plus
+one archived row), combining their ids so the cleanup cannot recur.
+[`tests/test_history_tail_refresh.py`, `tests/test_history_dedup.py`,
+`tests/test_mam_forward.py`]
 
 **MUC join reliability**: presence status lines (`muc_user_joined`/`left`/
 `muc_status_changed`) are shown only after a successful join — `MainWindow`

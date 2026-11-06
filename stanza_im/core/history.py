@@ -91,6 +91,9 @@ _NO_IDS_SQL = ("(archive_id IS NULL OR archive_id = '') "
                "AND (origin_id IS NULL OR origin_id = '') "
                "AND (message_id IS NULL OR message_id = '')")
 
+_ROW_FIELDS = ("id, archive_id, stanza_id, origin_id, message_id, timestamp, "
+               "body, encrypted, reply_to, reply_id, media, markup, encryption")
+
 # jid -> (connection, last_use_monotonic)
 _pool: OrderedDict[str, tuple[sqlite3.Connection, float]] = OrderedDict()
 
@@ -117,6 +120,60 @@ def _evict_expired(now: float) -> None:
         stale = [jid for jid, (_, t) in _pool.items() if now - t > _CONN_TTL]
         for jid in stale:
             close(jid)
+
+
+def _merge_live_mam_duplicates(conn: sqlite3.Connection) -> int:
+    """Collapse legacy live+MAM copies that have no shared id.
+
+    A live MUC row can carry the sender's UUID while its MAM copy carries only
+    server numbers.  Exact direction/sender/body/timestamp groups with one
+    live-like row (no archive/stanza) and at least one archived row are safe to
+    merge; groups of only archived rows (distinct archive ids) are left alone.
+    Returns the number of removed rows.
+    """
+    rows = conn.execute(
+        "SELECT " + _ROW_FIELDS + ", direction, sender "
+        "FROM messages ORDER BY id").fetchall()
+    groups: dict[tuple, list] = {}
+    for row in rows:
+        groups.setdefault((row[13], row[14], row[6], row[5]), []).append(row)
+    removed = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        live = [row for row in group
+                if not (row[1] or "") and not (row[2] or "")]
+        archived = [row for row in group
+                    if (row[1] or "") or (row[2] or "")]
+        if not live or len(archived) != 1:
+            # Multiple archived ids are distinct messages, not copies.
+            continue
+        survivor = min(live, key=lambda row: row[0])
+        for other in group:
+            if other[0] == survivor[0]:
+                continue
+            conn.execute("DELETE FROM messages WHERE id = ?", (other[0],))
+            removed += 1
+            current = conn.execute(
+                "SELECT " + _ROW_FIELDS + " FROM messages WHERE id = ?",
+                (survivor[0],)).fetchone()
+            if current is None:
+                continue
+            _merge_existing(
+                conn, current,
+                archive_id=str(other[1] or ""),
+                stanza_id=str(other[2] or ""),
+                origin_id=str(other[3] or ""),
+                message_id=str(other[4] or ""),
+                timestamp=str(other[5] or ""),
+                body=str(other[6] or ""),
+                reply_to=str(other[8] or ""),
+                reply_id=str(other[9] or ""),
+                media=str(other[10] or ""),
+                markup=str(other[11] or ""),
+                encrypted=bool(other[7]),
+                encryption=str(other[12] or ""))
+    return removed
 
 
 def _migrate_dedup(conn: sqlite3.Connection) -> None:
@@ -165,8 +222,16 @@ def _migrate_dedup(conn: sqlite3.Connection) -> None:
                 "AND stanza_id <> ''")
         except sqlite3.Error as exc:
             logger.warning("History stanza-id migration failed: %s", exc)
+    if version < 3:
+        try:
+            removed = _merge_live_mam_duplicates(conn)
+            if removed:
+                logger.info("HISTORY[dedup] merged %d legacy live/MAM rows",
+                            removed)
+        except sqlite3.Error as exc:
+            logger.warning("History live/MAM dedup migration failed: %s", exc)
     try:
-        conn.execute("PRAGMA user_version = 2")
+        conn.execute("PRAGMA user_version = 3")
     except sqlite3.Error:
         pass
 
@@ -330,6 +395,70 @@ def _is_omemo_fallback_body(body: str) -> bool:
             or "does not seem to support" in text)
 
 
+def _merge_existing(conn: sqlite3.Connection, row, *,
+                    archive_id: str, stanza_id: str, origin_id: str,
+                    message_id: str, timestamp: str, body: str,
+                    reply_to: str, reply_id: str, media: str, markup: str,
+                    encrypted: bool, encryption: str) -> bool:
+    """Merge missing ids/metadata into an existing matching row."""
+    (row_id, old_archive, old_stanza, old_origin, old_message, old_ts,
+     old_body, old_encrypted, old_reply_to, old_reply_id, old_media,
+     old_markup, old_encryption) = row
+    updates: dict[str, object] = {}
+    old_archive = str(old_archive or "")
+    old_stanza = str(old_stanza or "")
+    old_origin = str(old_origin or "")
+    old_message = str(old_message or "")
+
+    if archive_id and not old_archive:
+        updates["archive_id"] = archive_id
+    if stanza_id and not old_stanza:
+        updates["stanza_id"] = stanza_id
+    if origin_id:
+        # A live row carries the sender's UUID; a MAM row may only know the
+        # server number.  Prefer the live UUID, but fill a missing/plain
+        # server-number origin as well.
+        if (not old_origin
+                or (old_origin in (old_archive, old_stanza)
+                    and origin_id != old_origin)):
+            updates["origin_id"] = origin_id
+    if message_id and not old_message:
+        updates["message_id"] = message_id
+    if (timestamp and timestamp != (old_ts or "")
+            and (archive_id or stanza_id or origin_id or message_id)):
+        updates["timestamp"] = timestamp
+    if reply_to and not (old_reply_to or ""):
+        updates["reply_to"] = reply_to
+    if reply_id and not (old_reply_id or ""):
+        updates["reply_id"] = reply_id
+    if media and not (old_media or ""):
+        updates["media"] = media
+    if markup and not (old_markup or ""):
+        updates["markup"] = markup
+    if encrypted and not old_encrypted:
+        updates["encrypted"] = 1
+        if encryption and not (old_encryption or ""):
+            updates["encryption"] = encryption
+    if (encrypted and _is_omemo_fallback_body(old_body)
+            and not _is_omemo_fallback_body(body)):
+        updates["body"] = body
+        updates["encrypted"] = 1
+        if media:
+            updates["media"] = media
+        if markup:
+            updates["markup"] = markup
+        if encryption:
+            updates["encryption"] = encryption
+    if not updates:
+        return False
+    assignments = ", ".join(f"{name} = ?" for name in updates)
+    conn.execute(f"UPDATE messages SET {assignments} WHERE id = ?",
+                 [*updates.values(), row_id])
+    logger.debug("HISTORY[dedup] merged row id=%s updates=%s",
+                 row_id, ",".join(updates))
+    return True
+
+
 def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             sender: str, archive_id: str, stanza_id: str, origin_id: str,
             reply_to: str, reply_id: str, message_id: str, edited: bool,
@@ -346,69 +475,66 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
     copy is not duplicated.
     """
     if skip_existing:
-        clauses: list[str] = []
-        params: list = []
-        if archive_id:
-            clauses.append("archive_id = ?")
-            params.append(archive_id)
-        if stanza_id:
-            clauses.append("stanza_id = ?")
-            params.append(stanza_id)
-        if origin_id:
-            clauses.append("origin_id = ?")
-            params.append(origin_id)
-        if message_id:
-            clauses.append("message_id = ?")
-            params.append(message_id)
-        clauses.append(
-            "((archive_id IS NULL OR archive_id = '') "
-            "AND (stanza_id IS NULL OR stanza_id = '') "
-            "AND (origin_id IS NULL OR origin_id = '') "
-            "AND (message_id IS NULL OR message_id = '') "
-            "AND direction = ? AND sender = ? AND body = ? "
-            "AND timestamp = ?)")
-        params.extend([direction, sender, body, ts])
-        row = conn.execute(
-            "SELECT id, archive_id, stanza_id, origin_id, message_id, timestamp,"
-            " body, encrypted FROM messages WHERE (" + " OR ".join(clauses)
-            + ") LIMIT 1", params).fetchone()
+        id_values = tuple(dict.fromkeys(
+            str(value) for value in
+            (archive_id, stanza_id, origin_id, message_id) if value))
+        row = None
+        if id_values:
+            # Compare every incoming id with every stored id column.  Live
+            # copies and MAM copies often put the same value in different
+            # columns (origin_id vs archive_id), so same-column matching is
+            # not enough.
+            clauses = []
+            params: list = []
+            for value in id_values:
+                clauses.append(
+                    "(archive_id = ? OR stanza_id = ? OR origin_id = ? "
+                    "OR message_id = ?)")
+                params.extend((value, value, value, value))
+            row = conn.execute(
+                "SELECT " + _ROW_FIELDS + " FROM messages WHERE ("
+                + " OR ".join(clauses) + ") LIMIT 1", params).fetchone()
+
+        if row is None:
+            # Exact content match for rows without any ids (legacy).
+            row = conn.execute(
+                "SELECT " + _ROW_FIELDS + " FROM messages WHERE "
+                + _NO_IDS_SQL + " AND direction = ? AND sender = ? "
+                "AND body = ? AND timestamp = ? LIMIT 1",
+                (direction, sender, body, ts)).fetchone()
+
+        if row is None and (archive_id or stanza_id):
+            # A MAM/replay copy may have server ids while the live copy only
+            # has the sender's origin/message id.  Adopt the live row and add
+            # the server ids; two *distinct* archived rows are never merged.
+            row = conn.execute(
+                "SELECT " + _ROW_FIELDS + " FROM messages WHERE "
+                "(archive_id IS NULL OR archive_id = '') "
+                "AND (stanza_id IS NULL OR stanza_id = '') "
+                "AND direction = ? AND sender = ? AND body = ? "
+                "AND timestamp = ? LIMIT 1",
+                (direction, sender, body, ts)).fetchone()
+        elif row is None and not (archive_id or stanza_id):
+            # The reverse order: MAM was stored first, then the live copy.
+            row = conn.execute(
+                "SELECT " + _ROW_FIELDS + " FROM messages WHERE "
+                "((archive_id IS NOT NULL AND archive_id <> '') "
+                " OR (stanza_id IS NOT NULL AND stanza_id <> '')) "
+                "AND direction = ? AND sender = ? AND body = ? "
+                "AND timestamp = ? LIMIT 1",
+                (direction, sender, body, ts)).fetchone()
+
         if row is not None:
-            stable = bool(
-                (archive_id and archive_id == (row[1] or ""))
-                or (stanza_id and stanza_id == (row[2] or ""))
-                or (origin_id and origin_id == (row[3] or ""))
-                or (message_id and message_id == (row[4] or "")))
-            repaired = False
-            if stable and ts and ts != (row[5] or ""):
-                # An older build may have stored this archived message with a
-                # wrong timestamp: repair it.  The body is never rewritten (an
-                # XEP-0308 correction is a separate row update).
-                conn.execute("UPDATE messages SET timestamp = ? WHERE id = ?",
-                             (ts, row[0]))
-                repaired = True
-            if stable and encrypted and _is_omemo_fallback_body(row[6]):
-                # A fallback row (old MAM sync, or a failed live decrypt) can
-                # be upgraded when the plaintext becomes available.  A real
-                # plaintext row is never overwritten by another copy.
-                if not _is_omemo_fallback_body(body):
-                    conn.execute(
-                        "UPDATE messages SET body = ?, reply_to = ?, "
-                        "reply_id = ?, media = ?, markup = ?, encrypted = 1, "
-                        "encryption = ? WHERE id = ?",
-                        (body, reply_to or None, reply_id or None,
-                         media or None, markup or None,
-                         encryption or "omemo", row[0]))
-                    return True
-                if not row[7]:
-                    conn.execute(
-                        "UPDATE messages SET encrypted = 1, encryption = ? "
-                        "WHERE id = ?",
-                        (encryption or "omemo", row[0]))
-            return repaired
+            return _merge_existing(
+                conn, row, archive_id=archive_id, stanza_id=stanza_id,
+                origin_id=origin_id, message_id=message_id, timestamp=ts,
+                body=body, reply_to=reply_to, reply_id=reply_id, media=media,
+                markup=markup, encrypted=encrypted, encryption=encryption)
+
         if archived and (archive_id or stanza_id or origin_id or message_id):
             # The same message may already be stored without any stable id by
-            # an older build (a join replay that was rendered as live, with the
-            # receive time).  Adopt that row instead of adding a duplicate.
+            # an older build (a join replay rendered as live with the receive
+            # time).  Adopt that row instead of adding a duplicate.
             legacy = conn.execute(
                 "SELECT id FROM messages WHERE " + _NO_IDS_SQL +
                 " AND direction = ? AND sender = ? AND body = ? "

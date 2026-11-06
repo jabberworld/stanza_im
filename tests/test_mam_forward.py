@@ -117,6 +117,38 @@ check("the raw MAM fin state is parsed",
       JabberClient._mam_fin_state(_fin_iq) == (False, "arc-fin"))
 
 
+# 1a. MUC MAM keeps the sender's origin-id as the stable id -----------------
+def make_muc_mam_result():
+    outer = slixmpp.Message()
+    outer["to"] = "me@x/res"
+    result = ET.SubElement(outer.xml, "{urn:xmpp:mam:2}result",
+                           {"id": "archive-muc-1"})
+    forwarded = ET.SubElement(result, "{urn:xmpp:forward:0}forwarded")
+    ET.SubElement(forwarded, "{urn:xmpp:delay}delay",
+                  {"stamp": "2026-11-06T04:27:58.630126Z"})
+    inner = ET.SubElement(forwarded, "{jabber:client}message", {
+        "from": "obshenie@conference.example/alice",
+        "to": "me@x/res", "type": "groupchat", "id": "uuid-live-1",
+    })
+    ET.SubElement(inner, "{urn:xmpp:sid:0}origin-id", {"id": "uuid-live-1"})
+    ET.SubElement(inner, "{urn:xmpp:sid:0}stanza-id",
+                  {"by": "obshenie@conference.example",
+                   "id": "server-muc-1"})
+    ET.SubElement(inner, "{jabber:client}body").text = "hello MUC"
+    return outer
+
+
+asyncio.set_event_loop(asyncio.new_event_loop())
+_muc_parser = JabberClient("me@x/res", "pw")
+_muc_rows, _mp, _ms, _mr = _muc_parser._mam_rows(
+    "obshenie@conference.example", [make_muc_mam_result()], True)
+check("MUC MAM keeps the sender origin-id",
+      len(_muc_rows) == 1 and _muc_rows[0]["origin_id"] == "uuid-live-1")
+check("MUC MAM keeps the server stanza/archive ids",
+      _muc_rows[0]["stanza_id"] == "server-muc-1"
+      and _muc_rows[0]["archive_id"] == "archive-muc-1")
+
+
 # 2. An unresolved shared id never becomes an RSM ``after`` cursor ----------
 async def _fake_forward(jid, start_ts=None, after_id="", limit=100,
                         is_muc=None, max_pages=20):

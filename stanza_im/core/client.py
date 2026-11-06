@@ -4058,7 +4058,7 @@ class JabberClient:
                     "body": body,
                     "timestamp": _normalize_ts(str(stamp)) or None,
                     "sender": sender,
-                    "origin_id": _stanza_id(msg, room) or "",
+                    "origin_id": _origin_id(msg) or _stanza_id(msg, room) or "",
                     "reply_to": _reply_reference(msg)[0],
                     "reply_id": _reply_reference(msg)[1],
                 })
@@ -8390,7 +8390,11 @@ class JabberClient:
                         continue
                 if is_muc:
                     server_sid = _stanza_id(msg, jid)
-                    stable = server_sid or _archive_result_id(result)
+                    # Keep the sender's origin-id first, exactly like the live
+                    # groupchat path; otherwise a live copy and its MAM copy get
+                    # unrelated ids (UUID vs server number) and both survive.
+                    stable = (_origin_id(msg) or server_sid
+                              or _archive_result_id(result))
                 else:
                     server_sid = _stanza_id(msg, self.jid_str)
                     stable = _origin_id(msg) or str(msg.get("id") or "")
