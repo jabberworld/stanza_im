@@ -737,7 +737,14 @@ and reports a dead URL through `load_failed`, which the media view shows as
 «Файл не найден». A media-card context menu offers copy link, «Перейти в чат»
 (disabled for a conference we are not joined to) and «Перейти к сообщению»;
 the chat jump waits for the history window and focuses an already open tab
-without re-applying its read anchor. «Перейти к сообщению» within the already
+without re-applying its read anchor. The chat jump verifies that the target is
+actually in the WebEngine DOM, not merely in Python `_history`: `_rendered_keys`
+mirrors the view's 500-node cap and `_ensure_entry_rendered` prepends the
+missing contiguous slice between the target and the oldest rendered row before
+scrolling. A media jump is then re-centred for a 2 s settle window by the
+scroll poll (`ChatView._repin_jump_target`), so late image/video/avatar layout
+cannot shift the target out of view; a user wheel cancels the re-centre.
+[`tests/test_media_jump.py`] «Перейти к сообщению» within the already
 open contact/day only selects the matching block; it does not reset the media
 tabs or rebuild the text day. «Все контакты»
 builds one local media catalog across all histories. The media «Искать на
@@ -1384,10 +1391,12 @@ gets the quote and is sent as a plain message. Received replies are parsed in
 `.stanza-reply` quote bar (body quotes stripped) via `chat_themes.render_reply()`.
 The bar is clickable when the referenced message resolves locally
 (`render_reply(sender, snippet, target_id)` → a `stanza:jump:` anchor): the page
-scrolls to the `data-stanza-id` node and briefly highlights it; if the node is
-not rendered, `ChatWidget._jump_to_message` walks the **local** SQLite archive
-(never MAM, gated by `history.message_exists`) page by page, renders the loaded
-pages and scrolls. Those pages are inserted with
+scrolls to the `data-stanza-id` node and briefly highlights it; if the row is
+only in Python `_history` but its DOM node was trimmed, `_ensure_entry_rendered`
+prepends the missing slice, and if it is not loaded at all
+`ChatWidget._jump_to_message` walks the **local** SQLite archive (never MAM,
+gated by `history.message_exists`) page by page, renders the loaded pages and
+scrolls. Those pages are inserted with
 `View.prepend_messages(keep_position=False)` so the reading-anchor restore cannot
 revert the jump, and the target node is matched by `data-reply-id` or
 `data-stanza-id`. Feature advertised as `urn:xmpp:reply:0`.

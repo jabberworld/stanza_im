@@ -546,6 +546,14 @@ class ChatWidget(QtWidgets.QWidget):
         self._history: list[dict] = []
         self._status_lines: list[tuple[str, str]] = []
         self._messages: list[dict] = []
+        # Stable keys of the message nodes currently known to be in the
+        # rendered DOM (bounded like ChatView's DOM cap).  A jump uses this
+        # instead of trusting ``_history``: the Python window can still hold a
+        # row whose DOM node was trimmed, and scrolling to it would silently
+        # fall back to a timestamp near it.
+        self._rendered_order: list[tuple] = []
+        self._rendered_keys: set[tuple] = set()
+        self._jump_pin: bool = False
         self._window_size = 200
         self._hist_loading = False
         self._db_exhausted = False
@@ -2011,6 +2019,7 @@ class ChatWidget(QtWidgets.QWidget):
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
         self._render_entry(entry)
+        self._mark_rendered([entry])
         mine = self._is_mine(entry)
         if direction == "incoming" and not mine and self._view.is_scrolled_up():
             self._view.note_new_message(self._reply_target_id(entry))
@@ -2329,6 +2338,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_passed = False
         for entry in entries:
             self._render_entry(entry)
+        self._set_rendered(entries)
         self._preserve_fraction = None
         if self._anchor_bottom:
             self._view.scroll_to_bottom()
@@ -2377,6 +2387,93 @@ class ChatWidget(QtWidgets.QWidget):
         return (entry.get("direction", "incoming"),
                 entry.get("sender", ""), entry.get("body", ""),
                 entry.get("timestamp", ""))
+
+    def _rendered_cap(self) -> int:
+        """How many message nodes the view keeps in its document."""
+        try:
+            return max(0, int(getattr(self._view, "_MAX_DOM_MESSAGES", 0) or 0))
+        except (AttributeError, TypeError, ValueError):
+            return 0
+
+    def _set_rendered(self, entries: list[dict]) -> None:
+        """Replace the rendered-node registry after a full render."""
+        cap = self._rendered_cap()
+        if cap:
+            entries = entries[-cap:]
+        seen: set[tuple] = set()
+        order: list[tuple] = []
+        for entry in entries:
+            key = self._entry_key(entry)
+            if key in seen:
+                continue
+            seen.add(key)
+            order.append(key)
+        self._rendered_order = order
+        self._rendered_keys = seen
+
+    def _mark_rendered(self, entries: list[dict], prepend: bool = False) -> None:
+        """Record message nodes that were just added to the document."""
+        order = self.__dict__.setdefault("_rendered_order", [])
+        keys = self.__dict__.setdefault("_rendered_keys", set())
+        new: list[tuple] = []
+        for entry in entries:
+            key = self._entry_key(entry)
+            if key in keys:
+                continue
+            keys.add(key)
+            new.append(key)
+        if not new:
+            return
+        if prepend:
+            # ChatView inserts older rows at the top and never trims them.
+            order[0:0] = new
+            return
+        order.extend(new)
+        cap = self._rendered_cap()
+        if cap and len(order) > cap:
+            drop = order[:len(order) - cap]
+            del order[:len(order) - cap]
+            keys.difference_update(drop)
+
+    def _ensure_entry_rendered(self, entry: dict) -> bool:
+        """Make sure *entry* has a message node in the current document.
+
+        ``_history`` may contain rows older than the view's DOM cap (the last
+        rendered window).  A jump that trusts the Python window then asks the
+        page to scroll to a node that no longer exists; the timestamp fallback
+        lands somewhere else.  Prepend the missing contiguous slice between
+        the target and the oldest rendered row instead of re-rendering the
+        whole window.
+        """
+        if not entry:
+            return False
+        key = self._entry_key(entry)
+        keys = self.__dict__.setdefault("_rendered_keys", set())
+        if key in keys:
+            return True
+        cap = self._rendered_cap()
+        if not cap:
+            # No per-message DOM (QTextBrowser fallback or a test stub).
+            return True
+        ordered = self._ordered_entries()
+        index = next((i for i, item in enumerate(ordered)
+                      if self._entry_key(item) == key), None)
+        if index is None:
+            return False
+        stop = len(ordered)
+        for pos in range(index + 1, len(ordered)):
+            if self._entry_key(ordered[pos]) in keys:
+                stop = pos
+                break
+        missing = ordered[index:stop]
+        if not missing:
+            return False
+        logger.debug("JUMP[fill] jid=%s ref=%s rows=%d",
+                     self.jid, self._reply_target_id(entry), len(missing))
+        self._view.prepend_messages(self._view_messages(missing),
+                                    keep_position=False)
+        self._mark_rendered(missing, prepend=True)
+        return True
 
     # ── History window management ─────────────────────────────────
 
@@ -2877,7 +2974,7 @@ class ChatWidget(QtWidgets.QWidget):
         ref = self._mention_refs.pop(0)
         entry = self._find_message(ref)
         if entry is not None:
-            self._view.scroll_to_message(self._reply_target_id(entry))
+            self._scroll_to_entry(entry)
         else:
             # Outside the rendered window: walk the local archive towards it.
             self._jump_to_message(ref)
@@ -2925,7 +3022,7 @@ class ChatWidget(QtWidgets.QWidget):
             pass
         entry = self._find_message(ref)
         if entry is not None:
-            self._view.scroll_to_message(self._reply_target_id(entry))
+            self._scroll_to_entry(entry)
         else:
             # Outside the rendered window: walk the local archive towards it.
             self._jump_to_message(ref)
@@ -2998,15 +3095,29 @@ class ChatWidget(QtWidgets.QWidget):
         return bool(getattr(view, "_scroll_suspended", False))
 
     def _scroll_to_entry(self, entry: dict,
-                         anchor_restore: bool = False) -> bool:
+                         anchor_restore: bool = False,
+                         pin: bool = False) -> bool:
         """Scroll to a stored row, by stable id or (for old rows) timestamp."""
+        self._ensure_entry_rendered(entry)
         target = self._reply_target_id(entry)
         stamp = str(entry.get("timestamp") or "")
         if target:
             # The timestamp is the fallback when the id is not rendered (a
             # legacy row whose node only carries ``data-stanza-time``).
-            self._view.scroll_to_message(
-                target, timestamp=stamp, anchor_restore=anchor_restore)
+            kwargs = {"timestamp": stamp, "anchor_restore": anchor_restore}
+            if pin:
+                kwargs["pin"] = True
+            try:
+                self._view.scroll_to_message(target, **kwargs)
+            except TypeError:
+                # Test stubs and older fallback views accept only the id (or
+                # id + highlight).  Retry with the narrowest compatible call.
+                try:
+                    self._view.scroll_to_message(
+                        target, timestamp=stamp,
+                        anchor_restore=anchor_restore)
+                except TypeError:
+                    self._view.scroll_to_message(target)
             return True
         if stamp:
             self._view.scroll_to_time(
@@ -3025,6 +3136,27 @@ class ChatWidget(QtWidgets.QWidget):
                 best = entry
         return best
 
+    def _view_messages(self, entries: list[dict]) -> list[dict]:
+        """Build the view payload for stored rows (prepend/ensure-rendered)."""
+        from stanza_im.include.utils import ts_to_time
+        return [
+            {**entry, "user_icon_path": self._user_icon(
+                entry.get("direction", "incoming"),
+                entry.get("sender_jid", ""), entry.get("sender", "")),
+             "timestamp": ts_to_time(entry.get("timestamp", "")),
+             "raw_timestamp": entry.get("timestamp", ""),
+             "body": (entry.get("body", "") if not entry.get("reply_id")
+                      else self._split_reply_quote(entry.get("body", ""))[0]),
+             "origin_id": self._reply_target_id(entry),
+             "reply_author": entry.get("reply_author", ""),
+             "reply_quote": self._reply_reference(entry)
+                            if entry.get("reply_id") else None,
+             "outgoing": self._is_mine(entry),
+             "edited": bool(entry.get("edited")),
+             "moderatable": self._can_moderate_entry(entry)}
+            for entry in entries
+        ]
+
     def prepend_history(self, entries: list[dict], exhausted: bool,
                         keep_position: bool = True):
         """Insert older rows at the top of the window.
@@ -3032,7 +3164,6 @@ class ChatWidget(QtWidgets.QWidget):
         *keep_position* preserves the reading anchor (normal paging); a
         reply-quote jump passes ``False`` so its scroll is not reverted.
         """
-        from stanza_im.include.utils import ts_to_time
         known = {self._entry_key(entry) for entry in self._history}
         unique = []
         for entry in entries:
@@ -3050,23 +3181,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._trim_history()
         self._db_exhausted = bool(exhausted)
         self._hist_loading = False
-        self._view.prepend_messages([
-             {**entry, "user_icon_path": self._user_icon(
-                 entry.get("direction", "incoming"),
-                 entry.get("sender_jid", ""), entry.get("sender", "")),
-             "timestamp": ts_to_time(entry.get("timestamp", "")),
-             "raw_timestamp": entry.get("timestamp", ""),
-             "body": (entry.get("body", "") if not entry.get("reply_id")
-                      else self._split_reply_quote(entry.get("body", ""))[0]),
-             "origin_id": self._reply_target_id(entry),
-             "reply_author": entry.get("reply_author", ""),
-             "reply_quote": self._reply_reference(entry)
-                            if entry.get("reply_id") else None,
-             "outgoing": self._is_mine(entry),
-             "edited": bool(entry.get("edited")),
-             "moderatable": self._can_moderate_entry(entry)}
-             for entry in unique
-        ], keep_position=keep_position)
+        self._view.prepend_messages(self._view_messages(unique),
+                                    keep_position=keep_position)
+        self._mark_rendered(unique, prepend=True)
 
     def history_cleared(self):
         """Local history was wiped — reset buffers and show the marker."""
@@ -3331,6 +3448,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def jump_to_message(self, ref_id: str, timestamp: str = "") -> None:
         """Public jump used by the History Manager media context menu."""
+        logger.debug("JUMP[request] jid=%s ref=%s ts=%s",
+                     self.jid, ref_id, timestamp)
         self._pending_bottom = False
         if (self._suspended or not self._initial_load_done
                 or (not self._history and not self._messages)):
@@ -3343,9 +3462,9 @@ class ChatWidget(QtWidgets.QWidget):
         if ref_id:
             entry = self._find_message(ref_id)
             if entry is not None:
-                self._scroll_to_entry(entry)
+                self._scroll_to_entry(entry, pin=True)
             else:
-                self._jump_to_message(ref_id)
+                self._jump_to_message(ref_id, pin=True)
         elif timestamp:
             self._view.scroll_to_time(timestamp)
 
@@ -3381,7 +3500,8 @@ class ChatWidget(QtWidgets.QWidget):
                                  pending.get("ts", ""))
 
     def _jump_to_message(self, ref_id: str,
-                         fallback_unread: bool = False) -> None:
+                         fallback_unread: bool = False,
+                         pin: bool = False) -> None:
         """Scroll to a replied message, resolving it from local history.
 
         The target comes from the already loaded window when possible;
@@ -3395,26 +3515,31 @@ class ChatWidget(QtWidgets.QWidget):
             return
         entry = self._find_message(ref_id)
         if entry is not None:
-            self._view.scroll_to_message(self._reply_target_id(entry))
+            self._scroll_to_entry(entry, pin=pin)
             return
         self._jump_pending = ref_id
         self._jump_pages = 0
         self._jump_fallback_unread = bool(fallback_unread)
+        self._jump_pin = bool(pin)
         self._start_task(self._load_jump_pages_async())
 
     async def _load_jump_pages_async(self) -> None:
         from stanza_im.core import history
         ref_id = self._jump_pending
         fallback_unread = bool(getattr(self, "_jump_fallback_unread", False))
+        pin = bool(getattr(self, "_jump_pin", False))
+        self._jump_pin = False
         if not ref_id or self._released:
             self._jump_fallback_unread = False
-            self._finish_unread_resolve(None, fallback_unread=fallback_unread)
+            self._finish_unread_resolve(None, fallback_unread=fallback_unread,
+                                        pin=pin)
             return
         if not await history.message_exists_async(self.jid, ref_id):
             # Not in the local archive: do not bother the server.
             self._jump_pending = ""
             self._jump_fallback_unread = False
-            self._finish_unread_resolve(None, fallback_unread=fallback_unread)
+            self._finish_unread_resolve(None, fallback_unread=fallback_unread,
+                                        pin=pin)
             return
         while (self._jump_pending and not self._released
                and self._jump_pages < _JUMP_MAX_PAGES):
@@ -3422,7 +3547,9 @@ class ChatWidget(QtWidgets.QWidget):
             if entry is not None:
                 self._jump_pending = ""
                 self._jump_fallback_unread = False
-                self._finish_unread_resolve(entry)
+                logger.debug("JUMP[found] jid=%s ref=%s pages=%d",
+                             self.jid, ref_id, self._jump_pages)
+                self._finish_unread_resolve(entry, pin=pin)
                 return
             before = self.oldest_ts()
             if not before or not await \
@@ -3438,9 +3565,13 @@ class ChatWidget(QtWidgets.QWidget):
             self.prepend_history(rows, False, keep_position=False)
         self._jump_pending = ""
         self._jump_fallback_unread = False
-        self._finish_unread_resolve(None, fallback_unread=fallback_unread)
+        logger.debug("JUMP[miss] jid=%s ref=%s pages=%d",
+                     self.jid, ref_id, self._jump_pages)
+        self._finish_unread_resolve(None, fallback_unread=fallback_unread,
+                                    pin=pin)
 
-    def _finish_unread_resolve(self, entry, fallback_unread: bool = False) -> None:
+    def _finish_unread_resolve(self, entry, fallback_unread: bool = False,
+                               pin: bool = False) -> None:
         """End the deferred separator placement and scroll to the read point.
 
         When the read point was outside the loaded window the archive was
@@ -3458,7 +3589,7 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is None and fallback_unread and self._unread_boundary:
             entry = self._first_unread_entry()
         if entry is not None:
-            self._view.scroll_to_message(self._reply_target_id(entry))
+            self._scroll_to_entry(entry, pin=pin)
 
     def load_more_from_server(self):
         if (self._server_fetching or self._server_exhausted

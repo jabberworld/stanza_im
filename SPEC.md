@@ -1687,8 +1687,10 @@ quote is already in the body no automatic XEP-0421 fallback is prepended.
   `stanza:jump:<urlencoded id>` anchor. The `_ACTION_JS` click handler
   preventDefaults it (never a navigation) and scrolls the matching
   `.stanza-message[data-stanza-id]` node into view with a brief
-  `.stanza-jump-highlight` flash; if the node is not rendered yet it relays the
-  reference through `window.__stanzaJumpRef` (scroll poll → `link_clicked` →
+  `.stanza-jump-highlight` flash; if the row is only in Python `_history` but
+  its DOM node was trimmed, `_ensure_entry_rendered` prepends the missing slice;
+  if it is not loaded yet it relays the reference through
+  `window.__stanzaJumpRef` (scroll poll → `link_clicked` →
   `ChatWidget._jump_to_message`). The jump then walks the **local** SQLite
   archive only (`history.message_exists` + `older_available_timestamp`/
   `load_older_timestamp`, bounded by `_JUMP_MAX_PAGES`) — the server is never
@@ -3333,7 +3335,13 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   The media context menu offers copy
   link, «Перейти в чат» (joined conferences only) and «Перейти к сообщению»;
   the chat jump waits for the history window and focuses an existing tab
-  without re-applying its read anchor. «Перейти к сообщению» in the already
+  without re-applying its read anchor. It verifies that the target message node
+  is actually in the WebEngine DOM (a 500-node window mirrored by
+  `ChatWidget._rendered_keys`), prepends the missing contiguous slice between
+  the target and the oldest rendered row (`_ensure_entry_rendered`), and only
+  then scrolls. The jump target is re-centred for a 2 s settle window by the
+  scroll poll so late media/avatar layout cannot move it out of view; a manual
+  wheel cancels that re-centring. «Перейти к сообщению» in the already
   open contact/day only highlights the matching block (no media reset or day
   rebuild); a different day/contact takes the normal load path.
 - Media server mode uses ordinary XEP-0313 MAM, not a XEP-0431 `http*` query:

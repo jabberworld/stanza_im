@@ -770,6 +770,11 @@ if HAS_WEBENGINE:
             # "until"}``).  Kept until a poll sees the target in the viewport,
             # so the page's transient bottom position cannot mark unread rows.
             self._anchor_scroll: dict | None = None
+            # A user/media jump target that is re-centred for a short settle
+            # window: media previews and avatars load after the first
+            # scrollIntoView and can shift the target out of the viewport.
+            self._jump_pin_target = ""
+            self._jump_pin_until = 0.0
             # True from a render with an unread boundary until the read-anchor
             # scroll is confirmed (or its fallback runs).  A transient bottom
             # during that window must never mark the conversation read.
@@ -807,6 +812,11 @@ if HAS_WEBENGINE:
             self._anchor_scroll = None
             self._anchor_restore_pending = False
             self._scroll_suspended = False
+            self._clear_jump_pin()
+
+        def _clear_jump_pin(self) -> None:
+            self._jump_pin_target = ""
+            self._jump_pin_until = 0.0
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""
@@ -817,6 +827,8 @@ if HAS_WEBENGINE:
                 self.zoom_changed.emit(self._zoom)
                 event.accept()
                 return
+            # The user takes over scrolling: stop re-centring the jump target.
+            self._clear_jump_pin()
             super().wheelEvent(event)
 
         def _on_load_started(self):
@@ -2422,6 +2434,7 @@ window.__stanzaMentionRef = '';
                 self._maybe_emit_last_seen()
             except Exception:
                 pass
+            self._repin_jump_target()
             # Release the parked-scroll guard only after this poll: it lets the
             # first poll still see the stale "at the bottom" position and, more
             # importantly, keeps it from resetting the seeded unread count
@@ -2465,6 +2478,34 @@ window.__stanzaMentionRef = '';
             self._reset_unread_indicator()
             self._at_bottom_hit = True
             self.bottom_reached.emit()
+
+        def _repin_jump_target(self) -> None:
+            """Re-centre a media jump target while its layout settles."""
+            target = getattr(self, "_jump_pin_target", "")
+            until = float(getattr(self, "_jump_pin_until", 0.0) or 0.0)
+            if not target:
+                return
+            if time.monotonic() >= until:
+                self._clear_jump_pin()
+                return
+            safe = json.dumps(target)
+            try:
+                self.page().runJavaScript(f"""
+                (function() {{
+                    var id = {safe};
+                    var nodes = document.querySelectorAll(
+                        '#chat .stanza-message');
+                    for (var i = 0; i < nodes.length; i++) {{
+                        if (nodes[i].getAttribute('data-stanza-id') === id
+                            || nodes[i].getAttribute('data-reply-id') === id) {{
+                            nodes[i].scrollIntoView({{block: 'center'}});
+                            return;
+                        }}
+                    }}
+                }})();
+                """)
+            except RuntimeError:
+                self._clear_jump_pin()
 
         def _release_scroll_suspend(self) -> None:
             """Trust the scroll position again once the parked scroll ran.
@@ -2895,7 +2936,8 @@ window.__stanzaMentionRef = '';
         def scroll_to_message(self, message_id: str,
                               highlight: bool = True,
                               timestamp: str = "",
-                              anchor_restore: bool = False) -> None:
+                              anchor_restore: bool = False,
+                              pin: bool = False) -> None:
             """Scroll the ``data-stanza-id`` node into view (and flash it).
 
             While the document is empty (a ``clear()`` whose page load has not
@@ -2911,6 +2953,11 @@ window.__stanzaMentionRef = '';
             """
             if not message_id and not timestamp:
                 return
+            if pin and message_id:
+                self._jump_pin_target = str(message_id)
+                self._jump_pin_until = time.monotonic() + 2.0
+            elif not anchor_restore:
+                self._clear_jump_pin()
             self._arm_anchor_scroll(
                 "message", message_id or timestamp, restore=anchor_restore)
             if not self._ready or self._pending:
@@ -2948,6 +2995,8 @@ window.__stanzaMentionRef = '';
             stamp = str(timestamp or "")
             if not stamp:
                 return
+            if not anchor_restore:
+                self._clear_jump_pin()
             self._arm_anchor_scroll("time", stamp, restore=anchor_restore)
             if not self._ready or self._pending:
                 self._deferred_scroll = ("time", stamp)
@@ -3046,6 +3095,7 @@ window.__stanzaMentionRef = '';
             self._deferred_scroll = None
             self._anchor_scroll = None
             self._scroll_suspended = False
+            self._clear_jump_pin()
             self._fraction = 1.0
             self._overflow = False
             self._reset_unread_indicator()
@@ -3059,6 +3109,7 @@ window.__stanzaMentionRef = '';
             self._near_top_hit = False
             self._fraction = 1.0
             self._anchor_scroll = None
+            self._clear_jump_pin()
             self._scroll_suspended = True
             self._reset_unread_indicator()
             self._update_jump_button()
@@ -3300,7 +3351,8 @@ else:
         def scroll_to_message(self, message_id: str,
                               highlight: bool = True,
                               timestamp: str = "",
-                              anchor_restore: bool = False) -> None:
+                              anchor_restore: bool = False,
+                              pin: bool = False) -> None:
             """No-op: the QTextBrowser fallback has no per-message nodes."""
             if anchor_restore:
                 self.cancel_anchor_restore()
