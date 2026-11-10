@@ -233,6 +233,7 @@ class JingleSession:
     meta: FileMeta
     method: str = "s5b"            # "s5b" or "ibb"
     state: str = "initiating"
+    cancelled: bool = False
     path: str = ""                 # outbound: file; inbound: save path
     bsid: str = ""                 # SOCKS5 bytestream SID
     ibb_sid: str = ""              # XEP-0047 session id
@@ -320,6 +321,11 @@ class JingleFileTransferManager:
         if text.startswith("<"):
             return "server error"
         return text
+
+    @staticmethod
+    def _check_cancelled(session: JingleSession) -> None:
+        if session.cancelled:
+            raise S5BFailed("cancelled")
 
     def _loop(self) -> asyncio.AbstractEventLoop:
         try:
@@ -659,11 +665,25 @@ class JingleFileTransferManager:
             try:
                 await self._run_s5b(session)
             except S5BFailed:
+                if session.cancelled:
+                    return
                 logger.info("S5B failed (%s), falling back to IBB", session.sid)
                 if session.state in ("accepted", "transferring"):
                     await self._replace_with_ibb(session)
                 await self._run_ibb_send(session, fallback=True)
         except S5BFailed as exc:
+            if session.cancelled:
+                self._cleanup(session)
+                return
+            session.state = "failed"
+            self._emit("file_transfer_progress", peer_bare, "error",
+                       self._error_detail(exc), path, "out")
+            self._cleanup(session)
+        except Exception as exc:  # noqa: BLE001 - unexpected transport error
+            if session.cancelled:
+                self._cleanup(session)
+                return
+            logger.exception("P2P transfer failed")
             session.state = "failed"
             self._emit("file_transfer_progress", peer_bare, "error",
                        self._error_detail(exc), path, "out")
@@ -680,6 +700,9 @@ class JingleFileTransferManager:
     def cancel(self, sid: str) -> None:
         session = self.sessions.get(sid)
         if session is not None:
+            session.cancelled = True
+            self._resolve(session.accept_future, False)
+            self._resolve(session.transfer_future, False)
             self.client._start_task(self._terminate(session, "cancel"))
             return
         proposal = self._proposals.pop(sid, None)
@@ -859,10 +882,16 @@ class JingleFileTransferManager:
         if session is None:
             return
         reason = self._terminate_reason(jingle)
-        if session.state != "done":
+        direction = "out" if session.initiator else "in"
+        if reason in ("cancel", "cancelled", "decline") or session.cancelled:
+            session.state = "cancelled"
+            self._emit("file_transfer_progress", session.peer_bare,
+                       "cancelled", reason or "cancelled",
+                       session.path, direction)
+        elif session.state != "done":
             session.state = "failed"
             self._emit("file_transfer_progress", session.peer_bare, "error",
-                       reason or "cancelled", session.path, "out")
+                       reason or "cancelled", session.path, direction)
         self._resolve(session.accept_future, False)
         self._cleanup(session)
 
@@ -918,6 +947,8 @@ class JingleFileTransferManager:
     # ── SOCKS5 (XEP-0260) ─────────────────────────────────────────
 
     async def _run_s5b(self, session: JingleSession) -> None:
+        if session.cancelled:
+            return
         session.bsid = uuid.uuid4().hex
         session.my_candidates = self._build_candidates(session)
         await self._setup_listener(session)
@@ -1046,6 +1077,8 @@ class JingleFileTransferManager:
     # ── IBB (XEP-0261 / XEP-0047) ─────────────────────────────────
 
     async def _replace_with_ibb(self, session: JingleSession) -> None:
+        if session.cancelled:
+            return
         session.ibb_sid = session.ibb_sid or uuid.uuid4().hex
         session.method = "ibb"
         session.accept_future = self._new_future()
@@ -1074,10 +1107,14 @@ class JingleFileTransferManager:
                 session.accept_future, "session not accepted",
                 timeout=_JINGLE_ACCEPT_TIMEOUT)
         if session.state not in ("accepted", "transferring"):
+            if session.cancelled:
+                return
             session.state = "failed"
             self._emit("file_transfer_progress", session.peer_bare, "error",
                        "session not accepted", session.path, "out")
             self._cleanup(session)
+            return
+        if session.cancelled:
             return
         session.state = "transferring"
         session.accept_future = self._new_future()  # for a later replace
@@ -1085,6 +1122,8 @@ class JingleFileTransferManager:
         try:
             await self._ibb_send_file(session)
         except Exception as exc:  # noqa: BLE001 - surfaced as progress
+            if session.cancelled:
+                return
             logger.warning("IBB send failed: %s", exc)
             self._emit("file_transfer_progress", session.peer_bare, "error",
                        self._error_detail(exc), session.path, "out")
@@ -1129,23 +1168,26 @@ class JingleFileTransferManager:
                      if session.encrypted else None)
         with open(session.path, "rb") as fh:
             while True:
+                self._check_cancelled(session)
                 chunk = fh.read(session.ibb_block)
                 if not chunk:
                     break
                 payload = encryptor.update(chunk) if encryptor else chunk
                 await self._ibb_send_block(session, payload)
+                self._check_cancelled(session)
                 sent += len(chunk)
                 self._emit("file_transfer_progress", session.peer_bare,
-                           "progress", str(int(sent * 100 / total)),
-                           session.path, "out")
+                           "progress", str(sent), session.path, "out")
         if encryptor is not None:
             tail = encryptor.finish()
             if tail:
+                self._check_cancelled(session)
                 await self._ibb_send_block(session, tail)
         await self._ibb_send_close(session)
 
     async def _ibb_send_block(self, session: JingleSession,
                               chunk: bytes) -> None:
+        self._check_cancelled(session)
         seq = session.ibb_out_seq & 0xFFFF
         session.ibb_out_seq = (seq + 1) & 0xFFFF
         payload = base64.b64encode(chunk).decode("ascii")
@@ -1159,6 +1201,7 @@ class JingleFileTransferManager:
             data.text = payload
             try:
                 await iq.send(timeout=_IBB_IQ_TIMEOUT)
+                self._check_cancelled(session)
                 return
             except IqTimeout:
                 if not self.xmpp.is_connected():
@@ -1263,8 +1306,7 @@ class JingleFileTransferManager:
             return
         total = session.meta.size or session.ibb_reader.tell() or 1
         self._emit("file_transfer_progress", session.peer_bare, "progress",
-                   str(int(session.ibb_reader.tell() * 100 / total)),
-                   session.path, "in")
+                   str(session.ibb_reader.tell()), session.path, "in")
 
     def _fail_ibb_receive(self, session: JingleSession, reason: str) -> None:
         """Abort a receive whose byte stream has a gap or bad block."""
@@ -1390,6 +1432,8 @@ class JingleFileTransferManager:
             return
         session.state = "transferring"
         await self._stream_in(session, transport)
+        if session.cancelled:
+            return
         await self._send_received(session)
         await self._terminate(session, "success")
 
@@ -1414,16 +1458,17 @@ class JingleFileTransferManager:
         try:
             with open(session.path, "rb") as fh:
                 while True:
+                    self._check_cancelled(session)
                     chunk = fh.read(_CHUNK)
                     if not chunk:
                         break
                     writer.write(encryptor.update(chunk) if encryptor
                                  else chunk)
                     await writer.drain()
+                    self._check_cancelled(session)
                     sent += len(chunk)
                     self._emit("file_transfer_progress", session.peer_bare,
-                               "progress", str(int(sent * 100 / total)),
-                               session.path, "out")
+                               "progress", str(sent), session.path, "out")
             if encryptor is not None:
                 tail = encryptor.finish()
                 if tail:
@@ -1448,17 +1493,24 @@ class JingleFileTransferManager:
         try:
             with open(path, "wb") as fh:
                 while True:
+                    if session.cancelled:
+                        await self._close_writer(writer)
+                        self._discard_part(session)
+                        return
                     chunk = await reader.read(_CHUNK)
                     if not chunk:
                         break
+                    if session.cancelled:
+                        await self._close_writer(writer)
+                        self._discard_part(session)
+                        return
                     plain = decryptor.update(chunk) if decryptor else chunk
                     fh.write(plain)
                     received += len(plain)
                     if total:
                         self._emit("file_transfer_progress",
                                    session.peer_bare, "progress",
-                                   str(int(received * 100 / total)),
-                                   session.path, "in")
+                                   str(received), session.path, "in")
                         if received >= total and decryptor is None:
                             break
                 if decryptor is not None:

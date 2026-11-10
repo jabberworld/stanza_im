@@ -10421,11 +10421,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     jid, path, os.path.basename(path))
         name = os.path.basename(path or detail)
         if phase == "progress":
-            if row is not None:
+            if row is not None and not row.is_finished():
                 row.set_status(tr("ft_status_transferring"))
-                row.set_progress(int(detail or 0))
+                row.set_progress_bytes(int(float(detail or 0)))
             return
         if phase == "start":
+            if row is not None and row.is_finished():
+                return
             encrypted = detail == "encrypted"
             if row is None and direction == "in":
                 row = self._incoming_transfer_row(jid, path, name)
@@ -10444,8 +10446,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if direction == "out":
             self._file_upload_states.pop((bare, path), None)
-        if phase == "done":
+        if phase == "cancelled":
             if row is not None:
+                row.set_status(tr("ft_status_cancelled"))
+                row.mark_finished()
+            if chat:
+                chat.add_status(tr("ft_status_cancelled"),
+                                time.strftime("%H:%M:%S"))
+            if direction == "out":
+                self._check_uploads_finished(jid)
+            return
+        if phase == "done":
+            if row is not None and not row.is_finished():
                 row.set_progress(100)
                 row.finish()
             if chat:
@@ -10454,7 +10466,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._play_sound("ft_finish", "sound_ft_finish")
         elif phase == "error":
             reason = self._transfer_error_text(detail)
-            if row is not None:
+            if row is not None and not row.is_finished():
                 row.fail(reason)
             if chat:
                 chat.add_status(tr("ft_p2p_failed", error=reason),

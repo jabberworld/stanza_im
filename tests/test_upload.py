@@ -177,11 +177,11 @@ check("size format", format_size(0) == "0 B" and format_size(1536) == "1.5 KB")
 dlg._caption.setText("  Check this out  ")
 check("dialog caption", dlg.caption() == "Check this out")
 dlg.set_progress(1, 42)
-check("dialog per-file progress", doc_row._bar.value() == 42)
+check("dialog per-file progress", doc_row._bar.value() == 420)
 dlg.set_progress(1, 999)
-check("dialog progress clamped", doc_row._bar.value() == 100)
+check("dialog progress clamped", doc_row._bar.value() == 1000)
 dlg.set_row_done(0)
-check("dialog row done", img_row._bar.value() == 100)
+check("dialog row done", img_row._bar.value() == 1000)
 dlg.set_row_failed(1, "boom")
 check("dialog row failed", doc_row._status_label.text() == "boom"
       and "Failed" in doc_row._bar.text()
@@ -213,7 +213,8 @@ check("Enter in the caption starts the upload",
 
 # 8a. transfer speed + ETA -----------------------------------------------------
 check("speed format", format_speed(1536) == "1.5 KB/s"
-      and format_speed(0) == "" and format_speed(-5) == "")
+      and format_speed(0) == "" and format_speed(-5) == ""
+      and format_speed(0.5) == "<1 B/s")
 check("eta format", format_eta(12) == "12s" and format_eta(125) == "2:05"
       and format_eta(0) == "" and format_eta(3725) == "1:02:05")
 check("eta over one day is abbreviated", format_eta(90000) == ">1 day")
@@ -231,6 +232,14 @@ speed_row.finish(now=2.0)
 check("finish shows average speed", "/s" in speed_row._stats_label.text())
 speed_row.fail("boom")
 check("fail clears stats", speed_row._stats_label.text() == "")
+
+byte_row = _FileRow(speed_path)
+byte_row.set_progress_bytes(1024, now=0.0)
+check("byte progress shows the transferred volume",
+      "1.0 KB" in byte_row._stats_label.text())
+byte_row.set_progress_bytes(2048, now=1.0)
+check("byte progress computes a stable speed",
+      byte_row._speed > 0 and "/s" in byte_row._stats_label.text())
 
 # 8b. reusable transfer cards --------------------------------------------------
 reuse = FileTransferDialog([img_path])
@@ -294,12 +303,23 @@ check("an incoming transfer reports transferring",
       recv_row._status_label.text() == "Transferring…")
 win._on_file_transfer_progress("bob@example.com", "progress", "50",
                                "/tmp/received.bin", "in")
-check("incoming progress updates the shared card",
-      recv_row._bar.value() == 50)
+check("incoming byte progress updates the shared card",
+      recv_row._bar.value() == 500)
 win._on_file_transfer_progress("bob@example.com", "done", "",
                                "/tmp/received.bin", "in")
 check("an incoming transfer reaches the done state",
       recv_row._status_label.text() == "Completed")
+win._on_file_transfer_progress("bob@example.com", "progress", "100",
+                               "/tmp/received.bin", "in")
+check("late progress does not revive a finished row",
+      recv_row._status_label.text() == "Completed")
+cancel_row = win._incoming_transfer_row(
+    "bob@example.com", "/tmp/cancelled.bin", "cancelled.bin", 100)
+win._on_file_transfer_progress("bob@example.com", "cancelled", "cancel",
+                               "/tmp/cancelled.bin", "in")
+check("an incoming cancel marks the card cancelled",
+      cancel_row._status_label.text() == "Cancelled"
+      and cancel_row.is_finished())
 incoming_dlg.close()
 
 # 8d. an incoming offer shows the shared progress window ----------------------

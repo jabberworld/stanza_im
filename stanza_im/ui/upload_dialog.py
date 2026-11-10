@@ -34,6 +34,8 @@ def format_speed(bps: float) -> str:
     """Human-readable transfer speed, e.g. ``1.5 KB/s`` ("" when unknown)."""
     if not bps or bps <= 0 or math.isinf(bps):
         return ""
+    if bps < 1:
+        return "<1 B/s"
     return format_size(int(bps)) + "/s"
 
 
@@ -129,6 +131,8 @@ class _FileRow(QtWidgets.QWidget):
         self._start_time: float | None = None
         self._last_time: float | None = None
         self._last_bytes = 0
+        self._samples: list[tuple[float, int]] = []
+        self._last_progress_time: float | None = None
         self._status_text = str(status or "")
         self._cancelable = bool(cancelable)
         self._finished = False
@@ -153,7 +157,8 @@ class _FileRow(QtWidgets.QWidget):
         progress_row = QtWidgets.QHBoxLayout()
         progress_row.setSpacing(0)
         self._bar = QtWidgets.QProgressBar(self)
-        self._bar.setRange(0, 100)
+        # 0.1% resolution: a 4 KiB block is visible even on a 37.5 MB file.
+        self._bar.setRange(0, 1000)
         self._bar.setValue(0)
         self._bar.setTextVisible(True)
         self._bar.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
@@ -231,26 +236,60 @@ class _FileRow(QtWidgets.QWidget):
         self._status_label.setText(self._status_text)
         self._status_label.setToolTip(self._status_text)
 
-    def set_progress(self, pct: int, now: float | None = None) -> None:
-        pct = max(0, min(100, int(pct)))
-        self._bar.setValue(pct)
+    def set_progress(self, pct: float, now: float | None = None) -> None:
+        """Update from a percentage (HTTP Upload)."""
+        pct = max(0.0, min(100.0, float(pct)))
+        current = int(self._total * pct / 100) if self._total else 0
+        self._advance(current, now, bar_pct=pct)
+
+    def set_progress_bytes(self, current: int,
+                           now: float | None = None) -> None:
+        """Update from the number of acknowledged bytes (Jingle)."""
+        current = max(0, int(current))
+        if self._total:
+            current = min(current, self._total)
+        self._advance(current, now)
+
+    def _advance(self, current: int, now: float | None = None,
+                 bar_pct: float | None = None) -> None:
+        if self._finished:
+            return
+        if bar_pct is not None:
+            self._bar.setValue(int(round(max(0.0, min(100.0, bar_pct)) * 10)))
+        elif self._total:
+            self._bar.setValue(int(round(current * 1000 / self._total)))
+        else:
+            self._bar.setValue(0)
         if not self._total:
             return
         now = time.monotonic() if now is None else now
-        current = int(self._total * pct / 100)
         if self._last_time is None:
             self._start_time = now
             self._last_time = now
             self._last_bytes = current
+            self._last_progress_time = now
+            self._samples = [(now, current)]
             self._update_stats(current)
             return
+        if current > self._last_bytes:
+            self._last_progress_time = now
+            self._last_bytes = current
+        self._samples.append((now, current))
+        cutoff = now - 5.0
+        while len(self._samples) > 2 and self._samples[0][0] < cutoff:
+            self._samples.pop(0)
         elapsed = now - self._last_time
         if elapsed >= 0.3:
-            instant = (current - self._last_bytes) / elapsed
-            self._speed = (instant if self._speed <= 0
-                           else 0.6 * self._speed + 0.4 * instant)
+            if len(self._samples) >= 2:
+                t0, c0 = self._samples[0]
+                t1, c1 = self._samples[-1]
+                if t1 > t0:
+                    self._speed = max(0.0, (c1 - c0) / (t1 - t0))
+            stalled = (self._last_progress_time is not None
+                       and now - self._last_progress_time > 5.0)
+            if stalled:
+                self._speed = 0.0
             self._last_time = now
-            self._last_bytes = current
             self._update_stats(current)
 
     def _update_stats(self, current: int) -> None:
@@ -267,7 +306,7 @@ class _FileRow(QtWidgets.QWidget):
         self._stats_label.setText(" \u00b7 ".join(parts) or "\u2014")
 
     def finish(self, now: float | None = None) -> None:
-        self._bar.setValue(100)
+        self._bar.setValue(self._bar.maximum())
         self.set_status(tr("ft_status_done"))
         self.mark_finished()
         if not self._total or self._start_time is None:

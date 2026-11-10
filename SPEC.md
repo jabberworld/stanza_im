@@ -2934,9 +2934,10 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   a XEP-0234 `session-info <received/>` and the session is terminated. Remote
   file names are sanitized (`include/utils.safe_filename`) to prevent path
   traversal (XEP-0234 §12).
-- **Progress**: `file_transfer_progress(jid, start|progress|done|error, detail,
-  path, out|in)` updates the shared `FileTransferDialog` rows for sends and
-  receives; `file_transfer_status` reports the S5B→IBB fallback. The dialog is
+- **Progress**: `file_transfer_progress(jid, start|progress|done|error|cancelled,
+  detail, path, out|in)` updates the shared `FileTransferDialog` rows for sends
+  and receives; `progress` carries the number of acknowledged bytes.
+  `file_transfer_status` reports the S5B→IBB fallback. The dialog is
   a reusable list of vertical file cards (name, full-width progress/cancel,
   bytes/speed/ETA/status/encryption); every send inserts a new card at the top
   (a repeated path is never silently reused), and «Очистить завершённые»
@@ -2947,8 +2948,14 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   the session is accepted. Errors are shown as short status text
   (`ft_error_timeout`/`ft_error_connection`/`ft_error_server`/
   `ft_error_not_accepted`/`ft_error_out_of_order`); the full exception stays
-  in the log and never becomes the progress-bar label. Receiving shows the OSD
-  via `_notify_osd_file` when `files.download_notifications` is on.
+  in the log and never becomes the progress-bar label. The bar has 0.1 %
+  resolution and speed uses a ~5 s window, so an IBB transfer updates every
+  block (~1.8 s) rather than once per percent. A local cancel sets
+  `JingleSession.cancelled`, stops the IBB/S5B loop after the current block and
+  sends `session-terminate/cancel`; an incoming `session-terminate` is emitted
+  as `cancelled` with the correct direction, and late progress does not revive
+  a finished card. Receiving shows the OSD via `_notify_osd_file` when
+  `files.download_notifications` is on.
 - Features `urn:xmpp:jingle:1`, `urn:xmpp:jingle:apps:file-transfer:5`,
   `urn:xmpp:jingle:transports:s5b:1` and `urn:xmpp:jingle:transports:ibb:1` are
   advertised in disco (`core/client.py`).

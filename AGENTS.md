@@ -2980,7 +2980,13 @@ card **and shows/raises the dialog**, which is updated by
 `file_transfer_progress` for the receive direction as well. Transfer failures
 are mapped to short status text (`ft_error_timeout`/`ft_error_connection`/
 `ft_error_server`/`ft_error_not_accepted`/`ft_error_out_of_order`) with the
-full exception only in the log; the progress bar never contains raw XML.
+full exception only in the log; the progress bar never contains raw XML. The
+`progress` detail is the number of acknowledged bytes; the dialog uses a 0.1 %
+bar and a ~5 s speed window, so IBB progress updates every block (~1.8 s)
+instead of 1 % steps. A local cancel sets `JingleSession.cancelled`, stops the
+IBB/S5B loop after the current block and sends `session-terminate/cancel`; an
+incoming `session-terminate` is emitted as `cancelled` with the correct
+direction and late progress events are ignored by finished cards.
 **XEP-0353 JMI** selects the recipient
 resource when the target is not fixed and more than one online resource exists:
 a `<propose>` carrying the XEP-0234 file description goes privately to every
@@ -2992,8 +2998,10 @@ directly to that full JID. An incoming proposal opens the normal `file_offer`;
 accepting sends `<proceed>` and the follow-up `session-initiate` is
 auto-accepted with the chosen path, while a `<retract>` closes the prompt
 (`file_offer_cancelled`). [`tests/test_jingle_file_transfer.py`]
-Progress/done/error are emitted as `file_transfer_progress(jid, phase, detail,
-path, direction)` and reused `FileTransferDialog` rows. Incoming offers are
+Progress/done/error/cancelled are emitted as
+`file_transfer_progress(jid, phase, detail, path, direction)`; for `progress`
+`detail` is bytes transferred and reused `FileTransferDialog` rows show
+bytes/speed/ETA on a 0.1 % bar. Incoming offers are
 emitted as `file_offer(offer_id, from, meta)`; `MainWindow._on_file_offer`
 auto-accepts (saving into `files.download_dir`, unique name) when
 `files.auto_accept` is on, otherwise shows `IncomingFileDialog` (confirm →

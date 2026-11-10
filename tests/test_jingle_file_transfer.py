@@ -560,6 +560,71 @@ check("IBB sends one block at a time", _seq_max == 1)
 check("sequential IBB keeps the bytes in order", _seq_ok)
 check("IBB uses 4 KiB blocks", _seq_blocks == 10)
 
+# Cancelling an IBB session stops the loop before the next block.
+async def _cancel_ibb():
+    source = os.path.join(_SCRATCH, "cancel.bin")
+    payload = b"c" * (jingle.IBB_BLOCK_SIZE * 10)
+    with open(source, "wb") as fh:
+        fh.write(payload)
+    cclient = JabberClient("me@example.com/res", "pw")
+    cmgr = cclient.file_transfer
+    chunks = []
+
+    async def _block(session, chunk):
+        chunks.append(chunk)
+        session.cancelled = True
+
+    async def _close(session):
+        return None
+
+    cmgr._ibb_send_block = _block
+    cmgr._ibb_send_close = _close
+    csession = jingle.JingleSession(
+        sid="cancel", peer_bare="bob@example.com",
+        peer_full="bob@example.com/r", self_full="me@example.com/res",
+        initiator=True, content_name="file-cancel",
+        meta=jingle.FileMeta(name="cancel.bin", size=len(payload)),
+        path=source, method="ibb", ibb_sid="ibb-cancel")
+    try:
+        await cmgr._ibb_send_file(csession)
+    except jingle.S5BFailed:
+        pass
+    return len(chunks)
+
+
+check("cancelling IBB stops after the current block",
+      _run(_cancel_ibb()) == 1)
+
+
+# An incoming session-terminate is reported with the incoming direction.
+async def _incoming_cancel():
+    xclient = JabberClient("me@example.com/res", "pw")
+    xmgr = xclient.file_transfer
+    xs = jingle.JingleSession(
+        sid="in-cancel", peer_bare="bob@example.com",
+        peer_full="bob@example.com/r", self_full="me@example.com/res",
+        initiator=False, content_name="file-in",
+        meta=jingle.FileMeta(name="in.bin", size=10), method="ibb",
+        ibb_sid="ibb-in", path=os.path.join(_SCRATCH, "in.bin"))
+    xmgr.sessions[xs.sid] = xs
+    xmgr._cleanup = lambda session: None
+    events = []
+    xclient.on("file_transfer_progress",
+               lambda *a: events.append(a))
+    term = ET.Element("{%s}jingle" % jingle.NS_JINGLE)
+    term.set("sid", xs.sid)
+    reason = ET.SubElement(term, "{%s}reason" % jingle.NS_JINGLE)
+    ET.SubElement(reason, "{%s}cancel" % jingle.NS_JINGLE)
+    await xmgr._on_session_terminate(term)
+    return events
+
+
+_in_cancel_events = _run(_incoming_cancel())
+check("incoming cancel is reported with direction=in",
+      bool(_in_cancel_events)
+      and _in_cancel_events[-1][1] == "cancelled"
+      and _in_cancel_events[-1][-1] == "in")
+
 # A peer that rejects the larger open block falls back to 4096.
 async def _open_fallback():
     fclient = JabberClient("me@example.com/res", "pw")
