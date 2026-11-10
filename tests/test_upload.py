@@ -257,8 +257,13 @@ check("the progress bar expands across the card",
 check("the list has no horizontal scrollbar",
       reuse._scroll.horizontalScrollBarPolicy()
       == QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-check("the lock gutter matches the progress bar edge",
-      first._progress_gutter.width() == 30)
+name_row = first.layout().itemAt(0).layout()
+progress_row = first.layout().itemAt(1).layout()
+check("the cancel button lives in the name row",
+      name_row.indexOf(first._cancel_btn) >= 0)
+check("the progress bar spans the card",
+      progress_row.count() == 1
+      and progress_row.itemAt(0).widget() is first._bar)
 first.set_encrypted(True)
 check("the lock is shown for an encrypted transfer", not first._lock.isHidden())
 first.set_encrypted(False)
@@ -346,6 +351,11 @@ MainWindow._on_file_offer(
 check("an incoming offer shows the progress window",
       offer_dlg.isVisible()
       and offer_dlg.row_for_key("in:offer:offer-show") is not None)
+check("an incoming offer disables the send button",
+      not offer_dlg._ok_btn.isEnabled())
+offer_dlg.prepare_send([doc_path], targets=[])
+check("a new outgoing batch re-enables the send button",
+      offer_dlg._ok_btn.isEnabled())
 offer_dlg.close()
 
 # 8e. transfer errors are shortened for the UI -------------------------------

@@ -10392,6 +10392,7 @@ class MainWindow(QtWidgets.QMainWindow):
             name=name or os.path.basename(path) or "file", total=total,
             direction="in", status=tr("ft_status_waiting"), jid=jid,
             cancelable=True)
+        dlg.set_incoming_mode(True)
         self._incoming_transfer_rows[key] = row
         return row
 
@@ -10527,6 +10528,7 @@ class MainWindow(QtWidgets.QMainWindow):
             status=tr("ft_status_waiting"), offer_id=offer_id,
             jid=from_jid, cancelable=True)
         self._incoming_transfer_rows[("offer", offer_id)] = progress_row
+        progress_dlg.set_incoming_mode(True)
         self._place_dialog_over(progress_dlg, self._chat_dialog_parent())
         progress_dlg.show()
         progress_dlg.raise_()

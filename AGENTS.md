@@ -2969,15 +2969,18 @@ session (removing the partial file) on a real sequence gap. Jingle
 failure.
 `client.send_file_p2p(jid, path, method, target="")` is serialized by a lock so
 a batch runs one session at a time. `FileTransferDialog` is a reusable transfer
-list: each file is a vertical card (name; full-width progress bar with a cancel
-button; bytes/speed/ETA/status/encryption), every send inserts a **new** card
+list: each file is a vertical card (name row with the cancel button at its
+right; full-width progress bar; bytes/speed/ETA/status/encryption), every send
+inserts a **new** card
 at the top (a repeated path is never silently reused), and a «Очистить
 завершённые» button removes all done/failed/cancelled cards while leaving
 active transfers alone. The dialog auto-fits a few cards and scrolls only when
-they exceed the screen; the encryption lock sits in the progress bar's right
-gutter (not the card's outer edge). An incoming `file_offer` adds a waiting
-card **and shows/raises the dialog**, which is updated by
-`file_transfer_progress` for the receive direction as well. Transfer failures
+they exceed the screen; the encryption lock aligns with the full-width
+progress bar's right edge. An incoming `file_offer` adds a waiting card
+**and shows/raises the dialog**, which is updated by
+`file_transfer_progress` for the receive direction as well; the send button
+is disabled while the window is incoming-only (unless an outgoing batch is
+already waiting to start). Transfer failures
 are mapped to short status text (`ft_error_timeout`/`ft_error_connection`/
 `ft_error_server`/`ft_error_not_accepted`/`ft_error_out_of_order`) with the
 full exception only in the log; the progress bar never contains raw XML. The

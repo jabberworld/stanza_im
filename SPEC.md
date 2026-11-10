@@ -2938,14 +2938,16 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   detail, path, out|in)` updates the shared `FileTransferDialog` rows for sends
   and receives; `progress` carries the number of acknowledged bytes.
   `file_transfer_status` reports the S5B→IBB fallback. The dialog is
-  a reusable list of vertical file cards (name, full-width progress/cancel,
-  bytes/speed/ETA/status/encryption); every send inserts a new card at the top
+  a reusable list of vertical file cards (name row with the cancel button at
+  the right, full-width progress bar, bytes/speed/ETA/status/encryption);
+  every send inserts a new card at the top
   (a repeated path is never silently reused), and «Очистить завершённые»
   removes all done/failed/cancelled cards while active transfers stay. The
   dialog auto-fits a few cards and scrolls only when they exceed the screen;
   the encryption lock aligns with the progress bar's right edge. An incoming
   `file_offer` creates a waiting card **and shows/raises the dialog** before
-  the session is accepted. Errors are shown as short status text
+  the session is accepted; the send button is disabled while the window is
+  incoming-only. Errors are shown as short status text
   (`ft_error_timeout`/`ft_error_connection`/`ft_error_server`/
   `ft_error_not_accepted`/`ft_error_out_of_order`); the full exception stays
   in the log and never becomes the progress-bar label. The bar has 0.1 %

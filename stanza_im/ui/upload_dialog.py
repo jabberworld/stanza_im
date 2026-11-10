@@ -20,7 +20,6 @@ from stanza_im.include.utils import format_size
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
                ".svg", ".svgz", ".tif", ".tiff", ".ico"}
 _ICON_SIZE = 22
-_RIGHT_GUTTER = 24 + 6
 
 
 def _file_size(path: str) -> int:
@@ -175,17 +174,11 @@ class _FileRow(QtWidgets.QWidget):
         self._cancel_btn.setVisible(self._cancelable)
         self._cancel_btn.clicked.connect(
             lambda: self.cancel_requested.emit(self))
-        # Keep a fixed right gutter so the stats-row lock can align with the
-        # progress bar's right edge even when the cancel button is hidden.
-        self._progress_gutter = QtWidgets.QWidget(self)
-        self._progress_gutter.setFixedWidth(_RIGHT_GUTTER)
-        gutter = QtWidgets.QHBoxLayout(self._progress_gutter)
-        gutter.setContentsMargins(0, 0, 0, 0)
-        gutter.setSpacing(0)
-        gutter.addSpacing(6)
-        gutter.addWidget(self._cancel_btn, 0,
-                         QtCore.Qt.AlignmentFlag.AlignVCenter)
-        progress_row.addWidget(self._progress_gutter, 0)
+        # Put the cancel button in the name row; the progress bar below spans
+        # the full card width and never needs to be re-laid out when the
+        # button disappears after completion.
+        name_row.addWidget(self._cancel_btn, 0,
+                           QtCore.Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(progress_row)
 
         stats_row = QtWidgets.QHBoxLayout()
@@ -206,7 +199,6 @@ class _FileRow(QtWidgets.QWidget):
         stats_row.addWidget(self._stats_label, 1)
         stats_row.addWidget(self._status_label, 0)
         stats_row.addWidget(self._lock, 0)
-        stats_row.addSpacing(_RIGHT_GUTTER)
         layout.addLayout(stats_row)
 
         self.setToolTip(self._path or self._name)
@@ -449,8 +441,23 @@ class FileTransferDialog(QtWidgets.QDialog):
                 self._target_combo.count() - 1, full_jid,
                 QtCore.Qt.ItemDataRole.ToolTipRole)
 
+    def set_incoming_mode(self, incoming: bool) -> None:
+        """Make the send controls reflect an incoming-only window.
+
+        The dialog is shared with outgoing batches.  Disable OK only when no
+        outgoing batch is waiting to start, so an incoming offer cannot block
+        a send the user has already prepared.
+        """
+        if incoming:
+            if not self._pending_paths:
+                self._ok_btn.setEnabled(False)
+            return
+        self._ok_btn.setEnabled(True)
+        self._ok_btn.setText(tr("dialog_ok"))
+
     def prepare_send(self, paths, targets=None) -> None:
         """Add a new outgoing batch and re-enable the send controls."""
+        self.set_incoming_mode(False)
         if targets is not None:
             self._rebuild_targets(targets)
         self.add_paths(paths or [], pending=True)
