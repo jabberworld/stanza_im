@@ -324,6 +324,8 @@ STRINGS = {
     "ft_http_upload": "HTTP Upload",
     "ft_upload_started": "Загружается «{file}»…",
     "ft_upload_failed": "Ошибка загрузки: {error}",
+    "ft_target_label": "Клиент получателя:",
+    "ft_target_all": "Все клиенты",
     "ft_upload_title": "Отправить файлы",
     "ft_upload_caption": "Сообщение:",
     "ft_upload_caption_placeholder": "Дополнительное сообщение к файлам…",

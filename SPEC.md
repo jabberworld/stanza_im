@@ -2886,9 +2886,20 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   slixmpp stanza objects. It is driven by IQ handlers registered with
   `MatchXPath("{jabber:client}iq/…")` for `{urn:xmpp:jingle:1}jingle` and the
   XEP-0047 `{http://jabber.org/protocol/ibb}open|close|data` elements.
-- **Sending**: `client.send_file_p2p(jid, path, method)` serializes sessions
-  with a lock. A XEP-0234 `<description><file/>` carries name, size,
+- **Sending**: `client.send_file_p2p(jid, path, method, target="")` serializes
+  sessions with a lock. A XEP-0234 `<description><file/>` carries name, size,
   media-type, date and a SHA-1 `<hash/>` (`urn:xmpp:hashes:2`).
+  - **Multiple resources (XEP-0353)**: when no explicit target is chosen and
+    more than one online resource exists, a private `<propose>` with the file
+    description is sent to every JMI-capable resource; the first `<proceed>`
+    selects the full JID for `session-initiate`, the other proposals are
+    retracted, and a timeout falls back to the best remaining resource.
+    `FileTransferDialog` offers «Все клиенты» (default) or one concrete client
+    (`JingleFileTransferManager.targets`); a chosen full JID is used directly.
+  - An incoming proposal is surfaced as `file_offer`; accepting sends
+    `<proceed>` and the following `session-initiate` is auto-accepted with the
+    selected save path. A `<retract>`/`<reject>` emits
+    `file_offer_cancelled` and closes the prompt.
   - `method="p2p"`: XEP-0260 SOCKS5 first. The candidate list always includes
     our `direct` listener candidates (`xmpp/bytestream.py`,
     `listen_for_bytestream`, priority 126<<16) and, when a file proxy is
@@ -2901,7 +2912,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
     `transport-accept`, and the file continues over IBB.
   - `method="p2p-ibb"`: XEP-0261 In-Band Bytestreams immediately — Jingle
     session negotiation, then XEP-0047 `<open/>`, base64 `<data seq sid/>`
-    chunks of `block-size` bytes (seq wraps at 65536) and `<close/>`.
+    chunks of `block-size` bytes (seq wraps at 65536) and `<close/>`. IBB uses
+    32 KiB blocks and sends up to 8 blocks in flight (ordered `seq`); a peer
+    rejecting the larger `<open/>` block-size falls back to 4 KiB.
 - **Receiving**: `file_offer(offer_id, from, meta)` is emitted for an incoming
   `session-initiate`. With `files.auto_accept` on, `MainWindow` answers
   immediately saving into `files.download_dir` (unique name); otherwise it

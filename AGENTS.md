@@ -2954,8 +2954,21 @@ encrypted transfer shows a lock in the transfer/incoming dialogs and a chat
 status line. `"P2P IBB"` uses **Jingle In-Band (XEP-0261/0047)** immediately;
 `"P2P"`
 falls back to IBB automatically when SOCKS5 fails by sending a
-`transport-replace` and continuing as IBB. `client.send_file_p2p(jid, path,
-method)` is serialized by a lock so a batch runs one session at a time.
+`transport-replace` and continuing as IBB. IBB uses 32 KiB blocks and up to 8
+pipelined blocks in flight (session sequence numbers are assigned in order); a
+peer that rejects the larger `<open/>` block-size falls back to 4 KiB.
+`client.send_file_p2p(jid, path, method, target="")` is serialized by a lock so
+a batch runs one session at a time. **XEP-0353 JMI** selects the recipient
+resource when the target is not fixed and more than one online resource exists:
+a `<propose>` carrying the XEP-0234 file description goes privately to every
+JMI-capable resource, the first `<proceed>` wins, the `session-initiate` goes
+to that full JID and the other proposals are retracted. A timeout falls back to
+the best remaining resource; an explicit `target` (chosen in
+`FileTransferDialog`'s «Клиент получателя» / «Все клиенты» selector) sends
+directly to that full JID. An incoming proposal opens the normal `file_offer`;
+accepting sends `<proceed>` and the follow-up `session-initiate` is
+auto-accepted with the chosen path, while a `<retract>` closes the prompt
+(`file_offer_cancelled`). [`tests/test_jingle_file_transfer.py`]
 Progress/done/error are emitted as `file_transfer_progress(jid, phase, detail,
 path, direction)` and reused `FileTransferDialog` rows. Incoming offers are
 emitted as `file_offer(offer_id, from, meta)`; `MainWindow._on_file_offer`

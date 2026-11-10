@@ -34,6 +34,7 @@ from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.xmpp import bytestream
 from stanza_im.xmpp import jingle
+from stanza_im.xmpp import jmi
 
 i18n_load("en")
 
@@ -311,7 +312,7 @@ order = []
 
 
 class _SerialManager(jingle.JingleFileTransferManager):
-    async def _send_one(self, jid, path, method):
+    async def _send_one(self, jid, path, method, target=""):
         order.append("start:%s" % path)
         await asyncio.sleep(0.02)
         order.append("end:%s" % path)
@@ -329,6 +330,227 @@ async def _batch():
 _run(_batch())
 check("P2P batch is sequential",
       order == ["start:a", "end:a", "start:b", "end:b"])
+
+# ── 10b. XEP-0353 file proposals + client selection ------------------------
+jmi_client = JabberClient("me@example.com/res", "pw")
+jmi_client.presences = {
+    "bob@example.com/rbook": {"type": "available", "show": "online",
+                              "priority": 50},
+    "bob@example.com/monocles": {"type": "available", "show": "online",
+                                  "priority": 50},
+}
+jmi_client.contact_features = {
+    "bob@example.com/rbook": {jmi.NS_JINGLE_MSG},
+    "bob@example.com/monocles": {jmi.NS_JINGLE_MSG},
+}
+jmi_client.resource_client_name = lambda bare, res: (
+    "Stanza" if res == "rbook" else "Monocles")
+jmi_mgr = jmi_client.file_transfer
+labels = jmi_mgr.targets("bob@example.com")
+check("JMI targets list every online resource",
+      len(labels) == 2 and {full for full, _ in labels} == {
+          "bob@example.com/rbook", "bob@example.com/monocles"})
+check("JMI target labels name the client",
+      any("Stanza" in label for _full, label in labels)
+      and any("Monocles" in label for _full, label in labels))
+
+_meta = jingle.FileMeta(name="hello.bin", size=7,
+                        media_type="application/octet-stream")
+_propose_msg = jmi_mgr._jmi_message(
+    "propose", "sid-jmi", "bob@example.com/rbook", _meta, private=True)
+_propose = jmi.action_element(_propose_msg)
+_prop_desc = _propose.find("{%s}description" % jingle.NS_FT)
+check("a file proposal carries the XEP-0234 description",
+      _propose is not None and _prop_desc is not None
+      and _prop_desc.find("{%s}file" % jingle.NS_FT) is not None)
+check("a targeted proposal is private",
+      _propose_msg.xml.find("{urn:xmpp:carbons:2}private") is not None
+      and _propose_msg.xml.find("{urn:xmpp:hints}no-copy") is not None)
+
+_jmi_calls = []
+jmi_mgr._send_jmi_action = lambda action, sid, target, **kw:     _jmi_calls.append((action, target))
+
+
+async def _fake_proceed(_session, _timeout=30.0):
+    return "bob@example.com/monocles", "ok"
+
+
+jmi_mgr._wait_proceed = _fake_proceed
+jmi_session = jingle.JingleSession(
+    sid="sid-jmi", peer_bare="bob@example.com",
+    peer_full="bob@example.com/rbook", self_full="me@example.com/res",
+    initiator=True, content_name="file-x", meta=_meta)
+_run(jmi_mgr._propose_and_select(jmi_session))
+check("the first proceeding resource is selected",
+      jmi_session.peer_full == "bob@example.com/monocles")
+check("every JMI resource is proposed and the other is retracted",
+      ("propose", "bob@example.com/rbook") in _jmi_calls
+      and ("propose", "bob@example.com/monocles") in _jmi_calls
+      and ("retract", "bob@example.com/rbook") in _jmi_calls)
+
+# Incoming proposal -> file_offer; accepting sends proceed and remembers the
+# chosen path until the session-initiate arrives.
+offer_client2 = JabberClient("me@example.com/res", "pw")
+offer_client2.resource_client_name = lambda bare, res: ""
+received_offers = []
+offer_client2.on("file_offer", lambda *a: received_offers.append(a))
+offer_mgr = offer_client2.file_transfer
+incoming_msg = jmi_mgr._jmi_message(
+    "propose", "sid-in", "me@example.com/res", _meta)
+incoming_msg["from"] = "bob@example.com/phone"
+offer_mgr.handle_jingle_message(incoming_msg)
+check("a JMI proposal opens a file offer",
+      len(received_offers) == 1
+      and received_offers[0][0] == "sid-in"
+      and received_offers[0][2]["name"] == "hello.bin")
+accepted_calls = []
+offer_mgr._send_jmi_action = lambda action, sid, target, **kw:     accepted_calls.append((action, target))
+_run(offer_mgr._answer_offer(offer_mgr._proposals["sid-in"], True,
+                             os.path.join(_SCRATCH, "hello.bin")))
+check("accepting a proposal sends proceed",
+      accepted_calls == [("proceed", "bob@example.com/phone")])
+check("the accepted proposal waits for session-initiate",
+      "sid-in" in offer_mgr._proposals
+      and offer_mgr._proposal_paths["sid-in"].endswith("hello.bin"))
+
+# A retract closes the other client's prompt.
+retract_msg = jmi_mgr._jmi_message(
+    "retract", "sid-in", "me@example.com/res")
+retract_msg["from"] = "bob@example.com/phone"
+cancelled = []
+offer_client2.on("file_offer_cancelled", lambda sid: cancelled.append(sid))
+offer_mgr.handle_jingle_message(retract_msg)
+check("a retract cancels the pending proposal",
+      cancelled == ["sid-in"] and "sid-in" not in offer_mgr._proposals)
+
+# An accepted proposal is auto-accepted when the follow-up session-initiate
+# arrives, and the initiator's IBB sid is adopted.
+auto_client = JabberClient("me@example.com/res", "pw")
+auto_mgr = auto_client.file_transfer
+auto_msg = jmi_mgr._jmi_message(
+    "propose", "sid-auto", "me@example.com/res", _meta)
+auto_msg["from"] = "bob@example.com/phone"
+auto_mgr.handle_jingle_message(auto_msg)
+auto_calls = []
+auto_mgr._send_jmi_action = lambda action, sid, target, **kw:     auto_calls.append((action, target))
+_run(auto_mgr._answer_offer(auto_mgr._proposals["sid-auto"], True,
+                            os.path.join(_SCRATCH, "auto.bin")))
+auto_calls.clear()
+
+async def _fake_auto_answer(session, accept, save_path):
+    auto_calls.append(("answer", accept, save_path,
+                       session.ibb_sid))
+
+auto_mgr._answer_offer = _fake_auto_answer
+auto_iq = slixmpp.Iq()
+auto_iq["type"] = "set"
+auto_iq["from"] = "bob@example.com/phone"
+auto_jingle = ET.SubElement(auto_iq.xml,
+                            "{%s}jingle" % jingle.NS_JINGLE)
+auto_jingle.set("action", "session-initiate")
+auto_jingle.set("sid", "sid-auto")
+auto_content = ET.SubElement(auto_jingle,
+                             "{%s}content" % jingle.NS_JINGLE)
+auto_content.set("creator", "initiator")
+auto_content.set("name", "file-auto")
+auto_desc = ET.SubElement(auto_content,
+                          "{%s}description" % jingle.NS_FT)
+auto_desc.append(jingle.build_file_element(_meta))
+auto_ibb = ET.SubElement(auto_content,
+                         "{%s}transport" % jingle.NS_IBB)
+auto_ibb.set("sid", "ibb-auto")
+_run(auto_mgr._on_session_initiate(auto_jingle, auto_iq))
+check("an accepted proposal auto-accepts its session-initiate",
+      auto_calls == [("answer", True,
+                      os.path.join(_SCRATCH, "auto.bin"), "ibb-auto")])
+
+# The upload dialog exposes the recipient-resource selector and defaults to
+# "all clients".
+from stanza_im.ui.upload_dialog import FileTransferDialog
+selector = FileTransferDialog(
+    [os.path.join(_SCRATCH, "source.bin")],
+    targets=[("bob@example.com/rbook", "Stanza · rbook"),
+             ("bob@example.com/monocles", "Monocles · monocles")])
+check("the target selector defaults to all clients",
+      selector._target_combo is not None
+      and selector._target_combo.count() == 3
+      and selector.selected_target() == "")
+selector._target_combo.setCurrentIndex(1)
+check("the target selector returns the chosen full JID",
+      selector.selected_target() == "bob@example.com/rbook")
+selector.close()
+
+# ── 10c. Pipelined IBB ----------------------------------------------------
+check("IBB uses a larger block by default",
+      jingle.IBB_BLOCK_SIZE >= 32768 and jingle._IBB_WINDOW > 1)
+
+async def _pipeline():
+    source = os.path.join(_SCRATCH, "pipeline.bin")
+    payload = b"z" * (jingle.IBB_BLOCK_SIZE * 10)
+    with open(source, "wb") as fh:
+        fh.write(payload)
+    pclient = JabberClient("me@example.com/res", "pw")
+    pmgr = pclient.file_transfer
+    chunks = []
+    active = 0
+    max_active = 0
+
+    async def _block(session, chunk):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        chunks.append(chunk)
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    async def _close(session):
+        return None
+
+    pmgr._ibb_send_block = _block
+    pmgr._ibb_send_close = _close
+    psession = jingle.JingleSession(
+        sid="pipe", peer_bare="bob@example.com",
+        peer_full="bob@example.com/r", self_full="me@example.com/res",
+        initiator=True, content_name="file-pipe",
+        meta=jingle.FileMeta(name="pipeline.bin", size=len(payload)),
+        path=source, method="ibb", ibb_sid="ibsp")
+    await pmgr._ibb_send_file(psession)
+    return max_active, b"".join(chunks) == payload
+
+
+_pipe_max, _pipe_ok = _run(_pipeline())
+check("IBB pipelines more than one block", _pipe_max > 1)
+check("pipelined IBB keeps the bytes in order", _pipe_ok)
+
+# A peer that rejects the larger open block falls back to 4096.
+async def _open_fallback():
+    fclient = JabberClient("me@example.com/res", "pw")
+    fmgr = fclient.file_transfer
+    calls = []
+
+    async def _send(iq, *args, **kwargs):
+        calls.append(iq)
+        if len(calls) == 1:
+            raise RuntimeError("block too large")
+
+    _orig = slixmpp.Iq.send
+    slixmpp.Iq.send = _send
+    try:
+        fsession = jingle.JingleSession(
+            sid="fb", peer_bare="bob@example.com",
+            peer_full="bob@example.com/r", self_full="me@example.com/res",
+            initiator=True, content_name="file-fb",
+            meta=jingle.FileMeta(name="x", size=1), method="ibb",
+            ibb_sid="ibsfb", ibb_block=32768)
+        await fmgr._ibb_send_open(fsession)
+        return fsession.ibb_block, len(calls)
+    finally:
+        slixmpp.Iq.send = _orig
+
+
+_fb_block, _fb_calls = _run(_open_fallback())
+check("a rejected IBB block falls back to 4096",
+      _fb_block == 4096 and _fb_calls == 2)
 
 # ── 11. JET-OMEMO: policy, content security, refusal, stream ---------------
 from types import SimpleNamespace

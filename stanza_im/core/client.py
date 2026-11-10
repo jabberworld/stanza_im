@@ -1951,9 +1951,12 @@ class JabberClient:
             sid = str(element.get("id") or "") if element is not None else ""
             # A whiteboard proposal carries the whiteboard <description/>; a
             # later proceed/reject has none, so fall back to the sid.
-            if (jmi.description_ns(msg) == whiteboard_mod.NS_WHITEBOARD
+            desc_ns = jmi.description_ns(msg)
+            if (desc_ns == whiteboard_mod.NS_WHITEBOARD
                     or self.whiteboard.owns_jmi(sid)):
                 self.whiteboard.handle_jingle_message(msg)
+            elif desc_ns == jingle_mod.NS_FT or self.file_transfer.owns_jmi(sid):
+                self.file_transfer.handle_jingle_message(msg)
             else:
                 self.rtp_calls.handle_message(msg)
         except Exception:
@@ -5213,12 +5216,14 @@ class JabberClient:
         self._start_task(self.send_file_p2p(jid, filepath, "p2p"))
 
     async def send_file_p2p(self, jid: str, path: str,
-                            method: str = "p2p") -> None:
+                            method: str = "p2p", target: str = "") -> None:
         """Send *path* to *jid* over Jingle.
 
         *method*: ``p2p`` (SOCKS5 with IBB fallback), ``p2p-ibb`` (IBB only).
+        *target*: an explicit full JID chosen by the user; empty asks every
+        JMI-capable resource and keeps the first one that proceeds.
         """
-        await self.file_transfer.send_file(jid, path, method)
+        await self.file_transfer.send_file(jid, path, method, target=target)
 
     def answer_file_offer(self, offer_id: str, accept: bool,
                           save_path: str = "") -> None:

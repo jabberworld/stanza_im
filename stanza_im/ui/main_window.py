@@ -291,6 +291,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._icons = icons_mod.init_icons()
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
         self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
+        self._incoming_file_dialogs: dict[str, object] = {}  # offer id -> dialog
         self._call_windows: dict[str, object] = {}      # sid -> CallWindow
         self._incoming_calls: dict[str, object] = {}    # sid -> IncomingCallDialog
         self._call_targets: dict[str, str] = {}         # sid -> peer jid
@@ -4340,6 +4341,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("file_transfer_status", self._on_file_transfer_status)
         c.on("file_offer_rejected", self._on_file_offer_rejected)
         c.on("file_offer", self._on_file_offer)
+        c.on("file_offer_cancelled", self._on_file_offer_cancelled)
         c.on("muc_private_message", self._on_muc_private_message)
         c.on("groupchat_message", self._on_groupchat_message)
         c.on("groupchat_presence", self._on_groupchat_presence)
@@ -10138,17 +10140,25 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from stanza_im.ui.upload_dialog import FileTransferDialog
         parent = parent or self
-        dlg = FileTransferDialog(paths, parent)
+        targets = []
+        if self._client is not None and method in ("p2p", "p2p-ibb"):
+            bare = jid.split("/", 1)[0]
+            if not self._client.groupchats.get(bare):
+                try:
+                    targets = self._client.file_transfer.targets(bare)
+                except Exception:  # noqa: BLE001 - selector is best effort
+                    targets = []
+        dlg = FileTransferDialog(paths, parent, targets=targets)
         self._place_dialog_over(dlg, parent)
         dlg.upload_started.connect(
-            lambda caption: self._launch_file_uploads(jid, paths, method,
-                                                      caption, dlg))
+            lambda caption: self._launch_file_uploads(
+                jid, paths, method, caption, dlg, dlg.selected_target()))
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
 
     def _launch_file_uploads(self, jid: str, paths: list, method: str,
-                             caption: str, dlg):
+                             caption: str, dlg, target: str = ""):
         """Start per-file transfers and update the dialog rows."""
         tasks = []
         p2p_paths = []
@@ -10170,16 +10180,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 tasks.append(
                     self._start_task(self._client.upload_http(jid, path)))
         if p2p_paths:
-            tasks.append(
-                self._start_task(self._run_p2p_batch(jid, p2p_paths, method)))
+            tasks.append(self._start_task(
+                self._run_p2p_batch(jid, p2p_paths, method, target)))
         if caption and tasks:
             self._start_task(self._send_caption_after(jid, caption, tasks))
 
-    async def _run_p2p_batch(self, jid: str, paths: list, method: str):
+    async def _run_p2p_batch(self, jid: str, paths: list, method: str,
+                             target: str = ""):
         """Send P2P files sequentially (one Jingle session at a time)."""
         for path in paths:
             try:
-                await self._client.send_file_p2p(jid, str(path), method)
+                await self._client.send_file_p2p(jid, str(path), method,
+                                                 target=target)
             except Exception as exc:  # noqa: BLE001 - shown in the dialog row
                 logger.warning("P2P transfer failed for %s: %s", path, exc)
                 state = self._file_upload_states.get((jid, str(path)))
@@ -10387,10 +10399,23 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.decision.connect(
             lambda accept, save_path: self._on_file_offer_decision(
                 offer_id, from_jid, name, accept, save_path))
+        self._incoming_file_dialogs[offer_id] = dlg
+        dlg.finished.connect(
+            lambda _code, oid=offer_id:
+                self._incoming_file_dialogs.pop(oid, None))
         self._place_dialog_over(dlg, self._chat_dialog_parent())
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _on_file_offer_cancelled(self, offer_id: str):
+        """Another recipient client won the JMI proposal; close our prompt."""
+        dlg = self._incoming_file_dialogs.pop(offer_id, None)
+        if dlg is not None:
+            try:
+                dlg.close()
+            except RuntimeError:
+                pass
 
     def _on_file_offer_decision(self, offer_id: str, from_jid: str,
                                 name: str, accept: bool, save_path: str):

@@ -181,11 +181,12 @@ class FileTransferDialog(QtWidgets.QDialog):
 
     upload_started = QtCore.pyqtSignal(str)  # shared caption ("" if none)
 
-    def __init__(self, paths, parent=None):
+    def __init__(self, paths, parent=None, targets=None):
         super().__init__(parent)
         self.setWindowTitle(tr("ft_upload_title"))
         self.setMinimumWidth(480)
         self._rows = [_FileRow(path, self) for path in (paths or [])]
+        self._targets = list(targets or [])
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -205,6 +206,20 @@ class FileTransferDialog(QtWidgets.QDialog):
             scroll.setFixedHeight(
                 min(48 + len(self._rows) * (_THUMB_SIZE + 16), 320))
         layout.addWidget(scroll, 1)
+
+        self._target_combo = None
+        if len(self._targets) > 1:
+            target_row = QtWidgets.QHBoxLayout()
+            target_row.addWidget(QtWidgets.QLabel(tr("ft_target_label"), self))
+            self._target_combo = QtWidgets.QComboBox(self)
+            self._target_combo.addItem(tr("ft_target_all"), "")
+            for full_jid, label in self._targets:
+                self._target_combo.addItem(label, full_jid)
+                self._target_combo.setItemData(
+                    self._target_combo.count() - 1, full_jid,
+                    QtCore.Qt.ItemDataRole.ToolTipRole)
+            target_row.addWidget(self._target_combo, 1)
+            layout.addLayout(target_row)
 
         layout.addWidget(QtWidgets.QLabel(tr("ft_upload_caption"), self))
         self._caption = QtWidgets.QLineEdit(self)
@@ -238,6 +253,11 @@ class FileTransferDialog(QtWidgets.QDialog):
 
     def caption(self) -> str:
         return self._caption.text().strip()
+
+    def selected_target(self) -> str:
+        """The chosen full JID, or ``""`` for all recipients' clients."""
+        return str(self._target_combo.currentData() or "") \
+            if self._target_combo is not None else ""
 
     def row_count(self) -> int:
         return len(self._rows)

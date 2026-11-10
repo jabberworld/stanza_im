@@ -30,6 +30,7 @@ from xml.etree import ElementTree as ET
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import bytestream
 from stanza_im.xmpp import jet
+from stanza_im.xmpp import jmi
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,9 @@ NS_IBB_OLD = "http://jabber.org/protocol/ibb"
 NS_BYTESTREAMS = "http://jabber.org/protocol/bytestreams"
 NS_HASHES = "urn:xmpp:hashes:2"
 
-IBB_BLOCK_SIZE = 4096
+IBB_BLOCK_SIZE = 32768
+IBB_FALLBACK_BLOCK_SIZE = 4096
+_IBB_WINDOW = 8
 _CHUNK = 16 * 1024
 _S5B_CONNECT_TIMEOUT = 12.0
 _IQ_TIMEOUT = 30
@@ -254,6 +257,11 @@ class JingleSession:
     security_el: object = None
     decryptor: object = None       # inbound stream cipher
     part_path: str = ""            # inbound: the file before its tag matches
+    # XEP-0353: resources that were asked to proceed with this outgoing
+    # transfer, and the ones that already declined.
+    proposal_targets: list[str] = field(default_factory=list)
+    proposal_rejects: set[str] = field(default_factory=set)
+    propose_targeted: bool = False
 
 
 def _file_hashes(path: str) -> tuple[dict, int]:
@@ -279,6 +287,11 @@ class JingleFileTransferManager:
         self.client = client
         self.sessions: dict[str, JingleSession] = {}
         self._offers: dict[str, JingleSession] = {}
+        #: Incoming JMI proposals waiting for a session-initiate; the accepted
+        #: proposals keep their chosen save path in ``_proposal_paths``.
+        self._proposals: dict[str, JingleSession] = {}
+        self._proposal_paths: dict[str, str] = {}
+        self._proceed_futures: dict[str, object] = {}
         self._send_lock = asyncio.Lock()
 
     @property
@@ -297,13 +310,192 @@ class JingleFileTransferManager:
     def _new_future(self):
         return self._loop().create_future()
 
+    # ── Recipient resources / XEP-0353 ───────────────────────────
+
+    def targets(self, jid: str) -> list[tuple[str, str]]:
+        """Online resources of *jid* as ``(full_jid, label)`` pairs.
+
+        Used by the upload dialog so the sender can choose a specific client;
+        the default (empty target) asks every JMI-capable resource.
+        """
+        bare = str(jid).split("/", 1)[0]
+        rows: list[tuple[tuple, str, str]] = []
+        for full, info in (getattr(self.client, "presences", {}) or {}).items():
+            if full.split("/", 1)[0] != bare:
+                continue
+            if info.get("type") != "available" or "/" not in full:
+                continue
+            resource = full.split("/", 1)[1]
+            client_name = ""
+            try:
+                client_name = self.client.resource_client_name(bare, resource)
+            except Exception:  # noqa: BLE001 - label is best effort
+                client_name = ""
+            label = (f"{client_name} · {resource}" if client_name
+                     else resource)
+            show = SHOW_ORDER.get(info.get("show", "online"), 99)
+            priority = -int(info.get("priority", 0) or 0)
+            rows.append(((show, priority, full), full, label))
+        rows.sort(key=lambda item: item[0])
+        return [(full, label) for _key, full, label in rows]
+
+    def _resource_features(self, full: str) -> set:
+        features = set(
+            (getattr(self.client, "contact_features", {}) or {}).get(full)
+            or ())
+        if features:
+            return features
+        info = (getattr(self.client, "contact_caps_info", {}) or {}).get(full)
+        if isinstance(info, dict):
+            return set(info.get("features") or ())
+        return set()
+
+    def _jmi_targets(self, bare: str) -> list[str]:
+        """Online resources that may understand a XEP-0353 file proposal.
+
+        A resource with known caps but without ``urn:xmpp:jingle-message:0``
+        is skipped.  A resource whose caps failed to resolve is kept: Monocles
+        occasionally publishes a caps node slixmpp cannot resolve, but it still
+        understands JMI; dropping it would leave only the desktop client.
+        """
+        targets: list[str] = []
+        for full, _label in self.targets(bare):
+            features = self._resource_features(full)
+            if features and jmi.NS_JINGLE_MSG not in features:
+                continue
+            targets.append(full)
+        return targets
+
+    def owns_jmi(self, sid: str) -> bool:
+        """Whether a JMI response/action belongs to a file transfer."""
+        return (sid in self.sessions or sid in self._proposals
+                or sid in self._proceed_futures)
+
+    @staticmethod
+    def _mark_private(msg) -> None:
+        """Hide a per-resource proposal from the other account resources."""
+        ET.SubElement(msg.xml, "{urn:xmpp:carbons:2}private")
+        ET.SubElement(msg.xml, "{urn:xmpp:hints}no-copy")
+
+    def _jmi_message(self, action: str, sid: str, target: str,
+                     meta: FileMeta | None = None, private: bool = False):
+        descriptions = [(NS_FT, {})] if action == "propose" else []
+        try:
+            msg = jmi.build(self.client, action, target, sid, descriptions)
+        except TypeError:
+            # Test doubles / older helper without the descriptions argument.
+            msg = jmi.build(self.client, action, target, sid)
+        if action == "propose":
+            element = jmi.action_element(msg)
+            desc = (element.find(_q(NS_FT, "description"))
+                    if element is not None else None)
+            if desc is not None:
+                desc.append(build_file_element(meta or FileMeta(name="file")))
+        if private:
+            self._mark_private(msg)
+        return msg
+
+    def _send_jmi_action(self, action: str, sid: str, target: str,
+                         meta: FileMeta | None = None,
+                         private: bool = False) -> None:
+        if not target:
+            return
+        try:
+            self._jmi_message(action, sid, target, meta, private).send()
+            logger.info("FT jingle-message %s -> %s (sid=%s)", action,
+                        target, sid)
+        except Exception:  # noqa: BLE001 - a missing resource is best effort
+            logger.debug("FT jingle-message %s failed for %s", action,
+                         target, exc_info=True)
+
+    async def _wait_proceed(self, session: JingleSession,
+                            timeout: float = 30.0) -> tuple[str, str]:
+        future = self._new_future()
+        self._proceed_futures[session.sid] = future
+        try:
+            target = await asyncio.wait_for(future, timeout)
+            return str(target or ""), "ok"
+        except asyncio.TimeoutError:
+            logger.info("FT no proceed for %s within %.0fs", session.sid,
+                        timeout)
+            return "", "timeout"
+        finally:
+            if self._proceed_futures.get(session.sid) is future:
+                self._proceed_futures.pop(session.sid, None)
+
+    def _retract_others(self, session: JingleSession, chosen: str) -> None:
+        for target in session.proposal_targets:
+            if target != chosen and target not in session.proposal_rejects:
+                self._send_jmi_action("retract", session.sid, target)
+
+    def _proposal_meta(self, element) -> FileMeta | None:
+        if element is None:
+            return None
+        desc = element.find(_q(NS_FT, "description"))
+        if desc is None:
+            return None
+        return parse_description(desc)
+
+    def handle_jingle_message(self, msg) -> bool:
+        """Handle a XEP-0353 proposal/response for a file transfer."""
+        action = jmi.action_of(msg)
+        element = jmi.action_element(msg)
+        if not action or element is None:
+            return False
+        sid = str(element.get("id") or "")
+        frm_full = str(msg["from"])
+        frm_bare = frm_full.split("/", 1)[0]
+        if action == "propose":
+            meta = self._proposal_meta(element) or FileMeta(name="file")
+            session = JingleSession(
+                sid=sid, peer_bare=frm_bare, peer_full=frm_full,
+                self_full=self._full_jid(), initiator=False,
+                content_name="", meta=meta, state="proposed")
+            self._proposals[sid] = session
+            self._offers[sid] = session
+            offered = meta.as_dict()
+            offered["encrypted"] = False
+            logger.info("FT proposal from %s sid=%s file=%s size=%s",
+                        frm_full, sid, meta.name, meta.size)
+            self._emit("file_offer", sid, frm_full, offered)
+            return True
+        if action in ("proceed", "accept"):
+            future = self._proceed_futures.get(sid)
+            if future is not None and not future.done():
+                future.set_result(frm_full)
+            session = self.sessions.get(sid)
+            if session is not None and "/" in frm_full:
+                session.peer_full = frm_full
+            logger.info("FT jingle-message %s from %s (sid=%s)", action,
+                        frm_full, sid)
+            return True
+        if action in ("reject", "retract"):
+            session = self.sessions.get(sid)
+            if session is not None and session.proposal_targets:
+                session.proposal_rejects.add(frm_full)
+                pending = [target for target in session.proposal_targets
+                           if target not in session.proposal_rejects]
+                if not pending:
+                    future = self._proceed_futures.get(sid)
+                    if future is not None and not future.done():
+                        future.set_result("")
+            proposal = self._proposals.pop(sid, None)
+            if proposal is not None:
+                self._offers.pop(sid, None)
+                self._proposal_paths.pop(sid, None)
+                self._emit("file_offer_cancelled", sid)
+            logger.info("FT jingle-message %s from %s (sid=%s)", action,
+                        frm_full, sid)
+            return True
+        return False
+
     # ── Public API ────────────────────────────────────────────────
 
     async def send_file(self, jid: str, path: str,
-                        method: str = "p2p") -> None:
+                        method: str = "p2p", target: str = "") -> None:
         """Send *path* to *jid*; serialized so a batch runs sequentially."""
         async with self._send_lock:
-            await self._send_one(jid, path, method)
+            await self._send_one(jid, path, method, target=target)
 
     # ── JET-OMEMO policy ──────────────────────────────────────────
 
@@ -352,7 +544,34 @@ class JingleFileTransferManager:
             return None
         return tuple(made)
 
-    async def _send_one(self, jid: str, path: str, method: str) -> None:
+    async def _propose_and_select(self, session: JingleSession) -> None:
+        """Ask every JMI resource, then keep the first one that proceeds."""
+        targets = self._jmi_targets(session.peer_bare)
+        session.proposal_targets = list(targets)
+        session.propose_targeted = True
+        for target in targets:
+            self._send_jmi_action("propose", session.sid, target,
+                                  meta=session.meta, private=True)
+        chosen, status = await self._wait_proceed(session)
+        if chosen:
+            session.peer_full = chosen
+            self._retract_others(session, chosen)
+            logger.info("FT %s selected resource %s", session.sid, chosen)
+            return
+        if status == "rejected":
+            raise S5BFailed("all clients rejected the file")
+        pending = [target for target in targets
+                   if target not in session.proposal_rejects]
+        if not pending:
+            raise S5BFailed("all clients rejected the file")
+        # No JMI-capable client answered: keep the old one-resource fallback.
+        session.peer_full = pending[0]
+        self._retract_others(session, session.peer_full)
+        logger.info("FT %s no proceed, falling back to %s", session.sid,
+                    session.peer_full)
+
+    async def _send_one(self, jid: str, path: str, method: str,
+                        target: str = "") -> None:
         path = str(path)
         if not os.path.isfile(path):
             self._emit("file_transfer_progress", jid, "error",
@@ -371,13 +590,20 @@ class JingleFileTransferManager:
                         hash_algo="sha-1",
                         hash_value=hashes.get("sha-1", ""))
         peer_bare = str(jid).split("/")[0]
+        jmi_targets = self._jmi_targets(peer_bare)
+        if target:
+            peer_full = str(target)
+        elif jmi_targets:
+            peer_full = jmi_targets[0]
+        else:
+            peer_full = self._best_full_jid(peer_bare) or peer_bare
         decision = jet.outgoing_decision(
             self._encryption_mode(),
             peer_supports=self._peer_supports_jet(peer_bare),
             omemo_ready=self._omemo_ready())
         session = JingleSession(
             sid=uuid.uuid4().hex, peer_bare=peer_bare,
-            peer_full=self._best_full_jid(peer_bare) or peer_bare,
+            peer_full=peer_full,
             self_full=self._full_jid(), initiator=True,
             content_name="file-%s" % uuid.uuid4().hex[:8], meta=meta,
             path=path)
@@ -405,6 +631,8 @@ class JingleFileTransferManager:
                    "encrypted" if session.encrypted else "", path, "out")
 
         try:
+            if not target and len(jmi_targets) > 1:
+                await self._propose_and_select(session)
             if method in ("ibb", "p2p-ibb"):
                 await self._run_ibb_send(session)
                 return
@@ -433,6 +661,12 @@ class JingleFileTransferManager:
         session = self.sessions.get(sid)
         if session is not None:
             self.client._start_task(self._terminate(session, "cancel"))
+            return
+        proposal = self._proposals.pop(sid, None)
+        if proposal is not None:
+            self._offers.pop(sid, None)
+            self._proposal_paths.pop(sid, None)
+            self._send_jmi_action("reject", sid, proposal.peer_full)
 
     def close(self) -> None:
         """Drop every session and close its listener/sockets (on disconnect)."""
@@ -440,6 +674,9 @@ class JingleFileTransferManager:
             self._cleanup(session)
         self.sessions.clear()
         self._offers.clear()
+        self._proposals.clear()
+        self._proposal_paths.clear()
+        self._proceed_futures.clear()
 
     def active_offers(self) -> list[str]:
         return list(self._offers)
@@ -514,7 +751,11 @@ class JingleFileTransferManager:
         sid = jingle.get("sid", "")
         peer_full = str(iq["from"])
         peer_bare = peer_full.split("/")[0]
+        proposal = self._proposals.pop(sid, None)
+        accepted_path = self._proposal_paths.pop(sid, "")
         name, meta = self._content_meta(jingle)
+        if meta is None and proposal is not None:
+            meta = proposal.meta
         if meta is None:
             return
         content = jingle.find(_q(NS_JINGLE, "content"))
@@ -553,10 +794,17 @@ class JingleFileTransferManager:
             session.bsid = info["sid"]
             session.peer_candidates = info["candidates"]
         elif ibb_el is not None:
-            session.bsid = ibb_el.get("sid", "")
+            session.ibb_sid = ibb_el.get("sid", "")
         session.accept_future = self._new_future()
         session.transfer_future = self._new_future()
         self.sessions[sid] = session
+        if proposal is not None and accepted_path:
+            # The user already accepted the JMI proposal; the follow-up
+            # session-initiate must not open a second dialog.
+            logger.info("FT auto-accepting proposed session %s -> %s", sid,
+                        accepted_path)
+            await self._answer_offer(session, True, accepted_path)
+            return
         self._offers[sid] = session
         offered = meta.as_dict()
         offered["encrypted"] = session.encrypted
@@ -815,28 +1063,61 @@ class JingleFileTransferManager:
         open_el.set("block-size", str(int(session.ibb_block)))
         open_el.set("sid", session.ibb_sid)
         open_el.set("stanza", "iq")
-        await iq.send(timeout=_IQ_TIMEOUT)
+        try:
+            await iq.send(timeout=_IQ_TIMEOUT)
+        except Exception:
+            if session.ibb_block > IBB_FALLBACK_BLOCK_SIZE:
+                logger.info("IBB peer rejected block-size %s; retrying %s",
+                            session.ibb_block, IBB_FALLBACK_BLOCK_SIZE)
+                session.ibb_block = IBB_FALLBACK_BLOCK_SIZE
+                await self._ibb_send_open(session)
+                return
+            raise
+
+    async def _ibb_flush_window(self, pending: list) -> None:
+        """Wait for a window of pipelined IBB blocks."""
+        if not pending:
+            return
+        results = await asyncio.gather(*pending, return_exceptions=True)
+        pending.clear()
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
 
     async def _ibb_send_file(self, session: JingleSession) -> None:
         total = os.path.getsize(session.path) or 1
         sent = 0
+        pending: list = []
+        logger.info("IBB send %s: block=%s window=%s", session.sid,
+                    session.ibb_block, _IBB_WINDOW)
         encryptor = (jet.StreamEncryptor(self._secret(session))
                      if session.encrypted else None)
-        with open(session.path, "rb") as fh:
-            while True:
-                chunk = fh.read(session.ibb_block)
-                if not chunk:
-                    break
-                await self._ibb_send_block(
-                    session, encryptor.update(chunk) if encryptor else chunk)
-                sent += len(chunk)
-                self._emit("file_transfer_progress", session.peer_bare,
-                           "progress", str(int(sent * 100 / total)),
-                           session.path, "out")
-        if encryptor is not None:
-            tail = encryptor.finish()
-            if tail:
-                await self._ibb_send_block(session, tail)
+        try:
+            with open(session.path, "rb") as fh:
+                while True:
+                    chunk = fh.read(session.ibb_block)
+                    if not chunk:
+                        break
+                    payload = encryptor.update(chunk) if encryptor else chunk
+                    pending.append(asyncio.ensure_future(
+                        self._ibb_send_block(session, payload)))
+                    sent += len(chunk)
+                    self._emit("file_transfer_progress", session.peer_bare,
+                               "progress", str(int(sent * 100 / total)),
+                               session.path, "out")
+                    if len(pending) >= _IBB_WINDOW:
+                        await self._ibb_flush_window(pending)
+            if encryptor is not None:
+                tail = encryptor.finish()
+                if tail:
+                    pending.append(asyncio.ensure_future(
+                        self._ibb_send_block(session, tail)))
+            await self._ibb_flush_window(pending)
+        except Exception:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            raise
         await self._ibb_send_close(session)
 
     async def _ibb_send_block(self, session: JingleSession,
@@ -989,6 +1270,25 @@ class JingleFileTransferManager:
 
     async def _answer_offer(self, session: JingleSession, accept: bool,
                             save_path: str) -> None:
+        if session.state == "proposed":
+            if not accept:
+                self._proposals.pop(session.sid, None)
+                self._proposal_paths.pop(session.sid, None)
+                self._send_jmi_action("reject", session.sid,
+                                      session.peer_full)
+                return
+            if save_path:
+                session.path = save_path
+            if not session.path:
+                self._proposals.pop(session.sid, None)
+                self._send_jmi_action("reject", session.sid,
+                                      session.peer_full)
+                return
+            self._proposal_paths[session.sid] = session.path
+            self._send_jmi_action("proceed", session.sid, session.peer_full)
+            logger.info("FT proceeded proposal %s -> %s", session.sid,
+                        session.peer_full)
+            return
         if not accept:
             await self._terminate(session, "decline")
             return
@@ -1371,6 +1671,8 @@ class JingleFileTransferManager:
         self._discard_part(session)
         self.sessions.pop(session.sid, None)
         self._offers.pop(session.sid, None)
+        self._proposals.pop(session.sid, None)
+        self._proposal_paths.pop(session.sid, None)
 
     @staticmethod
     def _resolve(future, value) -> None:
