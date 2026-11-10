@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 import slixmpp
+from slixmpp.exceptions import IqTimeout
 
 from stanza_im.core.client import JabberClient
 from stanza_im.core.storage import Config
@@ -551,6 +552,37 @@ async def _open_fallback():
 _fb_block, _fb_calls = _run(_open_fallback())
 check("a rejected IBB block falls back to 4096",
       _fb_block == 4096 and _fb_calls == 2)
+
+# A timed-out IBB data block is retried once with the same sequence number.
+async def _ibb_retry():
+    rclient = JabberClient("me@example.com/res", "pw")
+    rmgr = rclient.file_transfer
+    rsession = jingle.JingleSession(
+        sid="retry", peer_bare="bob@example.com",
+        peer_full="bob@example.com/r", self_full="me@example.com/res",
+        initiator=True, content_name="file-retry",
+        meta=jingle.FileMeta(name="x", size=1), method="ibb",
+        ibb_sid="ibb-retry", ibb_block=32768)
+    seqs = []
+
+    async def _send(iq, *args, **kwargs):
+        seqs.append(iq.xml.find(
+            "{%s}data" % jingle.NS_IBB_OLD).get("seq"))
+        if len(seqs) == 1:
+            raise IqTimeout(iq)
+
+    orig = slixmpp.Iq.send
+    slixmpp.Iq.send = _send
+    try:
+        await rmgr._ibb_send_block(rsession, b"payload")
+        return seqs, rsession.ibb_out_seq
+    finally:
+        slixmpp.Iq.send = orig
+
+
+_retry_seqs, _retry_next = _run(_ibb_retry())
+check("a timed-out IBB block retries with the same seq",
+      _retry_seqs == ["0", "0"] and _retry_next == 1)
 
 # ── 11. JET-OMEMO: policy, content security, refusal, stream ---------------
 from types import SimpleNamespace

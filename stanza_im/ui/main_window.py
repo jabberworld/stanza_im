@@ -290,8 +290,11 @@ class MainWindow(QtWidgets.QMainWindow):
         populate_translations(tr)
         self._icons = icons_mod.init_icons()
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
-        self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
+        self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, row)
         self._incoming_file_dialogs: dict[str, object] = {}  # offer id -> dialog
+        self._transfer_dialog = None                    # shared progress window
+        self._pending_transfer_send = None              # (jid, paths, method)
+        self._incoming_transfer_rows: dict[tuple, object] = {}
         #: Bare JID of the account whose roster is being loaded.  The cached
         #: roster is rendered before ``_client`` exists, so it cannot use
         #: ``self._client.jid_str`` to recognise our own contact.
@@ -10153,6 +10156,17 @@ class MainWindow(QtWidgets.QMainWindow):
         except RuntimeError:
             pass
 
+    def _ensure_transfer_dialog(self):
+        """Return the single transfer window, creating it once."""
+        if self._transfer_dialog is None:
+            from stanza_im.ui.upload_dialog import FileTransferDialog
+            dlg = FileTransferDialog([], self)
+            dlg.upload_started.connect(self._on_transfer_dialog_started)
+            dlg.transfer_cancel_requested.connect(
+                self._on_transfer_cancel_requested)
+            self._transfer_dialog = dlg
+        return self._transfer_dialog
+
     def _on_chat_files_upload(self, jid: str, paths: list, method: str,
                               parent=None):
         if not self._client:
@@ -10160,41 +10174,59 @@ class MainWindow(QtWidgets.QMainWindow):
         paths = [str(p) for p in (paths or []) if p]
         if not paths:
             return
-        from stanza_im.ui.upload_dialog import FileTransferDialog
         parent = parent or self
         targets = []
-        if self._client is not None and method in ("p2p", "p2p-ibb"):
+        if method in ("p2p", "p2p-ibb"):
             bare = jid.split("/", 1)[0]
             if not self._client.groupchats.get(bare):
                 try:
                     targets = self._client.file_transfer.targets(bare)
                 except Exception:  # noqa: BLE001 - selector is best effort
                     targets = []
-        dlg = FileTransferDialog(paths, parent, targets=targets)
+        dlg = self._ensure_transfer_dialog()
+        dlg.prepare_send(paths, targets=targets)
+        self._pending_transfer_send = (jid, list(paths), method)
         self._place_dialog_over(dlg, parent)
-        dlg.upload_started.connect(
-            lambda caption: self._launch_file_uploads(
-                jid, paths, method, caption, dlg, dlg.selected_target()))
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
+
+    def _on_transfer_dialog_started(self, caption: str):
+        context = self._pending_transfer_send
+        if not context or self._client is None:
+            return
+        jid, paths, method = context
+        self._pending_transfer_send = None
+        dlg = self._transfer_dialog
+        pending = dlg.take_pending_paths() if dlg is not None else []
+        self._launch_file_uploads(
+            jid, pending or paths, method, caption, dlg,
+            dlg.selected_target() if dlg is not None else "")
 
     def _launch_file_uploads(self, jid: str, paths: list, method: str,
                              caption: str, dlg, target: str = ""):
         """Start per-file transfers and update the dialog rows."""
         tasks = []
         p2p_paths = []
-        self._file_uploads[jid] = (dlg, list(paths))
-        for index, path in enumerate(paths):
+        bare_jid = jid.split("/", 1)[0]
+        self._file_uploads[bare_jid] = (dlg, list(paths))
+        for path in paths:
             path = str(path)
-            self._file_upload_states[(jid, path)] = (dlg, index)
+            row = dlg.row_for_path(path) if dlg is not None else None
+            if row is None and dlg is not None:
+                row = dlg.add_path(path)
+            if row is not None:
+                row._jid = jid
+                row.set_status(tr("ft_status_waiting"))
+                row.set_cancelable(method in ("p2p", "p2p-ibb"))
+            self._file_upload_states[(bare_jid, path)] = (dlg, row)
             if method in ("p2p", "p2p-ibb"):
                 p2p_paths.append(path)
                 continue
-            target = jid.split("/")[0]
+            bare = jid.split("/")[0]
             omemo_mode = (getattr(self._client.omemo, "available", False)
-                          and self._client.omemo.chat_mode(target) == "omemo"
-                          and not self._client.groupchats.get(target))
+                          and self._client.omemo.chat_mode(bare) == "omemo"
+                          and not self._client.groupchats.get(bare))
             if omemo_mode:
                 tasks.append(self._start_task(
                     self._client.send_omemo_file(jid, path)))
@@ -10216,12 +10248,14 @@ class MainWindow(QtWidgets.QMainWindow):
                                                  target=target)
             except Exception as exc:  # noqa: BLE001 - shown in the dialog row
                 logger.warning("P2P transfer failed for %s: %s", path, exc)
-                state = self._file_upload_states.get((jid, str(path)))
+                bare_jid = jid.split("/", 1)[0]
+                state = self._file_upload_states.get((bare_jid, str(path)))
                 if state:
-                    dlg, index = state
-                    dlg.set_row_failed(index, tr("ft_p2p_failed", error=str(exc)))
-                self._file_upload_states.pop((jid, str(path)), None)
-                self._check_uploads_finished(jid)
+                    dlg, row = state
+                    if row is not None:
+                        row.fail(tr("ft_p2p_failed", error=str(exc)))
+                self._file_upload_states.pop((bare_jid, str(path)), None)
+                self._check_uploads_finished(bare_jid)
 
     def _display_local_outgoing(self, jid: str, body: str, message_id: str,
                                 encrypted: bool = False,
@@ -10260,25 +10294,27 @@ class MainWindow(QtWidgets.QMainWindow):
         if not batch:
             return
         dlg, paths = batch
-        if any((jid, path) in self._file_upload_states for path in paths):
+        bare = jid.split("/", 1)[0]
+        if any((bare, path) in self._file_upload_states for path in paths):
             return
-        self._file_uploads.pop(jid, None)
-        dlg.close()
+        self._file_uploads.pop(bare, None)
+        # Keep the shared transfer window open: another send may reuse it.
 
     def _on_file_upload_progress(self, jid: str, phase: str, detail: str = "",
                                  path: str = ""):
         bare = jid.split("/")[0]
         chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(jid)
-        state = self._file_upload_states.get((jid, path), (None, -1))
-        dlg, index = state if state else (None, -1)
+        dlg, row = self._file_upload_states.get((bare, path), (None, None))
         if phase == "progress":
-            if dlg is not None:
-                dlg.set_progress(index, int(detail or 0))
+            if row is not None:
+                row.set_progress(int(detail or 0))
             return
         if phase == "start":
             encrypted = detail == "encrypted"
-            if dlg is not None and index >= 0 and encrypted:
-                dlg.set_encrypted(index, True)
+            if row is not None:
+                row.set_status(tr("ft_status_transferring"))
+                if encrypted:
+                    row.set_encrypted(True)
             if chat:
                 key = ("file_transfer_encrypted" if encrypted
                        else "ft_upload_started")
@@ -10286,11 +10322,11 @@ class MainWindow(QtWidgets.QMainWindow):
                                    file=os.path.basename(path or detail)),
                                 time.strftime("%H:%M:%S"))
             return
-        self._file_upload_states.pop((jid, path), None)
+        self._file_upload_states.pop((bare, path), None)
         if phase == "done":
-            if dlg is not None:
-                dlg.set_progress(index, 100)
-                dlg.set_row_done(index)
+            if row is not None:
+                row.set_progress(100)
+                row.finish()
             # Show the file URL as a real outgoing message (clickable link)
             # instead of a plain-text status line. In MUC the room echo
             # already renders it, so only do this for 1:1.
@@ -10305,8 +10341,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     encrypted=str(detail).startswith("aesgcm://"),
                     media=media)
         elif phase == "error":
-            if dlg is not None:
-                dlg.set_row_failed(index, detail or "")
+            if row is not None:
+                row.fail(detail or "")
             if chat:
                 chat.add_status(tr("ft_upload_failed", error=detail or ""),
                                 time.strftime("%H:%M:%S"))
@@ -10314,23 +10350,62 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── P2P (Jingle) file transfer ───────────────────────────────
 
+    def _incoming_transfer_row(self, jid: str, path: str, name: str,
+                               total: int = 0):
+        """Get/create the shared progress row for an incoming transfer."""
+        bare = jid.split("/", 1)[0]
+        key = ("path", bare, str(path or ""))
+        row = self._incoming_transfer_rows.get(key)
+        if row is not None:
+            return row
+        dlg = self._ensure_transfer_dialog()
+        row = dlg.add_transfer(
+            "in:%s:%s" % (bare, path or name), path=path,
+            name=name or os.path.basename(path) or "file", total=total,
+            direction="in", status=tr("ft_status_waiting"), jid=jid,
+            cancelable=True)
+        self._incoming_transfer_rows[key] = row
+        return row
+
+    def _remember_incoming_transfer(self, offer_id: str, jid: str,
+                                    path: str, row) -> None:
+        bare = jid.split("/", 1)[0]
+        if path:
+            self._incoming_transfer_rows[("path", bare, str(path))] = row
+        if offer_id:
+            self._incoming_transfer_rows[("offer", offer_id)] = row
+
     def _on_file_transfer_progress(self, jid: str, phase: str, detail: str = "",
                                    path: str = "", direction: str = "out"):
         """Progress of a Jingle file transfer (send or receive)."""
         bare = jid.split("/")[0]
         chat = (self._chat_window.get_chat(bare)
                 or self._chat_window.get_chat(jid))
-        state = self._file_upload_states.get((jid, path), (None, -1))
-        dlg, index = state if state else (None, -1)
+        row = None
+        if direction == "out":
+            _dlg, row = self._file_upload_states.get((bare, path),
+                                                     (None, None))
+        else:
+            row = self._incoming_transfer_rows.get(
+                ("path", bare, str(path or "")))
+            if row is None and path:
+                row = self._incoming_transfer_row(
+                    jid, path, os.path.basename(path))
         name = os.path.basename(path or detail)
         if phase == "progress":
-            if dlg is not None and index >= 0:
-                dlg.set_progress(index, int(detail or 0))
+            if row is not None:
+                row.set_status(tr("ft_status_transferring"))
+                row.set_progress(int(detail or 0))
             return
         if phase == "start":
             encrypted = detail == "encrypted"
-            if dlg is not None and index >= 0 and encrypted:
-                dlg.set_encrypted(index, True)
+            if row is None and direction == "in":
+                row = self._incoming_transfer_row(jid, path, name)
+            if row is not None:
+                row.set_status(tr("ft_status_waiting") if direction == "out"
+                               else tr("ft_status_transferring"))
+                if encrypted:
+                    row.set_encrypted(True)
             if chat and encrypted:
                 chat.add_status(tr("file_transfer_encrypted", file=name),
                                 time.strftime("%H:%M:%S"))
@@ -10341,18 +10416,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._play_sound("ft_start", "sound_ft_start")
             return
         if direction == "out":
-            self._file_upload_states.pop((jid, path), None)
+            self._file_upload_states.pop((bare, path), None)
         if phase == "done":
-            if dlg is not None and index >= 0:
-                dlg.set_progress(index, 100)
-                dlg.set_row_done(index)
+            if row is not None:
+                row.set_progress(100)
+                row.finish()
             if chat:
                 key = "ft_recv_saved" if direction == "in" else "ft_p2p_done"
                 chat.add_status(tr(key, file=name), time.strftime("%H:%M:%S"))
             self._play_sound("ft_finish", "sound_ft_finish")
         elif phase == "error":
-            if dlg is not None and index >= 0:
-                dlg.set_row_failed(index, detail or "")
+            if row is not None:
+                row.fail(detail or "")
             if chat:
                 chat.add_status(tr("ft_p2p_failed", error=detail or ""),
                                 time.strftime("%H:%M:%S"))
@@ -10405,6 +10480,13 @@ class MainWindow(QtWidgets.QMainWindow):
         files = getattr(self._config, "files", None)
         auto_accept = bool(getattr(files, "auto_accept", False))
         name = safe_filename(meta.get("name") or "file")
+        progress_dlg = self._ensure_transfer_dialog()
+        progress_row = progress_dlg.add_transfer(
+            "in:offer:%s" % offer_id, name=name,
+            total=int(meta.get("size") or 0), direction="in",
+            status=tr("ft_status_waiting"), offer_id=offer_id,
+            jid=from_jid, cancelable=True)
+        self._incoming_transfer_rows[("offer", offer_id)] = progress_row
         if auto_accept:
             directory = (getattr(files, "download_dir", "")
                          or default_download_dir())
@@ -10413,6 +10495,9 @@ class MainWindow(QtWidgets.QMainWindow):
             except OSError:
                 directory = default_download_dir()
             save_path = unique_path(os.path.join(directory, name))
+            progress_row._path = save_path
+            self._remember_incoming_transfer(
+                offer_id, from_jid, save_path, progress_row)
             self._client.answer_file_offer(offer_id, True, save_path)
             self._notify_file_offer(from_jid, name, accepted=True)
             return
@@ -10438,12 +10523,44 @@ class MainWindow(QtWidgets.QMainWindow):
                 dlg.close()
             except RuntimeError:
                 pass
+        row = self._incoming_transfer_rows.pop(("offer", offer_id), None)
+        if row is not None:
+            row.set_status(tr("ft_status_cancelled"))
+            row.set_cancelable(False)
 
     def _on_file_offer_decision(self, offer_id: str, from_jid: str,
                                 name: str, accept: bool, save_path: str):
-        self._client.answer_file_offer(offer_id, accept, save_path)
+        row = self._incoming_transfer_rows.get(("offer", offer_id))
         if accept:
+            if row is not None and save_path:
+                row._path = save_path
+            self._remember_incoming_transfer(
+                offer_id, from_jid, save_path, row)
             self._notify_file_offer(from_jid, name, accepted=True)
+        elif row is not None:
+            row.set_status(tr("ft_status_cancelled"))
+            row.set_cancelable(False)
+        self._client.answer_file_offer(offer_id, accept, save_path)
+
+    def _on_transfer_cancel_requested(self, row) -> None:
+        """Cancel a transfer from its card's button."""
+        if row is None or self._client is None:
+            return
+        if getattr(row, "_direction", "") == "in":
+            offer_id = getattr(row, "_offer_id", "")
+            if offer_id:
+                if getattr(row, "_path", ""):
+                    self._client.cancel_file_offer(offer_id)
+                else:
+                    self._client.answer_file_offer(offer_id, False)
+            row.set_status(tr("ft_status_cancelled"))
+            row.set_cancelable(False)
+            return
+        path = getattr(row, "_path", "")
+        jid = getattr(row, "_jid", "")
+        if path and self._client.cancel_file_transfer(jid, path):
+            row.set_status(tr("ft_status_cancelled"))
+            row.set_cancelable(False)
 
     def _notify_file_offer(self, from_jid: str, name: str,
                            accepted: bool) -> None:
@@ -12156,6 +12273,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.sort_and_update()
         self._schedule_roster_repaint()
         self._chat_window.close_all()
+        self._pending_transfer_send = None
+        self._file_uploads.clear()
+        self._file_upload_states.clear()
+        self._incoming_transfer_rows.clear()
+        if self._transfer_dialog is not None:
+            try:
+                self._transfer_dialog.close()
+            except RuntimeError:
+                pass
+            self._transfer_dialog = None
         self._deactivate_plugins()
         MainWindow._update_tray_tooltip(self)
 

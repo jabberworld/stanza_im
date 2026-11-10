@@ -5233,6 +5233,10 @@ class JabberClient:
     def cancel_file_offer(self, sid: str) -> None:
         self.file_transfer.cancel(sid)
 
+    def cancel_file_transfer(self, jid: str, path: str) -> bool:
+        """Cancel an outgoing transfer by recipient and file path."""
+        return self.file_transfer.cancel_path(jid, path)
+
     # ── XEP-0363 HTTP File Upload ────────────────────────────────
 
     def take_upload_result(self, jid: str, path: str):

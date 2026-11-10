@@ -204,6 +204,7 @@ check("speed format", format_speed(1536) == "1.5 KB/s"
       and format_speed(0) == "" and format_speed(-5) == "")
 check("eta format", format_eta(12) == "12s" and format_eta(125) == "2:05"
       and format_eta(0) == "" and format_eta(3725) == "1:02:05")
+check("eta over one day is abbreviated", format_eta(90000) == ">1 day")
 speed_path = os.path.join(_SCRATCH, "speed.bin")
 with open(speed_path, "wb") as fh:
     fh.write(b"x" * 4096)
@@ -218,6 +219,64 @@ speed_row.finish(now=2.0)
 check("finish shows average speed", "/s" in speed_row._stats_label.text())
 speed_row.fail("boom")
 check("fail clears stats", speed_row._stats_label.text() == "")
+
+# 8b. reusable transfer cards --------------------------------------------------
+reuse = FileTransferDialog([img_path])
+first = reuse.add_transfer("in:first", name="incoming.bin", total=2048,
+                           direction="in", status="waiting")
+check("a new transfer is inserted at the top",
+      reuse._rows[0] is first and first._name_label.full_text() == "incoming.bin")
+check("the transfer name does not wrap",
+      not first._name_label.wordWrap()
+      and first._name_label.sizePolicy().horizontalPolicy()
+      == QtWidgets.QSizePolicy.Policy.Ignored)
+check("the progress bar expands across the card",
+      first._bar.sizePolicy().horizontalPolicy()
+      == QtWidgets.QSizePolicy.Policy.Expanding)
+check("the list has no horizontal scrollbar",
+      reuse._scroll.horizontalScrollBarPolicy()
+      == QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+cancelled_rows = []
+reuse.transfer_cancel_requested.connect(cancelled_rows.append)
+first._cancel_btn.click()
+check("the row cancel button reports its transfer",
+      cancelled_rows == [first])
+reuse.prepare_send([doc_path], targets=[])
+check("a new batch is appended to the same dialog",
+      reuse.row_for_path(doc_path) is not None
+      and reuse.take_pending_paths() == [doc_path])
+reuse.close()
+
+# 8c. incoming progress uses the same transfer cards ---------------------------
+from types import SimpleNamespace
+from stanza_im.ui.main_window import MainWindow
+
+win = MainWindow.__new__(MainWindow)
+incoming_dlg = FileTransferDialog([], None)
+win._transfer_dialog = incoming_dlg
+win._pending_transfer_send = None
+win._incoming_transfer_rows = {}
+win._file_upload_states = {}
+win._chat_window = SimpleNamespace(get_chat=lambda *_a: None)
+win._play_sound = lambda *_a, **_k: None
+win._ensure_transfer_dialog = lambda: incoming_dlg
+recv_row = win._incoming_transfer_row(
+    "bob@example.com", "/tmp/received.bin", "received.bin", 100)
+check("an incoming transfer starts in the waiting state",
+      recv_row._status_label.text() == "Waiting for confirmation")
+win._on_file_transfer_progress("bob@example.com", "start", "",
+                               "/tmp/received.bin", "in")
+check("an incoming transfer reports transferring",
+      recv_row._status_label.text() == "Transferring…")
+win._on_file_transfer_progress("bob@example.com", "progress", "50",
+                               "/tmp/received.bin", "in")
+check("incoming progress updates the shared card",
+      recv_row._bar.value() == 50)
+win._on_file_transfer_progress("bob@example.com", "done", "",
+                               "/tmp/received.bin", "in")
+check("an incoming transfer reaches the done state",
+      recv_row._status_label.text() == "Completed")
+incoming_dlg.close()
 
 # 9. resizable handle ----------------------------------------------------------
 handle = cw3._input_handle

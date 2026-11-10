@@ -2914,7 +2914,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
     session negotiation, then XEP-0047 `<open/>`, base64 `<data seq sid/>`
     chunks of `block-size` bytes (seq wraps at 65536) and `<close/>`. IBB uses
     32 KiB blocks and sends up to 8 blocks in flight (ordered `seq`); a peer
-    rejecting the larger `<open/>` block-size falls back to 4 KiB.
+    rejecting the larger `<open/>` block-size falls back to 4 KiB. Data IQs
+    use a 60 s timeout and a timed-out block is retried once with the same
+    `seq` before the session is failed.
 - **Receiving**: `file_offer(offer_id, from, meta)` is emitted for an incoming
   `session-initiate`. With `files.auto_accept` on, `MainWindow` answers
   immediately saving into `files.download_dir` (unique name); otherwise it
@@ -2925,8 +2927,11 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   traversal (XEP-0234 §12).
 - **Progress**: `file_transfer_progress(jid, start|progress|done|error, detail,
   path, out|in)` updates the shared `FileTransferDialog` rows for sends and
-  adds chat status lines for sends/receives; `file_transfer_status` reports the
-  S5B→IBB fallback. Receiving shows the OSD via `_notify_osd_file` when
+  receives; `file_transfer_status` reports the S5B→IBB fallback. The dialog is
+  a reusable list of vertical file cards (name, full-width progress/cancel,
+  bytes/speed/ETA/status/encryption); new transfers are inserted at the top.
+  An incoming `file_offer` creates a waiting card before the session is
+  accepted. Receiving shows the OSD via `_notify_osd_file` when
   `files.download_notifications` is on.
 - Features `urn:xmpp:jingle:1`, `urn:xmpp:jingle:apps:file-transfer:5`,
   `urn:xmpp:jingle:transports:s5b:1` and `urn:xmpp:jingle:transports:ibb:1` are

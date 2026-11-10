@@ -27,6 +27,8 @@ import uuid
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
+from slixmpp.exceptions import IqTimeout
+
 from stanza_im.include.enumerators import SHOW_ORDER
 from stanza_im.xmpp import bytestream
 from stanza_im.xmpp import jet
@@ -49,6 +51,8 @@ _IBB_WINDOW = 8
 _CHUNK = 16 * 1024
 _S5B_CONNECT_TIMEOUT = 12.0
 _IQ_TIMEOUT = 30
+_IBB_IQ_TIMEOUT = 60
+_IBB_RETRIES = 1
 
 
 def _q(ns: str, tag: str) -> str:
@@ -668,6 +672,18 @@ class JingleFileTransferManager:
             self._proposal_paths.pop(sid, None)
             self._send_jmi_action("reject", sid, proposal.peer_full)
 
+    def cancel_path(self, jid: str, path: str) -> bool:
+        """Cancel the outgoing session for *jid* and *path*, if any."""
+        bare = str(jid or "").split("/", 1)[0]
+        for session in list(self.sessions.values()):
+            if not session.initiator or session.path != str(path or ""):
+                continue
+            if bare and session.peer_bare != bare:
+                continue
+            self.cancel(session.sid)
+            return True
+        return False
+
     def close(self) -> None:
         """Drop every session and close its listener/sockets (on disconnect)."""
         for session in list(self.sessions.values()):
@@ -1122,15 +1138,28 @@ class JingleFileTransferManager:
 
     async def _ibb_send_block(self, session: JingleSession,
                               chunk: bytes) -> None:
-        iq = self.xmpp.Iq()
-        iq["type"] = "set"
-        iq["to"] = session.peer_full
-        data = ET.SubElement(iq.xml, _q(NS_IBB_OLD, "data"))
-        data.set("seq", str(session.ibb_out_seq & 0xFFFF))
-        data.set("sid", session.ibb_sid)
-        data.text = base64.b64encode(chunk).decode("ascii")
-        session.ibb_out_seq = (session.ibb_out_seq + 1) & 0xFFFF
-        await iq.send(timeout=_IQ_TIMEOUT)
+        seq = session.ibb_out_seq & 0xFFFF
+        session.ibb_out_seq = (seq + 1) & 0xFFFF
+        payload = base64.b64encode(chunk).decode("ascii")
+        for attempt in range(_IBB_RETRIES + 1):
+            iq = self.xmpp.Iq()
+            iq["type"] = "set"
+            iq["to"] = session.peer_full
+            data = ET.SubElement(iq.xml, _q(NS_IBB_OLD, "data"))
+            data.set("seq", str(seq))
+            data.set("sid", session.ibb_sid)
+            data.text = payload
+            try:
+                await iq.send(timeout=_IBB_IQ_TIMEOUT)
+                return
+            except IqTimeout:
+                if attempt >= _IBB_RETRIES:
+                    raise
+                logger.warning(
+                    "IBB block seq=%s timed out after %ss; retrying once",
+                    seq, _IBB_IQ_TIMEOUT)
+            except Exception:
+                raise
 
     async def _ibb_send_close(self, session: JingleSession) -> None:
         iq = self.xmpp.Iq()
