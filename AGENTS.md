@@ -2954,18 +2954,34 @@ encrypted transfer shows a lock in the transfer/incoming dialogs and a chat
 status line. `"P2P IBB"` uses **Jingle In-Band (XEP-0261/0047)** immediately;
 `"P2P"`
 falls back to IBB automatically when SOCKS5 fails by sending a
-`transport-replace` and continuing as IBB. IBB uses 32 KiB blocks and up to 8
-pipelined blocks in flight (session sequence numbers are assigned in order); a
-peer that rejects the larger `<open/>` block-size falls back to 4 KiB. Data IQs
-use a 60 s timeout and a timed-out block is retried once with the same `seq`
-before the session is failed, so a slow ACK is not treated as a fatal error.
+`transport-replace` and continuing as IBB. IBB uses **4 KiB blocks, one block
+at a time**: ejabberd's default c2s shaper (3000 B/s, 30000 B burst) makes a
+32 KiB block ~44 KiB on the wire (~14.6 s), and pipelining only builds a
+server-side queue that trips the 60 s IQ timeout. A 4 KiB block is ~5.5 KiB
+(~1.8 s), so progress is acknowledged block by block (the total time is still
+set by the shaper, e.g. a 39 MB file is ~4 h 51 min). A peer that rejects the
+`<open/>` block-size falls back to 4 KiB. Data IQs use a 60 s timeout and a
+timed-out block is retried once with the same `seq` only while the stream is
+connected; a `ConnectionReset` aborts the session instead of replaying the seq
+on the resumed stream. The receiver ignores a duplicate `seq` and fails the
+session (removing the partial file) on a real sequence gap. Jingle
+`session-accept` waits up to 120 s, so a manual accept is not mistaken for a
+failure.
 `client.send_file_p2p(jid, path, method, target="")` is serialized by a lock so
 a batch runs one session at a time. `FileTransferDialog` is a reusable transfer
 list: each file is a vertical card (name; full-width progress bar with a cancel
-button; bytes/speed/ETA/status/encryption), new transfers are inserted at the
-top, and the same window is reused for later batches. An incoming `file_offer`
-adds a waiting card, which is updated by `file_transfer_progress` for the
-receive direction as well. **XEP-0353 JMI** selects the recipient
+button; bytes/speed/ETA/status/encryption), every send inserts a **new** card
+at the top (a repeated path is never silently reused), and a «Очистить
+завершённые» button removes all done/failed/cancelled cards while leaving
+active transfers alone. The dialog auto-fits a few cards and scrolls only when
+they exceed the screen; the encryption lock sits in the progress bar's right
+gutter (not the card's outer edge). An incoming `file_offer` adds a waiting
+card **and shows/raises the dialog**, which is updated by
+`file_transfer_progress` for the receive direction as well. Transfer failures
+are mapped to short status text (`ft_error_timeout`/`ft_error_connection`/
+`ft_error_server`/`ft_error_not_accepted`/`ft_error_out_of_order`) with the
+full exception only in the log; the progress bar never contains raw XML.
+**XEP-0353 JMI** selects the recipient
 resource when the target is not fixed and more than one online resource exists:
 a `<propose>` carrying the XEP-0234 file description goes privately to every
 JMI-capable resource, the first `<proceed>` wins, the `session-initiate` goes

@@ -166,6 +166,11 @@ with open(doc_path, "w", encoding="utf-8") as fh:
 dlg = FileTransferDialog([img_path, doc_path])
 check("dialog rows", dlg.row_count() == 2)
 img_row, doc_row = dlg._rows[0], dlg._rows[1]
+dlg.show()
+app.processEvents()
+app.processEvents()
+check("two transfer cards need no scrollbar",
+      dlg._scroll.verticalScrollBar().maximum() == 0)
 check("dialog image thumbnail", not img_row._icon.pixmap().isNull())
 check("dialog generic icon", not doc_row._icon.pixmap().isNull())
 check("size format", format_size(0) == "0 B" and format_size(1536) == "1.5 KB")
@@ -178,7 +183,14 @@ check("dialog progress clamped", doc_row._bar.value() == 100)
 dlg.set_row_done(0)
 check("dialog row done", img_row._bar.value() == 100)
 dlg.set_row_failed(1, "boom")
-check("dialog row failed", "boom" in doc_row._bar.text())
+check("dialog row failed", doc_row._status_label.text() == "boom"
+      and "Failed" in doc_row._bar.text()
+      and "<" not in doc_row._bar.text()
+      and doc_row._bar.toolTip() == "boom")
+check("clear completed button is enabled", dlg._clear_btn.isEnabled())
+dlg.clear_completed()
+check("clear completed removes finished rows",
+      dlg.row_count() == 0 and not dlg._clear_btn.isEnabled())
 started = []
 dlg.upload_started.connect(started.append)
 dlg._on_ok()
@@ -236,15 +248,27 @@ check("the progress bar expands across the card",
 check("the list has no horizontal scrollbar",
       reuse._scroll.horizontalScrollBarPolicy()
       == QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+check("the lock gutter matches the progress bar edge",
+      first._progress_gutter.width() == 30)
+first.set_encrypted(True)
+check("the lock is shown for an encrypted transfer", not first._lock.isHidden())
+first.set_encrypted(False)
+check("the lock is hidden for an unencrypted transfer", first._lock.isHidden())
 cancelled_rows = []
 reuse.transfer_cancel_requested.connect(cancelled_rows.append)
 first._cancel_btn.click()
 check("the row cancel button reports its transfer",
       cancelled_rows == [first])
 reuse.prepare_send([doc_path], targets=[])
+first_send = reuse.row_for_path(doc_path)
 check("a new batch is appended to the same dialog",
-      reuse.row_for_path(doc_path) is not None
+      first_send is not None
       and reuse.take_pending_paths() == [doc_path])
+reuse.prepare_send([doc_path], targets=[])
+second_send = reuse.row_for_path(doc_path)
+check("a repeated send gets a fresh card",
+      second_send is not None and second_send is not first_send
+      and first_send in reuse._rows and second_send in reuse._rows)
 reuse.close()
 
 # 8c. incoming progress uses the same transfer cards ---------------------------
@@ -277,6 +301,40 @@ win._on_file_transfer_progress("bob@example.com", "done", "",
 check("an incoming transfer reaches the done state",
       recv_row._status_label.text() == "Completed")
 incoming_dlg.close()
+
+# 8d. an incoming offer shows the shared progress window ----------------------
+offer_dlg = FileTransferDialog([], None)
+offer_fake = SimpleNamespace(
+    _transfer_dialog=offer_dlg,
+    _incoming_transfer_rows={},
+    _incoming_file_dialogs={},
+    _client=SimpleNamespace(answer_file_offer=lambda *a: None),
+    _config=SimpleNamespace(files=SimpleNamespace(
+        auto_accept=True, download_dir=_SCRATCH)),
+    _ensure_transfer_dialog=lambda: offer_dlg,
+    _place_dialog_over=MainWindow._place_dialog_over,
+    _chat_dialog_parent=lambda: None,
+    _notify_file_offer=lambda *a, **k: None,
+    _remember_incoming_transfer=lambda oid, jid, path, row: (
+        offer_fake._incoming_transfer_rows.update(
+            {("offer", oid): row,
+             ("path", jid.split("/")[0], path): row})),
+)
+MainWindow._on_file_offer(
+    offer_fake, "offer-show", "bob@example.com/r",
+    {"name": "incoming.bin", "size": 2048})
+check("an incoming offer shows the progress window",
+      offer_dlg.isVisible()
+      and offer_dlg.row_for_key("in:offer:offer-show") is not None)
+offer_dlg.close()
+
+# 8e. transfer errors are shortened for the UI -------------------------------
+check("XML transfer errors are shortened",
+      MainWindow._transfer_error_text("<iq><error/></iq>") == "Server error")
+check("timeouts are shortened",
+      MainWindow._transfer_error_text("timeout") == "Timed out")
+check("connection resets are shortened",
+      MainWindow._transfer_error_text("connection reset") == "Connection lost")
 
 # 9. resizable handle ----------------------------------------------------------
 handle = cw3._input_handle

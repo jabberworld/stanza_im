@@ -10239,6 +10239,34 @@ class MainWindow(QtWidgets.QMainWindow):
         if caption and tasks:
             self._start_task(self._send_caption_after(jid, caption, tasks))
 
+    @staticmethod
+    def _transfer_error_text(detail) -> str:
+        """Map a transfer exception/detail to a short user-facing reason."""
+        text = str(detail or "").strip()
+        low = text.lower()
+        if not text or low in ("transfer failed", "not a file"):
+            return tr("ft_error_unknown")
+        if "session not accepted" in low:
+            return tr("ft_error_not_accepted")
+        if low == "timeout":
+            return tr("ft_error_timeout")
+        if low == "connection lost":
+            return tr("ft_error_connection")
+        if low == "server error":
+            return tr("ft_error_server")
+        if "timeout" in low or "timed out" in low:
+            return tr("ft_error_timeout")
+        if ("connection" in low or "reset" in low or "not connected" in low
+                or "broken" in low):
+            return tr("ft_error_connection")
+        if "out of order" in low or "sequence" in low:
+            return tr("ft_error_out_of_order")
+        if text.startswith("<") or "<error" in low or "<iq" in low:
+            return tr("ft_error_server")
+        if len(text) > 120:
+            return text[:117] + "…"
+        return text
+
     async def _run_p2p_batch(self, jid: str, paths: list, method: str,
                              target: str = ""):
         """Send P2P files sequentially (one Jingle session at a time)."""
@@ -10253,7 +10281,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if state:
                     dlg, row = state
                     if row is not None:
-                        row.fail(tr("ft_p2p_failed", error=str(exc)))
+                        row.fail(self._transfer_error_text(exc))
                 self._file_upload_states.pop((bare_jid, str(path)), None)
                 self._check_uploads_finished(bare_jid)
 
@@ -10313,8 +10341,7 @@ class MainWindow(QtWidgets.QMainWindow):
             encrypted = detail == "encrypted"
             if row is not None:
                 row.set_status(tr("ft_status_transferring"))
-                if encrypted:
-                    row.set_encrypted(True)
+                row.set_encrypted(encrypted)
             if chat:
                 key = ("file_transfer_encrypted" if encrypted
                        else "ft_upload_started")
@@ -10341,10 +10368,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     encrypted=str(detail).startswith("aesgcm://"),
                     media=media)
         elif phase == "error":
+            reason = self._transfer_error_text(detail)
             if row is not None:
-                row.fail(detail or "")
+                row.fail(reason)
             if chat:
-                chat.add_status(tr("ft_upload_failed", error=detail or ""),
+                chat.add_status(tr("ft_upload_failed", error=reason),
                                 time.strftime("%H:%M:%S"))
         self._check_uploads_finished(jid)
 
@@ -10404,8 +10432,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if row is not None:
                 row.set_status(tr("ft_status_waiting") if direction == "out"
                                else tr("ft_status_transferring"))
-                if encrypted:
-                    row.set_encrypted(True)
+                row.set_encrypted(encrypted)
             if chat and encrypted:
                 chat.add_status(tr("file_transfer_encrypted", file=name),
                                 time.strftime("%H:%M:%S"))
@@ -10426,10 +10453,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 chat.add_status(tr(key, file=name), time.strftime("%H:%M:%S"))
             self._play_sound("ft_finish", "sound_ft_finish")
         elif phase == "error":
+            reason = self._transfer_error_text(detail)
             if row is not None:
-                row.fail(detail or "")
+                row.fail(reason)
             if chat:
-                chat.add_status(tr("ft_p2p_failed", error=detail or ""),
+                chat.add_status(tr("ft_p2p_failed", error=reason),
                                 time.strftime("%H:%M:%S"))
         if direction == "out":
             self._check_uploads_finished(jid)
@@ -10487,7 +10515,11 @@ class MainWindow(QtWidgets.QMainWindow):
             status=tr("ft_status_waiting"), offer_id=offer_id,
             jid=from_jid, cancelable=True)
         self._incoming_transfer_rows[("offer", offer_id)] = progress_row
+        self._place_dialog_over(progress_dlg, self._chat_dialog_parent())
+        progress_dlg.show()
+        progress_dlg.raise_()
         if auto_accept:
+            progress_dlg.activateWindow()
             directory = (getattr(files, "download_dir", "")
                          or default_download_dir())
             try:
@@ -10526,7 +10558,7 @@ class MainWindow(QtWidgets.QMainWindow):
         row = self._incoming_transfer_rows.pop(("offer", offer_id), None)
         if row is not None:
             row.set_status(tr("ft_status_cancelled"))
-            row.set_cancelable(False)
+            row.mark_finished()
 
     def _on_file_offer_decision(self, offer_id: str, from_jid: str,
                                 name: str, accept: bool, save_path: str):
@@ -10539,7 +10571,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._notify_file_offer(from_jid, name, accepted=True)
         elif row is not None:
             row.set_status(tr("ft_status_cancelled"))
-            row.set_cancelable(False)
+            row.mark_finished()
+        if accept:
+            dlg = self._ensure_transfer_dialog()
+            self._place_dialog_over(dlg, self._chat_dialog_parent())
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
         self._client.answer_file_offer(offer_id, accept, save_path)
 
     def _on_transfer_cancel_requested(self, row) -> None:
@@ -10554,13 +10592,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 else:
                     self._client.answer_file_offer(offer_id, False)
             row.set_status(tr("ft_status_cancelled"))
-            row.set_cancelable(False)
+            row.mark_finished()
             return
         path = getattr(row, "_path", "")
         jid = getattr(row, "_jid", "")
         if path and self._client.cancel_file_transfer(jid, path):
             row.set_status(tr("ft_status_cancelled"))
-            row.set_cancelable(False)
+            row.mark_finished()
 
     def _notify_file_offer(self, from_jid: str, name: str,
                            accepted: bool) -> None:

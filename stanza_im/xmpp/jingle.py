@@ -45,11 +45,11 @@ NS_IBB_OLD = "http://jabber.org/protocol/ibb"
 NS_BYTESTREAMS = "http://jabber.org/protocol/bytestreams"
 NS_HASHES = "urn:xmpp:hashes:2"
 
-IBB_BLOCK_SIZE = 32768
+IBB_BLOCK_SIZE = 4096
 IBB_FALLBACK_BLOCK_SIZE = 4096
-_IBB_WINDOW = 8
 _CHUNK = 16 * 1024
 _S5B_CONNECT_TIMEOUT = 12.0
+_JINGLE_ACCEPT_TIMEOUT = 120.0
 _IQ_TIMEOUT = 30
 _IBB_IQ_TIMEOUT = 60
 _IBB_RETRIES = 1
@@ -304,6 +304,22 @@ class JingleFileTransferManager:
 
     def _emit(self, *args) -> None:
         self.client.emit(*args)
+
+    @staticmethod
+    def _error_detail(exc: Exception) -> str:
+        """Short, UI-friendly reason (never a whole stanza)."""
+        if isinstance(exc, IqTimeout):
+            return "timeout"
+        if isinstance(exc, S5BFailed):
+            return str(exc) or "transfer failed"
+        if isinstance(exc, (ConnectionError, OSError)):
+            return "connection lost"
+        text = str(exc or "").strip()
+        if not text:
+            return "transfer failed"
+        if text.startswith("<"):
+            return "server error"
+        return text
 
     def _loop(self) -> asyncio.AbstractEventLoop:
         try:
@@ -650,7 +666,7 @@ class JingleFileTransferManager:
         except S5BFailed as exc:
             session.state = "failed"
             self._emit("file_transfer_progress", peer_bare, "error",
-                       str(exc) or "transfer failed", path, "out")
+                       self._error_detail(exc), path, "out")
             self._cleanup(session)
 
     def answer_offer(self, offer_id: str, accept: bool,
@@ -906,7 +922,9 @@ class JingleFileTransferManager:
         session.my_candidates = self._build_candidates(session)
         await self._setup_listener(session)
         await self._send_session_initiate(session)
-        await self._await(session.accept_future, "session not accepted")
+        await self._await(
+            session.accept_future, "session not accepted",
+            timeout=_JINGLE_ACCEPT_TIMEOUT)
         await self._dial_candidates(session)
         transport = await self._await_transport(session)
         session.state = "transferring"
@@ -1035,7 +1053,9 @@ class JingleFileTransferManager:
         await self._send_transport_action(
             "transport-replace", session, self._ibb_transport_el(session))
         try:
-            await self._await(session.accept_future, "transport-replace rejected")
+            await self._await(session.accept_future,
+                              "transport-replace rejected",
+                              timeout=_JINGLE_ACCEPT_TIMEOUT)
         except S5BFailed as exc:
             raise S5BFailed("IBB fallback rejected") from exc
 
@@ -1050,7 +1070,9 @@ class JingleFileTransferManager:
         if not fallback:
             session.ibb_sid = session.ibb_sid or uuid.uuid4().hex
             await self._send_session_initiate(session, ibb=True)
-            await self._await(session.accept_future, "session not accepted")
+            await self._await(
+                session.accept_future, "session not accepted",
+                timeout=_JINGLE_ACCEPT_TIMEOUT)
         if session.state not in ("accepted", "transferring"):
             session.state = "failed"
             self._emit("file_transfer_progress", session.peer_bare, "error",
@@ -1065,7 +1087,7 @@ class JingleFileTransferManager:
         except Exception as exc:  # noqa: BLE001 - surfaced as progress
             logger.warning("IBB send failed: %s", exc)
             self._emit("file_transfer_progress", session.peer_bare, "error",
-                       str(exc), session.path, "out")
+                       self._error_detail(exc), session.path, "out")
             await self._terminate(session, "media-error")
             return
         await self._send_received(session)
@@ -1090,50 +1112,36 @@ class JingleFileTransferManager:
                 return
             raise
 
-    async def _ibb_flush_window(self, pending: list) -> None:
-        """Wait for a window of pipelined IBB blocks."""
-        if not pending:
-            return
-        results = await asyncio.gather(*pending, return_exceptions=True)
-        pending.clear()
-        for result in results:
-            if isinstance(result, Exception):
-                raise result
-
     async def _ibb_send_file(self, session: JingleSession) -> None:
+        """Send the file one block at a time.
+
+        ejabberd's default c2s shaper (3000 B/s, 30000 B burst) is the
+        bottleneck for IBB.  Pipelining only builds a server-side queue and
+        makes the last blocks exceed the IQ timeout, so wait for every block
+        before reading the next one.  Progress therefore reflects acknowledged
+        data, not bytes merely read from disk.
+        """
         total = os.path.getsize(session.path) or 1
         sent = 0
-        pending: list = []
-        logger.info("IBB send %s: block=%s window=%s", session.sid,
-                    session.ibb_block, _IBB_WINDOW)
+        logger.info("IBB send %s: block=%s", session.sid,
+                    session.ibb_block)
         encryptor = (jet.StreamEncryptor(self._secret(session))
                      if session.encrypted else None)
-        try:
-            with open(session.path, "rb") as fh:
-                while True:
-                    chunk = fh.read(session.ibb_block)
-                    if not chunk:
-                        break
-                    payload = encryptor.update(chunk) if encryptor else chunk
-                    pending.append(asyncio.ensure_future(
-                        self._ibb_send_block(session, payload)))
-                    sent += len(chunk)
-                    self._emit("file_transfer_progress", session.peer_bare,
-                               "progress", str(int(sent * 100 / total)),
-                               session.path, "out")
-                    if len(pending) >= _IBB_WINDOW:
-                        await self._ibb_flush_window(pending)
-            if encryptor is not None:
-                tail = encryptor.finish()
-                if tail:
-                    pending.append(asyncio.ensure_future(
-                        self._ibb_send_block(session, tail)))
-            await self._ibb_flush_window(pending)
-        except Exception:
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            raise
+        with open(session.path, "rb") as fh:
+            while True:
+                chunk = fh.read(session.ibb_block)
+                if not chunk:
+                    break
+                payload = encryptor.update(chunk) if encryptor else chunk
+                await self._ibb_send_block(session, payload)
+                sent += len(chunk)
+                self._emit("file_transfer_progress", session.peer_bare,
+                           "progress", str(int(sent * 100 / total)),
+                           session.path, "out")
+        if encryptor is not None:
+            tail = encryptor.finish()
+            if tail:
+                await self._ibb_send_block(session, tail)
         await self._ibb_send_close(session)
 
     async def _ibb_send_block(self, session: JingleSession,
@@ -1153,6 +1161,8 @@ class JingleFileTransferManager:
                 await iq.send(timeout=_IBB_IQ_TIMEOUT)
                 return
             except IqTimeout:
+                if not self.xmpp.is_connected():
+                    raise S5BFailed("connection lost") from None
                 if attempt >= _IBB_RETRIES:
                     raise
                 logger.warning(
@@ -1214,44 +1224,74 @@ class JingleFileTransferManager:
         if data is None:
             return
         session = self._find_ibb_session(data.get("sid", ""))
-        if session is None or session.initiator or session.ibb_reader is None:
+        if (session is None or session.initiator or session.ibb_reader is None
+                or session.state == "failed"):
             return
         try:
             seq = int(data.get("seq", "0")) & 0xFFFF
         except ValueError:
             return
-        if seq != (session.ibb_in_seq & 0xFFFF):
+        expected = session.ibb_in_seq & 0xFFFF
+        if seq != expected:
+            if seq == ((expected - 1) & 0xFFFF):
+                logger.debug("Duplicate IBB data seq=%s ignored", seq)
+                return
             logger.warning("Out-of-order IBB data (got %s, want %s)",
-                           seq, session.ibb_in_seq)
+                           seq, expected)
+            self._fail_ibb_receive(session, "out of order")
             return
         session.ibb_in_seq = (session.ibb_in_seq + 1) & 0xFFFF
         try:
             chunk = base64.b64decode(data.text or "", validate=True)
         except Exception:
+            logger.warning("IBB data seq=%s is not valid base64", seq)
+            self._fail_ibb_receive(session, "bad data")
             return
         if session.decryptor is not None:
             try:
                 chunk = session.decryptor.update(chunk)
             except jet.JetError as exc:
                 logger.warning("IBB decryption failed: %s", exc)
+                self._fail_ibb_receive(session, "decryption failed")
                 return
         try:
             session.ibb_reader.write(chunk)
             session.ibb_reader.flush()
         except OSError as exc:
             logger.warning("IBB write failed: %s", exc)
+            self._fail_ibb_receive(session, "write failed")
             return
         total = session.meta.size or session.ibb_reader.tell() or 1
         self._emit("file_transfer_progress", session.peer_bare, "progress",
                    str(int(session.ibb_reader.tell() * 100 / total)),
                    session.path, "in")
 
+    def _fail_ibb_receive(self, session: JingleSession, reason: str) -> None:
+        """Abort a receive whose byte stream has a gap or bad block."""
+        session.state = "failed"
+        if session.ibb_reader is not None:
+            try:
+                session.ibb_reader.close()
+            except OSError:
+                pass
+            session.ibb_reader = None
+        if session.encrypted:
+            self._discard_part(session)
+        else:
+            try:
+                os.remove(session.path)
+            except OSError:
+                pass
+        self._emit("file_transfer_progress", session.peer_bare, "error",
+                   reason, session.path, "in")
+        self.client._start_task(self._terminate(session, "media-error"))
+
     async def _on_ibb_close(self, iq) -> None:
         close_el = iq.xml.find(_q(NS_IBB_OLD, "close"))
         if close_el is None:
             return
         session = self._find_ibb_session(close_el.get("sid", ""))
-        if session is None or session.initiator:
+        if session is None or session.initiator or session.state == "failed":
             return
         if session.decryptor is not None:
             try:
@@ -1708,12 +1748,12 @@ class JingleFileTransferManager:
         if future is not None and not future.done():
             future.set_result(value)
 
-    async def _await(self, future, message: str) -> None:
+    async def _await(self, future, message: str,
+                     timeout: float = _S5B_CONNECT_TIMEOUT) -> None:
         if future is None:
             raise S5BFailed(message)
         try:
-            result = await asyncio.wait_for(asyncio.shield(future),
-                                            _S5B_CONNECT_TIMEOUT)
+            result = await asyncio.wait_for(asyncio.shield(future), timeout)
         except asyncio.TimeoutError as exc:
             raise S5BFailed(message) from exc
         if result is False or result is None:

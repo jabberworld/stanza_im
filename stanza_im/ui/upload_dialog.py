@@ -20,6 +20,7 @@ from stanza_im.include.utils import format_size
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
                ".svg", ".svgz", ".tif", ".tiff", ".ico"}
 _ICON_SIZE = 22
+_RIGHT_GUTTER = 24 + 6
 
 
 def _file_size(path: str) -> int:
@@ -109,6 +110,7 @@ class _FileRow(QtWidgets.QWidget):
     """One file transfer card (name / progress / stats)."""
 
     cancel_requested = QtCore.pyqtSignal(object)
+    state_changed = QtCore.pyqtSignal()
 
     def __init__(self, path: str = "", parent=None, *, name: str = "",
                  total: int | None = None, direction: str = "out",
@@ -129,6 +131,7 @@ class _FileRow(QtWidgets.QWidget):
         self._last_bytes = 0
         self._status_text = str(status or "")
         self._cancelable = bool(cancelable)
+        self._finished = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(4, 5, 4, 5)
@@ -148,7 +151,7 @@ class _FileRow(QtWidgets.QWidget):
         layout.addLayout(name_row)
 
         progress_row = QtWidgets.QHBoxLayout()
-        progress_row.setSpacing(6)
+        progress_row.setSpacing(0)
         self._bar = QtWidgets.QProgressBar(self)
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
@@ -167,8 +170,17 @@ class _FileRow(QtWidgets.QWidget):
         self._cancel_btn.setVisible(self._cancelable)
         self._cancel_btn.clicked.connect(
             lambda: self.cancel_requested.emit(self))
-        progress_row.addWidget(self._cancel_btn, 0,
-                               QtCore.Qt.AlignmentFlag.AlignVCenter)
+        # Keep a fixed right gutter so the stats-row lock can align with the
+        # progress bar's right edge even when the cancel button is hidden.
+        self._progress_gutter = QtWidgets.QWidget(self)
+        self._progress_gutter.setFixedWidth(_RIGHT_GUTTER)
+        gutter = QtWidgets.QHBoxLayout(self._progress_gutter)
+        gutter.setContentsMargins(0, 0, 0, 0)
+        gutter.setSpacing(0)
+        gutter.addSpacing(6)
+        gutter.addWidget(self._cancel_btn, 0,
+                         QtCore.Qt.AlignmentFlag.AlignVCenter)
+        progress_row.addWidget(self._progress_gutter, 0)
         layout.addLayout(progress_row)
 
         stats_row = QtWidgets.QHBoxLayout()
@@ -189,6 +201,7 @@ class _FileRow(QtWidgets.QWidget):
         stats_row.addWidget(self._stats_label, 1)
         stats_row.addWidget(self._status_label, 0)
         stats_row.addWidget(self._lock, 0)
+        stats_row.addSpacing(_RIGHT_GUTTER)
         layout.addLayout(stats_row)
 
         self.setToolTip(self._path or self._name)
@@ -198,6 +211,17 @@ class _FileRow(QtWidgets.QWidget):
         self._cancelable = bool(cancelable)
         self._cancel_btn.setVisible(self._cancelable)
 
+    def is_finished(self) -> bool:
+        return self._finished
+
+    def mark_finished(self) -> None:
+        """Mark the card as done/failed/cancelled (not active any more)."""
+        if self._finished:
+            return
+        self._finished = True
+        self.set_cancelable(False)
+        self.state_changed.emit()
+
     def set_encrypted(self, encrypted: bool) -> None:
         """Mark the row as an end-to-end encrypted transfer."""
         self._lock.setVisible(bool(encrypted))
@@ -205,6 +229,7 @@ class _FileRow(QtWidgets.QWidget):
     def set_status(self, status: str) -> None:
         self._status_text = str(status or "")
         self._status_label.setText(self._status_text)
+        self._status_label.setToolTip(self._status_text)
 
     def set_progress(self, pct: int, now: float | None = None) -> None:
         pct = max(0, min(100, int(pct)))
@@ -244,6 +269,7 @@ class _FileRow(QtWidgets.QWidget):
     def finish(self, now: float | None = None) -> None:
         self._bar.setValue(100)
         self.set_status(tr("ft_status_done"))
+        self.mark_finished()
         if not self._total or self._start_time is None:
             return
         now = time.monotonic() if now is None else now
@@ -255,12 +281,14 @@ class _FileRow(QtWidgets.QWidget):
         self._stats_label.setText(text)
 
     def fail(self, message: str) -> None:
+        reason = str(message or tr("ft_status_failed"))
         self._bar.setStyleSheet(
             "QProgressBar::chunk { background: #d9534f; }")
-        self._bar.setFormat((message or tr("ft_upload_error_row"))
-                            .replace("%", "%%"))
+        self._bar.setFormat(tr("ft_status_failed"))
+        self._bar.setToolTip(reason)
         self._stats_label.setText("")
-        self.set_status(tr("ft_status_failed"))
+        self.set_status(reason)
+        self.mark_finished()
 
 
 class FileTransferDialog(QtWidgets.QDialog):
@@ -303,13 +331,17 @@ class FileTransferDialog(QtWidgets.QDialog):
         layout.addLayout(self._target_row)
         self._rebuild_targets(self._targets)
 
-        layout.addWidget(QtWidgets.QLabel(tr("ft_upload_caption"), self))
+        self._caption_label = QtWidgets.QLabel(tr("ft_upload_caption"), self)
+        layout.addWidget(self._caption_label)
         self._caption = QtWidgets.QLineEdit(self)
         self._caption.setPlaceholderText(tr("ft_upload_caption_placeholder"))
         self._caption.returnPressed.connect(self._on_ok)
         layout.addWidget(self._caption)
 
         buttons = QtWidgets.QHBoxLayout()
+        self._clear_btn = QtWidgets.QPushButton(tr("ft_clear_completed"), self)
+        self._clear_btn.clicked.connect(self.clear_completed)
+        buttons.addWidget(self._clear_btn)
         buttons.addStretch(1)
         self._ok_btn = QtWidgets.QPushButton(tr("dialog_ok"), self)
         self._cancel_btn = QtWidgets.QPushButton(tr("dialog_cancel"), self)
@@ -321,12 +353,44 @@ class FileTransferDialog(QtWidgets.QDialog):
         self._ok_btn.clicked.connect(self._on_ok)
         self._cancel_btn.clicked.connect(self.reject)
         self.add_paths(paths or [], pending=True)
+        self._update_clear_button()
         self._caption.setFocus()
 
     def showEvent(self, event):  # noqa: N802 - Qt API
         super().showEvent(event)
-        if self._ok_btn.isEnabled():
+        self._schedule_fit()
+        if self._ok_btn.isVisible() and self._ok_btn.isEnabled():
             self._caption.setFocus()
+
+    def _schedule_fit(self) -> None:
+        QtCore.QTimer.singleShot(0, self._fit_height)
+
+    def _fit_height(self) -> None:
+        """Grow to fit a few cards, but scroll once they exceed the screen."""
+        rows = self._rows_layout.sizeHint().height()
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        max_list = 600
+        if screen is not None:
+            max_list = max(180, int(screen.availableGeometry().height() * 0.65))
+        self._scroll.setMinimumHeight(min(max(0, rows + 4), max_list))
+        self.adjustSize()
+        if screen is not None:
+            max_height = int(screen.availableGeometry().height() * 0.9)
+            if self.height() > max_height:
+                self.resize(self.width(), max_height)
+
+    def _update_clear_button(self) -> None:
+        finished = any(row.is_finished() for row in self._rows)
+        self._clear_btn.setVisible(finished)
+        self._clear_btn.setEnabled(finished)
+
+    def clear_completed(self) -> None:
+        """Remove every finished card (done, failed or cancelled)."""
+        for row in list(self._rows):
+            if row.is_finished():
+                self.remove_row(row)
+        self._update_clear_button()
+        self._schedule_fit()
 
     # ── target selector / send controls ──────────────────────────
 
@@ -371,20 +435,26 @@ class FileTransferDialog(QtWidgets.QDialog):
 
     def _connect_row(self, row: _FileRow) -> None:
         row.cancel_requested.connect(self.transfer_cancel_requested.emit)
+        row.state_changed.connect(self._on_row_state_changed)
+
+    def _on_row_state_changed(self) -> None:
+        self._update_clear_button()
+        self._schedule_fit()
 
     def add_path(self, path: str, *, direction: str = "out",
                  total: int | None = None, status: str = "",
                  cancelable: bool = True) -> _FileRow:
         path = str(path)
-        existing = self._rows_by_path.get(path)
-        if existing is not None:
-            return existing
+        # A new send always gets a new card.  The previous card for the same
+        # path may still be visible as history until "Clear completed".
         row = _FileRow(path, self, direction=direction, total=total,
                        status=status, cancelable=cancelable)
         self._rows.insert(0, row)
         self._rows_layout.insertWidget(0, row)
         self._rows_by_path[path] = row
         self._connect_row(row)
+        self._update_clear_button()
+        self._schedule_fit()
         return row
 
     def add_paths(self, paths, *, pending: bool = False) -> list[_FileRow]:
@@ -412,6 +482,8 @@ class FileTransferDialog(QtWidgets.QDialog):
         if path:
             self._rows_by_path[str(path)] = row
         self._connect_row(row)
+        self._update_clear_button()
+        self._schedule_fit()
         return row
 
     def row_for_path(self, path: str) -> _FileRow | None:
@@ -431,6 +503,8 @@ class FileTransferDialog(QtWidgets.QDialog):
         for key, item in list(self._rows_by_key.items()):
             if item is row:
                 self._rows_by_key.pop(key, None)
+        self._update_clear_button()
+        self._schedule_fit()
 
     # ── compatibility helpers used by the transfer flows/tests ───
 

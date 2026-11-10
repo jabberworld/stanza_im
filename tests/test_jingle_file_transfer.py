@@ -173,18 +173,49 @@ for seq, chunk in enumerate((b"abc", b"def")):
     data_el.text = base64.b64encode(chunk).decode("ascii")
     manager._on_ibb_data(data_iq)
 
-# An out-of-sequence chunk must be ignored.
-bad_iq = iq_with("data")
-bad_el = ET.SubElement(bad_iq.xml, "{%s}data" % jingle.NS_IBB_OLD)
-bad_el.set("seq", "7")
-bad_el.set("sid", "ibbsid")
-bad_el.text = base64.b64encode(b"XXX").decode("ascii")
-manager._on_ibb_data(bad_iq)
+# A duplicate block is acknowledged but not written again.
+dup_iq = iq_with("data")
+dup_el = ET.SubElement(dup_iq.xml, "{%s}data" % jingle.NS_IBB_OLD)
+dup_el.set("seq", "1")
+dup_el.set("sid", "ibbsid")
+dup_el.text = base64.b64encode(b"ZZZ").decode("ascii")
+manager._on_ibb_data(dup_iq)
 
 session.ibb_reader.flush()
 with open(tmp_path, "rb") as fh:
     received = fh.read()
 check("IBB data assembled in order", received == b"abcdef")
+check("duplicate IBB data is ignored", session.ibb_in_seq == 2)
+
+# A sequence gap aborts the receive instead of silently corrupting the file.
+async def _noop(*_a, **_k):
+    return None
+
+gap_path = os.path.join(_SCRATCH, "gap.bin")
+gap_session = jingle.JingleSession(
+    sid="gap", peer_bare="bob@example.com", peer_full="bob@example.com/r",
+    self_full="me@example.com/r", initiator=False, content_name="file-gap",
+    meta=jingle.FileMeta(name="gap.bin", size=9), method="ibb",
+    ibb_sid="ibbgap", path=gap_path)
+manager.sessions["gap"] = gap_session
+manager._terminate = _noop
+gap_open = iq_with("open")
+gap_open_el = ET.SubElement(gap_open.xml, "{%s}open" % jingle.NS_IBB_OLD)
+gap_open_el.set("sid", "ibbgap")
+gap_open_el.set("block-size", "4096")
+_run(manager._on_ibb_open(gap_open))
+for seq, chunk in ((0, b"abc"), (2, b"def")):
+    gap_iq = iq_with("data")
+    gap_el = ET.SubElement(gap_iq.xml, "{%s}data" % jingle.NS_IBB_OLD)
+    gap_el.set("seq", str(seq))
+    gap_el.set("sid", "ibbgap")
+    gap_el.text = base64.b64encode(chunk).decode("ascii")
+    manager._on_ibb_data(gap_iq)
+_run(asyncio.sleep(0))
+check("a gap aborts the IBB receive",
+      gap_session.state == "failed" and gap_session.ibb_reader is None)
+check("a failed IBB receive removes the partial file",
+      not os.path.exists(gap_path))
 
 
 async def _noop(*_a, **_k):
@@ -481,11 +512,16 @@ check("the target selector returns the chosen full JID",
       selector.selected_target() == "bob@example.com/rbook")
 selector.close()
 
-# ── 10c. Pipelined IBB ----------------------------------------------------
-check("IBB uses a larger block by default",
-      jingle.IBB_BLOCK_SIZE >= 32768 and jingle._IBB_WINDOW > 1)
+# ── 10c. Sequential IBB under the ejabberd c2s shaper -------------------
+check("IBB uses 4 KiB blocks",
+      jingle.IBB_BLOCK_SIZE == 4096)
+check("IBB has no pipelining window",
+      not hasattr(jingle, "_IBB_WINDOW"))
+check("Jingle accept timeout is generous",
+      jingle._JINGLE_ACCEPT_TIMEOUT >= 120.0)
 
-async def _pipeline():
+
+async def _sequential():
     source = os.path.join(_SCRATCH, "pipeline.bin")
     payload = b"z" * (jingle.IBB_BLOCK_SIZE * 10)
     with open(source, "wb") as fh:
@@ -516,12 +552,13 @@ async def _pipeline():
         meta=jingle.FileMeta(name="pipeline.bin", size=len(payload)),
         path=source, method="ibb", ibb_sid="ibsp")
     await pmgr._ibb_send_file(psession)
-    return max_active, b"".join(chunks) == payload
+    return max_active, b"".join(chunks) == payload, len(chunks)
 
 
-_pipe_max, _pipe_ok = _run(_pipeline())
-check("IBB pipelines more than one block", _pipe_max > 1)
-check("pipelined IBB keeps the bytes in order", _pipe_ok)
+_seq_max, _seq_ok, _seq_blocks = _run(_sequential())
+check("IBB sends one block at a time", _seq_max == 1)
+check("sequential IBB keeps the bytes in order", _seq_ok)
+check("IBB uses 4 KiB blocks", _seq_blocks == 10)
 
 # A peer that rejects the larger open block falls back to 4096.
 async def _open_fallback():
@@ -571,6 +608,7 @@ async def _ibb_retry():
         if len(seqs) == 1:
             raise IqTimeout(iq)
 
+    rmgr.xmpp.is_connected = lambda: True
     orig = slixmpp.Iq.send
     slixmpp.Iq.send = _send
     try:
@@ -583,6 +621,9 @@ async def _ibb_retry():
 _retry_seqs, _retry_next = _run(_ibb_retry())
 check("a timed-out IBB block retries with the same seq",
       _retry_seqs == ["0", "0"] and _retry_next == 1)
+check("IqTimeout maps to a short timeout detail",
+      jingle.JingleFileTransferManager._error_detail(
+          IqTimeout(slixmpp.Iq())) == "timeout")
 
 # ── 11. JET-OMEMO: policy, content security, refusal, stream ---------------
 from types import SimpleNamespace

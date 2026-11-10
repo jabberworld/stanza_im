@@ -2841,7 +2841,9 @@ Registers XEP plugins (conditionally where noted):
   per file — image thumbnail (or a generic file icon), name + size, and a
   per-file `QProgressBar` — plus one shared caption field and OK/Cancel. OK
   starts the transfers while the dialog stays open and shows live progress;
-  Cancel (or Close) hides the dialog without aborting running uploads. Each
+  Cancel (or Close) hides the dialog without aborting running uploads. A new
+  send always inserts a new card; «Очистить завершённые» removes all finished
+  cards, and the window auto-fits a few cards before it starts scrolling. Each
   row also shows live stats — transferred / total, the current speed (EMA over
   samples ≥ 0.3 s, `format_speed`) and an ETA (`format_eta`) — and the average
   speed on completion; the numbers are derived from the integer progress
@@ -2913,10 +2915,17 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   - `method="p2p-ibb"`: XEP-0261 In-Band Bytestreams immediately — Jingle
     session negotiation, then XEP-0047 `<open/>`, base64 `<data seq sid/>`
     chunks of `block-size` bytes (seq wraps at 65536) and `<close/>`. IBB uses
-    32 KiB blocks and sends up to 8 blocks in flight (ordered `seq`); a peer
-    rejecting the larger `<open/>` block-size falls back to 4 KiB. Data IQs
-    use a 60 s timeout and a timed-out block is retried once with the same
-    `seq` before the session is failed.
+    **4 KiB blocks sent one at a time**; this matches ejabberd's default c2s
+    shaper (3000 B/s, 30000 B burst): a 4 KiB block is ~5.5 KiB on the wire
+    (~1.8 s) while 32 KiB is ~44 KiB (~14.6 s), and a pipelined window only
+    queues blocks until the 60 s IQ timeout fires. Progress is therefore
+    acknowledged block by block; total time is still bounded by the shaper
+    (a 39 MB file is ~4 h 51 min). A peer rejecting the `<open/>` block-size
+    falls back to 4 KiB. Data IQs use a 60 s timeout and a timed-out block is
+    retried once with the same `seq` only while the stream is connected; a
+    `ConnectionReset` aborts instead of replaying the seq after resumption. The
+    receiver ignores duplicate `seq` values and fails (and removes the partial
+    file) on a real gap. Jingle `session-accept` waits up to 120 s.
 - **Receiving**: `file_offer(offer_id, from, meta)` is emitted for an incoming
   `session-initiate`. With `files.auto_accept` on, `MainWindow` answers
   immediately saving into `files.download_dir` (unique name); otherwise it
@@ -2929,10 +2938,17 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   path, out|in)` updates the shared `FileTransferDialog` rows for sends and
   receives; `file_transfer_status` reports the S5B→IBB fallback. The dialog is
   a reusable list of vertical file cards (name, full-width progress/cancel,
-  bytes/speed/ETA/status/encryption); new transfers are inserted at the top.
-  An incoming `file_offer` creates a waiting card before the session is
-  accepted. Receiving shows the OSD via `_notify_osd_file` when
-  `files.download_notifications` is on.
+  bytes/speed/ETA/status/encryption); every send inserts a new card at the top
+  (a repeated path is never silently reused), and «Очистить завершённые»
+  removes all done/failed/cancelled cards while active transfers stay. The
+  dialog auto-fits a few cards and scrolls only when they exceed the screen;
+  the encryption lock aligns with the progress bar's right edge. An incoming
+  `file_offer` creates a waiting card **and shows/raises the dialog** before
+  the session is accepted. Errors are shown as short status text
+  (`ft_error_timeout`/`ft_error_connection`/`ft_error_server`/
+  `ft_error_not_accepted`/`ft_error_out_of_order`); the full exception stays
+  in the log and never becomes the progress-bar label. Receiving shows the OSD
+  via `_notify_osd_file` when `files.download_notifications` is on.
 - Features `urn:xmpp:jingle:1`, `urn:xmpp:jingle:apps:file-transfer:5`,
   `urn:xmpp:jingle:transports:s5b:1` and `urn:xmpp:jingle:transports:ibb:1` are
   advertised in disco (`core/client.py`).
