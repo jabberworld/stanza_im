@@ -292,6 +292,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._file_uploads: dict[str, tuple] = {}      # jid -> (dlg, paths)
         self._file_upload_states: dict[tuple, tuple] = {}  # (jid, path) -> (dlg, i)
         self._incoming_file_dialogs: dict[str, object] = {}  # offer id -> dialog
+        #: Bare JID of the account whose roster is being loaded.  The cached
+        #: roster is rendered before ``_client`` exists, so it cannot use
+        #: ``self._client.jid_str`` to recognise our own contact.
+        self._login_jid = ""
         self._call_windows: dict[str, object] = {}      # sid -> CallWindow
         self._incoming_calls: dict[str, object] = {}    # sid -> IncomingCallDialog
         self._call_targets: dict[str, str] = {}         # sid -> peer jid
@@ -2474,11 +2478,20 @@ class MainWindow(QtWidgets.QMainWindow):
             "avatar_path": getattr(contact, "avatar_path", None),
         }
         existing = next((u for u in self._roster._users if u.jid == jid), None)
+        if existing is not None and existing.group != group:
+            # A cached roster was rendered before the client existed and may
+            # have put our own JID into an ordinary group.  Move it into the
+            # virtual group instead of updating a row in the wrong group.
+            self._roster.remove_user(jid)
+            existing = None
         if existing is not None:
             self._roster.update_user(jid, **fields)
         else:
             self._roster.add_user(UserItem(jid=jid, group=group, **fields))
-        self._roster._groups[group].single_count = True
+        # ``add_user`` normally creates the group, but an existing self row in
+        # an already-present group does not; create it explicitly before
+        # touching its render options.
+        self._roster.add_group(group).single_count = True
         self._schedule_roster_repaint()
 
     def _classify_bookmarked_conferences(self) -> None:
@@ -4104,6 +4117,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connecting = True
         self._connect_progress_active = True
         self._conn_progress_value = 0
+        self._login_jid = str(jid or "").split("/", 1)[0]
         # The last known roster is shown before the client exists (when there
         # is one), so the connection runs in the background; a first login
         # without a cache keeps the splash.
@@ -4739,8 +4753,10 @@ class MainWindow(QtWidgets.QMainWindow):
             cached = roster_cache.load(jid) or {}
         except Exception:  # noqa: BLE001 - a broken cache means "no cache"
             cached = {}
+        own = str(jid or "").split("/", 1)[0]
         items = [item for item in (cached.get("items") or [])
-                 if item.get("jid")]
+                 if item.get("jid")
+                 and str(item["jid"]).split("/", 1)[0] != own]
         if not items:
             return False
         self._rebuild_roster(items)
@@ -4761,10 +4777,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _add_roster_item(self, item: dict):
         jid = item["jid"]
-        if self._client is not None and jid == self._client.jid_str:
+        own = (self._client.jid_str if self._client is not None
+               else (getattr(self, "_login_jid", "")
+                     or getattr(self._config, "jid", "")))
+        own = str(own or "").split("/", 1)[0]
+        if own and jid.split("/", 1)[0] == own:
             # The account's own JID (a self-contact returned by the server) is
             # never an ordinary roster contact: it is shown on demand by
-            # _sync_self_roster as a virtual «Свой контакт» row.
+            # _sync_self_roster as a virtual «Свой контакт» row.  The cached
+            # roster is rendered before the client exists, so compare with the
+            # login JID there too.
             return
         if jid in self._transport_jids:
             # A classified transport lives in its own tab, not in the roster.

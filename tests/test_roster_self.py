@@ -98,6 +98,37 @@ win._add_roster_item({"jid": "me@example.com", "name": "Me",
 check("_add_roster_item skips the account's own JID",
       _self_row(win) is None and "Friends" not in win._roster._groups)
 
+# 4. a cached roster may have put self into an ordinary group before the
+# client existed.  _sync_self_roster must move it instead of assuming the
+# virtual group already exists (the start.crash KeyError).
+win = make_win(show_self=True)
+ordinary = tr("roster_group_ungrouped")
+win._roster.add_user(UserItem(jid="me@example.com", name="Me",
+                              group=ordinary, status="online"))
+win._sync_self_roster()
+row = _self_row(win)
+check("a cached self row in an ordinary group is moved",
+      row is not None and row.group == GROUP
+      and all(u.group == GROUP for u in win._roster._users
+              if u.jid == "me@example.com"))
+check("the self group is created before setting single_count",
+      GROUP in win._roster._groups
+      and win._roster._groups[GROUP].single_count is True)
+check("the old ordinary row is gone",
+      not any(u.jid == "me@example.com" and u.group == ordinary
+              for u in win._roster._users))
+
+# 5. before the client exists the cached JID is recognised through the login
+# JID, so it never becomes an ordinary contact at all.
+win = make_win(show_self=True)
+win._client = None
+win._config.jid = "me@example.com"
+win._login_jid = "me@example.com"
+win._add_roster_item({"jid": "me@example.com", "name": "Me",
+                      "groups": ["Friends"], "subscription": "both"})
+check("a cached self JID is skipped before the client exists",
+      _self_row(win) is None and "Friends" not in win._roster._groups)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
