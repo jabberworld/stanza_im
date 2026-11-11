@@ -139,6 +139,9 @@ NS_BOOKMARKS2_COMPAT_PEP = "urn:xmpp:bookmarks:1#compat-pep"
 NS_CAPS = "http://jabber.org/protocol/caps"    # XEP-0115 Entity Capabilities
 NS_PRIVACY = "jabber:iq:privacy"                # XEP-0016 Privacy Lists
 NS_PRIVATE = "jabber:iq:private"                # XEP-0049 Private XML Storage
+NS_PARS = "urn:xmpp:pars:0"                     # XEP-0379 PARS
+NS_IBR_TOKEN = "urn:xmpp:ibr-token:0"           # XEP-0445 preauth IBR
+NS_INVITE = "urn:xmpp:invite"                   # XEP-0401 ad-hoc commands
 NS_ATTENTION = "urn:xmpp:attention:0"           # XEP-0224 Attention
 NS_NOTES = "http://miranda-im.org/storage#notes"  # Miranda notes storage
 NS_BLOCKING = "urn:xmpp:blocking"               # XEP-0191 Blocking Command
@@ -3199,13 +3202,20 @@ class JabberClient:
         raise ValueError("The gateway did not return an XMPP address")
 
     def add_contact(self, jid: str, name: str = "", groups: list[str] | None = None,
-                    message: str = "", request_subscription: bool = True) -> None:
-        """Add a contact and send a subscribe request."""
-        if request_subscription:
+                    message: str = "", request_subscription: bool = True,
+                    preauth: str = "") -> None:
+        """Add a contact and send a subscribe request.
+
+        *preauth* is an optional XEP-0379 token; it makes the subscription
+        pre-authenticated and adds the roster item even without a group.
+        """
+        if request_subscription and preauth:
+            self.send_pars_subscription(jid, preauth, name)
+        elif request_subscription:
             self.xmpp.send_presence_subscription(
                 pto=jid, pfrom=self._full_jid, ptype="subscribe", pnick=name)
-        if groups:
-            self.xmpp.update_roster(jid, name=name, groups=groups)
+        if groups or preauth:
+            self.xmpp.update_roster(jid, name=name, groups=groups or [])
         if message.strip():
             self.send_message(jid, message.strip())
 
@@ -3743,6 +3753,113 @@ class JabberClient:
                  "name": str(item.get("name") or item.get("node") or "")}
                 for item in result.xml.iter()
                 if str(item.tag).endswith("item") and item.get("node")]
+
+    def supports_preauth_ibr(self) -> bool:
+        """Whether the last stream advertised XEP-0445 preauth IBR."""
+        return NS_IBR_TOKEN in set(
+            getattr(self.xmpp, "stream_feature_ns", set()) or set())
+
+    def supports_preapproval(self) -> bool:
+        """Whether the stream advertised subscription pre-approval."""
+        return "urn:xmpp:features:pre-approval" in set(
+            getattr(self.xmpp, "stream_feature_ns", set()) or set())
+
+    async def preauth_ibr(self, server: str, token: str) -> None:
+        """Send the XEP-0445 token before the XEP-0077 registration form."""
+        server = str(server or "").strip()
+        token = str(token or "").strip()
+        if not server or not token:
+            raise ValueError("missing invitation token or server")
+        iq = self.xmpp.Iq()
+        iq["type"] = "set"
+        iq["to"] = server
+        element = ET.SubElement(iq.xml, "{%s}preauth" % NS_PARS)
+        element.set("token", token)
+        await iq.send(timeout=20)
+
+    async def invite_commands(self) -> set[str]:
+        domain = self.jid_str.split("@")[-1]
+        try:
+            commands = await self.get_commands_list(domain)
+        except Exception:
+            return set()
+        return {str(command.get("node") or "") for command in commands
+                if str(command.get("node") or "").startswith(NS_INVITE + "#")}
+
+    @staticmethod
+    def _invitation_result(step: dict) -> dict:
+        form = step.get("form")
+        if form is None:
+            raise ValueError(step.get("error") or "the server returned no invitation")
+        values: dict[str, str] = {}
+        for field in form["fields"]:
+            var = str(field.get("var") or "")
+            if not var:
+                continue
+            value = field.get("value")
+            if isinstance(value, list):
+                value = value[0] if value else ""
+            values[var] = str(value or "")
+        uri = values.get("uri", "").strip()
+        if not uri:
+            raise ValueError("the server returned no invitation URI")
+        return {
+            "uri": uri,
+            "landing_url": values.get("landing-url", "").strip(),
+            "expire": (values.get("expire") or values.get("expiry") or "").strip(),
+        }
+
+    async def create_user_invitation(self) -> dict:
+        """Execute XEP-0401 ``urn:xmpp:invite#invite``."""
+        domain = self.jid_str.split("@")[-1]
+        step = await self.start_command(domain, NS_INVITE + "#invite")
+        if step.get("error"):
+            raise ValueError(step["error"])
+        if (step.get("status") not in ("completed", "canceled")
+                and step.get("form") is not None):
+            step = await self.continue_command(
+                step["session"], "complete", step.get("form"))
+        return self._invitation_result(step)
+
+    async def create_account_invitation(self, username: str = "",
+                                        roster_subscription: bool = True) -> dict:
+        """Execute XEP-0401 ``urn:xmpp:invite#create-account``."""
+        domain = self.jid_str.split("@")[-1]
+        step = await self.start_command(
+            domain, NS_INVITE + "#create-account")
+        if step.get("error"):
+            raise ValueError(step["error"])
+        form = step.get("form")
+        if form is not None:
+            for field in form["fields"]:
+                var = str(field.get("var") or "")
+                if var == "username" and username:
+                    field["value"] = str(username)
+                elif var == "roster-subscription":
+                    field["value"] = "1" if roster_subscription else "0"
+            step = await self.continue_command(step["session"], "complete", form)
+        if step.get("error"):
+            raise ValueError(step["error"])
+        return self._invitation_result(step)
+
+    def send_pars_subscription(self, jid: str, token: str,
+                               name: str = "") -> None:
+        """Send a XEP-0379 pre-authenticated subscribe request."""
+        token = str(token or "").strip()
+        if not token:
+            return
+        pres = self.xmpp.make_presence(pto=jid, ptype="subscribe")
+        if name:
+            try:
+                pres["nick"] = str(name)
+            except Exception:  # noqa: BLE001 - nick is optional
+                pass
+        element = ET.SubElement(pres.xml, "{%s}preauth" % NS_PARS)
+        element.set("token", token)
+        pres.send()
+        if self.supports_preapproval():
+            self.xmpp.send_presence_subscription(
+                pto=jid, pfrom=self._full_jid, ptype="subscribed")
 
     # ── Privacy lists / blocking (XEP-0016 / XEP-0191 / XEP-0377) ──
 
@@ -5549,6 +5666,24 @@ class JabberClient:
             return
         sub = self.subscription(jid)
         logger.info("SUB[request] from %s (current=%s)", jid, sub)
+        xml = getattr(pres, "xml", None)
+        token = ""
+        if xml is not None:
+            node = xml.find("{%s}preauth" % NS_PARS)
+            if node is not None:
+                token = str(node.get("token") or "")
+        if token:
+            from stanza_im.core import pars_tokens
+            accepted = pars_tokens.consume(token)
+            if accepted is not None:
+                name = str(accepted.get("name") or "")
+                self.approve_subscription(jid)
+                try:
+                    self.xmpp.update_roster(jid, name=name, groups=[])
+                except Exception:  # noqa: BLE001 - roster push is best effort
+                    pass
+                self.emit("pars_subscription_accepted", jid, name)
+                return
         if sub in ("to", "both"):
             self.approve_subscription(jid)
             return

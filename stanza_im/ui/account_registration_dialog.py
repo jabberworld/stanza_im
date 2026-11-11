@@ -49,7 +49,9 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
     registered = QtCore.pyqtSignal(str, str)  # jid, password
 
     def __init__(self, config: Config, parent=None,
-                 store_account: bool = True):
+                 store_account: bool = True, preauth: str = "",
+                 suggested_server: str = "", suggested_username: str = "",
+                 username_locked: bool = False):
         super().__init__(parent)
         self._config = config
         self._store_account = bool(store_account)
@@ -58,6 +60,10 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         self._form_widget: DataFormWidget | None = None
         self._legacy_widget: LegacyFormWidget | None = None
         self._server = ""
+        self._preauth = str(preauth or "").strip()
+        self._suggested_server = str(suggested_server or "").strip()
+        self._suggested_username = str(suggested_username or "").strip()
+        self._username_locked = bool(username_locked)
         self._result_jid = ""
         self._result_password = ""
         self.setWindowTitle(tr("register_account_title"))
@@ -99,7 +105,10 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         self._server_combo.addItem("")
         for server in load_servers():
             self._server_combo.addItem(server)
-        self._server_combo.setCurrentIndex(0)
+        if self._suggested_server:
+            self._server_combo.setCurrentText(self._suggested_server)
+        else:
+            self._server_combo.setCurrentIndex(0)
         server_row.addWidget(self._server_combo, 1)
         server_row.addWidget(self._info_icon(tr("register_server_info"), page))
         layout.addLayout(server_row)
@@ -233,6 +242,22 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
             await self._close_client()
             self._next_btn.setEnabled(True)
             return
+        if self._preauth:
+            if not self._client.supports_preauth_ibr():
+                self._set_status(tr("onboarding_preauth_unsupported"), "red")
+                await self._close_client()
+                self._next_btn.setEnabled(True)
+                return
+            try:
+                await self._client.preauth_ibr(server, self._preauth)
+            except Exception as exc:
+                logger.debug("Pre-authenticated registration failed",
+                             exc_info=True)
+                self._set_status(tr("onboarding_preauth_rejected",
+                                    error=str(exc)), "red")
+                await self._close_client()
+                self._next_btn.setEnabled(True)
+                return
         try:
             info = await self._client.get_registration_form(server)
         except Exception as exc:
@@ -267,9 +292,17 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
                     QtCore.QUrl(url)))
             self._form_widget.media_ready.connect(
                 lambda: fit_dialog_to_content(self))
+            if self._suggested_username:
+                self._form_widget.set_field_value(
+                    "username", self._suggested_username,
+                    readonly=self._username_locked)
             self._form_container.addWidget(self._form_widget)
         elif fields:
             self._legacy_widget = LegacyFormWidget(fields)
+            if self._suggested_username:
+                self._legacy_widget.set_field_value(
+                    "username", self._suggested_username,
+                    readonly=self._username_locked)
             self._form_container.addWidget(self._legacy_widget)
         else:
             self._set_status(tr("register_none"), "red")

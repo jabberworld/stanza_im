@@ -40,9 +40,9 @@ def render_qr_pixmap(text: str, module_size: int = 4, border: int = 4,
 class QrDialog(QtWidgets.QDialog):
     """Show a QR code for the given text."""
 
-    def __init__(self, text: str, parent=None):
+    def __init__(self, text: str, parent=None, title: str = ""):
         super().__init__(parent)
-        self.setWindowTitle(tr("prefs_omemo_qr"))
+        self.setWindowTitle(title or tr("prefs_omemo_qr"))
         layout = QtWidgets.QVBoxLayout(self)
         pixmap = render_qr_pixmap(text)
         if pixmap is None or pixmap.isNull():

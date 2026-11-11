@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Stanza IM
+Name[ru]=Stanza IM
+Comment=Lightweight XMPP/Jabber client
+Comment[ru]=Лёгкий XMPP/Jabber-клиент
+Exec=stanza-im %U
+TryExec=stanza-im
+Icon=stanza-im
+Terminal=false
+Categories=Network;InstantMessaging;Qt;
+MimeType=x-scheme-handler/xmpp;
+StartupNotify=true

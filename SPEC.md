@@ -39,6 +39,7 @@ daemon thread (`app.py`); `plugins.attention` avoids importing `core.client`
 ```
 stanza_im/
 ├── app.py              — QApplication + qasync event loop
+├── single_instance.py  — per-user QLocalServer forwarding
 ├── core/
 │   ├── client.py       — XMPP client wrapper (slixmpp), TLS/proxy/SM/CSI
 │   ├── storage.py      — Config (TOML) + JSONL chat history (XDG)
@@ -103,6 +104,8 @@ stanza_im/
 │   ├── client_features_dialog.py — peer client caps viewer (vCard resource click),
 │   ├── adhoc_dialog.py, add_contact_dialog.py, data_form_widget.py, captcha_dialog.py
 │   ├── account_registration_dialog.py — XEP-0077 account creation wizard
+│   ├── invite_dialog.py — XEP-0401 invitation creation + QR/copy
+│   ├── easy_onboarding_dialog.py — redeem/login/register onboarding
 │   ├── registration_result_dialog.py — created-account summary (apply/copy)
 │   ├── connection_info_dialog.py — Live connection details dialog
 │   ├── server_info_dialog.py — Server capability report (XEP support)
@@ -332,6 +335,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Known contacts | `$XDG_DATA_HOME/stanza-im/<jid>/known_contacts.json` |
 | Notification priorities | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` |
 | Classified transports | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` |
+| Client PARS invitation tokens | `$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json` (one use, seven days) |
 | OMEMO keys | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Cache (shared) | `$XDG_CACHE_HOME/stanza-im/` |
 | Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
@@ -942,6 +946,30 @@ later `save()` cannot revert the newly written sections. The dialog also takes
 `store_account` (default `True`): with `False` (used by the profile manager) it
 does not touch the config and only returns the new account through
 `result_profile()`.
+
+### 6.4.1 Easy Onboarding (XEP-0401 / 0379 / 0445)
+
+`ui/invite_dialog.py` creates invitations through the server's XEP-0401
+ad-hoc commands (`urn:xmpp:invite#invite` and `#create-account`), presenting
+the returned `uri`, optional `landing-url` and `expire`/`expiry`; when the
+invite command is absent the user invitation falls back to a client-generated
+XEP-0379 token in `core/pars_tokens.py` (one use, seven days, profile-local
+0600 JSON). `xmpp:` URIs from argv or the login page's invitation field open
+`ui/easy_onboarding_dialog.py`, which offers an existing login, XEP-0445
+pre-authenticated registration on the inviter's server, or registration on
+another server. `AccountRegistrationDialog` sends the preauth IQ before the
+XEP-0077 form and locks a predefined username; successful onboarding
+registration auto-logs in. Existing accounts use `AddContactDialog` and send
+the PARS token with the subscription request. Incoming PARS requests are
+auto-approved only for locally issued tokens; unknown tokens fall back to the
+normal approval flow. Server-generated invitations are handled by the server.
+
+`stanza_im/single_instance.py` forwards `xmpp:` URIs to the running process
+through a per-user `QLocalServer`; `app.py` extracts them from argv and queues
+them in `MainWindow.enqueue_uris`. `tools/install_desktop.py` generates and
+installs a user desktop entry (`Exec=… %U`,
+`MimeType=x-scheme-handler/xmpp;`) and the icon, then registers the scheme
+with `xdg-mime`.
 
 ### 6.5 Profiles (`core/profiles.py`, `ui/profiles_dialog.py`)
 

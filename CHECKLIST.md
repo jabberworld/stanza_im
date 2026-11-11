@@ -104,9 +104,9 @@ Stanza IM does not implement any of them (except where noted).
 | XEP-0386 (Bind 2) | ❌ | investigated; requires XEP-0388 SASL2, not implemented |
 | XEP-0409 (IM Routing-NG) | ❌ | |
 | XEP-0397 (Instant Stream Resumption) | ❌ | XEP-0198 resumption is used instead |
-| XEP-0401 (Easy User Onboarding) | ❌ | |
-| XEP-0379 (Pre-Authenticated Roster Subscription) | ❌ | |
-| XEP-0445 (Pre-Authenticated In-Band Registration) | ❌ | |
+| XEP-0401 (Easy User Onboarding) | ⚠️ | ad-hoc invitation creation + redemption (experimental) |
+| XEP-0379 (Pre-Authenticated Roster Subscription) | ✅ | client fallback tokens, outgoing preauth, auto-approval |
+| XEP-0445 (Pre-Authenticated In-Band Registration) | ✅ | preauth IBR in account registration |
 | XEP-0333 (Displayed Markers) | ✅ | `<markable/>` on outgoing messages, incoming `<displayed/>` marks delivered, plus the XEP-0490 MDS server-assist marker |
 | XEP-0369 (MIX) | ❌ | |
 | XEP-0380 / XEP-0420 (E2EE tagging / Stanza Content Encryption) | ✅ | EME `<encryption/>` on OMEMO messages; a bundled SCE (XEP-0420) envelope implementation for OMEMO 2 |

@@ -135,6 +135,19 @@ def parse_args(argv: list[str] | None = None):
     return build_parser(argv).parse_known_args(argv)
 
 
+def extract_xmpp_uris(args: list[str]) -> tuple[list[str], list[str]]:
+    """Split ``xmpp:`` URIs out of the command line (they stay app data)."""
+    uris: list[str] = []
+    rest: list[str] = []
+    for arg in args or ():
+        text = str(arg)
+        if text.lower().startswith("xmpp:"):
+            uris.append(text)
+        else:
+            rest.append(text)
+    return uris, rest
+
+
 def prepare_qt_argv(leftover: list[str]) -> list[str]:
     """Return the argv handed to Qt, keeping the program name.
 
@@ -269,6 +282,7 @@ def run() -> int:
         pass
 
     args, leftover = parse_args()
+    initial_uris, leftover = extract_xmpp_uris(leftover)
     sys.argv = prepare_qt_argv(leftover)
     debug = args.debug
     xml_dump = args.xml
@@ -324,6 +338,17 @@ def run() -> int:
     app.setApplicationVersion(VERSION_DISPLAY)
     app.setQuitOnLastWindowClosed(False)
 
+    from stanza_im.single_instance import SingleInstance
+    instance = SingleInstance()
+    if instance.forward(initial_uris, raise_window=True, timeout_ms=400):
+        return 0
+    if not instance.listen():
+        # A race with another starting instance: try forwarding once more.
+        if instance.forward(initial_uris, raise_window=True, timeout_ms=400):
+            return 0
+        logger.warning("Single-instance socket unavailable; continuing alone")
+        instance = None
+
     import qasync
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
@@ -332,7 +357,11 @@ def run() -> int:
     from PyQt6 import QtCore
     from stanza_im.ui.main_window import MainWindow
 
-    window = MainWindow(app, defer=defer_build)
+    window = MainWindow(app, defer=defer_build, initial_uris=initial_uris)
+    if instance is not None:
+        instance.uris_received.connect(window.enqueue_uris)
+        window._single_instance = instance
+        app.aboutToQuit.connect(instance.close)
     window.show()
     if defer_build:
         # Build the heavy widgets only after the login window is on screen.

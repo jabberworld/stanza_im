@@ -25,6 +25,25 @@
 python main.py
 ```
 
+## Интеграция с рабочим столом
+
+Установить ярлык и обработчик ссылок `xmpp:` для текущего пользователя:
+
+```bash
+python3 tools/install_desktop.py
+xdg-mime query default x-scheme-handler/xmpp
+```
+
+Установщик кладёт `.desktop`-файл и иконку в `$XDG_DATA_HOME`, не требует
+root и сам регистрирует `x-scheme-handler/xmpp`. Если Stanza IM уже запущен,
+новая `xmpp:`-ссылка пересылается в существующее окно через локальный сокет.
+
+Удалить ярлык и иконку:
+
+```bash
+python3 tools/install_desktop.py --uninstall
+```
+
 ## Зависимости
 
 - **Python 3.10+**

@@ -69,6 +69,41 @@ def parse_xmpp_uri(uri: str) -> dict | None:
     return {"jid": jid, "action": action, "params": params}
 
 
+def parse_invitation(uri: str) -> dict | None:
+    """Parse an XEP-0401/0379 invitation URI.
+
+    Returns ``{"uri", "action", "jid", "server", "username", "token",
+    "ibr", "name"}`` or ``None``.  A token is required for an invitation;
+    ordinary ``?roster`` links are handled by the caller instead.
+    """
+    parsed = parse_xmpp_uri(uri)
+    if not parsed:
+        return None
+    action = (parsed.get("action") or "").lower()
+    if action not in ("roster", "register"):
+        return None
+    jid = normalize_jid(parsed.get("jid") or "")
+    if not jid:
+        return None
+    params = parsed.get("params") or {}
+    token = str(params.get("preauth") or "").strip()
+    if not token:
+        return None
+    username, at, server = jid.partition("@")
+    if not at:
+        server, username = jid, ""
+    return {
+        "uri": uri,
+        "action": action,
+        "jid": jid,
+        "server": server,
+        "username": username if at else "",
+        "token": token,
+        "ibr": str(params.get("ibr") or "").lower() == "y",
+        "name": str(params.get("name") or ""),
+    }
+
+
 def normalize_jid(value: str, *, resource: bool = False) -> str:
     """Normalise a JID typed or pasted into a form.
 

@@ -17,6 +17,7 @@ class LoginWidget(QtWidgets.QWidget):
 
     login_requested = QtCore.pyqtSignal(str, str, str)  # jid, password, show
     register_requested = QtCore.pyqtSignal()            # "Create account" link
+    invite_requested = QtCore.pyqtSignal()              # "I have an invitation"
     profile_applied = QtCore.pyqtSignal(str)            # profile JID applied
     profiles_requested = QtCore.pyqtSignal()            # open the profile manager
 
@@ -98,6 +99,17 @@ class LoginWidget(QtWidgets.QWidget):
         layout.addWidget(self._connect_btn)
 
         layout.addSpacing(14)
+        self._invite_label = QtWidgets.QLabel(
+            f'<a href="invite">{tr("login_have_invitation")}</a>')
+        self._invite_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._invite_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._invite_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        self._invite_label.setOpenExternalLinks(False)
+        self._invite_label.linkActivated.connect(
+            lambda _href: self.invite_requested.emit())
+        layout.addWidget(self._invite_label)
+
         self._create_label = QtWidgets.QLabel(
             f'<a href="create">{tr("login_create_account")}</a>')
         self._create_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)

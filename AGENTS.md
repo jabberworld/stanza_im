@@ -48,6 +48,7 @@ stanza_im/                      # Python package
 ├── __init__.py
 ├── __main__.py                  # python -m stanza_im
 ├── app.py                       # Entry point: qasync event loop
+├── single_instance.py           # Per-user QLocalServer URI forwarding
 ├── core/
 │   ├── client.py                # JabberClient: slixmpp wrapper, TLS/proxy/SM/CSI
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
@@ -63,12 +64,15 @@ stanza_im/                      # Python package
 │   ├── discovery.py             # XEP-0065 proxy + STUN/TURN SRV discovery + cache
 │   ├── privacy.py               # XEP-0016 privacy-list parse/build helpers
 │   ├── server_features.py       # Server disco/stream capability report (XEP list)
+│   ├── pars_tokens.py           # XEP-0379 client-side fallback invitation tokens
 │   ├── memstats.py              # Periodic memory statistics (CLI -m)
 │   └── cpustats.py              # Per-thread/per-child CPU stats (CLI -C/-CC)
 ├── ui/
 │   ├── main_window.py           # Main window: stack (login/splash/roster)
 │   ├── login_widget.py          # Login form + config prefill/save + profile selector
 │   ├── profiles_dialog.py       # Application profile manager (create/apply/delete)
+│   ├── invite_dialog.py         # XEP-0401 invitation creation + QR/copy
+│   ├── easy_onboarding_dialog.py # Redeem invitation: login/register on server/other
 │   ├── profile_source_dialog.py # "Existing account" vs "Register new" choice
 │   ├── existing_account_dialog.py # Existing-account credentials/connection form
 │   ├── roster_widget.py         # Custom-painted contact list
@@ -1043,6 +1047,7 @@ Everything follows the XDG Base Directory spec:
 | OMEMO keys (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Notification priorities (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` (0600) |
 | Classified transports (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` (0600) |
+| Client PARS invitation tokens (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json` (0600, one use/7 days) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
 The minimal TOML writer (`Config._write_toml`) serialises scalars with
@@ -1994,6 +1999,35 @@ the login form (`LoginWidget.prefill`), returns to the login page, re-applies
 the settings and closes the Preferences window if it was open. The login
 widget now shares `MainWindow._config` so the saved values cannot be
 overwritten. [`tests/test_registration.py`]
+
+**Easy Onboarding (XEP-0401/0379/0445, `ui/invite_dialog.py`,
+`ui/easy_onboarding_dialog.py`, `core/pars_tokens.py`)**: the Actions menu's
+«Пригласить» opens `InviteDialog`, which discovers `urn:xmpp:invite#invite` /
+`#create-account` through XEP-0050 and shows the returned XMPP URI, landing
+URL/QR and expiry. When no invite command exists, the user invitation falls
+back to a client-generated XEP-0379 PARS token (`pars_tokens`,
+`$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json`, 0600, one use, seven days);
+account invitations are server-only. Incoming preauth subscription requests
+are matched against those local tokens and auto-approved (normal manual
+handling otherwise). `xmpp:` URIs from argv or the login page's «У меня есть
+приглашение» field open `EasyOnboardingDialog`: login with an existing account,
+register on the inviter's server (XEP-0445 preauth IBR in
+`AccountRegistrationDialog`), or register on another server, then auto-login
+and add the inviter through `AddContactDialog` with the PARS token. A
+`register;preauth` URI locks the username when the URI contains one. Tokens are
+never logged; server-generated tokens are not stored locally (the server
+auto-approves them). [`tests/test_easy_onboarding.py`]
+
+**Single instance & desktop integration (`stanza_im/single_instance.py`,
+`tools/install_desktop.py`, `resources/stanza-im.desktop`)**: `app.py` extracts
+every `xmpp:` argument, forwards it (and a raise request) to the first instance
+through a per-user `QLocalServer` socket, and queues the URIs for
+`MainWindow.enqueue_uris`; a normal second launch only raises the existing
+window. `tools/install_desktop.py` writes the user-level desktop entry with
+`Exec=… %U`, installs the app icon under `$XDG_DATA_HOME/icons/hicolor`, and
+registers `x-scheme-handler/xmpp` with `xdg-mime`; `--uninstall` removes them.
+No system-wide install or automatic single-instance beyond the local socket is
+performed.
 
 **XML console (`ui/xml_console.py`, Actions → «XML-консоль» after «Профили»)**:
 a non-modal window that captures the raw stream from the `slixmpp.xmlstream`

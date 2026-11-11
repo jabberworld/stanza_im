@@ -200,6 +200,43 @@ class DataFormWidget(QtWidgets.QWidget):
                 continue
         self._align_selectors()
 
+    def set_field_value(self, var: str, value, readonly: bool = False) -> bool:
+        """Set a rendered field's value (and optionally make it read-only)."""
+        widget = self._fields.get(str(var))
+        if widget is None:
+            return False
+        if isinstance(widget, QtWidgets.QLineEdit):
+            widget.setText(str(value or ""))
+            if readonly:
+                widget.setReadOnly(True)
+            return True
+        if isinstance(widget, QtWidgets.QPlainTextEdit):
+            if isinstance(value, (list, tuple)):
+                widget.setPlainText("\n".join(str(v) for v in value))
+            else:
+                widget.setPlainText(str(value or ""))
+            if readonly:
+                widget.setReadOnly(True)
+            return True
+        if isinstance(widget, QtWidgets.QComboBox):
+            index = widget.findData(str(value or ""))
+            if index < 0:
+                index = widget.findText(str(value or ""))
+            if index >= 0:
+                widget.setCurrentIndex(index)
+            widget.setEnabled(not readonly)
+            return True
+        if isinstance(widget, QtWidgets.QCheckBox):
+            if isinstance(value, str):
+                checked = value.strip().lower() not in (
+                    "", "0", "false", "no", "off")
+            else:
+                checked = bool(value)
+            widget.setChecked(checked)
+            widget.setEnabled(not readonly)
+            return True
+        return False
+
     def _align_selectors(self) -> None:
         """Give every list-single selector the same width (widest value)."""
         if not self._combos:
@@ -531,6 +568,15 @@ class LegacyFormWidget(QtWidgets.QWidget):
                 edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
             self._edits[key] = edit
             form_layout.addRow(label, edit)
+
+    def set_field_value(self, var: str, value, readonly: bool = False) -> bool:
+        edit = self._edits.get(str(var))
+        if edit is None:
+            return False
+        edit.setText(str(value or ""))
+        if readonly:
+            edit.setReadOnly(True)
+        return True
 
     def values(self) -> dict[str, str]:
         return {key: edit.text() for key, edit in self._edits.items()}

@@ -16,9 +16,11 @@ class AddContactDialog(QtWidgets.QDialog):
     vcard_requested = QtCore.pyqtSignal(str)  # jid
 
     def __init__(self, groups: list[str], client, parent=None, jid: str = "",
-                 gateways: list | None = None, preselect: str = ""):
+                 gateways: list | None = None, preselect: str = "",
+                 preauth: str = "", invite_name: str = ""):
         super().__init__(parent)
         self._client = client
+        self._preauth = str(preauth or "").strip()
         self.setWindowTitle(tr("add_contact_title"))
         self.setMinimumWidth(500)
         layout = QtWidgets.QVBoxLayout(self)
@@ -104,6 +106,8 @@ class AddContactDialog(QtWidgets.QDialog):
         grid.setRowStretch(4, 1)
         layout.addWidget(form_widget, 1)
         self._jid.setText(jid if isinstance(jid, str) else "")
+        if invite_name:
+            self._name.setText(str(invite_name))
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -228,4 +232,5 @@ class AddContactDialog(QtWidgets.QDialog):
         return {"jid": self._jid.jid(), "name": self._name.text().strip(),
                 "group": self._group.currentText().strip(),
                 "subscribe": self._subscribe.isChecked(),
-                "message": self._message.toPlainText().strip()}
+                "message": self._message.toPlainText().strip(),
+                "preauth": self._preauth}

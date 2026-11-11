@@ -270,11 +270,20 @@ class MainWindow(QtWidgets.QMainWindow):
     #: listens to it (for its "new events" line).
     events_changed = QtCore.pyqtSignal()
 
-    def __init__(self, app: QtWidgets.QApplication, defer: bool = False):
+    def __init__(self, app: QtWidgets.QApplication, defer: bool = False,
+                 initial_uris=None):
         super().__init__()
         self.app = app
         #: ``True`` once :meth:`build_deferred` has built the heavy widgets.
         self._deferred_done = False
+        #: ``xmpp:`` invitations from argv or the single-instance socket.
+        self._pending_uris = list(initial_uris or [])
+        self._onboarding_dialog = None
+        self._onboarding_invite_uri = ""
+        self._onboarding_registration = None
+        self._waiting_login_uri = False
+        self._invite_dialog = None
+        self._single_instance = None
 
         # ── Initialise subsystems ─────────────────────────────────
         load_i18n()
@@ -755,6 +764,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── Auto-connect (if configured) delayed until loop runs ──
         QtCore.QTimer.singleShot(100, self.try_auto_connect)
+        # Give auto-connect a chance to start before offering an invitation
+        # on the login page (the session/error handlers flush the queue).
+        QtCore.QTimer.singleShot(200, self._process_pending_uris)
 
     # ── UI construction ───────────────────────────────────────────
 
@@ -779,6 +791,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._login = LoginWidget(self._config)
         self._login.login_requested.connect(self._on_login)
         self._login.register_requested.connect(self._on_create_account)
+        self._login.invite_requested.connect(self._on_invite_requested)
         self._login.profile_applied.connect(self._on_login_profile_applied)
         self._login.profiles_requested.connect(self._on_profiles)
         self._stack.addWidget(self._login)
@@ -1571,6 +1584,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     and self._client.subscription(widget.jid) in ("to", "both")):
                 widget.mark(True)
 
+    def _on_pars_subscription_accepted(self, jid: str, name: str = "") -> None:
+        """A XEP-0379 token was accepted and the contact was auto-approved."""
+        message = tr("pars_contact_added", jid=jid)
+        self._tray.show_message(APP_NAME, message)
+        if self._config.notifications.osd_enabled:
+            self._osd.show(self._menu_icon("ok.png"),
+                           tr("pars_contact_added_title"), message)
+
     def _on_subscription_cancelled(self, jid: str) -> None:
         name = ""
         if self._client:
@@ -1834,6 +1855,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                              tr("menu_add_contact"))
         add_contact.triggered.connect(
             lambda checked=False: self._on_add_contact())
+        invite = actions_menu.addAction(
+            self._menu_icon("add-user.png"), tr("menu_invite"))
+        invite.triggered.connect(self._on_invite)
         create_room = actions_menu.addAction(
             self._menu_icon("conference-add.svg"),
             tr("menu_create_conference"))
@@ -1940,7 +1964,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ── Menu actions ─────────────────────────────────────────────
 
-    def _on_add_contact(self, jid: str = "", gateways=None, preselect: str = ""):
+    def _on_add_contact(self, jid: str = "", gateways=None, preselect: str = "",
+                        preauth: str = "", invite_name: str = ""):
         if not isinstance(jid, str):
             # ``QAction.triggered`` passes a ``checked`` bool; ignore it.
             jid = ""
@@ -1956,7 +1981,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if gateways is None:
             gateways = self._transport_gateways()
         dlg = AddContactDialog(groups, self._client, self, jid=jid,
-                               gateways=gateways, preselect=preselect)
+                               gateways=gateways, preselect=preselect,
+                               preauth=preauth, invite_name=invite_name)
         dlg.vcard_requested.connect(self._show_profile)
 
         def finished(result: int):
@@ -1966,9 +1992,11 @@ class MainWindow(QtWidgets.QMainWindow):
             target = normalize_jid(data["jid"])
             if not target:
                 return
-            self._client.add_contact(target, data["name"],
-                                     [data["group"]] if data["group"] else [],
-                                     data["message"], data["subscribe"])
+            self._client.add_contact(
+                target, data["name"],
+                [data["group"]] if data["group"] else [],
+                data["message"], data["subscribe"],
+                preauth=str(data.get("preauth") or ""))
             self._client.request_roster()
         show_modeless(dlg, finished)
 
@@ -4311,6 +4339,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # with the reconnect button rather than a dead splash.
             self._stack.setCurrentIndex(_PAGE_ROSTER)
         self._tray.show_message(APP_NAME, message)
+        QtCore.QTimer.singleShot(0, self._process_pending_uris)
 
     def _set_connect_progress(self, text: str, percent: int) -> None:
         """Update the splash and the roster connection progress together."""
@@ -4376,6 +4405,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("subscribed", self._on_subscribed)
         c.on("subscription_requested", self._on_subscription_request)
         c.on("subscription_cancelled", self._on_subscription_cancelled)
+        c.on("pars_subscription_accepted", self._on_pars_subscription_accepted)
         c.on("vcard_received", self._on_vcard_received)
         c.on("avatar_updated", self._on_avatar_updated)
         c.on("bookmarks_changed", self._on_bookmarks_changed)
@@ -4477,6 +4507,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recount_unread()
         self._sync_tray_blink()
         self._set_info_actions_enabled(True)
+        self._waiting_login_uri = False
         if (self._client is not None
                 and getattr(self._client.omemo, "available", False)):
             # Give our own device a readable label (resource) if it has none.
@@ -4487,6 +4518,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Pull the per-contact notification priorities stored on the server.
         if self._client is not None:
             self._start_task(self._sync_notification_priorities())
+        QtCore.QTimer.singleShot(0, self._process_pending_uris)
 
     def _on_auth_failed(self, condition: str = ""):
         self._set_info_actions_enabled(False)
@@ -6354,6 +6386,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_xmpp_uri(self, uri: str):
         """Act on a clicked ``xmpp:`` URI (XEP-0147)."""
         if not self._client:
+            # An invitation may arrive on the login screen; queue it and let
+            # the onboarding flow or a later session consume it.
+            from stanza_im.include.xmpp_uri import parse_invitation
+            if parse_invitation(uri) is not None:
+                self.enqueue_uris([uri], raise_window=True)
             return
         from stanza_im.include.xmpp_uri import parse_xmpp_uri
         parsed = parse_xmpp_uri(uri)
@@ -6362,6 +6399,11 @@ class MainWindow(QtWidgets.QMainWindow):
         jid = parsed["jid"]
         action = (parsed.get("action") or "").lower()
         params = parsed.get("params", {})
+
+        if action == "register":
+            QtWidgets.QMessageBox.information(
+                self, APP_NAME, tr("onboarding_register_while_logged_in"))
+            return
 
         if not jid:
             # XEP-0147 allows an address-less message URI, e.g.
@@ -6392,12 +6434,169 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         if action in ("roster", "subscribe"):
-            self._on_add_contact(jid=jid)
+            preauth = str(params.get("preauth") or "")
+            self._on_add_contact(
+                jid=jid, preauth=preauth,
+                invite_name=str(params.get("name") or ""))
             return
 
         QtWidgets.QMessageBox.warning(
             self, APP_NAME,
             tr("xmpp_uri_unhandled", action=action))
+
+    def enqueue_uris(self, uris, raise_window: bool = True) -> None:
+        """Queue ``xmpp:`` URIs from argv, the socket or the login field."""
+        incoming = [str(uri) for uri in (uris or ()) if str(uri).strip()]
+        if not incoming:
+            if raise_window:
+                self.show()
+                self.raise_()
+                self.activateWindow()
+            return
+        self._pending_uris.extend(incoming)
+        if raise_window:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        self._process_pending_uris()
+
+    def _on_invite_requested(self) -> None:
+        """Ask for an invitation URI pasted into the login window."""
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, tr("onboarding_title"), tr("onboarding_invite_prompt"))
+        if ok and text.strip():
+            self.enqueue_uris([text.strip()], raise_window=True)
+
+    def _on_invite(self) -> None:
+        if self._client is None:
+            return
+        from stanza_im.ui.invite_dialog import InviteDialog
+        dialog = InviteDialog(self._client, self)
+        self._invite_dialog = dialog
+        show_modeless(dialog, lambda _result: setattr(
+            self, "_invite_dialog", None))
+
+    def _process_pending_uris(self) -> None:
+        if (self._onboarding_dialog is not None
+                or self._onboarding_registration is not None):
+            return
+        if not self._pending_uris:
+            return
+        if self._client is None:
+            # With auto-connect enabled, wait for the session (or the failure
+            # handler) instead of showing onboarding over the login splash.
+            if ((self._config.auto_connect and self._config.jid)
+                    or self._waiting_login_uri):
+                return
+            self._show_onboarding_for_next()
+            return
+        uri = self._pending_uris.pop(0)
+        self._handle_invite_uri(uri)
+        if self._pending_uris:
+            QtCore.QTimer.singleShot(0, self._process_pending_uris)
+
+    def _show_onboarding_for_next(self) -> None:
+        from stanza_im.include.xmpp_uri import parse_invitation
+        from stanza_im.ui.easy_onboarding_dialog import EasyOnboardingDialog
+        while self._pending_uris:
+            uri = self._pending_uris.pop(0)
+            invite = parse_invitation(uri)
+            if invite is None:
+                self._tray.show_message(APP_NAME,
+                                        tr("onboarding_invite_invalid"))
+                continue
+            self._onboarding_invite_uri = uri
+            dialog = EasyOnboardingDialog(invite, self)
+            dialog.login_requested.connect(self._on_onboarding_login)
+            dialog.register_requested.connect(self._on_onboarding_register)
+            dialog.finished.connect(
+                lambda _result, d=dialog: self._on_onboarding_finished(d))
+            self._onboarding_dialog = dialog
+            show_modeless(dialog)
+            return
+
+    def _on_onboarding_finished(self, dialog) -> None:
+        if self._onboarding_dialog is dialog:
+            self._onboarding_dialog = None
+        self._onboarding_invite_uri = ""
+        QtCore.QTimer.singleShot(0, self._process_pending_uris)
+
+    def _restore_onboarding_uri(self) -> None:
+        if self._onboarding_invite_uri:
+            self._pending_uris.insert(0, self._onboarding_invite_uri)
+            self._onboarding_invite_uri = ""
+
+    def _on_onboarding_login(self) -> None:
+        # Keep the invitation until the user has actually logged in; do not
+        # immediately reopen the same onboarding dialog.
+        self._restore_onboarding_uri()
+        self._waiting_login_uri = True
+        self._stack.setCurrentIndex(_PAGE_LOGIN)
+        self._login.setFocus()
+        self._login.show()
+
+    def _on_onboarding_register(self, data: dict) -> None:
+        self._restore_onboarding_uri()
+        if self._client is not None:
+            QtWidgets.QMessageBox.information(
+                self, APP_NAME, tr("onboarding_register_while_logged_in"))
+            return
+        from stanza_im.ui.account_registration_dialog import (
+            AccountRegistrationDialog)
+        dialog = AccountRegistrationDialog(
+            self._config, self, store_account=True,
+            preauth=str(data.get("preauth") or ""),
+            suggested_server=str(data.get("server") or ""),
+            suggested_username=str(data.get("username") or ""),
+            username_locked=bool(data.get("username_locked", False)))
+        dialog.registered.connect(self._on_onboarding_registered)
+        self._onboarding_registration = dialog
+        show_modeless(dialog, lambda _result: self._clear_onboarding_registration())
+
+    def _clear_onboarding_registration(self) -> None:
+        self._onboarding_registration = None
+        QtCore.QTimer.singleShot(0, self._process_pending_uris)
+
+    def _on_onboarding_registered(self, jid: str, password: str) -> None:
+        self._onboarding_registration = None
+        self._waiting_login_uri = False
+        # A ``register`` invitation is fulfilled by the new account itself;
+        # roster invitations stay pending and become a contact after login.
+        from stanza_im.include.xmpp_uri import parse_invitation
+        self._pending_uris = [
+            uri for uri in self._pending_uris
+            if (parse_invitation(uri) or {}).get("action") != "register"]
+        self._login.prefill(jid, password)
+        self._on_settings_applied()
+        self._on_login(jid, password, self._config.last_status or "online")
+
+    def _handle_invite_uri(self, uri: str) -> None:
+        from stanza_im.include.xmpp_uri import parse_invitation
+        invite = parse_invitation(uri)
+        if invite is None:
+            self._tray.show_message(APP_NAME, tr("onboarding_invite_invalid"))
+            return
+        if invite["action"] == "register":
+            QtWidgets.QMessageBox.information(
+                self, APP_NAME, tr("onboarding_register_while_logged_in"))
+            return
+        if self._client is None:
+            self._pending_uris.insert(0, uri)
+            self._show_onboarding_for_next()
+            return
+        jid = str(invite.get("jid") or "")
+        bare = jid.split("/", 1)[0]
+        try:
+            already = bare in self._client.contacts
+            subscribed = self._client.subscription(bare) in ("to", "both")
+        except Exception:  # noqa: BLE001 - presentation only
+            already, subscribed = False, False
+        if already and subscribed:
+            self._on_contact_open(bare)
+            return
+        self._on_add_contact(jid=jid,
+                             preauth=str(invite.get("token") or ""),
+                             invite_name=str(invite.get("name") or ""))
 
     def _open_join_conference_dialog_for_jid(self, jid: str):
         from stanza_im.ui.conference_dialog import JoinConferenceDialog
