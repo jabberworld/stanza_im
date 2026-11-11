@@ -100,7 +100,7 @@ stanza_im/                      # Python package
 │   ├── smiley_picker.py         # Emoticon-set smiley picker (Qt.Popup grid; unicode reuses the emoji picker)
 │   ├── omemo_devices_dialog.py  # XEP-0384 device/trust manager
 │   ├── omemo_popup.py           # Chat shield: quick device trust/rename popup
-│   ├── qr_dialog.py             # QR code dialog (OMEMO fingerprint)
+│   ├── qr_dialog.py             # Resizable QR code dialog (OMEMO/invitations)
 │   ├── reactions_list_dialog.py # XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
@@ -2544,7 +2544,9 @@ Publishing goes through `core/private_pep.py` (raw IQ + XML
 also subscribe to the node (`_subscribe_own_pep`); a live
 `omemo_aliases_updated` event replaces the local alias set (server wins) and
 refreshes open device dialogs. The QR code is
-rendered by a bundled pure-Python encoder (`qr.py`). UI: the Privacy
+rendered by a bundled pure-Python encoder (`qr.py`); `ui/qr_dialog.QrCodeView`
+caches that matrix and repaints it at the current window size (280 px default),
+so resizing neither re-encodes the code nor blurs it. UI: the Privacy
 preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
 (per-row icon actions for trust/rename/copy/delete; only global Refresh/Close
 at the bottom), the reaction-style `ui/omemo_popup.py` (chat shield) and the

@@ -195,7 +195,7 @@ check("QR of a fingerprint fits a small version",
 from PyQt6 import QtWidgets
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.chat_themes import ChatThemeFactory
-from stanza_im.ui.qr_dialog import render_qr_pixmap
+from stanza_im.ui.qr_dialog import QrCodeView, QrDialog, render_qr_pixmap
 
 _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 _cw = ChatWidget("bob@example.com", "Bob", ChatThemeFactory())
@@ -364,6 +364,34 @@ _pm = render_qr_pixmap("abc")
 check("QR pixmap renders", _pm is not None and not _pm.isNull())
 check("QR pixmap is square and sized", _pm.width() == _pm.height()
       and _pm.width() > 21)
+
+_qr_encodes = []
+_original_encode = qr.encode
+
+
+def _counted_encode(data, version=None):
+    _qr_encodes.append(data)
+    return _original_encode(data, version)
+
+
+qr.encode = _counted_encode
+try:
+    _qr_view = QrCodeView("abc")
+    _qr_view.resize(420, 300)
+    _qr_view.grab()
+finally:
+    qr.encode = _original_encode
+check("QR view encodes its matrix only once", len(_qr_encodes) == 1)
+check("QR view has a large default size",
+      _qr_view.sizeHint().width() == QrCodeView.SIZE_HINT)
+check("QR view is resizable",
+      _qr_view.width() == 420 and _qr_view.height() == 300)
+_qr_dialog = QrDialog("abc")
+check("QR dialog uses the resizable view",
+      _qr_dialog._qr_view.sizeHint().width() >= 280
+      and _qr_dialog._qr_view.sizePolicy().horizontalPolicy()
+      == QtWidgets.QSizePolicy.Policy.Expanding)
+_qr_dialog.deleteLater()
 
 # 8. server-side aliases payload ---------------------------------------------
 from stanza_im.core import omemo_aliases

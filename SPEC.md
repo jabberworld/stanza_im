@@ -84,7 +84,7 @@ stanza_im/
 │   ├── emoji_picker_dialog.py — XEP-0444 reaction picker (search/categories/recent)
 │   ├── omemo_devices_dialog.py — XEP-0384 device/trust manager
 │   ├── omemo_popup.py  — chat shield quick device trust/rename popup
-│   ├── qr_dialog.py    — QR code dialog (OMEMO fingerprint)
+│   ├── qr_dialog.py    — resizable QR code dialog (cached matrix)
 │   ├── reactions_list_dialog.py — XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
@@ -2736,7 +2736,9 @@ Registers XEP plugins (conditionally where noted):
   only the «OMEMO» mode entry is gated on the peer's support, which is
   determined by the peer's caps **or** by a non-empty device list (many clients
   publish devices without advertising OMEMO in disco). The QR code is rendered
-  by a bundled pure-Python encoder (`xmpp/omemo/qr.py`).
+  by a bundled pure-Python encoder (`xmpp/omemo/qr.py`); `ui/qr_dialog.py`
+  caches the matrix in a resizable `QrCodeView` (280 px default) and repaints
+  it at the current window size without re-encoding.
 - On the chat toolbar the lock and shield sit **after** the XEP-0224 attention
   bell (so the shield appearing/disappearing only moves the trailing stretch),
   and the lock's mode menu entries are checkable (the active mode carries the
