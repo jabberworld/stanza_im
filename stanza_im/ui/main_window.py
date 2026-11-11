@@ -4493,7 +4493,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_connect_progress(tr("login_roster"), 80)
         else:
             self._connect_progress_active = False
-            self._conn_progress.setVisible(False)
+            self._clear_status()
         # A successful login clears any stale "connection lost" status left by
         # a previous session (e.g. during a profile switch).
         self._presence_sound_seen.clear()
