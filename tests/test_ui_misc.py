@@ -307,6 +307,10 @@ _built = []
 
 
 class _RecordingACD(_orig_acd):
+    def show(self):
+        # The dialog is modeless now (``show_modeless``), not ``exec``.
+        _built.append(self)
+
     def exec(self):
         _built.append(self)
         return 0  # reject, so nothing is sent
