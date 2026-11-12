@@ -50,8 +50,10 @@ class InviteDialog(QtWidgets.QDialog):
         form = QtWidgets.QFormLayout()
         self._username = QtWidgets.QLineEdit(self)
         self._username.setPlaceholderText(tr("invite_username_placeholder"))
+        self._username.setToolTip(tr("invite_username_tip"))
         self._roster = QtWidgets.QCheckBox(tr("invite_roster_subscription"),
                                            self)
+        self._roster.setToolTip(tr("invite_roster_subscription_tip"))
         self._roster.setChecked(True)
         form.addRow(tr("invite_username"), self._username)
         form.addRow(self._roster)
