@@ -27,6 +27,7 @@ from stanza_im.ui.account_registration_dialog import (
     AccountRegistrationDialog, load_servers)
 from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.preferences import PreferencesDialog
+from stanza_im.ui.data_form_widget import DataFormWidget
 
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -213,6 +214,81 @@ form_info = asyncio.run(form_client.get_registration_form("conference.example.co
 check("a data form ignores the legacy fields set (no dict crash)",
       form_info["form"] is not None and form_info["fields"] is None)
 
+
+# ── CAPTCHA fallback layout + hidden required fields ─────────────
+class _RegField:
+    def __init__(self, var, ftype, label, value, required=False):
+        self.data = {
+            "var": var, "type": ftype, "label": label, "value": value,
+            "required": required, "options": [],
+        }
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+
+class _RegForm:
+    def __init__(self, fields):
+        self.fields = fields
+
+    def __getitem__(self, key):
+        if key == "fields":
+            return self.fields
+        if key in ("title", "instructions"):
+            return ""
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        if key != "type":
+            raise KeyError(key)
+
+
+def _reg_form(ocr_value=""):
+    return _RegForm([
+        _RegField("username", "text-single", "Пользователь", "bob", True),
+        _RegField("password", "text-private", "Пароль", "pw", True),
+        _RegField("from", "hidden", "Атрибут «кому»", "linuxoid.in"),
+        _RegField("challenge", "hidden", "ИД проверки",
+                  "5ycoci3ltbliobjr", True),
+        _RegField("captcha-fallback-text", "fixed", "",
+                  "Если вы не видите изображение капчи, перейдите по ссылке."),
+        _RegField("captcha-fallback-url", "text-single", "Ссылка на капчу",
+                  "https://jabberworld.info:5282/captcha/5ycoci3ltbliobjr/image"),
+        _RegField("ocr", "text-single", "Введите увиденный текст",
+                  ocr_value, True),
+    ])
+
+
+captcha_form = _reg_form("abc")
+captcha_widget = DataFormWidget(captcha_form)
+labels = [label.text() for label in captcha_widget.findChildren(
+    QtWidgets.QLabel)]
+check("captcha fallback hides the raw field name",
+      "captcha-fallback-text" not in labels)
+check("captcha fallback text and link share a row",
+      any("Если вы не видите изображение" in text
+          and "Ссылка на капчу" in text for text in labels))
+check("captcha fallback URL is a link field",
+      "captcha-fallback-url" in captcha_widget._link_fields)
+check("a filled CAPTCHA form passes validation",
+      captcha_widget.validate() is None)
+check("hidden required values still reach the form",
+      captcha_widget.values().get("challenge") == "5ycoci3ltbliobjr")
+captcha_widget.apply_to_form()
+check("hidden required values are submitted",
+      any(field.get("var") == "challenge"
+          and field.get("value") == "5ycoci3ltbliobjr"
+          for field in captcha_form["fields"]))
+empty_ocr = DataFormWidget(_reg_form(""))
+check("only the visible CAPTCHA field is reported as required",
+      empty_ocr.validate() == tr("form_required",
+                                 label="Введите увиденный текст"))
 
 # ── login widget ─────────────────────────────────────────────────
 login = LoginWidget(config)

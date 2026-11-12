@@ -180,6 +180,24 @@ class DataFormWidget(QtWidgets.QWidget):
         self._multi_fields: dict[str, list] = {}
         self._link_fields: set[str] = set()
         self._combos: list[QtWidgets.QComboBox] = []
+        self._captcha_fallback_text = ""
+        self._captcha_fallback_url = ""
+        self._captcha_fallback_label = ""
+        for field in form["fields"]:
+            var = str(field.get("var") or "")
+            if var not in ("captcha-fallback-text", "captcha-fallback-url"):
+                continue
+            value = field.get("value")
+            if isinstance(value, list):
+                value = value[0] if value else ""
+            text = str(value or "").strip()
+            if var == "captcha-fallback-text":
+                self._captcha_fallback_text = text
+            else:
+                self._captcha_fallback_url = _as_url(text) or ""
+                self._captcha_fallback_label = (
+                    str(field.get("label") or "").strip()
+                    or tr("captcha_open_oob"))
         form_layout = QtWidgets.QFormLayout(self)
         self._form_layout = form_layout
         form_layout.setFieldGrowthPolicy(
@@ -249,13 +267,33 @@ class DataFormWidget(QtWidgets.QWidget):
         ftype = str(field["type"] or "text-single")
         var = str(field["var"] or "")
         label = str(field.get("label", "") or var)
-        if field["required"]:
-            label += " *"
         value = field["value"]
         options = list(field["options"] or ())
 
         if ftype == "hidden":
             return False
+
+        if var == "captcha-fallback-text":
+            if not self._captcha_fallback_url:
+                widget = QtWidgets.QLabel(str(value or ""))
+                widget.setWordWrap(True)
+                widget.setTextInteractionFlags(
+                    widget.textInteractionFlags()
+                    | QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+                layout.addRow(widget)
+            return True
+
+        if var == "captcha-fallback-url":
+            widget = self._captcha_fallback_widget()
+            if widget is not None:
+                self._link_fields.add(var)
+                layout.addRow(widget)
+            else:
+                layout.addRow(QtWidgets.QLabel(self._captcha_fallback_text))
+            return True
+
+        if field["required"]:
+            label += " *"
 
         if ftype == "fixed":
             fixed_url = _as_url(field["value"])
@@ -267,8 +305,9 @@ class DataFormWidget(QtWidgets.QWidget):
                 widget.setTextInteractionFlags(
                     widget.textInteractionFlags()
                     | QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
-            if label.strip():
-                layout.addRow(label, widget)
+            fixed_label = str(field.get("label") or "").strip()
+            if fixed_label:
+                layout.addRow(fixed_label, widget)
             else:
                 layout.addRow(widget)
             return True
@@ -371,6 +410,27 @@ class DataFormWidget(QtWidgets.QWidget):
         layout.addRow(label, edit)
         return True
 
+    def _captcha_fallback_widget(self):
+        """One full-width line: fallback text + clickable CAPTCHA link."""
+        url = self._captcha_fallback_url
+        if not url:
+            return None
+        link_text = self._captcha_fallback_label or tr("captcha_open_oob")
+        text = self._captcha_fallback_text
+        link = (f'<a href="{html.escape(url, quote=True)}">'
+                f'{html.escape(link_text)}</a>')
+        content = f'{html.escape(text)} — {link}' if text else link
+        label = QtWidgets.QLabel(content)
+        label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        label.setOpenExternalLinks(True)
+        label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+        label.setWordWrap(True)
+        label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                            QtWidgets.QSizePolicy.Policy.Preferred)
+        label.setToolTip(url)
+        return label
+
     def _media_row(self, media, edit):
         """A CAPTCHA challenge widget (image inline / audio-video button)."""
         container = QtWidgets.QWidget()
@@ -455,6 +515,8 @@ class DataFormWidget(QtWidgets.QWidget):
         for field in self._form["fields"]:
             if not field["required"]:
                 continue
+            if str(field.get("type") or "") in ("hidden", "fixed"):
+                continue  # serialized from the form value, no widget needed
             var = str(field["var"] or "")
             if var in self._link_fields:
                 continue  # a pre-filled read-only URL, always satisfied
