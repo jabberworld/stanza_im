@@ -68,7 +68,7 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         self._result_jid = ""
         self._result_password = ""
         self.setWindowTitle(tr("register_account_title"))
-        self.resize(470, 0)
+        self.setMinimumSize(520, 300)
         self._build_ui()
 
     # ── UI construction ─────────────────────────────────────────
@@ -201,6 +201,10 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         return label
 
     # ── actions ─────────────────────────────────────────────────
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QtCore.QTimer.singleShot(0, lambda: fit_dialog_to_content(self))
 
     def _on_next(self) -> None:
         if self._stack.currentIndex() == 0:

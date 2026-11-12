@@ -27,7 +27,7 @@ from stanza_im.ui.account_registration_dialog import (
     AccountRegistrationDialog, load_servers)
 from stanza_im.ui.login_widget import LoginWidget
 from stanza_im.ui.preferences import PreferencesDialog
-from stanza_im.ui.data_form_widget import DataFormWidget
+from stanza_im.ui.data_form_widget import DataFormWidget, fit_dialog_to_content
 
 i18n_load("en")
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -289,6 +289,31 @@ empty_ocr = DataFormWidget(_reg_form(""))
 check("only the visible CAPTCHA field is reported as required",
       empty_ocr.validate() == tr("form_required",
                                  label="Введите увиденный текст"))
+
+# ── the registration dialog fits the CAPTCHA form without extra scrollbars
+geometry_dialog = AccountRegistrationDialog(Config())
+geometry_dialog._populate_form({
+    "form": captcha_form, "fields": None,
+    "instructions": "Выберите имя пользователя и пароль для регистрации",
+    "oob": "",
+})
+geometry_dialog._stack.setCurrentIndex(1)
+geometry_dialog.show()
+app.processEvents()
+fit_dialog_to_content(geometry_dialog)
+app.processEvents()
+_geometry_scroll = geometry_dialog._form_scroll
+check("the registration dialog fits the captcha form without scrolling",
+      not _geometry_scroll.horizontalScrollBar().isVisible()
+      and not _geometry_scroll.verticalScrollBar().isVisible())
+_screen = geometry_dialog.screen() or app.primaryScreen()
+check("the registration dialog stays within the screen-aware limit",
+      _screen is not None
+      and geometry_dialog.width() <= min(1000,
+                                         int(_screen.availableGeometry().width() * 0.9))
+      and geometry_dialog.height() <= min(900,
+                                          int(_screen.availableGeometry().height() * 0.9)))
+geometry_dialog.close()
 
 # ── login widget ─────────────────────────────────────────────────
 login = LoginWidget(config)

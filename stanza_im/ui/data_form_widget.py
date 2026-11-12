@@ -116,39 +116,48 @@ def _url_label(url: str, parent=None) -> QtWidgets.QLabel:
 
 
 def fit_dialog_to_content(dialog: QtWidgets.QDialog) -> None:
-    """Grow *dialog* to fit its content, clamped to the available screen.
+    """Size *dialog* to its content, with a bounded screen-aware maximum.
 
-    ``QScrollArea`` caches the inner widget's size hint, so ``adjustSize``
-    would size the dialog to a stale value.  The full content size is
-    reserved on the scroll area for the duration of the ``adjustSize`` call
-    (so the measurement never depends on the current viewport or on whether
-    the dialog has been laid out yet), then released.  If the content is
-    larger than the screen the dialog stays clamped and the scroll area
-    provides the scrolling.
+    A widget-resizable ``QScrollArea`` reports a small ``sizeHint`` while its
+    content is larger, and resizing from the dialog's current (often initial)
+    width leaves avoidable horizontal scrollbars.  Measure the content with a
+    temporary minimum size, capture the complete dialog hint, then restore the
+    scroll area and resize the dialog directly.  Only when the content exceeds
+    the reasonable screen limit does the scroll area keep its scrollbars.
     """
     layout = dialog.layout()
     if layout is not None:
         layout.activate()
     scroll = getattr(dialog, "_form_scroll", None)
     inner = scroll.widget() if scroll is not None else None
+    target = None
     if scroll is not None and inner is not None:
+        inner_layout = inner.layout()
+        if inner_layout is not None:
+            inner_layout.activate()
         hint = inner.sizeHint()
         frame = 2 * scroll.frameWidth()
         scroll.setMinimumSize(hint.width() + frame, hint.height() + frame)
         if layout is not None:
             layout.activate()
-        dialog.adjustSize()
+        target = dialog.sizeHint()
         scroll.setMinimumSize(0, 0)
         if layout is not None:
             layout.activate()
     else:
-        dialog.adjustSize()
+        target = dialog.sizeHint()
+
     screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
-    if screen is None:
-        return
-    available = screen.availableGeometry()
-    dialog.resize(min(dialog.width(), int(available.width() * 0.9)),
-                  min(dialog.height(), int(available.height() * 0.9)))
+    if screen is not None:
+        available = screen.availableGeometry()
+        max_width = min(1000, int(available.width() * 0.9))
+        max_height = min(900, int(available.height() * 0.9))
+    else:
+        max_width, max_height = 1000, 900
+    minimum = dialog.minimumSizeHint()
+    width = max(target.width(), minimum.width())
+    height = max(target.height(), minimum.height())
+    dialog.resize(min(width, max_width), min(height, max_height))
 
 
 def _place_button_in_row(layout: QtWidgets.QFormLayout,
