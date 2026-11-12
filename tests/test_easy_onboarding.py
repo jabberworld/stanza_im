@@ -3,6 +3,7 @@
 Run with:
     QT_QPA_PLATFORM=offscreen python3 tests/test_easy_onboarding.py
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -209,6 +210,65 @@ check("invitation result fields parsed",
       result["uri"].startswith("xmpp:")
       and result["landing_url"] == "https://example.com/i/x"
       and result["expire"] == "2026-01-01T00:00:00Z")
+
+# 7. Account invitation submits the form -------------------------------------
+from slixmpp.plugins.xep_0004.stanza import Form, FormField
+
+
+def _form(kind, fields):
+    form = Form()
+    form["type"] = kind
+    for var, value, ftype in fields:
+        field = FormField()
+        field["var"] = var
+        field["type"] = ftype
+        if value is not None:
+            field["value"] = value
+        form.append(field)
+    return form
+
+
+captured = {}
+
+
+async def _start_command(jid, node):
+    return {
+        "session": {"sessionid": "s1"}, "status": "executing",
+        "error": "",
+        "form": _form("form", [
+            ("username", None, "text-single"),
+            ("roster-subscription", None, "boolean"),
+        ]),
+    }
+
+
+async def _continue_command(session, action, form):
+    captured["type"] = form["type"]
+    captured["values"] = {field["var"]: field["value"]
+                          for field in form["fields"]}
+    return {
+        "session": session, "status": "completed", "error": "",
+        "form": _form("result", [
+            ("uri", "xmpp:new@example.com?register;preauth=t", "text-single"),
+            ("landing-url", "https://example.com/invite/t", "text-single"),
+            ("expire", "2026-01-01T00:00:00Z", "text-single"),
+        ]),
+    }
+
+
+async_client = JabberClient("me@example.com/res", "pw")
+async_client.start_command = _start_command
+async_client.continue_command = _continue_command
+_account_result = asyncio.run(
+    async_client.create_account_invitation("new", True))
+check("account invitation submits a submit form",
+      captured.get("type") == "submit"
+      and captured.get("values", {}).get("username") == "new"
+      and str(captured.get("values", {}).get("roster-subscription")).lower()
+      in ("1", "true"))
+check("account invitation parses the server result",
+      _account_result["uri"].startswith("xmpp:")
+      and _account_result["landing_url"].endswith("/invite/t"))
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

@@ -3878,8 +3878,10 @@ class JabberClient:
             raise ValueError(step["error"])
         if (step.get("status") not in ("completed", "canceled")
                 and step.get("form") is not None):
+            form = step["form"]
+            form["type"] = "submit"
             step = await self.continue_command(
-                step["session"], "complete", step.get("form"))
+                step["session"], "complete", form)
         return self._invitation_result(step)
 
     async def create_account_invitation(self, username: str = "",
@@ -3898,6 +3900,7 @@ class JabberClient:
                     field["value"] = str(username)
                 elif var == "roster-subscription":
                     field["value"] = "1" if roster_subscription else "0"
+            form["type"] = "submit"
             step = await self.continue_command(step["session"], "complete", form)
         if step.get("error"):
             raise ValueError(step["error"])
