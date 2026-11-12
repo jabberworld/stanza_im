@@ -27,7 +27,7 @@ import slixmpp
 from slixmpp.exceptions import IqError
 
 from stanza_im import app as app_mod
-from stanza_im.core.client import JabberClient
+from stanza_im.core.client import JabberClient, _iq_error_text
 from stanza_im.include import constants
 from stanza_im.include.xmpp_uri import make_xmpp_uri, parse_invitation
 from stanza_im.core import pars_tokens
@@ -345,6 +345,79 @@ check("pre-auth server errors expose only the error text",
       and "<error" not in _preauth_error)
 check("the override is restored after a pre-auth error",
       _preauth_client.xmpp._always_send_everything is False)
+
+
+class _ErrorText:
+    def __init__(self, text, condition="internal-server-error"):
+        self.text = text
+        self.condition = condition
+
+
+check("human server error text is kept",
+      _iq_error_text(_ErrorText("Username already taken"))
+      == "Username already taken")
+check("Erlang/XML server text is not shown",
+      _iq_error_text(_ErrorText(
+          "Unexpected error condition: {stanza_error,wait,undefined,"
+          "'resource-constraint',[]}")) == "internal-server-error")
+check("machine text is suppressed when no condition fallback is wanted",
+      _iq_error_text(_ErrorText(
+          "Unexpected error condition: {stanza_error,wait,undefined,"
+          "'resource-constraint',[]}"), allow_condition=False) == "")
+
+
+class _FakeRegister:
+    form_fields = {"username"}
+
+    def __setitem__(self, key, value):
+        pass
+
+
+class _MachineErrorIqPayload(_ErrorIqPayload):
+    def __getitem__(self, key):
+        if key == "error":
+            return {
+                "condition": "internal-server-error",
+                "text": ("Unexpected error condition: {stanza_error,wait,"
+                         "undefined,'resource-constraint',[]}"),
+                "type": "wait",
+            }
+        raise KeyError(key)
+
+
+class _FakeRegistrationIq:
+    def __init__(self):
+        self.xml = ET.Element("iq")
+        self._register = _FakeRegister()
+
+    def __setitem__(self, key, value):
+        self.xml.set(key, str(value))
+
+    def __getitem__(self, key):
+        if key == "register":
+            return self._register
+        raise KeyError(key)
+
+    async def send(self):
+        raise IqError(_MachineErrorIqPayload())
+
+
+class _FakeRegistrationXmpp:
+    def Iq(self):
+        return _FakeRegistrationIq()
+
+
+_registration_client = async_client
+_registration_client.xmpp = _FakeRegistrationXmpp()
+try:
+    asyncio.run(_registration_client.submit_registration(
+        "example.com", {"username": "taken"}))
+except ValueError as exc:
+    _registration_error = str(exc)
+else:
+    _registration_error = "not raised"
+check("submit_registration drops the XML/Erlang error payload",
+      _registration_error == "")
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

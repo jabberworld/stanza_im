@@ -342,7 +342,8 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         except Exception as exc:
             logger.debug("Account registration at %s failed", self._server,
                          exc_info=True)
-            self._set_status(tr("register_error", error=str(exc)), "red")
+            error = str(exc).strip() or tr("register_error_generic")
+            self._set_status(tr("register_error", error=error), "red")
             self._next_btn.setEnabled(True)
             return
         jid, password = self._credentials(values)

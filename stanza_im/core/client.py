@@ -3541,7 +3541,10 @@ class JabberClient:
             for key, value in values.items():
                 if key in allowed:
                     iq["register"][key] = value
-        await iq.send()
+        try:
+            await iq.send()
+        except slixmpp.exceptions.IqError as exc:
+            raise ValueError(_iq_error_text(exc, allow_condition=False)) from exc
         return None
 
     @staticmethod
@@ -3847,9 +3850,8 @@ class JabberClient:
         except slixmpp.exceptions.IqError as exc:
             # ``str(IqError)`` serialises the whole error IQ; the UI only
             # wants the server's human-readable error text.
-            text = str(getattr(exc, "text", "") or "").strip()
-            condition = str(getattr(exc, "condition", "") or "").strip()
-            raise ValueError(text or condition or "pre-authentication failed") from exc
+            raise ValueError(
+                _iq_error_text(exc) or "pre-authentication failed") from exc
         finally:
             self.xmpp._always_send_everything = previous
 
@@ -8838,6 +8840,25 @@ def _clean_jid(value) -> str:
         return ""
     result = str(value).strip()
     return "" if result.lower() in ("", "none", "null") else result
+
+
+def _looks_like_machine_error(text: str) -> bool:
+    """True for server texts that are Erlang terms/XML, not user-facing prose."""
+    text = str(text or "")
+    return ("{stanza_error" in text or "<<" in text
+            or "<error" in text.lower())
+
+
+def _iq_error_text(exc, allow_condition: bool = True) -> str:
+    """Return the human-readable part of an ``IqError``, never the IQ/XML."""
+    text = str(getattr(exc, "text", "") or "").strip()
+    if _looks_like_machine_error(text):
+        text = ""
+    if text:
+        return text
+    if allow_condition:
+        return str(getattr(exc, "condition", "") or "").strip()
+    return ""
 
 
 def _presence_error_condition(stanza, default: str = "error") -> tuple[str, str]:

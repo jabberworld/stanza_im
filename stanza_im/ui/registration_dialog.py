@@ -122,7 +122,8 @@ class RegistrationDialog(QtWidgets.QDialog):
             self._status.setText(tr("register_success"))
             self._btn_remove.setEnabled(True)
         except Exception as exc:
-            self._status.setText(tr("register_error", error=str(exc)))
+            error = str(exc).strip() or tr("register_error_generic")
+            self._status.setText(tr("register_error", error=error))
         finally:
             self._btn_submit.setEnabled(True)
 

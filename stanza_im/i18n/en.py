@@ -640,6 +640,7 @@ STRINGS = {
     "register_removed": "Registration removed.",
     "register_none": "This service does not offer registration.",
     "register_error": "Registration failed: {error}",
+    "register_error_generic": "The server rejected the registration.",
     "register_account_title": "Account registration",
     "register_server": "Server",
     "register_server_info": "Please enter the name of the server where you want to register.\nYou can also choose one of the suggested servers.",
