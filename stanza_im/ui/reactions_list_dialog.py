@@ -77,7 +77,7 @@ class _ReactionRow(QtWidgets.QWidget):
         name_label.setTextInteractionFlags(
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         time_label = QtWidgets.QLabel(at, self)
-        time_label.setStyleSheet("color: #888; font-size: 90%;")
+        time_label.setStyleSheet("color: palette(mid); font-size: 90%;")
         left.addWidget(name_label)
         left.addWidget(time_label)
         layout.addLayout(left, 1)

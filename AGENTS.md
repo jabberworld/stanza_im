@@ -82,6 +82,7 @@ stanza_im/                      # Python package
 │   ├── chat_widget.py           # Single chat tab content
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
 │   ├── chat_themes.py           # Adium-style theme HTML generator
+│   ├── theme.py                 # Palette/contrast helpers (light & dark Qt themes)
 │   ├── nick_colors.py           # Session MUC nickname → color allocation
 │   ├── network_quality.py       # Signal-bar network-quality icon painter
 │   ├── font_zoom.py             # Ctrl+wheel font-size helper (input/roster/MUC)
@@ -1050,6 +1051,8 @@ Everything follows the XDG Base Directory spec:
 | Client PARS invitation tokens (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json` (0600, one use/7 days) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
+A top-level `config_version` (currently `1`) lets `Config.load` run one-time
+migrations; version 1 clears the old forced-light roster/chat colour defaults.
 The minimal TOML writer (`Config._write_toml`) serialises scalars with
 `json.dumps(..., ensure_ascii=False)`: the file is UTF-8, so non-BMP characters
 (emoji in `emoji.recent`) are stored literally — `ensure_ascii=True` would emit
@@ -3735,18 +3738,27 @@ slider. Changing the chat font re-renders open tabs via
 **Colors** (`appearance.{roster_bg_color,roster_group_bg_color,chat_bg_color,
 muc_highlight_color,osd_bg_color,osd_font_color,osd_opacity,
 colored_muc_nicks}`, a «Цвет» page in Appearance
-preferences): roster colors are drawn by the QPainter pass — `RosterStyle.set_colors`
-(`bg_color()` fills each item area in `RosterWidget.paintEvent`, `group_bg_color()`
-stripes the group headers) and `MainWindow._apply_roster_colors` also paints the
-viewport so empty space below the roster matches. The chat background is a CSS
-override injected by `ChatThemeFactory.set_chat_bg_color` (`body {
-background-color: … !important; background-image: none !important }`, applied
-to both 1:1 and MUC factories; it overrides the skin's tiled image); the MUC
-mention highlight color feeds `ChatThemeFactory.set_highlight_color`. Color
-changes re-render open chats via `ChatWindow.rerender_messages`. The OSD
-background/text color and opacity (0–100 %) feed `OsdManager.apply_colors` →
-`_OsdWindow.apply_style`, which rebuilds the OSD stylesheet (`rgba(r,g,b,a)`
-background, text color on all labels); live popups update in place.
+preferences): the three Qt surfaces default to the **system palette**, not a
+fixed white. An empty `roster_bg_color`/`roster_group_bg_color`/`chat_bg_color`
+means «use the theme»; an explicit user colour is stored and always used.
+`RosterStyle.fill_color()`/`group_fill_color()` return the custom colour or
+`QPalette.Base`/`Window`, `RosterStyle` derives a contrasting name/status
+colour for custom backgrounds, and `RosterWidget.paintEvent` plus
+`MainWindow._apply_roster_colors` fill from those helpers (no white fallback).
+The chat background is a CSS override injected by
+`ChatThemeFactory.set_chat_bg_color`; when the configured value is empty
+`MainWindow._chat_theme_colors()` resolves it to `QPalette.Base` and passes
+derived text/muted colours, so the chat stays readable in a dark theme. The
+MUC mention highlight color feeds `ChatThemeFactory.set_highlight_color`.
+`ui/theme.py` centralises `app_palette`/`is_dark`/`contrasting_text`/
+`muted_color`/`error_color`. `Config.load` performs a one-time migration
+(`config_version < 1`) of the old forced-light `#ffffff`/`#ececec` values to
+the system defaults. Color changes re-render open chats via
+`ChatWindow.rerender_messages`. The OSD background/text color and opacity
+(0–100 %) feed `OsdManager.apply_colors` → `_OsdWindow.apply_style`, which
+rebuilds the OSD stylesheet (`rgba(r,g,b,a)` background, text color on all
+labels); live popups update in place. [`tests/test_colors.py`,
+`tests/test_dark_theme.py`]
 
 **Colorful MUC nicknames** (`appearance.colored_muc_nicks`, default on):
 `ChatWidget` keeps a `NickColorAllocator` (`ui/nick_colors.py`); keys are the

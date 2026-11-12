@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from stanza_im.ui import theme
+
 _SHOW_DELAY_MS = 350
 _OFFSET = QtCore.QPoint(16, 14)
 _MARGIN = 8
@@ -54,9 +56,19 @@ class _ToolTipWindow(QtWidgets.QWidget):
         row.addWidget(self._label, 1)
 
     def _apply_style(self) -> None:
-        pal = QtGui.QPalette()
+        pal = theme.app_palette()
         base = pal.color(QtGui.QPalette.ColorRole.ToolTipBase)
         text = pal.color(QtGui.QPalette.ColorRole.ToolTipText)
+        # Some platform themes leave the ToolTip roles light even when the
+        # window palette is dark; keep the popup consistent with the active
+        # scheme.  Explicit custom tooltip colours are not configurable here.
+        if theme.is_dark(pal) and base.lightnessF() >= 0.5:
+            base = pal.color(QtGui.QPalette.ColorRole.Base)
+            text = pal.color(QtGui.QPalette.ColorRole.Text)
+        if base.lightnessF() < 0.5 and text.lightnessF() < 0.5:
+            text = theme.contrasting_text(base)
+        elif base.lightnessF() >= 0.5 and text.lightnessF() >= 0.5:
+            text = theme.contrasting_text(base)
         self.setStyleSheet(
             f"QWidget {{ background-color: {base.name()}; "
             f"color: {text.name()}; border: none; }}")

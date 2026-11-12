@@ -4,6 +4,7 @@ from __future__ import annotations
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 
 
 class ChangePasswordDialog(QtWidgets.QDialog):
@@ -57,7 +58,8 @@ class ChangePasswordDialog(QtWidgets.QDialog):
         error = self._validate()
         if error:
             self._status.setText(error)
-            self._status.setStyleSheet("color: red;")
+            self._status.setStyleSheet(
+                f"color: {theme.error_color().name()};")
             return
         self.accept()
 

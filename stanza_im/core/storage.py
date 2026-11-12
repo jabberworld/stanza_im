@@ -64,6 +64,7 @@ class Config:
     """
 
     DEFAULTS: dict = {
+        "config_version": 1,
         "jid": "",
         "password": "",
         "save_password": False,
@@ -171,9 +172,9 @@ class Config:
                         "media_cache_days": 30,
                         "media_cache_mb": 128,
                         "muc_highlight": "both",
-                        "roster_bg_color": "#ffffff",
-                        "roster_group_bg_color": "#ececec",
-                        "chat_bg_color": "#ffffff",
+                        "roster_bg_color": "",
+                        "roster_group_bg_color": "",
+                        "chat_bg_color": "",
                         "muc_highlight_color": "#e53935",
                         "colored_muc_nicks": True,
                         "roster_show_avatars": True,
@@ -260,6 +261,22 @@ class Config:
 
     # ── Loading / saving ─────────────────────────────────────────
 
+    @staticmethod
+    def _migrate_legacy_colors(appearance: dict) -> None:
+        """Replace the old forced light background defaults with system colours.
+
+        Older builds stored the light defaults in the config, so a dark Qt
+        theme ended up with white roster/chat surfaces.  Empty values now mean
+        "use the palette"; a value the user picks explicitly stays untouched
+        after this one-time migration.
+        """
+        if appearance.get("roster_bg_color") == "#ffffff":
+            appearance["roster_bg_color"] = ""
+        if appearance.get("roster_group_bg_color") == "#ececec":
+            appearance["roster_group_bg_color"] = ""
+        if appearance.get("chat_bg_color") == "#ffffff":
+            appearance["chat_bg_color"] = ""
+
     def load(self) -> None:
         """Load config from disk (missing file → defaults)."""
         _ensure_dirs()
@@ -272,6 +289,10 @@ class Config:
             logger.warning("Could not parse %s: %s", CONFIG_FILE, exc)
             return
 
+        try:
+            raw_version = int(data.get("config_version", 0) or 0)
+        except (TypeError, ValueError):
+            raw_version = 0
         for key, value in data.items():
             if key in self.DEFAULTS and isinstance(value, type(self.DEFAULTS[key])):
                 # Deep-merge so default keys survive partial TOML sections.
@@ -282,6 +303,11 @@ class Config:
                 self._data[key] = merged
             elif key not in self.DEFAULTS:
                 self._data[key] = value
+        if raw_version < 1:
+            appearance = self._data.get("appearance")
+            if isinstance(appearance, dict):
+                self._migrate_legacy_colors(appearance)
+            self._data["config_version"] = 1
 
     def save(self) -> None:
         """Write config to disk with 0600 permissions."""

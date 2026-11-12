@@ -13,6 +13,7 @@ from stanza_im.i18n import tr
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui import icons as icons_mod
+from stanza_im.ui import theme as theme_mod
 from stanza_im.ui.sounds import SoundPlayer
 from stanza_im.ui.tray import normalize_popups_mode
 from stanza_im.ui.font_zoom import clamp_font_size, wheel_font_size
@@ -135,34 +136,68 @@ class _ColorButton(QtWidgets.QPushButton):
 
     Registered in ``self._controls`` under the config key; ``_value``/``_set``
     dispatch on this class instead of falling through to ``widget.text()``.
+    With *allow_auto* an empty value means "use the system palette"; the
+    button then shows that effective colour and a right-click resets to it.
     """
 
-    def __init__(self, default: str = "#000000", parent=None):
+    def __init__(self, default: str = "", parent=None, *,
+                 allow_auto: bool = False,
+                 role: QtGui.QPalette.ColorRole
+                 = QtGui.QPalette.ColorRole.Window):
         super().__init__(parent)
-        self._color = default
+        self._color = ""
+        self._allow_auto = bool(allow_auto)
+        self._role = role
         self.clicked.connect(self._pick)
+        if self._allow_auto:
+            self.setContextMenuPolicy(
+                QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+            self.customContextMenuRequested.connect(self._show_menu)
         self.set_color(default)
 
     def color(self) -> str:
-        """Return the currently stored hex color (``#rrggbb``)."""
+        """Return the explicit hex color, or ``""`` for the system colour."""
         return self._color
 
+    def _effective(self) -> QtGui.QColor:
+        if self._color:
+            return QtGui.QColor(self._color)
+        return self.palette().color(self._role)
+
     def set_color(self, value: str) -> None:
-        color = QtGui.QColor(str(value))
-        if not color.isValid():
-            color = QtGui.QColor("#000000")
-        self._color = color.name()
-        contrast = "#ffffff" if color.lightnessF() < 0.5 else "#000000"
-        self.setText(self._color)
+        text = str(value or "")
+        color = QtGui.QColor(text)
+        if text and color.isValid():
+            self._color = color.name()
+        else:
+            self._color = ""
+            color = self._effective()
+        contrast = theme_mod.contrasting_text(color).name()
+        label = self._color or (tr("prefs_color_system")
+                                if self._allow_auto else color.name())
+        self.setText(label)
         self.setStyleSheet(
-            f"QPushButton {{ background-color: {self._color}; color: {contrast}; "
-            f"border: 1px solid #888; border-radius: 4px; }}")
+            f"QPushButton {{ background-color: {color.name()}; "
+            f"color: {contrast}; border: 1px solid #888; "
+            f"border-radius: 4px; }}")
         self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        if self._allow_auto:
+            self.setToolTip(tr("prefs_color_system_tip")
+                            if not self._color else self._color)
 
     def _pick(self):
-        color = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._color), self)
+        color = QtWidgets.QColorDialog.getColor(self._effective(), self)
         if color.isValid():
             self.set_color(color.name())
+
+    def _show_menu(self, pos: QtCore.QPoint) -> None:
+        if not self._allow_auto:
+            return
+        menu = QtWidgets.QMenu(self)
+        action = menu.addAction(tr("prefs_color_use_system"))
+        action.setEnabled(bool(self._color))
+        action.triggered.connect(lambda: self.set_color(""))
+        menu.exec(self.mapToGlobal(pos))
 
 
 class _SpellLanguagesButton(QtWidgets.QToolButton):
@@ -268,8 +303,9 @@ class PreferencesDialog(QtWidgets.QDialog):
         self._sections.setToolTip(tr("prefs_nav_zoom_tip"))
         self._sections.zoom_requested.connect(self._on_nav_zoom)
         self._sections.setStyleSheet(
-            "QListWidget { background: white; border: 1px solid #d5d5d5; "
-            "padding: 4px; } QListWidget::item { padding: 7px 4px; } "
+            "QListWidget { background: palette(base); color: palette(text); "
+            "border: 1px solid palette(mid); padding: 4px; } "
+            "QListWidget::item { color: palette(text); padding: 7px 4px; } "
             "QListWidget::item:selected { color: palette(highlighted-text); "
             "background: palette(highlight); }")
         self._sections.currentRowChanged.connect(self._on_section_changed)
@@ -637,7 +673,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             # list devices — that would defeat the memory-saving mode.
             note = QtWidgets.QLabel(tr("prefs_devices_calls_off"))
             note.setWordWrap(True)
-            note.setStyleSheet("color: #c0392b;")
+            note.setStyleSheet(
+                f"color: {theme_mod.error_color().name()};")
             form.addRow(note)
             return page
         from stanza_im.xmpp import media
@@ -1157,9 +1194,11 @@ class PreferencesDialog(QtWidgets.QDialog):
         return box
 
     def _color_button(self, key: str, default: str = "#000000",
-                      tooltip: str = "") -> _ColorButton:
+                      tooltip: str = "", *, allow_auto: bool = False,
+                      role: QtGui.QPalette.ColorRole
+                      = QtGui.QPalette.ColorRole.Window) -> _ColorButton:
         """A swatch button opening a QColorDialog, stored as ``#rrggbb``."""
-        button = _ColorButton(default)
+        button = _ColorButton(default, allow_auto=allow_auto, role=role)
         if tooltip:
             button.setToolTip(tooltip)
         button.setMinimumWidth(120)
@@ -1342,7 +1381,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             self._row(self._cert_btn, trailing_stretch=True))
         allow_invalid = self._check(
             "allow_invalid_cert", tr("prefs_allow_invalid_cert"))
-        allow_invalid.setStyleSheet("color: #b00020;")
+        allow_invalid.setStyleSheet(
+            f"color: {theme_mod.error_color().name()};")
         self._allow_invalid_info = self._info_label(
             tr("prefs_allow_invalid_cert_tip"))
         advanced_form.addRow(
@@ -1714,7 +1754,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         if availability.disabled():
             note = QtWidgets.QLabel(tr("omemo_disabled_settings"))
             note.setWordWrap(True)
-            note.setStyleSheet("color: #c0392b;")
+            note.setStyleSheet(
+                f"color: {theme_mod.error_color().name()};")
             form.addRow(note)
             return page
         if not availability.AVAILABLE:
@@ -1722,7 +1763,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             # many platforms): just the reason and the missing Python modules.
             note = QtWidgets.QLabel(tr("omemo_unavailable"))
             note.setWordWrap(True)
-            note.setStyleSheet("color: #c0392b;")
+            note.setStyleSheet(
+                f"color: {theme_mod.error_color().name()};")
             form.addRow(note)
             if availability.MISSING_MODULES:
                 modules = QtWidgets.QLabel(
@@ -1920,12 +1962,21 @@ class PreferencesDialog(QtWidgets.QDialog):
         _sync_nick_default()
 
         colors, color_form = self._page()
-        color_form.addRow(tr("prefs_color_roster_bg"),
-                          self._color_button("roster_bg_color", "#ffffff"))
-        color_form.addRow(tr("prefs_color_group_bg"),
-                          self._color_button("roster_group_bg_color", "#ececec"))
-        color_form.addRow(tr("prefs_color_chat_bg"),
-                          self._color_button("chat_bg_color", "#ffffff"))
+        color_form.addRow(
+            tr("prefs_color_roster_bg"),
+            self._color_button(
+                "roster_bg_color", allow_auto=True,
+                role=QtGui.QPalette.ColorRole.Base))
+        color_form.addRow(
+            tr("prefs_color_group_bg"),
+            self._color_button(
+                "roster_group_bg_color", allow_auto=True,
+                role=QtGui.QPalette.ColorRole.Window))
+        color_form.addRow(
+            tr("prefs_color_chat_bg"),
+            self._color_button(
+                "chat_bg_color", allow_auto=True,
+                role=QtGui.QPalette.ColorRole.Base))
         color_form.addRow(tr("prefs_color_highlight"),
                           self._color_button("muc_highlight_color", "#e53935"))
         color_form.addRow(
@@ -1978,7 +2029,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         skin = self._controls["emoticon_theme"].currentData()
         if skin == emoticons.NO_SKIN:
             note = QtWidgets.QLabel(tr("prefs_emoticon_none_preview"))
-            note.setStyleSheet("color: gray;")
+            note.setStyleSheet("color: palette(mid);")
             self._emoticon_preview.addWidget(note)
         elif skin == emoticons.UNICODE_SKIN:
             from stanza_im.include import emoji_data
@@ -2350,9 +2401,11 @@ class PreferencesDialog(QtWidgets.QDialog):
             "avatar_radius": getattr(appearance, "avatar_radius", 20),
             "tooltip_avatar_size": getattr(
                 appearance, "tooltip_avatar_size", 64) or 64,
-            "roster_bg_color": getattr(appearance, "roster_bg_color", "#ffffff"),
-            "roster_group_bg_color": getattr(appearance, "roster_group_bg_color", "#ececec"),
-            "chat_bg_color": getattr(appearance, "chat_bg_color", "#ffffff"),
+            "roster_bg_color": getattr(
+                appearance, "roster_bg_color", ""),
+            "roster_group_bg_color": getattr(
+                appearance, "roster_group_bg_color", ""),
+            "chat_bg_color": getattr(appearance, "chat_bg_color", ""),
             "muc_highlight_color": getattr(appearance, "muc_highlight_color", "#e53935"),
             "colored_muc_nicks": getattr(appearance, "colored_muc_nicks", True),
             "roster_show_avatars": getattr(

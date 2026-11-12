@@ -189,7 +189,7 @@ class _FileRow(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Policy.Preferred)
         self._stats_label.setMinimumWidth(0)
         self._status_label = QtWidgets.QLabel(self._status_text, self)
-        self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._status_label.setStyleSheet("color: palette(mid); font-size: 11px;")
         self._lock = QtWidgets.QLabel(self)
         lock_icon = find_icon("lock.svg")
         if lock_icon:

@@ -675,7 +675,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._name_label.setStyleSheet("font-weight: bold;")
         self._name_label.setVisible(False)
         self._status_label = QtWidgets.QLabel("", self)
-        self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._status_label.setStyleSheet(
+            "color: palette(mid); font-size: 11px;")
         self._status_label.setVisible(False)
         header.addWidget(self._name_label)
         header.addWidget(self._status_label)
@@ -743,8 +744,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._reply_ctx = QtWidgets.QFrame(self)
         self._reply_ctx.setObjectName("reply-ctx")
         self._reply_ctx.setStyleSheet(
-            "#reply-ctx { background: #f0f0f0; border-bottom: 1px solid #d8d8d8; }"
-            "#reply-ctx QLabel { color: #444; font-size: 12px; }")
+            "#reply-ctx { background: palette(alternate-base); "
+            "border-bottom: 1px solid palette(mid); }"
+            "#reply-ctx QLabel { color: palette(text); font-size: 12px; }")
         _ctx = QtWidgets.QHBoxLayout(self._reply_ctx)
         _ctx.setContentsMargins(8, 3, 4, 3)
         _ctx.setSpacing(6)
@@ -770,8 +772,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._edit_ctx = QtWidgets.QFrame(self)
         self._edit_ctx.setObjectName("edit-ctx")
         self._edit_ctx.setStyleSheet(
-            "#edit-ctx { background: #fdeecc; border-bottom: 1px solid #e0c875; }"
-            "#edit-ctx QLabel { color: #6b5b1f; font-size: 12px; }")
+            "#edit-ctx { background: palette(alternate-base); "
+            "border-bottom: 1px solid palette(highlight); }"
+            "#edit-ctx QLabel { color: palette(text); font-size: 12px; }")
         _edit_layout = QtWidgets.QHBoxLayout(self._edit_ctx)
         _edit_layout.setContentsMargins(8, 3, 4, 3)
         _edit_layout.setSpacing(6)

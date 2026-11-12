@@ -39,7 +39,7 @@ class RosterExchangeDialog(QtWidgets.QDialog):
             who = f"{sender_name} ({sender})"
         label = QtWidgets.QLabel(tr("rosterx_from", who=who or sender), self)
         label.setWordWrap(True)
-        label.setStyleSheet("color: gray;")
+        label.setStyleSheet("color: palette(mid);")
         layout.addWidget(label)
 
         if body:

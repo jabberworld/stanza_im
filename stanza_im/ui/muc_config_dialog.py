@@ -6,6 +6,7 @@ import asyncio
 from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 from stanza_im.ui.data_form_widget import DataFormWidget
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.hats_dialog import HatsTab
@@ -450,7 +451,8 @@ class MucConfigDialog(QtWidgets.QDialog):
 
     def _show_error(self, text: str) -> None:
         self._management_info.setText(text)
-        self._management_info.setStyleSheet("color: #c0392b;")
+        self._management_info.setStyleSheet(
+            f"color: {theme.error_color().name()};")
 
     def _on_ok(self) -> None:
         if self._busy:

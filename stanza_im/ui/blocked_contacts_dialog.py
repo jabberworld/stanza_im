@@ -7,6 +7,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.include.xmpp_uri import normalize_jid
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 from stanza_im.ui.dialogs import show_modeless
 
 
@@ -102,7 +103,8 @@ class BlockedContactsDialog(QtWidgets.QDialog):
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self._status.setText(text)
-        self._status.setStyleSheet("color: #c0392b;" if error else "")
+        self._status.setStyleSheet(
+            f"color: {theme.error_color().name()};" if error else "")
 
     def _on_block(self) -> None:
         jid = normalize_jid(self._jid.currentText())

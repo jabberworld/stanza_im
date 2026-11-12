@@ -41,7 +41,7 @@ class IncomingFileDialog(QtWidgets.QDialog):
 
         if self._meta.get("encrypted"):
             note = QtWidgets.QLabel(tr("ft_encrypted"), self)
-            note.setStyleSheet("color: gray;")
+            note.setStyleSheet("color: palette(mid);")
             layout.addWidget(note)
 
         buttons = QtWidgets.QHBoxLayout()

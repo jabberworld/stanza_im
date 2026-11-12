@@ -36,6 +36,7 @@ from stanza_im.core.storage import Config
 from stanza_im.core import profiles, unread_state
 from stanza_im.ui import icons as icons_mod
 from stanza_im.ui import spellcheck as spellcheck_mod
+from stanza_im.ui import theme
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.zoom_list import ZoomListWidget as _ZoomListWidget
 from stanza_im.ui.login_widget import LoginWidget
@@ -134,7 +135,7 @@ def _event_separator() -> QtWidgets.QFrame:
     line = QtWidgets.QFrame()
     line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
     line.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-    line.setStyleSheet("color: rgba(0, 0, 0, 40);")
+    line.setStyleSheet("color: palette(mid);")
     return line
 
 
@@ -158,11 +159,11 @@ class _SubscriptionRequestRow(QtWidgets.QWidget):
         title.setWordWrap(True)
         layout.addWidget(title)
         stamp = QtWidgets.QLabel(time.strftime("%H:%M"))
-        stamp.setStyleSheet("color: #888; font-size: 90%;")
+        stamp.setStyleSheet("color: palette(mid); font-size: 90%;")
         layout.addWidget(stamp)
         if who != jid:
             sub = QtWidgets.QLabel(jid)
-            sub.setStyleSheet("color: #888; font-size: 90%;")
+            sub.setStyleSheet("color: palette(mid); font-size: 90%;")
             layout.addWidget(sub)
         if groups:
             layout.addWidget(QtWidgets.QLabel(tr("event_groups",
@@ -215,11 +216,11 @@ class _VoiceRequestRow(QtWidgets.QWidget):
         title.setWordWrap(True)
         layout.addWidget(title)
         stamp = QtWidgets.QLabel(time.strftime("%H:%M"))
-        stamp.setStyleSheet("color: #888; font-size: 90%;")
+        stamp.setStyleSheet("color: palette(mid); font-size: 90%;")
         layout.addWidget(stamp)
         if jid and jid != nick:
             sub = QtWidgets.QLabel(jid)
-            sub.setStyleSheet("color: #888; font-size: 90%;")
+            sub.setStyleSheet("color: palette(mid); font-size: 90%;")
             layout.addWidget(sub)
 
         buttons = QtWidgets.QHBoxLayout()
@@ -548,8 +549,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_theme_factory.set_nick_font(
             self._config.appearance.nick_font,
             self._config.appearance.nick_font_size)
-        self._theme_factory.set_chat_bg_color(self._config.appearance.chat_bg_color)
-        self._muc_theme_factory.set_chat_bg_color(self._config.appearance.chat_bg_color)
+        chat_bg, chat_text, chat_muted = self._chat_theme_colors()
+        self._theme_factory.set_chat_bg_color(chat_bg, chat_text, chat_muted)
+        self._muc_theme_factory.set_chat_bg_color(
+            chat_bg, chat_text, chat_muted)
         self._theme_factory.set_highlight_color(
             self._config.appearance.muc_highlight_color)
         self._muc_theme_factory.set_highlight_color(
@@ -1142,7 +1145,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # A separator line under every plain event row (custom request rows draw
         # their own via _event_separator) so adjacent events are distinguishable.
         self._events_list.setStyleSheet(
-            "QListWidget::item { border-bottom: 1px solid rgba(0, 0, 0, 40);"
+            "QListWidget::item { border-bottom: 1px solid palette(mid);"
             " padding: 3px; }")
         self._events_list.font_zoom_requested.connect(self._on_roster_font_zoom)
         layout.addWidget(self._events_list, stretch=1)
@@ -3659,14 +3662,28 @@ class MainWindow(QtWidgets.QMainWindow):
         transport_roster = getattr(self, "_transport_roster", None)
         if transport_roster is not None:
             transport_roster.set_style(self._roster_style)
-        fill = self._roster_style.bg_color() or QtGui.QColor(
-            QtCore.Qt.GlobalColor.white)
+        fill = self._roster_style.fill_color()
         for viewport in (getattr(self, "_roster_viewport", None),
                          getattr(self, "_transport_viewport", None)):
             if viewport is not None:
                 pal = viewport.palette()
+                pal.setColor(QtGui.QPalette.ColorRole.Base, fill)
                 pal.setColor(QtGui.QPalette.ColorRole.Window, fill)
                 viewport.setPalette(pal)
+
+    def _chat_theme_colors(self) -> tuple[str, str, str]:
+        """Resolve the chat background and its readable text colours.
+
+        An empty ``chat_bg_color`` follows the system palette; an explicit
+        user colour is used as-is (and its text contrast is derived from it).
+        """
+        configured = str(getattr(
+            self._config.appearance, "chat_bg_color", "") or "")
+        background = theme.auto_color(
+            configured, role=QtGui.QPalette.ColorRole.Base)
+        text = theme.contrasting_text(background)
+        muted = theme.muted_color(text, background)
+        return background.name(), text.name(), muted.name()
 
     def _on_settings_applied(self):
         """Apply saved settings to live widgets."""
@@ -3740,8 +3757,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._applied_roster_colors = roster_colors
         chat_bg = getattr(self._config.appearance, "chat_bg_color", "") or ""
         if chat_bg != getattr(self, "_applied_chat_bg", ""):
-            self._theme_factory.set_chat_bg_color(chat_bg)
-            self._muc_theme_factory.set_chat_bg_color(chat_bg)
+            colors = self._chat_theme_colors()
+            self._theme_factory.set_chat_bg_color(*colors)
+            self._muc_theme_factory.set_chat_bg_color(*colors)
             self._applied_chat_bg = chat_bg
             self._chat_window.rerender_messages()
         highlight_color = getattr(self._config.appearance,

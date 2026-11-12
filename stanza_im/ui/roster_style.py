@@ -12,6 +12,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.include import pep
 from stanza_im.include.avatars import rounded_avatar
 from stanza_im.ui import icons as icons_mod
+from stanza_im.ui import theme
 
 
 @dataclass
@@ -60,8 +61,8 @@ class RosterStyle:
     status message is present.
 
     Background colors are configurable via :meth:`set_colors`; unset values
-    fall back to the previous behavior (white widget fill, palette ``Window``
-    group stripe).
+    fall back to the application palette (``Base`` for the list, ``Window`` for
+    the group stripe) so light and dark desktop themes are both readable.
     """
 
     GROUP_HEIGHT = 26
@@ -142,7 +143,7 @@ class RosterStyle:
         self._group_bg_color = self._parse(group_bg_color)
 
     def bg_color(self) -> QtGui.QColor | None:
-        """The roster background color (None = keep the previous white)."""
+        """The explicit roster background colour (None = use the palette)."""
         return self._bg_color
 
     def group_bg_color(self) -> QtGui.QColor | None:
@@ -151,7 +152,32 @@ class RosterStyle:
 
     def _palette(self) -> QtGui.QPalette:
         """Return the application default palette (available without a widget)."""
-        return QtWidgets.QApplication.palette()
+        return theme.app_palette()
+
+    def fill_color(self) -> QtGui.QColor:
+        """The roster background: the custom colour or palette ``Base``."""
+        return self._bg_color or self._palette().color(
+            QtGui.QPalette.ColorRole.Base)
+
+    def group_fill_color(self) -> QtGui.QColor:
+        """The group stripe: the custom colour or palette ``Window``."""
+        return self._group_bg_color or self._palette().color(
+            QtGui.QPalette.ColorRole.Window)
+
+    def _text_on(self, background: QtGui.QColor,
+                 role: QtGui.QPalette.ColorRole
+                 = QtGui.QPalette.ColorRole.Text,
+                 custom: bool = False) -> QtGui.QColor:
+        """Text colour for *background* (custom colours use contrast)."""
+        if custom:
+            return theme.contrasting_text(background)
+        return self._palette().color(role)
+
+    @staticmethod
+    def _secondary_on(background: QtGui.QColor,
+                      text: QtGui.QColor) -> QtGui.QColor:
+        """Dimmed secondary text that remains readable on *background*."""
+        return theme.muted_color(text, background)
 
     def user_height(self, item: UserItem) -> int:
         if item.status_message:
@@ -178,11 +204,13 @@ class RosterStyle:
         """Draw a group header stripe."""
         painter.save()
 
-        pal = self._palette()
-
         # Background stripe
-        bg = self._group_bg_color or pal.color(QtGui.QPalette.ColorRole.Window)
+        bg = self.group_fill_color()
         painter.fillRect(rect, bg)
+        text_color = self._text_on(
+            bg, QtGui.QPalette.ColorRole.WindowText,
+            custom=self._group_bg_color is not None)
+        secondary_color = self._secondary_on(bg, text_color)
         # Drop-target highlight (drag a contact onto this group).
         if is_selected:
             painter.fillRect(rect, QtGui.QColor(60, 120, 216, 70))
@@ -205,7 +233,7 @@ class RosterStyle:
                 QtCore.QPoint(arrow_x + 5, arrow_y),
                 QtCore.QPoint(arrow_x, arrow_y + 3),
             ]
-        painter.setBrush(pal.color(QtGui.QPalette.ColorRole.Text))
+        painter.setBrush(text_color)
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
         painter.drawPolygon(QtGui.QPolygon(points))
 
@@ -214,7 +242,7 @@ class RosterStyle:
         font.setBold(True)
         font.setPointSize(font.pointSize() - 1)
         painter.setFont(font)
-        painter.setPen(pal.color(QtGui.QPalette.ColorRole.Text))
+        painter.setPen(text_color)
         text_rect = QtCore.QRect(rect.left() + 16, rect.top(),
                                  rect.width() - 16, rect.height())
         painter.drawText(text_rect,
@@ -224,7 +252,7 @@ class RosterStyle:
         # Online/total count "(3/7)" on the right
         count_text = (str(item.total_count) if item.single_count
                       else f"({item.online_count}/{item.total_count})")
-        painter.setPen(pal.color(QtGui.QPalette.ColorRole.Mid))
+        painter.setPen(secondary_color)
         count_rect = QtCore.QRect(rect.right() - 60, rect.top(),
                                   56, rect.height())
         painter.drawText(count_rect,
@@ -243,12 +271,15 @@ class RosterStyle:
         pal = self._palette()
 
         # Selection highlight
+        row_bg = self.fill_color()
         if is_selected:
-            sel_bg = pal.color(QtGui.QPalette.ColorRole.Highlight)
-            painter.fillRect(rect, sel_bg)
+            row_bg = pal.color(QtGui.QPalette.ColorRole.Highlight)
+            painter.fillRect(rect, row_bg)
             text_color = pal.color(QtGui.QPalette.ColorRole.HighlightedText)
         else:
-            text_color = pal.color(QtGui.QPalette.ColorRole.Text)
+            text_color = self._text_on(
+                row_bg, custom=self._bg_color is not None)
+        secondary_color = self._secondary_on(row_bg, text_color)
 
         x = rect.left() + self.MARGIN_LEFT
         y = rect.top()
@@ -346,7 +377,7 @@ class RosterStyle:
         # edge of the status icon.
         first_line = (item.status_message.splitlines() or [""])[0]
         if first_line:
-            painter.setPen(pal.color(QtGui.QPalette.ColorRole.Mid))
+            painter.setPen(secondary_color)
             sm_font = painter.font()
             sm_font.setItalic(True)
             sm_font.setPointSize(max(sm_font.pointSize() - 1, 7))

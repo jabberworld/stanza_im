@@ -22,6 +22,7 @@ from stanza_im.i18n import tr
 from stanza_im.ui.resize_handle import VerticalResizeHandle
 from stanza_im.ui.history_media import HistoryMediaView
 from stanza_im.ui.media_meta import MediaMetadataService
+from stanza_im.ui import theme
 from stanza_im.include.media import media_item_tokens, media_items_from_entry
 
 logger = logging.getLogger(__name__)
@@ -725,8 +726,10 @@ class HistoryManagerDialog(QtWidgets.QDialog):
             body = body.replace("\r\n", "\n").replace("\r", "\n").replace(
                 "\n", "<br>")
             arrow = "→" if entry.get("direction") == "outgoing" else "←"
+            muted = theme.app_palette().color(
+                QtGui.QPalette.ColorRole.Mid).name()
             parts.append(
-                f'<p><span style="color:#808080">{escape_html(date)}'
+                f'<p><span style="color: {muted}">{escape_html(date)}'
                 f'{(" " + escape_html(time_s)) if time_s else ""}</span> '
                 f'<b>{escape_html(arrow)} {escape_html(sender)}:</b> '
                 f'{body}</p>')

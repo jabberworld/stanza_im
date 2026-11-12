@@ -14,6 +14,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from slixmpp.exceptions import IqTimeout
 
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 from stanza_im.core.client import JabberClient
 from stanza_im.core.storage import Config
 from stanza_im.include.constants import SERVERS_FILE, find_icon
@@ -437,6 +438,11 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
 
     def _set_status(self, text: str, color: str = "gray") -> None:
         self._status.setText(text)
+        if color == "red":
+            color = theme.error_color().name()
+        elif color == "gray":
+            color = theme.app_palette().color(
+                QtGui.QPalette.ColorRole.Mid).name()
         self._status.setStyleSheet(f"color: {color};")
 
     async def _close_client(self) -> None:

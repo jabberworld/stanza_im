@@ -70,6 +70,7 @@ stanza_im/
 │   ├── chat_widget.py  — Single chat tab (header + view + input)
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
+│   ├── theme.py        — palette/contrast helpers (light & dark Qt themes)
 │   ├── nick_colors.py  — Session MUC nickname → color allocation
 │   ├── network_quality.py — Signal-bar network-quality icon painter
 │   ├── font_zoom.py    — Ctrl+wheel font-size helper (input/roster/MUC list)
@@ -341,6 +342,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
 
 - Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
+- `config_version` (currently `1`) gates one-time migrations; version 1 replaces the old forced-light roster/chat colour defaults with the system palette.
 - Password stored **plaintext** (explicit user decision); file permissions 0600
 - The TOML writer serialises scalars with `json.dumps(..., ensure_ascii=False)`;
   since the file is UTF-8, non-BMP characters (emoji in `emoji.recent`) are
@@ -417,9 +419,9 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.tooltip_font` / `tooltip_font_size` | `""` / `0` | Tooltip text font (Preferences → Appearance → «Шрифты»): the shared rich tooltip (`ui/tooltip.set_font`) and, via a `QToolTip { … }` rule in `MainWindow._apply_widget_fonts`, the native Qt tooltips. Long content can request wrapping (`tooltip.show(..., wrap=True, max_width=…)`, used by the MUC subject) and every popup is clamped to the screen width. |
 | `appearance.service_browser_font` / `service_browser_font_size` | `""` / `0` | Service-browser tree font (Preferences → Appearance → «Шрифты»); icons scale proportionally (16→32/48 px). Ctrl+wheel over the tree persists the size immediately; action buttons keep their geometry. |
 | `appearance.prefs_nav_font` / `prefs_nav_font_size` | `""` / `0` | Preferences section-navigator font; icons scale proportionally (24→48/64 px) and the list width grows. Ctrl+wheel and the «Шрифты» rows apply it; the zoom is saved immediately. |
-| `appearance.roster_bg_color` | `#ffffff` | Roster background color (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.bg_color()`). |
-| `appearance.roster_group_bg_color` | `#ececec` | Roster group header stripe color, drawn by `RosterStyle.paint_group`. |
-| `appearance.chat_bg_color` | `#ffffff` | Chat background override injected as `body { background-color: … !important; background-image: none !important }` by `ChatThemeFactory.set_chat_bg_color` (clears skin tile images); applied to both 1:1 and MUC theme factories. |
+| `appearance.roster_bg_color` | `""` | Roster background: empty = system `QPalette.Base`, explicit hex = fixed user colour (`MainWindow._apply_roster_colors` → `RosterStyle.set_colors` + viewport palette; `RosterWidget.paintEvent` fills with `style.fill_color()`). |
+| `appearance.roster_group_bg_color` | `""` | Roster group header stripe: empty = system `QPalette.Window`, explicit hex = fixed user colour (`RosterStyle.group_fill_color`/`paint_group`). |
+| `appearance.chat_bg_color` | `""` | Chat background: empty = system `QPalette.Base`, explicit hex = fixed colour. `MainWindow._chat_theme_colors()` derives contrasting text/muted colours; `ChatThemeFactory.set_chat_bg_color` injects `body { background-color: … !important; background-image: none !important; color: … }` for both 1:1 and MUC factories. |
 | `appearance.muc_highlight_color` | `#e53935` | MUC mention highlight color used by `ChatThemeFactory.set_highlight_color` in the XEP-0393 highlight `<span>`. |
 | `appearance.colored_muc_nicks` | `true` | Colorful MUC nicknames: per-participant colors for message senders and the participant sidebar (`NickColorAllocator`, see §9.5). |
 | `appearance.roster_show_avatars` | `true` | Show/hide vCard avatars in roster rows. Applied live via `MainWindow._apply_roster_options` → `RosterStyle.set_options`; gated in `RosterStyle.paint_user`. |
@@ -1084,12 +1086,16 @@ pass by `MainWindow._apply_roster_font` — no relayout/rebuild. Ctrl+wheel over
 the roster changes only the size (`RosterWidget.wheelEvent` →
 `roster_font_zoom_requested`).
 
-The roster background and the group-header stripe colorized per
+The roster background and the group-header stripe are colorized per
 `appearance.roster_bg_color` / `appearance.roster_group_bg_color`
-(`RosterStyle.set_colors`): `paintEvent` first fills the whole item area with
-`bg_color()` (white default), and `paint_group` draws its stripe with
-`group_bg_color()`. `MainWindow._apply_roster_colors` also colors the roster
-widget's viewport palette so the area below the last contact matches.
+(`RosterStyle.set_colors`): an empty value uses the application palette
+(`QPalette.Base` for rows, `QPalette.Window` for group headers); an explicit
+hex value is fixed and gets a contrast-derived text colour. `paintEvent` first
+fills the whole item area with `fill_color()`, and `paint_group` draws its
+stripe with `group_fill_color()`. `MainWindow._apply_roster_colors` also colors
+the roster widget's viewport palette so the area below the last contact
+matches. `Config.load` migrates the old forced-light defaults (`config_version
+< 1`) to the empty/system values.
 
 Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
 `MainWindow` to the conferences group, `roster_group_conferences`, and to the

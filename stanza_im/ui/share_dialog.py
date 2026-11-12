@@ -22,7 +22,7 @@ class ShareDialog(QtWidgets.QDialog):
 
         preview = QtWidgets.QLabel(self._shorten(content), self)
         preview.setWordWrap(True)
-        preview.setStyleSheet("color: gray;")
+        preview.setStyleSheet("color: palette(mid);")
         layout.addWidget(preview)
 
         self._search = QtWidgets.QLineEdit(self)

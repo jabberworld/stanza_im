@@ -9,6 +9,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from stanza_im.include.constants import (APP_ICON_SVG, APP_NAME, PROJECT_ROOT,
                                          VERSION_DISPLAY)
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 
 
 class AboutDialog(QtWidgets.QDialog):
@@ -70,7 +71,8 @@ class AboutDialog(QtWidgets.QDialog):
             if label_key == "about_component_omemo":
                 label.setToolTip(availability.detail())
                 if not availability.AVAILABLE:
-                    label.setStyleSheet("color: #c0392b;")
+                    label.setStyleSheet(
+                        f"color: {theme.error_color().name()};")
             form.addRow(tr(label_key) + ":", label)
         return page
 

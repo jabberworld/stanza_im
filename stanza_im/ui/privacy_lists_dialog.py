@@ -12,6 +12,7 @@ from PyQt6 import QtGui, QtWidgets
 
 from stanza_im.core import privacy
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.privacy_rule_dialog import PrivacyRuleDialog, describe_item
 
@@ -143,7 +144,8 @@ class PrivacyListsDialog(QtWidgets.QDialog):
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self._status.setText(text)
-        self._status.setStyleSheet("color: #c0392b;" if error else "")
+        self._status.setStyleSheet(
+            f"color: {theme.error_color().name()};" if error else "")
 
     # ── data ────────────────────────────────────────────────────
 

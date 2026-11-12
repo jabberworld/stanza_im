@@ -8,6 +8,7 @@ from __future__ import annotations
 from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 
 
 class CertificateErrorDialog(QtWidgets.QDialog):
@@ -31,7 +32,8 @@ class CertificateErrorDialog(QtWidgets.QDialog):
 
         self._warning = QtWidgets.QLabel(tr("cert_error_warning"))
         self._warning.setWordWrap(True)
-        self._warning.setStyleSheet("color: #b00020;")
+        self._warning.setStyleSheet(
+            f"color: {theme.error_color().name()};")
         layout.addWidget(self._warning)
 
         self._details = QtWidgets.QPlainTextEdit(self)

@@ -24,7 +24,7 @@ class VerticalResizeHandle(QtWidgets.QFrame):
         super().__init__(parent)
         self.setFixedHeight(6)
         self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
-        self.setStyleSheet("background: rgba(0, 0, 0, 0.05);")
+        self.setStyleSheet("background: palette(mid);")
         self._get_height = get_height or (lambda: 60)
         self._invert = bool(invert)
         self._press_y: float | None = None

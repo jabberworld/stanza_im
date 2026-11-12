@@ -19,6 +19,7 @@ import os
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 from stanza_im.include.constants import find_icon_sized
 from stanza_im.ui.dialogs import show_modeless
 from stanza_im.ui.font_zoom import clamp_font_size, wheel_font_size
@@ -175,7 +176,8 @@ class ServiceBrowserDialog(QtWidgets.QDialog):
         bottom.addWidget(self._auto)
         bottom.addStretch()
         self._status = QtWidgets.QLabel()
-        self._status.setStyleSheet("color: #b00020;")
+        self._status.setStyleSheet(
+            f"color: {theme.error_color().name()};")
         bottom.addWidget(self._status)
         close = QtWidgets.QPushButton(tr("dialog_close")); close.clicked.connect(self.reject)
         bottom.addWidget(close)

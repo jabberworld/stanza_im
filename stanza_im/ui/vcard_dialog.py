@@ -124,7 +124,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         self._title_label = title
         subtitle = QtWidgets.QLabel(card.get("jid") or self._jid)
-        subtitle.setStyleSheet("color: gray;")
+        subtitle.setStyleSheet("color: palette(mid);")
         self._subtitle_label = subtitle
         copy_btn = QtWidgets.QToolButton()
         copy_btn.setIcon(QtGui.QIcon(find_icon("copy.svg")))
@@ -331,7 +331,7 @@ class VCardEditDialog(QtWidgets.QDialog):
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         self._title_label = title
         subtitle = QtWidgets.QLabel(card.get("jid") or "")
-        subtitle.setStyleSheet("color: gray;")
+        subtitle.setStyleSheet("color: palette(mid);")
         pic_col.addWidget(title)
         pic_col.addWidget(subtitle)
         pic_col.addSpacing(8)

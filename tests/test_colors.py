@@ -36,12 +36,33 @@ def check(name, cond):
 
 # ── Config defaults ─────────────────────────────────────────────────
 cfg = Config()
-check("appearance.roster_bg_color default",
-      getattr(cfg.appearance, "roster_bg_color", "") == "#ffffff")
-check("appearance.roster_group_bg_color default",
-      getattr(cfg.appearance, "roster_group_bg_color", "") == "#ececec")
-check("appearance.chat_bg_color default",
-      getattr(cfg.appearance, "chat_bg_color", "") == "#ffffff")
+check("appearance.roster_bg_color default is system",
+      getattr(cfg.appearance, "roster_bg_color", "") == "")
+check("appearance.roster_group_bg_color default is system",
+      getattr(cfg.appearance, "roster_group_bg_color", "") == "")
+check("appearance.chat_bg_color default is system",
+      getattr(cfg.appearance, "chat_bg_color", "") == "")
+check("config version default", cfg.config_version == 1)
+legacy_colors = {
+    "roster_bg_color": "#ffffff",
+    "roster_group_bg_color": "#ececec",
+    "chat_bg_color": "#ffffff",
+}
+Config._migrate_legacy_colors(legacy_colors)
+check("legacy light colors migrate to system",
+      legacy_colors == {"roster_bg_color": "",
+                        "roster_group_bg_color": "",
+                        "chat_bg_color": ""})
+explicit_colors = {
+    "roster_bg_color": "#123456",
+    "roster_group_bg_color": "#654321",
+    "chat_bg_color": "#abcdef",
+}
+Config._migrate_legacy_colors(explicit_colors)
+check("explicit colors survive migration",
+      explicit_colors == {"roster_bg_color": "#123456",
+                          "roster_group_bg_color": "#654321",
+                          "chat_bg_color": "#abcdef"})
 check("appearance.muc_highlight_color default",
       getattr(cfg.appearance, "muc_highlight_color", "") == "#e53935")
 check("appearance.colored_muc_nicks default",

@@ -15,6 +15,7 @@ from stanza_im.include.utils import escape_html, restore_url_tokens
 from stanza_im.include import hats as hats_mod
 from stanza_im.include import media as media_mod
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 
 _logger = logging.getLogger(__name__)
 
@@ -334,6 +335,8 @@ class ChatThemeFactory:
         self._nick_font_family = ""
         self._nick_font_size_pt = 0
         self._chat_bg_color = ""
+        self._chat_text_color = ""
+        self._chat_muted_color = ""
         self._highlight_color = _HIGHLIGHT_COLOR
         self._load_templates()
 
@@ -451,18 +454,34 @@ class ChatThemeFactory:
         """Return the current (family, size-in-points) nickname override."""
         return self._nick_font_family, self._nick_font_size_pt
 
-    def set_chat_bg_color(self, color: str = "") -> None:
+    def set_chat_bg_color(self, color: str = "", text_color: str = "",
+                          muted_color: str = "") -> None:
         """Set the chat background override (hex ``#rrggbb``).
 
         Empty/invalid values keep the skin's own body background.  The color
         is injected as a ``body`` CSS rule that also clears the skin's
         ``background-image`` so the chosen shade actually shows (e.g. the
         ``minimal-mod`` tiled image would otherwise still paint on top).
+
+        *text_color*/*muted_color* keep the chat readable when the background
+        comes from a dark system palette; when omitted they are derived from
+        the background.
         """
         if color and QtGui.QColor(str(color)).isValid():
-            self._chat_bg_color = QtGui.QColor(str(color)).name()
+            background = QtGui.QColor(str(color))
+            self._chat_bg_color = background.name()
+            text = QtGui.QColor(str(text_color or ""))
+            if not text.isValid():
+                text = theme.contrasting_text(background)
+            self._chat_text_color = text.name()
+            muted = QtGui.QColor(str(muted_color or ""))
+            if not muted.isValid():
+                muted = theme.muted_color(text, background)
+            self._chat_muted_color = muted.name()
         else:
             self._chat_bg_color = ""
+            self._chat_text_color = ""
+            self._chat_muted_color = ""
 
     def set_highlight_color(self, color: str = "") -> None:
         """Set the MUC mention highlight color (hex ``#rrggbb``)."""
@@ -491,8 +510,32 @@ class ChatThemeFactory:
             css += (f"\n.sender {{ font-family: '{safe_family}' !important; "
                     f"font-size: {size}pt !important; }}")
         if self._chat_bg_color:
-            css += (f"\nbody {{ background-color: {self._chat_bg_color} "
-                    f"!important; background-image: none !important; }}")
+            text = self._chat_text_color or "#000000"
+            muted = self._chat_muted_color or text
+            css += (
+                f"\nbody {{ background-color: {self._chat_bg_color} "
+                f"!important; background-image: none !important; "
+                f"color: {text} !important; }}"
+                f"\n.sender, .fromstatus, .next_label, .message, "
+                f".context_message, .stanza-file-meta, "
+                f".message_actions button, "
+                f".message_actions a.action-reply, "
+                f".message_actions a.action-delete {{ color: {text}; }}"
+                f"\n.time_initial, .typing-indicator, .stanza-action, "
+                f".stanza-action .time, .stanza-reply, "
+                f".stanza-reply .reply-quote, .stanza-unread, .delivery, "
+                f".stanza-edited, .stanza-retracted, "
+                f".stanza-retracted-text {{ color: {muted} !important; }}"
+                f"\n.container, .container_next {{ border-top-color: "
+                f"{muted} !important; }}"
+                f"\n.stanza-reply {{ border-left-color: {muted} !important; "
+                f"background: rgba(127,127,127,.12) !important; }}"
+                f"\n.message_actions {{ background: "
+                f"rgba(127,127,127,.18) !important; }}"
+                f"\n.message_actions button:hover, "
+                f".message_actions a.action-reply:hover, "
+                f".message_actions a.action-delete:hover {{ background: "
+                f"rgba(127,127,127,.28) !important; }}")
         family = _emoji_font_family()
         if family:
             safe = family.replace("\\", "\\\\").replace("'", "\\'")

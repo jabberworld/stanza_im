@@ -54,7 +54,7 @@ class PepManagerDialog(QtWidgets.QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._status = QtWidgets.QLabel(tr("pep_list_nodes"))
-        self._status.setStyleSheet("color: gray;")
+        self._status.setStyleSheet("color: palette(mid);")
         layout.addWidget(self._status)
 
         self._list = QtWidgets.QTreeWidget()

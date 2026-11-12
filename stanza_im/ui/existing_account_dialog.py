@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6 import QtWidgets
 
 from stanza_im.i18n import tr
+from stanza_im.ui import theme
 from stanza_im.ui.jid_edit import JidLineEdit
 from stanza_im.core.profiles import Profile
 
@@ -85,7 +86,8 @@ class ExistingAccountDialog(QtWidgets.QDialog):
         layout.addWidget(group)
 
         self._status = QtWidgets.QLabel("")
-        self._status.setStyleSheet("color: red;")
+        self._status.setStyleSheet(
+            f"color: {theme.error_color().name()};")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
 

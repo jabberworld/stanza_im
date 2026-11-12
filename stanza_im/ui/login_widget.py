@@ -10,6 +10,7 @@ from stanza_im.ui.jid_edit import JidLineEdit
 from stanza_im.core.storage import Config
 from stanza_im.core import profiles
 from stanza_im.include.constants import find_icon
+from stanza_im.ui import theme
 
 
 class LoginWidget(QtWidgets.QWidget):
@@ -216,11 +217,17 @@ class LoginWidget(QtWidgets.QWidget):
 
     def set_error(self, message: str):
         self._info_label.setText(message)
-        self._info_label.setStyleSheet("color: red;")
+        self._info_label.setStyleSheet(
+            f"color: {theme.error_color().name()};")
         self._connect_btn.setEnabled(True)
 
     def set_status_text(self, message: str, color: str = "gray"):
         self._info_label.setText(message)
+        if color == "red":
+            color = theme.error_color().name()
+        elif color == "gray":
+            color = theme.app_palette().color(
+                QtGui.QPalette.ColorRole.Mid).name()
         self._info_label.setStyleSheet(f"color: {color};")
 
     def prefill(self, jid: str, password: str = "") -> None:
