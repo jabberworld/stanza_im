@@ -1078,7 +1078,14 @@ queries `client.get_last_activity(bare)` (raw `jabber:iq:last`) and merges
 `last_seen` (absolute `YYYY-MM-DD HH:MM` of `now − seconds`) and `last_status`
 (the `<query>` text) into the dialog.
 
-Dynamic height: 32px without status message, 52px with.
+Dynamic height: at least 32px without status message, at least 52px with;
+the actual row height grows with the roster font metrics. The name/status are
+drawn by baseline using the visual letter body (`capHeight` when the string
+contains an upper-case letter or digit, else `xHeight`): without a status the
+body centre is the status-icon centre; with a status the name body top is the
+icon top and the status body bottom is the icon bottom. Descenders/ascenders
+therefore stay outside the alignment; `RosterWidget.setFont` recalculates the
+font-dependent heights.
 
 The roster typeface is taken live from `appearance.roster_font` /
 `roster_font_size` (empty/0 = Qt default) and applied to the same QPainter

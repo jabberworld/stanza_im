@@ -4,6 +4,7 @@ This is the pluggable rendering strategy for the roster widget.
 """
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -179,10 +180,75 @@ class RosterStyle:
         """Dimmed secondary text that remains readable on *background*."""
         return theme.muted_color(text, background)
 
-    def user_height(self, item: UserItem) -> int:
-        if item.status_message:
-            return self.USER_HEIGHT_TALL
-        return self.USER_HEIGHT_SHORT
+    @staticmethod
+    def _status_font(base: QtGui.QFont) -> QtGui.QFont:
+        """The smaller italic font used for the status message."""
+        font = QtGui.QFont(base)
+        font.setItalic(True)
+        font.setPointSize(max(font.pointSize() - 1, 7))
+        return font
+
+    @staticmethod
+    def _body_height(metrics: QtGui.QFontMetricsF,
+                     text: str) -> float:
+        """Visual letter body height: no ascenders or descenders.
+
+        Mixed/upper-case strings use the cap height (``Bob``), while a fully
+        lower-case string uses the x-height (``bob``).  This keeps the
+        descender of ``р``/``g`` and the ascender of ``b`` out of the
+        vertical alignment.
+        """
+        text = str(text or "")
+        if any(char.isupper() or char.isdigit() for char in text):
+            height = metrics.capHeight()
+        else:
+            height = metrics.xHeight()
+        if height <= 0:
+            height = metrics.height() * 0.7
+        return max(1.0, height)
+
+    @classmethod
+    def name_baseline(cls, icon_top: float, icon_height: float,
+                      metrics: QtGui.QFontMetricsF, text: str,
+                      has_status: bool) -> float:
+        """Baseline for the contact name relative to the status icon."""
+        body = cls._body_height(metrics, text)
+        if has_status:
+            return float(icon_top) + body
+        return float(icon_top) + (float(icon_height) + body) / 2.0
+
+    @staticmethod
+    def status_baseline(icon_top: float, icon_height: float) -> float:
+        """Baseline for the status message (its body bottom = icon bottom)."""
+        return float(icon_top) + float(icon_height)
+
+    def user_height(self, item: UserItem,
+                    font: QtGui.QFont | None = None) -> int:
+        """Row height for *item*, growing with the configured roster font."""
+        base = font or QtWidgets.QApplication.font()
+        metrics = QtGui.QFontMetricsF(base)
+        name = item.name or item.jid
+        body = self._body_height(metrics, name)
+        first_line = (item.status_message.splitlines() or [""])[0]
+        if first_line:
+            status = QtGui.QFontMetricsF(self._status_font(base))
+            # The icon is vertically centred; include room for the name's
+            # full ascender/descender and the status line's ascender/descender.
+            need = max(
+                24.0,
+                24 + 2 * (metrics.ascent() - body),
+                2 * (body + metrics.descent()) - 24,
+                2 * status.ascent() - 24,
+                24 + 2 * status.descent(),
+            ) + 2
+            return max(self.USER_HEIGHT_TALL, int(math.ceil(need)))
+        need = max(
+            24.0,
+            2 * metrics.ascent() - body,
+            body + 2 * metrics.descent(),
+            metrics.height() + 2,
+        )
+        return max(self.USER_HEIGHT_SHORT, int(math.ceil(need)))
 
     @staticmethod
     def badge_text(item: UserItem) -> str:
@@ -196,8 +262,13 @@ class RosterStyle:
             return "%d / %d" % (item.unread_count, mentions)
         return str(item.unread_count)
 
-    def group_height(self) -> int:
-        return self.GROUP_HEIGHT
+    def group_height(self, font: QtGui.QFont | None = None) -> int:
+        base = font or QtWidgets.QApplication.font()
+        group_font = QtGui.QFont(base)
+        group_font.setBold(True)
+        group_font.setPointSize(group_font.pointSize() - 1)
+        metrics = QtGui.QFontMetricsF(group_font)
+        return max(self.GROUP_HEIGHT, int(math.ceil(metrics.height() + 6)))
 
     def paint_group(self, painter: QtGui.QPainter, item: GroupItem,
                     rect: QtCore.QRect, is_selected: bool) -> None:
@@ -359,39 +430,39 @@ class RosterStyle:
             # would be ignored for contacts with unread messages).
             painter.setFont(base_font)
 
-        name_rect = QtCore.QRect(name_x, y + 2, avail_right - name_x, 16)
-        painter.setPen(text_color)
         display_name = item.name if item.name else item.jid
-        name_font = painter.font()
+        first_line = (item.status_message.splitlines() or [""])[0]
+        name_font = QtGui.QFont(base_font)
         if getattr(item, "blocked", False):
             name_font.setStrikeOut(True)
-            painter.setFont(name_font)
-        painter.drawText(name_rect,
-                         QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
-                         display_name)
-        if name_font.strikeOut():
-            name_font.setStrikeOut(False)
-            painter.setFont(name_font)
+        painter.setFont(name_font)
+        name_metrics = QtGui.QFontMetricsF(name_font)
+        baseline = self.name_baseline(
+            icon_y, self.STATUS_ICON_DRAW, name_metrics, display_name,
+            bool(first_line))
+        name_clip = QtCore.QRectF(
+            name_x, rect.top(), max(0, avail_right - name_x),
+            rect.height())
+        painter.save()
+        painter.setClipRect(name_clip)
+        painter.setPen(text_color)
+        painter.drawText(QtCore.QPointF(name_x, baseline), display_name)
+        painter.restore()
 
-        # Status message (if present): first line only, aligned to the bottom
-        # edge of the status icon.
-        first_line = (item.status_message.splitlines() or [""])[0]
+        # Status message (if present): first line only.  Its body bottom sits
+        # on the icon bottom; descenders extend below it intentionally.
         if first_line:
             painter.setPen(secondary_color)
-            sm_font = painter.font()
-            sm_font.setItalic(True)
-            sm_font.setPointSize(max(sm_font.pointSize() - 1, 7))
+            sm_font = self._status_font(base_font)
             painter.setFont(sm_font)
-            fm = painter.fontMetrics()
-            sm_top = icon_y + self.STATUS_ICON_DRAW - fm.height()
-            sm_rect = QtCore.QRect(
-                name_x, sm_top,
-                min(self.STATUS_MSG_MAX_WIDTH, avail_right - name_x),
-                fm.height())
+            sm_baseline = self.status_baseline(
+                icon_y, self.STATUS_ICON_DRAW)
+            sm_width = min(self.STATUS_MSG_MAX_WIDTH, avail_right - name_x)
             clipped = first_line[:40] + ("…" if len(first_line) > 40 else "")
-            painter.drawText(sm_rect,
-                             QtCore.Qt.AlignmentFlag.AlignTop
-                             | QtCore.Qt.AlignmentFlag.AlignLeft,
-                             clipped)
+            painter.save()
+            painter.setClipRect(QtCore.QRectF(
+                name_x, rect.top(), max(0, sm_width), rect.height()))
+            painter.drawText(QtCore.QPointF(name_x, sm_baseline), clipped)
+            painter.restore()
 
         painter.restore()

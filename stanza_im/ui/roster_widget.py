@@ -55,6 +55,13 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self.setAcceptDrops(True)
         self._tooltip_provider = None
 
+    def setFont(self, font: QtGui.QFont) -> None:
+        """Apply a new roster font and recompute font-dependent row heights."""
+        super().setFont(font)
+        if getattr(self, "_style", None) is not None:
+            self._recalc_heights()
+            self.update()
+
     # Drag-and-drop: move a contact onto a target group (header or row).
     _DRAG_MIME = "application/x-stanza-roster-jid"
 
@@ -301,15 +308,17 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         h = 0
         for kind, item in self._visible_items():
             if kind == "group":
-                h += self._style.group_height()
+                h += self._style.group_height(self.font())
             else:
-                h += self._style.user_height(item)
+                h += self._style.user_height(item, self.font())
         return h
 
     def _item_rect(self, index: int) -> QtCore.QRect:
         y = 0
         for i, (kind, item) in enumerate(self._visible_items()):
-            h = self._style.group_height() if kind == "group" else self._style.user_height(item)
+            h = (self._style.group_height(self.font())
+                 if kind == "group"
+                 else self._style.user_height(item, self.font()))
             if i == index:
                 return QtCore.QRect(0, y, self.width(), h)
             y += h
@@ -318,7 +327,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
     def _item_at(self, y: int) -> tuple[str, GroupItem | UserItem] | None:
         cy = 0
         for kind, item in self._visible_items():
-            h = self._style.group_height() if kind == "group" else self._style.user_height(item)
+            h = (self._style.group_height(self.font())
+                 if kind == "group"
+                 else self._style.user_height(item, self.font()))
             if cy <= y < cy + h:
                 return (kind, item)
             cy += h
@@ -368,14 +379,14 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         cy = 0
         for kind, item in self._visible_items():
             if kind == "group":
-                h = self._style.group_height()
+                h = self._style.group_height(self.font())
                 rect = QtCore.QRect(0, cy, self.width(), h)
                 if rect.intersects(dirty):
                     self._style.paint_group(
                         painter, item, rect, item.name == self._drop_group)
                 cy += h
             else:
-                h = self._style.user_height(item)
+                h = self._style.user_height(item, self.font())
                 rect = QtCore.QRect(0, cy, self.width(), h)
                 if rect.intersects(dirty):
                     is_sel = (item.jid == self._selected_jid)

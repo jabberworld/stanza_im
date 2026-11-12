@@ -1189,6 +1189,17 @@ is togglable from Preferences → Appearance → «Ростер» via
 `roster_show_clients` (default all `true`): `MainWindow._apply_roster_options` →
 `RosterStyle.set_options` gates rendering live, no relayout.
 
+**Roster row typography**: the name/status are drawn by baseline, using the
+visual body of the letters (`capHeight` for strings containing upper-case
+letters/digits, `xHeight` for fully lower-case text) instead of the full line
+box, so descenders (`р`, `g`) and ascenders (`b`) do not shift the alignment.
+Without a status message the body centre is the status-icon centre; with a
+status message the name body top meets the icon top and the status baseline
+meets the icon bottom. Row/group heights are font-aware (`RosterStyle.
+user_height(item, font)`/`group_height(font)`, keeping the 32/52 px minimums)
+and `RosterWidget.setFont` recalculates them, so Ctrl+wheel scaling grows the
+rows without clipping. [`tests/test_roster_alignment.py`]
+
 **Client icon (XEP-0115)**: each presence's `<c node=…/>` is captured by
 `_on_presence` (`_caps_node`) into `contact.resources[res]["caps_node"]`
 (a MUC occupant presence is skipped there — it would otherwise give the room a
