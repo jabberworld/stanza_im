@@ -68,6 +68,7 @@ NS_DISCO_ITEMS = "http://jabber.org/protocol/disco#items"
 NS_DATA = "jabber:x:data"
 NS_CORRECT = "urn:xmpp:message-correct:0"  # XEP-0308 Last Message Correction
 NS_REACTIONS = "urn:xmpp:reactions:0"      # XEP-0444 Message Reactions
+NS_QUICK_RESPONSE = "urn:xmpp:tmp:quick-response"  # XEP-0439 Quick Response
 NS_OCCUPANT_ID = "urn:xmpp:occupant-id:0"  # XEP-0421 Occupant IDs
 NS_UPLOAD = "urn:xmpp:http:upload:0"      # XEP-0363 HTTP File Upload
 NS_MUC_INVITE = "jabber:x:conference"     # XEP-0249 Direct MUC Invitation
@@ -1002,6 +1003,58 @@ def _reactions(msg) -> tuple[str, list[str]] | None:
               for child in element.findall("{%s}reaction" % NS_REACTIONS)]
     emojis = [emoji for emoji in emojis if emoji]
     return target_id, emojis
+
+
+def _quick_response(msg) -> dict | None:
+    """Parse a XEP-0439 Quick Response payload from *msg*.
+
+    Returns ``{"responses": [...], "actions": [...]}`` with response entries
+    ``value``/``label``/``lang`` and action entries ``id``/``label``/``lang``;
+    duplicate values/ids (the spec forbids them) are dropped.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return None
+    prefix = "{%s}" % NS_QUICK_RESPONSE
+    xml_lang = "{http://www.w3.org/XML/1998/namespace}lang"
+    responses: list[dict] = []
+    actions: list[dict] = []
+    seen_values: set[str] = set()
+    seen_labels: set[str] = set()
+    seen_actions: set[str] = set()
+    for child in list(xml):
+        tag = str(child.tag)
+        if not tag.startswith(prefix):
+            continue
+        kind = tag[len(prefix):]
+        lang = str(child.get(xml_lang) or "")
+        if kind == "response":
+            value = str(child.get("value") or "").strip()
+            if not value or value in seen_values:
+                continue
+            seen_values.add(value)
+            raw_label = str(child.get("label") or "").strip()
+            label = raw_label or value
+            if raw_label:
+                if raw_label in seen_labels:
+                    continue
+                seen_labels.add(raw_label)
+            responses.append({"value": value, "label": label, "lang": lang})
+        elif kind == "action":
+            action_id = str(child.get("id") or "").strip()
+            if not action_id or action_id in seen_actions:
+                continue
+            seen_actions.add(action_id)
+            raw_label = str(child.get("label") or "").strip()
+            label = raw_label or action_id
+            if raw_label:
+                if raw_label in seen_labels:
+                    continue
+                seen_labels.add(raw_label)
+            actions.append({"id": action_id, "label": label, "lang": lang})
+    if not responses and not actions:
+        return None
+    return {"responses": responses, "actions": actions}
 
 
 def _upload_max_file_size(xml) -> int:
@@ -2496,7 +2549,7 @@ class JabberClient:
                      reply_id: str = "", reply_ref_sender: str = "",
                      reply_ref_body: str = "",
                      replace_id: str = "",
-                     media: dict | None = None) -> str:
+                     media: dict | None = None, lang: str = "") -> str:
         """Send a message.
 
         With *reply_to* + *reply_id* a XEP-0461 ``<reply/>`` is attached as
@@ -2512,7 +2565,7 @@ class JabberClient:
         jid = jid.strip()
         msg, message_id = self._compose_message(
             jid, body, mtype, mhtml, reply_to, reply_id, reply_ref_sender,
-            reply_ref_body, replace_id, media)
+            reply_ref_body, replace_id, media, lang=lang)
         logger.debug("Sending %s message to %s (reply_id=%s): %r",
                      mtype, jid, reply_id, str(msg["body"])[:200])
         msg.send()
@@ -2522,7 +2575,7 @@ class JabberClient:
                          mhtml: str | None = None, reply_to: str = "",
                          reply_id: str = "", reply_ref_sender: str = "",
                          reply_ref_body: str = "", replace_id: str = "",
-                         media: dict | None = None):
+                         media: dict | None = None, lang: str = ""):
         """Build an outgoing ``<message>`` stanza (not sent yet)."""
         msg = self.xmpp.Message()
         msg["to"] = jid
@@ -2534,6 +2587,13 @@ class JabberClient:
             quote = compose_reply_body(prefix)
             body = quote + body
         msg["body"] = body
+        lang = str(lang or "").strip()
+        if lang:
+            for child in msg.xml:
+                if str(child.tag).rsplit("}", 1)[-1] != "body":
+                    continue
+                child.set("{http://www.w3.org/XML/1998/namespace}lang", lang)
+                break
         message_id = uuid.uuid4().hex
         msg["id"] = message_id
         # XEP-0359: a stable origin-id lets the recipient (and other clients)
@@ -2562,7 +2622,8 @@ class JabberClient:
                                  reply_ref_sender: str = "",
                                  reply_ref_body: str = "",
                                  replace_id: str = "",
-                                 media: dict | None = None) -> str:
+                                 media: dict | None = None,
+                                 lang: str = "") -> str:
         """Encrypt and send a message with OMEMO (XEP-0384).
 
         *recipients* is the set of bare JIDs to encrypt for (defaults to *jid*,
@@ -2575,7 +2636,7 @@ class JabberClient:
         jid = jid.strip()
         msg, message_id = self._compose_message(
             jid, body, mtype, mhtml, reply_to, reply_id, reply_ref_sender,
-            reply_ref_body, replace_id, media)
+            reply_ref_body, replace_id, media, lang=lang)
         targets = set(recipients) if recipients else {jid}
         encrypted, errors = await self.omemo.encrypt(
             msg, targets, identifier=jid)
@@ -4690,13 +4751,33 @@ class JabberClient:
     def send_muc_message(self, room: str, body: str, reply_to: str = "",
                          reply_id: str = "", reply_ref_sender: str = "",
                          reply_ref_body: str = "", replace_id: str = "",
-                         media: dict | None = None) -> None:
+                         media: dict | None = None, lang: str = "") -> None:
         """Send a message to a MUC room, optionally replying or correcting."""
         self.send_message(room, body, mtype="groupchat",
                           reply_to=reply_to, reply_id=reply_id,
                           reply_ref_sender=reply_ref_sender,
                           reply_ref_body=reply_ref_body,
-                          replace_id=replace_id, media=media)
+                          replace_id=replace_id, media=media, lang=lang)
+
+    def send_quick_action(self, jid: str, action_id: str,
+                          mtype: str = "chat") -> str:
+        """Send a XEP-0439 ``<action-selected/>`` (a bodyless message)."""
+        if not isinstance(jid, str) or not jid.strip():
+            return ""
+        action_id = str(action_id or "").strip()
+        if not action_id:
+            return ""
+        msg = self.xmpp.Message()
+        msg["to"] = jid.strip()
+        msg["type"] = mtype
+        message_id = uuid.uuid4().hex
+        msg["id"] = message_id
+        ET.SubElement(msg.xml, "{%s}origin-id" % NS_SID).set(
+            "id", message_id)
+        ET.SubElement(msg.xml, "{%s}action-selected" % NS_QUICK_RESPONSE).set(
+            "id", action_id)
+        msg.send()
+        return message_id
 
     def edit_message(self, jid: str, body: str, replace_id: str,
                      mtype: str = "chat") -> str:
@@ -6519,13 +6600,14 @@ class JabberClient:
         unstyled, ts, reply_to, reply_id, stable_id = self._message_fields(msg)
         media = message_media(msg)
         markup = message_markup(msg)
+        quick = _quick_response(msg)
         server_sid = _stanza_id(msg, self.jid_str)
         if server_sid:
             self._mds_track(frm.split("/")[0], msg, server_sid)
         self.emit("message_received", frm, body, ts, unstyled, stable_id,
                   frm, reply_to, reply_id, carbon, media=media,
                   encrypted=self._omemo_flag(msg), markup=markup,
-                  stanza_id=server_sid)
+                  stanza_id=server_sid, quick_response=quick)
 
     def _emit_1to1_sent(self, msg) -> None:
         """Emit a decrypted XEP-0280 ``sent`` carbon as our own outgoing row."""
@@ -6614,6 +6696,7 @@ class JabberClient:
                 self._message_fields(msg)
             media = message_media(msg)
             markup = message_markup(msg)
+            quick = _quick_response(msg)
             server_sid = _stanza_id(msg, self.jid_str)
             replace_ref = _replace_reference(msg)
             room, separator, nick = frm.partition("/")
@@ -6641,7 +6724,7 @@ class JabberClient:
                           unstyled, stable_id, frm, reply_to, reply_id,
                           media=media, encrypted=self._omemo_flag(msg),
                           markup=markup, urgency=_shim_urgency(msg),
-                          stanza_id=server_sid)
+                          stanza_id=server_sid, quick_response=quick)
                 return
             if server_sid:
                 self._mds_track(frm.split("/")[0], msg, server_sid)
@@ -6656,7 +6739,8 @@ class JabberClient:
             self.emit("message_received", frm, body, ts, unstyled,
                       stable_id, frm, reply_to, reply_id, media=media,
                       encrypted=self._omemo_flag(msg), markup=markup,
-                      urgency=_shim_urgency(msg), stanza_id=server_sid)
+                      urgency=_shim_urgency(msg), stanza_id=server_sid,
+                      quick_response=quick)
 
     @staticmethod
     def _message_fields(msg):
@@ -6715,7 +6799,8 @@ class JabberClient:
                 return
             logger.debug("Incoming correction ignored (edits disabled)")
         media = message_media(inner)
-        if not body and not media:
+        quick = _quick_response(inner)
+        if not body and not media and quick is None:
             # Receipts, chat markers and other bodyless carbon copies are not
             # chat messages; rendering them would create empty "Me" rows.
             return
@@ -6728,7 +6813,7 @@ class JabberClient:
         self.emit("message_received", frm, body, ts, unstyled,
                   stable_id, frm, reply_to, reply_id, True, media=media,
                   markup=markup, urgency=_shim_urgency(inner),
-                  stanza_id=server_sid)
+                  stanza_id=server_sid, quick_response=quick)
 
     def _on_carbon_sent(self, msg) -> None:
         """A 1:1 message sent from another of our resources (XEP-0280)."""
@@ -6860,6 +6945,7 @@ class JabberClient:
             self._mds_track(room, msg, server_sid or stable_id)
         media = message_media(msg)
         markup = message_markup(msg)
+        quick = _quick_response(msg)
         replace_ref = _replace_reference(msg)
         if replace_ref:
             if self.allow_incoming_edits:
@@ -6872,7 +6958,8 @@ class JabberClient:
         self.emit("groupchat_message", room, nick, body, ts, archived,
                   archive_id, unstyled, stable_id, frm, reply_to, reply_id,
                   media=media, encrypted=self._omemo_flag(msg), markup=markup,
-                  urgency=_shim_urgency(msg), stanza_id=server_sid)
+                  urgency=_shim_urgency(msg), stanza_id=server_sid,
+                  quick_response=quick)
 
     def _room_pm_occupant(self, frm: str, msg) -> tuple[str, str] | None:
         """Occupant ``(room, nick)`` of a room PM relayed from the real JID.
@@ -8494,7 +8581,8 @@ class JabberClient:
                 mod_info = _moderation_info(msg)
                 body = str(_stanza_value(msg, "body") or "")
                 media = message_media(msg)
-                if not body and not media and not tomb_id:
+                quick = _quick_response(msg)
+                if not body and not media and not tomb_id and quick is None:
                     skipped += 1
                     skip_reasons["empty_body"] = skip_reasons.get("empty_body", 0) + 1
                     continue
@@ -8559,6 +8647,7 @@ class JabberClient:
                     "replace_id": _replace_reference(msg),
                     "markup": message_markup(msg),
                     "media": media,
+                    "quick_response": quick,
                     "encrypted": False,
                     "encryption": "",
                     # Kept only until the async MAM pass decrypts the row; it is
@@ -8615,6 +8704,9 @@ class JabberClient:
             row["replace_id"] = _replace_reference(decrypted)
             row["markup"] = message_markup(decrypted)
             row["media"] = message_media(decrypted)
+            decrypted_quick = _quick_response(decrypted)
+            if decrypted_quick is not None:
+                row["quick_response"] = decrypted_quick
             tomb_id, _tomb_stamp = _retracted_tombstone(decrypted)
             if tomb_id:
                 info = _moderation_info(decrypted)

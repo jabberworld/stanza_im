@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS messages (
     retract_by TEXT,
     media TEXT,
     markup TEXT,
+    quick_response TEXT,
     encrypted INTEGER NOT NULL DEFAULT 0,
     encryption TEXT,
     stanza_id TEXT
@@ -92,7 +93,8 @@ _NO_IDS_SQL = ("(archive_id IS NULL OR archive_id = '') "
                "AND (message_id IS NULL OR message_id = '')")
 
 _ROW_FIELDS = ("id, archive_id, stanza_id, origin_id, message_id, timestamp, "
-               "body, encrypted, reply_to, reply_id, media, markup, encryption")
+               "body, encrypted, reply_to, reply_id, media, markup, encryption, "
+               "quick_response")
 
 # jid -> (connection, last_use_monotonic)
 _pool: OrderedDict[str, tuple[sqlite3.Connection, float]] = OrderedDict()
@@ -136,7 +138,7 @@ def _merge_live_mam_duplicates(conn: sqlite3.Connection) -> int:
         "FROM messages ORDER BY id").fetchall()
     groups: dict[tuple, list] = {}
     for row in rows:
-        groups.setdefault((row[13], row[14], row[6], row[5]), []).append(row)
+        groups.setdefault((row[14], row[15], row[6], row[5]), []).append(row)
     removed = 0
     for group in groups.values():
         if len(group) < 2:
@@ -172,7 +174,8 @@ def _merge_live_mam_duplicates(conn: sqlite3.Connection) -> int:
                 media=str(other[10] or ""),
                 markup=str(other[11] or ""),
                 encrypted=bool(other[7]),
-                encryption=str(other[12] or ""))
+                encryption=str(other[12] or ""),
+                quick_response=str(other[13] or ""))
     return removed
 
 
@@ -287,6 +290,8 @@ def _connection(jid: str) -> sqlite3.Connection:
                 conn.execute("ALTER TABLE messages ADD COLUMN media TEXT")
             if "markup" not in columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN markup TEXT")
+            if "quick_response" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN quick_response TEXT")
             if "encrypted" not in columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN encrypted "
                              "INTEGER NOT NULL DEFAULT 0")
@@ -331,11 +336,30 @@ def _parse_markup(raw) -> dict | None:
     return value if isinstance(value, dict) and value else None
 
 
+def _parse_quick_response(raw) -> dict | None:
+    """Decode the stored ``quick_response`` JSON (XEP-0439), or ``None``."""
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    responses = [item for item in (value.get("responses") or [])
+                 if isinstance(item, dict) and item.get("value")]
+    actions = [item for item in (value.get("actions") or [])
+               if isinstance(item, dict) and item.get("id")]
+    if not responses and not actions:
+        return None
+    return {"responses": responses, "actions": actions}
+
+
 def _row_to_entry(row) -> dict:
     _id, direction, sender, body, timestamp, archive_id, origin_id, \
         reply_to, reply_id, message_id, edited, retracted, retract_marker, \
         retract_reason, retract_by, reactions, media, markup, encrypted, \
-        encryption, stanza_id = row
+        encryption, stanza_id, quick_response = row
     return {
         "id": _id,
         "direction": direction,
@@ -358,6 +382,7 @@ def _row_to_entry(row) -> dict:
         "encrypted": bool(encrypted),
         "encryption": encryption or "",
         "stanza_id": stanza_id or "",
+        "quick_response": _parse_quick_response(quick_response),
     }
 
 
@@ -399,11 +424,12 @@ def _merge_existing(conn: sqlite3.Connection, row, *,
                     archive_id: str, stanza_id: str, origin_id: str,
                     message_id: str, timestamp: str, body: str,
                     reply_to: str, reply_id: str, media: str, markup: str,
-                    encrypted: bool, encryption: str) -> bool:
+                    encrypted: bool, encryption: str,
+                    quick_response: str = "") -> bool:
     """Merge missing ids/metadata into an existing matching row."""
     (row_id, old_archive, old_stanza, old_origin, old_message, old_ts,
      old_body, old_encrypted, old_reply_to, old_reply_id, old_media,
-     old_markup, old_encryption) = row
+     old_markup, old_encryption, old_quick_response) = row
     updates: dict[str, object] = {}
     old_archive = str(old_archive or "")
     old_stanza = str(old_stanza or "")
@@ -435,6 +461,8 @@ def _merge_existing(conn: sqlite3.Connection, row, *,
         updates["media"] = media
     if markup and not (old_markup or ""):
         updates["markup"] = markup
+    if quick_response and not (old_quick_response or ""):
+        updates["quick_response"] = quick_response
     if encrypted and not old_encrypted:
         updates["encrypted"] = 1
         if encryption and not (old_encryption or ""):
@@ -466,7 +494,8 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
             skip_existing: bool,
             retract_reason: str = "", retract_by: str = "",
             media: str = "", markup: str = "", encrypted: bool = False,
-            encryption: str = "", archived: bool = False) -> bool:
+            encryption: str = "", archived: bool = False,
+            quick_response: str = "") -> bool:
     """Insert one row; returns True when a row was actually written.
 
     *archived* marks a message that came from a server replay or a MAM page.
@@ -529,7 +558,8 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
                 conn, row, archive_id=archive_id, stanza_id=stanza_id,
                 origin_id=origin_id, message_id=message_id, timestamp=ts,
                 body=body, reply_to=reply_to, reply_id=reply_id, media=media,
-                markup=markup, encrypted=encrypted, encryption=encryption)
+                markup=markup, encrypted=encrypted, encryption=encryption,
+                quick_response=quick_response)
 
         if archived and (archive_id or stanza_id or origin_id or message_id):
             # The same message may already be stored without any stable id by
@@ -555,14 +585,14 @@ def _insert(conn: sqlite3.Connection, direction: str, body: str, ts: str,
         "(direction, sender, body, timestamp, archive_id, stanza_id, "
         "origin_id, reply_to, reply_id, message_id, edited, "
         "retracted, retract_marker, retract_reason, retract_by, media, "
-        "markup, encrypted, encryption) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "markup, quick_response, encrypted, encryption) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (direction, sender, body, ts, archive_id or None, stanza_id or None,
          origin_id or None, reply_to or None, reply_id or None,
          message_id or None, 1 if edited else 0,
          1 if retracted else 0, 1 if retract_marker else 0,
          retract_reason or None, retract_by or None, media or None,
-         markup or None,
+         markup or None, quick_response or None,
          1 if encrypted else 0, encryption or None),
     )
     return True
@@ -577,6 +607,7 @@ def store_message(jid: str, direction: str, body: str,
                   retract_marker: bool = False,
                   retract_reason: str = "", retract_by: str = "",
                   media: dict | None = None, markup: dict | None = None,
+                  quick_response: dict | None = None,
                   encrypted: bool = False, encryption: str = "",
                   archived: bool = False) -> bool:
     """Append a message to *jid*'s history.
@@ -601,7 +632,9 @@ def store_message(jid: str, direction: str, body: str,
                                if media else "",
                                json.dumps(markup, ensure_ascii=False)
                                if markup else "",
-                               encrypted, encryption, archived)
+                               encrypted, encryption, archived,
+                               json.dumps(quick_response, ensure_ascii=False)
+                               if quick_response else "")
             conn.commit()
             return inserted
     except sqlite3.Error as exc:
@@ -650,7 +683,11 @@ def store_many(jid: str, rows: list[dict], skip_existing: bool = True) -> int:
                            if entry.get("markup") else "",
                            bool(entry.get("encrypted", False)),
                            entry.get("encryption", ""),
-                           archived=True):
+                           archived=True,
+                           quick_response=json.dumps(
+                               entry.get("quick_response"),
+                               ensure_ascii=False)
+                           if entry.get("quick_response") else ""):
                     inserted += 1
             conn.commit()
         return inserted
@@ -829,7 +866,7 @@ def load_history(jid: str, limit: int = 200, since: str | None = None,
                 f"SELECT id, direction, sender, body, timestamp, archive_id,"
                 f" origin_id, reply_to, reply_id, message_id, edited,"
                 f" retracted, retract_marker, retract_reason, retract_by,"
-                f" reactions, media, markup, encrypted, encryption, stanza_id"
+                f" reactions, media, markup, encrypted, encryption, stanza_id, quick_response"
                 f" FROM messages"
                 f"{clause} ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 f"ORDER BY timestamp ASC, id ASC",
@@ -854,7 +891,7 @@ def load_older(jid: str, before_id: int, limit: int = 200) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption, stanza_id"
+                " reactions, media, markup, encrypted, encryption, stanza_id, quick_response"
                 " FROM messages "
                 "WHERE id < ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (str(int(before_id)), str(int(limit))))
@@ -874,7 +911,7 @@ def load_older_timestamp(jid: str, before: str, limit: int = 200) -> list[dict]:
                 "SELECT * FROM (SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption, stanza_id"
+                " reactions, media, markup, encrypted, encryption, stanza_id, quick_response"
                 " FROM messages WHERE timestamp < ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT ?) "
                 "ORDER BY timestamp ASC, id ASC", (before, int(limit)))
@@ -956,7 +993,7 @@ def load_day(jid: str, date: str) -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption, stanza_id "
+                " reactions, media, markup, encrypted, encryption, stanza_id, quick_response "
                 "FROM messages "
                 "WHERE local_day(timestamp) = ? "
                 "ORDER BY timestamp ASC, id ASC", (date,))
@@ -982,7 +1019,7 @@ def media_entries(jid: str, date: str = "") -> list[dict]:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption, stanza_id "
+                " reactions, media, markup, encrypted, encryption, stanza_id, quick_response "
                 "FROM messages WHERE retracted = 0 "
                 "AND ((media IS NOT NULL AND media != '') "
                 "     OR body LIKE '%://%')")
@@ -1239,7 +1276,7 @@ def entry_by_ref(jid: str, stable_id: str) -> dict | None:
                 "SELECT id, direction, sender, body, timestamp, archive_id,"
                 " origin_id, reply_to, reply_id, message_id, edited,"
                 " retracted, retract_marker, retract_reason, retract_by,"
-                " reactions, media, markup, encrypted, encryption, stanza_id"
+                " reactions, media, markup, encrypted, encryption, stanza_id, quick_response"
                 " FROM messages WHERE archive_id = ? "
                 "OR stanza_id = ? OR origin_id = ? OR message_id = ? "
                 "ORDER BY timestamp DESC, id DESC LIMIT 1",
@@ -1399,6 +1436,7 @@ async def store_message_async(jid: str, direction: str, body: str,
                               edited: bool = False,
                               media: dict | None = None,
                               markup: dict | None = None,
+                              quick_response: dict | None = None,
                               encrypted: bool = False,
                               encryption: str = "",
                               archived: bool = False) -> bool:
@@ -1408,6 +1446,7 @@ async def store_message_async(jid: str, direction: str, body: str,
         stanza_id=stanza_id, origin_id=origin_id, reply_to=reply_to,
         reply_id=reply_id,
         message_id=message_id, edited=edited, media=media, markup=markup,
+        quick_response=quick_response,
         encrypted=encrypted, encryption=encryption, archived=archived)
 
 

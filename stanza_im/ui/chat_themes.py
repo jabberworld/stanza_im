@@ -102,6 +102,32 @@ _REACTION_CSS = """
                                    margin-left: 3px; }
 """
 
+_QUICK_RESPONSE_CSS = """
+.stanza-quick-responses, .stanza-quick-actions {
+    display: block; margin: 4px 0 0 4px; line-height: 1.6;
+}
+.placeholder ~ .stanza-quick-responses, .placeholder ~ .stanza-quick-actions,
+.placeholder_next ~ .stanza-quick-responses,
+.placeholder_next ~ .stanza-quick-actions { margin-left: 30px; }
+.placeholder[visible*="buddy_icon.png"] ~ .stanza-quick-responses,
+.placeholder[visible*="buddy_icon.png"] ~ .stanza-quick-actions,
+.placeholder_next[visible*="buddy_icon.png"] ~ .stanza-quick-responses,
+.placeholder_next[visible*="buddy_icon.png"] ~ .stanza-quick-actions {
+    margin-left: 0;
+}
+.stanza-quick-response, .stanza-quick-action {
+    display: inline-block; margin: 0 4px 3px 0; padding: 2px 9px;
+    border: 1px solid rgba(42,111,176,.45); border-radius: 10px;
+    color: #1a5f9e; background: rgba(42,111,176,.08);
+    font-size: 12px; line-height: 1.4; text-decoration: none;
+    cursor: pointer; white-space: normal;
+}
+.stanza-quick-response:hover, .stanza-quick-action:hover {
+    background: rgba(42,111,176,.18);
+}
+.stanza-quick-action { border-style: dashed; }
+"""
+
 _MAX_REACTION_CHIPS = 6
 
 # The "unread messages" separator.  The size is relative so the label always
@@ -163,6 +189,52 @@ def _render_reactions_chips(reactions) -> str:
                    % (html_escape(tr("reaction_list_title"), quote=True),
                       escape_html(tr("reaction_more", n=extra))))
     return "".join(out)
+
+
+def _render_quick_buttons(quick, ref: str = "", active: bool = True) -> str:
+    """Render XEP-0439 response/action buttons under a message body."""
+    if not isinstance(quick, dict):
+        return ""
+    ref = quote(str(ref or ""), safe="")
+    responses = quick.get("responses") if active else []
+    parts: list[str] = []
+    for item in responses or []:
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value") or "")
+        if not value:
+            continue
+        label = str(item.get("label") or value)
+        lang = str(item.get("lang") or "")
+        href = ("stanza:quick:response/%s/%s/%s"
+                % (ref, quote(value, safe=""), quote(lang, safe="")))
+        parts.append(
+            '<a class="stanza-quick-response" href="%s" title="%s">%s</a>'
+            % (href, escape_html(label), escape_html(label)))
+    for item in (quick.get("actions") or []):
+        if not isinstance(item, dict):
+            continue
+        action_id = str(item.get("id") or "")
+        if not action_id:
+            continue
+        label = str(item.get("label") or action_id)
+        href = "stanza:quick:action/%s/%s" % (
+            ref, quote(action_id, safe=""))
+        parts.append(
+            '<a class="stanza-quick-action" href="%s" title="%s">%s</a>'
+            % (href, escape_html(label), escape_html(label)))
+    if not parts:
+        return ""
+    response_html = "".join(
+        part for part in parts if 'class="stanza-quick-response"' in part)
+    action_html = "".join(
+        part for part in parts if 'class="stanza-quick-action"' in part)
+    out = ""
+    if response_html:
+        out += '<div class="stanza-quick-responses">%s</div>' % response_html
+    if action_html:
+        out += '<div class="stanza-quick-actions">%s</div>' % action_html
+    return out
 
 
 def _qwebchannel_js() -> str:
@@ -573,7 +645,10 @@ class ChatThemeFactory:
                        unread_marker: bool = False,
                        media: dict | None = None,
                        encrypted: bool = False,
-                       markup: dict | None = None) -> str:
+                       markup: dict | None = None,
+                       quick_response: dict | None = None,
+                       quick_response_active: bool = False,
+                       quick_response_ref: str = "") -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -656,6 +731,9 @@ class ChatThemeFactory:
                              tr("msg_encrypted_tooltip"))) + body_html
         if media_html:
             body_html += media_html
+        if not retracted:
+            body_html += _render_quick_buttons(
+                quick_response, quick_response_ref, quick_response_active)
 
         sender_html = escape_html(sender)
         if mention and direction == "incoming" and sender:
@@ -796,6 +874,9 @@ class ChatThemeFactory:
                     sender_color=msg.get("sender_color", "#000000"),
                     user_icon_path=msg.get("user_icon_path", ""),
                     hats=msg.get("hats"),
+                    quick_response=msg.get("quick_response"),
+                    quick_response_active=msg.get("quick_response_active", False),
+                    quick_response_ref=msg.get("quick_response_ref", ""),
                 ))
 
         messages_html = "\n".join(body_parts)
@@ -825,6 +906,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {_HATS_CSS}
 {_DELETE_CSS}
 {_REACTION_CSS}
+{_QUICK_RESPONSE_CSS}
 {_UNREAD_CSS}
 {self._font_override_css()}
 </style>
@@ -870,6 +952,7 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 {_HATS_CSS}
 {_DELETE_CSS}
 {_REACTION_CSS}
+{_QUICK_RESPONSE_CSS}
 {_UNREAD_CSS}
 {self._font_override_css()}
 </style>

@@ -2470,6 +2470,24 @@ message the user was already reading at the end. All these relays fall back to
 `data-reply-id` when `data-stanza-id` is absent. Feature advertised as
 `urn:xmpp:reactions:0`. [`tests/test_reactions.py`]
 
+**Quick Response (XEP-0439, Deferred, `urn:xmpp:tmp:quick-response`)**:
+`_quick_response()` parses the direct `<response value/label/xml:lang>` and
+`<action id/label>` children of a message and the payload is threaded through
+`message_received`, `muc_private_message`, `groupchat_message`, carbons and
+MAM rows. A `quick_response` JSON column in SQLite (with migration) preserves
+it across reloads. `chat_themes._render_quick_buttons` renders
+`.stanza-quick-response` / `.stanza-quick-action` anchors under the body
+(`stanza:quick:response/<ref>/<value>/<lang>` and
+`stanza:quick:action/<ref>/<id>`); the WebEngine click is relayed through
+`window.__stanzaQuickRef` + the scroll poll (the fallback uses `anchorClicked`).
+Responses are offered only for the newest incoming text message **per sender**
+(so one participant's answer never hides a bot's poll in a MUC; in a 1:1 this
+collapses to the newest message). A newer text message from that sender without
+responses hides its old prompt, and a used response is not offered again.
+Actions remain available on older messages. `MainWindow` sends a response as a
+plain body (with the response's `xml:lang`) or a bodyless `<action-selected/>`
+via `JabberClient.send_quick_action`. [`tests/test_quick_response.py`]
+
 **OMEMO Encryption (XEP-0384, `stanza_im/xmpp/omemo/`)**: optional end-to-end
 encryption with legacy OMEMO 0.3 (`eu.siacs.conversations.axolotl`) and OMEMO 2
 (`urn:xmpp:omemo:2`), detected at runtime by importing the components

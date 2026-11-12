@@ -186,6 +186,8 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.set_spellcheck(self._spellcheck_service)
         widget.set_mds_throttle(self._mds_throttle)
         widget.message_sent.connect(self._on_message_sent)
+        widget.quick_response_requested.connect(self.quick_response_to_send)
+        widget.quick_action_requested.connect(self.quick_action_to_send)
         widget.message_reply_sent.connect(self._on_message_reply_sent)
         widget.message_edit_sent.connect(self._on_message_edit_sent)
         widget.message_retract_sent.connect(self.message_retract_requested)
@@ -278,6 +280,8 @@ class ChatWindow(QtWidgets.QMainWindow):
             self.participant_width_changed.emit)
         widget.set_colored_muc_nicks(self._colored_muc_nicks)
         widget.message_sent.connect(self._on_groupchat_message_sent)
+        widget.quick_response_requested.connect(self.quick_response_to_send)
+        widget.quick_action_requested.connect(self.quick_action_to_send)
         widget.message_reply_sent.connect(self._on_groupchat_message_reply_sent)
         widget.message_edit_sent.connect(
             self._on_groupchat_message_edit_sent)
@@ -859,6 +863,8 @@ class ChatWindow(QtWidgets.QMainWindow):
     # ── Signals ───────────────────────────────────────────────────
 
     message_to_send = QtCore.pyqtSignal(str, str)       # jid, body
+    quick_response_to_send = QtCore.pyqtSignal(str, str, str)  # jid, value, lang
+    quick_action_to_send = QtCore.pyqtSignal(str, str)  # jid, action_id
     groupchat_message_to_send = QtCore.pyqtSignal(str, str)  # room, body
     message_reply_to_send = QtCore.pyqtSignal(str, str, str, str, str, str)
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)

@@ -2663,6 +2663,34 @@ Registers XEP plugins (conditionally where noted):
   It only decreases by clicking, never by reaching the bottom.
   [`tests/test_reaction_button.py`]
 
+### 14.4.4 Quick Response (XEP-0439, Deferred)
+
+- `_quick_response()` parses direct `<response value label xml:lang>` and
+  `<action id label>` children in `urn:xmpp:tmp:quick-response` from live
+  1:1, MUC, private, carbon and MAM messages. The result is carried as a
+  `quick_response` dict through the message events and stored in a SQLite
+  `quick_response` JSON column (with migration).
+- `chat_themes._render_quick_buttons` draws response and action anchors under
+  the body. The hrefs are
+  `stanza:quick:response/<ref>/<value>/<lang>` and
+  `stanza:quick:action/<ref>/<id>`; the WebEngine handler relays them through
+  `window.__stanzaQuickRef` and the scroll poll, while the `QTextBrowser`
+  fallback uses its normal `anchorClicked` signal. All `stanza:` controls are
+  preventDefaulted and never navigate the chat document.
+- A response is sent as a plaintext body copying the response's `xml:lang`;
+  an action is sent as a bodyless `<action-selected xmlns='urn:xmpp:tmp:quick-response' id='…'/>`
+  through `JabberClient.send_quick_action`. `MainWindow` shows/stores the
+  outgoing response like any normal message.
+- Response prompts follow the XEP's "most recent text" rule per sender: in a
+  1:1 only the newest incoming text message exposes its responses, while in a
+  MUC each sender keeps its own newest prompt, so another participant's answer
+  never hides a bot's poll. A newer text message from the same sender without
+  responses hides that sender's old prompt; actions remain available on all
+  messages. A clicked response is removed from that tab's active set.
+- The fallback view renders the same buttons (it cannot remove an older
+  response block without rebuilding the document); WebEngine removes stale
+  response blocks through `ChatView.set_quick_responses`.
+
 ### 14.4.5 OMEMO Encryption (XEP-0384 / XEP-0420 / XEP-0380)
 
 - Optional end-to-end encryption supporting both legacy OMEMO 0.3

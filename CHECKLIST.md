@@ -93,6 +93,7 @@ notes of the applicable suites).
 | XEP-0385 (Stateless Inline Media Sharing) | ✅ | SIMS metadata parsed/rendered (file card + preview) and attached to uploaded files, with XEP-0372/0300/0428/0066 companions |
 | XEP-0454 (OMEMO Media Sharing) | ✅ | a file sent from an OMEMO chat over HTTP Upload is AES-256-GCM encrypted and shared as an `aesgcm://…#iv+key` link inside an OMEMO message; incoming links are decrypted for the media preview, the viewer and audio playback (P2P files use JET-OMEMO, below) |
 | XEP-0433 (Extended Channel Search) | ❌ | not implemented |
+| XEP-0439 (Quick Response) | ⚠️ | Deferred; exploratory response/action buttons in messages |
 
 ## Future development
 

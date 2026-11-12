@@ -460,6 +460,8 @@ class ChatWidget(QtWidgets.QWidget):
     """A single chat tab's content: header info + message view + input bar."""
 
     message_sent = QtCore.pyqtSignal(str, str)  # jid, body
+    quick_response_requested = QtCore.pyqtSignal(str, str, str)  # jid, value, lang
+    quick_action_requested = QtCore.pyqtSignal(str, str)  # jid, action_id
     message_reply_sent = QtCore.pyqtSignal(str, str, str, str, str, str)
     #   jid, body, reply_to, reply_id, ref_sender, ref_body   (XEP-0461)
     message_edit_sent = QtCore.pyqtSignal(str, str, str)  # jid, body, edit_id
@@ -546,6 +548,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._history: list[dict] = []
         self._status_lines: list[tuple[str, str]] = []
         self._messages: list[dict] = []
+        self._quick_response_refs: set[str] = set()
+        self._quick_response_used_refs: set[str] = set()
         # Stable keys of the message nodes currently known to be in the
         # rendered DOM (bounded like ChatView's DOM cap).  A jump uses this
         # instead of trusting ``_history``: the Python window can still hold a
@@ -1068,6 +1072,9 @@ class ChatWidget(QtWidgets.QWidget):
     # ── Link / marker handling ────────────────────────────────────
 
     def _open_link(self, url: str):
+        if url.startswith("stanza:quick:"):
+            self._handle_quick_uri(url)
+            return
         if url.startswith("stanza:reply:"):
             self._handle_reply_uri(url)
             return
@@ -1160,6 +1167,68 @@ class ChatWidget(QtWidgets.QWidget):
             webbrowser.open(url)
             return
         self.link_clicked.emit(url)
+
+    def _handle_quick_uri(self, url: str) -> None:
+        """A XEP-0439 response/action button was clicked."""
+        payload = url[len("stanza:quick:"):]
+        kind, _sep, rest = payload.partition("/")
+        if kind == "response":
+            ref, _sep, rest = rest.partition("/")
+            value, _sep, lang = rest.partition("/")
+            value = unquote(value)
+            if not value:
+                return
+            ref = unquote(ref)
+            if ref:
+                self._quick_response_used_refs.add(ref)
+                self._quick_response_refs.discard(ref)
+                self._sync_quick_response_buttons()
+            self.quick_response_requested.emit(self.jid, value, unquote(lang))
+            return
+        if kind == "action":
+            _ref, _sep, action_id = rest.partition("/")
+            action_id = unquote(action_id)
+            if action_id:
+                self.quick_action_requested.emit(self.jid, action_id)
+
+    def _quick_response_ref(self, entry: dict) -> str:
+        # Match the node's ``data-stanza-id`` (message_id, then replyable id).
+        return str(entry.get("message_id") or entry.get("origin_id")
+                   or entry.get("archive_id") or "")
+
+    def _quick_sender_key(self, entry: dict) -> str:
+        return str(entry.get("sender_jid") or entry.get("sender") or "")
+
+    def _compute_quick_response_refs(self, entries=None) -> set[str]:
+        """The response-bearing messages currently allowed to be answered.
+
+        In a conference the rule is per sender: a reply from another occupant
+        must not hide a bot's poll.  In a 1:1 chat all incoming messages share
+        the same sender key, so only the newest text message wins.
+        """
+        if entries is None:
+            entries = self._ordered_entries()
+        latest: dict[str, dict] = {}
+        for entry in entries:
+            if entry.get("direction") != "incoming" or entry.get("retracted"):
+                continue
+            quick = entry.get("quick_response") or {}
+            if not str(entry.get("body") or "").strip() and not quick.get(
+                    "responses"):
+                continue
+            latest[self._quick_sender_key(entry)] = entry
+        refs: set[str] = set()
+        for entry in latest.values():
+            if (entry.get("quick_response") or {}).get("responses"):
+                ref = self._quick_response_ref(entry)
+                if ref and ref not in self._quick_response_used_refs:
+                    refs.add(ref)
+        return refs
+
+    def _sync_quick_response_buttons(self) -> None:
+        sync = getattr(self._view, "set_quick_responses", None)
+        if sync is not None:
+            sync(self._quick_response_refs)
 
     def _handle_reply_uri(self, url: str) -> None:
         """Decode a ``stanza:reply:id/author/sender/body`` click and start a
@@ -1992,7 +2061,8 @@ class ChatWidget(QtWidgets.QWidget):
                     reply_to: str = "", reply_id: str = "",
                     edited: bool = False, media: dict | None = None,
                     encrypted: bool = False, markup: dict | None = None,
-                    stanza_id: str = ""):
+                    stanza_id: str = "",
+                    quick_response: dict | None = None):
         if not isinstance(timestamp, str):
             timestamp = (timestamp.strftime("%H:%M:%S")
                          if hasattr(timestamp, "strftime")
@@ -2014,12 +2084,15 @@ class ChatWidget(QtWidgets.QWidget):
                   "origin_id": reply_able_id, "reply_author": reply_author,
                   "reply_to": reply_to, "reply_id": reply_id,
                   "edited": edited, "media": media,
-                  "encrypted": bool(encrypted), "markup": markup}
+                  "encrypted": bool(encrypted), "markup": markup,
+                  "quick_response": quick_response}
         self._messages.append(entry)
         if len(self._messages) > _MESSAGES_MAX:
             del self._messages[:len(self._messages) - _MESSAGES_MAX]
+        self._quick_response_refs = self._compute_quick_response_refs()
         self._render_entry(entry)
         self._mark_rendered([entry])
+        self._sync_quick_response_buttons()
         mine = self._is_mine(entry)
         if direction == "incoming" and not mine and self._view.is_scrolled_up():
             self._view.note_new_message(self._reply_target_id(entry))
@@ -2125,6 +2198,11 @@ class ChatWidget(QtWidgets.QWidget):
             "media": entry.get("media"),
             "encrypted": bool(entry.get("encrypted")),
             "markup": entry.get("markup"),
+            "quick_response": entry.get("quick_response"),
+            "quick_response_active": (
+                self._quick_response_ref(entry)
+                in self._quick_response_refs),
+            "quick_response_ref": self._quick_response_ref(entry),
         }
 
     def compute_reactions(self, entry: dict) -> list[dict]:
@@ -2336,6 +2414,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_marker_shown = False
         self._unread_armed = False
         self._unread_passed = False
+        self._quick_response_refs = self._compute_quick_response_refs(entries)
         for entry in entries:
             self._render_entry(entry)
         self._set_rendered(entries)

@@ -621,6 +621,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._config.chat.tab_title_length)
         self._chat_window.set_chat_options(self._config.chat)
         self._chat_window.message_to_send.connect(self._on_message_send)
+        self._chat_window.quick_response_to_send.connect(
+            self._on_quick_response_send)
+        self._chat_window.quick_action_to_send.connect(
+            self._on_quick_action_send)
         self._chat_window.groupchat_message_to_send.connect(self._on_groupchat_send)
         self._chat_window.message_reply_to_send.connect(self._on_message_reply_send)
         self._chat_window.groupchat_message_reply_to_send.connect(
@@ -8453,7 +8457,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              encrypted: bool = False,
                              markup: dict | None = None,
                              urgency: str = "",
-                             stanza_id: str = ""):
+                             stanza_id: str = "",
+                             quick_response: dict | None = None):
         bare_jid = frm.split("/")[0]
         self._touch_tab_activity(bare_jid)
         priority = self._effective_priority(bare_jid, urgency)
@@ -8484,7 +8489,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_author=reply_author or frm,
                              reply_to=reply_to, reply_id=reply_id,
                              media=media, encrypted=encrypted, markup=markup,
-                             stanza_id=stanza_id)
+                             stanza_id=stanza_id,
+                             quick_response=quick_response)
 
         from stanza_im.core import history
         self._start_task(history.store_message_async(
@@ -8494,7 +8500,8 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted, markup=markup, stanza_id=stanza_id))
+            encrypted=encrypted, markup=markup, stanza_id=stanza_id,
+            quick_response=quick_response))
 
         if encrypted:
             self._maybe_auto_enable_omemo(bare_jid)
@@ -9061,7 +9068,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                   encrypted: bool = False,
                                   markup: dict | None = None,
                                   urgency: str = "",
-                                  stanza_id: str = ""):
+                                  stanza_id: str = "",
+                                  quick_response: dict | None = None):
         info = self._participant_info(room, nick)
         # Conference PMs use the occupant identity in every room type; the real
         # JID (when the room reveals one) is metadata for status/avatar/vCard.
@@ -9092,7 +9100,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id, media=media,
                              encrypted=encrypted, markup=markup,
-                             stanza_id=stanza_id)
+                             stanza_id=stanza_id,
+                             quick_response=quick_response)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             target, "incoming", body,
@@ -9100,7 +9109,8 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_able_id,
             message_id=reply_able_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted, markup=markup, stanza_id=stanza_id))
+            encrypted=encrypted, markup=markup, stanza_id=stanza_id,
+            quick_response=quick_response))
         if priority != "low":
             self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
@@ -9119,6 +9129,34 @@ class MainWindow(QtWidgets.QMainWindow):
         room_nick = self._pm_targets.get(target)
         if room_nick and room_nick[0]:
             self._sync_pm_roster(target, room_nick[0], room_nick[1])
+
+    def _on_quick_response_send(self, jid: str, value: str,
+                                lang: str = "") -> None:
+        """Send a XEP-0439 response (a normal plaintext message)."""
+        if not (self._client and isinstance(jid, str) and jid.strip()
+                and isinstance(value, str) and value):
+            return
+        jid = jid.strip()
+        if jid in self._client.groupchats:
+            self._client.send_muc_message(jid, value, lang=lang)
+            self._play_sound("message_send", "sound_on_send")
+            return
+        if (getattr(self._client.omemo, "available", False)
+                and self._client.omemo.chat_mode(jid) == "omemo"):
+            self._start_task(self._send_omemo(jid, value, lang=lang))
+            return
+        message_id = self._client.send_message(jid, value, lang=lang)
+        self._display_local_outgoing(jid, value, message_id)
+        self._play_sound("message_send", "sound_on_send")
+
+    def _on_quick_action_send(self, jid: str, action_id: str) -> None:
+        """Send a XEP-0439 bodyless ``<action-selected/>``."""
+        if not (self._client and isinstance(jid, str) and jid.strip()
+                and isinstance(action_id, str) and action_id):
+            return
+        jid = jid.strip()
+        mtype = "groupchat" if jid in self._client.groupchats else "chat"
+        self._client.send_quick_action(jid, action_id, mtype=mtype)
 
     def _on_message_send(self, jid: str, body: str):
         if self._client and isinstance(jid, str) and jid.strip():
@@ -9145,10 +9183,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._remember_contact(jid)
             self._play_sound("message_send", "sound_on_send")
 
-    async def _send_omemo(self, jid: str, body: str) -> None:
+    async def _send_omemo(self, jid: str, body: str, lang: str = "") -> None:
         """Encrypt and send a 1:1 message with OMEMO, then echo/store it."""
         try:
-            message_id = await self._client.send_omemo_message(jid, body)
+            message_id = await self._client.send_omemo_message(
+                jid, body, lang=lang)
         except Exception as exc:  # noqa: BLE001
             logger.warning("OMEMO send to %s failed: %s", jid, exc)
             chat = self._chat_window.get_chat(jid)
@@ -9186,7 +9225,8 @@ class MainWindow(QtWidgets.QMainWindow):
                               encrypted: bool = False,
                               markup: dict | None = None,
                               urgency: str = "",
-                              stanza_id: str = ""):
+                              stanza_id: str = "",
+                              quick_response: dict | None = None):
         self._touch_tab_activity(room)
         if archived:
             from stanza_im.core import history
@@ -9196,7 +9236,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 sender=nick, archive_id=archive_id,
                 stanza_id=stanza_id, origin_id=reply_able_id,
                 reply_to=reply_to, reply_id=reply_id, markup=markup,
-                archived=True))
+                quick_response=quick_response, archived=True))
             # A join-time history replay is stored, not rendered: merge it into
             # the window when the room is the conversation on screen.  A replay
             # has no archive id and is usually older than the tail this client
@@ -9236,7 +9276,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_author=reply_author or f"{room}/{nick}",
                              reply_to=reply_to, reply_id=reply_id,
                              media=media, encrypted=encrypted, markup=markup,
-                             stanza_id=stanza_id)
+                             stanza_id=stanza_id,
+                             quick_response=quick_response)
         from stanza_im.core import history
         self._start_task(history.store_message_async(
             room, "incoming", body,
@@ -9245,7 +9286,8 @@ class MainWindow(QtWidgets.QMainWindow):
             origin_id=reply_ref_id,
             message_id=reply_ref_id,
             reply_to=reply_to, reply_id=reply_id, media=media,
-            encrypted=encrypted, markup=markup, stanza_id=stanza_id))
+            encrypted=encrypted, markup=markup, stanza_id=stanza_id,
+            quick_response=quick_response))
         priority = self._effective_priority(room, urgency)
         if priority != "low":
             self._maybe_osd_groupchat(room, nick, body)

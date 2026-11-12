@@ -1395,6 +1395,7 @@ window.__stanzaMentionRef = '';
             window.__stanzaUnreactRef = '';
             window.__stanzaReactLikeRef = '';
             window.__stanzaReactionsRef = '';
+            window.__stanzaQuickRef = '';
             window.__stanzaOmemoRef = '';
 
             function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -1788,6 +1789,17 @@ window.__stanzaMentionRef = '';
                         om.getAttribute('href') || '';
                     return;
                 }
+                // XEP-0439 response/action buttons: never navigate; the
+                // always-running scroll poll forwards the href to Python.
+                var quick = t && t.closest
+                    ? t.closest('a.stanza-quick-response, a.stanza-quick-action')
+                    : null;
+                if (quick) {
+                    e.preventDefault();
+                    window.__stanzaQuickRef =
+                        quick.getAttribute('href') || '';
+                    return;
+                }
                 var btn = t && t.closest
                     ? t.closest('.message_actions button') : null;
                 if (!btn) return;
@@ -2044,7 +2056,8 @@ window.__stanzaMentionRef = '';
                 "if(r.bottom>0&&r.top<vh){var id=m[i].getAttribute('data-stanza-id')"
                 "||m[i].getAttribute('data-reply-id')||'';if(id)out.push(id);}}"
                 "return JSON.stringify(out);})(),"
-                " window.__stanzaImageLoadRef || '']",
+                " window.__stanzaImageLoadRef || '',"
+                " window.__stanzaQuickRef || '']",
                 self._on_scroll_position,
             )
 
@@ -2069,6 +2082,12 @@ window.__stanzaMentionRef = '';
         def _clear_image_load_request(self):
             try:
                 self._page.runJavaScript("window.__stanzaImageLoadRef = '';")
+            except RuntimeError:
+                pass
+
+        def _clear_quick_request(self):
+            try:
+                self._page.runJavaScript("window.__stanzaQuickRef = '';")
             except RuntimeError:
                 pass
 
@@ -2404,6 +2423,14 @@ window.__stanzaMentionRef = '';
                     self.link_clicked.emit(requested)
             else:
                 self._last_omemo_ref = ""
+            if len(value) > 30 and isinstance(value[30], str) and value[30]:
+                self._clear_quick_request()
+                requested = value[30]
+                if requested != getattr(self, "_last_quick_ref", ""):
+                    self._last_quick_ref = requested
+                    self.link_clicked.emit(requested)
+            else:
+                self._last_quick_ref = ""
             try:
                 offset = float(value[0])
                 viewport = float(value[1])
@@ -2614,7 +2641,10 @@ window.__stanzaMentionRef = '';
                                 media: dict | None = None,
                                 encrypted: bool = False,
                                 markup: dict | None = None,
-                                stanza_id: str = "") -> str:
+                                stanza_id: str = "",
+                                quick_response: dict | None = None,
+                                quick_response_active: bool = False,
+                                quick_response_ref: str = "") -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2630,7 +2660,10 @@ window.__stanzaMentionRef = '';
                     retracted=retracted, retract_marker=retract_marker,
                     retract_reason=retract_reason, retract_by=retract_by,
                     reactions=reactions, unread_marker=unread_marker,
-                    media=media, encrypted=encrypted, markup=markup)
+                    media=media, encrypted=encrypted, markup=markup,
+                    quick_response=quick_response,
+                    quick_response_active=quick_response_active,
+                    quick_response_ref=quick_response_ref)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -2660,7 +2693,10 @@ window.__stanzaMentionRef = '';
                         media: dict | None = None,
                         encrypted: bool = False,
                         markup: dict | None = None,
-                        stanza_id: str = ""):
+                        stanza_id: str = "",
+                        quick_response: dict | None = None,
+                        quick_response_active: bool = False,
+                        quick_response_ref: str = ""):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2673,7 +2709,8 @@ window.__stanzaMentionRef = '';
                 raw_timestamp, reply_able_id, reply_author, reply_quote,
                 outgoing, edited, hats, retracted, retract_marker,
                 retract_reason, retract_by, moderatable, reactions,
-                unread_marker, media, encrypted, markup, stanza_id)
+                unread_marker, media, encrypted, markup, stanza_id,
+                quick_response, quick_response_active, quick_response_ref)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -2716,6 +2753,29 @@ window.__stanzaMentionRef = '';
                     " box.innerHTML = " + json.dumps(reactions_html) + "; }"
                     "if (" + str(stick) + ") window.scrollTo(0,"
                     " document.body.scrollHeight);")
+            except RuntimeError:
+                pass
+
+        def set_quick_responses(self, active_refs) -> None:
+            """Remove response blocks that are no longer the active prompt."""
+            if not self._ready:
+                return
+            refs = json.dumps([str(ref) for ref in (active_refs or ()) if ref])
+            js = f"""
+            (function() {{
+                var active = new Set({refs});
+                var nodes = document.querySelectorAll('#chat .stanza-message');
+                for (var i = 0; i < nodes.length; i++) {{
+                    var box = nodes[i].querySelector('.stanza-quick-responses');
+                    if (!box) continue;
+                    var ref = nodes[i].getAttribute('data-stanza-id')
+                        || nodes[i].getAttribute('data-reply-id') || '';
+                    if (!active.has(ref)) box.remove();
+                }}
+            }})();
+            """
+            try:
+                self.page().runJavaScript(js)
             except RuntimeError:
                 pass
 
@@ -3491,7 +3551,10 @@ else:
                         media: dict | None = None,
                         encrypted: bool = False,
                         markup: dict | None = None,
-                        stanza_id: str = ""):
+                        stanza_id: str = "",
+                        quick_response: dict | None = None,
+                        quick_response_active: bool = False,
+                        quick_response_ref: str = ""):
             # *markup* (XEP-0394) is accepted for API parity with the WebEngine
             # view but the plain fallback does not render it.
             marker_html = (ChatThemeFactory.render_unread_marker()
@@ -3514,6 +3577,11 @@ else:
                     edited_suffix += " " + tr("msg_edited_tooltip")
                 if retract_marker:
                     edited_suffix += " \u2715"
+            if not retracted and quick_response:
+                from stanza_im.ui.chat_themes import _render_quick_buttons
+                body_html += _render_quick_buttons(
+                    quick_response, quick_response_ref,
+                    quick_response_active)
             hats_suffix = self._hats_text(hats)
             reactions_suffix = self._reactions_text(reactions)
             reply_line = ""
@@ -3577,6 +3645,10 @@ else:
 
         def update_reactions(self, ref_id: str, reactions_html: str) -> None:
             """No-op: the fallback renders reactions once, at add time."""
+            return
+
+        def set_quick_responses(self, active_refs) -> None:
+            """No-op: the fallback renders quick responses at add time."""
             return
 
         def shutdown(self) -> None:
