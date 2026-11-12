@@ -654,7 +654,6 @@ STRINGS = {
     "registration_result_password": "Password",
     "registration_result_encryption": "Encryption",
     "registration_result_proxy": "Proxy",
-    "registration_result_submitted": "Data submitted to the server:",
     "registration_result_copy": "Copy",
     "captcha_title": "CAPTCHA",
     "captcha_body_hint": "Please solve the challenge to continue.",

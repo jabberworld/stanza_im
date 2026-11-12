@@ -654,7 +654,6 @@ STRINGS = {
     "registration_result_password": "Пароль",
     "registration_result_encryption": "Шифрование",
     "registration_result_proxy": "Прокси",
-    "registration_result_submitted": "Данные, отправленные на сервер:",
     "registration_result_copy": "Копировать",
     "captcha_title": "CAPTCHA",
     "captcha_body_hint": "Решите задачу, чтобы продолжить.",

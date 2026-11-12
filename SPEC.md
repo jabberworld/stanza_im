@@ -934,9 +934,9 @@ and re-run on `DataFormWidget.media_ready`; it measures the live inner widget
 because `QScrollArea` caches its size hint, and clamps to the screen, the
 `QScrollArea` providing scrolling only when the content exceeds it). On success
 the dialog opens
-`RegistrationResultDialog` showing the Jabber ID, the password, the
-encryption/proxy details and the data actually submitted ("Копировать" copies
-the summary, "Применить" applies, "Закрыть" discards). Only "Применить" writes
+`RegistrationResultDialog` showing the Jabber ID, the password and the
+encryption/proxy details ("Копировать" copies the summary, "Применить" applies,
+"Закрыть" discards). Only "Применить" writes
 `jid`, `password`, `save_password=true` and the `connection.*` settings into
 the shared `Config` and emits `registered(jid, password)`; `MainWindow`
 prefills the login form (`LoginWidget.prefill`), returns to the login page,

@@ -348,8 +348,7 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
         jid, password = self._credentials(values)
         await self._close_client()
         result = RegistrationResultDialog(
-            jid, password, self._connection_details(),
-            self._submitted_data(values), parent=self)
+            jid, password, self._connection_details(), parent=self)
 
         def finished(result_code: int):
             if result_code != QtWidgets.QDialog.DialogCode.Accepted:
@@ -416,22 +415,6 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
             details.append((tr("prefs_host"),
                             f"{host}:{self._port.value()}" if host else ""))
         return details
-
-    def _submitted_data(self, values: dict) -> list[tuple[str, str]]:
-        """Localized ``(label, value)`` rows for the data sent to the server."""
-        if self._form is None:
-            return [(str(key), str(value)) for key, value in values.items()]
-        rows: list[tuple[str, str]] = []
-        for field in self._form["fields"]:
-            if str(field["type"] or "") == "hidden":
-                continue
-            var = str(field.get("var") or "")
-            label = str(field.get("label", "") or var)
-            value = field.get("value")
-            if isinstance(value, list):
-                value = ", ".join(str(item) for item in value)
-            rows.append((label or var, str(value or "")))
-        return rows
 
     def _save_config(self, jid: str, password: str) -> None:
         cfg = self._config

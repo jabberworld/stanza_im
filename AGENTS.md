@@ -1990,8 +1990,8 @@ inner widget because `QScrollArea` caches its size hint, and clamps to the
 screen, the `QScrollArea` then providing scrolling only when needed). On
 success the dialog shows
 `ui/registration_result_dialog.py::RegistrationResultDialog` with the Jabber ID,
-password, encryption/proxy details and the data actually submitted
-("Копировать" copies the whole summary, "Применить" writes the account,
+password and encryption/proxy details ("Копировать" copies the summary,
+"Применить" writes the account,
 "Закрыть" discards it); only on "Применить" does the dialog store the account
 (`jid`, `password`, `save_password`) and the connection/proxy settings in the
 shared `Config` and emit `registered(jid, password)`; `MainWindow` prefills

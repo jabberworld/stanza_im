@@ -1,8 +1,8 @@
 """Result dialog shown after a successful account registration (XEP-0077).
 
-Shows the credentials of the created account, the connection settings used
-and the data that was submitted to the server, so the user can copy and keep
-them before the values are written to the configuration.
+Shows the credentials of the created account and the connection settings used,
+so the user can copy and keep them before the values are written to the
+configuration.
 """
 from __future__ import annotations
 
@@ -16,11 +16,9 @@ class RegistrationResultDialog(QtWidgets.QDialog):
 
     def __init__(self, jid: str, password: str,
                  details: list[tuple[str, str]] | None = None,
-                 submitted: list[tuple[str, str]] | None = None,
                  parent=None):
         super().__init__(parent)
-        self._summary = self._build_summary(jid, password, details or [],
-                                            submitted or [])
+        self._summary = self._build_summary(jid, password, details or [])
         self.setWindowTitle(tr("registration_result_title"))
         self.setMinimumWidth(420)
         layout = QtWidgets.QVBoxLayout(self)
@@ -55,18 +53,12 @@ class RegistrationResultDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _build_summary(jid: str, password: str,
-                       details: list[tuple[str, str]],
-                       submitted: list[tuple[str, str]]) -> str:
+                       details: list[tuple[str, str]]) -> str:
         lines = [
             f'{tr("registration_result_jid")}: {jid}',
             f'{tr("registration_result_password")}: {password}',
         ]
         for label, value in details:
             if value:
-                lines.append(f"{label}: {value}")
-        if submitted:
-            lines.append("")
-            lines.append(tr("registration_result_submitted"))
-            for label, value in submitted:
                 lines.append(f"{label}: {value}")
         return "\n".join(lines)

@@ -429,41 +429,18 @@ check("connection details include the host override",
       proxy_details.get(tr("prefs_host")) == "xmpp.example.com:5223")
 
 
-class _FormField:
-    def __init__(self, **values):
-        self._values = values
-
-    def __getitem__(self, key):
-        return self._values[key]
-
-    def get(self, key, default=None):
-        return self._values.get(key, default)
-
-
-dlg._form = {"fields": [
-    _FormField(type="hidden", var="FORM_TYPE", label="", value="x"),
-    _FormField(type="text-single", var="username", label="User", value="bob"),
-    _FormField(type="text-private", var="password", label="", value="pw"),
-]}
-check("submitted data skips hidden fields",
-      dlg._submitted_data({}) == [("User", "bob"), ("password", "pw")])
-dlg._form = None
-check("submitted data lists legacy fields",
-      dlg._submitted_data({"username": "bob", "password": "pw"})
-      == [("username", "bob"), ("password", "pw")])
-
-
 # ── result dialog ────────────────────────────────────────────────
 from stanza_im.ui.registration_result_dialog import (  # noqa: E402
     RegistrationResultDialog)
 
 rd = RegistrationResultDialog("bob@example.com", "secret",
-                              [("Encryption", "Prefer TLS")],
-                              [("User", "bob")])
+                              [("Encryption", "Prefer TLS")])
 summary = rd.summary()
-check("result summary carries the JID, password, details and data",
+check("result summary carries the JID, password and connection details",
       "bob@example.com" in summary and "secret" in summary
-      and "Encryption: Prefer TLS" in summary and "User: bob" in summary)
+      and "Encryption: Prefer TLS" in summary)
+check("result summary omits submitted form data",
+      "User: bob" not in summary and "captcha" not in summary.lower())
 check("result buttons are localized",
       rd._copy_btn.text() == tr("registration_result_copy")
       and rd._apply_btn.text() == tr("dialog_apply")
