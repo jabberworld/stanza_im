@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtCore, QtWidgets
 
 import slixmpp
+from slixmpp.exceptions import IqError
 
 from stanza_im import app as app_mod
 from stanza_im.core.client import JabberClient
@@ -307,6 +308,43 @@ check("pre-auth IQ is sent before session start",
       and captured_preauth.get("timeout") == 20)
 check("the pre-session send override is restored",
       _fake_xmpp._always_send_everything is False)
+
+
+class _ErrorIqPayload:
+    def __getitem__(self, key):
+        if key == "error":
+            return {
+                "condition": "item-not-found",
+                "text": "The token provided is either invalid or expired.",
+                "type": "cancel",
+            }
+        raise KeyError(key)
+
+
+class _FakeErrorIq(_FakeIq):
+    async def send(self, timeout=None):
+        captured_preauth["error_override"] = self._owner._always_send_everything
+        raise IqError(_ErrorIqPayload())
+
+
+class _FakeErrorXmpp(_FakeXmpp):
+    def Iq(self):
+        return _FakeErrorIq(self)
+
+
+_preauth_client.xmpp = _FakeErrorXmpp()
+try:
+    asyncio.run(_preauth_client.preauth_ibr("example.com", "expired"))
+except ValueError as exc:
+    _preauth_error = str(exc)
+else:
+    _preauth_error = ""
+check("pre-auth server errors expose only the error text",
+      _preauth_error == "The token provided is either invalid or expired."
+      and "<iq" not in _preauth_error
+      and "<error" not in _preauth_error)
+check("the override is restored after a pre-auth error",
+      _preauth_client.xmpp._always_send_everything is False)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)

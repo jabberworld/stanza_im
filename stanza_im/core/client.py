@@ -3844,6 +3844,12 @@ class JabberClient:
         self.xmpp._always_send_everything = True
         try:
             await iq.send(timeout=20)
+        except slixmpp.exceptions.IqError as exc:
+            # ``str(IqError)`` serialises the whole error IQ; the UI only
+            # wants the server's human-readable error text.
+            text = str(getattr(exc, "text", "") or "").strip()
+            condition = str(getattr(exc, "condition", "") or "").strip()
+            raise ValueError(text or condition or "pre-authentication failed") from exc
         finally:
             self.xmpp._always_send_everything = previous
 
