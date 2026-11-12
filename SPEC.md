@@ -3290,7 +3290,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   session-only exception, or a persisted profile exception. The Advanced page
   has the corresponding red checkbox; ignoring verification shows an unverified
   certificate and a warning.
-- **Keep-alive** `keepalive` → `xmpp.whitespace_keepalive`.
+- **Keep-alive** `keepalive` → `xmpp.whitespace_keepalive`, every 60 s
+  (`JabberClient.KEEPALIVE_INTERVAL_S`), below common two-minute server idle
+  timeouts.
 - `connection_info()` (mode, TLS version/cipher, SASL, keep-alive, SM, CSI,
   actual SRV endpoint, and `cert` — the peer certificate: subject/issuer CN+O,
   validity with days left/expired, serial, DNS SANs, SHA-256 fingerprint,

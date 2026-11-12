@@ -1205,6 +1205,10 @@ class _StanzaXMPP(slixmpp.ClientXMPP):
 class JabberClient:
     """High-level XMPP client built on top of slixmpp.ClientXMPP."""
 
+    #: Keepalive cadence.  Must stay below common server idle timeouts (ejabberd
+    #: closes an otherwise idle c2s stream after roughly two minutes).
+    KEEPALIVE_INTERVAL_S = 60
+
     # XEP-0045 §17.1 status → resource priority used when the priority mode
     # is "status".  "chat" (free for chat) counts as available.
     _STATUS_PRIORITY = {"online": 50, "chat": 50, "away": 40, "xa": 30,
@@ -1331,6 +1335,7 @@ class JabberClient:
         self.xmpp._require_starttls = flags["require_starttls"]
         self.xmpp._tls_first = (tls_mode == "prefer")
         self.xmpp.whitespace_keepalive = self.keepalive
+        self.xmpp.whitespace_keepalive_interval = self.KEEPALIVE_INTERVAL_S
         self.xmpp.add_event_handler("tls_required", self._on_tls_required)
         self.xmpp.add_event_handler("connection_failed",
                                     self._on_connection_failed)

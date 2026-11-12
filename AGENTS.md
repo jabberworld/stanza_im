@@ -3821,7 +3821,9 @@ text is kept. Returning activity (`eventFilter`) resumes
   lang=…)`) and `start_stream_handler` forces `peer_default_lang` to it, so
   outgoing stanzas carry it and servers localize data forms (e.g. the room
   configuration) like Psi.
-- **Keep-alive**: `connection.keepalive` → `xmpp.whitespace_keepalive`.
+- **Keep-alive**: `connection.keepalive` → `xmpp.whitespace_keepalive`, sent
+  every 60 s (`JabberClient.KEEPALIVE_INTERVAL_S`) — below the roughly two
+  minute idle timeout of common servers (e.g. ejabberd).
 - `_connected_target` (via `_dns_hosts`) reports the real SRV endpoint;
   `connection_info()` feeds the preferences info icon (mode, TLS version,
   cipher, SASL, keep-alive, SM, CSI, server) and carries `cert` — the peer TLS
