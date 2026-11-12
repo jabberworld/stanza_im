@@ -192,6 +192,7 @@ STRINGS = {
     "onboarding_register_other": "Register on another server",
     "onboarding_preauth_unsupported": "This server does not support pre-authenticated registration.",
     "onboarding_preauth_rejected": "The invitation token was rejected: {error}",
+    "onboarding_preauth_timeout": "The server did not answer the invitation token check.",
     "onboarding_invite_prompt": "Paste an XMPP invitation link:",
     "onboarding_invite_invalid": "This is not a valid XMPP invitation link.",
     "onboarding_register_while_logged_in": "Log out first to create another account from this invitation.",

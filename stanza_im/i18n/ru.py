@@ -192,6 +192,7 @@ STRINGS = {
     "onboarding_register_other": "Зарегистрироваться на другом сервере",
     "onboarding_preauth_unsupported": "Сервер не поддерживает регистрацию по приглашению.",
     "onboarding_preauth_rejected": "Токен приглашения отклонён: {error}",
+    "onboarding_preauth_timeout": "Сервер не ответил на проверку токена приглашения.",
     "onboarding_invite_prompt": "Вставьте ссылку-приглашение XMPP:",
     "onboarding_invite_invalid": "Это не корректная ссылка-приглашение XMPP.",
     "onboarding_register_while_logged_in": "Сначала завершите сеанс, чтобы создать по этому приглашению другой аккаунт.",

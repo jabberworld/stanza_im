@@ -11,6 +11,7 @@ import logging
 import os
 
 from PyQt6 import QtCore, QtGui, QtWidgets
+from slixmpp.exceptions import IqTimeout
 
 from stanza_im.i18n import tr
 from stanza_im.core.client import JabberClient
@@ -250,6 +251,13 @@ class AccountRegistrationDialog(QtWidgets.QDialog):
                 return
             try:
                 await self._client.preauth_ibr(server, self._preauth)
+            except IqTimeout:
+                logger.debug("Pre-authenticated registration timed out",
+                             exc_info=True)
+                self._set_status(tr("onboarding_preauth_timeout"), "red")
+                await self._close_client()
+                self._next_btn.setEnabled(True)
+                return
             except Exception as exc:
                 logger.debug("Pre-authenticated registration failed",
                              exc_info=True)

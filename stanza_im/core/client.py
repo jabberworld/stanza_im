@@ -3836,7 +3836,16 @@ class JabberClient:
         iq["to"] = server
         element = ET.SubElement(iq.xml, "{%s}preauth" % NS_PARS)
         element.set("token", token)
-        await iq.send(timeout=20)
+        # This IQ is sent before authentication/bind, when slixmpp normally
+        # queues every non-register stanza until the session starts.  Without
+        # this override the token is never written to the socket and the
+        # client only sees a 20 s IqTimeout.
+        previous = getattr(self.xmpp, "_always_send_everything", False)
+        self.xmpp._always_send_everything = True
+        try:
+            await iq.send(timeout=20)
+        finally:
+            self.xmpp._always_send_everything = previous
 
     async def invite_commands(self) -> set[str]:
         domain = self.jid_str.split("@")[-1]

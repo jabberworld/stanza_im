@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _SCRATCH = tempfile.mkdtemp(prefix="stanza_onboarding_")
@@ -269,6 +270,43 @@ check("account invitation submits a submit form",
 check("account invitation parses the server result",
       _account_result["uri"].startswith("xmpp:")
       and _account_result["landing_url"].endswith("/invite/t"))
+
+# 8. Pre-auth IBR bypasses the pre-session stanza queue ----------------------
+captured_preauth = {}
+
+
+class _FakeIq:
+    def __init__(self, owner):
+        self._owner = owner
+        self.xml = ET.Element("iq")
+
+    def __setitem__(self, key, value):
+        self.xml.set(key, str(value))
+
+    async def send(self, timeout=None):
+        captured_preauth["timeout"] = timeout
+        captured_preauth["sends_before_session"] = (
+            self._owner._always_send_everything)
+        return None
+
+
+class _FakeXmpp:
+    def __init__(self):
+        self._always_send_everything = False
+
+    def Iq(self):
+        return _FakeIq(self)
+
+
+_preauth_client = async_client
+_fake_xmpp = _FakeXmpp()
+_preauth_client.xmpp = _fake_xmpp
+asyncio.run(_preauth_client.preauth_ibr("example.com", "token-1"))
+check("pre-auth IQ is sent before session start",
+      captured_preauth.get("sends_before_session") is True
+      and captured_preauth.get("timeout") == 20)
+check("the pre-session send override is restored",
+      _fake_xmpp._always_send_everything is False)
 
 print("FAILURES:", FAILURES if FAILURES else "none")
 sys.exit(1 if FAILURES else 0)
