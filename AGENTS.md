@@ -3771,7 +3771,10 @@ colour for custom backgrounds, and `RosterWidget.paintEvent` plus
 The chat background is a CSS override injected by
 `ChatThemeFactory.set_chat_bg_color`; when the configured value is empty
 `MainWindow._chat_theme_colors()` resolves it to `QPalette.Base` and passes
-derived text/muted colours, so the chat stays readable in a dark theme. The
+derived text/muted colours, so the chat stays readable in a dark theme; the
+message separator keeps the skin's `#ccc` on light backgrounds and uses a
+subtle 20 % text/background blend on dark ones (separate from the muted text
+colour). The
 MUC mention highlight color feeds `ChatThemeFactory.set_highlight_color`.
 `ui/theme.py` centralises `app_palette`/`is_dark`/`contrasting_text`/
 `muted_color`/`error_color`. `Config.load` performs a one-time migration

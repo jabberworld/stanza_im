@@ -131,6 +131,20 @@ factory.set_chat_bg_color("#ffffff")
 page = factory.generate_page([], "")
 check("light custom chat background gets dark text",
       "color: #000000 !important" in page)
+check("light chat separator keeps the old #ccc",
+      factory._chat_separator_color == "#cccccc")
+check("light chat page uses the old separator",
+      "border-top-color: #cccccc" in page)
+
+factory.set_chat_bg_color(BASE.name())
+page = factory.generate_page([], "")
+check("dark chat separator is not the muted text colour",
+      factory._chat_separator_color != factory._chat_muted_color)
+separator = QtGui.QColor(factory._chat_separator_color)
+check("dark chat separator stays subtle",
+      0.15 < separator.lightnessF() < 0.4)
+check("dark chat page uses the subtle separator",
+      f"border-top-color: {factory._chat_separator_color}" in page)
 
 
 # ── MUC nickname colours ──────────────────────────────────────────

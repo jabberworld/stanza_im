@@ -339,6 +339,7 @@ class ChatThemeFactory:
         self._chat_bg_color = ""
         self._chat_text_color = ""
         self._chat_muted_color = ""
+        self._chat_separator_color = ""
         self._highlight_color = _HIGHLIGHT_COLOR
         self._load_templates()
 
@@ -480,10 +481,16 @@ class ChatThemeFactory:
             if not muted.isValid():
                 muted = theme.muted_color(text, background)
             self._chat_muted_color = muted.name()
+            if background.lightnessF() >= 0.5:
+                self._chat_separator_color = "#cccccc"
+            else:
+                self._chat_separator_color = theme.muted_color(
+                    text, background, 0.20).name()
         else:
             self._chat_bg_color = ""
             self._chat_text_color = ""
             self._chat_muted_color = ""
+            self._chat_separator_color = ""
 
     def set_highlight_color(self, color: str = "") -> None:
         """Set the MUC mention highlight color (hex ``#rrggbb``)."""
@@ -514,6 +521,7 @@ class ChatThemeFactory:
         if self._chat_bg_color:
             text = self._chat_text_color or "#000000"
             muted = self._chat_muted_color or text
+            separator = self._chat_separator_color or "#cccccc"
             css += (
                 f"\nbody {{ background-color: {self._chat_bg_color} "
                 f"!important; background-image: none !important; "
@@ -529,7 +537,7 @@ class ChatThemeFactory:
                 f".stanza-edited, .stanza-retracted, "
                 f".stanza-retracted-text {{ color: {muted} !important; }}"
                 f"\n.container, .container_next {{ border-top-color: "
-                f"{muted} !important; }}"
+                f"{separator} !important; }}"
                 f"\n.stanza-reply {{ border-left-color: {muted} !important; "
                 f"background: rgba(127,127,127,.12) !important; }}"
                 f"\n.message_actions {{ background: "
