@@ -2581,8 +2581,10 @@ rendered by a bundled pure-Python encoder (`qr.py`); `ui/qr_dialog.QrCodeView`
 caches that matrix and repaints it at the current window size (280 px default),
 so resizing neither re-encodes the code nor blurs it. UI: the Privacy
 preferences tabs (compact copy/QR icon buttons), `ui/omemo_devices_dialog.py`
-(per-row icon actions for trust/rename/copy/delete; only global Refresh/Close
-at the bottom), the reaction-style `ui/omemo_popup.py` (chat shield) and the
+(per-row icon actions for trust/rename/copy/delete; the current device keeps a
+disabled delete button so the action column stays aligned; only global
+Refresh/Close at the bottom), the reaction-style `ui/omemo_popup.py` (chat
+shield) and the
 roster «Управление OMEMO» entry (a shield icon, in the rename/group/
 subscription block). The chat lock button is always shown while OMEMO is
 available — only the «OMEMO» mode entry is gated on the peer's support, which

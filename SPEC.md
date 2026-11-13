@@ -2771,7 +2771,8 @@ Registers XEP plugins (conditionally where noted):
   blind-trust option + info glyph, the alias-sync toggle, the own fingerprint
   with compact copy/QR icon buttons and a device-manager button), the device
   manager (`ui/omemo_devices_dialog.py`, per-row icon actions for
-  trust/rename/copy/delete and only global Refresh/Close at the bottom), the
+  trust/rename/copy/delete; the current device keeps a disabled delete button
+  so all action columns align; only global Refresh/Close at the bottom), the
   chat lock/shield buttons with the reaction-style `ui/omemo_popup.py`, and the
   roster «Управление OMEMO» entry (a shield icon, in the rename/group/
   subscription block). The lock button is shown whenever OMEMO is available —

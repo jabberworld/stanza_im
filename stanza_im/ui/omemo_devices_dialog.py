@@ -193,12 +193,19 @@ class OmemoDevicesDialog(QtWidgets.QDialog):
         copy_btn.clicked.connect(lambda: self._copy(device))
         box.addWidget(copy_btn)
 
-        if (self._own
-                and int(device.device_id) != self._own_device_id):
-            delete_btn = _icon_button("process-stop.png",
-                                      tr("omemo_delete_device"))
+        # Keep the delete action in every row.  The current device cannot be
+        # removed, but hiding its button shifts the other icons and makes the
+        # list look uneven; a disabled button keeps the action column aligned.
+        current = (self._own
+                   and int(device.device_id) == self._own_device_id)
+        delete_btn = _icon_button(
+            "process-stop.png",
+            tr("omemo_delete_current") if current
+            else tr("omemo_delete_device"))
+        delete_btn.setEnabled(not current)
+        if not current:
             delete_btn.clicked.connect(lambda: self._delete(device))
-            box.addWidget(delete_btn)
+        box.addWidget(delete_btn)
         return row
 
     # ── actions ─────────────────────────────────────────────────

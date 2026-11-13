@@ -565,6 +565,45 @@ _dlg_src = open(os.path.join(
     "stanza_im", "ui", "omemo_devices_dialog.py"), encoding="utf-8").read()
 check("the device dialog force-downloads the list",
       "refresh_device_lists([self._jid], force=True)" in _dlg_src)
+
+from types import SimpleNamespace  # noqa: E402
+from stanza_im.ui.omemo_devices_dialog import OmemoDevicesDialog  # noqa: E402
+
+
+class _RowOmemo:
+    def device_name(self, jid, device_id, label=""):
+        return "Device %s" % device_id
+
+    def trust_level_name(self, device):
+        return "UNDECIDED"
+
+    def device_last_seen(self, jid, device_id):
+        return 0
+
+    def fingerprint(self, key):
+        return "aa bb cc"
+
+    def device_resource(self, jid, device_id):
+        return ""
+
+
+_dialog = OmemoDevicesDialog(
+    SimpleNamespace(omemo=SimpleNamespace(available=False)),
+    "me@example.com", own=True)
+_dialog._own_device_id = 2
+_own_row = _dialog._device_row(
+    _RowOmemo(), SimpleNamespace(device_id=2, label="", identity_key=b"x"))
+_other_row = _dialog._device_row(
+    _RowOmemo(), SimpleNamespace(device_id=3, label="", identity_key=b"x"))
+_own_delete = _own_row.layout().itemAt(4).widget()
+_other_delete = _other_row.layout().itemAt(4).widget()
+check("the current device keeps a disabled delete button",
+      _own_delete is not None and not _own_delete.isEnabled()
+      and _own_delete.toolTip() in (
+          "omemo_delete_current",
+          "The current device cannot be deleted."))
+check("another device keeps an enabled delete button",
+      _other_delete is not None and _other_delete.isEnabled())
 check("device actions are per-row icon buttons",
       "_device_row" in _dlg_src and "setItemWidget" in _dlg_src
       and "_trust_btn" not in _dlg_src)
