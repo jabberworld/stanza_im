@@ -58,6 +58,35 @@ view._overflow = False
 view._fraction = 0.5
 check("no overflow is not scrolled up", not view.is_scrolled_up())
 
+# 1b. a fast reply after our own send must follow the pending bottom scroll --
+view._overflow = True
+view._fraction = 1.0
+view._scroll_suspended = True
+view._deferred_scroll = None
+view._anchor_scroll = None
+view._follow_bottom = True
+check("a fast reply follows a pending bottom scroll",
+      view._sticks_to_bottom())
+view._follow_bottom = False
+check("a generic suspended scroll does not chase the bottom",
+      not view._sticks_to_bottom())
+view._scroll_suspended = False
+check("a settled bottom still follows new messages",
+      view._sticks_to_bottom())
+view._anchor_scroll = {"kind": "message"}
+check("an anchor jump never chases the bottom",
+      not view._sticks_to_bottom())
+view._anchor_scroll = None
+view._anchor_restore_pending = True
+view._scroll_suspended = True
+view._follow_bottom = True
+check("an unconfirmed anchor restore never chases the bottom",
+      not view._sticks_to_bottom())
+view._anchor_restore_pending = False
+view._follow_bottom = False
+view._scroll_suspended = False
+view._deferred_scroll = None
+
 # 2. counting + first-unread memory + label -----------------------------------
 view._overflow = True
 view._fraction = 0.5

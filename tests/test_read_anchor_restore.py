@@ -733,10 +733,15 @@ check("the bottom report is ignored while the anchor restore is pending",
 
 # 18c. an unread render does not scroll its buffered chunks to the bottom ----
 _append = method_source(_cv_src, "_append_chunk")
+_sticks = method_source(_cv_src, "_sticks_to_bottom")
+check("buffered chunks use the bottom-following guard",
+      "self._sticks_to_bottom()" in _append)
 check("buffered chunks do not chase the bottom during anchor restore",
-      "not self._scroll_suspended" in _append
-      and "self._deferred_scroll is None" in _append
-      and "self._anchor_scroll is None" in _append)
+      "not self._scroll_suspended" in _sticks
+      and "self._follow_bottom" in _sticks
+      and "not self._anchor_restore_pending" in _sticks
+      and "self._deferred_scroll is None" in _sticks
+      and "self._anchor_scroll is None" in _sticks)
 _render_all = method_source(_cw_src, "_render_all")
 check("an unread render prepares the anchor restore before rendering",
       '"prepare_anchor_restore"' in _render_all

@@ -1358,7 +1358,9 @@ Single conversation tab. Layout:
   (`hideEvent` stops it, `showEvent` starts it) and while the application is
   active (`poll_allowed`), and skips the last-seen query
   when the view is at the bottom. Incoming messages never force a scroll to the
-  bottom — only the user's own outgoing messages do.
+  bottom — only the user's own outgoing messages do — but a message appended
+  while that just-requested bottom scroll is still pending keeps following it
+  (`_follow_bottom`; an anchor restore still blocks the chase).
 - MUC participant sidebar (`_users_list`, a `_ParticipantList` subclass): a
   single click selects a row (highlight only), a double-click opens the private
   chat (`participant_clicked` → MainWindow opens the participant's `real_jid`,

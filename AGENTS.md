@@ -1434,7 +1434,10 @@ messages while `ChatView.is_scrolled_up()` (`note_new_message`), showing
 (`scroll_to_message(..., highlight=False)`), the second click (or reaching the
 bottom) scrolls to the end and clears the counter, which lives until the actual
 bottom. Incoming messages no longer force a scroll to the bottom (only the
-user's own outgoing messages do); the HTML button's click sets
+user's own outgoing messages do); an incoming message appended while a just
+requested bottom scroll is still pending keeps following it (`_follow_bottom`
+lets `_sticks_to_bottom()` override the short `_scroll_suspended` window,
+while an anchor restore still blocks it). The HTML button's click sets
 `window.__stanzaJumpPress` and is relayed through the scroll poll, with the
 QWebChannel `bridge.on_jump_clicked` only as an optional fast path (the poll is
 the fallback when the transport is unavailable). The 250 ms scroll poll runs

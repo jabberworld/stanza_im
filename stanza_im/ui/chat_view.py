@@ -304,6 +304,7 @@ class _JumpButtonMixin:
 
     def suspend_scroll_reports(self) -> None:
         """Ignore bottom/seen reports while a programmatic scroll is pending."""
+        self._follow_bottom = False
         self._scroll_suspended = True
 
     def resume_scroll_reports(self) -> None:
@@ -322,12 +323,14 @@ class _JumpButtonMixin:
         self._near_top_hit = False
         self._anchor_scroll = None
         self._anchor_restore_pending = True
+        self._follow_bottom = False
         self._scroll_suspended = True
 
     def cancel_anchor_restore(self) -> None:
         """Stop waiting for a read-anchor scroll (fallback is taking over)."""
         self._anchor_scroll = None
         self._anchor_restore_pending = False
+        self._follow_bottom = False
         self._scroll_suspended = False
 
     def anchor_restore_pending(self) -> bool:
@@ -765,6 +768,10 @@ if HAS_WEBENGINE:
             # a "sitting at the bottom" report would be the empty document and
             # would mark the freshly opened conversation as read.
             self._scroll_suspended = False
+            # True while a scroll_to_bottom() has not been confirmed by the
+            # next poll: a fast reply appended in that window must still follow
+            # the bottom, even though scroll reports are suspended.
+            self._follow_bottom = False
             # The programmatic jump to the read anchor, while its target has
             # not been confirmed visible yet (``{"kind", "target", "ref",
             # "until"}``).  Kept until a poll sees the target in the viewport,
@@ -811,6 +818,7 @@ if HAS_WEBENGINE:
             self._deferred_scroll = None
             self._anchor_scroll = None
             self._anchor_restore_pending = False
+            self._follow_bottom = False
             self._scroll_suspended = False
             self._clear_jump_pin()
 
@@ -827,7 +835,9 @@ if HAS_WEBENGINE:
                 self.zoom_changed.emit(self._zoom)
                 event.accept()
                 return
-            # The user takes over scrolling: stop re-centring the jump target.
+            # The user takes over scrolling: stop re-centring the jump target
+            # and never pull a fast reply back down over their position.
+            self._follow_bottom = False
             self._clear_jump_pin()
             super().wheelEvent(event)
 
@@ -2547,6 +2557,7 @@ window.__stanzaMentionRef = '';
             """
             if self._deferred_scroll is not None:
                 return
+            self._follow_bottom = False
             pending = self._anchor_scroll
             if pending is None:
                 if self._anchor_restore_pending:
@@ -2571,18 +2582,28 @@ window.__stanzaMentionRef = '';
                 # whole block read).
                 self.anchor_scroll_failed.emit()
 
+        def _sticks_to_bottom(self) -> bool:
+            """Whether a newly appended chunk should scroll to the bottom.
+
+            A pending ``scroll_to_bottom()`` keeps ``_scroll_suspended`` set
+            until the next poll.  A fast reply appended in that window must
+            still follow the bottom; an anchor restore or another programmatic
+            jump clears ``_follow_bottom`` and must never chase it.
+            """
+            return bool(
+                self._fraction >= 0.999
+                and (not self._scroll_suspended or self._follow_bottom)
+                and not self._anchor_restore_pending
+                and self._deferred_scroll is None
+                and self._anchor_scroll is None)
+
         def _append_chunk(self, html: str) -> None:
             safe = json.dumps(html)
             # Never chase the bottom while a read-anchor restore is pending:
             # a full unread window is appended chunk by chunk, and scrolling
             # each chunk to the end would hide the anchor and mark the block
             # read before the restore scroll paints.
-            do_scroll = 1 if (
-                self._fraction >= 0.999
-                and not self._scroll_suspended
-                and self._deferred_scroll is None
-                and self._anchor_scroll is None
-            ) else 0
+            do_scroll = 1 if self._sticks_to_bottom() else 0
             js = f"""
             var chat = document.getElementById('chat');
             if (chat) {{
@@ -2610,6 +2631,7 @@ window.__stanzaMentionRef = '';
             self._deferred_scroll = None
             self._anchor_scroll = None
             self._anchor_restore_pending = False
+            self._follow_bottom = False
             self._scroll_suspended = False
             self._fraction = 1.0
             self._overflow = False
@@ -2983,6 +3005,7 @@ window.__stanzaMentionRef = '';
                 "restore": bool(restore),
                 "until": time.monotonic() + self._ANCHOR_SCROLL_TIMEOUT_S,
             }
+            self._follow_bottom = False
             self._scroll_suspended = True
 
         def _anchor_scroll_resolved(self, result) -> None:
@@ -3154,6 +3177,7 @@ window.__stanzaMentionRef = '';
             self._pending.clear()
             self._deferred_scroll = None
             self._anchor_scroll = None
+            self._follow_bottom = False
             self._scroll_suspended = False
             self._clear_jump_pin()
             self._fraction = 1.0
@@ -3170,6 +3194,7 @@ window.__stanzaMentionRef = '';
             self._fraction = 1.0
             self._anchor_scroll = None
             self._clear_jump_pin()
+            self._follow_bottom = True
             self._scroll_suspended = True
             self._reset_unread_indicator()
             self._update_jump_button()
@@ -3194,6 +3219,7 @@ window.__stanzaMentionRef = '';
             self._near_top_hit = fraction <= 0.0
             self._fraction = fraction
             self._anchor_scroll = None
+            self._follow_bottom = False
             self._scroll_suspended = True
             js = (
                 "requestAnimationFrame(function(){"
