@@ -436,6 +436,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._history_manager: object | None = None
         self._last_activity = time.monotonic()
         self._auto_status_applied = False
+        # XEP-0352: delay the first real state until initial presence/roster
+        # have settled.  Sending <inactive/> during the login burst makes the
+        # server queue contact presences (they arrive much later with a
+        # "Client Inactive" delay).  ``_csi_last_sent`` deduplicates transitions.
+        self._csi_ready_at = float("inf")
+        self._csi_last_sent: bool | None = None
+        self._presence_probed: set[str] = set()
         # System sleep: the monitor reports logind/UPower transitions; while
         # asleep the presence is offline (see _on_system_suspend).
         self._suspend_monitor = None
@@ -4172,6 +4179,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connecting = True
         self._connect_progress_active = True
         self._conn_progress_value = 0
+        self._csi_ready_at = float("inf")
+        self._csi_last_sent = None
+        self._presence_probed.clear()
         self._login_jid = str(jid or "").split("/", 1)[0]
         # The last known roster is shown before the client exists (when there
         # is one), so the connection runs in the background; a first login
@@ -4505,6 +4515,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_session_started(self):
         logger.info("Session started, roster arriving...")
+        # Let the initial roster/presence burst pass before reporting an
+        # inactive desktop.  A server buffers CSIs and can otherwise hold
+        # transport presences for many seconds.
+        self._csi_ready_at = time.monotonic() + 1.5
+        self._csi_last_sent = None
+        self._presence_probed.clear()
+        QtCore.QTimer.singleShot(
+            int(max(0.0, self._csi_ready_at - time.monotonic()) * 1000) + 50,
+            self._update_csi)
         ready = getattr(self, "_session_ready", None)
         if ready is not None and not ready.done():
             ready.set_result(True)
@@ -4709,7 +4728,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_tray_status_icon(self._config.last_status)
         if self._visible:
             self._tray.show_message(APP_NAME, tr("login_reconnected"))
-        self._update_csi()
+        self._csi_ready_at = time.monotonic()
+        self._csi_last_sent = None
+        self._presence_probed.clear()
+        self._update_csi(force=True)
         self._sync_tray_blink()
         self._set_info_actions_enabled(True)
 
@@ -4736,15 +4758,61 @@ class MainWindow(QtWidgets.QMainWindow):
                 and bool(getattr(notifications, "osd_enabled", False))
                 and bool(getattr(notifications, "osd_typing", False)))
 
-    def _update_csi(self):
-        """Send the current activity state (XEP-0352) to the server."""
+    def _update_csi(self, *, force: bool = False):
+        """Send the current activity state (XEP-0352) to the server.
+
+        During the login burst the client stays effectively active: a server
+        may queue presence while CSI is inactive, which delayed the RSS/gateway
+        status updates by many seconds.  The first real state is sent after
+        the short settle window; focus changes after that take effect at once.
+        """
         if self._client is None:
+            return
+        if not force and time.monotonic() < getattr(
+                self, "_csi_ready_at", 0.0):
             return
         active = (self.app.applicationState()
                   == QtCore.Qt.ApplicationState.ApplicationActive)
         if not active and self._keep_csi_active_for_typing_osd():
             active = True
+        if active == getattr(self, "_csi_last_sent", None):
+            return
+        self._csi_last_sent = active
         self._client.set_client_active(active)
+        logger.debug("CSI[send] state=%s", "active" if active else "inactive")
+        if active:
+            # A CSI queue flush may be delayed by the server; probing the
+            # contacts that still have no resource resolves their status
+            # without waiting for the next presence race.
+            QtCore.QTimer.singleShot(300, self._probe_missing_presence)
+
+    def _probe_missing_presence(self) -> None:
+        """Probe subscribed contacts whose current presence is still unknown."""
+        client = self._client
+        if client is None:
+            return
+        probed = getattr(self, "_presence_probed", None)
+        if probed is None:
+            probed = self._presence_probed = set()
+        try:
+            items = client.get_roster_snapshot()
+        except Exception:  # noqa: BLE001 - best effort
+            return
+        for item in items:
+            bare = str(item.get("jid") or "").split("/", 1)[0]
+            own = str(getattr(client, "jid_str", "")).split("/", 1)[0]
+            if (not bare or bare == own
+                    or bare in probed
+                    or client.subscription(bare) not in ("to", "both")):
+                continue
+            try:
+                resources = getattr(client.get_contact(bare), "resources", {})
+            except Exception:  # noqa: BLE001 - presentation only
+                resources = {}
+            if resources:
+                continue
+            if client.probe_presence(bare):
+                probed.add(bare)
 
     def _set_tray_status_icon(self, show: str):
         """Use the presence status icon in the tray (right away)."""
@@ -12675,6 +12743,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._schedule_roster_repaint()
         self._chat_window.close_all()
         self._pending_transfer_send = None
+        self._csi_ready_at = 0.0
+        self._csi_last_sent = None
+        self._presence_probed.clear()
         self._file_uploads.clear()
         self._file_upload_states.clear()
         self._incoming_transfer_rows.clear()

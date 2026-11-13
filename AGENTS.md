@@ -4028,7 +4028,12 @@ text is kept. Returning activity (`eventFilter`) resumes
   `QApplication.applicationState() == ApplicationActive` through an application
   `eventFilter` (`ApplicationStateChange`/`WindowActivate`/`WindowDeactivate`)
   plus the show/hide/toggle/Esc/close hooks, and re-sends the state on
-  `session_start`/`session_resumed`/`csi_enabled`. The preference applies live
+  `session_start`/`session_resumed`/`csi_enabled`.  The first real state is
+  delayed until 1.5 s after `session_start` (the client stays effectively
+  active during the initial presence/roster burst), transitions are
+  deduplicated (`_csi_last_sent`), and becoming active probes subscribed
+  contacts that still have no resource (`JabberClient.probe_presence`) so a
+  server's CSI queue cannot leave RSS/gateway statuses stale.  The preference applies live
   (no restart): `JabberClient.set_csi_config()` (un)registers the plugin and
   sends `<active/>` on disable; MainWindow calls it from `_on_settings_applied`.
   Because a server holds non-urgent stanzas (chat states) while the client is

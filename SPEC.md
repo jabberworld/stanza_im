@@ -3371,7 +3371,11 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   `set_client_active()`/`_sync_csi()` send `<active/>`/`<inactive/>`.
   MainWindow recomputes activity from `QApplication.applicationState()` via an
   application event filter and the show/hide/toggle/Esc/close hooks, and
-  re-sends the state on `session_start`/`session_resumed`/`csi_enabled`. The
+  re-sends the state on `session_start`/`session_resumed`/`csi_enabled`.
+  The initial state is deferred for 1.5 s after `session_start` (the login
+  presence/roster burst stays active), transitions are deduplicated, and an
+  active transition probes subscribed contacts with no known resource
+  (`JabberClient.probe_presence`) to avoid stale CSI-queued statuses. The
   preference is applied live by `JabberClient.set_csi_config()` (called from
   `_on_settings_applied`): it registers/unregisters the plugin and sends
   `<active/>` before disabling. Servers hold non-urgent chat states while the

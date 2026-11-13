@@ -5451,6 +5451,18 @@ class JabberClient:
             self.request_roster()
         return count
 
+    def probe_presence(self, bare: str) -> bool:
+        """Ask *bare* for its current presence (XEP-0352 catch-up)."""
+        bare = str(bare or "").split("/", 1)[0]
+        if not bare or not self.xmpp.is_connected():
+            return False
+        presence = self.xmpp.Presence()
+        presence["to"] = bare
+        presence["type"] = "probe"
+        presence.send()
+        logger.debug("SUB[probe] sent presence probe to %s", bare)
+        return True
+
     def resend_subscription(self, jid: str) -> None:
         """Send a fresh presence subscribe request to *jid* (e.g. after a
         rejected or pending subscription)."""
