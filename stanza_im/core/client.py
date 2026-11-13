@@ -628,6 +628,18 @@ def _oob_url(msg) -> str:
     return ""
 
 
+def _oob_desc(msg) -> str:
+    """Return the XEP-0066 ``<desc/>`` beside an OOB ``<url/>``, else ""."""
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        return ""
+    for x in xml.iter("{%s}x" % NS_OOB):
+        desc = x.find("{%s}desc" % NS_OOB)
+        if desc is not None and (desc.text or "").strip():
+            return str(desc.text).strip()
+    return ""
+
+
 def _int_or_zero(text: str) -> int:
     try:
         return int(text)
@@ -638,12 +650,14 @@ def _int_or_zero(text: str) -> int:
 def _parse_file_element(file_el) -> dict:
     """Parse a XEP-0234/SIMS ``<file/>`` into a media dict."""
     media = {"name": "", "size": 0, "media_type": "", "width": 0, "height": 0,
-             "hashes": {}}
+             "hashes": {}, "description": ""}
     for child in file_el:
         tag = child.tag.rsplit("}", 1)[-1]
         text = (child.text or "").strip()
         if tag == "name":
             media["name"] = text
+        elif tag == "desc":
+            media["description"] = text
         elif tag == "size":
             media["size"] = _int_or_zero(text)
         elif tag == "media-type":
@@ -703,7 +717,9 @@ def message_media(msg) -> dict | None:
         file_el = sharing.find("{%s}file" % NS_FT)
         media = _parse_file_element(file_el) if file_el is not None else {
             "name": "", "size": 0, "media_type": "", "width": 0, "height": 0,
-            "hashes": {}}
+            "hashes": {}, "description": ""}
+        if not media.get("description"):
+            media["description"] = _oob_desc(msg)
         url = ""
         for ref in sharing.iter("{%s}reference" % NS_REFERENCE):
             if ref.get("uri"):
@@ -716,11 +732,13 @@ def message_media(msg) -> dict | None:
     if url:
         return {"name": "", "size": 0, "media_type": "", "width": 0,
                 "height": 0, "hashes": {}, "url": url,
+                "description": _oob_desc(msg),
                 "hide_body": _fallback_body_range(msg, NS_REFERENCE)}
     url = _oob_url(msg)
     if url:
         return {"name": "", "size": 0, "media_type": "", "width": 0,
                 "height": 0, "hashes": {}, "url": url,
+                "description": _oob_desc(msg),
                 "hide_body": _fallback_body_range(msg, NS_OOB)}
     return None
 
@@ -2726,10 +2744,6 @@ class JabberClient:
                               str(pct), str(path))
             await put_task
             url = XEP_0454.format_url(get_url, fragment)
-            message_id = await self.send_omemo_message(
-                jid, url, mtype=mtype, recipients=recipients)
-            if not message_id:
-                raise RuntimeError("OMEMO message was not sent")
             media = {
                 "name": os.path.basename(str(path)),
                 "size": os.path.getsize(str(path)),
@@ -2740,8 +2754,13 @@ class JabberClient:
                 "url": url,
                 "hashes": await asyncio.to_thread(
                     file_hashes_b64, str(path)),
+                "description": str(caption or "").strip(),
                 "hide_body": None,
             }
+            message_id = await self.send_omemo_message(
+                jid, url, mtype=mtype, recipients=recipients, media=media)
+            if not message_id:
+                raise RuntimeError("OMEMO message was not sent")
             # The UI local echo must reuse the real OMEMO stanza id: otherwise
             # the MAM archive copy (which the sending device cannot decrypt,
             # because it is not an OMEMO recipient) appears as a second
@@ -2948,6 +2967,9 @@ class JabberClient:
         name = str(media.get("name") or "")
         if name:
             ET.SubElement(file_el, "{%s}name" % NS_FT).text = name
+        description = str(media.get("description") or "")
+        if description:
+            ET.SubElement(file_el, "{%s}desc" % NS_FT).text = description
         for algo, value in (media.get("hashes") or {}).items():
             if algo and value:
                 hash_el = ET.SubElement(file_el, "{%s}hash" % NS_HASHES)
@@ -2972,6 +2994,9 @@ class JabberClient:
         xml.insert(0, reference)
         oob = ET.SubElement(xml, "{%s}x" % NS_OOB)
         ET.SubElement(oob, "{%s}url" % NS_OOB).text = url
+        description = str(media.get("description") or "")
+        if description:
+            ET.SubElement(oob, "{%s}desc" % NS_OOB).text = description
         body = str(msg["body"] or "")
         start = body.find(url)
         if start < 0:
@@ -3955,6 +3980,20 @@ class JabberClient:
         if features is None:
             return True  # not probed yet — do not hide the UI
         return feature in features
+
+    def supports_private_pep(self) -> bool:
+        """Whether the server can host private PEP nodes with publish-options.
+
+        The account domain's cached ``disco#info`` features need both the
+        pubsub service and its ``publish-options`` form; a server that does
+        not advertise them is not asked to store the OMEMO alias node.
+        """
+        features = getattr(self, "_server_features", None)
+        if not features:
+            return False
+        pubsub = "http://jabber.org/protocol/pubsub"
+        return ((pubsub + "#publish-options") in features
+                and (pubsub in features or (pubsub + "#pep") in features))
 
     def supports_privacy(self) -> bool:
         """XEP-0016 privacy lists (`jabber:iq:privacy`)."""
@@ -5439,14 +5478,17 @@ class JabberClient:
         self._start_task(self.send_file_p2p(jid, filepath, "p2p"))
 
     async def send_file_p2p(self, jid: str, path: str,
-                            method: str = "p2p", target: str = "") -> None:
+                            method: str = "p2p", target: str = "",
+                            caption: str = "") -> None:
         """Send *path* to *jid* over Jingle.
 
         *method*: ``p2p`` (SOCKS5 with IBB fallback), ``p2p-ibb`` (IBB only).
         *target*: an explicit full JID chosen by the user; empty asks every
         JMI-capable resource and keeps the first one that proceeds.
+        *caption* becomes the XEP-0234 ``<desc/>`` of the file offer.
         """
-        await self.file_transfer.send_file(jid, path, method, target=target)
+        await self.file_transfer.send_file(
+            jid, path, method, target=target, caption=caption)
 
     def answer_file_offer(self, offer_id: str, accept: bool,
                           save_path: str = "") -> None:
@@ -5474,8 +5516,8 @@ class JabberClient:
     def upload_http(self, jid: str, path: str, caption: str = ""):
         """Upload *path* via HTTP Upload and share the URL in *jid*'s chat.
 
-        *caption* (optional) is not used here — callers send it once as a
-        separate message via ``send_message``/``send_muc_message``.
+        *caption* (optional) becomes the XEP-0066 ``<desc/>`` of the same
+        uploaded-file message; it is never sent as a separate message.
         """
         return self._http_upload_flow(jid, path, caption)
 
@@ -5545,6 +5587,7 @@ class JabberClient:
                 "name": filename, "size": size, "media_type": content_type,
                 "width": 0, "height": 0, "url": get_url,
                 "hashes": await asyncio.to_thread(file_hashes_b64, str(path)),
+                "description": str(caption or "").strip(),
                 "hide_body": None,
             }
             if self.groupchats.get(target):

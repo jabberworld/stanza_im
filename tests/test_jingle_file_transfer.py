@@ -344,7 +344,7 @@ order = []
 
 
 class _SerialManager(jingle.JingleFileTransferManager):
-    async def _send_one(self, jid, path, method, target=""):
+    async def _send_one(self, jid, path, method, target="", caption=""):
         order.append("start:%s" % path)
         await asyncio.sleep(0.02)
         order.append("end:%s" % path)

@@ -135,7 +135,7 @@ from stanza_im.core.storage import Config
 cfg = Config()
 check("omemo config defaults",
       cfg.omemo.enabled is True and cfg.omemo.blind_trust is True
-      and cfg.omemo.alias_sync is False)
+      and cfg.omemo.alias_sync is True)
 cfg.omemo.blind_trust = False
 cfg.save()
 check("omemo config round-trips", Config().omemo.blind_trust is False)
@@ -761,6 +761,16 @@ check("devices() hides inactive devices",
 # 17. device naming + last-seen ---------------------------------------------
 from stanza_im.core.client import JabberClient as _JC
 
+_pep_probe = object.__new__(_JC)
+_pep_probe._server_features = {
+    "http://jabber.org/protocol/pubsub",
+    "http://jabber.org/protocol/pubsub#publish-options",
+}
+check("private PEP support is detected", _pep_probe.supports_private_pep())
+_pep_probe._server_features = {"http://jabber.org/protocol/pubsub"}
+check("publish-options is required for private PEP",
+      not _pep_probe.supports_private_pep())
+
 
 class _Contact:
     def __init__(self):
@@ -1040,6 +1050,25 @@ _aliases8 = _c8.xmpp["xep_0384"].storage.get_app("device_aliases", {})
 check("a live server event replaces the local alias set",
       _aliases8 == {"bob@example.com/2": "New",
                     "carol@example.com/9": "Carol"})
+
+class _NoPepClient(_MgrClient):
+    def supports_private_pep(self):
+        return False
+
+
+async def _run_no_pep():
+    client = _NoPepClient()
+    mgr = OmemoManager(client)
+    mgr.alias_sync = True
+    mgr.set_device_alias("bob@example.com", 2, "My Gajim")
+    await mgr.sync_aliases()
+    return client, mgr
+
+
+_no_pep_client, _no_pep_mgr = asyncio.run(_run_no_pep())
+check("servers without private PEP are not queried",
+      _no_pep_client.get_calls == 0 and not _no_pep_client.published
+      and _no_pep_mgr._alias_sync_supported is False)
 
 # MUC guard: the device<->resource mapping is only learned for 1:1.
 _client_src = open(os.path.join(

@@ -104,6 +104,7 @@ stanza_im/                      # Python package
 │   ├── qr_dialog.py             # Resizable QR code dialog (OMEMO/invitations)
 │   ├── reactions_list_dialog.py # XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py         # HTTP upload / P2P progress dialog
+│   ├── image_send_dialog.py     # Ctrl+V single-image preview/caption sender
 │   ├── incoming_file_dialog.py  # Incoming Jingle file-offer confirmation
 │   ├── call_window.py           # Call UI (incoming prompt, active call, Muji)
 │   ├── device_test.py           # Devices self-tests (mic meter/tone/camera)
@@ -2561,8 +2562,8 @@ as fallback until occupant/real-JID context is available. When a plaintext
 copy later meets an already stored fallback row (live after MAM, or a later
 MAM page), `_insert` upgrades the fallback body in place instead of skipping
 it; a real plaintext row is never overwritten. Device names can be mirrored to a private PEP node
-(`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, opt-in
-`omemo.alias_sync`) so they follow the user across clients: a **manual** rename
+(`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, default-on
+`omemo.alias_sync`; skipped when the server does not advertise private PEP) so they follow the user across clients: a **manual** rename
 is published (overwriting), while a **learned** name is published only when the
 node has no name for that device (it fills gaps, never overwrites); a publish is
 the union of local aliases, the node's current names (preserved) and learned
@@ -2979,14 +2980,17 @@ when finished. OK starts the transfers while the dialog stays open,
 `file_upload_progress` events (phases `start`/`progress`/`done`/`error`, now
 carrying the file `path`) update the bars. The dialog is parented to the
 window that issued the request (`_place_dialog_over` centers it over the chat
-window or the roster), and the caption is sent once — as a separate message —
-after the batch finishes (`_send_caption_after`). File URLs and the caption are
-rendered as real outgoing messages with clickable links: in 1:1 the client
-displays them locally via `_display_local_outgoing` with the **sent** stanza id
-and the media dict (`JabberClient.take_upload_result`), so an XEP-0184 receipt
-matches the local row and the media card is rendered like any other media (no carbons echo reaches
-the sending resource), in MUC the room echo renders them.
-`client.upload_http(jid, path)` discovers the `urn:xmpp:http:upload:0` service
+window or the roster). The shared caption is attached as the XEP-0066
+`<desc/>` of **every** file in the batch and is not sent as a separate
+message. A clipboard image uses the separate `ui/image_send_dialog.py` (large
+preview, one caption, progress, automatic close on success) instead of the
+multi-file dialog. File URLs and captions are rendered as real outgoing
+messages with clickable links: in 1:1 the client displays them locally via
+`_display_local_outgoing` with the **sent** stanza id and the media dict
+(`JabberClient.take_upload_result`), so an XEP-0184 receipt matches the local
+row and the media card is rendered like any other media (no carbons echo
+reaches the sending resource), in MUC the room echo renders them.
+`client.upload_http(jid, path, caption="")` discovers the `urn:xmpp:http:upload:0` service
 (cached), requests a `<slot>` and PUTs the bytes streamed in 64 KiB chunks via
 `http.client` (Content-Length + `conn.send`), reporting the progress fraction
 through a shared `_UploadProgress` object polled by the flow coroutine. The
@@ -3035,7 +3039,7 @@ on the resumed stream. The receiver ignores a duplicate `seq` and fails the
 session (removing the partial file) on a real sequence gap. Jingle
 `session-accept` waits up to 120 s, so a manual accept is not mistaken for a
 failure.
-`client.send_file_p2p(jid, path, method, target="")` is serialized by a lock so
+`client.send_file_p2p(jid, path, method, target="", caption="")` is serialized by a lock so
 a batch runs one session at a time. `FileTransferDialog` is a reusable transfer
 list: each file is a vertical card (name row with the cancel button at its
 right; full-width progress bar; bytes/speed/ETA/status/encryption), every send

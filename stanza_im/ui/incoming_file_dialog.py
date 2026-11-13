@@ -39,6 +39,14 @@ class IncomingFileDialog(QtWidgets.QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
 
+        description = str(self._meta.get("desc") or "").strip()
+        if description:
+            caption = QtWidgets.QLabel(description, self)
+            caption.setWordWrap(True)
+            caption.setTextInteractionFlags(
+                QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(caption)
+
         if self._meta.get("encrypted"):
             note = QtWidgets.QLabel(tr("ft_encrypted"), self)
             note.setStyleSheet("color: palette(mid);")

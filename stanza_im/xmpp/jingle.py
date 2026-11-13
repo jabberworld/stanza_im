@@ -518,10 +518,12 @@ class JingleFileTransferManager:
     # ── Public API ────────────────────────────────────────────────
 
     async def send_file(self, jid: str, path: str,
-                        method: str = "p2p", target: str = "") -> None:
+                        method: str = "p2p", target: str = "",
+                        caption: str = "") -> None:
         """Send *path* to *jid*; serialized so a batch runs sequentially."""
         async with self._send_lock:
-            await self._send_one(jid, path, method, target=target)
+            await self._send_one(jid, path, method, target=target,
+                                 caption=caption)
 
     # ── JET-OMEMO policy ──────────────────────────────────────────
 
@@ -597,7 +599,7 @@ class JingleFileTransferManager:
                     session.peer_full)
 
     async def _send_one(self, jid: str, path: str, method: str,
-                        target: str = "") -> None:
+                        target: str = "", caption: str = "") -> None:
         path = str(path)
         if not os.path.isfile(path):
             self._emit("file_transfer_progress", jid, "error",
@@ -612,6 +614,7 @@ class JingleFileTransferManager:
         meta = FileMeta(name=os.path.basename(path), size=size,
                         media_type=mimetypes.guess_type(path)[0]
                         or "application/octet-stream",
+                        desc=str(caption or "").strip(),
                         hashes=hashes,
                         hash_algo="sha-1",
                         hash_value=hashes.get("sha-1", ""))

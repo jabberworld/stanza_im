@@ -88,6 +88,7 @@ stanza_im/
 │   ├── qr_dialog.py    — resizable QR code dialog (cached matrix)
 │   ├── reactions_list_dialog.py — XEP-0444 full reaction list ("+k" chip)
 │   ├── upload_dialog.py — HTTP upload / P2P progress dialog
+│   ├── image_send_dialog.py — Ctrl+V single-image preview/caption sender
 │   ├── incoming_file_dialog.py — Incoming Jingle file-offer confirmation
 │   ├── call_window.py  — Incoming call prompt, active call + Muji window
 │   ├── device_test.py  — Devices self-tests (mic meter/tone/camera)
@@ -559,7 +560,7 @@ media cache layout: `{z}/{x}/{y}.png` + `index.json`).
 | `plugin_settings` | `{}` | Per-plugin settings: plugin id → `{key: value}` (`plugins.settings_section`). Kept apart from the boolean enable flag; a settings-capable plugin writes its own values when its «Настроить» dialog is accepted. |
 | `omemo.enabled` | `true` | Enable OMEMO (XEP-0384) when the stack is installed. |
 | `omemo.blind_trust` | `true` | BTBV: blindly trust (and encrypt to) new devices until verified; off = strict (only manually trusted devices). |
-| `omemo.alias_sync` | `false` | Mirror device names to the private PEP node `urn:xmpp:omemo:aliases:0`. |
+| `omemo.alias_sync` | `true` | Mirror device names to the private PEP node `urn:xmpp:omemo:aliases:0`; skipped when the account domain does not advertise private PEP/publish-options. |
 | `omemo.auto_enable` | `true` | Switch a chat to OMEMO when an encrypted message arrives. |
 | `omemo.show_warnings` | `true` | Show chat warnings for new/untrusted devices. |
 | `omemo.default_mode` | `off` | Default per-chat encryption mode (`off`/`omemo`). |
@@ -2843,7 +2844,7 @@ Registers XEP plugins (conditionally where noted):
   cache keeps it.
 - Device names/aliases can be mirrored to a private PEP node
   (`core/omemo_aliases.py`, `urn:xmpp:omemo:aliases:0`, access model
-  `whitelist`, opt-in `omemo.alias_sync`): a manual rename is published
+  `whitelist`, default-on `omemo.alias_sync`): a manual rename is published
   (overwriting), a learned name only fills a node gap (never overwrites). A
   publish is the union of local aliases, the node's current names (preserved)
   and learned names, and the node snapshot is fetched before the first publish
@@ -2920,7 +2921,7 @@ Registers XEP plugins (conditionally where noted):
   speed on completion; the numbers are derived from the integer progress
   percentage and the file size, so no extra protocol data is needed.
 - `core/client.py` implements the protocol:
-  `upload_http(jid, path)` → discover the service (`urn:xmpp:http:upload:0`
+  `upload_http(jid, path, caption="")` → discover the service (`urn:xmpp:http:upload:0`
   via disco items/info, cached) → request a `<slot>` (filename/size/
   content-type) → PUT the bytes streamed in 64 KiB chunks (`http.client`,
   Content-Length + `conn.send`, progress fraction shared via
@@ -2928,14 +2929,15 @@ Registers XEP plugins (conditionally where noted):
   is reported through `file_upload_progress(jid, start|progress|done|error,
   detail, path)`, updating the dialog bars and chat status lines. The dialog
   is parented to the issuing window (chat or roster) and centered over it
-  (`_place_dialog_over`). A caption typed in the dialog is sent once as a
-  separate message after the batch finishes (`_send_caption_after`). For 1:1
-  uploads the `get` URL and the caption are rendered as real outgoing
-  messages with clickable links via `_display_local_outgoing` with the **sent**
-  stanza id and the media dict (`JabberClient.take_upload_result`), so an
-  XEP-0184 receipt matches the local row and the media card renders like every
-  other media message (the sending resource never sees its own carbons echo);
-  in MUC the room echo renders both.
+  (`_place_dialog_over`). The shared caption becomes the XEP-0066 `<desc/>` of
+  every file in the batch; no separate caption message is sent. A clipboard
+  image opens the separate `ui/image_send_dialog.py` (large preview, one
+  caption, progress, automatic close on success). For 1:1 uploads the `get`
+  URL and its caption are rendered as a real outgoing media message via
+  `_display_local_outgoing` with the **sent** stanza id and the media dict
+  (`JabberClient.take_upload_result`), so an XEP-0184 receipt matches the local
+  row and the media card renders like every other media message (the sending
+  resource never sees its own carbons echo); in MUC the room echo renders it.
 - "P2P" routes to the Jingle file transfer (§14.5.1); the roster context menu
   also gains "Send file → P2P / P2P IBB / HTTP Upload" for contacts (and
   conferences).
@@ -2959,9 +2961,10 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   slixmpp stanza objects. It is driven by IQ handlers registered with
   `MatchXPath("{jabber:client}iq/…")` for `{urn:xmpp:jingle:1}jingle` and the
   XEP-0047 `{http://jabber.org/protocol/ibb}open|close|data` elements.
-- **Sending**: `client.send_file_p2p(jid, path, method, target="")` serializes
-  sessions with a lock. A XEP-0234 `<description><file/>` carries name, size,
-  media-type, date and a SHA-1 `<hash/>` (`urn:xmpp:hashes:2`).
+- **Sending**: `client.send_file_p2p(jid, path, method, target="", caption="")`
+  serializes sessions with a lock. A XEP-0234 `<description><file/>` carries
+  name, size, media-type, date, the optional caption in `<desc/>` and a SHA-1
+  `<hash/>` (`urn:xmpp:hashes:2`).
   - **Multiple resources (XEP-0353)**: when no explicit target is chosen and
     more than one online resource exists, a private `<propose>` with the file
     description is sent to every JMI-capable resource; the first `<proceed>`
@@ -3036,18 +3039,21 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
 ### 14.5.2 Media Sharing & Hashes (XEP-0385/0372/0300/0428/0066/0333)
 
 - Incoming media messages are parsed by `core/client.message_media()` into a
-  dict (`name`/`size`/`media_type`/`width`/`height`/`hashes`/`url`/`hide_body`):
-  a XEP-0385 `<media-sharing>` block (optionally wrapped in a XEP-0372
-  `<reference type='data'>`), a bare data reference or a XEP-0066
-  `<x xmlns='jabber:x:oob'><url/></x>`, plus the XEP-0428 fallback body range.
+  dict (`name`/`size`/`media_type`/`width`/`height`/`hashes`/`url`/
+  `description`/`hide_body`): a XEP-0385 `<media-sharing>` block (optionally
+  wrapped in a XEP-0372 `<reference type='data'>`), a bare data reference or a
+  XEP-0066 `<x xmlns='jabber:x:oob'><url/><desc/></x>`, plus the XEP-0428
+  fallback body range.
   It is passed as `media=` through the message events and stored in the
   history `media` JSON column.
 - Rendering (`ChatThemeFactory.render_message(media=…)`): the fallback body
   range is stripped and a file card (name, size) plus the preview (classified
   by the announced media-type when the URL has no useful extension) is shown.
 - Sending (`JabberClient._attach_media_sharing`, from `_http_upload_flow`)
-  builds the same block with XEP-0300 sha-256 + sha-1 hashes, the OOB URL and
-  the two fallback ranges; the features `urn:xmpp:sims:1`,
+  builds the same block with XEP-0300 sha-256 + sha-1 hashes, the OOB URL,
+  optional OOB/SIMS `<desc>` and the two fallback ranges; a batch caption is
+  copied to every file and no separate caption message is sent. The features
+  `urn:xmpp:sims:1`,
   `urn:xmpp:reference:0`, `urn:xmpp:hashes:2`, `jabber:x:oob`,
   `urn:xmpp:fallback:0` and `urn:xmpp:chat-markers:0` are advertised in disco.
 - **Encryption (XEP-0391/0396, `xmpp/jet.py`)**: when `files.encryption`
@@ -3671,7 +3677,7 @@ client.resume_expected()        # True if XEP-0198 may resume the stream
 client.discover_transfer_services()  # File proxy + STUN/TURN (cached)
 client.refresh_services()       # Force re-discovery
 client.discovered_services()    # Last discovery result
-client.upload_http(jid, path)   # XEP-0363 upload
+client.upload_http(jid, path, caption="")   # XEP-0363 upload
 client.edit_message(jid, body, replace_id)  # XEP-0308 correction
 client.publish_mood(key, text="")      # XEP-0107 PEP publish
 client.publish_activity(group, sub="") # XEP-0108 PEP publish

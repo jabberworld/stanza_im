@@ -90,6 +90,8 @@ check("the source URL is read",
       media and media["url"].endswith("/IMG.jpg"))
 check("the SIMS fallback body range is read",
       media and media["hide_body"] == (1, 110))
+check("a message without OOB desc has an empty description",
+      media and media["description"] == "")
 
 # 2. OOB-only message ---------------------------------------------------------
 oob = _Msg(ET.fromstring(
@@ -98,7 +100,15 @@ oob = _Msg(ET.fromstring(
 check("an OOB-only message yields media",
       message_media(oob) == {
           "name": "", "size": 0, "media_type": "", "width": 0, "height": 0,
-          "hashes": {}, "url": "https://host/pic.png", "hide_body": None})
+          "hashes": {}, "url": "https://host/pic.png",
+          "description": "", "hide_body": None})
+
+oob_desc = _Msg(ET.fromstring(
+    '<message><x xmlns="jabber:x:oob">'
+    '<url>https://host/pic.png</url>'
+    '<desc>A caption</desc></x></message>'))
+check("an OOB desc is read",
+      message_media(oob_desc)["description"] == "A caption")
 
 # 3. a bare XEP-0372 data reference -------------------------------------------
 ref = _Msg(ET.fromstring(
@@ -125,6 +135,7 @@ JabberClient._attach_media_sharing(msg, {
     "name": "pic.jpg", "size": 2048, "media_type": "image/jpeg",
     "width": 800, "height": 600,
     "hashes": {"sha-256": "AAAA", "sha-1": "BBBB"}, "url": _url,
+    "description": "A caption",
 })
 built = message_media(_Msg(msg.xml))
 check("the built SIMS block round-trips", built is not None)
@@ -136,10 +147,15 @@ check("the built hashes round-trip",
 check("the built dimensions round-trip",
       built and built["width"] == 800 and built["height"] == 600)
 check("the built source URL round-trips", built and built["url"] == _url)
+check("the built description round-trips",
+      built and built["description"] == "A caption")
 check("the built fallback range marks the body URL",
       built and built["hide_body"] == (0, len(_url)))
 check("an OOB url is attached as a fallback",
       msg.xml.find("{jabber:x:oob}x") is not None)
+check("the OOB desc is attached",
+      msg.xml.find("{jabber:x:oob}x/{jabber:x:oob}desc").text
+      == "A caption")
 
 # 6. XEP-0300 hashes ----------------------------------------------------------
 import tempfile as _tf  # noqa: E402

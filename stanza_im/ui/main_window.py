@@ -304,6 +304,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._incoming_file_dialogs: dict[str, object] = {}  # offer id -> dialog
         self._transfer_dialog = None                    # shared progress window
         self._pending_transfer_send = None              # (jid, paths, method)
+        self._image_send_dialog = None                  # Ctrl+V image sender
+        self._image_send_context = None                 # (dialog, jid, path)
         self._incoming_transfer_rows: dict[tuple, object] = {}
         #: Bare JID of the account whose roster is being loaded.  The cached
         #: roster is rendered before ``_client`` exists, so it cannot use
@@ -1863,7 +1865,7 @@ class MainWindow(QtWidgets.QMainWindow):
         add_contact.triggered.connect(
             lambda checked=False: self._on_add_contact())
         invite = actions_menu.addAction(
-            self._menu_icon("add-user.png"), tr("menu_invite"))
+            self._menu_icon("invite.svg"), tr("menu_invite"))
         invite.triggered.connect(self._on_invite)
         create_room = actions_menu.addAction(
             self._menu_icon("conference-add.svg"),
@@ -10434,6 +10436,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not paths:
             return
         parent = parent or self
+        if method == "pasted-image":
+            self._open_pasted_image(jid, paths[0], parent)
+            return
         targets = []
         if method in ("p2p", "p2p-ibb"):
             bare = jid.split("/", 1)[0]
@@ -10488,15 +10493,13 @@ class MainWindow(QtWidgets.QMainWindow):
                           and not self._client.groupchats.get(bare))
             if omemo_mode:
                 tasks.append(self._start_task(
-                    self._client.send_omemo_file(jid, path)))
+                    self._client.send_omemo_file(jid, path, caption)))
             else:
-                tasks.append(
-                    self._start_task(self._client.upload_http(jid, path)))
+                tasks.append(self._start_task(
+                    self._client.upload_http(jid, path, caption)))
         if p2p_paths:
             tasks.append(self._start_task(
-                self._run_p2p_batch(jid, p2p_paths, method, target)))
-        if caption and tasks:
-            self._start_task(self._send_caption_after(jid, caption, tasks))
+                self._run_p2p_batch(jid, p2p_paths, method, target, caption)))
 
     @staticmethod
     def _transfer_error_text(detail) -> str:
@@ -10527,12 +10530,13 @@ class MainWindow(QtWidgets.QMainWindow):
         return text
 
     async def _run_p2p_batch(self, jid: str, paths: list, method: str,
-                             target: str = ""):
+                             target: str = "", caption: str = ""):
         """Send P2P files sequentially (one Jingle session at a time)."""
         for path in paths:
             try:
                 await self._client.send_file_p2p(jid, str(path), method,
-                                                 target=target)
+                                                 target=target,
+                                                 caption=caption)
             except Exception as exc:  # noqa: BLE001 - shown in the dialog row
                 logger.warning("P2P transfer failed for %s: %s", path, exc)
                 bare_jid = jid.split("/", 1)[0]
@@ -10543,6 +10547,68 @@ class MainWindow(QtWidgets.QMainWindow):
                         row.fail(self._transfer_error_text(exc))
                 self._file_upload_states.pop((bare_jid, str(path)), None)
                 self._check_uploads_finished(bare_jid)
+
+    def _open_pasted_image(self, jid: str, path: str, parent=None) -> None:
+        """Open the single-image sender for a Ctrl+V clipboard image."""
+        if not self._client or not path:
+            return
+        if self._image_send_dialog is not None:
+            self._remove_temp_upload(path)
+            self._image_send_dialog.raise_()
+            self._image_send_dialog.activateWindow()
+            return
+        from stanza_im.ui.image_send_dialog import ImageSendDialog
+        dlg = ImageSendDialog(path, parent or self)
+        self._image_send_dialog = dlg
+        self._image_send_context = (dlg, jid, str(path))
+
+        def send(caption: str) -> None:
+            self._send_pasted_image(dlg, jid, str(path), caption)
+
+        def finished(_result: int) -> None:
+            self._on_image_send_finished(dlg, str(path))
+
+        dlg.send_requested.connect(send)
+        dlg.finished.connect(finished)
+        self._place_dialog_over(dlg, parent or self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _send_pasted_image(self, dlg, jid: str, path: str,
+                           caption: str) -> None:
+        if not self._client:
+            return
+        dlg.set_sending()
+        bare = jid.split("/", 1)[0]
+        omemo_mode = (getattr(self._client.omemo, "available", False)
+                      and self._client.omemo.chat_mode(bare) == "omemo"
+                      and not self._client.groupchats.get(bare))
+        try:
+            if omemo_mode:
+                self._start_task(
+                    self._client.send_omemo_file(jid, path, caption))
+            else:
+                self._start_task(self._client.upload_http(jid, path, caption))
+        except Exception as exc:  # noqa: BLE001 - shown in the dialog
+            dlg.set_error(self._transfer_error_text(exc))
+
+    def _on_image_send_finished(self, dlg, path: str) -> None:
+        context = self._image_send_context
+        if context is None or context[0] is not dlg:
+            return
+        self._image_send_context = None
+        self._image_send_dialog = None
+        self._remove_temp_upload(path)
+
+    @staticmethod
+    def _remove_temp_upload(path: str) -> None:
+        if not path or not os.path.basename(str(path)).startswith("stanza-paste-"):
+            return
+        try:
+            os.remove(str(path))
+        except OSError:
+            pass
 
     def _display_local_outgoing(self, jid: str, body: str, message_id: str,
                                 encrypted: bool = False,
@@ -10566,16 +10632,6 @@ class MainWindow(QtWidgets.QMainWindow):
             media=media))
         self._remember_contact(jid)
 
-    async def _send_caption_after(self, jid: str, caption: str, tasks):
-        """Send the shared caption once, after the batch finished uploading."""
-        await asyncio.gather(*tasks, return_exceptions=True)
-        target = jid.split("/")[0] if "/" in jid else jid
-        if self._client.groupchats.get(target):
-            self._client.send_muc_message(target, caption)
-        else:
-            message_id = self._client.send_message(target, caption)
-            self._display_local_outgoing(target, caption, message_id)
-
     def _check_uploads_finished(self, jid: str):
         batch = self._file_uploads.get(jid)
         if not batch:
@@ -10592,6 +10648,19 @@ class MainWindow(QtWidgets.QMainWindow):
         bare = jid.split("/")[0]
         chat = self._chat_window.get_chat(bare) or self._chat_window.get_chat(jid)
         dlg, row = self._file_upload_states.get((bare, path), (None, None))
+        image = self._image_send_context
+        image_dlg = (image[0] if image is not None
+                     and str(path) == image[2] else None)
+        if image_dlg is not None:
+            if phase == "progress":
+                image_dlg.set_progress(int(detail or 0))
+                return
+            if phase == "start":
+                image_dlg.set_sending()
+            elif phase == "done":
+                image_dlg.mark_success()
+            elif phase == "error":
+                image_dlg.set_error(self._transfer_error_text(detail))
         if phase == "progress":
             if row is not None:
                 row.set_progress(int(detail or 0))
@@ -12588,6 +12657,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._file_uploads.clear()
         self._file_upload_states.clear()
         self._incoming_transfer_rows.clear()
+        image_context = self._image_send_context
+        self._image_send_context = None
+        if image_context is not None:
+            self._remove_temp_upload(image_context[2])
+        if self._image_send_dialog is not None:
+            try:
+                self._image_send_dialog.close()
+                self._image_send_dialog.deleteLater()
+            except RuntimeError:
+                pass
+            self._image_send_dialog = None
         if self._transfer_dialog is not None:
             try:
                 self._transfer_dialog.close()

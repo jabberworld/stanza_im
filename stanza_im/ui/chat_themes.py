@@ -43,6 +43,8 @@ _MEDIA_CSS = """
 .stanza-media-card { display: block; margin: 3px 0; }
 .stanza-file-meta { display: block; margin-top: 2px; font-size: 11px;
                     color: #777; word-break: break-all; }
+.stanza-media-desc { display: block; margin-top: 3px; color: inherit;
+                     white-space: pre-wrap; word-break: break-word; }
 .stanza-media { display: inline-block; margin: 3px 0; vertical-align: top; }
 .stanza-media-thumb { border-radius: 6px; max-width: 100%; height: auto;
                       cursor: pointer; background: rgba(0,0,0,.06); display: block; }
@@ -649,9 +651,19 @@ class ChatThemeFactory:
         if label:
             html += ('<span class="stanza-file-meta">%s</span>'
                      % escape_html(label))
+        html += self._media_description(media)
         if not html:
             return ""
         return '<span class="stanza-media-card">%s</span>' % html
+
+    @staticmethod
+    def _media_description(media: dict) -> str:
+        """XEP-0066 ``<desc/>`` shown under a media preview."""
+        description = str((media or {}).get("description") or "").strip()
+        if not description:
+            return ""
+        return ('<span class="stanza-media-desc">%s</span>'
+                % escape_html(description))
 
     @staticmethod
     def _media_body(body: str, media: dict) -> tuple[str, bool]:
@@ -732,6 +744,7 @@ class ChatThemeFactory:
                 if label:
                     media_html = ('<span class="stanza-file-meta">%s</span>'
                                   % escape_html(label))
+                media_html += self._media_description(media)
             else:
                 media_html = self._media_card(media)
         body_html = self._transform_body(body_text, styled=not unstyled,

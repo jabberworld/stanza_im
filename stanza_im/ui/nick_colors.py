@@ -13,6 +13,8 @@ import unicodedata
 
 from PyQt6 import QtGui
 
+from stanza_im.ui import theme
+
 _PALETTE = [
     "#000000",
     "#c62828",   # dark red
@@ -31,9 +33,31 @@ _PALETTE = [
     "#4a148c",   # purple
 ]
 
+#: Light shades for a dark chat background.  The normal palette above is
+#: deliberately dark for light skins, so reusing it there made nicknames such
+#: as dark blue almost invisible.
+_LIGHT_PALETTE = [
+    "#ff8a80",
+    "#81c784",
+    "#64b5f6",
+    "#ba68c8",
+    "#ffb74d",
+    "#4dd0e1",
+    "#f06292",
+    "#a1887f",
+    "#90a4ae",
+    "#dce775",
+    "#7986cb",
+    "#4db6ac",
+    "#e57373",
+    "#ce93d8",
+    "#ffd54f",
+]
+
 _GOLDEN_ANGLE = 137.508
 _FALLBACK_SATURATION = 0.55
 _FALLBACK_LIGHTNESS = 0.30
+_FALLBACK_LIGHTNESS_DARK = 0.68
 
 
 def normalize_nick(nick: str) -> str:
@@ -46,11 +70,12 @@ def normalize_nick(nick: str) -> str:
                   unicodedata.normalize("NFKC", nick or "").strip().casefold())
 
 
-def _dark_hsl(index: int) -> str:
-    """Golden-angle dark color for participants beyond the fixed palette."""
+def _fallback_hsl(index: int, *, dark: bool) -> str:
+    """Golden-angle color for participants beyond the fixed palette."""
     hue = (index * _GOLDEN_ANGLE) % 360
+    lightness = _FALLBACK_LIGHTNESS_DARK if dark else _FALLBACK_LIGHTNESS
     color = QtGui.QColor.fromHslF(
-        hue / 360.0, _FALLBACK_SATURATION, _FALLBACK_LIGHTNESS)
+        hue / 360.0, _FALLBACK_SATURATION, lightness)
     return color.name()
 
 
@@ -63,7 +88,9 @@ class NickColorAllocator:
     re-joining may therefore get a different color, which is allowed).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dark: bool | None = None) -> None:
+        self._dark = theme.is_dark() if dark is None else bool(dark)
+        self._palette = _LIGHT_PALETTE if self._dark else _PALETTE
         self._map: dict[str, str] = {}
         self._used: list[str] = []
         self._freed: list[str] = []
@@ -100,9 +127,9 @@ class NickColorAllocator:
         self._next_index = 0
 
     def _next_color(self) -> str:
-        if self._next_index < len(_PALETTE):
-            color = _PALETTE[self._next_index]
+        if self._next_index < len(self._palette):
+            color = self._palette[self._next_index]
         else:
-            color = _dark_hsl(self._next_index)
+            color = _fallback_hsl(self._next_index, dark=self._dark)
         self._next_index += 1
         return color

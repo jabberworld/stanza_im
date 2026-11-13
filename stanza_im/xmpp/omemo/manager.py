@@ -90,6 +90,9 @@ class OmemoManager:
         #: by another of the user's clients.
         self._server_names: dict[str, str] = {}
         self._server_loaded = False
+        #: ``None`` = not checked yet; a negative result is cached per session
+        #: so an unsupported server is not probed on every window activation.
+        self._alias_sync_supported: bool | None = None
         #: Coalesces bursts of publishes into one.
         self._publish_pending = False
 
@@ -377,7 +380,32 @@ class OmemoManager:
         except RuntimeError:
             pass
 
+    async def _aliases_supported(self) -> bool:
+        """Check (once per session) that the server supports private PEP."""
+        if self._alias_sync_supported is not None:
+            return self._alias_sync_supported
+        checker = getattr(self._client, "supports_private_pep", None)
+        if not callable(checker):
+            # Test doubles and older client objects: keep the previous
+            # best-effort behaviour.
+            self._alias_sync_supported = True
+            return True
+        features = getattr(self._client, "_server_features", None)
+        if not features:
+            refresh = getattr(self._client, "refresh_server_features", None)
+            if callable(refresh):
+                try:
+                    await refresh()
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+        self._alias_sync_supported = bool(checker())
+        if not self._alias_sync_supported:
+            logger.debug("OMEMO alias sync skipped: server has no private PEP")
+        return self._alias_sync_supported
+
     async def _publish_aliases(self) -> None:
+        if not await self._aliases_supported():
+            return
         self._publish_pending = True
         try:
             # Load the node's current names first, so a publish preserves what
@@ -453,6 +481,8 @@ class OmemoManager:
 
     async def sync_aliases(self) -> None:
         """Merge the server-side aliases into the local store (local wins)."""
+        if not await self._aliases_supported():
+            return
         try:
             entries = await self._client.get_omemo_aliases()
         except Exception:  # noqa: BLE001

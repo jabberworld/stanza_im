@@ -28,6 +28,7 @@ from stanza_im.include.avatars import (
     avatar_data_uri, avatar_file_data_uri, default_avatar, default_avatar_uri,
 )
 from stanza_im.ui.chat_themes import ChatThemeFactory, mentions_nick
+from stanza_im.ui import theme as theme_mod
 from stanza_im.ui.nick_colors import NickColorAllocator, normalize_nick
 from stanza_im.ui.font_zoom import FontZoomMixin, wheel_font_size
 from stanza_im.ui.resize_handle import VerticalResizeHandle as _InputHandle
@@ -578,7 +579,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._participant_filter = ""
         self._muc_color_keys: set = set()
         self._hovered_participant: str = ""
-        self._nick_colors = NickColorAllocator()
+        self._nick_colors = NickColorAllocator(dark=theme_mod.is_dark())
         self._colored_muc_nicks: bool = True
         self._bookmarked = False
         self._bookmark_action = None
@@ -4282,7 +4283,7 @@ class ChatWidget(QtWidgets.QWidget):
         path = self._clipboard_image_to_tempfile(image)
         if not path:
             return False
-        self.files_upload_requested.emit(self.jid, [path], "http")
+        self.files_upload_requested.emit(self.jid, [path], "pasted-image")
         return True
 
     @staticmethod

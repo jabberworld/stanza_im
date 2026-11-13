@@ -138,7 +138,7 @@ _mw_src = open(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "main_window.py"), encoding="utf-8").read()
 check("roster send file menu", "ctx_send_file" in _mw_src
-      and "upload_http(jid, path)" in _mw_src
+      and "upload_http(jid, path, caption)" in _mw_src
       and "send_file(jid" in _mw_src)
 check("upload dialog parented to source window",
       "_on_chat_files_upload(jid, paths, method" in _mw_src
@@ -386,6 +386,12 @@ url_html = theme.render_message("Me", "https://upload.example.com/get/abc123",
                                 "12:00:00", "outgoing")
 check("file url renders as link",
       '<a href="https://upload.example.com/get/abc123"' in url_html)
+desc_html = theme.render_message(
+    "Me", "https://upload.example.com/get/abc123", "12:00:00", "outgoing",
+    media={"url": "https://upload.example.com/get/abc123",
+           "description": "A caption"})
+check("media description renders under the URL",
+      "stanza-media-desc" in desc_html and "A caption" in desc_html)
 
 # 11. Ctrl+V pastes a clipboard image as an upload ----------------------------
 cb = QtGui.QGuiApplication.clipboard()
@@ -402,7 +408,8 @@ cw5.eventFilter(cw5._input, paste_ev)
 pasted_path = paste_rows[0][1][0] if paste_rows else ""
 check("ctrl+v offers clipboard image",
       bool(paste_rows) and paste_rows[0][0] == "bob@example.com"
-      and paste_rows[0][2] == "http" and os.path.exists(pasted_path))
+      and paste_rows[0][2] == "pasted-image"
+      and os.path.exists(pasted_path))
 if pasted_path:
     with open(pasted_path, "rb") as fh:
         check("pasted image is a png", fh.read(4) == b"\x89PNG")

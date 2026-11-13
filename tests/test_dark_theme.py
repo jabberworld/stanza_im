@@ -133,6 +133,19 @@ check("light custom chat background gets dark text",
       "color: #000000 !important" in page)
 
 
+# ── MUC nickname colours ──────────────────────────────────────────
+from stanza_im.ui.nick_colors import NickColorAllocator
+
+nicks = NickColorAllocator(dark=True)
+nick_colors = [nicks.color_for(f"u{i}") for i in range(20)]
+check("dark-theme nicks avoid near-black colours",
+      all(QtGui.QColor(color).lightnessF() > 0.45 for color in nick_colors))
+check("dark-theme nicks stay distinct", len(set(nick_colors)) == 20)
+light_nicks = NickColorAllocator(dark=False)
+check("light-theme nicks keep the original dark palette",
+      light_nicks.color_for("alice") == "#000000")
+
+
 # ── Separators / resize handle ────────────────────────────────────
 from stanza_im.ui.resize_handle import VerticalResizeHandle
 
