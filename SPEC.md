@@ -2938,8 +2938,8 @@ Registers XEP plugins (conditionally where noted):
   is parented to the issuing window (chat or roster) and centered over it
   (`_place_dialog_over`). The shared caption becomes the XEP-0066 `<desc/>` of
   every file in the batch; no separate caption message is sent. A clipboard
-  image opens the separate `ui/image_send_dialog.py` (large preview, one
-  caption, progress, automatic close on success). For 1:1 uploads the `get`
+  image opens the separate `ui/image_send_dialog.py` (large preview that
+  re-scales with the window, one caption, progress, automatic close on success). For 1:1 uploads the `get`
   URL and its caption are rendered as a real outgoing media message via
   `_display_local_outgoing` with the **sent** stanza id and the media dict
   (`JabberClient.take_upload_result`), so an XEP-0184 receipt matches the local

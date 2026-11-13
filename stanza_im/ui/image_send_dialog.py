@@ -15,6 +15,40 @@ from stanza_im.ui import theme
 from stanza_im.ui.upload_dialog import format_size
 
 
+class _ImagePreview(QtWidgets.QLabel):
+    """Image preview that keeps filling the space the dialog gives it."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._source = QtGui.QPixmap()
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                           QtWidgets.QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(320, 180)
+        self.setStyleSheet(
+            "QLabel { background: palette(alternate-base); "
+            "border: 1px solid palette(mid); border-radius: 4px; }")
+
+    def set_source_pixmap(self, pixmap: QtGui.QPixmap) -> None:
+        self._source = QtGui.QPixmap(pixmap)
+        self._rescale()
+
+    def _rescale(self) -> None:
+        if self._source.isNull():
+            return
+        target = self.contentsRect().size()
+        if target.width() <= 0 or target.height() <= 0:
+            return
+        self.setPixmap(self._source.scaled(
+            target,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        self._rescale()
+
+
 class ImageSendDialog(QtWidgets.QDialog):
     """Preview one image, let the user caption it and send it."""
 
@@ -32,20 +66,11 @@ class ImageSendDialog(QtWidgets.QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(9)
 
-        self._preview = QtWidgets.QLabel(self)
-        self._preview.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self._preview.setMinimumSize(440, 280)
-        self._preview.setMaximumHeight(360)
-        self._preview.setStyleSheet(
-            "QLabel { background: palette(alternate-base); "
-            "border: 1px solid palette(mid); border-radius: 4px; }")
+        self._preview = _ImagePreview(self)
         pixmap = QtGui.QPixmap(self._path)
         if not pixmap.isNull():
-            self._preview.setPixmap(pixmap.scaled(
-                520, 330,
-                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation))
-        layout.addWidget(self._preview)
+            self._preview.set_source_pixmap(pixmap)
+        layout.addWidget(self._preview, 1)
 
         name = os.path.basename(self._path) or tr("image_send_title")
         try:

@@ -63,6 +63,30 @@ check("failure keeps the dialog usable",
       and dlg2._caption.isEnabled())
 dlg2.close()
 
+# The preview re-scales with the dialog instead of leaving empty bands.
+dlg3 = ImageSendDialog(path)
+dlg3.show()
+app.processEvents()
+small = dlg3._preview.pixmap().size()
+dlg3.resize(900, 700)
+app.processEvents()
+large = dlg3._preview.pixmap().size()
+check("preview grows with the dialog", large.width() > small.width()
+      and large.height() > small.height())
+check("preview fits the available label area",
+      large.width() <= dlg3._preview.contentsRect().width()
+      and large.height() <= dlg3._preview.contentsRect().height())
+source = QtGui.QPixmap(path)
+check("preview keeps the source aspect ratio",
+      abs(large.width() / max(1, large.height())
+          - source.width() / max(1, source.height())) < 0.02)
+dlg3.resize(900, 900)
+app.processEvents()
+tall = dlg3._preview.pixmap().size()
+check("extra dialog height goes to the preview",
+      tall.height() > large.height())
+dlg3.close()
+
 # MainWindow routes a clipboard image to the dedicated dialog, not the batch.
 mw = MainWindow.__new__(MainWindow)
 mw._client = object()

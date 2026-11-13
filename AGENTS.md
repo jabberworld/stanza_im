@@ -2994,8 +2994,8 @@ window that issued the request (`_place_dialog_over` centers it over the chat
 window or the roster). The shared caption is attached as the XEP-0066
 `<desc/>` of **every** file in the batch and is not sent as a separate
 message. A clipboard image uses the separate `ui/image_send_dialog.py` (large
-preview, one caption, progress, automatic close on success) instead of the
-multi-file dialog. File URLs and captions are rendered as real outgoing
+preview that re-scales with the window, one caption, progress, automatic close
+on success) instead of the multi-file dialog. File URLs and captions are rendered as real outgoing
 messages with clickable links: in 1:1 the client displays them locally via
 `_display_local_outgoing` with the **sent** stanza id and the media dict
 (`JabberClient.take_upload_result`), so an XEP-0184 receipt matches the local
