@@ -6796,6 +6796,29 @@ class MainWindow(QtWidgets.QMainWindow):
         if is_new:
             self._request_vcard(room, force=True)
 
+    def _contact_show(self, jid: str) -> str | None:
+        """Presence show for a roster row, including classified transports.
+
+        Classified transports are deliberately removed from the ordinary
+        roster, so the tab-status lookup must also consult the Transports tab
+        (and finally the client contact) instead of reporting an empty status.
+        """
+        for user in getattr(self._roster, "_users", ()):
+            if user.jid == jid:
+                return user.status
+        transport_roster = getattr(self, "_transport_roster", None)
+        if transport_roster is not None:
+            for user in transport_roster._users:
+                if user.jid == jid:
+                    return user.status
+        if self._client is not None:
+            try:
+                show = getattr(self._client.get_contact(jid), "show", "")
+            except Exception:  # noqa: BLE001 - presentation only
+                show = ""
+            return show or None
+        return None
+
     def _on_contact_open(self, jid: str):
         display_name = self._roster_name(jid) or jid.split("@")[0]
         self._touch_tab_activity(jid)
@@ -6821,10 +6844,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if pm:
                     self._apply_pm_presence(jid, pm[0], pm[1], chat)
                 else:
-                    chat_show = next(
-                        (user.status for user in self._roster._users
-                         if user.jid == jid), None)
-                    self._chat_window.set_contact_status(jid, chat_show)
+                    self._chat_window.set_contact_status(
+                        jid, self._contact_show(jid))
                 self._focus_chat(jid, chat, is_new=is_new)
                 self._request_vcard(jid)
         finally:

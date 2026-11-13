@@ -82,6 +82,15 @@ class _FakeClient:
     def send_directed_presence(self, to, ptype="", status="", priority=None):
         self.presences.append((to, ptype))
 
+    def send_chat_state(self, jid, state):
+        pass
+
+    def supports_calls(self, jid, video=False):
+        return False
+
+    def supports_omemo(self, jid):
+        return False
+
 
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
@@ -132,6 +141,17 @@ check("the plain contact stays in the roster",
       any(u.jid == "bob@example.com" for u in win._roster._users))
 check("the transports tab lists the gateway",
       any(u.jid == GW for u in win._transport_roster._users))
+check("the transport row provides the chat-tab presence",
+      win._contact_show(GW) == "online")
+
+# A transport chat tab must show the same presence icon as an ordinary chat.
+_chat = win._chat_window.open_chat(GW, "J2J")
+win._chat_window.set_contact_status(GW, win._contact_show(GW))
+_index = win._chat_window._tab_widget.indexOf(_chat)
+check("a transport chat tab gets its status icon",
+      _index >= 0
+      and not win._chat_window._tab_widget.tabIcon(_index).isNull())
+win._chat_window.close_chat(GW)
 check("a classified transport is never re-added as a contact",
       win._add_roster_item({"jid": GW, "name": "J2J", "groups": []}) is None
       and all(u.jid != GW for u in win._roster._users))

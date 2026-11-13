@@ -1332,6 +1332,12 @@ class JabberClient:
         self._full_jid = f"{self.jid_str}/{resource}"
 
         self.xmpp = _StanzaXMPP(jid, password, lang=_current_language())
+        # slixmpp's roster defaults auto-authorize every incoming subscription
+        # and auto-subscribe back.  That bypassed our Events confirmation UI:
+        # the user saw a request already "approved" before doing anything.
+        # Keep manual handling; _on_subscription_request owns the flow.
+        self.xmpp.auto_authorize = None
+        self.xmpp.auto_subscribe = False
         self.xmpp.add_filter("out", self._drop_disconnected_presence)
         self.xmpp.ssl_context = build_ssl_context(not self.allow_invalid_cert)
         self.xmpp.requested_jid = JID(f"{self.jid_str}/{resource}")

@@ -828,7 +828,9 @@ can be added through a transport, and the service in-band registration dialog
 `fit_dialog_to_content` sizes the window to the form (no scrollbars).
 `JabberClient.send_directed_presence(to, type, status, priority)` sends a
 directed available/unavailable presence to connect/disconnect a transport (used
-by the Transports tab).
+by the Transports tab). A transport chat tab gets its status icon from
+`MainWindow._contact_show()`, which checks the transport roster when the JID is
+absent from the ordinary roster.
 
 ## 6. Login Form (`ui/login_widget.py`)
 
@@ -1220,7 +1222,9 @@ avatar, name, status icon, status message, unread badge.
 
 ### 7.6 Presence Subscription Requests
 
-- An incoming `<presence type='subscribe'/>` is handled by
+- slixmpp's `auto_authorize`/`auto_subscribe` roster defaults are disabled in
+  `JabberClient.__init__`, so no incoming request is approved before the Events
+  UI. An incoming `<presence type='subscribe'/>` is handled by
   `JabberClient._on_subscription_request`: a peer already subscribed
   (`to`/`both`) is auto-approved; otherwise it is emitted as
   `subscription_requested(jid, nick, name, groups)` (the nickname read from a

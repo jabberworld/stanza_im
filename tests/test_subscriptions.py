@@ -39,6 +39,13 @@ def check(name, cond):
         FAILURES.append(name)
 
 
+# 0. slixmpp must not auto-authorize/auto-subscribe on our behalf.
+_auto_client = JabberClient("auto@example.com", "pw")
+check("incoming subscriptions are not auto-authorized",
+      _auto_client.xmpp.auto_authorize is None)
+check("incoming subscriptions do not auto-subscribe back",
+      _auto_client.xmpp.auto_subscribe is False)
+
 # 1. Client: incoming subscribe ----------------------------------------------
 c = JabberClient.__new__(JabberClient)
 c.xmpp = slixmpp.ClientXMPP("me@example.com/r", "pw")
