@@ -138,12 +138,12 @@ stanza_im/
 │                          bytestream.py = SOCKS5 bytestream transport,
 │                          socks5.py = dependency-free SOCKS5 CONNECT,
 │                          omemo/ = XEP-0384 (availability/storage/plugin/manager/SCE/QR))
-├── i18n/               — Translation dicts (en.py, ru.py)
+├── i18n/               — Translation dicts (en.py, ru.py, uk.py)
 ├── include/            — Constants (XDG paths), enumerators, pep payloads, utilities, geo (RFC 5870), hats (XEP-0317/0392), clients (XEP-0115 caps→icon), sounds (theme parsing), emoji (XEP-0444 catalogue), routing (default-route ICE source selection)
 └── plugins/            — Plugin registry (__init__.py) + bundled plugins
                           (notes/ = XEP-0049 tagged notes;
                            attention/ = XEP-0224 attention requests; each with
-                           <name>/strings/ = the plugin's own en/ru UI strings)
+                           <name>/strings/ = the plugin's own en/ru/uk UI strings)
 ```
 
 Root-level documents: `README.md` (overview), `FEATURES.md` (user-facing feature
@@ -441,7 +441,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
 | `appearance.show_unread_in_tabs` | `true` | Psi-style unread indicator on the chat tabs and the window title (`ChatWindow.set_unread`/`set_show_unread_in_tabs`): `[N] name` with `#cc0000` for a 1:1/private chat with unread (a conference only when a message mentions us), the window title summing the open tabs. Off hides the prefix, the color and the title total. Preferences → Appearance → «Разное». |
 | `appearance.emoticon_unicode_replace` | `true` | With the `unicode` emoticon theme, replace text smileys (`:)`, `:-D`, `(K)` …) with unicode emoji from `include.emoticons.unicode_map()` (`smile_to_html(..., unicode_replace=True)`); drawn with the platform font (no chat-font override). Preferences → Appearance → «Темы». |
-| `ui.language` | `""` | UI language code (`en`/`ru`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |
+| `ui.language` | `""` | UI language code (`en`/`ru`/`uk`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
 | `appearance.osd_bg_color` | `#282828` | OSD bubble background color (rendered with `osd_opacity` as the alpha) via `OsdManager.apply_colors` → `_OsdWindow.apply_style`. |
 | `appearance.osd_font_color` | `#ffffff` | OSD text color applied to all OSD labels (`_OsdWindow._stylesheet`). |
@@ -4165,7 +4165,8 @@ label.setText(tr("status_online"))
 error.setText(tr("error_nickname_conflict"))
 ```
 
-Auto-detects language from `LANG` env var. Falls back to English.
+Auto-detects language from `LANG` env var. Packaged core languages are
+`en`, `ru` and `uk`; a missing/invalid module falls back to English.
 
 Plugins keep their own strings in `stanza_im/plugins/<id>/strings/<lang>.py`
 (`STRINGS = {...}`); `i18n.load()` merges all of them into the active dictionary

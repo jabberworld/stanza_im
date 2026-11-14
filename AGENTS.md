@@ -165,8 +165,9 @@ stanza_im/                      # Python package
 │   └── utils.py                 # format_time, escape_html, etc.
 ├── i18n/
 │   ├── __init__.py              # tr() function + auto language detection
-│   ├── en.py                    # English strings (~530 keys)
-│   └── ru.py                    # Russian strings
+│   ├── en.py                    # English strings
+│   ├── ru.py                    # Russian strings
+│   └── uk.py                    # Ukrainian strings
 ├── plugins/
 │   ├── __init__.py              # Plugin registry (discover/manifest/hooks)
 │   ├── notes/                   # Notes plugin (XEP-0049 private storage)
@@ -2135,6 +2136,8 @@ changing the names back.
 
 Translation strings are plain Python dicts. `tr(key, **kwargs)` looks up and formats.
 No `.ts`/`.qm` compilation. Language auto-detected from `LANG` env var.
+Packaged core languages are `en`, `ru` and `uk`; new files are discovered by
+`available_languages()` automatically.
 
 ### 7. Event-Driven XMPP (`core/client.py`)
 
