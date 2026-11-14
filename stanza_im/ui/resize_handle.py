@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from PyQt6 import QtCore, QtWidgets
 
+from stanza_im.ui import theme
+
 
 class VerticalResizeHandle(QtWidgets.QFrame):
     """A thin (6px) draggable bar; emits the new field height while dragged.
@@ -24,12 +26,31 @@ class VerticalResizeHandle(QtWidgets.QFrame):
         super().__init__(parent)
         self.setFixedHeight(6)
         self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
-        self.setStyleSheet("background: palette(mid);")
+        self._apply_style()
         self._get_height = get_height or (lambda: 60)
         self._invert = bool(invert)
         self._press_y: float | None = None
         self._press_h = 60
         self.setMouseTracking(True)
+
+    def _apply_style(self) -> None:
+        """Use a subtle overlay instead of the high-contrast palette Mid."""
+        if getattr(self, "_applying_style", False):
+            return
+        self._applying_style = True
+        try:
+            dark = theme.is_dark(self.palette())
+            color = ("rgba(255, 255, 255, 0.08)" if dark
+                     else "rgba(0, 0, 0, 0.05)")
+            self.setStyleSheet(f"background: {color};")
+        finally:
+            self._applying_style = False
+
+    def changeEvent(self, event):  # noqa: N802 - Qt API
+        if event.type() in (QtCore.QEvent.Type.PaletteChange,
+                            QtCore.QEvent.Type.ApplicationPaletteChange):
+            self._apply_style()
+        super().changeEvent(event)
 
     def _resized_height(self, dy: float) -> int:
         """New field height for a vertical drag delta *dy*."""

@@ -164,8 +164,14 @@ check("light-theme nicks keep the original dark palette",
 from stanza_im.ui.resize_handle import VerticalResizeHandle
 
 handle = VerticalResizeHandle()
-check("resize handle follows palette mid",
-      "palette(mid)" in handle.styleSheet())
+check("dark resize handle uses a subtle light overlay",
+      "rgba(255, 255, 255, 0.08)" in handle.styleSheet())
+light_palette = QtGui.QPalette()
+light_palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#f5f5f5"))
+handle.setPalette(light_palette)
+handle._apply_style()
+check("light resize handle restores the old translucent black",
+      "rgba(0, 0, 0, 0.05)" in handle.styleSheet())
 
 
 print()
