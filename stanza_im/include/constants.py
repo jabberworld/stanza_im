@@ -4,7 +4,7 @@ import os
 import re
 
 APP_NAME = "Stanza IM"
-VERSION = "0.1.0"
+VERSION = "1.0.0"
 
 # Logical size (the SVG viewBox) of the collaborative whiteboard document.
 WHITEBOARD_WIDTH = 1280

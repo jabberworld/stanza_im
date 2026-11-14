@@ -3333,7 +3333,7 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   `software_name`/`version`/`os` attributes are set explicitly because
   slixmpp's `plugin_init` only honours the `name` config key. The advertised
   version is `constants.VERSION_DISPLAY`: the plain `VERSION` outside a git
-  checkout, with the short HEAD commit appended (`0.1.0 (00dc38b)`) when running
+  checkout, with the short HEAD commit appended (`1.0.0 (<commit>)`) when running
   from one (`constants._git_commit`); it feeds the caps node, XEP-0092, the About
   dialog and the startup log. The disco identities/features are registered by
   `JabberClient._register_disco()`, re-run in `_on_session_start` before the

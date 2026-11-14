@@ -1,6 +1,6 @@
 [project]
 name = "stanza-im"
-version = "0.1.0"
+version = "1.0.0"
 description = "Stanza IM — a lightweight XMPP/Jabber client inspired by Jabbim"
 requires-python = ">=3.10"
 license = {text = "GPL-2.0-or-later"}

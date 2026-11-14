@@ -3978,7 +3978,7 @@ text is kept. Returning activity (`eventFilter`) resumes
   `software_name`/`version`/`os` are set explicitly (slixmpp's `plugin_init`
   only honours the `name` config key), so version queries report Stanza IM.
   The advertised version is `constants.VERSION_DISPLAY` — the plain `VERSION`
-  outside a git checkout, with the short HEAD commit appended (`0.1.0 (00dc38b)`)
+  outside a git checkout, with the short HEAD commit appended (`1.0.0 (<commit>)`)
   when running from one (`constants._git_commit`, `PROJECT_ROOT/.git`) — used in
   the caps node, XEP-0092, the About dialog and the startup log, so a stale build
   is visible at a glance. The disco identities/features are registered by
