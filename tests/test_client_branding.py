@@ -111,7 +111,8 @@ sent = []
 c.xmpp = _FakeXmpp()
 c.send_presence = lambda show=None, status="", priority=None: sent.append(show)
 _loop.run_until_complete(c.disconnect())
-check("reconnect disabled on shutdown", c.xmpp.auto_reconnect is False)
+check("reconnect disabled on shutdown",
+      c._reconnect_enabled is False and c._shutting_down is True)
 check("unavailable presence sent", sent == ["offline"])
 check("stream close awaited", c.xmpp.closed is True)
 check("bounded wait passed to slixmpp", c.xmpp.wait == 1.0)
