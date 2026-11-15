@@ -1258,9 +1258,11 @@ The MUC participant sidebar shows the same client icon before the avatar
 changed participant's row is created/updated/removed, rows move between the
 moderator/participant/guest sections in place and the section counters
 (`… (N)`) are refreshed, so a large-room join no longer recreates every row
-per presence (`_take_muc_item` unregisters a row's item widget with
-`removeItemWidget` before `takeItem`, so Qt's persistent-editor geometry pass
-can never `show()` a deleted row); roster and participant avatars are clipped by
+per presence (removals use `_take_muc_item`, which unregisters a row's item
+widget with `removeItemWidget` before `takeItem`; reordering uses
+`QListWidget.model().moveRows` in `_sync_muc_order`, never remove/reinsert, so
+Qt's persistent-editor geometry pass can never `show()` a deleted or
+pending-delete row); roster and participant avatars are clipped by
 `include.avatars.rounded_avatar` with `appearance.avatar_radius` (0 = square,
 100 = circle; `RosterStyle.set_avatar_radius`/`ChatWidget.set_avatar_radius`,
 applied live via `MainWindow._apply_avatar_radius`). A participant's vCard is

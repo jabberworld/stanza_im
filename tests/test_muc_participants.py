@@ -132,6 +132,13 @@ check("the section counts follow the role change",
       _headers() == [tr("muc_section_moderators") + " (3)",
                      tr("muc_section_participants") + " (1)",
                      tr("muc_section_guests") + " (2)"])
+if sip is not None:
+    QtCore.QCoreApplication.sendPostedEvents(
+        None, QtCore.QEvent.Type.DeferredDelete)
+    check("a moved row is not scheduled for deletion",
+          not sip.isdeleted(alpha_row))
+    check("a moved row keeps its item widget",
+          lw.itemWidget(_row("alpha")["item"]) is alpha_row)
 
 # 4. leaving removes only that row -----------------------------------------
 cw.update_muc_users([

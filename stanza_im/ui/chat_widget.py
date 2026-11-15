@@ -3776,13 +3776,16 @@ class ChatWidget(QtWidgets.QWidget):
         self._sync_muc_users()
 
     def _take_muc_item(self, item) -> None:
-        """Remove an item widget before taking its list item.
+        """Remove an item widget before taking its list item permanently.
 
         ``QListWidget`` keeps a widget set with ``setItemWidget`` registered as
         a persistent editor.  Taking the item without clearing that
         registration leaves a stale editor in Qt's geometry pass; the next
         ``paintEvent`` then calls ``show()`` on the deleted row widget and
         crashes natively.  ``removeItemWidget`` unregisters it first.
+
+        Never use this for a reorder: it schedules the detached widget for
+        ``deleteLater``.  Moves go through ``QListWidget.model().moveRows``.
         """
         if item is None:
             return
@@ -3877,17 +3880,36 @@ class ChatWidget(QtWidgets.QWidget):
             desired.append(header)
             for nick in nicks:
                 desired.append(self._muc_rows[nick]["item"])
-        for index, item in enumerate(desired):
-            if self._users_list.item(index) is item:
+        desired_ids = {id(item) for item in desired}
+        for row in range(self._users_list.count() - 1, -1, -1):
+            item = self._users_list.item(row)
+            if item is None or id(item) in desired_ids:
                 continue
+            # Removing is safe here: the row widget is going away, not reused.
+            self._take_muc_item(item)
+        for index, item in enumerate(desired):
             if self._users_list.row(item) >= 0:
-                self._take_muc_item(item)
+                continue
             self._users_list.insertItem(index, item)
             nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
             if nick:
                 state = self._muc_rows.get(str(nick))
                 if state is not None:
                     self._users_list.setItemWidget(item, state["row"])
+        # Move existing rows with the model, never removeItemWidget + reinsert:
+        # removeItemWidget schedules the row widget for deleteLater(), so
+        # reusing it would make the next QAbstractItemView geometry pass call
+        # show() on a deleted widget.  QListWidget's model move keeps the item
+        # and its item widget alive (verified by the participant tests).
+        model = self._users_list.model()
+        for index, item in enumerate(desired):
+            current = self._users_list.row(item)
+            if current < 0 or current == index:
+                continue
+            # moveRows inserts *before* destinationChild when moving down.
+            destination = index + 1 if current < index else index
+            model.moveRows(QtCore.QModelIndex(), current, 1,
+                           QtCore.QModelIndex(), destination)
         while self._users_list.count() > len(desired):
             item = self._users_list.item(len(desired))
             if item is None:

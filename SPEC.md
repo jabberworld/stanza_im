@@ -1381,11 +1381,14 @@ Single conversation tab. Layout:
   incrementally (`_sync_muc_users`/`_sync_muc_order`): a row is created once,
   updated in place (show/badge/colour/client/avatar), moved between the
   moderator/participant/guest sections and removed without touching the
-  others; the section counters follow. Rows are item widgets, so every
-  removal/reorder unregisters the widget with `removeItemWidget` before
-  `takeItem` (`_take_muc_item`); taking the item directly leaves Qt's
-  persistent-editor geometry pass with a stale row widget and the next paint
-  segfaults in `QWidget::show()`. A participant's vCard is cache-first:
+  others; the section counters follow. Rows are item widgets: an actual
+  removal unregisters the widget with `removeItemWidget` before `takeItem`
+  (`_take_muc_item`), while a reorder goes through
+  `QListWidget.model().moveRows` in `_sync_muc_order` and never removes the
+  item. Reusing a row after `removeItemWidget` is unsafe because Qt schedules
+  the detached widget for `deleteLater()`, and the next persistent-editor
+  geometry pass then calls `QWidget::show()` on the deleted row (a native
+  segfault). A participant's vCard is cache-first:
   `MainWindow._on_groupchat_presence` only enqueues it
   (`client.queue_participant_vcard`), a cached card (24 h) is applied at once,
   the misses are fetched one at a time (2/s, departing occupants skipped; the
