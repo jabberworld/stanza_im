@@ -571,7 +571,8 @@ check("reaching the newest message is the one point that marks it read",
       "self._mark_chat_read(jid)" in reached)
 _mark_read = method_source(_mw_src, "_mark_chat_read")
 check("marking read clears the counters, divider and MDS state",
-      "self._reset_unread(jid)" in _mark_read
+      "self._reset_unread(jid, anchor)" in _mark_read
+      and '_current_timestamp()' in _mark_read
       and "chat.mark_read()" in _mark_read
       and "mds_mark_displayed(jid)" in _mark_read)
 check("a background tab reaching the bottom stays unread",
@@ -622,7 +623,7 @@ check("a scroll to the anchor waits for a loaded page",
 check("the deferred scroll is replayed once the page finished loading",
       "self._flush_deferred_scroll()" in on_load)
 check("buffered messages are in the DOM before the scroll is replayed",
-      on_load.index("self._append_chunk(chunk)")
+      on_load.index('self._append_chunk("".join(pending))')
       < on_load.index("self._flush_deferred_scroll()"))
 
 # 14. the floating mention button mirrors the jump button ----------------------

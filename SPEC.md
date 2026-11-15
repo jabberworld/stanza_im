@@ -434,6 +434,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.roster_show_groups` | `true` | View menu «Показывать группы»: off draws the real contacts as one flat list (one row per JID, sorted by the active options); conferences and private messages keep their virtual group headers (`RosterWidget.set_show_groups`). |
 | `appearance.roster_show_offline` | `true` | View menu «Показывать оффлайн-контакты»: show/hide offline contacts (`RosterWidget.set_show_offline`). |
 | `appearance.roster_show_self` | `false` | View menu «Показывать свой контакт»: show the account's own JID (a self-contact the server may return) as a virtual «Свой контакт» row at the top of the roster (`MainWindow._sync_self_roster`); off hides it (`_add_roster_item` always skips the own JID). |
+| `appearance.roster_collapsed_groups` | `[]` | Names of roster groups collapsed by the user; `RosterWidget.group_toggled` plus `MainWindow._on_roster_group_toggled` save it and `add_group` restores the state after a rebuild. |
 | `appearance.muc_show_avatars` | `true` | Show/hide participant avatars in the MUC participant sidebar (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_participant_options`). |
 | `appearance.muc_show_clients` | `true` | Show/hide participant client icons (XEP-0115 caps of the occupant) before the avatar in the MUC participant sidebar and its tooltip. |
 | `appearance.muc_show_hats` | `true` | Show/hide XEP-0317 hat chips under messages in a MUC chat (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_hats_visible`). Off keeps the hats in the participant tooltip. |
@@ -1931,16 +1932,21 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   mark the persisted unread counter until the user opens the tab. An unread
   conversation without a read/seen anchor uses a truthy empty sentinel, so its
   whole loaded suffix is unread.
-- `JabberClient._on_session_start` fetches the bookmark list once **before the
-  initial presence** (the roster request is already in flight) and joins the
-  auto-join rooms from that fresh list (a room removed on another client is
-  never joined); a successful empty answer is not an error, and only a failed
-  fetch is retried (1/2 s) in the background. The fetched list is handed to the
-  Bookmarks tab once (`bookmarks_snapshot()`), and the PEP subscriptions to the
-  known contacts run as background work. `_autojoin_bookmarks` skips only rooms
-  that actually joined (`GroupChatInfo.joined`), so a stale entry from a failed
-  attempt does not block the retry; `client.join_muc` cancels a pending join
-  task before starting a new one.
+- `JabberClient._on_session_start` sends the initial presence **first**, then
+  requests the roster and fetches the bookmark list / joins auto-join rooms in
+  the background (a room removed on another client is never joined); a
+  successful empty answer is not an error, and only a failed fetch is retried
+  (1/2 s) in the background. The fetched list is handed to the Bookmarks tab
+  once (`bookmarks_snapshot()`). PEP subscriptions are gated by the contact's
+  advertised caps and paced by a semaphore, so RSS/transport peers do not get a
+  five-node IQ burst. `_autojoin_bookmarks` skips only rooms that actually
+  joined (`GroupChatInfo.joined`), so a stale entry from a failed attempt does
+  not block the retry; `client.join_muc` cancels a pending join task before
+  starting a new one. `client.leave_muc` catches slixmpp's missing-room
+  `KeyError`, optionally sends a directed unavailable presence and always clears
+  the local room state. A new MUC tab defers its local history until
+  `muc_joined` and appends the buffered history in one DOM turn, avoiding a
+  first-render race on the WebEngine page.
 - `MainWindow._classify_bookmarked_conferences` (run after bookmarks load and on
   roster additions) moves a bookmarked room that is also a plain roster contact
   into the conferences group only when the room is actually joined or its
@@ -2006,6 +2012,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   archived MAM replay never is. `_reset_unread` also stores the read anchor
   (`ChatWidget.read_anchor()`: newest displayed message — server `stanza-id` →
   `origin-id` → own message id — plus its raw timestamp), so an unread
+  conversation can be restored from the point the user stopped reading; an
+  explicit «Отметить прочитанным» for a closed chat (`whole=True`) stores a
+  fresh UTC boundary so a later MAM pass cannot resurrect the old block. The
   conversation can be restored from the point the user stopped reading. The
   restore finds the row by a stable id, else by its timestamp
   (`ChatView.scroll_to_time`, for legacy rows without ids), else pages the

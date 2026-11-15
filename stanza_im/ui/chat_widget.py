@@ -698,6 +698,9 @@ class ChatWidget(QtWidgets.QWidget):
             on_hover=self._subject_tooltip,
             on_leave=tooltip_mod.hide)
         self._subject_edit.setReadOnly(True)
+        self._subject_edit.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignVCenter)
         self._subject_edit.font_zoom_requested.connect(
             self._on_subject_font_zoom)
         self._subject_edit.setStyleSheet(
@@ -4636,6 +4639,11 @@ class ChatWidget(QtWidgets.QWidget):
                     text = candidate
                     break
         self._subject_edit.setText(text)
+        # A read-only QLineEdit leaves its cursor at the end after setText(),
+        # which scrolls a long subject to its tail.  Keep the header showing
+        # the beginning of the topic instead.
+        self._subject_edit.deselect()
+        self._subject_edit.setCursorPosition(0)
 
     def _subject_tooltip(self, global_pos: QtCore.QPoint) -> None:
         """Show the MUC subject via the rich tooltip popup."""

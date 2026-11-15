@@ -25,6 +25,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
     contact_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)  # jid, global_pos
     group_context_menu = QtCore.pyqtSignal(str, QtCore.QPoint)    # group, global_pos
     contact_dropped_on_group = QtCore.pyqtSignal(str, str)  # jid, target group
+    group_toggled = QtCore.pyqtSignal(str, bool)  # group name, expanded
     roster_font_zoom_requested = QtCore.pyqtSignal(int)  # new size (pt)
     selection_changed = QtCore.pyqtSignal(str)  # selected jid, or "" when cleared
 
@@ -37,6 +38,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._sorted_users: dict[str, list[UserItem]] = {}
         self._leading_groups: set[str] = set()
         self._trailing_groups: set[str] = set()
+        self._collapsed_groups: set[str] = set()
         self._selected_jid: str | None = None
         self._hover_jid: str | None = None
         self._search_text: str = ""
@@ -119,9 +121,22 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._sorted_groups.sort(key=self._group_sort_key)
         self.update()
 
+    def set_collapsed_groups(self, names) -> None:
+        """Restore persisted collapsed group names."""
+        self._collapsed_groups = {str(name) for name in (names or ()) if name}
+        for name, item in self._groups.items():
+            item.expanded = name not in self._collapsed_groups
+        self._recalc_heights()
+        self.update()
+
+    def collapsed_groups(self) -> list[str]:
+        """Names of the currently collapsed groups."""
+        return sorted(self._collapsed_groups)
+
     def add_group(self, name: str) -> GroupItem:
         if name not in self._groups:
-            item = GroupItem(name=name)
+            item = GroupItem(name=name,
+                             expanded=name not in self._collapsed_groups)
             self._groups[name] = item
             self._sorted_groups.append(name)
             self._sorted_groups.sort(key=self._group_sort_key)
@@ -412,8 +427,13 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             # the group menu without also collapsing/expanding it.
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 item.expanded = not item.expanded
+                if item.expanded:
+                    self._collapsed_groups.discard(item.name)
+                else:
+                    self._collapsed_groups.add(item.name)
                 self._recalc_heights()
                 self.update()
+                self.group_toggled.emit(item.name, item.expanded)
         elif kind == "user":
             if self._selected_jid != item.jid:
                 self._selected_jid = item.jid

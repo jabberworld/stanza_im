@@ -535,14 +535,15 @@ its tab closed, and the reason is shown — a `QMessageBox` with
 `muc_join_cannot_join` for a manual join, a tray balloon/OSD for an auto-join — a
 members-only room cannot be entered until we are added, so nothing is left
 looking like a joined room.
-`client._on_session_start` fetches the bookmark list **once, before the initial
-presence** (the roster request is already in flight) and joins the auto-join
-rooms from that fresh list — a room removed on another client is never joined,
-and the join no longer queues behind the roster/PEP burst. A successful empty
-answer is not an error; only a failed fetch is retried (1/2 s) in the
-background, and the PEP subscriptions to the known contacts are background
-work too. The fetched list is handed to the Bookmarks tab once
-(`bookmarks_snapshot()`), so it needs no second request.
+`client._on_session_start` sends the initial presence **first**, before the
+roster request and bookmark/PEP work, then fetches the bookmark list in the
+background and joins the auto-join rooms from it; a room removed on another
+client is never joined. A successful empty answer is not an error; only a
+failed fetch is retried (1/2 s) in the background. The fetched list is handed
+to the Bookmarks tab once (`bookmarks_snapshot()`), so it needs no second
+request. PEP subscriptions are gated by the contact's advertised caps, paced by
+a small semaphore, and unknown/non-PEP peers (RSS/transports) are not sent the
+five-node burst.
 Auto-joined rooms are retried on transient
 `muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
 `internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and
@@ -1175,7 +1176,10 @@ virtual groups — conferences and private messages (`_trailing_groups`) and the
 self-contact (`_leading_groups`) — keep their header. The flags live in
 `appearance.roster_sort_by_status`/`roster_sort_by_unread`/`roster_show_groups`/
 `roster_show_offline`/`roster_show_self` and are applied/toggled from the View
-menu.
+menu. Collapsed group names are persisted in
+`appearance.roster_collapsed_groups`: `RosterWidget.group_toggled` updates the
+set, `MainWindow._on_roster_group_toggled` saves it, and `add_group` applies it
+after a roster rebuild.
 
 **Rendering strategy**: `RosterStyle` is a pluggable class. `set_style()` hot-swaps
 the renderer. Heights are dynamic: contacts with status messages are taller.
@@ -1691,6 +1695,9 @@ a message that arrives while its own conversation is the active one is skipped,
 and an archived MAM replay never counts. `_reset_unread` also records the
 **read anchor** via `ChatWidget.read_anchor()` (newest displayed message:
 server `stanza-id` → `origin-id` → own message id, plus its raw timestamp).
+An explicit «Отметить прочитанным» (`_mark_chat_read(..., whole=True)`) uses a
+fresh UTC boundary when the chat is closed, so a later MAM/reconcile pass cannot
+recreate the old unread block.
 **Reaching the newest message is the only thing that marks a conversation
 read** — opening it, switching to it, sending into it and a remote XEP-0490
 state never do. `MainWindow._restore_anchor_for` therefore hands the anchor to

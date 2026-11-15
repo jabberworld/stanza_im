@@ -1526,6 +1526,8 @@ class JabberClient:
         self._pep_subscribe_inflight: set[tuple[str, str]] = set()
         self._pep_subscribe_failed: dict[str, float] = {}  # bare -> last ts
         self._pep_subscribe_cooldown = 300.0               # s before a retry
+        # Never flood the c2s stream with one subscribe IQ per contact node.
+        self._pep_subscribe_sem = asyncio.Semaphore(2)
         self._pep_sweep_task: asyncio.Task | None = None
         self._pep_sweep_paused = False
         # XEP-0115 features per full JID (for call-capability gating)
@@ -4725,17 +4727,37 @@ class JabberClient:
         self.emit("bookmarks_changed", bookmarks)
 
     def leave_muc(self, room: str, reason: str = "") -> None:
-        """Leave a Multi-User Chat room."""
+        """Leave a Multi-User Chat room without letting slixmpp abort us.
+
+        slixmpp raises ``KeyError`` when the room is no longer in its own
+        joined set (for example after a failed/local-only join).  That used to
+        escape a Qt callback and abort the process, so leave the XMPP call
+        best-effort and always clear the local state below.
+        """
         muc = self.xmpp.plugin["xep_0045"]
         nick = self.groupchats[room].nick if room in self.groupchats else ""
-        muc.leave_muc(room, nick, msg=reason)
-        task = self._muc_join_tasks.pop(room, None)
-        if task and not task.done():
-            task.cancel()
-        self.groupchats.pop(room, None)
-        self._muc_room_features.pop(room, None)
-        self._muc_last_activity.pop(room, None)
-        self._muc_self_ping_busy.discard(room)
+        try:
+            muc.leave_muc(room, nick, msg=reason)
+        except KeyError:
+            # The room is not in slixmpp's joined map.  A directed unavailable
+            # presence is still useful when we know the occupant nick (the
+            # server may have a stale occupant), but its failure is harmless.
+            if nick and self.xmpp.is_connected():
+                try:
+                    self.send_directed_presence(
+                        f"{room}/{nick}", "unavailable", reason)
+                except Exception:  # noqa: BLE001 - best effort
+                    logger.debug("Could not send unavailable to %s/%s",
+                                 room, nick, exc_info=True)
+            logger.debug("MUC %s was not in slixmpp's joined rooms", room)
+        finally:
+            task = self._muc_join_tasks.pop(room, None)
+            if task and not task.done():
+                task.cancel()
+            self.groupchats.pop(room, None)
+            self._muc_room_features.pop(room, None)
+            self._muc_last_activity.pop(room, None)
+            self._muc_self_ping_busy.discard(room)
 
     # ── XEP-0410 MUC self-ping (Schrödinger's chat) ───────────────
 
@@ -5901,16 +5923,18 @@ class JabberClient:
             except Exception:  # noqa: BLE001
                 logger.debug("update_caps failed", exc_info=True)
         self._seed_roster_cache()
-        self.request_roster()
-        # Auto-join before the initial presence: the fresh bookmark list is
-        # authoritative (a room removed on another client is not joined) and
-        # the fetch must not queue behind the roster/PEP burst.  The initial
-        # presence follows immediately afterwards.
-        await self._autojoin_bookmarks()
+        # Send the initial presence before the roster/PEP burst.  The roster
+        # push used to subscribe every added contact to five PEP nodes before
+        # the presence reached the wire, delaying all contact statuses by
+        # 10-15 seconds on a large roster.
         self.send_presence()
+        self.request_roster()
+        # The bookmark fetch and MUC joins are useful, but must never hold up
+        # the presence or the incoming contact statuses.
+        loop = asyncio.get_event_loop()
+        loop.create_task(self._autojoin_bookmarks())
         # Cache the domain features (privacy/blocking/report gating) and the
         # XEP-0191 blocklist for the roster's strikethrough state.
-        loop = asyncio.get_event_loop()
         loop.create_task(self._load_blocklist())
         if self.message_carbons:
             try:
@@ -6442,7 +6466,17 @@ class JabberClient:
         last_fail = self._pep_subscribe_failed.get(bare, 0.0)
         if now - last_fail < self._pep_subscribe_cooldown:
             return
-        for node in (*pep.PEP_NODES, NS_AVATAR_METADATA):
+        # Only subscribe to nodes the peer actually advertises.  A transport,
+        # RSS bot or old client without PEP would otherwise receive five
+        # pointless IQs (and answer feature-not-implemented each time).
+        nodes = [
+            node for node in (*pep.PEP_NODES, NS_AVATAR_METADATA)
+            if (self.supports_feature(bare, node)
+                or self.supports_feature(bare, node + "+notify"))
+        ]
+        if not nodes:
+            return
+        for node in nodes:
             key = (bare, node)
             if key in self._pep_subscribe_inflight:
                 continue
@@ -6454,9 +6488,13 @@ class JabberClient:
     async def _pep_subscribe(self, key: tuple[str, str]) -> None:
         bare, node = key
         try:
-            result = await asyncio.wait_for(
-                self.xmpp["xep_0060"].subscribe(bare, node, bare=True),
-                timeout=8)
+            async with self._pep_subscribe_sem:
+                # The semaphore keeps a large roster from putting hundreds of
+                # subscription IQs into the c2s send queue at once.
+                result = await asyncio.wait_for(
+                    self.xmpp["xep_0060"].subscribe(bare, node, bare=True),
+                    timeout=8)
+            await asyncio.sleep(0.02)
             status = ""
             for sub in result.xml.iter("{%s}subscription" % NS_PUBSUB):
                 status = sub.get("subscription", "")
@@ -7332,6 +7370,7 @@ class JabberClient:
             bare = full_jid.split("/")[0]
             logger.debug("CAPS %s: %d features", full_jid, len(features))
             self.emit("contact_caps", bare)
+            self._ensure_pep_subscription(bare)
             # Entity capabilities can be stale: slixmpp caches by the
             # verification string alone, so a peer that shares our caps node (a
             # second instance of this client) inherits our own cached feature
@@ -7547,6 +7586,7 @@ class JabberClient:
                 logger.debug("CAPS(disco) %s: %d features", full_jid,
                              len(features))
                 self.emit("contact_caps", full_jid.split("/")[0])
+                self._ensure_pep_subscription(full_jid.split("/")[0])
         finally:
             self._caps_disco_inflight.discard(full_jid)
 

@@ -402,6 +402,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_base_nicks: dict[str, str] = {}
         # Room configuration to apply once a room we are creating is joined.
         self._muc_create_opts: dict[str, dict] = {}
+        self._muc_history_pending: set[str] = set()
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
         # Roster contacts classified as transports/gateways (disco category
@@ -854,6 +855,11 @@ class MainWindow(QtWidgets.QMainWindow):
             tr("roster_group_conferences"),
             tr("roster_group_personal_messages")})
         self._roster.set_leading_groups({tr("roster_group_self")})
+        self._roster.set_collapsed_groups(
+            getattr(self._config.appearance,
+                    "roster_collapsed_groups", []) or [])
+        self._roster.group_toggled.connect(
+            self._on_roster_group_toggled)
         self._apply_roster_font()
         self._roster.set_tooltip_provider(self._roster_tooltip)
         self._roster.roster_font_zoom_requested.connect(
@@ -2717,6 +2723,10 @@ class MainWindow(QtWidgets.QMainWindow):
         is_new = not self._chat_window.has_chat(room)
         if is_new:
             self._chat_window.open_groupchat(room, nick, display_name)
+            # Do not push a local history page into a QWebEngineView that is
+            # still loading while the join response is in flight.  The history
+            # is loaded once ``muc_joined`` arrives (the page is ready then).
+            self._muc_history_pending.add(room)
         self._muc_self_nicks[room] = nick
         self._muc_base_nicks[room] = nick
         self._muc_join_tries[room] = 0
@@ -2734,8 +2744,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 room, nick, password, autojoin=autojoin, name=bookmark_name))
         chat = self._chat_window.get_chat(room)
         if chat:
-            if is_new:
-                self._load_history(room)
             chat.set_self_nick(nick)
             chat.update_muc_users(list(self._muc_users[room].values()),
                                   self_nick=nick)
@@ -2747,8 +2755,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_conference_roster(room)
 
     def _on_muc_leave(self, room: str):
-        if self._client:
-            self._client.leave_muc(room)
+        try:
+            if self._client:
+                self._client.leave_muc(room)
+        except Exception:  # noqa: BLE001 - never lose the UI cleanup
+            logger.debug("Could not leave MUC %s cleanly", room,
+                         exc_info=True)
         self._muc_users.pop(room, None)
         self._muc_room_features.pop(room, None)
         self._muc_moderation.pop(room, None)
@@ -2763,6 +2775,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_join_grace.pop(room, None)
         self._muc_base_nicks.pop(room, None)
         self._muc_create_opts.pop(room, None)
+        self._muc_history_pending.discard(room)
         if self._client:
             self._client.autojoin_rooms.discard(room)
         if room in self._conference_roster:
@@ -2826,6 +2839,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self._client else "")
             self._muc_self_nicks[room] = nick
         minimized = self._should_minimize_muc(room)
+        pending_history = room in self._muc_history_pending
+        self._muc_history_pending.discard(room)
+        history_started = False
         chat = self._chat_window.get_chat(room)
         if not chat and not minimized:
             chat = self._chat_window.open_groupchat(
@@ -2838,7 +2854,14 @@ class MainWindow(QtWidgets.QMainWindow):
             if anchor:
                 chat.set_restore_anchor(anchor)
             self._load_history(room, anchor, background=True)
+            history_started = True
             self._request_vcard(room, force=True)
+        if (chat and pending_history and not history_started
+                and not chat._history):
+            anchor = self._restore_anchor_for(room)
+            if anchor:
+                chat.set_restore_anchor(anchor)
+            self._load_history(room, anchor)
         self._apply_muji_support(room)
         self._apply_muc_admin(room)
         self._apply_omemo_support(room)
@@ -3080,6 +3103,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_join_grace.pop(room, None)
         self._muc_join_tries.pop(room, None)
         self._muc_create_opts.pop(room, None)
+        self._muc_history_pending.discard(room)
         self._muc_names.pop(room, None)
         self._muc_vcard_names.pop(room, None)
         self._muc_avatar_paths.pop(room, None)
@@ -7168,7 +7192,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             lambda: self._on_report_contact(bare)))
         menu.addSeparator()
         menu.addAction(self._menu_icon("ok.png"), tr("ctx_mark_read"),
-                       lambda: self._mark_chat_read(jid))
+                       lambda: self._mark_chat_read(jid, whole=True))
         menu.addAction(self._menu_icon("clear.png"),
                        tr("ctx_clear_history"), lambda: self._on_clear_history(jid))
         if is_conf:
@@ -7218,7 +7242,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     lambda: self._on_send_contact(real)))
         menu.addSeparator()
         menu.addAction(self._menu_icon("ok.png"), tr("ctx_mark_read"),
-                       lambda: self._mark_chat_read(target))
+                       lambda: self._mark_chat_read(target, whole=True))
         menu.addAction(self._menu_icon("clear.png"),
                        tr("ctx_clear_history"),
                        lambda: self._on_clear_history(target))
@@ -7288,7 +7312,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for jid in self._group_jids(group):
             entry = self._unread_chats.get(jid)
             if entry and entry.get("unread"):
-                self._mark_chat_read(jid)
+                self._mark_chat_read(jid, whole=True)
 
     def _build_subscription_menu(self, parent_menu, jid: str) -> None:
         """Add a subscription submenu reflecting the current subscription."""
@@ -8278,17 +8302,28 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
         self._mark_chat_read(jid)
 
-    def _mark_chat_read(self, jid: str) -> None:
+    def _mark_chat_read(self, jid: str, *, whole: bool = False) -> None:
         """Mark *jid* read: clear its counters, divider and XEP-0490 state.
 
         Used both when the active chat reaches its newest message and by the
         explicit «Отметить прочитанным» actions, so the two never diverge.
+        *whole* is set by the explicit actions: a closed chat has no
+        ``read_anchor()``, and using no anchor here left the old ``read_ts`` in
+        place, so the next MAM/reconcile pass counted the old archive again.
         """
         if not jid:
             return
-        self._reset_unread(jid)
         chat = (self._chat_window.get_chat(jid)
                 if self._chat_window is not None else None)
+        anchor = None
+        if chat is not None and not whole:
+            anchor = chat.read_anchor()
+        if not anchor or not any(anchor.values()):
+            # Explicit mark-read covers every currently known row.  A current
+            # UTC stamp is a safe boundary even without an open tab; the
+            # newest-id path below still publishes the MDS point when known.
+            anchor = {"ref": "", "ts": _current_timestamp(), "sid": ""}
+        self._reset_unread(jid, anchor)
         if chat is not None:
             # The unread divider has served its purpose: it must not survive
             # into the next re-render now that the counters are gone.
@@ -8301,7 +8336,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for jid in list(self._unread_chats):
             entry = self._unread_chats.get(jid)
             if entry and entry.get("unread"):
-                self._mark_chat_read(jid)
+                self._mark_chat_read(jid, whole=True)
 
 
     def _queue_mds_displayed(self, jid: str, sid: str) -> None:
@@ -9672,6 +9707,21 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_input_height_changed(self, jid: str, height: int):
         self._config.chat.input_height = max(40, min(240, int(height)))
         self._config.save()
+
+    def _on_roster_group_toggled(self, group: str, expanded: bool) -> None:
+        """Persist a roster group's expanded/collapsed state."""
+        names = {str(name) for name in (
+            getattr(self._config.appearance, "roster_collapsed_groups", [])
+            or []) if name}
+        if expanded:
+            names.discard(group)
+        else:
+            names.add(group)
+        values = sorted(names)
+        if values != list(getattr(
+                self._config.appearance, "roster_collapsed_groups", []) or []):
+            self._config.appearance.roster_collapsed_groups = values
+            self._config.save()
 
     def _on_roster_font_zoom(self, size: int):
         self._config.appearance.roster_font_size = int(size)
@@ -12720,6 +12770,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_vcard_names.clear()
         self._muc_avatar_paths.clear()
         self._muc_room_features.clear()
+        self._muc_history_pending.clear()
         self._mam_unsupported.clear()
         self._mds_reconciling.clear()
         self._mds_reconciled.clear()

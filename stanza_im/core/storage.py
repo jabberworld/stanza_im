@@ -186,6 +186,7 @@ class Config:
                         "roster_sort_by_unread": True,
                         "roster_show_groups": True,
                         "roster_show_self": False,
+                        "roster_collapsed_groups": [],
                         "muc_show_avatars": True,
                         "muc_show_clients": True,
                         "muc_show_hats": True,

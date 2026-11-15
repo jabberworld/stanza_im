@@ -1169,8 +1169,9 @@ if HAS_WEBENGINE:
                 return
             if self._pending:
                 pending, self._pending = self._pending, []
-                for chunk in pending:
-                    self._append_chunk(chunk)
+                # One DOM/JS turn instead of one per buffered message: a MUC
+                # join can seed a whole history page before the page is ready.
+                self._append_chunk("".join(pending))
             # A scroll requested while the document was still empty (the
             # read-anchor resume) only becomes meaningful once the buffered
             # chunks above are in the DOM, so replay it last.
@@ -1183,8 +1184,7 @@ if HAS_WEBENGINE:
                     self._ready = True
                     if self._pending:
                         pending, self._pending = self._pending, []
-                        for chunk in pending:
-                            self._append_chunk(chunk)
+                        self._append_chunk("".join(pending))
                     self._flush_deferred_scroll()
                 elif self._load_failures >= self._LOAD_RETRY_LIMIT:
                     logger.error("chat document repeatedly lost (%d); "
