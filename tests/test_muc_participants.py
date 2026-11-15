@@ -22,6 +22,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6 import QtCore, QtGui, QtWidgets
+try:
+    from PyQt6 import sip
+except ImportError:  # pragma: no cover - sip is bundled with PyQt6
+    sip = None
 
 from stanza_im.i18n import load as i18n_load, tr
 from stanza_im.ui import chat_themes
@@ -184,9 +188,15 @@ check("names sort case-insensitively",
       _nicks() == ["Alice", "bob", "carol"])
 
 # 7. a real full rebuild (font/options) can still be requested --------------
+old_rows = [state["row"] for state in cw._muc_rows.values()]
 cw._render_muc_users()
 check("a full rebuild lists everyone again", len(_nicks()) == 3)
 check("a full rebuild recreates the rows", len(built) > built_before)
+if sip is not None:
+    QtCore.QCoreApplication.sendPostedEvents(
+        None, QtCore.QEvent.Type.DeferredDelete)
+    check("a full rebuild deletes the replaced row widgets",
+          all(sip.isdeleted(row) for row in old_rows))
 
 # 8. the large-channel case: 200 presences, 200 rows ----------------------
 cw2 = chat_widget_mod.ChatWidget(

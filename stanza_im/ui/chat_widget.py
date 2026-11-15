@@ -342,6 +342,7 @@ class _ParticipantList(FontZoomMixin, QtWidgets.QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("mucParticipants")
         self.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
         self.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -3774,16 +3775,54 @@ class ChatWidget(QtWidgets.QWidget):
         self._refresh_nick_colors()
         self._sync_muc_users()
 
+    def _take_muc_item(self, item) -> None:
+        """Remove an item widget before taking its list item.
+
+        ``QListWidget`` keeps a widget set with ``setItemWidget`` registered as
+        a persistent editor.  Taking the item without clearing that
+        registration leaves a stale editor in Qt's geometry pass; the next
+        ``paintEvent`` then calls ``show()`` on the deleted row widget and
+        crashes natively.  ``removeItemWidget`` unregisters it first.
+        """
+        if item is None:
+            return
+        try:
+            self._users_list.removeItemWidget(item)
+        except RuntimeError:
+            return
+        index = self._users_list.row(item)
+        if index >= 0:
+            self._users_list.takeItem(index)
+
+    def _drop_muc_row(self, state: dict) -> None:
+        """Detach and delete one participant row safely."""
+        self._take_muc_item(state.get("item"))
+        row = state.get("row")
+        if row is None:
+            return
+        try:
+            row.setParent(None)
+            row.deleteLater()
+        except RuntimeError:
+            pass
+
     def _render_muc_users(self):
         """Drop every participant row and build the list from scratch."""
         if not self.is_muc:
             return
-        self._users_list.clear()
-        self._muc_rows = {}
-        self._muc_headers = {}
-        self._muc_color_keys = set()
-        self._refresh_nick_colors()
-        self._sync_muc_users()
+        old_rows = list(self._muc_rows.values())
+        self._users_list.setUpdatesEnabled(False)
+        try:
+            for state in old_rows:
+                self._drop_muc_row(state)
+            self._users_list.clear()
+            self._muc_rows = {}
+            self._muc_headers = {}
+            self._muc_color_keys = set()
+            self._refresh_nick_colors()
+            self._sync_muc_users()
+        finally:
+            self._users_list.setUpdatesEnabled(True)
 
     @staticmethod
     def _muc_section(user: dict) -> str:
@@ -3803,11 +3842,7 @@ class ChatWidget(QtWidgets.QWidget):
                 by_nick[nick] = user
         for nick in [name for name in self._muc_rows if name not in by_nick]:
             state = self._muc_rows.pop(nick)
-            index = self._users_list.row(state["item"])
-            if index >= 0:
-                self._users_list.takeItem(index)
-            state["row"].setParent(None)
-            state["row"].deleteLater()
+            self._drop_muc_row(state)
         for nick, user in by_nick.items():
             state = self._muc_rows.get(nick)
             if state is None:
@@ -3828,9 +3863,7 @@ class ChatWidget(QtWidgets.QWidget):
             if not nicks:
                 header = self._muc_headers.pop(section, None)
                 if header is not None:
-                    index = self._users_list.row(header)
-                    if index >= 0:
-                        self._users_list.takeItem(index)
+                    self._take_muc_item(header)
                 continue
             header = self._muc_headers.get(section)
             if header is None:
@@ -3847,9 +3880,8 @@ class ChatWidget(QtWidgets.QWidget):
         for index, item in enumerate(desired):
             if self._users_list.item(index) is item:
                 continue
-            current = self._users_list.row(item)
-            if current >= 0:
-                self._users_list.takeItem(current)
+            if self._users_list.row(item) >= 0:
+                self._take_muc_item(item)
             self._users_list.insertItem(index, item)
             nick = item.data(QtCore.Qt.ItemDataRole.UserRole)
             if nick:
@@ -3857,9 +3889,11 @@ class ChatWidget(QtWidgets.QWidget):
                 if state is not None:
                     self._users_list.setItemWidget(item, state["row"])
         while self._users_list.count() > len(desired):
-            item = self._users_list.takeItem(len(desired))
-            if item is not None:
-                del item
+            item = self._users_list.item(len(desired))
+            if item is None:
+                break
+            self._take_muc_item(item)
+            del item
         self._apply_participant_filter()
 
     @staticmethod
