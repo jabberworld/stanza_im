@@ -2856,8 +2856,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_history(room, anchor, background=True)
             history_started = True
             self._request_vcard(room, force=True)
-        if (chat and pending_history and not history_started
-                and not chat._history):
+        if (chat and not history_started and not chat._history):
             anchor = self._restore_anchor_for(room)
             if anchor:
                 chat.set_restore_anchor(anchor)
@@ -6920,10 +6919,13 @@ class MainWindow(QtWidgets.QMainWindow):
         restore_anchor = self._restore_anchor_for(jid)
         self._opening_chat = True
         try:
-            if jid in self._muc_self_nicks:
+            if (jid in self._muc_self_nicks
+                    or self._is_conference_jid(jid)):
                 is_new = not self._chat_window.has_chat(jid)
+                nick = (self._muc_self_nicks.get(jid)
+                        or self._default_nick())
                 chat = self._chat_window.open_groupchat(
-                    jid, self._muc_self_nicks[jid], display_name)
+                    jid, nick, display_name)
                 self._seed_muc_chat(jid, chat, title=display_name,
                                     is_new=is_new, anchor=restore_anchor)
                 self._apply_muji_support(jid)
@@ -6973,6 +6975,13 @@ class MainWindow(QtWidgets.QMainWindow):
         chat = self._chat_window.get_chat(jid)
         if not chat:
             self._history_reload_pending.discard(jid)
+            return
+        if (self._is_conference_jid(jid)
+                and jid not in self._muc_joined):
+            # A room's first local history page must not be rendered into a
+            # QWebEngineView while its join response is still in flight.  The
+            # join path calls _load_history again after muc_joined.
+            logger.debug("HISTORY[defer] jid=%s not joined yet", jid)
             return
         anchor_ts = str((anchor or {}).get("ts") or "")
         if jid in self._history_loading:
