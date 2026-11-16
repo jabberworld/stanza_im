@@ -419,6 +419,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.participant_width_changed.connect(
             self.participant_width_changed.emit)
         widget.set_colored_muc_nicks(self._colored_muc_nicks)
+        widget.set_notes_enabled(self._notes_enabled)
 
     def reload_themes(self, variant: str = "", muc_variant: str | None = None):
         """Re-apply the chat theme variant to all open tabs."""

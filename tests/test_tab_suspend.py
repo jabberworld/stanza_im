@@ -41,6 +41,7 @@ a = cw.open_chat("a@example.com", "A")
 b = cw.open_chat("b@example.com", "B")
 b.add_message(sender="B", body="hello", timestamp="12:00:00",
               direction="incoming")
+cw.set_notes_enabled(True)
 
 check("current tab refuses suspension",
       cw.suspend_tab("b@example.com") is False)
@@ -57,6 +58,9 @@ cw.resume_tab("a@example.com")
 check("tab resumed", not cw.is_suspended("a@example.com"))
 check("view recreated", not isinstance(a._view, type(None))
       and a._view.height() >= 0)
+check("the Notes menu survives tab resume",
+      cw._notes_enabled and a._notes_enabled
+      and a._view._notes_enabled)
 
 # 2. MainWindow scheduler gates ----------------------------------------------
 class _FakeClient:

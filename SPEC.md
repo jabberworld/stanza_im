@@ -3569,6 +3569,8 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   _on_note_requested`, which appends a note via `NotesWidget.add_note(title,
   text, "Сообщения")` (title `@<room name or nick> <date> <time>`, fixed tag
   «Сообщения») and shows an OSD notice when `notifications.osd_enabled`.
+  The flag is stored on `ChatWidget` and re-applied when an idle tab resumes,
+  so both this menu and the selected-text menu survive suspension.
 
 ### 14.8.3 Attention (XEP-0224, `stanza_im/plugins/attention/`)
 

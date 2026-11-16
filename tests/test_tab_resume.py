@@ -45,6 +45,10 @@ class _StubView(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.highlight_nick = ""
+        self.notes_enabled = False
+
+    def set_notes_enabled(self, enabled):
+        self.notes_enabled = bool(enabled)
 
     def shutdown(self):
         pass
@@ -135,10 +139,13 @@ check("an unchanged text scale is a no-op", True)
 # Simulate the suspended state (a real suspend destroys the WebEngine page,
 # which the offscreen teardown dislikes); resume() itself is the code under
 # test and uses the stub view.
+cw.set_notes_enabled(True)
 cw.set_history([], 50, True)
 renders.clear()
 cw._suspended = True
 cw.resume()
+check("resume keeps the Notes menu enabled",
+      cw._notes_enabled and cw._view.notes_enabled)
 check("resume defers its render", not renders
       and cw._resume_render_timer.isActive())
 cw.set_history([], 50, True)

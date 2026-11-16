@@ -546,6 +546,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._send_typing_notifications = True
         self._send_activity_notifications = True
         self._show_status = True
+        self._notes_enabled = False
         self._last_sender: str = ""
         self._history: list[dict] = []
         self._status_lines: list[tuple[str, str]] = []
@@ -633,6 +634,7 @@ class ChatWidget(QtWidgets.QWidget):
         from stanza_im.ui.chat_view import ChatView
         view = ChatView(theme)
         view.set_avatar_radius(self._avatar_radius)
+        view.set_notes_enabled(self._notes_enabled)
         view.mention_senders = self.is_muc
         view.link_clicked.connect(self._open_link)
         view.link_clicked.connect(self.link_clicked)
@@ -1331,9 +1333,10 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_notes_enabled(self, enabled: bool) -> None:
         """Toggle the 'Add to notes' menu entry (Notes plugin active)."""
+        self._notes_enabled = bool(enabled)
         setter = getattr(self._view, "set_notes_enabled", None)
         if callable(setter):
-            setter(bool(enabled))
+            setter(self._notes_enabled)
 
     def _handle_geo_uri(self, url: str) -> None:
         """Open the map window for a ``stanza:geo:<ref>/<uri>`` or plain geo:."""
@@ -2668,6 +2671,7 @@ class ChatWidget(QtWidgets.QWidget):
         view = self._create_view(self._theme)
         view.highlight_nick = self._self_nick
         self._view = view
+        self._view.set_notes_enabled(self._notes_enabled)
         self._chat_col.insertWidget(0, view, 1)
         self._view.set_chat_zoom(self._text_scale)
         self._preserve_fraction = self._suspended_fraction
