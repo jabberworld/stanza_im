@@ -417,6 +417,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # Roster contacts classified as transports/gateways (disco category
         # "gateway"); shown in their own tab, never as ordinary contacts.
         self._transport_jids: set[str] = set()
+        # Transports discovered from a live conversation but not explicitly
+        # added to the roster yet.  They are listed in the Transports tab for
+        # this session only; transports.json changes only after «Добавить в
+        # список».
+        self._session_transports: set[str] = set()
         self._transport_probed: set[str] = set()
         self._transport_pending: set[str] = set()
         self._transport_roster: RosterWidget | None = None
@@ -1301,10 +1306,14 @@ class MainWindow(QtWidgets.QMainWindow):
                         self._add_roster_item(item)
                         break
                 self._roster.sort_and_update()
+            self._session_transports.discard(bare)
+            self._rebuild_transports()
             return
         if bare in self._transport_jids:
+            self._session_transports.discard(bare)
             return
         self._transport_jids.add(bare)
+        self._session_transports.discard(bare)
         self._save_transports()
         # The transport must leave the ordinary roster.
         self._roster.remove_user(bare)
@@ -1338,12 +1347,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         roster.clear()
         if self._client is not None:
-            for jid in sorted(self._transport_jids, key=str.casefold):
+            transports = (set(self._transport_jids)
+                          | set(getattr(self, "_session_transports", set())))
+            for jid in sorted(transports, key=str.casefold):
                 contact = self._client.get_contact(jid)
                 show = getattr(contact, "show", "offline") or "offline"
                 roster.add_user(UserItem(
                     jid=jid,
-                    name=self._roster_name(jid) or jid,
+                    name=self._transport_name(jid),
                     group=tr("roster_group_transports"),
                     status=show,
                     status_message=getattr(contact, "status", ""),
@@ -1414,6 +1425,12 @@ class MainWindow(QtWidgets.QMainWindow):
             tr("transport_remove_confirm", jid=jid))
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
             return
+        if jid in getattr(self, "_session_transports", set()):
+            # A session-only transport is not a roster item: dropping its row
+            # must not send a roster removal for a JID the server never had.
+            self._session_transports.discard(jid)
+            self._rebuild_transports()
+            return
         if self._client is not None:
             self._start_task(self._client.remove_contact(jid))
         self._transport_jids.discard(jid)
@@ -1429,6 +1446,12 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(0, callback)
 
         online = self._transport_online(jid)
+        if jid in getattr(self, "_session_transports", set()):
+            menu.addAction(
+                self._menu_icon("add-user.png"), tr("ctx_add_to_roster"),
+                lambda checked=False: defer(
+                    lambda: self._add_session_transport(jid)))
+            menu.addSeparator()
         menu.addAction(
             QtGui.QIcon(find_icon(
                 "connected.svg" if online else "disconnected.svg")),
@@ -1466,8 +1489,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _transport_gateways(self) -> list:
         """The added transports as ``(name, jid)`` for the add-contact dialog."""
-        return [(self._roster_name(jid) or jid, jid)
-                for jid in sorted(self._transport_jids, key=str.casefold)]
+        transports = (set(self._transport_jids)
+                      | set(getattr(self, "_session_transports", set())))
+        return [(self._transport_name(jid), jid)
+                for jid in sorted(transports, key=str.casefold)]
 
     def _clear_events_placeholder(self) -> None:
         # Only the *placeholder* row may be cleared: a real event is also a
@@ -2566,10 +2591,6 @@ class MainWindow(QtWidgets.QMainWindow):
         bare = str(jid).split("/", 1)[0]
         if not bare:
             return False
-        # A server/transport JID has no localpart (``xmpp.example.org``); it
-        # is not a 1:1 contact and must never get a «Не в списке» row.
-        if "@" not in bare:
-            return False
         own = str(self._client.jid_str or "").split("/", 1)[0]
         if own and bare == own:
             return False
@@ -2604,13 +2625,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self._schedule_roster_repaint()
 
     def _track_not_in_roster(self, jid: str, name: str = "") -> None:
-        """Keep a session row for a 1:1 peer that is absent from the roster."""
+        """Keep a session row for a peer that is absent from the roster."""
         bare = str(jid or "").split("/", 1)[0]
         if not bare:
             return
         if not self._is_unknown_contact(bare):
             self._drop_not_in_roster(bare)
             return
+        if "@" not in bare:
+            # A service/transport JID is not a personal contact; show it on
+            # the Transports tab for this session instead.
+            self._track_session_transport(bare, name)
+            return
+        # A session-only peer has no authoritative roster nickname; never use
+        # a domain/service name left in an old row as its nickname.
+        name = bare.split("@", 1)[0]
         pending = getattr(self, "_not_in_roster", None)
         if pending is None:
             pending = self.__dict__.setdefault("_not_in_roster", set())
@@ -2641,6 +2670,36 @@ class MainWindow(QtWidgets.QMainWindow):
             self._roster.add_user(UserItem(jid=bare, group=group, **fields))
         self._roster.add_group(group)
         self._schedule_roster_repaint()
+
+    def _transport_name(self, jid: str) -> str:
+        """Display name of a transport (a server JID has no localpart)."""
+        return self._roster_name(jid) or str(jid or "")
+
+    def _track_session_transport(self, jid: str, name: str = "") -> None:
+        """List an unknown service JID in the Transports tab for this session."""
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare or self._client is None:
+            return
+        if bare in getattr(self, "_transport_jids", set()):
+            return
+        session = getattr(self, "_session_transports", None)
+        if session is None:
+            session = self.__dict__.setdefault("_session_transports", set())
+        if bare in session:
+            return
+        self._drop_not_in_roster(bare)
+        session.add(bare)
+        self._rebuild_transports()
+
+    def _add_session_transport(self, jid: str) -> None:
+        """Add a session-only transport to the roster and persist after probe."""
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare or self._client is None:
+            return
+        self._transport_probed.discard(bare)
+        self._transport_pending.discard(bare)
+        self._client.update_contact(
+            bare, name=self._transport_name(bare), groups=[])
 
     def _sync_not_in_roster(self) -> None:
         """Drop session rows that entered the roster and restore the others.
@@ -6991,7 +7050,9 @@ class MainWindow(QtWidgets.QMainWindow):
                                          self._client.client_icon(bare_jid))
         # A transport's presence drives its row in the Transports tab and the
         # Connect/Disconnect button (live).
-        if bare_jid in self._transport_jids and self._transport_roster is not None:
+        if ((bare_jid in self._transport_jids
+             or bare_jid in getattr(self, "_session_transports", set()))
+                and self._transport_roster is not None):
             self._transport_roster.update_user(
                 bare_jid, status=show, status_message=status,
                 icon_key=show_to_icon_key(show))
@@ -7266,8 +7327,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._menu_icon("add-user.png"), tr("ctx_add_to_roster"),
                 lambda checked=False: defer(
                     lambda: self._on_add_contact(
-                        jid=jid, name=self._roster_name(jid)
-                        or jid.split("@", 1)[0], preselect=preselect)))
+                        jid=jid, name=jid.split("@", 1)[0],
+                        preselect=preselect)))
             menu.addSeparator()
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))
@@ -12976,6 +13037,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pm_roster = set()
         self._pm_targets = {}
         self._not_in_roster = set()
+        self._session_transports = set()
         self._cached_roster_key = None
         self._muc_self_nicks.clear()
         self._muc_users.clear()

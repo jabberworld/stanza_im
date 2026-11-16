@@ -31,8 +31,20 @@ class _Client:
     jid_str = "me@example.com"
     roster = {}
 
+    def __init__(self):
+        self.updated = []
+
     def get_contact(self, jid):
         return _Contact()
+
+    def client_icon(self, jid):
+        return ""
+
+    def update_contact(self, jid, name="", groups=None):
+        self.updated.append((jid, name, groups))
+
+    def request_roster(self):
+        pass
 
 
 def _win():
@@ -53,6 +65,14 @@ def _win():
     win._roster_name = lambda jid: ""
     win._schedule_roster_repaint = lambda: None
     win._not_in_roster = set()
+    win._session_transports = set()
+    win._transport_probed = set()
+    win._transport_pending = set()
+    win._blocked_jids = set()
+    win._transport_roster = RosterWidget()
+    win._transport_connect_btn = None
+    win._transport_command_btn = None
+    win._transport_remove_btn = None
     return win
 
 
@@ -65,6 +85,8 @@ checks = [
     ("an unknown contact gets a session row", row is not None),
     ("the session row is in «Не в списке»", row is not None and row.group == group),
     ("the session row is offline", row is not None and row.status == "offline"),
+    ("the session row uses the localpart as its name",
+     row is not None and row.name == "1234060895"),
     ("the session set contains the JID", jid in win._not_in_roster),
 ]
 win._roster.clear()
@@ -80,15 +102,25 @@ checks.extend([
     ("the session set is pruned", jid not in win._not_in_roster),
 ])
 
-# Server/transport JIDs (no localpart) never become unknown contacts.
+# A server/transport JID is listed in the Transports tab for this session,
+# never in «Не в списке» and never persisted without an explicit add.
 server = "xmpp.example.org"
 win._track_not_in_roster(server)
 checks.extend([
     ("a transport JID is not a «Не в списке» contact",
      all(u.jid != server for u in win._roster._users)),
-    ("a transport JID is not kept in the session set",
-     server not in win._not_in_roster),
+    ("a transport JID is kept as a session transport",
+     server in win._session_transports),
+    ("a session transport is shown in the Transports tab",
+     any(u.jid == server for u in win._transport_roster._users)),
+    ("a session transport uses the service name",
+     any(u.jid == server and u.name == server
+         for u in win._transport_roster._users)),
 ])
+win._add_session_transport(server)
+checks.append(("adding a session transport updates the roster without persisting",
+               (server, server, []) in win._client.updated
+               and server not in win._transport_jids))
 
 # The context-menu action reuses AddContactDialog with the JID/name prefilled.
 _dlg = AddContactDialog([], None, jid=jid, name="Роман")

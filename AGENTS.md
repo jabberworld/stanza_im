@@ -260,8 +260,13 @@ read back in `_load_transports` **before** the roster is built, so a gateway
 never flashes in the Contacts roster (nor lingers there on a slow/offline
 login); a definite non-gateway answer for a persisted JID drops it back into the
 roster and a full roster prunes JIDs the server no longer returns
-(`_prune_transports`). A classified transport is filtered out of the Contacts
-roster (`_add_roster_item` skips it, `_probe_transport` removes the row) and
+(`_prune_transports`). An unknown service JID (no `@`) that sends a 1:1
+message is shown on the Transports tab for the session only
+(`_session_transports`), never in «Не в списке»; its «Добавить в список»
+context action adds the server JID to the roster and lets the normal
+classification persist it. A classified transport is filtered out of the
+Contacts roster (`_add_roster_item` skips it, `_probe_transport` removes the row)
+and
 rendered by a **second `RosterWidget`** (`_transport_roster`, same
 renderer/tooltip/font/colors, no group header). Its
 context menu (`_on_transport_context`) offers Connect/Disconnect (a **directed**
@@ -1137,10 +1142,11 @@ used for the self-contact group) which always come first. Four groups hold an
 app-computed row rather than a real contact group — conferences
 (`MainWindow._sync_conference_roster`, one row per joined room), MUC private
 messages, the account's own contact (`MainWindow._sync_self_roster`) and the
-session-only «Не в списке» group for unknown 1:1 peers
-(`MainWindow._track_not_in_roster`; server/transport JIDs without an `@` are
-never contact rows; its context menu's «Добавить в список» reuses
-`AddContactDialog` with the JID/name prefilled) — so
+session-only «Не в списке» group for unknown 1:1 **user** peers
+(`MainWindow._track_not_in_roster`; a service JID without an `@` is kept on
+the Transports tab for the session instead; a user row's context menu's
+«Добавить в список» reuses `AddContactDialog` with the JID/localpart
+prefilled) — so
 they are excluded from the group pickers and roster sharing via
 `_virtual_roster_groups()` and are never persisted into
 `core/known_contacts.py`. The server often returns the account itself in the

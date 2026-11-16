@@ -185,7 +185,11 @@ marker so only it is removed on the first real event) and **Transports**
 identity is a gateway, classified once each into `_transport_jids` on roster load
 and tab activation, the set cached per profile in `transports.json` and loaded
 before the roster so a gateway never flashes in the Contacts roster, and rendered
-by a second `RosterWidget`; a bookmarks-style fixed-height toolbar of wide 2:1
+by a second `RosterWidget`; an unknown service JID (no `@`) that sends a 1:1
+message is listed there for the session only (`_session_transports`) and is not
+put in «Не в списке»; «Добавить в список» adds it to the roster and persists it
+through the normal gateway classification. The tab has a bookmarks-style
+fixed-height toolbar of wide 2:1
 icon-only buttons — Connect/Disconnect (`connected.svg`/`disconnected.svg`, a
 diagonal chain intact vs. with the middle link broken, showing the current
 state), Commands, Remove — enabled only while a transport is selected and cleared
@@ -1115,12 +1119,12 @@ Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
 private-messages group, `roster_group_personal_messages`, and the session-only
 `roster_group_not_in_list`) forces those groups after all contact groups, and
 `set_leading_groups` (set to the self-contact group, `roster_group_self`)
-forces it before them. An unknown 1:1 peer that messages us while absent from
-the XMPP roster gets a session row in «Не в списке» (offline icon); its context
-menu offers «Добавить в список», reusing `AddContactDialog` with the JID and
-name prefilled. Server/transport JIDs (no `@`) are never unknown contacts. The
-row is removed once the JID enters the roster and is kept until logout
-otherwise.
+forces it before them. An unknown 1:1 **user** peer that messages us while
+absent from the XMPP roster gets a session row in «Не в списке» (offline icon);
+its context menu offers «Добавить в список», reusing `AddContactDialog` with
+the JID and localpart prefilled. A service/transport JID (no `@`) is shown on
+the Transports tab instead, also session-only until the user adds it. The row
+is removed once the JID enters the roster and is kept until logout otherwise.
 
 Those groups hold a row **computed by the app** rather than a real
 contact group, so they are excluded from the group pickers and from
