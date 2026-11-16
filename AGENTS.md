@@ -477,7 +477,13 @@ registered, so the stamp is read from the XML, `_delay_stamp`). Any delayed
 groupchat message is history: `JabberClient._on_groupchat_message` sets
 `archived = bool(ts)` and `_on_groupchat_message`'s archived branch stores it
 without rendering, sounding, OSD or unread counters. The MAM backfill may also
-store rows while the tab is open. `ChatWidget.schedule_tail_refresh`
+store rows while the tab is open. Backward MAM paging uses the visible oldest
+row's archive id as the RSM `<before>` cursor
+(`history.archive_id_for_timestamp`,
+`JabberClient.fetch_history_mam(before_id=...)`):
+some MUC archives ignore the form `<end>` and return their first page, which
+would make the client jump months back and then falsely mark the archive
+exhausted. `ChatWidget.schedule_tail_refresh`
 (debounced, also called after `server_fetch_done`) reloads the window only for
 the visible, not-user-scrolled conversation (`refresh_tail_if_newer`; the flag
 is set by an actual `last_seen` scroll-up and cleared when the view reaches the
@@ -1116,6 +1122,10 @@ and allows full visual control (avatars, status icons, unread badges, mood icons
 
 **Data model**: `GroupItem` and `UserItem` dataclasses. The widget maintains
 flat lists and sorted dicts. Hit-testing iterates items by accumulated Y offset.
+Bulk roster loads use `begin_batch()`/`end_batch()`: row additions and updates
+only append to the internal lists, and sorting, height recalculation and the
+single repaint happen once at the end (a 200-contact login used to recalculate
+every visible row per contact).
 Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
 used by `MainWindow` for the conferences group **and** the private-messages
 group) which always come last, and the leading groups (`set_leading_groups`,

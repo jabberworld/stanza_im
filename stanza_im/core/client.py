@@ -8113,22 +8113,27 @@ class JabberClient:
         self.emit("vcard_received", jid or bare, card)
 
     async def fetch_history_mam(self, jid: str, since: str | None = None,
-                                limit: int = 200) -> int | None:
+                                limit: int = 200,
+                                before_id: str = "") -> int | None:
         """Fetch older messages for *jid* from the server archive (MAM,
         XEP-0313) and store them locally.
 
         Queries only the range strictly before the locally stored ``since``
-        timestamp so overlapping messages are not re-fetched.  Returns the
-        number of messages stored, or ``None`` when another query for the
-        same JID is in flight.
+        timestamp (or the explicit RSM ``before_id``) so overlapping messages
+        are not re-fetched.  A ``before_id`` is preferred: some room archives
+        ignore the form ``end`` field and return the first page instead of the
+        page adjacent to the requested timestamp.  Returns the number of
+        messages stored, or ``None`` when another query for the same JID is in
+        flight.
         """
         if jid in self._mam_inflight:
             return None
-        if since is None:
+        if since is None and not before_id:
             self._mam_cursors.pop(jid, None)
         self._mam_inflight.add(jid)
         try:
-            return await self._fetch_history_mam_impl(jid, since, limit)
+            return await self._fetch_history_mam_impl(
+                jid, since, limit, before_id=before_id)
         finally:
             self._mam_inflight.discard(jid)
 
@@ -8170,7 +8175,8 @@ class JabberClient:
         return bare == jid.lower() or bare == own_jid.lower()
 
     async def _fetch_history_mam_impl(self, jid: str, since: str | None,
-                                       limit: int) -> int:
+                                       limit: int,
+                                       before_id: str = "") -> int:
         from stanza_im.core import history
         mam = self.xmpp.plugin["xep_0313"]
         end = None
@@ -8183,7 +8189,10 @@ class JabberClient:
                     end = end.replace(tzinfo=datetime.timezone.utc)
             except ValueError:
                 end = None
-        cursor = self._mam_cursors.get(jid)
+        # An explicit local archive id is the safest backward cursor: an
+        # <end> timestamp made ejabberd return the oldest room page instead
+        # of the page before the local window.
+        cursor = str(before_id or self._mam_cursors.get(jid) or "")
         if cursor:
             end = None
         rsm = {"max": int(limit)}

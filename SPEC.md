@@ -395,7 +395,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `chat.text_scale` | `1.0` | Chat text zoom factor; clamped to 0.5–3.0 (50–300 %). Ctrl+wheel in the chat view and the Preferences → Appearance → Fonts slider share this value; reopened 1:1 and MUC tabs re-apply it via `ChatWidget.set_text_scale`. When the WebEngine page owns focus, Chromium consumes Ctrl+wheel, so the factor is also followed by polling `QWebEngineView.zoomFactor()` in the 250 ms scroll poll (Qt 6 has no `zoomFactorChanged` signal) and saved the same way. |
 | `chat.open_incoming_tab` | `except_low` | Auto-open a tab for an incoming 1:1/PM message: `always` / `except_low` (default; no tab for low-priority contacts) / `never`. The message is stored and counted regardless; an existing tab always receives it. |
 | `chat.idle_unload_minutes` | `10` | Unload the WebEngine page of cold tabs after this many idle minutes (`0` = off). `MainWindow._maybe_suspend_tabs` skips the current tab and any tab with an unread message; `ChatWidget.suspend`/`resume` free and rebuild the view (`_NullView` stand-in in between). |
-| `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. `application.history_limit` is a legacy mirror. |
+| `chat.history_limit` | `50` | History window: how many recent messages a tab loads on open (10–1000, Preferences → Chat → «Общие»/«General»; applies to 1:1 and MUC). `MainWindow._load_history_async` loads this many from local SQLite and sets `ChatWidget._window_size`; DB/MAM requests page in `_HISTORY_PAGE` (60) steps. Backward MAM paging passes the visible oldest row's archive id as RSM `before` (`JabberClient.fetch_history_mam(before_id=...)`), because some MUC archives ignore the form `end` and return their oldest page. `application.history_limit` is a legacy mirror. |
 | `chat.spellcheck_enabled` | `true` | Optional enchant/pyenchant spell checking in the message input. Without the `enchant` module, `libenchant` or installed dictionaries it is a silent no-op. |
 | `chat.spellcheck_languages` | `[]` | Enchant dictionary tags to use. Empty = automatic: UI language + system locale + English, limited to installed dictionaries. Several tags may be selected; a word is accepted by any active dictionary. Words whose script has no active dictionary are skipped. |
 | `chat.mds_displayed_throttle` | `3` | Seconds (1–30) between XEP-0490 `displayed` publishes for **partial** read progress while scrolling (Preferences → Chat → «Общие»/«General»). `MainWindow._on_chat_last_seen` arms a single-shot `_mds_throttle_timer` carrying the newest seen stanza-id; reaching the bottom still publishes immediately. Applied live from `_on_settings_applied`. |
@@ -1296,6 +1296,13 @@ history rows, `_MESSAGES_MAX` live rows and `_STATUS_MAX` (300) status lines,
 and the WebEngine DOM trims to `ChatView._MAX_DOM_MESSAGES` (500) message nodes
 (oldest first); everything older stays in SQLite/MAM and is re-fetched through
 the history paging menus.
+
+Bulk roster rendering uses `RosterWidget.begin_batch()`/`end_batch()`: contacts
+are appended without per-row sort/height/repaint work, and the roster is sorted,
+measured and repainted once at the end. The cached roster and the server roster
+are compared by a normalized key, so an identical server answer reuses the
+already-rendered rows instead of clearing and rebuilding them; `known_contacts`
+is updated once per rebuild with `update_many()`.
 
 Cold tabs are additionally suspended: after `chat.idle_unload_minutes`
 (default 10, `0` = off) `MainWindow._maybe_suspend_tabs` unloads a tab that is

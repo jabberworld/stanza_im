@@ -51,6 +51,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._press_pos: QtCore.QPoint | None = None
         self._press_jid: str | None = None
         self._drop_group: str | None = None
+        self._batch_depth = 0
 
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -142,12 +143,28 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             self._sorted_groups.sort(key=self._group_sort_key)
         return self._groups[name]
 
+    def begin_batch(self) -> None:
+        """Defer sorting, height recalculation and repaints for a bulk load."""
+        self._batch_depth += 1
+
+    def end_batch(self) -> None:
+        """Finish a :meth:`begin_batch` block and repaint once."""
+        if self._batch_depth <= 0:
+            return
+        self._batch_depth -= 1
+        if self._batch_depth:
+            return
+        self._rebuild_sorted()
+        self._recalc_heights()
+        self.update()
+
     def add_user(self, user: UserItem) -> None:
         self._users.append(user)
         self.add_group(user.group)
         self._sorted_users.setdefault(user.group, []).append(user)
-        self._recalc_heights()
-        self.update()
+        if not self._batch_depth:
+            self._recalc_heights()
+            self.update()
 
     def update_user(self, jid: str, **kwargs) -> None:
         for user in self._users:
@@ -155,8 +172,9 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
                 for k, v in kwargs.items():
                     if hasattr(user, k):
                         setattr(user, k, v)
-                self._recalc_heights()
-                self.update()
+                if not self._batch_depth:
+                    self._recalc_heights()
+                    self.update()
                 return
 
     def set_blocked(self, jid: str, blocked: bool) -> None:
@@ -181,9 +199,10 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
 
     def remove_user(self, jid: str) -> None:
         self._users = [u for u in self._users if u.jid != jid]
-        self._rebuild_sorted()
-        self._recalc_heights()
-        self.update()
+        if not self._batch_depth:
+            self._rebuild_sorted()
+            self._recalc_heights()
+            self.update()
 
     def remove_group(self, name: str) -> None:
         """Drop an empty group (e.g. the virtual private-messages group)."""
@@ -351,6 +370,8 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         return None
 
     def _recalc_heights(self) -> None:
+        if self._batch_depth:
+            return
         h = self._total_height()
         self.setMinimumHeight(h)
         self.setMaximumHeight(16777215)

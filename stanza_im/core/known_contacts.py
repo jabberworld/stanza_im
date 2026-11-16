@@ -77,6 +77,29 @@ def update(jid: str, name: str = "", groups: list[str] | None = None,
     save(data)
 
 
+def update_many(entries) -> None:
+    """Upsert many ``(jid, name, groups, is_conference)`` rows with one save.
+
+    The roster rebuild touches every contact; loading and rewriting the whole
+    JSON file once per row made a 200-contact login spend seconds on disk I/O.
+    """
+    if not entries:
+        return
+    data = _load()
+    changed = False
+    for jid, name, groups, is_conference in entries:
+        if not jid:
+            continue
+        entry = data.get(jid)
+        if entry is None:
+            entry = {}
+            data[jid] = entry
+        _merge(entry, name or "", groups, is_conference)
+        changed = True
+    if changed:
+        save(data)
+
+
 def get(jid: str) -> dict:
     """Return the stored entry (``{"name", "groups", "is_conference"}``)
     or an empty dict when unknown."""

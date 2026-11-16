@@ -1052,6 +1052,30 @@ def media_dates(jid: str, kind: str = "") -> list[str]:
     return sorted(dates)
 
 
+def archive_id_for_timestamp(jid: str, timestamp: str) -> str:
+    """Archive id of the stored row at *timestamp*, or ``""``.
+
+    Used as the RSM ``before`` cursor for the page immediately older than the
+    visible history window.  Sending only the form ``end`` timestamp makes
+    some MUC archives return their first (oldest) page instead.
+    """
+    if not timestamp:
+        return ""
+    try:
+        with _lock:
+            conn = _connection(jid)
+            row = conn.execute(
+                "SELECT archive_id FROM messages "
+                "WHERE timestamp = ? AND archive_id IS NOT NULL "
+                "AND archive_id != '' ORDER BY id DESC LIMIT 1",
+                (str(timestamp),)).fetchone()
+            return str(row[0] or "") if row else ""
+    except sqlite3.Error as exc:
+        logger.warning("Could not read archive id for %s at %s: %s",
+                       jid, timestamp, exc)
+        return ""
+
+
 def oldest_archive_id(jid: str) -> str:
     """Archive id of the oldest stored MAM row, or ``""``."""
     try:
@@ -1530,6 +1554,10 @@ async def media_entries_async(jid: str, date: str = "") -> list[dict]:
 
 async def media_dates_async(jid: str, kind: str = "") -> list[str]:
     return await asyncio.to_thread(media_dates, jid, kind)
+
+
+async def archive_id_for_timestamp_async(jid: str, timestamp: str) -> str:
+    return await asyncio.to_thread(archive_id_for_timestamp, jid, timestamp)
 
 
 async def oldest_archive_id_async(jid: str) -> str:

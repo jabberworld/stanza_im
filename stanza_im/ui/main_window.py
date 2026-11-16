@@ -311,6 +311,10 @@ class MainWindow(QtWidgets.QMainWindow):
         #: roster is rendered before ``_client`` exists, so it cannot use
         #: ``self._client.jid_str`` to recognise our own contact.
         self._login_jid = ""
+        #: Normalized key of the cached roster last rendered at login.  A
+        #: server roster with the same contacts/names/groups does not need a
+        #: second clear + full row rebuild.
+        self._cached_roster_key: tuple | None = None
         self._call_windows: dict[str, object] = {}      # sid -> CallWindow
         self._incoming_calls: dict[str, object] = {}    # sid -> IncomingCallDialog
         self._call_targets: dict[str, str] = {}         # sid -> peer jid
@@ -4206,6 +4210,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._csi_last_sent = None
         self._presence_probed.clear()
         self._login_jid = str(jid or "").split("/", 1)[0]
+        self._cached_roster_key = None
         # The last known roster is shown before the client exists (when there
         # is one), so the connection runs in the background; a first login
         # without a cache keeps the splash.
@@ -4855,7 +4860,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._stack.currentIndex() == _PAGE_SPLASH:
             QtCore.QTimer.singleShot(
                 300, lambda: self._stack.setCurrentIndex(_PAGE_ROSTER))
-        self._rebuild_roster(items)
+        cached_key = self._cached_roster_key
+        same_as_cached = (cached_key is not None
+                          and cached_key == self._roster_key(items))
+        self._cached_roster_key = None
+        if same_as_cached:
+            logger.debug("ROSTER[ui] reuse cached rows (server roster identical)")
+            # The cached pass had no client and could not request cards; keep
+            # the post-login prefetch lazy so it never blocks the roster paint.
+            QtCore.QTimer.singleShot(
+                0, lambda rows=list(items): self._prefetch_roster_vcards(rows))
+        else:
+            self._rebuild_roster(items)
         self._sync_all_conference_roster()
         self._sync_all_pm_roster()
         self._sync_self_roster()
@@ -4883,12 +4899,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.remove_user(jid)
         self._roster.sort_and_update()
 
+    @staticmethod
+    def _roster_item_key(item: dict) -> tuple:
+        return (str(item.get("jid") or ""),
+                str(item.get("name") or ""),
+                tuple(sorted(item.get("groups") or ())))
+
+    def _roster_key(self, items) -> tuple:
+        """Normalized roster identity, excluding our own JID and transports."""
+        own = str((self._client.jid_str if self._client is not None
+                   else self._login_jid) or "").split("/", 1)[0]
+        rows = []
+        for item in items or ():
+            jid = str(item.get("jid") or "")
+            if not jid:
+                continue
+            if own and jid.split("/", 1)[0] == own:
+                continue
+            if jid in self._transport_jids:
+                continue
+            rows.append(self._roster_item_key(item))
+        return tuple(sorted(rows))
+
     def _rebuild_roster(self, items):
-        self._roster.clear()
-        logger.debug("ROSTER[ui] rebuild n=%d jids=%s", len(items),
-                     [i.get("jid") for i in items])
-        for item in items:
-            self._add_roster_item(item)
+        from stanza_im.core import known_contacts
+        self._roster.begin_batch()
+        remembered = []
+        try:
+            self._roster.clear()
+            logger.debug("ROSTER[ui] rebuild n=%d jids=%s", len(items),
+                         [i.get("jid") for i in items])
+            for item in items:
+                remembered_row = self._add_roster_item(item, remember=False)
+                if remembered_row is not None:
+                    remembered.append(remembered_row)
+            known_contacts.update_many(remembered)
+        finally:
+            self._roster.end_batch()
 
     def _show_cached_roster(self, jid: str) -> bool:
         """Render the last known roster from disk before the client exists.
@@ -4909,13 +4956,27 @@ class MainWindow(QtWidgets.QMainWindow):
                  and str(item["jid"]).split("/", 1)[0] != own]
         if not items:
             return False
-        self._rebuild_roster(items)
-        self._prefill_avatars(items)
-        self._recount_groups()
-        self._roster.sort_and_update()
+        self._cached_roster_key = self._roster_key(items)
+        self._roster.begin_batch()
+        try:
+            self._rebuild_roster(items)
+            self._prefill_avatars(items)
+            self._recount_groups()
+            self._roster.sort_and_update()
+        finally:
+            self._roster.end_batch()
         self._stack.setCurrentIndex(_PAGE_ROSTER)
         self._set_conn_progress(5)
         return True
+
+    def _prefetch_roster_vcards(self, items: list) -> None:
+        """Request roster vCards after the first roster paint."""
+        if self._client is None:
+            return
+        for item in items:
+            jid = str(item.get("jid") or "")
+            if jid:
+                self._request_vcard(jid)
 
     def _prefill_avatars(self, items: list) -> None:
         """Show cached avatar files before the vCards are (re)fetched."""
@@ -4925,7 +4986,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if path and os.path.isfile(path):
                 self._roster.update_user(item["jid"], avatar_path=path)
 
-    def _add_roster_item(self, item: dict):
+    def _add_roster_item(self, item: dict, remember: bool = True):
         jid = item["jid"]
         own = (self._client.jid_str if self._client is not None
                else (getattr(self, "_login_jid", "")
@@ -4937,10 +4998,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # _sync_self_roster as a virtual «Свой контакт» row.  The cached
             # roster is rendered before the client exists, so compare with the
             # login JID there too.
-            return
+            return None
         if jid in self._transport_jids:
             # A classified transport lives in its own tab, not in the roster.
-            return
+            return None
         name = item["name"] or jid.split("@")[0]
         groups = item["groups"]
         if not groups:
@@ -4952,8 +5013,9 @@ class MainWindow(QtWidgets.QMainWindow):
         pep_entry = self._client.pep_data.get(jid, {}) if self._client else {}
         mood_data = pep_entry.get("mood") or {}
         activity_data = pep_entry.get("activity") or {}
-        self._remember_contact(jid, name=name, groups=groups,
-                               is_conference=False)
+        if remember:
+            self._remember_contact(jid, name=name, groups=groups,
+                                   is_conference=False)
         for group in groups:
             user = UserItem(
                 jid=jid,
@@ -4973,6 +5035,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self._roster.add_user(user)
         self._request_vcard(jid)
+        return (jid, name, groups, False)
 
     def _request_vcard(self, jid: str, force: bool = False):
         """Request a cached or fresh vCard; the client enforces the TTL."""
@@ -7693,7 +7756,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # One network page per request; scrolling loads the next page.
         page = max(10, min(window, _HISTORY_PAGE))
         try:
-            stored = await client.fetch_history_mam(jid, since, page)
+            from stanza_im.core import history as history_store
+            before_id = (await history_store.archive_id_for_timestamp_async(
+                jid, since) if since else "")
+            stored = await client.fetch_history_mam(
+                jid, since, page, before_id=before_id)
         except Exception:
             stored = None
         chat = self._chat_window.get_chat(jid)
@@ -12774,6 +12841,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._conference_roster = set()
         self._pm_roster = set()
         self._pm_targets = {}
+        self._cached_roster_key = None
         self._muc_self_nicks.clear()
         self._muc_users.clear()
         self._muc_vcard_names.clear()

@@ -24,6 +24,15 @@ from stanza_im.core.client import JabberClient
 FAILURES = []
 
 
+def _new_client() -> JabberClient:
+    """Create a client with an event loop for slixmpp's Future fields."""
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    return JabberClient("me@x/res", "pw")
+
+
 def check(name, cond):
     print(("PASS" if cond else "FAIL") + ": " + name)
     if not cond:
@@ -82,6 +91,7 @@ class _Holder:
 
     def __init__(self, with_results, jid_results):
         self.calls = []
+        self.rsm_calls = []
         self.with_results = with_results
         self.jid_results = jid_results
 
@@ -96,13 +106,14 @@ class _Recorder:
                        rsm=None, **_kw):
         mode = "jid" if jid is not None else "with_jid"
         self.holder.calls.append((mode, jid or with_jid, end))
+        self.holder.rsm_calls.append((jid or with_jid, end, dict(rsm or {})))
         results = (self.holder.jid_results if jid is not None
                    else self.holder.with_results)
         return {"type": "result", "mam": {"results": results}}
 
 
 def _run_11_with_stranger():
-    c = JabberClient("me@x/res", "pw")
+    c = _new_client()
     mam = c.xmpp.plugin["xep_0313"]
     holder = _Holder(
         [make_msg("kal@linuxoid.in", "hello", "m1"),
@@ -136,7 +147,7 @@ check("only with_jid used for 1:1",
 
 # 4. archive-jid mode never reached when with_jid is empty -------------------
 def _run_empty_with():
-    c = JabberClient("me@x/res", "pw")
+    c = _new_client()
     mam = c.xmpp.plugin["xep_0313"]
     holder = _Holder([], [make_msg("other@else.org", "intruder", "m9")])
     stored = {}
@@ -158,6 +169,31 @@ check("archive-jid fallback never used for 1:1",
       [call for call in calls2 if call[0] == "jid"] == [])
 check("1:1 with empty archive returns 0",
       stored_n2 == 0)
+
+
+# 5. an explicit archive id becomes the RSM before cursor --------------------
+def _run_before_id():
+    c = _new_client()
+    mam = c.xmpp.plugin["xep_0313"]
+    holder = _Holder(
+        [make_msg("kal@linuxoid.in", "older", "m1")], [])
+    from stanza_im.core import history
+    async def _capture(jid, rows):
+        return len(rows)
+    with unittest.mock.patch.object(mam, "retrieve", _Recorder(holder)):
+        with unittest.mock.patch.object(history, "store_many_async",
+                                        _capture):
+            stored = asyncio.run(c.fetch_history_mam(
+                "kal@linuxoid.in", None, 30, before_id="1784347815307553"))
+    return stored, holder
+
+
+stored_before, holder_before = _run_before_id()
+check("before_id fetch stores its page", stored_before == 1)
+check("before_id is sent as RSM before",
+      holder_before.rsm_calls
+      and holder_before.rsm_calls[0][2].get("before") == "1784347815307553"
+      and holder_before.rsm_calls[0][1] is None)
 
 
 if FAILURES:
