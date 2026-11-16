@@ -2399,6 +2399,10 @@ class ChatWidget(QtWidgets.QWidget):
         keep = self._preserve_fraction if self._preserve_fraction is not None \
             else self._view.scroll_fraction()
         self._view.clear()
+        if not self._unread_boundary:
+            release = getattr(self._view, "release_bottom_lock", None)
+            if callable(release):
+                release()
         # An unread window is rendered before the read-anchor scroll is
         # queued.  Do not preserve the previous bottom fraction: every chunk
         # would otherwise scroll to the end and the anchor restore could lose
@@ -2463,14 +2467,18 @@ class ChatWidget(QtWidgets.QWidget):
         share) over the content, so a live message and its reloaded row are the
         same entry even though their timestamps were computed separately.
         """
-        if entry.get("stanza_id"):
-            return ("stanza", entry["stanza_id"])
-        if entry.get("archive_id"):
-            return ("archive", entry["archive_id"])
+        # The origin id is the one stable id shared by a live local row and
+        # its later MAM copy; the MAM copy also carries server stanza/archive
+        # ids, while the live row often has only the origin id.  Prefer it over
+        # the server ids so a resumed tab does not render both copies.
         if entry.get("origin_id"):
             return ("origin", entry["origin_id"])
         if entry.get("message_id"):
             return ("message", entry["message_id"])
+        if entry.get("stanza_id"):
+            return ("stanza", entry["stanza_id"])
+        if entry.get("archive_id"):
+            return ("archive", entry["archive_id"])
         return (entry.get("direction", "incoming"),
                 entry.get("sender", ""), entry.get("body", ""),
                 entry.get("timestamp", ""))
@@ -2913,6 +2921,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_resolving = False
         self._seen_unread_refs = set()
         self._seen_mention_refs = set()
+        release = getattr(self._view, "release_bottom_lock", None)
+        if callable(release):
+            release()
         try:
             if not self._view.clear_unread_separator():
                 self._render_all()

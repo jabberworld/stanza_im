@@ -2110,9 +2110,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   jump button with the block already on screen (`ChatView.seed_unseen`); the
   count is cleared only when `ChatView._note_bottom` actually reaches the newest
   message (edge-triggered and suspension-aware), so the transient bottom during
-  an anchor restore cannot wipe it.
-  `bottom_reached` is not suppressed, so the newest message always marks the
-  conversation read, and a background auto-joined MUC is never anchored. A hidden tab (opened with `focus=False` by an incoming message) loads
+  an anchor restore cannot wipe it. An automatic anchor restore also holds
+  `ChatView._bottom_locked`; its first bottom position is ignored until the user
+  scrolls away and back or explicitly marks the chat read, so a short unread
+  block cannot lose its divider as soon as the restore starts. A live row and
+  its later MAM copy share `origin_id`, which `ChatWidget._entry_key` checks
+  before the server stanza/archive ids, so they render once.
+  A hidden tab (opened with `focus=False` by an incoming message) loads
   its archive when it is first shown. The file is a **v2 payload**
   `{"account": "<jid>", "chats": {"<chat-key>": {"unread": N, "mentions": M,
   "read_sid": "<sid>", "read_ts": "<ts>", "read_ref": "<message-id>",

@@ -323,6 +323,7 @@ class _JumpButtonMixin:
         self._near_top_hit = False
         self._anchor_scroll = None
         self._anchor_restore_pending = True
+        self._bottom_locked = True
         self._follow_bottom = False
         self._scroll_suspended = True
 
@@ -335,6 +336,10 @@ class _JumpButtonMixin:
 
     def anchor_restore_pending(self) -> bool:
         return bool(self._anchor_restore_pending)
+
+    def release_bottom_lock(self) -> None:
+        """Allow the next actual bottom position to mark the chat read."""
+        self._bottom_locked = False
 
     def _flush_pending_seen(self):
         pending = getattr(self, "_pending_seen", None)
@@ -768,6 +773,12 @@ if HAS_WEBENGINE:
             # a "sitting at the bottom" report would be the empty document and
             # would mark the freshly opened conversation as read.
             self._scroll_suspended = False
+            # True after an automatic read-anchor restore until the user
+            # actually scrolls away from the bottom.  A programmatic jump to a
+            # short unread block can otherwise look like "reached the newest
+            # message" on the next poll and clear the unread divider before the
+            # user has read anything.
+            self._bottom_locked = False
             # True while a scroll_to_bottom() has not been confirmed by the
             # next poll: a fast reply appended in that window must still follow
             # the bottom, even though scroll reports are suspended.
@@ -2504,6 +2515,15 @@ window.__stanzaMentionRef = '';
                     or self._anchor_restore_pending):
                 self._at_bottom_hit = False
                 return
+            if self._bottom_locked:
+                if self._fraction < 0.999:
+                    # The user scrolled away from the automatic anchor; from
+                    # here on a real return to the bottom counts.
+                    self._bottom_locked = False
+                    self._at_bottom_hit = False
+                else:
+                    self._at_bottom_hit = True
+                return
             if self._fraction < 0.999:
                 self._at_bottom_hit = False
                 return
@@ -3273,6 +3293,7 @@ else:
             # a conversation read on its own — mirrors the WebEngine view.
             self._scroll_suspended = False
             self._anchor_restore_pending = False
+            self._bottom_locked = False
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -3298,6 +3319,13 @@ else:
                 self._at_bottom_hit = False
                 return
             bar = self.verticalScrollBar()
+            if self._bottom_locked:
+                if bar.value() < bar.maximum() - 2:
+                    self._bottom_locked = False
+                    self._at_bottom_hit = False
+                else:
+                    self._at_bottom_hit = True
+                return
             if bar.value() < bar.maximum() - 2:
                 self._at_bottom_hit = False
                 self._fraction = max(0.0, bar.value() / max(1, bar.maximum()))
@@ -3317,6 +3345,7 @@ else:
         def prepare_anchor_restore(self) -> None:
             """The fallback has no per-message nodes; wait for the loader."""
             self._anchor_restore_pending = True
+            self._bottom_locked = True
             self._scroll_suspended = True
 
         def cancel_anchor_restore(self) -> None:
@@ -3325,6 +3354,10 @@ else:
 
         def anchor_restore_pending(self) -> bool:
             return bool(self._anchor_restore_pending)
+
+        def release_bottom_lock(self) -> None:
+            """Allow the next actual bottom position to mark the chat read."""
+            self._bottom_locked = False
 
         def wheelEvent(self, event):
             """Ctrl+wheel resizes the chat text instead of scrolling."""

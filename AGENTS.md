@@ -494,7 +494,11 @@ already on screen; a MAM page does not. The refresh keeps the unread boundary
 and stays at the bottom; a suspended tab defers it to `resume`, a
 background/user-scrolled tab is left alone. `TAIL[…]` debug lines trace the
 merge. A groupchat message's stable id is its `origin-id` (falling back to the
-room `stanza-id`, the MAM archive id and the stanza `id`); the MAM parser and
+room `stanza-id`, the MAM archive id and the stanza `id`);
+`ChatWidget._entry_key` prefers `origin_id` over the server stanza/archive ids,
+so a live
+outgoing row and its later MAM copy share a key and render once when a resumed
+tab reloads its history; the MAM parser and
 the join-replay writer now use the same priority, so the replay, MAM and live
 copies of one message share an id even when the server only provides numbers.
 `history._insert` compares any incoming id with **all four** id columns
@@ -1807,7 +1811,11 @@ the jump button** from the block that is already on screen
 unread chat shows `▼ N` instead of an empty tail; a re-render does not recount
 it. The count is cleared only when the view actually reaches the newest message
 (`ChatView._note_bottom`, edge-triggered and suspension-aware), never by the
-transient "at the bottom" position during the anchor restore.
+transient "at the bottom" position during the anchor restore. An automatic
+anchor restore also sets `ChatView._bottom_locked`; the first bottom position
+is then ignored until the user actually scrolls away and back (or explicitly
+marks the chat read), so a short unread block cannot lose its divider as soon
+as the restore highlight starts.
 `ChatView.scroll_to_message`/`scroll_to_time` park the request in
 `_deferred_scroll` while the document is empty or has buffered chunks
 (`clear()` loads a fresh page asynchronously), replaying it in
