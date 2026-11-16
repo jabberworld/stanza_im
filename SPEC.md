@@ -1118,8 +1118,9 @@ private-messages group, `roster_group_personal_messages`, and the session-only
 forces it before them. An unknown 1:1 peer that messages us while absent from
 the XMPP roster gets a session row in «Не в списке» (offline icon); its context
 menu offers «Добавить в список», reusing `AddContactDialog` with the JID and
-name prefilled. The row is removed once the JID enters the roster and is kept
-until logout otherwise.
+name prefilled. Server/transport JIDs (no `@`) are never unknown contacts. The
+row is removed once the JID enters the roster and is kept until logout
+otherwise.
 
 Those groups hold a row **computed by the app** rather than a real
 contact group, so they are excluded from the group pickers and from

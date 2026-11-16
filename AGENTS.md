@@ -1138,8 +1138,9 @@ app-computed row rather than a real contact group — conferences
 (`MainWindow._sync_conference_roster`, one row per joined room), MUC private
 messages, the account's own contact (`MainWindow._sync_self_roster`) and the
 session-only «Не в списке» group for unknown 1:1 peers
-(`MainWindow._track_not_in_roster`; its context menu's «Добавить в список»
-reuses `AddContactDialog` with the JID/name prefilled) — so
+(`MainWindow._track_not_in_roster`; server/transport JIDs without an `@` are
+never contact rows; its context menu's «Добавить в список» reuses
+`AddContactDialog` with the JID/name prefilled) — so
 they are excluded from the group pickers and roster sharing via
 `_virtual_roster_groups()` and are never persisted into
 `core/known_contacts.py`. The server often returns the account itself in the

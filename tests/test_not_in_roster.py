@@ -80,6 +80,16 @@ checks.extend([
     ("the session set is pruned", jid not in win._not_in_roster),
 ])
 
+# Server/transport JIDs (no localpart) never become unknown contacts.
+server = "xmpp.example.org"
+win._track_not_in_roster(server)
+checks.extend([
+    ("a transport JID is not a «Не в списке» contact",
+     all(u.jid != server for u in win._roster._users)),
+    ("a transport JID is not kept in the session set",
+     server not in win._not_in_roster),
+])
+
 # The context-menu action reuses AddContactDialog with the JID/name prefilled.
 _dlg = AddContactDialog([], None, jid=jid, name="Роман")
 _data = _dlg.collect()

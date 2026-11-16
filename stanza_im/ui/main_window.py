@@ -2566,6 +2566,10 @@ class MainWindow(QtWidgets.QMainWindow):
         bare = str(jid).split("/", 1)[0]
         if not bare:
             return False
+        # A server/transport JID has no localpart (``xmpp.example.org``); it
+        # is not a 1:1 contact and must never get a «Не в списке» row.
+        if "@" not in bare:
+            return False
         own = str(self._client.jid_str or "").split("/", 1)[0]
         if own and bare == own:
             return False
@@ -2613,7 +2617,8 @@ class MainWindow(QtWidgets.QMainWindow):
         pending.add(bare)
         group = tr("roster_group_not_in_list")
         if not name:
-            name = self._roster_name(bare) or bare.split("@", 1)[0]
+            name = self._roster_name(bare) or (
+                bare.split("@", 1)[0] if "@" in bare else bare)
         contact = self._client.get_contact(bare) if self._client else None
         show = getattr(contact, "show", "") or "offline"
         fields = {
