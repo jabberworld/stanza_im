@@ -847,7 +847,9 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget = self._tabs.get(jid)
         if widget is not None and widget.is_muc:
             return
-        if state in ("active", "inactive", "gone", "composing", "paused"):
+        if not state:
+            self._remote_activity.pop(jid, None)
+        elif state in ("active", "inactive", "gone", "composing", "paused"):
             labels = {
                 "active": tr("chat_activity_active"),
                 "inactive": tr("chat_activity_inactive"),

@@ -1133,10 +1133,13 @@ every visible row per contact).
 Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
 used by `MainWindow` for the conferences group **and** the private-messages
 group) which always come last, and the leading groups (`set_leading_groups`,
-used for the self-contact group) which always come first. Three groups hold an
+used for the self-contact group) which always come first. Four groups hold an
 app-computed row rather than a real contact group — conferences
 (`MainWindow._sync_conference_roster`, one row per joined room), MUC private
-messages **and** the account's own contact (`MainWindow._sync_self_roster`) — so
+messages, the account's own contact (`MainWindow._sync_self_roster`) and the
+session-only «Не в списке» group for unknown 1:1 peers
+(`MainWindow._track_not_in_roster`; its context menu's «Добавить в список»
+reuses `AddContactDialog` with the JID/name prefilled) — so
 they are excluded from the group pickers and roster sharing via
 `_virtual_roster_groups()` and are never persisted into
 `core/known_contacts.py`. The server often returns the account itself in the

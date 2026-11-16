@@ -287,6 +287,7 @@ STRINGS = {
     "roster_group_conferences": "Conferences",
     "roster_group_personal_messages": "Private messages",
     "roster_group_self": "Own contact",
+    "roster_group_not_in_list": "Not in list",
     "category_personal": "Personal messages",
     # Chat
     "chat_is_typing": "{name} is typing...",
@@ -707,7 +708,7 @@ STRINGS = {
     "ctx_view_profile": "View vCard",
     "ctx_open_whiteboard": "Open Whiteboard",
     "ctx_rename": "Rename",
-    "ctx_add_to_roster": "Add to contacts…",
+    "ctx_add_to_roster": "Add to list",
     "ctx_remove_pm_row": "Remove from private messages",
     "ctx_send_contact": "Send contact…",
     "ctx_rename_prompt": "New nickname:",

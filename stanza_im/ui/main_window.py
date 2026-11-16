@@ -76,7 +76,8 @@ def _virtual_roster_groups() -> set[str]:
     persisted as such in the known-contacts registry).
     """
     return {tr("roster_group_conferences"), tr("roster_group_transports"),
-            tr("roster_group_personal_messages"), tr("roster_group_self")}
+            tr("roster_group_personal_messages"), tr("roster_group_self"),
+            tr("roster_group_not_in_list")}
 
 _PAGE_LOGIN = 0
 _PAGE_SPLASH = 1
@@ -368,6 +369,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # JIDs known (from the persisted registry) to be conferences, so a room
         # with restored unread is classified correctly before it is joined.
         self._known_conferences: set[str] = set()
+        # Session-only contacts that sent a 1:1 message but are not in the
+        # roster (unauthorised / one-off contacts).  They stay in the virtual
+        # «Не в списке» group until logout.
+        self._not_in_roster: set[str] = set()
         # Per-contact notification priority: {"high"|"low"} (absence = normal).
         self._notification_priorities: dict[str, str] = {}
         self._priority_publish_pending = False
@@ -857,7 +862,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster = RosterWidget()
         self._roster.set_trailing_groups({
             tr("roster_group_conferences"),
-            tr("roster_group_personal_messages")})
+            tr("roster_group_personal_messages"),
+            tr("roster_group_not_in_list")})
         self._roster.set_leading_groups({tr("roster_group_self")})
         self._roster.set_collapsed_groups(
             getattr(self._config.appearance,
@@ -1991,7 +1997,8 @@ class MainWindow(QtWidgets.QMainWindow):
     # ── Menu actions ─────────────────────────────────────────────
 
     def _on_add_contact(self, jid: str = "", gateways=None, preselect: str = "",
-                        preauth: str = "", invite_name: str = ""):
+                        preauth: str = "", invite_name: str = "",
+                        name: str = ""):
         if not isinstance(jid, str):
             # ``QAction.triggered`` passes a ``checked`` bool; ignore it.
             jid = ""
@@ -2008,7 +2015,8 @@ class MainWindow(QtWidgets.QMainWindow):
             gateways = self._transport_gateways()
         dlg = AddContactDialog(groups, self._client, self, jid=jid,
                                gateways=gateways, preselect=preselect,
-                               preauth=preauth, invite_name=invite_name)
+                               preauth=preauth, invite_name=invite_name,
+                               name=name)
         dlg.vcard_requested.connect(self._show_profile)
 
         def finished(result: int):
@@ -2550,6 +2558,100 @@ class MainWindow(QtWidgets.QMainWindow):
         # touching its render options.
         self._roster.add_group(group).single_count = True
         self._schedule_roster_repaint()
+
+    def _is_unknown_contact(self, jid: str) -> bool:
+        """Whether *jid* is a 1:1 peer not present in the XMPP roster."""
+        if not jid or self._client is None:
+            return False
+        bare = str(jid).split("/", 1)[0]
+        if not bare:
+            return False
+        own = str(self._client.jid_str or "").split("/", 1)[0]
+        if own and bare == own:
+            return False
+        if bare in getattr(self, "_transport_jids", set()):
+            return False
+        if bare in getattr(self, "_pm_targets", {}):
+            return False
+        if bare in getattr(self, "_muc_self_nicks", {}):
+            return False
+        try:
+            if self._is_conference_jid(bare):
+                return False
+        except Exception:  # noqa: BLE001 - presentation only
+            pass
+        try:
+            roster = getattr(self._client, "roster", {}) or {}
+        except Exception:  # noqa: BLE001
+            roster = {}
+        return bare not in roster
+
+    def _drop_not_in_roster(self, jid: str) -> None:
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare:
+            return
+        pending = getattr(self, "_not_in_roster", None)
+        if pending is not None:
+            pending.discard(bare)
+        group = tr("roster_group_not_in_list")
+        if any(user.jid == bare and user.group == group
+               for user in self._roster._users):
+            self._roster.remove_user(bare)
+            self._schedule_roster_repaint()
+
+    def _track_not_in_roster(self, jid: str, name: str = "") -> None:
+        """Keep a session row for a 1:1 peer that is absent from the roster."""
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare:
+            return
+        if not self._is_unknown_contact(bare):
+            self._drop_not_in_roster(bare)
+            return
+        pending = getattr(self, "_not_in_roster", None)
+        if pending is None:
+            pending = self.__dict__.setdefault("_not_in_roster", set())
+        pending.add(bare)
+        group = tr("roster_group_not_in_list")
+        if not name:
+            name = self._roster_name(bare) or bare.split("@", 1)[0]
+        contact = self._client.get_contact(bare) if self._client else None
+        show = getattr(contact, "show", "") or "offline"
+        fields = {
+            "name": name or bare,
+            "status": show,
+            "status_message": getattr(contact, "status", "") or "",
+            "icon_key": show_to_icon_key(show),
+            "avatar_path": getattr(contact, "avatar_path", None),
+            "unread_count": self._unread_counts.get(bare, 0),
+            "unread_mentions": self._unread_mentions.get(bare, 0),
+        }
+        existing = next((user for user in self._roster._users
+                         if user.jid == bare), None)
+        if existing is not None and existing.group != group:
+            self._roster.remove_user(bare)
+            existing = None
+        if existing is not None:
+            self._roster.update_user(bare, **fields)
+        else:
+            self._roster.add_user(UserItem(jid=bare, group=group, **fields))
+        self._roster.add_group(group)
+        self._schedule_roster_repaint()
+
+    def _sync_not_in_roster(self) -> None:
+        """Drop session rows that entered the roster and restore the others.
+
+        A full roster rebuild clears the widget, so unknown session rows must
+        be recreated from ``_not_in_roster`` afterwards; otherwise an incoming
+        message received before a reconnect would disappear from «Не в списке».
+        """
+        group = tr("roster_group_not_in_list")
+        for jid in list(getattr(self, "_not_in_roster", set())):
+            if not self._is_unknown_contact(jid):
+                self._drop_not_in_roster(jid)
+                continue
+            if not any(user.jid == jid and user.group == group
+                       for user in self._roster._users):
+                self._track_not_in_roster(jid)
 
     def _classify_bookmarked_conferences(self) -> None:
         """Group bookmarked rooms under Conferences while they are active.
@@ -4288,6 +4390,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_all_conference_roster()
         self._sync_all_pm_roster()
         self._sync_self_roster()
+        self._sync_not_in_roster()
         self._recount_groups()
         self._roster.sort_and_update()
         self._last_connect_args = (jid, show)
@@ -4890,6 +4993,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_roster_item_added(self, item):
         self._add_roster_item(item)
+        self._sync_not_in_roster()
         self._classify_bookmarked_conferences()
         self._classify_transports()
         self._roster.sort_and_update()
@@ -4897,6 +5001,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_roster_item_removed(self, jid: str):
         self._roster.remove_user(jid)
+        if self._chat_window.get_chat(jid) is not None:
+            self._track_not_in_roster(jid)
         self._roster.sort_and_update()
 
     @staticmethod
@@ -5002,6 +5108,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if jid in self._transport_jids:
             # A classified transport lives in its own tab, not in the roster.
             return None
+        if jid in getattr(self, "_not_in_roster", set()):
+            self._not_in_roster.discard(jid)
+            self._drop_not_in_roster(jid)
         name = item["name"] or jid.split("@")[0]
         groups = item["groups"]
         if not groups:
@@ -6891,6 +7000,10 @@ class MainWindow(QtWidgets.QMainWindow):
             chat.add_status(tr("status_changed", status=tr(f"status_{show}")),
                             time.strftime("%H:%M:%S"))
         self._chat_window.set_contact_status(bare_jid, show)
+        if show == "offline":
+            # A stale chat state from before the disconnect must not leave the
+            # window title saying «активен».
+            self._chat_window.set_remote_activity(bare_jid, "")
         self._schedule_roster_repaint()
         self._maybe_osd_status(bare_jid, show, old_show)
         self._notify_presence_sound(bare_jid, old_show, show)
@@ -6994,6 +7107,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._apply_muji_support(jid)
                 self._apply_muc_admin(jid)
             else:
+                self._track_not_in_roster(jid, display_name)
                 is_new = not self._chat_window.has_chat(jid)
                 chat = self._chat_window.open_chat(jid, display_name)
                 self._apply_call_support(jid)
@@ -7002,7 +7116,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._apply_pm_presence(jid, pm[0], pm[1], chat)
                 else:
                     self._chat_window.set_contact_status(
-                        jid, self._contact_show(jid))
+                        jid, self._contact_show(jid) or "offline")
                 self._focus_chat(jid, chat, is_new=is_new)
                 self._request_vcard(jid)
         finally:
@@ -7138,6 +7252,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if jid in self._pm_roster:
             self._build_pm_menu(jid).exec(pos)
             return
+        if jid in getattr(self, "_not_in_roster", set()):
+            domain = jid.split("@", 1)[1] if "@" in jid else ""
+            preselect = (domain if any(
+                gateway == domain for _, gateway in self._transport_gateways())
+                else "")
+            menu.addAction(
+                self._menu_icon("add-user.png"), tr("ctx_add_to_roster"),
+                lambda checked=False: defer(
+                    lambda: self._on_add_contact(
+                        jid=jid, name=self._roster_name(jid)
+                        or jid.split("@", 1)[0], preselect=preselect)))
+            menu.addSeparator()
         menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
                        lambda: self._on_contact_open(jid))
         menu.addAction(self._menu_icon("v-card-48.svg"), tr("ctx_view_profile"),
@@ -8685,6 +8811,7 @@ class MainWindow(QtWidgets.QMainWindow):
         sender_name = self._roster_name(bare_jid) or bare_jid.split("@")[0]
         self._remember_contact(bare_jid, name=sender_name,
                                is_conference=False)
+        self._track_not_in_roster(bare_jid, sender_name)
 
         # Sound decision must run before the tab is opened (``carbon`` copies
         # from our other devices stay silent).
@@ -8695,6 +8822,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 and self._should_open_incoming_tab(priority)):
             self._chat_window.open_chat(bare_jid, sender_name, focus=False)
             self._apply_call_support(bare_jid)
+        self._chat_window.set_contact_status(
+            bare_jid, self._contact_show(bare_jid) or "offline")
 
         # One timestamp for both the live row and the stored copy, so the two
         # de-duplicate (the same message must not render twice on reload).
@@ -12841,6 +12970,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._conference_roster = set()
         self._pm_roster = set()
         self._pm_targets = {}
+        self._not_in_roster = set()
         self._cached_roster_key = None
         self._muc_self_nicks.clear()
         self._muc_users.clear()

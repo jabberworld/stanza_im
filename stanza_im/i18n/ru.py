@@ -287,6 +287,7 @@ STRINGS = {
     "roster_group_conferences": "Конференции",
     "roster_group_personal_messages": "Личные сообщения",
     "roster_group_self": "Свой контакт",
+    "roster_group_not_in_list": "Не в списке",
     "category_personal": "Личные сообщения",
     # Chat
     "chat_is_typing": "{name} пишет...",
@@ -707,7 +708,7 @@ STRINGS = {
     "ctx_view_profile": "Просмотр визитки",
     "ctx_open_whiteboard": "Открыть доску",
     "ctx_rename": "Переименовать",
-    "ctx_add_to_roster": "Добавить в контакты…",
+    "ctx_add_to_roster": "Добавить в список",
     "ctx_remove_pm_row": "Убрать из личных сообщений",
     "ctx_send_contact": "Отправить контакт…",
     "ctx_rename_prompt": "Новое имя:",

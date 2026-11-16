@@ -17,7 +17,8 @@ class AddContactDialog(QtWidgets.QDialog):
 
     def __init__(self, groups: list[str], client, parent=None, jid: str = "",
                  gateways: list | None = None, preselect: str = "",
-                 preauth: str = "", invite_name: str = ""):
+                 preauth: str = "", invite_name: str = "",
+                 name: str = ""):
         super().__init__(parent)
         self._client = client
         self._preauth = str(preauth or "").strip()
@@ -108,6 +109,8 @@ class AddContactDialog(QtWidgets.QDialog):
         self._jid.setText(jid if isinstance(jid, str) else "")
         if invite_name:
             self._name.setText(str(invite_name))
+        elif name:
+            self._name.setText(str(name))
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok

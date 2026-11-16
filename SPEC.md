@@ -1111,10 +1111,15 @@ matches. `Config.load` migrates the old forced-light defaults (`config_version
 < 1`) to the empty/system values.
 
 Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
-`MainWindow` to the conferences group, `roster_group_conferences`, and to the
-private-messages group, `roster_group_personal_messages`) forces those
-groups after all contact groups, and `set_leading_groups` (set to the
-self-contact group, `roster_group_self`) forces it before them.
+`MainWindow` to the conferences group, `roster_group_conferences`, the
+private-messages group, `roster_group_personal_messages`, and the session-only
+`roster_group_not_in_list`) forces those groups after all contact groups, and
+`set_leading_groups` (set to the self-contact group, `roster_group_self`)
+forces it before them. An unknown 1:1 peer that messages us while absent from
+the XMPP roster gets a session row in «Не в списке» (offline icon); its context
+menu offers «Добавить в список», reusing `AddContactDialog` with the JID and
+name prefilled. The row is removed once the JID enters the roster and is kept
+until logout otherwise.
 
 Those groups hold a row **computed by the app** rather than a real
 contact group, so they are excluded from the group pickers and from
@@ -1521,7 +1526,10 @@ on clear; new messages are inserted before it (no stale "пишет…" lines).
 «пользователь закрыл чат» (`chat_activity_gone` i18n key); any later non-`gone`
 state clears it. MUC chats ignore remote activity. Closing a chat tab
 (`close_chat`) discards the stored remote activity, so reopening the tab starts
-with a clean title and header.
+with a clean title and header. A chat-state child echoed in a `type="error"`
+reply (e.g. `service-unavailable` for an offline peer) is ignored, and an
+offline presence clears the stored remote activity, so the title never says
+«активен» for a contact that is not online.
 
 ## 11. Chat Themes (`ui/chat_themes.py`)
 

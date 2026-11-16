@@ -8860,7 +8860,11 @@ class JabberClient:
     def _on_chatstate(self, msg) -> None:
         # Chat states (XEP-0085) apply to 1:1 messaging only — ignore
         # groupchat messages so a conference never appears "active".
-        if str(msg["type"]) == "groupchat":
+        # An error reply often echoes the chat-state child we just sent
+        # (``service-unavailable`` while the peer is offline); that is not the
+        # peer's activity and must never reach the window title.
+        mtype = str(msg["type"] or "")
+        if mtype in ("groupchat", "error"):
             return
         frm = str(msg["from"]).split("/")[0]
         state = str(msg["chat_state"])
