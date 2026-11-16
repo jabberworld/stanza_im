@@ -2176,8 +2176,10 @@ to `"online"`. The roster is cached across sessions for
 account name gets a short SHA-1 suffix and the payload records its account, so
 two such accounts never share a file): `_seed_roster_cache()`
 (called at the start of `_on_session_start`, before `request_roster`) loads it
-lazily and preloads `client_roster` + `version`, so the server can answer an
-unchanged version with an empty result
+lazily and preloads `client_roster` + `version`, then mirrors the seeded
+snapshot into `JabberClient.roster` so the next roster update does not emit
+`roster_item_added` for every cached contact (the UI already drew them), so
+the server can answer an unchanged version with an empty result
 instead of a full roster; `_schedule_roster_save` (1 s debounce) rewrites the
 cache after every roster update and `flush_roster_cache` on quit. A
 missing/corrupt cache falls back to the full request. **Room pseudo items**:

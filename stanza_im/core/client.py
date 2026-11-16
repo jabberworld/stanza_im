@@ -3206,6 +3206,13 @@ class JabberClient:
             item["pending_in"] = bool(entry.get("pending_in"))
             seeded += 1
         cr.version = str(cache.get("version") or "")
+        # Keep the event-diff snapshot in step with the seeded client roster.
+        # Otherwise the next full roster response sees an empty old-key set
+        # and emits roster_item_added for every cached contact, which adds a
+        # second row in the UI (the cached roster is already rendered).
+        self.roster = {
+            item["jid"]: item for item in self.get_roster_snapshot()
+        }
         logger.info("Seeded %d cached roster items (version=%r)",
                     seeded, cr.version)
         logger.debug("ROSTER[seed] ver=%r items=%s", cr.version,

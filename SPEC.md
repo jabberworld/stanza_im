@@ -903,8 +903,10 @@ The roster is cached across sessions for **XEP-0237 roster versioning**
 0600; a Unicode account name gets a short SHA-1 suffix and the payload carries
 its account, so two such accounts never share one file). `_seed_roster_cache()` (the start of `_on_session_start`, before
 `request_roster`) loads it lazily and preloads `client_roster` and its
-`version`; the request then carries the cached `ver`, and an unchanged
-roster is answered with an empty result that keeps the seeded list. Every
+`version`; it also mirrors the snapshot into `JabberClient.roster`, so the
+roster diff does not treat cached contacts as newly added and the UI does not
+render a second row for each. The request then carries the cached `ver`, and an
+unchanged roster is answered with an empty result that keeps the seeded list. Every
 `roster_update` schedules a debounced rewrite (`_schedule_roster_save`, 1 s)
 and `flush_roster_cache()` runs on quit. A missing/corrupt cache falls back to
 the full fetch. slixmpp's `basexmpp._handle_available`
