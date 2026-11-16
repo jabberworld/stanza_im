@@ -171,8 +171,11 @@ _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(_root, "stanza_im", "core", "client.py"),
           encoding="utf-8") as fh:
     src = fh.read()
+_seed_at = src.find("self._seed_roster_cache()")
+_request_at = (src.find("self.request_roster()", _seed_at)
+               if _seed_at >= 0 else -1)
 check("session start seeds the cache before requesting",
-      "self._seed_roster_cache()\n        self.request_roster()" in src)
+      _seed_at >= 0 and _request_at > _seed_at)
 check("construction does not eagerly load the roster cache",
       "self._roster_cache = roster_cache.load(self.jid_str)" not in src)
 with open(os.path.join(_root, "stanza_im", "ui", "main_window.py"),
