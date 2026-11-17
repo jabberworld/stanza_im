@@ -8667,11 +8667,14 @@ class MainWindow(QtWidgets.QMainWindow):
         another device rebuilds the whole gap from an older displayed point
         (walkbook showed 40 while rbook reconstructed 90).
         """
-        if remaining <= 0:
-            # ``_mark_chat_read`` publishes the newest message immediately.
-            return
         seen = chat.seen_anchor()
         seen_sid = str(seen.get("sid") or entry.get("seen_sid") or "")
+        if remaining <= 0:
+            # The divider deliberately stays until the user scrolls it away,
+            # but the displayed point must still reach the shared node.
+            if seen_sid:
+                MainWindow._queue_mds_displayed(self, jid, seen_sid)
+            return
         seen_ts = str(seen.get("ts") or entry.get("seen_ts") or "")
         read_ts = str(entry.get("read_ts") or "")
         if seen_sid and seen_ts and (not read_ts or seen_ts > read_ts):

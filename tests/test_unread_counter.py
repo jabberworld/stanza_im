@@ -314,8 +314,9 @@ seen_win._mds_pending_jid = ""
 seen_win._chat_window = _SuspendedWindow(
     _SeenChat(_SuspendedView(False), 0))
 MainWindow._apply_visible_unread(seen_win, "room@example", 16)
-check("a fully seen block publishes through mark-read, not twice",
-      seen_win._mds_pending_sid == "")
+check("a fully seen block publishes its displayed point without wiping the divider",
+      seen_win._mds_pending_sid == "sid-1"
+      and seen_win._mds_pending_jid == "room@example")
 
 if FAILURES:
     print("FAILURES:", FAILURES)
