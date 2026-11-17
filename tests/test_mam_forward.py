@@ -320,6 +320,7 @@ def _sync_probe():
         _mds_reconciling=set(),
         _chat_area_visible=lambda: True,
         _chat_area_active=lambda: True,
+        _chat_area_available=lambda: True,
         _mark_chat_read=lambda jid: calls.append(("read", jid)),
         _mds_throttle_timer=SimpleNamespace(start=lambda *_a: None),
     )
@@ -347,6 +348,7 @@ _reload_probe = SimpleNamespace(
             set_restore_anchor=lambda _anchor: None),
         current_jid=lambda: _KEY),
     _chat_area_visible=lambda: True,
+    _chat_area_available=lambda: True,
     _history_reload_pending=set(),
     _restore_anchor_for=lambda _jid: {"ts": "2026-11-04T09:00:00Z"},
     _load_history=lambda jid, anchor, force=False: _reload_calls.append(

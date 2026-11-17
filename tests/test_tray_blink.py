@@ -133,6 +133,7 @@ p = _probe()
 p._unread_chats = {"a@example.com": {"unread": 0, "mentions": 0}}
 p._unread_total = 4
 p._chat_area_visible = lambda: True
+p._chat_area_available = lambda: True
 p._chat_window = SimpleNamespace(
     get_chat=lambda jid: _Chat(0, 0), current_jid=lambda: "a@example.com")
 MainWindow._apply_visible_unread(p, "a@example.com")

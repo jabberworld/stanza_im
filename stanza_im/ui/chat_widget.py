@@ -658,6 +658,7 @@ class ChatWidget(QtWidgets.QWidget):
         view.last_seen_changed.connect(self._on_last_seen)
         view.mention_jump_requested.connect(self._jump_to_next_mention)
         view.reaction_jump_requested.connect(self._jump_to_next_reaction)
+        view.divider_passed.connect(self._on_divider_passed)
         try:
             view.set_mention_count(self._mention_count)
             view.set_unseen_count(self._unread_count)
@@ -2167,6 +2168,24 @@ class ChatWidget(QtWidgets.QWidget):
         if text:
             self._status_lines.append((text, time.strftime("%H:%M:%S")))
 
+    def _display_sender_name(self, sender: str) -> str:
+        """The name to show for a stored sender.
+
+        Live 1:1 messages are stored with the roster name, while MAM/older
+        rows carry the bare JID.  Rendering must not expose that difference.
+        MUC nicks (which may contain ``@``) are data, not addresses, so they
+        are never rewritten.
+        """
+        sender = str(sender or "")
+        if self.is_muc or not sender or "@" not in sender:
+            return sender
+        return self.display_name or sender.split("@", 1)[0]
+
+    def _display_sender(self, entry: dict) -> str:
+        if entry.get("direction", "incoming") == "outgoing":
+            return str(entry.get("sender") or "Me")
+        return self._display_sender_name(str(entry.get("sender") or ""))
+
     def _entry_view_kwargs(self, entry: dict,
                             unread_marker: bool = False) -> dict:
         body = entry.get("body", "")
@@ -2174,11 +2193,13 @@ class ChatWidget(QtWidgets.QWidget):
         if entry.get("reply_id"):
             body, fb_quote = self._split_reply_quote(body)
             ref_sender, ref_body, ref_target = self._reply_reference(entry)
-            reply_quote = (ref_sender or entry.get("reply_author") or "",
-                           ref_body or fb_quote, ref_target)
+            reply_quote = (
+                self._display_sender_name(
+                    ref_sender or entry.get("reply_author") or ""),
+                ref_body or fb_quote, ref_target)
         from stanza_im.include.utils import ts_to_time
         return {
-            "sender": entry["sender"],
+            "sender": self._display_sender(entry),
             "body": body,
             "timestamp": ts_to_time(entry.get("timestamp", "")),
             "direction": entry.get("direction", "incoming"),
@@ -2909,6 +2930,13 @@ class ChatWidget(QtWidgets.QWidget):
         count, first = self._measure_unread_block(entries)
         self._view.seed_unseen(count, first)
 
+    def _on_divider_passed(self) -> None:
+        """The user scrolled the unread divider out of the window."""
+        if self._released or not self._unread_boundary:
+            return
+        logger.debug("UNREAD[divider] jid=%s passed by user scroll", self.jid)
+        self.mark_read()
+
     def mark_read(self) -> None:
         """The conversation reached its newest message — drop the separator.
 
@@ -3152,13 +3180,15 @@ class ChatWidget(QtWidgets.QWidget):
         ref = str(anchor.get("ref") or "")
         entry = self._find_message(ref) if ref else None
         if entry is not None and self._scroll_to_entry(
-                entry, anchor_restore=True):
+                entry, anchor_restore=True, highlight=False):
+            self._flash_first_unread()
             return
         # The anchor message is outside the loaded window: fall back to its
         # timestamp, and only then walk the local archive page by page.
         entry = self._entry_before_or_at(str(anchor.get("ts") or ""))
         if entry is not None and self._scroll_to_entry(
-                entry, anchor_restore=True):
+                entry, anchor_restore=True, highlight=False):
+            self._flash_first_unread()
             return
         if ref:
             self._jump_to_message(ref, fallback_unread=True)
@@ -3168,6 +3198,7 @@ class ChatWidget(QtWidgets.QWidget):
         # the whole block read on open (a room whose shared MDS point predates
         # the loaded window reset its counter on both clients).
         self._finish_unread_resolve(None, fallback_unread=True)
+        self._flash_first_unread()
         if not self._unread_boundary:
             self._view.scroll_to_bottom()
 
@@ -3181,6 +3212,7 @@ class ChatWidget(QtWidgets.QWidget):
             return
         logger.info("ANCHOR[fallback] jid=%s first unread", self.jid)
         self._finish_unread_resolve(None, fallback_unread=True)
+        self._flash_first_unread()
         cancel = getattr(self._view, "cancel_anchor_restore", None)
         if callable(cancel):
             cancel()
@@ -3198,7 +3230,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _scroll_to_entry(self, entry: dict,
                          anchor_restore: bool = False,
-                         pin: bool = False) -> bool:
+                         pin: bool = False,
+                         highlight: bool = True) -> bool:
         """Scroll to a stored row, by stable id or (for old rows) timestamp."""
         self._ensure_entry_rendered(entry)
         target = self._reply_target_id(entry)
@@ -3206,7 +3239,8 @@ class ChatWidget(QtWidgets.QWidget):
         if target:
             # The timestamp is the fallback when the id is not rendered (a
             # legacy row whose node only carries ``data-stanza-time``).
-            kwargs = {"timestamp": stamp, "anchor_restore": anchor_restore}
+            kwargs = {"timestamp": stamp, "anchor_restore": anchor_restore,
+                      "highlight": highlight}
             if pin:
                 kwargs["pin"] = True
             try:
@@ -3227,6 +3261,18 @@ class ChatWidget(QtWidgets.QWidget):
             return True
         return False
 
+    def _flash_first_unread(self) -> None:
+        """Flash the first unread message without moving the viewport."""
+        entry = self._first_unread_entry()
+        if entry is None:
+            return
+        target = self._reply_target_id(entry)
+        if not target:
+            return
+        highlighter = getattr(self._view, "highlight_message", None)
+        if callable(highlighter):
+            highlighter(target)
+
     def _entry_before_or_at(self, ts: str):
         """The newest loaded message whose raw timestamp is not newer than *ts*."""
         if not ts:
@@ -3241,23 +3287,32 @@ class ChatWidget(QtWidgets.QWidget):
     def _view_messages(self, entries: list[dict]) -> list[dict]:
         """Build the view payload for stored rows (prepend/ensure-rendered)."""
         from stanza_im.include.utils import ts_to_time
-        return [
-            {**entry, "user_icon_path": self._user_icon(
-                entry.get("direction", "incoming"),
-                entry.get("sender_jid", ""), entry.get("sender", "")),
-             "timestamp": ts_to_time(entry.get("timestamp", "")),
-             "raw_timestamp": entry.get("timestamp", ""),
-             "body": (entry.get("body", "") if not entry.get("reply_id")
-                      else self._split_reply_quote(entry.get("body", ""))[0]),
-             "origin_id": self._reply_target_id(entry),
-             "reply_author": entry.get("reply_author", ""),
-             "reply_quote": self._reply_reference(entry)
-                            if entry.get("reply_id") else None,
-             "outgoing": self._is_mine(entry),
-             "edited": bool(entry.get("edited")),
-             "moderatable": self._can_moderate_entry(entry)}
-            for entry in entries
-        ]
+        out = []
+        for entry in entries:
+            reply_quote = None
+            if entry.get("reply_id"):
+                ref_sender, ref_body, ref_target = self._reply_reference(entry)
+                reply_quote = (
+                    self._display_sender_name(ref_sender or ""),
+                    ref_body, ref_target)
+            out.append({
+                **entry,
+                "sender": self._display_sender(entry),
+                "user_icon_path": self._user_icon(
+                    entry.get("direction", "incoming"),
+                    entry.get("sender_jid", ""), entry.get("sender", "")),
+                "timestamp": ts_to_time(entry.get("timestamp", "")),
+                "raw_timestamp": entry.get("timestamp", ""),
+                "body": (entry.get("body", "") if not entry.get("reply_id")
+                         else self._split_reply_quote(entry.get("body", ""))[0]),
+                "origin_id": self._reply_target_id(entry),
+                "reply_author": entry.get("reply_author", ""),
+                "reply_quote": reply_quote,
+                "outgoing": self._is_mine(entry),
+                "edited": bool(entry.get("edited")),
+                "moderatable": self._can_moderate_entry(entry),
+            })
+        return out
 
     def prepend_history(self, entries: list[dict], exhausted: bool,
                         keep_position: bool = True):

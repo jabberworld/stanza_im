@@ -118,6 +118,13 @@ _PRESENCE_OSD_TAIL_S = 2.0
 # most this often (seconds); carbons cover the live case, this catches copies
 # written by another resource while this device was offline.
 _HISTORY_GAP_INTERVAL_S = 60.0
+# Bound concurrent XEP-0490/MAM reconstructions.  A startup catch-up can carry
+# dozens of displayed points; running them all at once saturates the event loop
+# and the serialized SQLite writer while the user is still seeing the roster.
+_MDS_CONCURRENCY = 3
+# Background catch-up (a chat the user has not opened) starts after this pause,
+# so the roster and the first paint are not competing with archive queries.
+_MDS_BACKGROUND_DELAY_S = 2.0
 # Auto-join retry backoff (seconds) for transient join failures.
 _MUC_AUTOJOIN_RETRY_DELAYS = (5, 15, 45)
 _MUC_TRANSIENT_JOIN_ERRORS = {
@@ -617,6 +624,10 @@ class MainWindow(QtWidgets.QMainWindow):
         #: MDS+MAM unread reconstruction: in-flight and already-resolved points.
         self._mds_reconciling: set[str] = set()
         self._mds_reconciled: set[tuple[str, str]] = set()
+        # Shared by the XEP-0490 clamp and the ordinary MDS/MAM reconcile.
+        # Keeping both paths behind the same small pool prevents a startup
+        # catch-up from launching one MAM query per historical chat at once.
+        self._mds_semaphore = asyncio.Semaphore(_MDS_CONCURRENCY)
         #: Last forward history-gap sync per chat (no shared MDS point).
         self._history_gap_checked: dict[str, float] = {}
 
@@ -1873,6 +1884,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._unified:
             return self.isActiveWindow()
         return self._chat_window.isActiveWindow()
+
+    def _chat_area_available(self) -> bool:
+        """Whether the chat surface is on screen and not minimized.
+
+        ``isVisible()`` stays true for a minimized window, so a message that
+        arrived in the current tab was mistaken for a read one and neither
+        the badge nor the title counter moved.  This is deliberately not
+        ``isActiveWindow()``: a merely unfocused window keeps the existing
+        display behaviour.
+        """
+        if not self._chat_area_visible():
+            return False
+        target = (self if self.__dict__.get("_unified", False)
+                  else self.__dict__.get("_chat_window"))
+        if target is None:
+            return True
+        try:
+            return not target.isMinimized()
+        except (AttributeError, RuntimeError):
+            return True
 
     def _raise_chat_area(self) -> None:
         """Bring the chat surface to the front (main or chat window)."""
@@ -7272,7 +7303,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)
         entry = self._unread_chats.get(jid)
-        active = (not background and self._chat_area_visible()
+        active = (not background and self._chat_area_available()
                   and self._chat_window.current_jid() == jid)
         if active and entry is not None and entry.get("unread"):
             total = chat.unread_total()
@@ -8532,7 +8563,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # An auto-joined room may have loaded its history in the background
         # without touching the counters.  Now that the user actually opened it,
         # reconcile the block and (only if it is empty) clear a stale counter.
-        if self._chat_area_visible() and self._chat_window.current_jid() == jid:
+        if self._chat_area_available() and self._chat_window.current_jid() == jid:
             QtCore.QTimer.singleShot(
                 80, lambda key=jid: self._apply_visible_unread(key))
 
@@ -8709,9 +8740,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 entry["mentions"] = mentions
                 self._recount_unread()
                 self._refresh_unread_badge(jid)
-                if remaining == 0 and (prev_unread or prev_mentions):
-                    self._mark_chat_read(jid)
-                    return
         # Keep the jump-to-bottom number equal to the roster badge as it ticks
         # down while the user reads.
         self._push_unread_to_chat(jid)
@@ -8737,7 +8765,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if self._chat_window is not None else None)
         if entry is None or chat is None:
             return
-        if not (self._chat_area_visible()
+        if not (self._chat_area_available()
                 and self._chat_window.current_jid() == jid):
             return
         if _history_sync_state(self, jid):
@@ -8780,7 +8808,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._sync_tray_blink()
             return
         old_unread = entry.get("unread")
-        had_unread = bool(old_unread)
         logger.debug("UNREAD[reconcile] jid=%s old=%s new=%s mentions=%s",
                      jid, old_unread, remaining, mentions)
         entry["unread"] = remaining
@@ -8796,8 +8823,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_unread_badge(jid)
         self._push_unread_to_chat(jid)
         self._schedule_unread_save()
-        if remaining == 0 and had_unread:
-            self._mark_chat_read(jid)
 
     def _chat_at_bottom(self, jid: str) -> bool:
         """Whether the conversation on screen is showing its newest message.
@@ -8922,7 +8947,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._maybe_auto_enable_omemo(bare_jid)
 
         # Unread badge + tray blink (skip when conversation is on screen)
-        active = (self._chat_area_visible()
+        active = (self._chat_area_available()
                   and self._chat_window.current_jid() == bare_jid)
         if not active:
             self._bump_unread(bare_jid, important=(priority == "high"),
@@ -9002,7 +9027,27 @@ class MainWindow(QtWidgets.QMainWindow):
         key = self._resolve_mds_key(chat_jid)
         if not key or not sid:
             return
-        self._start_task(self._clamp_read_state(key, sid, force=force))
+        self._start_task(self._run_mds_clamp(key, sid, force=force))
+
+    def _mds_foreground(self, key: str) -> bool:
+        """Whether *key* deserves an immediate archive pass at startup."""
+        chat_window = getattr(self, "_chat_window", None)
+        if chat_window is not None and chat_window.has_chat(key):
+            return True
+        if key in getattr(self, "_muc_joined", set()):
+            return True
+        if key in getattr(self, "_bookmarks", {}):
+            return True
+        entry = (getattr(self, "_unread_chats", {}) or {}).get(key)
+        return bool(entry and int(entry.get("unread") or 0))
+
+    async def _run_mds_clamp(self, key: str, sid: str, *,
+                             force: bool = False) -> None:
+        """Apply a displayed point through the bounded MDS pool."""
+        if not self._mds_foreground(key):
+            await asyncio.sleep(_MDS_BACKGROUND_DELAY_S)
+        async with self._mds_semaphore:
+            await self._clamp_read_state(key, sid, force=force)
 
     def _set_mds_anchor(self, key: str, sid: str, ts: str = "") -> None:
         """Remember a remote displayed point even when nothing is unread."""
@@ -9028,6 +9073,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     async def _run_mds_reconcile(self, key: str, *,
                                  force: bool = False) -> None:
+        """Run the MAM/MDS pass through the bounded pool."""
+        async with self._mds_semaphore:
+            await self._run_mds_reconcile_inner(key, force=force)
+
+    async def _run_mds_reconcile_inner(self, key: str, *,
+                                       force: bool = False) -> None:
         """Run the MAM/MDS pass and release the history-sync guard.
 
         Another request may arrive while the first pass is still inside
@@ -9040,7 +9091,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._history_sync_pending.discard(key)
                 if (not _history_sync_state(self, key)
                         and self._chat_window is not None
-                        and self._chat_area_visible()
+                        and self._chat_area_available()
                         and self._chat_window.current_jid() == key):
                     # A long MAM query may have outlived the bounded retries of
                     # the initial visible-unread reconciliation.
@@ -9303,7 +9354,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if count <= 0:
                 done = True
                 return
-            if (chat is not None and self._chat_area_visible()
+            if (chat is not None and self._chat_area_available()
                     and self._chat_window.current_jid() == key
                     and not history_changed
                     and self._chat_at_bottom(key)):
@@ -9530,7 +9581,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._maybe_osd_message(nick, body, target)
         # A private message is attributed to its sender: it counts as unread in
         # its own roster row (skipping a conversation that is on screen).
-        active = (self._chat_area_visible()
+        active = (self._chat_area_available()
                   and self._chat_window.current_jid() == target)
         if not active:
             self._bump_unread(target, important=(priority == "high"),
@@ -9673,7 +9724,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # well: an unread message of a backgrounded room carries the separator,
         # and it is armed before the entry is rendered.
         self_nick = self._muc_self_nicks.get(room, "")
-        room_active = (self._chat_area_visible()
+        room_active = (self._chat_area_available()
                        and self._chat_window.current_jid() == room)
         if chat and not room_active and nick != self_nick:
             self._arm_unread_separator(room, chat)
@@ -9714,7 +9765,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._play_sound("message", "sound_muc_mention")
         # A conference counts unread too (skipped while the room is on screen);
         # mentions are counted separately for the composite roster badge.
-        active = (self._chat_area_visible()
+        active = (self._chat_area_available()
                   and self._chat_window.current_jid() == room)
         if not active and nick != self_nick:
             self._bump_unread(room, mention=is_mention,
@@ -11428,7 +11479,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_id=reply_id, media=media, markup=markup,
                              edited=True)
         if direction == "incoming":
-            active = (self._chat_area_visible()
+            active = (self._chat_area_available()
                       and self._chat_window.current_jid() == target)
             if not active:
                 self._bump_unread(target, ts=stamp, ref=stable_id)
@@ -11483,7 +11534,7 @@ class MainWindow(QtWidgets.QMainWindow):
                              reply_id=reply_id, media=media, markup=markup,
                              edited=True)
         if not own and self_nick:
-            active = (self._chat_area_visible()
+            active = (self._chat_area_available()
                       and self._chat_window.current_jid() == room)
             if not active:
                 mention = mentions_nick(body, self_nick)
@@ -12569,7 +12620,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._priority_sound_allowed(
                 priority, "sound_low_priority_message"):
             return
-        active = (self._chat_area_visible()
+        active = (self._chat_area_available()
                   and self._chat_window.current_jid() == target)
         if active:
             return

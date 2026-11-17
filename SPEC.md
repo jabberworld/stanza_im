@@ -444,7 +444,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | `appearance.muc_show_hats` | `true` | Show/hide XEP-0317 hat chips under messages in a MUC chat (Preferences → Appearance → «Конференции»; live via `ChatWindow.set_muc_hats_visible`). Off keeps the hats in the participant tooltip. |
 | `appearance.muc_participant_width` | `0` | Remembered MUC participant sidebar width in px (`0` = default 180); saved on splitter drag, restored for new MUC tabs. |
 | `appearance.interface_mode` | `separate` | Chat layout: `separate` (own top-level window) or `unified` (embedded beside the roster in a `QSplitter`). Applied live by `MainWindow._apply_interface_mode`; selector in Preferences → Appearance → «Разное». See §8.1. |
-| `appearance.show_unread_in_tabs` | `true` | Psi-style unread indicator on the chat tabs and the window title (`ChatWindow.set_unread`/`set_show_unread_in_tabs`): `[N] name` with `#cc0000` for a 1:1/private chat with unread (a conference only when a message mentions us), the window title summing the open tabs. Off hides the prefix, the color and the title total. Preferences → Appearance → «Разное». |
+| `appearance.show_unread_in_tabs` | `true` | Psi-style unread indicator on the chat tabs and the window title (`ChatWindow.set_unread`/`set_show_unread_in_tabs`): `[N] name` with `#cc0000` for a 1:1/private chat with unread (a conference only when a message mentions us), the window title summing the open tabs. Off hides the prefix, the color and the title total. Preferences → Appearance → «Разное». A minimized chat surface (`_chat_area_available`, not `isVisible()` alone) is not treated as read, so the title counter still updates. |
 | `appearance.emoticon_unicode_replace` | `true` | With the `unicode` emoticon theme, replace text smileys (`:)`, `:-D`, `(K)` …) with unicode emoji from `include.emoticons.unicode_map()` (`smile_to_html(..., unicode_replace=True)`); drawn with the platform font (no chat-font override). Preferences → Appearance → «Темы». |
 | `ui.language` | `""` | UI language code (`en`/`ru`/`uk`); empty = auto-detect from the system locale. Selector in Preferences → Stanza IM → «Общие» (options from `i18n.available_languages()`); `MainWindow.__init__` calls `load_i18n(saved or None)` after `Config`, so it applies on the next start. |
 | `appearance.osd_font` / `osd_font_size` | `""` / `0` | OSD notification font; `OsdManager.apply_font` re-renders visible popups. |
@@ -2043,8 +2043,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `origin-id` → own message id — plus its raw timestamp), so an unread
   conversation can be restored from the point the user stopped reading; an
   explicit «Отметить прочитанным» for a closed chat (`whole=True`) stores a
-  fresh UTC boundary so a later MAM pass cannot resurrect the old block. The
-  conversation can be restored from the point the user stopped reading. The
+  fresh UTC boundary so a later MAM pass cannot resurrect the old block. A
+  stored 1:1 MAM `sender` is a bare JID while a live row uses the roster name;
+  `ChatWidget._display_sender` normalizes only the rendered name (MUC nicks are
+  left untouched), including reply quotes.
+  The conversation can be restored from the point the user stopped reading. The
   restore finds the row by a stable id, else by its timestamp
   (`ChatView.scroll_to_time`, for legacy rows without ids), else pages the
   archive; an unreachable anchor opens at the first unread message
@@ -2092,8 +2095,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   the newest unread rows seen on open. `_apply_visible_unread` retries while the
   view is suspended, and a missing anchor id falls back to its timestamp
   (`ChatView.scroll_to_message(..., timestamp=...)`) instead of staying at the
-  bottom. A conversation with no unread messages opens at its newest message
-  as before.
+  bottom. The restore scroll uses `highlight=False`; once it is placed,
+  `ChatWidget._flash_first_unread` flashes the first unread message in place
+  (`ChatView.highlight_message`, no scroll), so the old read anchor is never
+  the message that blinks. A conversation with no unread messages opens at its
+  newest message as before.
 - An unread conversation opens with **every** new message already on screen: the
   window is the ordinary tail of the conversation (`history.load_history`), there
   is no forward pager, and older messages are reached by scrolling up or the
@@ -2116,10 +2122,12 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   to its end) is wholly unread: the block spans the whole loaded window and the
   tab opens at its first message. an unread message in an open but unfocused tab is armed by
   `MainWindow._arm_unread_separator` before `add_message` renders it
-  (`ChatWidget.note_unread_arrival`). It stays in the window until the
-  conversation is actually read — reaching the newest message removes it in
-  place (`ChatView.clear_unread_separator`) and a re-render cannot resurrect it
-  (`ChatWidget.mark_read` also clears the `@` mentions). The same pass seeds the
+  (`ChatWidget.note_unread_arrival`). The counter and the divider are
+  decoupled: visible messages may become read (`_apply_visible_unread`), but
+  the divider is removed only when the user scrolls it past the top
+  (`divider_passed` → `ChatWidget.mark_read`), reaches the bottom, or
+  explicitly marks the chat read — opening/re-rendering no longer removes it.
+  `ChatWidget.mark_read` also clears the `@` mentions. The same pass seeds the
   jump button with the block already on screen (`ChatView.seed_unseen`); the
   count is cleared only when `ChatView._note_bottom` actually reaches the newest
   message (edge-triggered and suspension-aware), so the transient bottom during
@@ -2458,7 +2466,11 @@ Registers XEP plugins (conditionally where noted):
   shared node), when it is older **or equal** the shared point wins (an equal
   point still rebuilds: new messages may exist only on the server — rbook
   showed 5 while walkbook had 24; it also covers a 1:1 chat with a non-zero
-  local block without opening it). An unresolved shared id is
+  local block without opening it). Startup work is bounded:
+  `MainWindow._run_mds_clamp`/`_run_mds_reconcile` share `_mds_semaphore`
+  (`_MDS_CONCURRENCY`, 3); a non-foreground key waits
+  `_MDS_BACKGROUND_DELAY_S` before the pool, while an open/joined/bookmarked/
+  unread chat runs immediately. An unresolved shared id is
   never "local newer": the gap is fetched from the local tail (or with MAM
   `after_id` only when there is no local point), and the unread count falls
   back to the local read point (or the MAM page when there is no local point),

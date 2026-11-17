@@ -1333,6 +1333,8 @@ is generated from the bundled `index.html` by
 Messages are rendered as HTML/CSS using Adium-compatible chat skins from
 `resources/chatskins/`. A `QWebChannel` bridge (`_ChatBridge`) exposes Python
 methods to JavaScript for link clicks, file transfer buttons, etc.
+`ChatWidget._display_sender` renders an old 1:1 MAM row (whose stored `sender`
+is the bare JID) with the current roster name; MUC nicks are never rewritten.
 `chat_view.py` defines **two** `ChatView` classes: the WebEngine one and a
 plain `QTextBrowser` fallback (used when QtWebEngine is missing **or** disabled
 via `performance.webengine_mode = off`). The fallback must mirror the
@@ -1701,7 +1703,10 @@ paints it `#cc0000` for a 1:1/private chat with unread (a conference only when a
 message mentions us), while the title shows `[<sum over the open tabs>] <active
 chat name>` (in `unified` mode through the `window_title_changed` signal, since
 the title belongs to the main window); `appearance.show_unread_in_tabs` (default
-on, Preferences → Appearance → «Разное») turns it off.
+on, Preferences → Appearance → «Разное») turns it off. A minimized chat
+surface (`_chat_area_available`: not `isVisible()` alone) is not treated as
+read: a message in the current tab still bumps the counter, the tab/title and
+the tray, and plays the sound/OSD.
 `_recount_unread` recomputes the
 aggregates and owns the tray-blink state, so every path that clears/shrinks a
 count (restored counters blink the tray again after a re-login,
@@ -1726,15 +1731,21 @@ server `stanza-id` → `origin-id` → own message id, plus its raw timestamp).
 An explicit «Отметить прочитанным» (`_mark_chat_read(..., whole=True)`) uses a
 fresh UTC boundary when the chat is closed, so a later MAM/reconcile pass cannot
 recreate the old unread block.
-**Reaching the newest message is the only thing that marks a conversation
-read** — opening it, switching to it, sending into it and a remote XEP-0490
-state never do. `MainWindow._restore_anchor_for` therefore hands the anchor to
+**Reaching the newest message is the only thing that marks the whole
+conversation read** — opening it, switching to it, sending into it and a remote
+XEP-0490 state never do. Opening may still reduce the counter for messages
+already visible (`_apply_visible_unread`); that visible reconciliation no
+longer removes the separator, which follows the user's scroll (see below).
+`MainWindow._restore_anchor_for` therefore hands the anchor to
 the tab (`ChatWidget.set_restore_anchor`) on open (`_on_contact_open`,
 `_on_muc_participant_clicked`) without clearing anything; `set_history` then
 calls `_restore_from_anchor`, which scrolls to the anchor message (by ref, else
 by timestamp via `_entry_before_or_at`, else paging the local archive with
-`_jump_to_message`), so an unread chat opens with the unread block right below
-the last message the user read. A legacy row with no replyable id is addressed
+`_jump_to_message`) with `highlight=False`, so an unread chat opens with the
+unread block right below the last message the user read without flashing that
+old message. `ChatWidget._flash_first_unread` then flashes the first unread
+message in place (no scroll, via `ChatView.highlight_message`). A legacy row
+with no replyable id is addressed
 by its timestamp (`ChatView.scroll_to_time`, the last `.stanza-message` with
 `data-stanza-time <= ts`), and an unreachable anchor opens at the first unread
 message instead of the newest one. The anchor is applied
@@ -1814,8 +1825,13 @@ newest message on screen. Arming *after* the render would be lost by the next
 is actually read** (reaching the newest message removes it in place — a
 re-render cannot resurrect it), `_render_all` re-emits it once per pass
 (theme/font change, restore) and `detach`/`refresh_history` drop the state.
-Reaching the bottom is `bottom_reached` again, with no trimming to suppress, so
-the newest message always marks the conversation read. The same pass **seeds
+The divider is decoupled from the counter: `_apply_visible_unread` and
+`_on_chat_last_seen` may reduce the unread count to zero on screen, but they no
+longer call `mark_read`. The divider disappears only when the user scrolls it
+past the top (`ChatView` reports a user-initiated scroll plus the
+`.stanza-unread` rect leaving the viewport → `divider_passed` →
+`ChatWidget.mark_read`), on reaching the bottom (`bottom_reached`), or on an
+explicit «Отметить прочитанным». The same pass **seeds
 the jump button** from the block that is already on screen
 (`ChatView.seed_unseen(count, target_id)`, the first unseen message), so an
 unread chat shows `▼ N` instead of an empty tail; a re-render does not recount
@@ -2333,7 +2349,11 @@ so a stale 2-message block grows to the real 23. A server-assist XEP-0333
 `_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
 the startup catch-up passes `force=True`: the map is seeded at connect from the
 persisted unread state, and an equal point must still trigger the rebuild or a
-second client would keep its stale local counters. A forced rebuild uses the
+second client would keep its stale local counters. Startup work is bounded:
+`MainWindow._run_mds_clamp`/`_run_mds_reconcile` share `_mds_semaphore`
+(`_MDS_CONCURRENCY`, 3) so a catch-up cannot launch one MAM query per historical
+chat at once; a non-foreground key waits `_MDS_BACKGROUND_DELAY_S` first, while
+an open/joined/bookmarked/unread chat runs immediately. A forced rebuild uses the
 **newer** of the shared and the local `seen_ts`/`read_ts` point: when the local
 point is newer (a throttled publish was lost, or an older build never sent it)
 it rebuilds from the local timestamp and republishes that point

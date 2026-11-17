@@ -71,6 +71,7 @@ class _View:
         self.scrolled = []
         self.cleared = 0
         self.seeded = []
+        self.highlighted = []
         self.separators_cleared = 0
         self.bottom_scrolls = 0
         self.bottom = False
@@ -98,6 +99,9 @@ class _View:
 
     def scroll_to_bottom(self):
         self.bottom_scrolls += 1
+
+    def highlight_message(self, message_id):
+        self.highlighted.append(message_id)
 
     def scroll_fraction(self):
         return 1.0
@@ -281,6 +285,10 @@ w._restore_from_anchor()
 check("a timestamp-only read point places the separator anyway",
       not w._unread_resolving
       and [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
+check("the first unread message (not the old anchor) is flashed",
+      w._view.highlighted == ["m-4"])
+check("the anchor scroll itself never flashes",
+      "highlight=False" in method_source(_cw_src, "_restore_from_anchor"))
 
 # 3c. the separator is emitted once per render ---------------------------------
 w = widget()

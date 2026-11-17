@@ -319,6 +319,14 @@ class _JumpButtonMixin:
         could lose the race), so the view starts neutral and ignores bottom
         reports until the anchor is confirmed.
         """
+        self._user_scrolled = False
+        self._divider_passed_emitted = False
+        page = getattr(self, "page", None)
+        if callable(page):
+            try:
+                page().runJavaScript("window.__stanzaUserScrolled = 0;")
+            except (RuntimeError, AttributeError):
+                pass
         self._fraction = 0.0
         self._near_top_hit = False
         self._anchor_scroll = None
@@ -711,6 +719,7 @@ if HAS_WEBENGINE:
         note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
         anchor_scroll_failed = QtCore.pyqtSignal()
+        divider_passed = QtCore.pyqtSignal()
 
         _LOAD_RETRY_LIMIT = 5
         _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
@@ -766,8 +775,13 @@ if HAS_WEBENGINE:
             # Messages added before the (async) page load completes would see
             # no #chat node; buffer them until the load has finished.
             self._pending: list[str] = []
+            self._pending_highlight = ""
             self._ready = False
             self._deferred_scroll: tuple | None = None
+            # User-scroll/divider lifecycle: programmatic anchor restores and
+            # renders must never remove the unread divider by themselves.
+            self._user_scrolled = False
+            self._divider_passed_emitted = False
             # True while a parked scroll (the read-anchor resume) has not been
             # applied yet: until the first poll that observes the new position,
             # a "sitting at the bottom" report would be the empty document and
@@ -1187,6 +1201,7 @@ if HAS_WEBENGINE:
             # read-anchor resume) only becomes meaningful once the buffered
             # chunks above are in the DOM, so replay it last.
             self._flush_deferred_scroll()
+            self._flush_pending_highlight()
 
         def _probe_chat_alive(self):
             """Check whether the ``#chat`` node survived a rejected load."""
@@ -1197,6 +1212,7 @@ if HAS_WEBENGINE:
                         pending, self._pending = self._pending, []
                         self._append_chunk("".join(pending))
                     self._flush_deferred_scroll()
+                    self._flush_pending_highlight()
                 elif self._load_failures >= self._LOAD_RETRY_LIMIT:
                     logger.error("chat document repeatedly lost (%d); "
                                  "stopping reload attempts",
@@ -1223,6 +1239,18 @@ if HAS_WEBENGINE:
 
         _SCROLL_JS = """
         (function installStanzaScroll() {
+            if (!window.__stanzaUserScrollHooked) {
+                window.__stanzaUserScrollHooked = true;
+                window.__stanzaUserScrolled = 0;
+                var markUserScroll = function () {
+                    window.__stanzaUserScrolled = 1;
+                };
+                window.addEventListener('wheel', markUserScroll,
+                                        {passive: true});
+                window.addEventListener('touchmove', markUserScroll,
+                                        {passive: true});
+                window.addEventListener('keydown', markUserScroll, true);
+            }
             if (window.__stanzaScrollInstalled) return;
             if (!window.bridge) {
                 if (window.QWebChannel && window.qt && qt.webChannelTransport) {
@@ -2078,7 +2106,11 @@ window.__stanzaMentionRef = '';
                 "||m[i].getAttribute('data-reply-id')||'';if(id)out.push(id);}}"
                 "return JSON.stringify(out);})(),"
                 " window.__stanzaImageLoadRef || '',"
-                " window.__stanzaQuickRef || '']",
+                " window.__stanzaQuickRef || '',"
+                " (function(){var s=document.querySelector('#chat .stanza-unread');"
+                "if(!s)return 0;var r=s.getBoundingClientRect();"
+                "return r.bottom<=0 ? 1 : 0;})(),"
+                " window.__stanzaUserScrolled ? 1 : 0]",
                 self._on_scroll_position,
             )
 
@@ -2453,6 +2485,17 @@ window.__stanzaMentionRef = '';
             else:
                 self._last_quick_ref = ""
             try:
+                if len(value) > 32 and value[32]:
+                    self._user_scrolled = True
+                sep_passed = bool(len(value) > 31 and value[31])
+                if not sep_passed:
+                    self._divider_passed_emitted = False
+                elif self._user_scrolled and not self._divider_passed_emitted:
+                    self._divider_passed_emitted = True
+                    self.divider_passed.emit()
+            except (TypeError, ValueError):
+                pass
+            try:
                 offset = float(value[0])
                 viewport = float(value[1])
                 total = float(value[2])
@@ -2647,12 +2690,15 @@ window.__stanzaMentionRef = '';
 
         def _load_empty(self):
             self._pending.clear()
+            self._pending_highlight = ""
             self._ready = False
             self._deferred_scroll = None
             self._anchor_scroll = None
             self._anchor_restore_pending = False
             self._follow_bottom = False
             self._scroll_suspended = False
+            self._user_scrolled = False
+            self._divider_passed_emitted = False
             self._fraction = 1.0
             self._overflow = False
             self._reset_unread_indicator()
@@ -3175,6 +3221,44 @@ window.__stanzaMentionRef = '';
             }})();
             """, self._anchor_scroll_resolved)
 
+        def highlight_message(self, message_id: str) -> None:
+            """Flash one rendered message without changing the scroll position."""
+            message_id = str(message_id or "")
+            if not message_id:
+                return
+            if not self._ready or self._pending:
+                self._pending_highlight = message_id
+                return
+            safe = json.dumps(message_id)
+            try:
+                self.page().runJavaScript(f"""
+                (function() {{
+                    var id = {safe};
+                    var nodes = document.querySelectorAll(
+                        '#chat .stanza-message');
+                    for (var i = 0; i < nodes.length; i++) {{
+                        var n = nodes[i];
+                        if (n.getAttribute('data-stanza-id') === id
+                            || n.getAttribute('data-reply-id') === id) {{
+                            n.classList.remove('stanza-jump-highlight');
+                            void n.offsetWidth;
+                            n.classList.add('stanza-jump-highlight');
+                            setTimeout(function() {{
+                                n.classList.remove('stanza-jump-highlight');
+                            }}, 1600);
+                            return;
+                        }}
+                    }}
+                }})();
+                """)
+            except RuntimeError:
+                pass
+
+        def _flush_pending_highlight(self) -> None:
+            target, self._pending_highlight = self._pending_highlight, ""
+            if target:
+                self.highlight_message(target)
+
         def set_typing_indicator(self, text: str):
             safe = json.dumps(text or "")
             self.page().runJavaScript(f"""
@@ -3195,10 +3279,13 @@ window.__stanzaMentionRef = '';
         def clear(self):
             """Clear all messages."""
             self._pending.clear()
+            self._pending_highlight = ""
             self._deferred_scroll = None
             self._anchor_scroll = None
             self._follow_bottom = False
             self._scroll_suspended = False
+            self._user_scrolled = False
+            self._divider_passed_emitted = False
             self._clear_jump_pin()
             self._fraction = 1.0
             self._overflow = False
@@ -3274,6 +3361,7 @@ else:
         note_requested = QtCore.pyqtSignal(str)             # selected text
         reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
         anchor_scroll_failed = QtCore.pyqtSignal()
+        divider_passed = QtCore.pyqtSignal()
 
         #: Cap on the document's blocks (≈ messages); the oldest are trimmed on
         #: append, mirroring the WebEngine ``_MAX_DOM_MESSAGES`` DOM trim.
@@ -3294,6 +3382,8 @@ else:
             self._scroll_suspended = False
             self._anchor_restore_pending = False
             self._bottom_locked = False
+            self._user_scrolled = False
+            self._divider_passed_emitted = False
             self.setOpenExternalLinks(False)
             self.anchorClicked.connect(
                 lambda url: self.link_clicked.emit(url.toString()))
@@ -3344,6 +3434,8 @@ else:
 
         def prepare_anchor_restore(self) -> None:
             """The fallback has no per-message nodes; wait for the loader."""
+            self._user_scrolled = False
+            self._divider_passed_emitted = False
             self._anchor_restore_pending = True
             self._bottom_locked = True
             self._scroll_suspended = True
@@ -3368,6 +3460,7 @@ else:
                 self.zoom_changed.emit(self._zoom)
                 event.accept()
                 return
+            self._user_scrolled = True
             super().wheelEvent(event)
 
         def contextMenuEvent(self, event):
@@ -3463,6 +3556,10 @@ else:
                 self.document().setDefaultFont(font)
                 self._zoom = factor
 
+        def highlight_message(self, message_id: str) -> None:
+            """No-op: the fallback has no per-message nodes."""
+            return
+
         def set_media_thumbnail(self, url: str, data_uri: str) -> None:
             """No-op: media previews are disabled without QWebEngine."""
             return
@@ -3538,6 +3635,13 @@ else:
                     self._near_top_hit = False
             if self._fraction >= 0.999:
                 self._reset_unread_indicator()
+            if self._user_scrolled and not self._divider_passed_emitted:
+                marker = tr("chat_unread_marker")
+                cursor = self.document().find(marker) if marker else None
+                if cursor is not None and not cursor.isNull():
+                    if self.cursorRect(cursor).bottom() < 0:
+                        self._divider_passed_emitted = True
+                        self.divider_passed.emit()
             self._update_jump_button()
 
         def _typing_block_start(self) -> int:
@@ -3790,6 +3894,8 @@ else:
 
         def clear(self):
             super().clear()
+            self._user_scrolled = False
+            self._divider_passed_emitted = False
             self._near_top_hit = False
             self._fraction = 1.0
             self._overflow = False
