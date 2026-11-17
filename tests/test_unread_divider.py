@@ -22,14 +22,28 @@ def check(name, cond):
         FAILURES.append(name)
 
 
+class _View:
+    def clear_unread_separator(self):
+        return True
+
+    def release_bottom_lock(self):
+        pass
+
+
 cw = ChatWidget.__new__(ChatWidget)
 cw._released = False
 cw.jid = "room@example"
 cw._unread_boundary = {"ref": "m-1", "ts": "", "sid": ""}
+cw._view = _View()
 marks = []
 cw.mark_read = lambda: marks.append(1)
 ChatWidget._on_divider_passed(cw)
-check("a user scroll past the divider clears it", marks == [1])
+check("a user scroll past the divider keeps the unread boundary",
+      marks == [] and bool(cw._unread_boundary)
+      and cw._divider_dismissed is True)
+ChatWidget.mark_read(cw)
+check("marking read still clears the boundary",
+      not cw._unread_boundary and cw._divider_dismissed is False)
 
 cw2 = ChatWidget.__new__(ChatWidget)
 cw2._released = False

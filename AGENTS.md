@@ -1845,8 +1845,9 @@ The divider is decoupled from the counter: `_apply_visible_unread` and
 longer call `mark_read`. The divider disappears only when the user scrolls it
 past the top (`ChatView` reports a user-initiated scroll plus the
 `.stanza-unread` rect leaving the viewport → `divider_passed` →
-`ChatWidget.mark_read`), on reaching the bottom (`bottom_reached`), or on an
-explicit «Отметить прочитанным». The same pass **seeds
+`ChatWidget.dismiss_divider`, which removes only the visual divider and keeps
+the boundary/counter), on reaching the bottom (`bottom_reached`), or on an
+explicit «Отметить прочитанным» (`ChatWidget.mark_read`). The same pass **seeds
 the jump button** from the block that is already on screen
 (`ChatView.seed_unseen(count, target_id)`, the first unseen message), so an
 unread chat shows `▼ N` instead of an empty tail; a re-render does not recount

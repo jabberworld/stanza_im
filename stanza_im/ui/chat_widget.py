@@ -607,6 +607,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._unread_resolving = False
+        self._divider_dismissed = False
         self._seen_unread_refs: set[str] = set()
         self._seen_mention_refs: set[str] = set()
         self._mention_refs: list[str] = []
@@ -2657,6 +2658,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._unread_resolving = False
+        self._divider_dismissed = False
 
     def suspend(self) -> bool:
         """Free the WebEngine page of an inactive tab, keeping its state.
@@ -2746,6 +2748,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_marker_shown = False
         self._unread_armed = False
         self._unread_passed = False
+        self._divider_dismissed = False
         self._seen_unread_refs = set()
         self._seen_mention_refs = set()
         # A read point older than the whole window is only reachable by paging
@@ -2819,6 +2822,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._unread_resolving = False
+        self._divider_dismissed = False
 
     @property
     def unread_boundary(self) -> dict:
@@ -2837,6 +2841,7 @@ class ChatWidget(QtWidgets.QWidget):
         if (self._released or self._unread_marker_shown
                 or self._unread_resolving):
             return
+        self._divider_dismissed = False
         if not self._unread_boundary:
             self._unread_boundary = self.read_anchor() or {"ref": "", "ts": "",
                                                            "sid": ""}
@@ -2853,7 +2858,9 @@ class ChatWidget(QtWidgets.QWidget):
         first message newer than the anchor opens the block.  A boundary we
         cannot place at all marks the first message of the window.
         """
-        if self._unread_marker_shown or not self._unread_boundary:
+        if (self._unread_marker_shown
+                or self.__dict__.get("_divider_dismissed", False)
+                or not self._unread_boundary):
             return False
         if self._unread_resolving:
             return False
@@ -2949,7 +2956,22 @@ class ChatWidget(QtWidgets.QWidget):
         if self._released or not self._unread_boundary:
             return
         logger.debug("UNREAD[divider] jid=%s passed by user scroll", self.jid)
-        self.mark_read()
+        self.dismiss_divider()
+
+    def dismiss_divider(self) -> None:
+        """Remove the divider visually while keeping the unread boundary.
+
+        The block is not read just because its divider scrolled out of sight;
+        the counter and the boundary stay until the user reaches the newest
+        message or explicitly marks the chat read.
+        """
+        if self._released or not self._unread_boundary:
+            return
+        self._divider_dismissed = True
+        try:
+            self._view.clear_unread_separator()
+        except (AttributeError, RuntimeError):
+            pass
 
     def mark_read(self) -> None:
         """The conversation reached its newest message — drop the separator.
@@ -2965,6 +2987,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._unread_resolving = False
+        self._divider_dismissed = False
         self._seen_unread_refs = set()
         self._seen_mention_refs = set()
         release = getattr(self._view, "release_bottom_lock", None)

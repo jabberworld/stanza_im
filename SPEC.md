@@ -2137,8 +2137,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`ChatWidget.note_unread_arrival`). The counter and the divider are
   decoupled: visible messages may become read (`_apply_visible_unread`), but
   the divider is removed only when the user scrolls it past the top
-  (`divider_passed` → `ChatWidget.mark_read`), reaches the bottom, or
-  explicitly marks the chat read — opening/re-rendering no longer removes it.
+  (`divider_passed` → `ChatWidget.dismiss_divider`, which removes only the
+  visual divider and keeps the boundary/counter), reaches the bottom, or
+  explicitly marks the chat read (`mark_read`) — opening/re-rendering no longer
+  removes it.
   `ChatWidget.mark_read` also clears the `@` mentions. The same pass seeds the
   jump button with the block already on screen (`ChatView.seed_unseen`); the
   count is cleared only when `ChatView._note_bottom` actually reaches the newest
