@@ -45,6 +45,8 @@ class _Contact:
 
 
 class _FakeClient:
+    omemo = type("_Omemo", (), {"available": False, "alias_sync": False})()
+
     def __init__(self):
         self.pep_data = {}
         self.contacts = {}

@@ -720,6 +720,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._on_media_copy_requested)
         self._chat_window.share_requested.connect(self._on_share_requested)
         self._chat_window.note_requested.connect(self._on_note_requested)
+        self._chat_window.anchor_settled.connect(self._on_anchor_settled)
         self._chat_window.bookmark_jid_requested.connect(
             self._on_bookmark_jid_requested)
         self._chat_window.add_contact_jid_requested.connect(
@@ -2515,8 +2516,13 @@ class MainWindow(QtWidgets.QMainWindow):
         info = self._participant_info(room, nick) if room else {}
         if chat is None:
             chat = self._chat_window.get_chat(target)
-        self._chat_window.set_contact_status(
-            target, str(info.get("show") or "online"))
+        # An absent occupant (left the room / offline) is not "online": the
+        # empty info dict used to fall back to online on every PM reopen.
+        if room and not info:
+            show = "offline"
+        else:
+            show = str(info.get("show") or "online")
+        self._chat_window.set_contact_status(target, show)
         if room:
             self._pm_targets[target] = (room, nick)
             self._vcard_muc_ctx[target] = True
@@ -2525,6 +2531,9 @@ class MainWindow(QtWidgets.QMainWindow):
             real = self._participant_real_jid(info)
             if hasattr(chat, "set_pm_mode"):
                 chat.set_pm_mode(real)
+            setter = getattr(chat, "set_pm_peer_available", None)
+            if callable(setter):
+                setter(bool(info))
 
     @staticmethod
     def _set_pm_avatar(chat, target: str, info: dict) -> None:
@@ -3475,6 +3484,24 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.ui.resource_tree import resource_tree_html
         if not self._client:
             return "", None
+        # A conference private-message row is keyed by ``room/nick``.  Resolving
+        # that through get_contact() drops the resource and picks the room's
+        # avatar, so handle the participant explicitly.
+        pm = getattr(self, "_pm_targets", {}).get(jid)
+        if pm:
+            room, nick = pm
+            info = self._participant_info(room, nick)
+            name = str(info.get("nick") or nick or jid)
+            avatar = str(info.get("avatar_path") or "")
+            if not avatar and has_avatar(jid):
+                avatar = avatar_path(jid)
+            lines = [f"<b>{escape_html(name)}</b>",
+                     f"{tr('tooltip_jid')}: {escape_html(jid)}"]
+            status = str(info.get("show") or "offline")
+            lines.append(f"{tr('tooltip_status')}: {escape_html(tr(f'status_{status}'))}")
+            if info.get("status"):
+                lines.append(escape_html(str(info["status"])).replace("\n", "<br>"))
+            return "<br>".join(lines), avatar or None
         is_conf = (jid in self._conference_roster or jid in self._muc_self_nicks)
         if is_conf:
             avatar = self._muc_avatar_paths.get(jid)
@@ -5399,6 +5426,10 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = self._vcard_dialogs.get(jid)
         if dialog is not None and dialog.isVisible():
             return dialog
+        if "/" in jid and self._vcard_muc_ctx.get(jid):
+            # A participant/PM card must never be merged into the bare room's
+            # card; only an exact key is the same dialog.
+            return None
         bare = jid.split("/", 1)[0]
         for key, candidate in self._vcard_dialogs.items():
             if (key.split("/", 1)[0] == bare and candidate is not None
@@ -5561,8 +5592,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._request_last_activity(jid, existing)
             return
         bare = jid.split("/", 1)[0]
-        is_room = bool(bare in self._conference_roster
-                       or bare in self._muc_self_nicks)
+        # A participant vCard (``room/nick`` or a real JID) is not a room card:
+        # copying its address must not append the room's ``?join`` action.
+        is_participant = bool(self._vcard_muc_ctx.get(jid))
+        is_room = (not is_participant and "/" not in jid
+                   and bool(bare in self._conference_roster
+                            or bare in self._muc_self_nicks))
         can_edit = is_room and self._can_edit_room_vcard(bare)
         parent = self._chat_dialog_parent() if is_room else self
         dlg = VCardInfoDialog(jid, card, status=status, parent=parent,
@@ -8566,6 +8601,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._chat_area_available() and self._chat_window.current_jid() == jid:
             QtCore.QTimer.singleShot(
                 80, lambda key=jid: self._apply_visible_unread(key))
+            # A short chat can open already at the bottom without a scroll
+            # event (and an anchor fallback has no scroll target); retry once
+            # after the page settles so its visible unread still clears.
+            QtCore.QTimer.singleShot(
+                800, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -8574,6 +8614,13 @@ class MainWindow(QtWidgets.QMainWindow):
             # for the tab it is opening.
             return
         self._focus_chat(jid, self._chat_window.get_chat(jid))
+
+    def _on_anchor_settled(self, jid: str) -> None:
+        """Reconcile visible unread once an automatic anchor resume ended."""
+        if not jid:
+            return
+        QtCore.QTimer.singleShot(
+            80, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_chat_reached_bottom(self, jid: str):
         """The active chat is scrolled to its newest message: it is read.
@@ -9890,6 +9937,10 @@ class MainWindow(QtWidgets.QMainWindow):
                             icon_key=show_to_icon_key("offline"))
                         self._schedule_roster_repaint()
                     self._chat_window.set_contact_status(target, "offline")
+                    pm_chat = self._chat_window.get_chat(target)
+                    setter = getattr(pm_chat, "set_pm_peer_available", None)
+                    if callable(setter):
+                        setter(False)
                 else:
                     if target in self._pm_roster:
                         self._sync_pm_roster(target, room, nick)

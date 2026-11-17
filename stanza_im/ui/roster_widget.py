@@ -528,14 +528,20 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         hit = self._item_at(int(event.position().y()))
         if hit is not None and hit[0] == "user":
             jid = hit[1].jid
-            if jid != self._hover_jid:
+            changed = jid != self._hover_jid
+            if changed:
                 self._hover_jid = jid
                 tooltip_mod.hide()
-                if self._tooltip_provider is not None:
-                    html, avatar = self._tooltip_provider(jid)
-                    if html:
-                        tooltip_mod.show(event.globalPosition().toPoint(),
-                                         html, avatar)
+            # Re-arm the delayed popup when the pointer stays in the same row
+            # after the popup was dismissed: the old code only reacted to a row
+            # change, so hovering a nick/status could silently do nothing until
+            # the pointer crossed a row boundary.
+            if (self._tooltip_provider is not None
+                    and (changed or not tooltip_mod.is_visible())):
+                html, avatar = self._tooltip_provider(jid)
+                if html:
+                    tooltip_mod.show(event.globalPosition().toPoint(),
+                                     html, avatar)
         elif self._hover_jid is not None:
             self._hover_jid = None
             tooltip_mod.hide()

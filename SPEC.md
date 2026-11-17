@@ -1084,7 +1084,10 @@ icon before the resource name (`<img …>&nbsp;<b>resource</b> — Client: …`)
 prefixes its «Mood»/«Activity»/«Now playing» lines with `pep.mood_icon_path` /
 `pep.activity_icon_path` / `pep.tune_icon_path`, and shows the roster
 subscription (`client.subscription(bare)` → `privacy_sub_*`) under the JID. The
-vCard "Status" tab carries the same `subscription` field and, for an **offline**
+A PM row (`room/nick`) uses the participant name/status/avatar directly (not
+`get_contact`, which would pick the room avatar), and the popup re-arms its
+delayed show while the pointer stays in the same row.
+The vCard "Status" tab carries the same `subscription` field and, for an **offline**
 1:1 contact, its last activity (XEP-0012): `MainWindow._request_last_activity`
 queries `client.get_last_activity(bare)` (raw `jabber:iq:last`) and merges
 `last_seen` (absolute `YYYY-MM-DD HH:MM` of `now − seconds`) and `last_status`
@@ -1150,7 +1153,11 @@ stay). The tab's status/avatar come from the participant data
 occupant one (`ChatWidget.set_pm_mode`: no Jingle calls/whiteboard/P2P files
 and no attention/OMEMO buttons; HTTP Upload, text, reactions, reply and the
 participant profile stay), and its vCard button uses
-`_show_muc_participant_profile`. The PM context menu (`_build_pm_menu`) offers
+`_show_muc_participant_profile` (a participant card never gets `?join` on copy).
+When the participant is absent the tab is offline and
+`ChatWidget.set_pm_peer_available(False)` shows a persistent «участник покинул
+конференцию» banner and disables Send until the occupant returns. The PM
+context menu (`_build_pm_menu`) offers
 open chat, vCard, history, send file (HTTP Upload), add to contacts (real JID
 known, not a contact), invite/send contact (real JID known), mark read, clear
 history and remove the row. A normal 1:1 chat with the same user stays a
@@ -2097,7 +2104,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   the newest unread rows seen on open. `_apply_visible_unread` retries while the
   view is suspended, and a missing anchor id falls back to its timestamp
   (`ChatView.scroll_to_message(..., timestamp=...)`) instead of staying at the
-  bottom. The restore scroll uses `highlight=False`; once it is placed,
+  bottom. The automatic resume emits `ChatWidget.anchor_settled` when it ends
+  (including its fallback), and `MainWindow` retries `_apply_visible_unread`,
+  so a short chat already at the bottom clears its counter/digest without a
+  scroll. The restore scroll uses `highlight=False`; once it is placed,
   `ChatWidget._flash_first_unread` flashes the first unread message in place
   (`ChatView.highlight_message`, no scroll), so the old read anchor is never
   the message that blinks. A conversation with no unread messages opens at its
@@ -4197,8 +4207,10 @@ class GroupChatInfo:     # room, nick, subject, users
   its standard menu.
 - **Copy to clipboard** — the vCard dialog shows an icon-only copy button
   right beside the JID address (`copy.svg`, tooltip "Copy XMPP address")
-  copying `xmpp:<jid>`; the conference roster context menu ("Copy conference
-  address") copies `xmpp:<jid>?join`.
+  copying `xmpp:<jid>`; a room card adds `?join`, a participant card does not.
+  The conference roster context menu ("Copy conference address") copies
+  `xmpp:<jid>?join`. The vCard field values are selectable; «Сайт» is a link
+  opening the browser and «Email» a `mailto:` link opening the mail client.
 
 ## 15. i18n System (`i18n/`)
 

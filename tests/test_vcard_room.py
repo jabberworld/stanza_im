@@ -133,6 +133,8 @@ dlg.deleteLater()
 
 # 7. MainWindow refreshes the cache and reuses the open window ----------------
 class _FakeVCardClient:
+    jid_str = ""
+
     def __init__(self):
         self.calls = []
         self.pep_data = {}

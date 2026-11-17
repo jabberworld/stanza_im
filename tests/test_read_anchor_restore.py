@@ -722,6 +722,9 @@ _finish = method_source(_cw_src, "_finish_unread_resolve")
 check("the deferred resolve can fall back to the unread start",
       "_first_unread_entry()" in _finish
       and "fallback_unread" in _finish)
+check("the deferred resolve notifies the owner that the anchor settled",
+      "anchor_settled.emit" in _finish
+      and "_on_anchor_settled" in _mw_src)
 
 # 18b. a failed anchor scroll opens at the first unread, never the bottom -----
 w = widget()

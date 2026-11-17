@@ -510,6 +510,7 @@ class ChatWidget(QtWidgets.QWidget):
     media_copy_requested = QtCore.pyqtSignal(str)             # url
     share_requested = QtCore.pyqtSignal(str)                  # shared content
     note_requested = QtCore.pyqtSignal(str, str)              # chat_key, content
+    anchor_settled = QtCore.pyqtSignal(str)                    # chat_key
     bookmark_jid_requested = QtCore.pyqtSignal(str)           # xmpp: room jid
     add_contact_jid_requested = QtCore.pyqtSignal(str)        # xmpp: contact jid
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
@@ -533,6 +534,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._own_avatar = ""
         self._pm_mode = False
         self._pm_real_jid = ""
+        self._pm_peer_available = True
         # A private conversation with a conference occupant has no roster
         # contact: its avatar comes from the participant data.
         self._peer_avatar = ""
@@ -976,6 +978,16 @@ class ChatWidget(QtWidgets.QWidget):
             self, get_height=lambda: self._input_height)
         self._input_handle.height_changed.connect(self._set_input_height)
         chat_col.addWidget(self._input_handle)
+
+        self._pm_offline_label = QtWidgets.QLabel(self)
+        self._pm_offline_label.setObjectName("pm-offline")
+        self._pm_offline_label.setWordWrap(True)
+        self._pm_offline_label.setStyleSheet(
+            "#pm-offline { background: palette(alternate-base); "
+            "color: palette(text); padding: 4px 8px; "
+            "border-top: 1px solid palette(mid); }")
+        self._pm_offline_label.setVisible(False)
+        chat_col.addWidget(self._pm_offline_label)
 
         # Input area
         input_row = QtWidgets.QHBoxLayout()
@@ -1488,6 +1500,8 @@ class ChatWidget(QtWidgets.QWidget):
         return True
 
     def _send(self):
+        if self._pm_mode and not self._pm_peer_available:
+            return
         text = self._input.toPlainText()
         if not text:
             return
@@ -3747,6 +3761,12 @@ class ChatWidget(QtWidgets.QWidget):
             entry = self._first_unread_entry()
         if entry is not None:
             self._scroll_to_entry(entry, pin=pin)
+        # The automatic read-anchor resume has finished (including its
+        # fallback); let the owner reconcile the visible unread block now.
+        try:
+            self.anchor_settled.emit(self.jid)
+        except (AttributeError, RuntimeError):
+            pass
 
     def load_more_from_server(self):
         if (self._server_fetching or self._server_exhausted
@@ -4305,6 +4325,21 @@ class ChatWidget(QtWidgets.QWidget):
     def _update_omemo_icon(self) -> None:
         icon = "lock.svg" if self._omemo_mode == "omemo" else "lock-open.svg"
         self._omemo_btn.setIcon(self._chat_icon(icon))
+
+    def set_pm_peer_available(self, available: bool) -> None:
+        """Mark whether a MUC PM peer is still in the room.
+
+        An occupant who left cannot receive a private message (the room would
+        reject or silently drop it), so show a persistent banner and disable
+        sending until they return.
+        """
+        self._pm_peer_available = bool(available)
+        self._pm_offline_label.setText(
+            tr("pm_peer_left_notice") if not self._pm_peer_available else "")
+        self._pm_offline_label.setVisible(
+            self._pm_mode and not self._pm_peer_available)
+        self._send_btn.setEnabled(
+            not self._pm_mode or self._pm_peer_available)
 
     def set_pm_mode(self, real_jid: str = "") -> None:
         """A conference private chat: keep only the features that work.

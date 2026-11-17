@@ -294,6 +294,7 @@ STRINGS = {
     "chat_activity_active": "активний",
     "chat_activity_inactive": "неактивний",
     "chat_activity_gone": "користувач закрив чат",
+    "pm_peer_left_notice": "Учасник залишив конференцію; повідомлення не будуть доставлені.",
     "chat_send": "Надіслати",
     "chat_jump_mention": "Перейти до згадки",
     "chat_jump_mention_count": "До згадки ({count})",

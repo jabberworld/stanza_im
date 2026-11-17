@@ -232,6 +232,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_copy_requested.connect(self.media_copy_requested)
         widget.share_requested.connect(self.share_requested)
         widget.note_requested.connect(self.note_requested)
+        widget.anchor_settled.connect(self.anchor_settled.emit)
         widget.bookmark_jid_requested.connect(self.bookmark_jid_requested)
         widget.add_contact_jid_requested.connect(self.add_contact_jid_requested)
         widget.geo_view_requested.connect(self.geo_view_requested)
@@ -327,6 +328,7 @@ class ChatWindow(QtWidgets.QMainWindow):
         widget.media_copy_requested.connect(self.media_copy_requested)
         widget.share_requested.connect(self.share_requested)
         widget.note_requested.connect(self.note_requested)
+        widget.anchor_settled.connect(self.anchor_settled.emit)
         widget.bookmark_jid_requested.connect(self.bookmark_jid_requested)
         widget.add_contact_jid_requested.connect(self.add_contact_jid_requested)
         widget.geo_view_requested.connect(self.geo_view_requested)
@@ -924,6 +926,7 @@ class ChatWindow(QtWidgets.QMainWindow):
     media_copy_requested = QtCore.pyqtSignal(str)              # url
     share_requested = QtCore.pyqtSignal(str)                   # shared content
     note_requested = QtCore.pyqtSignal(str, str)             # chat_key, content
+    anchor_settled = QtCore.pyqtSignal(str)                   # chat_key
     bookmark_jid_requested = QtCore.pyqtSignal(str)         # xmpp: room jid
     add_contact_jid_requested = QtCore.pyqtSignal(str)      # xmpp: contact jid
     geo_view_requested = QtCore.pyqtSignal(str, str, str)      # chat, ref, geo_uri

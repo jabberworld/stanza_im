@@ -1175,10 +1175,14 @@ pushes the participant's status/avatar into the tab (`ChatWidget.set_peer_avatar
 switches it to the occupant feature set (`set_pm_mode`: no calls, whiteboard,
 attention bell, OMEMO or P2P files — HTTP Upload, text, reactions, reply and
 the participant vCard stay), and the toolbar vCard routes through
-`_show_muc_participant_profile` (bare real JID or `room/nick`);
+`_show_muc_participant_profile` (bare real JID or `room/nick`); a participant
+card is never treated as a room card, so its copied address has no `?join`.
 `_on_groupchat_presence` keeps it in step with presence — an occupant who
 **leaves the room stays in the group shown offline** (the row lives for the
-whole session and is only cleared on logout by `_reset_account_ui`); a full
+whole session and is only cleared on logout by `_reset_account_ui`); the PM tab
+then shows a persistent «участник покинул конференцию» banner and disables
+Send (`ChatWidget.set_pm_peer_available`), re-enabled when the occupant returns.
+A full
 roster refresh restores it through `_sync_all_pm_roster` (only the rows in
 `_pm_roster`; called from `_on_roster_received` after `_rebuild_roster`, which
 clears the widget). The PM context menu (`_build_pm_menu`) carries only the
@@ -1266,7 +1270,12 @@ presence. Concurrent lookups per JID are deduped by `_version_inflight`.
 JID of the best **online** resource; `probe_entity` probes **it** for the
 software version, local time and ping (not the bare JID, which the server
 answers) and skips the request entirely for an offline contact. The
-contact tooltip is a per-resource **tree**: after the name/JID/subscription the
+contact tooltip is a per-resource **tree**; a PM row (`room/nick`) uses the
+participant's name/status/avatar directly instead of resolving it through
+`get_contact` (which would pick the room's avatar), and the custom tooltip
+re-arms its delayed show while the pointer stays in the same row, so hovering a
+nick or status works as reliably as the blank part of the row. After the
+name/JID/subscription the
 extended-presence lines (mood/activity/now playing/location, each prefixed with
 `pep.mood_icon_path`/`pep.activity_icon_path`/`pep.tune_icon_path`) come first,
 then all resources rendered by the shared
@@ -1762,7 +1771,11 @@ the pre-scroll bottom and would mark the newest unread rows seen (the walkbook
 pravda log cleared 13 unread on open). `_apply_visible_unread` therefore
 retries while the view is suspended, and `scroll_to_message` takes the entry's
 timestamp as a fallback when its id is not rendered (a legacy row) instead of
-silently staying at the bottom. When the stored read point predates the loaded
+silently staying at the bottom. The automatic resume emits
+`ChatWidget.anchor_settled` when it ends (including its fallback), and
+`MainWindow` retries `_apply_visible_unread` once more, so a short chat already
+at the bottom clears its counter/digest without a scroll. When the stored read
+point predates the loaded
 window and the archive cannot page back to it, the chat opens at the first
 unread message (`ChatWidget._first_unread_entry` via
 `_finish_unread_resolve(..., fallback_unread=True)`) rather than scrolling to
@@ -2188,6 +2201,11 @@ and 32 px, plus the `.svg` used by the View-menu entry) —
 `IconCache.get_status_icon` maps `online`/`chat` to them; the original blue
 `jabber-online`/`jabber-chat` files are kept so the look can be reverted by
 changing the names back.
+
+The vCard field values are selectable text; the «Сайт» field is a clickable
+link (opens the default browser) and «Email» is a `mailto:` link (opens the
+mail client). `VCardInfoDialog._field_html` escapes the value and builds the
+anchor; a refresh updates the link in place.
 
 ### 6. Lightweight i18n (`i18n/`)
 
@@ -2778,7 +2796,8 @@ Unrecognized actions warn the user. The vCard dialog shows its JID with an
 icon-only copy button right beside the address (toolbar-style
 `QToolButton`, `copy.svg` in `ACTIONS_DIR_16`, tooltip "Copy XMPP address",
 `make_xmpp_uri(jid)` → clipboard; for a **room** card the copied address carries
-`?join`); the conference roster context menu's
+`?join`, while a participant card (`room/nick` or a real JID) never does); the
+conference roster context menu's
 «Скопировать адрес конференции» entry (directly below «История переписки»)
 copies `xmpp:<jid>?join`. A non-conference roster contact's context menu also
 carries «Пригласить в» (`_build_invite_menu`), a submenu of the conferences we

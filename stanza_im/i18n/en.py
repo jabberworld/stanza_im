@@ -294,6 +294,7 @@ STRINGS = {
     "chat_activity_active": "active",
     "chat_activity_inactive": "inactive",
     "chat_activity_gone": "user closed the chat",
+    "pm_peer_left_notice": "This participant left the conference; messages will not be delivered.",
     "chat_send": "Send",
     "chat_jump_mention": "Jump to mention",
     "chat_jump_mention_count": "Jump to mention ({count})",

@@ -199,13 +199,47 @@ class VCardInfoDialog(QtWidgets.QDialog):
         if "clients" in values:
             self._render_clients(values.get("clients") or [])
 
+    @staticmethod
+    def _field_html(key: str, value) -> str:
+        """Escape a field value and linkify the web/email fields."""
+        import html as html_mod
+        text = str(value) if value not in (None, "") else "-"
+        escaped = html_mod.escape(text).replace("\n", "<br>")
+        if value in (None, "") or text == "-":
+            return escaped
+        if key == "url":
+            href = text if text.lower().startswith(
+                ("http://", "https://")) else "https://" + text
+            return (f'<a href="{html_mod.escape(href, quote=True)}">'
+                    f'{escaped}</a>')
+        if key == "email":
+            return (f'<a href="mailto:{html_mod.escape(text, quote=True)}">'
+                    f'{escaped}</a>')
+        return escaped
+
+    @staticmethod
+    def _open_link(url: str) -> None:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+
+    def _make_value_label(self, key: str, value) -> QtWidgets.QLabel:
+        label = QtWidgets.QLabel()
+        label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        label.setOpenExternalLinks(False)
+        label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+            | QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard
+            | QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        label.setText(self._field_html(key, value))
+        label.linkActivated.connect(self._open_link)
+        return label
+
     def _set_field(self, key: str, value, hide_empty: bool = False) -> None:
         """Update a field label in place (toggle its row for the Status tab)."""
         label = self._field_labels.get(key)
         if label is None:
             return
         has_value = bool(value) and str(value) != "-"
-        label.setText(str(value) if has_value else "-")
+        label.setText(self._field_html(key, value))
         form = self._field_forms.get(key)
         if form is not None:
             form.setRowVisible(label, has_value if hide_empty else True)
@@ -228,7 +262,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         outer.addLayout(form)
         self._status_form = form
         for key in _STATUS_SCALARS:
-            label = QtWidgets.QLabel(str(values.get(key) or "-"))
+            label = self._make_value_label(key, values.get(key))
             label.setWordWrap(True)
             form.addRow(f"{tr(f'vcard_field_{key}')}:", label)
             self._field_labels[key] = label
@@ -282,7 +316,7 @@ class VCardInfoDialog(QtWidgets.QDialog):
         inner = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(inner)
         for key in keys:
-            label = QtWidgets.QLabel(str(values.get(key) or "-"))
+            label = self._make_value_label(key, values.get(key))
             label.setWordWrap(True)
             form.addRow(f"{tr(f'vcard_field_{key}')}:", label)
             self._field_labels[key] = label

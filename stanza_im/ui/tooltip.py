@@ -178,6 +178,11 @@ def show(global_pos: QtCore.QPoint, html: str,
     _TIMER.start(_SHOW_DELAY_MS)
 
 
+def is_visible() -> bool:
+    """Whether the rich-text popup is currently on screen."""
+    return bool(_WINDOW is not None and _WINDOW.isVisible())
+
+
 def hide() -> None:
     """Cancel any pending popup and hide the current one."""
     if _TIMER is not None:
