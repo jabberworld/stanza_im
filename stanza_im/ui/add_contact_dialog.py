@@ -32,8 +32,8 @@ class AddContactDialog(QtWidgets.QDialog):
         self._service.addItem("XMPP", "")
         # ``gateways`` is a list of ``(name, jid)`` — the transports the user
         # actually added to the roster (never every gateway of the domain).
-        for name, gateway in (gateways or []):
-            self._service.addItem(name or gateway, gateway)
+        for gateway_name, gateway in (gateways or []):
+            self._service.addItem(gateway_name or gateway, gateway)
         service_form.addRow(tr("add_contact_service"), self._service)
         layout.addLayout(service_form)
 

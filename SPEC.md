@@ -159,7 +159,9 @@ translator" compact (description over a prompt + a fixed-size "Get XMPP address"
 button) and gives the Jabber ID and Nickname fields 16px icon buttons: a vCard
 button (`v-card-48.svg`, `chat_vcard`) that opens the entered address's profile, and
 a fill-nickname button (`nick-fill.svg`, `add_contact_fill_nick`) that fills the
-nickname from the vCard (`nickname`, else `fn`, else the JID localpart).
+nickname from the vCard (`nickname`, else `fn`, else the JID localpart). The
+service-selector loop names its variable `gateway_name`, so the last transport
+label cannot overwrite the constructor's `name`/`invite_name` nickname.
 Conference discovery uses XEP-0030; used
 conference servers are stored in `connection.conference_servers`. XEP-0048
 bookmark names are preserved and used in the Bookmarks tab with a localpart

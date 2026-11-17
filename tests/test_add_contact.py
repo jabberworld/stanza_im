@@ -63,6 +63,20 @@ check("the dialog does not discover the domain's gateways",
       not hasattr(dlg, "_load_gateways"))
 dlg.close()
 
+# 1b. the gateway loop must not overwrite the nickname argument ---------------
+plain = AddContactDialog(
+    [], None, gateways=[("xmpp.jabberworld.info", "xmpp.jabberworld.info")])
+check("a plain add-contact dialog has an empty nickname",
+      plain._name.text() == "")
+plain.close()
+
+prefilled = AddContactDialog(
+    [], None, jid="1234060895@tg.jabberworld.info", name="1234060895",
+    gateways=[("xmpp.jabberworld.info", "xmpp.jabberworld.info")])
+check("an unknown contact keeps its localpart nickname",
+      prefilled._name.text() == "1234060895")
+prefilled.close()
+
 # 2. a preselected gateway is chosen and its info loaded ----------------------
 dlg2 = AddContactDialog([], _FakeClient(),
                         gateways=[("J2J", "xmpp.example.com")],

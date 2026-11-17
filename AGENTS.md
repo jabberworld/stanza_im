@@ -201,6 +201,8 @@ else `fn`, else the JID localpart. Its **service selector** lists the
 transports the user actually **added** (`gateways=[(name, jid)]` from
 `MainWindow._transport_gateways`, with `preselect=<jid>`) — never every gateway
 of the account domain — so a contact can be added through a chosen transport.
+The transport loop uses `gateway_name`, never the constructor's `name`, so a
+transport label cannot become the initial nickname.
 The conference dialog
 provides conference joining,
 XEP-0030 room browsing, room vCard requests and JID copying. Conference
