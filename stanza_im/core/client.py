@@ -8261,7 +8261,9 @@ class JabberClient:
             else:
                 logger.warning("MAM results for %s have no archive cursor", jid)
 
-        rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+        reaction_events: list[dict] = []
+        rows, parsed, skipped, skip_reasons = self._mam_rows(
+            jid, results, reactions_out=reaction_events)
         rows = await self._decrypt_mam_rows(
             jid, rows, is_muc=jid in self.groupchats)
         edits = [row for row in rows if row.get("replace_id")]
@@ -8274,6 +8276,8 @@ class JabberClient:
             duplicates = len(rows) - inserted
         if edits:
             stored += await self._apply_mam_edits(jid, edits)
+        if reaction_events:
+            await self._apply_mam_reactions(jid, reaction_events)
         logger.info("MAM returned %d results for %s: parsed=%d skipped=%d "
                     "duplicates=%d stored=%d edits=%d", len(results), jid,
                     parsed, skipped, duplicates, stored, len(edits))
@@ -8610,7 +8614,9 @@ class JabberClient:
             if not results:
                 complete_seen = True
                 break
-            rows, parsed, skipped, skip_reasons = self._mam_rows(jid, results)
+            reaction_events: list[dict] = []
+            rows, parsed, skipped, skip_reasons = self._mam_rows(
+                jid, results, reactions_out=reaction_events)
             rows = await self._decrypt_mam_rows(
                 jid, rows, is_muc=bool(is_muc))
             if start_ts:
@@ -8622,6 +8628,8 @@ class JabberClient:
                 await history.store_many_async(jid, rows)
             if edits:
                 await self._apply_mam_edits(jid, edits)
+            if reaction_events:
+                await self._apply_mam_reactions(jid, reaction_events)
             for row in rows:
                 stamp = str(row.get("timestamp") or "")
                 if stamp > last_timestamp:
@@ -8696,7 +8704,8 @@ class JabberClient:
                 "edited messages", jid, len(orphans), sample)
         return applied
 
-    def _mam_rows(self, jid: str, results, is_muc: bool | None = None
+    def _mam_rows(self, jid: str, results, is_muc: bool | None = None,
+                  reactions_out: list[dict] | None = None
                   ) -> tuple[list[dict], int, int, dict]:
         """Parse MAM results into history rows (shared by before/after queries)."""
         if is_muc is None:
@@ -8721,6 +8730,30 @@ class JabberClient:
                     continue
                 tomb_id, _tomb_stamp = _retracted_tombstone(msg)
                 mod_info = _moderation_info(msg)
+                reaction = _reactions(msg)
+                if reaction is not None:
+                    target_id, emojis = reaction
+                    if target_id and reactions_out is not None:
+                        frm = str(_stanza_value(msg, "from") or "")
+                        if is_muc:
+                            by = (frm.split("/", 1)[1]
+                                  if "/" in frm else frm)
+                        else:
+                            by = frm.split("/", 1)[0]
+                            if by == self.jid_str:
+                                by = "Me"
+                        stamp = _message_timestamp(msg, result)
+                        reactions_out.append({
+                            "target": str(target_id),
+                            "by": by,
+                            "emojis": list(emojis),
+                            "occupant_id": _occupant_id(msg),
+                            "at": _normalize_ts(stamp) if stamp else "",
+                        })
+                    skipped += 1
+                    skip_reasons["reaction"] = (
+                        skip_reasons.get("reaction", 0) + 1)
+                    continue
                 body = str(_stanza_value(msg, "body") or "")
                 media = message_media(msg)
                 quick = _quick_response(msg)
@@ -8803,6 +8836,22 @@ class JabberClient:
                              jid, exc_info=True)
                 continue
         return rows, parsed, skipped, skip_reasons
+
+    async def _apply_mam_reactions(self, jid: str,
+                                   events: list[dict]) -> None:
+        """Apply XEP-0444 reaction stanzas collected from a MAM page."""
+        from stanza_im.core import history
+        for event in events or []:
+            try:
+                await history.set_reactions_async(
+                    jid, str(event.get("target") or ""),
+                    str(event.get("by") or ""),
+                    list(event.get("emojis") or []),
+                    at=str(event.get("at") or ""),
+                    occupant_id=str(event.get("occupant_id") or ""))
+            except Exception:  # noqa: BLE001 - a stale target is harmless
+                logger.debug("Could not apply MAM reaction for %s", jid,
+                             exc_info=True)
 
     async def _decrypt_mam_rows(self, jid: str, rows: list[dict],
                                 is_muc: bool = False) -> list[dict]:

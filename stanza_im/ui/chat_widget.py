@@ -2031,10 +2031,8 @@ class ChatWidget(QtWidgets.QWidget):
         """Apply XEP-0444 reactions to the message *ref_id* (in place)."""
         if not ref_id:
             return False
-        for entry in list(self._messages) + list(self._history):
-            if not (str(entry.get("message_id") or "") == ref_id
-                    or str(self._reply_target_id(entry) or "") == ref_id):
-                continue
+        entry = self._find_message(ref_id)
+        if entry is not None:
             entry["reactions"] = reactions
             try:
                 from stanza_im.ui.chat_themes import _render_reactions_chips

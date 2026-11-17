@@ -2564,9 +2564,13 @@ slixmpp's own `message`/`groupchat_message` event, so the bodyless handler skips
 it to avoid processing it twice. Each reactor's set replaces its
 previous set (keyed by occupant-id in MUC — `_occupant_id(pres)` is stored in
 `gi.users[nick]["occupant_id"]` — else nickname/JID). `MainWindow` persists via
-`history.set_reactions` (SQLite `reactions` JSON column, migration) and refreshes
-the open tab in place with `ChatWindow.update_reactions` → `ChatWidget.
-set_reactions`. `ChatWidget.compute_reactions` aggregates chips
+`history.set_reactions` (SQLite `reactions` JSON column, migration); the target
+is matched by any of `message_id`/`origin_id`/`stanza_id`/`archive_id` (the MUC
+target id is usually a server `stanza-id`) and the open tab is refreshed in
+place with `ChatWindow.update_reactions` → `ChatWidget.set_reactions`.
+MAM reaction stanzas are collected during `_mam_rows` and applied to their
+target after the page is stored, so a reaction received while offline is
+recovered too. `ChatWidget.compute_reactions` aggregates chips
 `{emoji, count, mine, title}` (title lists reactors + timestamps) and
 `chat_themes._render_reactions_chips` renders `.stanza-reaction` spans under the
 body (sorted by count desc, capped at 6 with a "+k" chip). Clicking a chip is

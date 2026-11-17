@@ -2713,8 +2713,10 @@ Registers XEP plugins (conditionally where noted):
   `<body>` is delivered by slixmpp's own `message`/`groupchat_message` event and
   skipped by the bodyless handler to avoid handling it twice.
   `MainWindow` persists it with `history.set_reactions` (matched by
-  `message_id`/`origin_id`) and refreshes the open tab in place via
-  `ChatWindow.update_reactions` → `ChatWidget.set_reactions`.
+  `message_id`/`origin_id`/`stanza_id`/`archive_id`) and refreshes the open tab
+  in place via `ChatWindow.update_reactions` → `ChatWidget.set_reactions`.
+  MAM reaction stanzas are collected by `_mam_rows` and applied to the target
+  after the page is stored, so offline reactions are recovered.
 - Each reactor's set **replaces** its previous set (keyed by occupant-id in MUC,
   else nickname/JID). Chips are aggregated by `ChatWidget.compute_reactions`
   into `{emoji, count, mine, title}` and rendered as `.stanza-reaction` spans

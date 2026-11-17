@@ -4,6 +4,7 @@ Run with:
     LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu \
     QT_QPA_PLATFORM=offscreen python3 tests/test_reactions.py
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -123,6 +124,16 @@ check("occupant-id keyed entry removed",
       all(e.get("occupant_id") != "occ-me"
           for e in history.reactions(jid, "MSG1")))
 
+# A reaction id may be the server stanza-id or archive id, not only the
+# sender's origin/message id.
+sid_jid = "sid-history@example.com"
+history.store_message(sid_jid, "incoming", "target", sender="bob",
+                      stanza_id="SERVER-SID", archive_id="ARCHIVE-ID")
+check("set_reactions finds a message by stanza_id",
+      history.set_reactions(sid_jid, "SERVER-SID", "bob", ["😀"]))
+check("reactions reads a message by archive_id",
+      len(history.reactions(sid_jid, "ARCHIVE-ID")) == 1)
+
 
 # 4. ChatWidget chip aggregation ----------------------------------------------
 def _make_widget(is_muc=False, self_nick="", users=None):
@@ -172,6 +183,15 @@ check("our chip is marked mine before removal",
       next(c for c in w3.compute_reactions(e3) if c["emoji"] == "😀")["mine"])
 check("set_reactions finds a message by origin_id",
       w3.set_reactions("ORIG3", []) is True)
+
+w3sid = _make_widget()
+e3sid = {"sender": "Bob", "direction": "incoming",
+         "stanza_id": "SERVER-SID", "origin_id": "LOCAL-ORIGIN",
+         "reactions": []}
+w3sid._messages.append(e3sid)
+check("ChatWidget set_reactions finds a message by stanza_id",
+      w3sid.set_reactions("SERVER-SID", [{"by": "Bob", "emojis": ["😀"]}])
+      and e3sid["reactions"])
 check("our reaction entry is removed", e3["reactions"] == [])
 check("no chips remain after removal", w3.compute_reactions(e3) == [])
 
@@ -448,6 +468,39 @@ _react_before, _msg_before = len(_react_events), len(_msg_events)
 asyncio.run(_muc_client._on_bodyless_reactions_stanza(fallback))
 check("bodyless handler skips a reaction that carries a fallback body",
       len(_react_events) == _react_before and len(_msg_events) == _msg_before)
+
+
+# 6b. A reaction stanza in MAM is collected, not stored as a message. ----
+
+
+def make_mam_reaction():
+    result = ET.Element("{urn:xmpp:mam:2}result")
+    result.set("id", "arc-reaction")
+    fwd = ET.SubElement(result, "{urn:xmpp:forward:0}forwarded")
+    inner = ET.SubElement(fwd, "{jabber:client}message")
+    inner.set("from", "room@conf.example/Eugene_K")
+    inner.set("to", "me@example.com/r")
+    inner.set("type", "groupchat")
+    node = ET.SubElement(inner, f"{{{NS_REACTIONS}}}reactions")
+    node.set("id", "SERVER-SID")
+    ET.SubElement(node, f"{{{NS_REACTIONS}}}reaction").text = "😁"
+    ET.SubElement(inner, "{jabber:client}body").text = "😁"
+    delay = ET.SubElement(fwd, "{urn:xmpp:delay}delay")
+    delay.set("stamp", "2026-11-17T15:31:03Z")
+    return result
+
+
+asyncio.set_event_loop(asyncio.new_event_loop())
+mam_client = JabberClient("me@x/res", "pw")
+reaction_events = []
+mam_rows, _parsed, _skipped, _reasons = mam_client._mam_rows(
+    "room@conf.example", [make_mam_reaction()], True,
+    reactions_out=reaction_events)
+check("a MAM reaction is not a chat row", mam_rows == [])
+check("a MAM reaction event is collected",
+      reaction_events == [{
+          "target": "SERVER-SID", "by": "Eugene_K", "emojis": ["😁"],
+          "occupant_id": "", "at": "2026-11-17T15:31:03.000000Z"}])
 
 
 print()

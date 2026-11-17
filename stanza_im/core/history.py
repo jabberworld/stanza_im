@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS mam_sync (
 );
 """
 
+_REACTION_ID_SQL = ("(message_id = ? OR origin_id = ? "
+                    "OR stanza_id = ? OR archive_id = ?)")
 #: SQL predicate for a row that carries no stable id at all.
 _NO_IDS_SQL = ("(archive_id IS NULL OR archive_id = '') "
                "AND (stanza_id IS NULL OR stanza_id = '') "
@@ -728,7 +730,8 @@ def set_reactions(jid: str, ref_id: str, by: str, emojis: list[str],
 
     The set replaces any previous set by the same reactor (matched by
     ``occupant_id`` when known, else by ``by``); an empty *emojis* removes the
-    reactor's entry.  Matches the message by ``message_id``/``origin_id``.
+    reactor's entry.  Matches any stored id: ``message_id``, ``origin_id``,
+    ``stanza_id`` or ``archive_id``.
     """
     if not ref_id or not by:
         return False
@@ -737,9 +740,10 @@ def set_reactions(jid: str, ref_id: str, by: str, emojis: list[str],
         with _lock:
             conn = _connection(jid)
             row = conn.execute(
-                "SELECT reactions FROM messages "
-                "WHERE message_id = ? OR origin_id = ? "
-                "ORDER BY id LIMIT 1", (ref_id, ref_id)).fetchone()
+                "SELECT reactions FROM messages WHERE "
+                + _REACTION_ID_SQL +
+                " ORDER BY id LIMIT 1",
+                (ref_id, ref_id, ref_id, ref_id)).fetchone()
             if row is None:
                 return False
             entries = _parse_reactions(row[0])
@@ -750,9 +754,10 @@ def set_reactions(jid: str, ref_id: str, by: str, emojis: list[str],
                 entries.append({"by": by, "occupant_id": occupant_id,
                                 "emojis": clean, "at": at})
             payload = json.dumps(entries, ensure_ascii=False) if entries else None
-            conn.execute("UPDATE messages SET reactions = ? "
-                         "WHERE (message_id = ? OR origin_id = ?)",
-                         (payload, ref_id, ref_id))
+            conn.execute(
+                "UPDATE messages SET reactions = ? WHERE "
+                + _REACTION_ID_SQL,
+                (payload, ref_id, ref_id, ref_id, ref_id))
             conn.commit()
             return True
     except sqlite3.Error as exc:
@@ -768,9 +773,10 @@ def reactions(jid: str, ref_id: str) -> list[dict]:
         with _lock:
             conn = _connection(jid)
             row = conn.execute(
-                "SELECT reactions FROM messages "
-                "WHERE message_id = ? OR origin_id = ? "
-                "ORDER BY id LIMIT 1", (ref_id, ref_id)).fetchone()
+                "SELECT reactions FROM messages WHERE "
+                + _REACTION_ID_SQL +
+                " ORDER BY id LIMIT 1",
+                (ref_id, ref_id, ref_id, ref_id)).fetchone()
     except sqlite3.Error as exc:
         logger.warning("Could not read reactions for %s: %s", jid, exc)
         return []
