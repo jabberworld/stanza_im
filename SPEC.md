@@ -2104,10 +2104,11 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   the newest unread rows seen on open. `_apply_visible_unread` retries while the
   view is suspended, and a missing anchor id falls back to its timestamp
   (`ChatView.scroll_to_message(..., timestamp=...)`) instead of staying at the
-  bottom. The automatic resume emits `ChatWidget.anchor_settled` when it ends
-  (including its fallback), and `MainWindow` retries `_apply_visible_unread`,
-  so a short chat already at the bottom clears its counter/digest without a
-  scroll. The restore scroll uses `highlight=False`; once it is placed,
+  bottom. The view emits `anchor_visible`/`viewport_settled` only when the
+  target is actually in the viewport; `ChatWidget.anchor_settled` and
+  `MainWindow` react to that event (no fixed delay), so a short chat already at
+  the bottom clears its counter/digest without a scroll. The restore scroll
+  uses `highlight=False`; once it is placed,
   `ChatWidget._flash_first_unread` flashes the first unread message in place
   (`ChatView.highlight_message`, no scroll), so the old read anchor is never
   the message that blinks. A conversation with no unread messages opens at its
@@ -2140,7 +2141,9 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   (`divider_passed` → `ChatWidget.dismiss_divider`, which removes only the
   visual divider and keeps the boundary/counter), reaches the bottom, or
   explicitly marks the chat read (`mark_read`) — opening/re-rendering no longer
-  removes it.
+  removes it. When visible reconciliation advances the boundary,
+  `mark_visible_unread` moves the rendered divider to the first remaining
+  unread entry.
   `ChatWidget.mark_read` also clears the `@` mentions. The same pass seeds the
   jump button with the block already on screen (`ChatView.seed_unseen`); the
   count is cleared only when `ChatView._note_bottom` actually reaches the newest

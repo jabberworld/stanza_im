@@ -1775,8 +1775,9 @@ pravda log cleared 13 unread on open). `_apply_visible_unread` therefore
 retries while the view is suspended, and `scroll_to_message` takes the entry's
 timestamp as a fallback when its id is not rendered (a legacy row) instead of
 silently staying at the bottom. The automatic resume emits
-`ChatWidget.anchor_settled` when it ends (including its fallback), and
-`MainWindow` retries `_apply_visible_unread` once more, so a short chat already
+`ChatWidget.anchor_settled` when the target is actually visible (the view
+emits `anchor_visible`/`viewport_settled`, not a fixed delay), and
+`MainWindow` runs `_apply_visible_unread` on that event, so a short chat already
 at the bottom clears its counter/digest without a scroll. When the stored read
 point predates the loaded
 window and the archive cannot page back to it, the chat opens at the first
@@ -1845,7 +1846,9 @@ re-render cannot resurrect it), `_render_all` re-emits it once per pass
 (theme/font change, restore) and `detach`/`refresh_history` drop the state.
 The divider is decoupled from the counter: `_apply_visible_unread` and
 `_on_chat_last_seen` may reduce the unread count to zero on screen, but they no
-longer call `mark_read`. The divider disappears only when the user scrolls it
+longer call `mark_read`; when the boundary advances, `mark_visible_unread`
+moves the rendered divider to the first remaining unread entry in place. The
+divider disappears only when the user scrolls it
 past the top (`ChatView` reports a user-initiated scroll plus the
 `.stanza-unread` rect leaving the viewport → `divider_passed` →
 `ChatWidget.dismiss_divider`, which removes only the visual divider and keeps

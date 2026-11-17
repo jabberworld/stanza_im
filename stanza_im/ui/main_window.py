@@ -721,6 +721,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._chat_window.share_requested.connect(self._on_share_requested)
         self._chat_window.note_requested.connect(self._on_note_requested)
         self._chat_window.anchor_settled.connect(self._on_anchor_settled)
+        self._chat_window.viewport_settled.connect(self._on_viewport_settled)
         self._chat_window.bookmark_jid_requested.connect(
             self._on_bookmark_jid_requested)
         self._chat_window.add_contact_jid_requested.connect(
@@ -7373,7 +7374,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._push_unread_to_chat(jid)
         if active:
             QtCore.QTimer.singleShot(
-                80, lambda key=jid: self._apply_visible_unread(key))
+                0, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_contact_context(self, jid: str, pos):
         menu = QtWidgets.QMenu(self)
@@ -8602,13 +8603,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # without touching the counters.  Now that the user actually opened it,
         # reconcile the block and (only if it is empty) clear a stale counter.
         if self._chat_area_available() and self._chat_window.current_jid() == jid:
+            # Event-loop turn only; the view's viewport_settled/anchor_visible
+            # signals drive the reconciliation once the DOM is actually ready.
             QtCore.QTimer.singleShot(
-                80, lambda key=jid: self._apply_visible_unread(key))
-            # A short chat can open already at the bottom without a scroll
-            # event (and an anchor fallback has no scroll target); retry once
-            # after the page settles so its visible unread still clears.
-            QtCore.QTimer.singleShot(
-                800, lambda key=jid: self._apply_visible_unread(key))
+                0, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_tab_focused(self, jid: str):
         self._touch_tab_activity(jid)
@@ -8622,8 +8620,16 @@ class MainWindow(QtWidgets.QMainWindow):
         """Reconcile visible unread once an automatic anchor resume ended."""
         if not jid:
             return
+        # ``0`` only yields one event-loop turn; it is not a render-time guess.
         QtCore.QTimer.singleShot(
-            80, lambda key=jid: self._apply_visible_unread(key))
+            0, lambda key=jid: self._apply_visible_unread(key))
+
+    def _on_viewport_settled(self, jid: str) -> None:
+        """The chat DOM/scroll state is settled; reconcile what is visible."""
+        if not jid:
+            return
+        QtCore.QTimer.singleShot(
+            0, lambda key=jid: self._apply_visible_unread(key))
 
     def _on_chat_reached_bottom(self, jid: str):
         """The active chat is scrolled to its newest message: it is read.
@@ -9149,7 +9155,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     # A long MAM query may have outlived the bounded retries of
                     # the initial visible-unread reconciliation.
                     QtCore.QTimer.singleShot(
-                        80, lambda: self._apply_visible_unread(key))
+                        0, lambda: self._apply_visible_unread(key))
 
     def _reload_chat_after_sync(self, key: str) -> None:
         """Re-read the now-complete history window of the active chat.

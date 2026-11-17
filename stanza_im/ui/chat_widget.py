@@ -511,6 +511,7 @@ class ChatWidget(QtWidgets.QWidget):
     share_requested = QtCore.pyqtSignal(str)                  # shared content
     note_requested = QtCore.pyqtSignal(str, str)              # chat_key, content
     anchor_settled = QtCore.pyqtSignal(str)                    # chat_key
+    viewport_settled = QtCore.pyqtSignal(str)                  # chat_key
     bookmark_jid_requested = QtCore.pyqtSignal(str)           # xmpp: room jid
     add_contact_jid_requested = QtCore.pyqtSignal(str)        # xmpp: contact jid
     geo_view_requested = QtCore.pyqtSignal(str, str, str)  # chat_key, ref, geo_uri
@@ -662,6 +663,8 @@ class ChatWidget(QtWidgets.QWidget):
         view.mention_jump_requested.connect(self._jump_to_next_mention)
         view.reaction_jump_requested.connect(self._jump_to_next_reaction)
         view.divider_passed.connect(self._on_divider_passed)
+        view.anchor_visible.connect(self._on_anchor_visible)
+        view.viewport_settled.connect(self._on_viewport_settled)
         try:
             view.set_mention_count(self._mention_count)
             view.set_unseen_count(self._unread_count)
@@ -1697,6 +1700,11 @@ class ChatWidget(QtWidgets.QWidget):
         remaining = [
             entry for entry in block
             if self._unread_entry_ref(entry) not in self._seen_unread_refs]
+        if remaining:
+            move = getattr(self._view, "move_unread_separator", None)
+            target = self._reply_target_id(remaining[0])
+            if callable(move) and target:
+                move(target)
         return len(remaining)
 
     def seen_anchor(self) -> dict:
@@ -2951,6 +2959,20 @@ class ChatWidget(QtWidgets.QWidget):
         count, first = self._measure_unread_block(entries)
         self._view.seed_unseen(count, first)
 
+    def _on_anchor_visible(self, _ref: str = "") -> None:
+        """A restored anchor is now actually in the viewport."""
+        try:
+            self.anchor_settled.emit(self.jid)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _on_viewport_settled(self) -> None:
+        """The viewport/DOM is ready for a visible-unread reconciliation."""
+        try:
+            self.viewport_settled.emit(self.jid)
+        except (AttributeError, RuntimeError):
+            pass
+
     def _on_divider_passed(self) -> None:
         """The user scrolled the unread divider out of the window."""
         if self._released or not self._unread_boundary:
@@ -3783,7 +3805,8 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is None and fallback_unread and self._unread_boundary:
             entry = self._first_unread_entry()
         if entry is not None:
-            self._scroll_to_entry(entry, pin=pin)
+            self._scroll_to_entry(entry, pin=pin,
+                                  anchor_restore=bool(fallback_unread))
         # The automatic read-anchor resume has finished (including its
         # fallback); let the owner reconcile the visible unread block now.
         try:

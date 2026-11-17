@@ -99,6 +99,53 @@ MainWindow._apply_visible_unread(probe, "room@example", 16)
 check("visible unread may become read without clearing the divider",
       probe._unread_chats["room@example"]["unread"] == 0 and calls == [])
 
+
+
+class _MoveView:
+    def __init__(self):
+        self.moved = []
+
+    def visible_refs(self):
+        return ["m1"]
+
+    def move_unread_separator(self, ref):
+        self.moved.append(ref)
+
+    def clear_unread_separator(self):
+        return True
+
+    def release_bottom_lock(self):
+        pass
+
+
+cw3 = ChatWidget.__new__(ChatWidget)
+cw3._released = False
+cw3.jid = "room@example"
+cw3.is_muc = False
+cw3._unread_boundary = {"ref": "m0", "ts": "T0", "sid": ""}
+cw3._unread_marker_shown = False
+cw3._unread_armed = False
+cw3._unread_passed = False
+cw3._unread_resolving = False
+cw3._seen_unread_refs = set()
+cw3._seen_mention_refs = set()
+cw3._seen_ref = ""
+cw3._seen_ts = ""
+cw3._seen_sid = ""
+cw3._messages = []
+cw3._history = [
+    {"direction": "incoming", "sender": "A", "body": "read",
+     "timestamp": "T0", "origin_id": "m0"},
+    {"direction": "incoming", "sender": "A", "body": "visible",
+     "timestamp": "T1", "origin_id": "m1"},
+    {"direction": "incoming", "sender": "A", "body": "still unread",
+     "timestamp": "T2", "origin_id": "m2"},
+]
+cw3._view = _MoveView()
+remaining = ChatWidget.mark_visible_unread(cw3)
+check("advancing the boundary moves the rendered divider",
+      remaining == 1 and cw3._view.moved == ["m2"])
+
 if FAILURES:
     print("FAILURES:", FAILURES)
     sys.exit(1)

@@ -720,6 +720,8 @@ if HAS_WEBENGINE:
         reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
         anchor_scroll_failed = QtCore.pyqtSignal()
         divider_passed = QtCore.pyqtSignal()
+        anchor_visible = QtCore.pyqtSignal(str)
+        viewport_settled = QtCore.pyqtSignal()
 
         _LOAD_RETRY_LIMIT = 5
         _MAX_DOM_MESSAGES = 500   # oldest message nodes trimmed past this
@@ -1202,6 +1204,7 @@ if HAS_WEBENGINE:
             # chunks above are in the DOM, so replay it last.
             self._flush_deferred_scroll()
             self._flush_pending_highlight()
+            self.viewport_settled.emit()
 
         def _probe_chat_alive(self):
             """Check whether the ``#chat`` node survived a rejected load."""
@@ -1213,6 +1216,7 @@ if HAS_WEBENGINE:
                         self._append_chunk("".join(pending))
                     self._flush_deferred_scroll()
                     self._flush_pending_highlight()
+                    self.viewport_settled.emit()
                 elif self._load_failures >= self._LOAD_RETRY_LIMIT:
                     logger.error("chat document repeatedly lost (%d); "
                                  "stopping reload attempts",
@@ -2638,6 +2642,8 @@ window.__stanzaMentionRef = '';
             self._anchor_scroll = None
             self._scroll_suspended = False
             self._anchor_restore_pending = False
+            if restore and not failed:
+                self.anchor_visible.emit(str(pending.get("ref") or ""))
             if failed and restore:
                 # The stored read point could not be reached in the rendered
                 # window.  The owner opens the first unread message instead of
@@ -2864,6 +2870,44 @@ window.__stanzaMentionRef = '';
             """
             try:
                 self.page().runJavaScript(js)
+            except RuntimeError:
+                pass
+
+        def move_unread_separator(self, target_ref: str) -> None:
+            """Place the existing unread divider before *target_ref*.
+
+            ``mark_visible_unread`` advances the Python boundary as the user
+            reads visible rows; the already-rendered divider must follow it
+            immediately, otherwise it stays at the old read point until the tab
+            is reopened.
+            """
+            target_ref = str(target_ref or "")
+            if not target_ref or not self._ready or self._pending:
+                return
+            safe = json.dumps(target_ref)
+            try:
+                self.page().runJavaScript(f"""
+                (function() {{
+                    var d = document.querySelector('#chat .stanza-unread');
+                    var id = {safe};
+                    if (!d) return;
+                    var nodes = document.querySelectorAll(
+                        '#chat .stanza-message');
+                    var target = null;
+                    for (var i = 0; i < nodes.length; i++) {{
+                        var n = nodes[i];
+                        if (n.getAttribute('data-stanza-id') === id
+                            || n.getAttribute('data-reply-id') === id) {{
+                            target = n;
+                            break;
+                        }}
+                    }}
+                    if (!target || !target.parentNode) return;
+                    var y = window.scrollY || 0;
+                    target.parentNode.insertBefore(d, target);
+                    window.scrollTo(0, y);
+                }})();
+                """)
             except RuntimeError:
                 pass
 
@@ -3362,6 +3406,8 @@ else:
         reaction_anchor = QtCore.pyqtSignal(int, int, int, int)  # x, y, w, h
         anchor_scroll_failed = QtCore.pyqtSignal()
         divider_passed = QtCore.pyqtSignal()
+        anchor_visible = QtCore.pyqtSignal(str)
+        viewport_settled = QtCore.pyqtSignal()
 
         #: Cap on the document's blocks (≈ messages); the oldest are trimmed on
         #: append, mirroring the WebEngine ``_MAX_DOM_MESSAGES`` DOM trim.
@@ -3583,6 +3629,10 @@ else:
                 self.cancel_anchor_restore()
                 return
             self.scroll_to_bottom()
+
+        def move_unread_separator(self, target_ref: str) -> None:
+            """No-op: the fallback has no per-message nodes."""
+            return
 
         def clear_unread_separator(self) -> bool:
             """Remove the divider paragraph from the fallback document.

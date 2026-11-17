@@ -725,6 +725,12 @@ check("the deferred resolve can fall back to the unread start",
 check("the deferred resolve notifies the owner that the anchor settled",
       "anchor_settled.emit" in _finish
       and "_on_anchor_settled" in _mw_src)
+check("the view reports the anchor only after it is visible",
+      "anchor_visible" in _cv_src
+      and "anchor_visible.emit" in _cv_src)
+check("the view reports a settled viewport after load",
+      "viewport_settled" in _cv_src
+      and "viewport_settled.emit" in _cv_src)
 
 # 18b. a failed anchor scroll opens at the first unread, never the bottom -----
 w = widget()
