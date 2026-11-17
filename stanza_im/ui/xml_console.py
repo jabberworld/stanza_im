@@ -241,6 +241,7 @@ class XmlConsoleDialog(QtWidgets.QDialog):
         row.addWidget(QtWidgets.QLabel(tr("xml_console_jid"), filters))
         self._jid_edit = QtWidgets.QLineEdit(filters)
         self._jid_edit.setMinimumWidth(220)
+        self._jid_edit.setClearButtonEnabled(True)
         self._jid_edit.textChanged.connect(self._rerender)
         row.addWidget(self._jid_edit)
         layout.addWidget(filters)

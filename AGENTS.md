@@ -999,7 +999,10 @@ groups are ignored). The target header is highlighted during the drag.
 UI convention: context menus and menu-bar menus always use icons. Load them via
 `MainWindow._menu_icon(name)`, which resolves through
 `include.constants.find_icon` (scalable dirs first, then the sized dirs);
-`SearchDialog._icon` mirrors it.
+`SearchDialog._icon` mirrors it. Every local content search/filter `QLineEdit`
+(roster, bookmarks, events, notes, conference/share/history/media/emoji and the
+XML-console JID filter) enables Qt's built-in clear button; it is hidden while
+the field is empty.
 
 **Non-modal dialogs**: a blocking (`exec()`/`open()`) dialog prevents copying
 data from another window (e.g. a room name from a chat) into it, so every

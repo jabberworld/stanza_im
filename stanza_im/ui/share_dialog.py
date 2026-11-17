@@ -27,6 +27,7 @@ class ShareDialog(QtWidgets.QDialog):
 
         self._search = QtWidgets.QLineEdit(self)
         self._search.setPlaceholderText(tr("share_search"))
+        self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._filter)
         layout.addWidget(self._search)
 

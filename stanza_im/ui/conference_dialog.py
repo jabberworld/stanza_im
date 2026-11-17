@@ -25,6 +25,7 @@ class ConferenceBrowserDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         self._search = QtWidgets.QLineEdit()
         self._search.setPlaceholderText(tr("conference_search"))
+        self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._filter)
         layout.addWidget(self._search)
         self._table = QtWidgets.QTreeWidget()

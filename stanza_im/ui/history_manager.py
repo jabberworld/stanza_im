@@ -233,6 +233,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         search_row = QtWidgets.QHBoxLayout()
         self._search = QtWidgets.QLineEdit()
         self._search.setPlaceholderText(tr("history_search_placeholder"))
+        self._search.setClearButtonEnabled(True)
         self._search.returnPressed.connect(self._on_search_run)
         search_row.addWidget(self._search, 1)
         self._btn_prev_match = QtWidgets.QToolButton()
@@ -361,6 +362,7 @@ class HistoryManagerDialog(QtWidgets.QDialog):
         row = QtWidgets.QHBoxLayout()
         filter_edit = QtWidgets.QLineEdit()
         filter_edit.setPlaceholderText(tr("history_media_filter"))
+        filter_edit.setClearButtonEnabled(True)
         filter_edit.textChanged.connect(
             lambda text, k=kind: self._on_media_filter_changed(k, text))
         row.addWidget(filter_edit, 1)

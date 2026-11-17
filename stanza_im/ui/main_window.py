@@ -871,6 +871,7 @@ class MainWindow(QtWidgets.QMainWindow):
         search_bar = QtWidgets.QHBoxLayout()
         self._search_input = QtWidgets.QLineEdit()
         self._search_input.setPlaceholderText(tr("roster_search_placeholder"))
+        self._search_input.setClearButtonEnabled(True)
         self._search_input.textChanged.connect(self._on_search)
         search_bar.addWidget(self._search_input)
         roster_layout.addLayout(search_bar)
@@ -1084,6 +1085,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bookmarks_search = QtWidgets.QLineEdit()
         self._bookmarks_search.setPlaceholderText(
             tr("bookmarks_search_placeholder"))
+        self._bookmarks_search.setClearButtonEnabled(True)
         self._bookmarks_search.textChanged.connect(self._filter_bookmarks)
         layout.addWidget(self._bookmarks_search)
 
@@ -1178,6 +1180,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._events_search = QtWidgets.QLineEdit()
         self._events_search.setPlaceholderText(tr("events_search_placeholder"))
+        self._events_search.setClearButtonEnabled(True)
         layout.addWidget(self._events_search)
 
         self._events_list = _ZoomListWidget()

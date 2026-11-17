@@ -3478,6 +3478,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   which sets `_released`; `showEvent` and `open_for` reset that flag so a
   reopened dialog loads again instead of staying empty (a released dialog
   short-circuits every async load).
+- Local search/filter fields use Qt's built-in clear button
+  (`setClearButtonEnabled(True)`): roster, bookmarks, events, notes,
+  conference/share/history/media/emoji and the XML-console JID filter.
 - `core/history` pools one SQLite connection per JID (`WAL`).  An empty JID is
   refused (`_connection` raises `sqlite3.OperationalError`, `_path` maps it to
   a non-colliding name), so no nameless `<HISTORY_DIR>/.sqlite3` store is ever

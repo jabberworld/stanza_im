@@ -110,6 +110,7 @@ class EmojiPickerDialog(QtWidgets.QDialog):
 
         self._search = QtWidgets.QLineEdit(self)
         self._search.setPlaceholderText(tr("emoji_search_placeholder"))
+        self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._populate)
         layout.addWidget(self._search)
 

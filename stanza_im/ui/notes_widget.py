@@ -53,6 +53,7 @@ class NotesWidget(QtWidgets.QWidget):
 
         self._search = QtWidgets.QLineEdit()
         self._search.setPlaceholderText(tr("notes_search_placeholder"))
+        self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._apply_filter)
         layout.addWidget(self._search)
 
