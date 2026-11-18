@@ -2417,6 +2417,12 @@ class ChatWidget(QtWidgets.QWidget):
     def _render_after_resume(self) -> None:
         pending = bool(self.__dict__.get("_pending_jump")
                         or self.__dict__.get("_pending_bottom", False))
+        # An unread tab keeps its divider boundary; reopening it must resume
+        # at that point rather than at the newest message.  The boundary is
+        # the anchor when no explicit restore request is already pending.
+        if (self._unread_boundary and not self._restore_anchor
+                and not getattr(self, "_divider_dismissed", False)):
+            self._restore_anchor = dict(self._unread_boundary)
         if (not self._unread_boundary and not self._restore_anchor
                 and not pending and not self._user_scrolled_up):
             # Reopening a read conversation must land at the newest message;
@@ -2426,6 +2432,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._render_all()
         if pending:
             QtCore.QTimer.singleShot(0, self._apply_pending_navigation)
+        elif self._restore_anchor:
+            QtCore.QTimer.singleShot(0, self._restore_from_anchor)
         if self._tail_refresh_on_resume:
             self._tail_refresh_on_resume = False
             force = bool(self.__dict__.pop("_tail_refresh_force", False))
@@ -3318,17 +3326,22 @@ class ChatWidget(QtWidgets.QWidget):
             return True
         return False
 
+    def request_anchor_update(self) -> None:
+        """Refresh the unread anchor after the tab/window regains focus."""
+        updater = getattr(self._view, "request_anchor_update", None)
+        if callable(updater):
+            updater()
+
     def _flash_first_unread(self) -> None:
-        """Flash the first unread message without moving the viewport."""
-        entry = self._first_unread_entry()
-        if entry is None:
-            return
-        target = self._reply_target_id(entry)
-        if not target:
-            return
-        highlighter = getattr(self._view, "highlight_message", None)
-        if callable(highlighter):
-            highlighter(target)
+        """Flash the unread divider without touching the message beneath it.
+
+        Highlighting the first unread message made links inside it unusable
+        while the animation ran and forced the following message to repaint
+        when it ended.  The divider is the visual anchor and has no controls.
+        """
+        flasher = getattr(self._view, "flash_unread_separator", None)
+        if callable(flasher):
+            flasher()
 
     def _entry_before_or_at(self, ts: str):
         """The newest loaded message whose raw timestamp is not newer than *ts*."""

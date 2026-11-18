@@ -8590,10 +8590,21 @@ class MainWindow(QtWidgets.QMainWindow):
         anchor = self._restore_anchor_for(jid)
         if chat is None:
             return
-        if anchor:
+        suspended = bool(getattr(chat, "suspended", False))
+        has_window = bool(
+            (getattr(chat, "_history", None) or getattr(chat, "_messages", None))
+            and getattr(chat, "_initial_load_done", False))
+        if suspended:
+            # ChatWindow normally resumes before emitting tab_focused; keep
+            # this path safe for direct callers too.
+            if anchor:
+                chat.set_restore_anchor(anchor)
+            chat.resume()
+            has_window = True
+        elif anchor and not has_window:
             chat.set_restore_anchor(anchor)
             self._load_history(jid, anchor)
-        elif is_new or not chat._history:
+        elif is_new or not has_window:
             # A tab created by an incoming message (opened with focus=False)
             # never loaded its archive; do it when it is first shown.
             self._load_history(jid)
@@ -8605,7 +8616,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # Mirror the unread counter now (relevant for an already-loaded tab; a
         # scheduled reload re-pushes it once the window is applied).
         self._push_unread_to_chat(jid)
-        self._schedule_mds_reconcile(jid)
+        # A focus/activation is one of the few points where the unread anchor
+        # may move; a downward read keeps it static.
+        updater = getattr(chat, "request_anchor_update", None)
+        if callable(updater):
+            updater()
+        if is_new or not has_window:
+            self._schedule_mds_reconcile(jid)
         self._push_reaction_pending(jid)
         # An auto-joined room may have loaded its history in the background
         # without touching the counters.  Now that the user actually opened it,
@@ -13106,6 +13123,7 @@ class MainWindow(QtWidgets.QMainWindow):
                               QtCore.QEvent.Type.WindowActivate,
                               QtCore.QEvent.Type.WindowDeactivate):
             self._update_csi()
+            self._request_active_chat_anchor()
             if (event.type() == QtCore.QEvent.Type.WindowActivate
                     or (event.type() == QtCore.QEvent.Type.ApplicationStateChange
                         and QtWidgets.QApplication.applicationState()
@@ -13117,6 +13135,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 and self._handle_widget_font_wheel(obj, event):
             return True
         return super().eventFilter(obj, event)
+
+    def _request_active_chat_anchor(self) -> None:
+        """Refresh the active chat's unread anchor after a focus change."""
+        window = getattr(self, "_chat_window", None)
+        if window is None:
+            return
+        jid = window.current_jid()
+        chat = window.get_chat(jid) if jid else None
+        if chat is not None:
+            updater = getattr(chat, "request_anchor_update", None)
+            if callable(updater):
+                updater()
 
     def _handle_widget_font_wheel(self, obj, event) -> bool:
         """Handle a Ctrl+wheel font zoom over a menu bar / tab bar."""

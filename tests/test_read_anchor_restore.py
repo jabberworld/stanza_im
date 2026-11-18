@@ -72,6 +72,7 @@ class _View:
         self.cleared = 0
         self.seeded = []
         self.highlighted = []
+        self.flashed = 0
         self.separators_cleared = 0
         self.bottom_scrolls = 0
         self.bottom = False
@@ -102,6 +103,9 @@ class _View:
 
     def highlight_message(self, message_id):
         self.highlighted.append(message_id)
+
+    def flash_unread_separator(self):
+        self.flashed += 1
 
     def scroll_fraction(self):
         return 1.0
@@ -285,9 +289,9 @@ w._restore_from_anchor()
 check("a timestamp-only read point places the separator anyway",
       not w._unread_resolving
       and [m["body"] for m in w._view.messages if m["unread_marker"]] == ["four"])
-check("the first unread message (not the old anchor) is flashed",
-      w._view.highlighted == ["m-4"])
-check("the anchor scroll itself never flashes",
+check("the unread divider (not the message) is flashed",
+      w._view.flashed == 1 and w._view.highlighted == [])
+check("the anchor scroll itself never flashes a message",
       "highlight=False" in method_source(_cw_src, "_restore_from_anchor"))
 
 # 3c. the separator is emitted once per render ---------------------------------
@@ -559,7 +563,8 @@ check("an unread tab is still resumed from its anchor",
       and "chat.set_restore_anchor(anchor)" in focus_chat
       and "self._load_history(jid, anchor)" in focus_chat)
 check("a hidden tab loads its archive when it is first shown",
-      "elif is_new or not chat._history:" in focus_chat)
+      "elif is_new or not has_window:" in focus_chat
+      and "self._load_history(jid)" in focus_chat)
 check("repeated loads of one conversation are collapsed",
       "if jid in self._history_loading:" in
       method_source(_mw_src, "_load_history"))
@@ -679,7 +684,7 @@ check("the scroll poll starts when the tab is shown",
 check("the scroll poll starts on load only when visible",
       "if self.isVisible():" in on_load)
 check("last-seen is not searched while the view sits at the bottom",
-      "if not self.is_scrolled_up():" in
+      "if not force and not self.is_scrolled_up():" in
       method_source(_cv_src, "_maybe_emit_last_seen"))
 
 # 16. the divider-removal JS is a function (no top-level `return`) -------------

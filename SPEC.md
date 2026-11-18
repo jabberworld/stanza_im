@@ -2113,10 +2113,10 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   `MainWindow` react to that event (no fixed delay), so a short chat already at
   the bottom clears its counter/digest without a scroll. The restore scroll
   uses `highlight=False`; once it is placed,
-  `ChatWidget._flash_first_unread` flashes the first unread message in place
-  (`ChatView.highlight_message`, no scroll), so the old read anchor is never
-  the message that blinks. A conversation with no unread messages opens at its
-  newest message as before.
+  `ChatWidget._flash_first_unread` flashes only the unread divider in place
+  (`ChatView.flash_unread_separator`), so the following message and its links
+  are never covered by the animation. A conversation with no unread messages
+  opens at its newest message as before.
 - An unread conversation opens with **every** new message already on screen: the
   window is the ordinary tail of the conversation (`history.load_history`), there
   is no forward pager, and older messages are reached by scrolling up or the
@@ -2124,7 +2124,7 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   anchor therefore only does two things: it places the separator and it is the
   position the window opens at (`MainWindow._focus_chat` hands it to
   `ChatWidget.set_history(…, anchor=…)` and `set_restore_anchor` without
-  touching the counters).
+  touching the counters; an already rendered tab is not reloaded on focus).
 - The separator is part of the message stream: `ChatThemeFactory.render_message(
   unread_marker=True)` prepends `<div class="stanza-unread">` and `_UNREAD_CSS`
   styles it `font-size: 0.85em`, so it stays one step below the chat text and
@@ -2568,7 +2568,10 @@ Registers XEP plugins (conditionally where noted):
   (same direction/sender/body) and repairs its timestamp instead of
   duplicating an older build's live copy. The one-time `user_version = 3`
   migration merges existing live/MAM duplicate pairs and combines their ids.
-- **Partial progress**: the scroll poll returns all visible message refs;
+- **Partial progress**: the scroll poll returns all visible message refs, but
+  the divider moves only on focus/activation, the start of an upward user
+  scroll away from the bottom, or reaching the bottom (`anchor_update_action`,
+  `ChatView.request_anchor_update`); a downward read keeps it static.
   `ChatWidget.mark_visible_unread` removes exactly those unread rows and the
   count comes from the deduplicated chronological unread suffix (live+history
   copies count once, outgoing is excluded). The seen anchor is the topmost
@@ -3034,7 +3037,9 @@ Registers XEP plugins (conditionally where noted):
   (`_place_dialog_over`). The shared caption becomes the XEP-0066 `<desc/>` of
   every file in the batch; no separate caption message is sent. A clipboard
   image opens the separate `ui/image_send_dialog.py` (large preview that
-  re-scales with the window, one caption, progress, automatic close on success). For 1:1 uploads the `get`
+  re-scales with the window, one caption, progress, automatic close on success).
+  The image dialog owns its start/error progress UI, so a Ctrl+V upload leaves
+  no permanent `ft_upload_started` status line in the chat. For 1:1 uploads the `get`
   URL and its caption are rendered as a real outgoing media message via
   `_display_local_outgoing` with the **sent** stanza id and the media dict
   (`JabberClient.take_upload_result`), so an XEP-0184 receipt matches the local

@@ -1761,8 +1761,10 @@ calls `_restore_from_anchor`, which scrolls to the anchor message (by ref, else
 by timestamp via `_entry_before_or_at`, else paging the local archive with
 `_jump_to_message`) with `highlight=False`, so an unread chat opens with the
 unread block right below the last message the user read without flashing that
-old message. `ChatWidget._flash_first_unread` then flashes the first unread
-message in place (no scroll, via `ChatView.highlight_message`). A legacy row
+old message. `ChatWidget._flash_first_unread` then flashes only the
+`.stanza-unread` divider in place (no scroll, via
+`ChatView.flash_unread_separator`), so the following message and its links are
+not covered by the animation. A legacy row
 with no replyable id is addressed
 by its timestamp (`ChatView.scroll_to_time`, the last `.stanza-message` with
 `data-stanza-time <= ts`), and an unreachable anchor opens at the first unread
@@ -1809,12 +1811,13 @@ returns to the newest one). The persisted anchor therefore only does two
 things: it places the separator and it is the position the window opens at.
 `MainWindow._focus_chat(jid, chat, is_new=…)` (called from `_on_tab_focused`,
 `_on_contact_open`, `_on_muc_participant_clicked`) resolves the anchor and
-hands it to `ChatWidget.set_history(…, anchor=…)` (and `set_restore_anchor`)
-alongside the tail loaded by `MainWindow._load_history[_async]`
-(`history.load_history`, deduplicated per conversation through
-`_history_loading`). The counters stay untouched, so the anchor cannot be
-overwritten mid-open; a background auto-join MUC keeps loading the ordinary
-tail and never applies an anchor.
+hands it to `ChatWidget.set_history(…, anchor=…)` only when the tab has no
+rendered window yet (or was resumed from suspend), along with the tail loaded by
+`MainWindow._load_history[_async]` (`history.load_history`, deduplicated per
+conversation through `_history_loading`). Focusing an already loaded tab keeps
+its DOM/history and does not reload SQLite. The counters stay untouched, so the
+anchor cannot be overwritten mid-open; a background auto-join MUC keeps loading
+the ordinary tail and never applies an anchor.
 
 The separator is part of the message stream rather than a control link:
 `ChatThemeFactory.render_message(unread_marker=True)` prepends
@@ -2440,9 +2443,13 @@ once and seeds the cursor at the pre-migration point; a fresh profile only
 seeds it. [`tests/test_global_mam_sync.py`]
 
 **Partial read progress (`seen`)**: the WebEngine scroll poll returns every
-visible `#chat .stanza-message` ref (not only the bottom-most one), so
-`MainWindow._on_chat_last_seen` removes exactly the unread rows that are on
-screen (`ChatWidget.mark_visible_unread`). Counts are derived from the
+visible `#chat .stanza-message` ref (not only the bottom-most one), but the
+divider is updated only on a focus/window activation, the **start** of an
+upward user scroll away from the bottom, or reaching the bottom
+(`anchor_update_action`/`ChatView.request_anchor_update`). A normal downward
+read therefore does not move/reflow the divider for every visible message.
+`MainWindow._on_chat_last_seen` then removes exactly the unread rows that are
+on screen (`ChatWidget.mark_visible_unread`). Counts are derived from the
 **deduplicated chronological unread suffix** (`_ordered_entries` /
 `_unread_block_entries`); live and SQLite copies are counted once, and outgoing
 messages never consume unread. The seen anchor is the **topmost visible unread**
@@ -3115,7 +3122,9 @@ window or the roster). The shared caption is attached as the XEP-0066
 `<desc/>` of **every** file in the batch and is not sent as a separate
 message. A clipboard image uses the separate `ui/image_send_dialog.py` (large
 preview that re-scales with the window, one caption, progress, automatic close
-on success) instead of the multi-file dialog. File URLs and captions are rendered as real outgoing
+on success) instead of the multi-file dialog. The image dialog owns its
+`start`/`error` progress UI, so a Ctrl+V upload does not add a permanent
+`ft_upload_started`/failure status line to the chat. File URLs and captions are rendered as real outgoing
 messages with clickable links: in 1:1 the client displays them locally via
 `_display_local_outgoing` with the **sent** stanza id and the media dict
 (`JabberClient.take_upload_result`), so an XEP-0184 receipt matches the local

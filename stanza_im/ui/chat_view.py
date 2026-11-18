@@ -60,6 +60,30 @@ def clamp_zoom(factor: float) -> float:
         return 1.0
 
 
+def anchor_update_action(previous_offset, offset, *, user_scrolled: bool,
+                         suspended: bool, at_bottom: bool,
+                         armed: bool) -> tuple[str, bool]:
+    """Classify one scroll poll for the unread-anchor update policy.
+
+    Returns ``(action, armed)`` where *action* is ``"update"`` only at the
+    start of an upward user scroll away from the bottom.  Downward movement
+    and reaching the bottom re-arm the next upward update; further upward
+    movement while already armed does nothing.  This keeps the divider static
+    during a normal downward read.
+    """
+    if previous_offset is None or suspended or not user_scrolled:
+        return "", bool(armed)
+    delta = float(offset) - float(previous_offset)
+    if delta <= -2:
+        if at_bottom:
+            return "", True
+        if not armed:
+            return "", False
+        return "update", False
+    if delta >= 2 or at_bottom:
+        return "", True
+    return "", bool(armed)
+
 def anchor_scroll_guard_open(pending: dict | None, visible_refs,
                              now: float) -> bool:
     """Whether the read-anchor scroll guard may release the scroll reports.
@@ -287,20 +311,24 @@ class _JumpButtonMixin:
         except Exception:
             pass
 
-    def _maybe_emit_last_seen(self):
+    def _maybe_emit_last_seen(self, force: bool = False):
         # The seen point only matters while the view is scrolled up; a view at
         # the bottom is "read" and its owner (the bottom report) handles that.
-        # Skipping here avoids a needless JS round-trip and log line per poll.
         if getattr(self, "_scroll_suspended", False):
             return
         if getattr(self, "_deferred_scroll", None) is not None:
             return
-        if not self.is_scrolled_up():
+        if not force and not self.is_scrolled_up():
             return
         try:
             self._find_last_visible_ref()
         except Exception:
             pass
+
+    def request_anchor_update(self) -> None:
+        """Refresh the unread anchor after a focus/activation event."""
+        self._anchor_update_armed = True
+        self._maybe_emit_last_seen(force=True)
 
     def suspend_scroll_reports(self) -> None:
         """Ignore bottom/seen reports while a programmatic scroll is pending."""
@@ -329,6 +357,9 @@ class _JumpButtonMixin:
                 pass
         self._fraction = 0.0
         self._near_top_hit = False
+        self._last_scroll_offset = None
+        self._scroll_direction = ""
+        self._anchor_update_armed = True
         self._anchor_scroll = None
         self._anchor_restore_pending = True
         self._bottom_locked = True
@@ -778,6 +809,7 @@ if HAS_WEBENGINE:
             # no #chat node; buffer them until the load has finished.
             self._pending: list[str] = []
             self._pending_highlight = ""
+            self._pending_unread_flash = False
             self._ready = False
             self._deferred_scroll: tuple | None = None
             # User-scroll/divider lifecycle: programmatic anchor restores and
@@ -815,6 +847,13 @@ if HAS_WEBENGINE:
             self._anchor_restore_pending = False
             self._load_failures = 0
             self._last_seen_cache = ("", "", "")
+            # Anchor movement policy: the unread divider only follows a
+            # focus/activation update, the start of an upward scroll away from
+            # the bottom, or reaching the bottom.  A downward read must not
+            # reflow the chat for every newly visible message.
+            self._last_scroll_offset = None
+            self._scroll_direction = ""
+            self._anchor_update_armed = True
             self._loading = False
             self.loadFinished.connect(self._on_load_finished)
             self.loadStarted.connect(self._on_load_started)
@@ -1204,6 +1243,7 @@ if HAS_WEBENGINE:
             # chunks above are in the DOM, so replay it last.
             self._flush_deferred_scroll()
             self._flush_pending_highlight()
+            self._flush_pending_unread_flash()
             self.viewport_settled.emit()
 
         def _probe_chat_alive(self):
@@ -1216,6 +1256,7 @@ if HAS_WEBENGINE:
                         self._append_chunk("".join(pending))
                     self._flush_deferred_scroll()
                     self._flush_pending_highlight()
+                    self._flush_pending_unread_flash()
                     self.viewport_settled.emit()
                 elif self._load_failures >= self._LOAD_RETRY_LIMIT:
                     logger.error("chat document repeatedly lost (%d); "
@@ -2516,6 +2557,21 @@ window.__stanzaMentionRef = '';
                     self._fraction = 1.0
             else:
                 self._fraction = 1.0
+            at_bottom = offset + viewport >= total - 2 or total <= viewport
+            action, self._anchor_update_armed = anchor_update_action(
+                self._last_scroll_offset, offset,
+                user_scrolled=bool(self._user_scrolled),
+                suspended=bool(self._scroll_suspended),
+                at_bottom=at_bottom,
+                armed=bool(self._anchor_update_armed))
+            self._last_scroll_offset = offset
+            if action == "update":
+                # One update at the start of the upward movement; dragging
+                # further through history must not move the divider again.
+                try:
+                    self._maybe_emit_last_seen(force=True)
+                except Exception:
+                    pass
             near_top = offset <= max(24.0, viewport)
             if near_top:
                 if not self._near_top_hit:
@@ -2525,10 +2581,6 @@ window.__stanzaMentionRef = '';
                 self._near_top_hit = False
             self._update_jump_button()
             self._note_bottom()
-            try:
-                self._maybe_emit_last_seen()
-            except Exception:
-                pass
             self._repin_jump_target()
             # Release the parked-scroll guard only after this poll: it lets the
             # first poll still see the stale "at the bottom" position and, more
@@ -2545,10 +2597,6 @@ window.__stanzaMentionRef = '';
             self._update_jump_button()
             if not self._scroll_suspended and self._deferred_scroll is None:
                 self._note_bottom()
-            try:
-                self._maybe_emit_last_seen()
-            except Exception:
-                pass
 
         def _note_bottom(self) -> None:
             """Edge-triggered "the view sits at the newest message" report.
@@ -3303,6 +3351,33 @@ window.__stanzaMentionRef = '';
             if target:
                 self.highlight_message(target)
 
+        def flash_unread_separator(self) -> None:
+            """Flash only the unread divider, never the following message."""
+            if not self._ready or self._pending:
+                self._pending_unread_flash = True
+                return
+            try:
+                self.page().runJavaScript("""
+                (function() {
+                    var d = document.querySelector('#chat .stanza-unread');
+                    if (!d) return;
+                    d.classList.remove('stanza-unread-flash');
+                    void d.offsetWidth;
+                    d.classList.add('stanza-unread-flash');
+                    setTimeout(function() {
+                        d.classList.remove('stanza-unread-flash');
+                    }, 1600);
+                })();
+                """)
+            except RuntimeError:
+                pass
+
+        def _flush_pending_unread_flash(self) -> None:
+            if not self._pending_unread_flash:
+                return
+            self._pending_unread_flash = False
+            self.flash_unread_separator()
+
         def set_typing_indicator(self, text: str):
             safe = json.dumps(text or "")
             self.page().runJavaScript(f"""
@@ -3324,11 +3399,15 @@ window.__stanzaMentionRef = '';
             """Clear all messages."""
             self._pending.clear()
             self._pending_highlight = ""
+            self._pending_unread_flash = False
             self._deferred_scroll = None
             self._anchor_scroll = None
             self._follow_bottom = False
             self._scroll_suspended = False
             self._user_scrolled = False
+            self._last_scroll_offset = None
+            self._scroll_direction = ""
+            self._anchor_update_armed = True
             self._divider_passed_emitted = False
             self._clear_jump_pin()
             self._fraction = 1.0
@@ -3604,6 +3683,10 @@ else:
 
         def highlight_message(self, message_id: str) -> None:
             """No-op: the fallback has no per-message nodes."""
+            return
+
+        def flash_unread_separator(self) -> None:
+            """No-op: the fallback has no divider node."""
             return
 
         def set_media_thumbnail(self, url: str, data_uri: str) -> None:

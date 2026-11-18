@@ -966,6 +966,10 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 .stanza-jump-highlight {{ animation: stanza-jump-flash 1.6s ease-out; }}
 @keyframes stanza-jump-flash {{ 0% {{ background: rgba(255,214,0,.45); }}
                  100% {{ background: transparent; }} }}
+.stanza-unread-flash {{ animation: stanza-unread-flash 1.6s ease-out; }}
+@keyframes stanza-unread-flash {{ 0% {{ background: rgba(255,214,0,.45);
+                 border-radius: 4px; }}
+                 100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
 {_HATS_CSS}
 {_DELETE_CSS}
@@ -1011,6 +1015,10 @@ body {{ margin: 0; padding: 4px; font-family: sans-serif; font-size: 13px; }}
 .stanza-reply a.stanza-reply-jump:hover .reply-label {{ text-decoration: underline; }}
 .stanza-jump-highlight {{ animation: stanza-jump-flash 1.6s ease-out; }}
 @keyframes stanza-jump-flash {{ 0% {{ background: rgba(255,214,0,.45); }}
+                 100% {{ background: transparent; }} }}
+.stanza-unread-flash {{ animation: stanza-unread-flash 1.6s ease-out; }}
+@keyframes stanza-unread-flash {{ 0% {{ background: rgba(255,214,0,.45);
+                 border-radius: 4px; }}
                  100% {{ background: transparent; }} }}
 {_MEDIA_CSS}
 {_HATS_CSS}
