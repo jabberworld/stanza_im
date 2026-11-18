@@ -49,6 +49,7 @@ stanza_im/
 │   ├── notification_priorities.py — per-contact priority (private PEP node)
 │   ├── private_pep.py  — raw private-PEP publish helper (XML publish-options)
 │   ├── unread_state.py — persisted per-chat read state (unread/mentions/anchor)
+│   ├── sync_state.py   — account-wide XEP-0313 MAM catch-up cursor
 │   ├── profiles.py     — account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py  — vCard avatar download/cache coordination
 │   ├── discovery.py    — XEP-0065 proxy + STUN/TURN SRV discovery/cache
@@ -339,6 +340,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/<jid>/history/<bare-jid>.jsonl` |
 | Chat history (SQLite) | `$XDG_DATA_HOME/stanza-im/<jid>/history/` |
 | Unread counters | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` |
+| Account MAM cursor | `$XDG_DATA_HOME/stanza-im/<jid>/sync_state.json` (0600) |
 | Roster cache | `$XDG_DATA_HOME/stanza-im/<jid>/roster/<account>.json` |
 | Known contacts | `$XDG_DATA_HOME/stanza-im/<jid>/known_contacts.json` |
 | Notification priorities | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` |
@@ -357,8 +359,8 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
   that TOML parsers reject.
 - History appended line-by-line as JSON, one file per bare JID
 - **Per-profile data**: every account keeps its history, roster cache, unread
-  counters, known-contacts registry, notification priorities and classified
-  transports under `$XDG_DATA_HOME/stanza-im/<jid>/`;
+  counters, account MAM cursor, known-contacts registry, notification priorities
+  and classified transports under `$XDG_DATA_HOME/stanza-im/<jid>/`;
   `core/profiles.set_active(jid)` re-bases those stores and closes the pooled
   history connections. The `CACHE_DIR` stores (avatars, media, tiles, discovery,
   vCard cache) are shared. With no profile selected the unscoped `DATA_DIR`
@@ -2487,9 +2489,10 @@ Registers XEP plugins (conditionally where noted):
   showed 5 while walkbook had 24; it also covers a 1:1 chat with a non-zero
   local block without opening it). Startup work is bounded:
   `MainWindow._run_mds_clamp`/`_run_mds_reconcile` share `_mds_semaphore`
-  (`_MDS_CONCURRENCY`, 3); a non-foreground key waits
-  `_MDS_BACKGROUND_DELAY_S` before the pool, while an open/joined/bookmarked/
-  unread chat runs immediately. An unresolved shared id is
+  (`_MDS_CONCURRENCY`, 3); a non-foreground key only stores its displayed sid
+  as a pending anchor and starts no per-chat MAM query, while an
+  open/joined/bookmarked/unread chat runs immediately. The account-wide pass
+  below finds the messages for quiet chats. An unresolved shared id is
   never "local newer": the gap is fetched from the local tail (or with MAM
   `after_id` only when there is no local point), and the unread count falls
   back to the local read point (or the MAM page when there is no local point),
@@ -2503,7 +2506,23 @@ Registers XEP plugins (conditionally where noted):
   `conference.`/`muc.`/`rooms.` domain), so an old unjoined room (`bimroom`) is
   never rebuilt as a 1:1 and does not become invisible unread; the join path
   reconciles it once the room is live. A normal join/open leaves a strictly
-  newer local point alone but republishes it. Partial progress made by
+  newer local point alone but republishes it.
+- **Account-wide offline catch-up**: `core/sync_state.py` stores the account's
+  forward MAM cursor (`sync_state.json`, per-profile, 0600). On login
+  `JabberClient.sync_global_mam()` queries the account's **own archive**
+  without `with_jid` from that cursor, groups each page by conversation
+  (1:1 bare JID, groupchat room; an ambiguous MUC PM stays on the join/open
+  path), stores one batch per affected chat and advances the cursor after the
+  page. `MainWindow` recomputes only the affected counters with
+  `effective = max(local read/seen point, remote MDS displayed point)`: rows
+  after it are unread, a remote point in the middle clears only the prefix,
+  and an unresolved remote id never clears a block. A quiet contact therefore
+  costs no SQLite open or MAM query; the per-chat path remains for open/
+  joined/bookmarked/unread chats, ambiguous displayed ids and servers without
+  global MAM. The first run without a cursor runs the old per-chat reconcile
+  once and seeds the cursor at the pre-migration point; a fresh profile only
+  seeds it. [`tests/test_global_mam_sync.py`]
+  Partial progress made by
   `_apply_visible_unread` is published through the same throttled timer, so
   opening a chat can advance the shared displayed point without a scroll poll.
   Auto-joined rooms use
@@ -2514,7 +2533,8 @@ Registers XEP plugins (conditionally where noted):
   anchor afterwards (the pravda 113-unread race). On login `MainWindow` seeds
   `_mds_local` from the persisted unread state (`client.set_displayed_state`),
   so the catch-up does not wipe restored unread while a newer remote state still
-  clears it. Config `chat.message_displayed_sync` (default on).
+  clears it. Config `chat.message_displayed_sync` (default on); the account-wide
+  MAM catch-up still runs when MDS is disabled, using local read points only.
 - **History behind an open tab**: the join-time room replay arrives as
   **delayed** groupchat messages; a XEP-0203 `<delay/>` is the reliable history
   signal (old servers send it without `<archived/>`, and it is read from the

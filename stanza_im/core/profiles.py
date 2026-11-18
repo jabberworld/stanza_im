@@ -193,11 +193,12 @@ def set_active(jid: str) -> None:
     """
     from stanza_im.core import (
         history, known_contacts, notification_priorities, roster_cache,
-        transports, unread_state)
+        sync_state, transports, unread_state)
     history.set_profile(jid)
     roster_cache.set_profile(jid)
     unread_state.set_profile(jid)
     known_contacts.set_profile(jid)
     notification_priorities.set_profile(jid)
     transports.set_profile(jid)
+    sync_state.set_profile(jid)
     history.close_all()

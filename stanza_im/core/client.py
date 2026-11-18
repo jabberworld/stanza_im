@@ -1305,6 +1305,10 @@ class JabberClient:
         self._mds_own_sids: set[str] = set()
         self._mds_server_assist = False
         self._mds_pubsub_options = False
+        # Account-level history catch-up (one MAM pass instead of one per chat).
+        self._global_mam_inflight = False
+        self._global_mam_unsupported = False
+        self._global_sync_start_ts = ""
         self._upload_service_cache: str | None = None
         self._upload_limit: int | None = None
         self._hats_support: dict[str, bool] = {}
@@ -5949,9 +5953,11 @@ class JabberClient:
                 logger.info("Enabled message carbons (XEP-0280)")
             except Exception as exc:
                 logger.warning("Could not enable message carbons: %s", exc)
-        if self.message_displayed_sync:
-            loop = asyncio.get_event_loop()
-            loop.create_task(self._mds_init())
+        # The account history catch-up runs even when XEP-0490 is disabled:
+        # MDS supplies read points, but it is the MAM pass that finds offline
+        # messages.  _mds_init gates only the MDS-specific part.
+        self._global_mam_inflight = False
+        loop.create_task(self._mds_init())
         # PEP subscriptions survive a reconnect, so re-subscribe to the
         # currently known contacts (servers typically drop them on session end).
         # This is background work: it must not hold up the session start.
@@ -6091,14 +6097,18 @@ class JabberClient:
         loop.create_task(task)
 
     async def _mds_init(self) -> None:
-        try:
-            await self._mds_detect_server()
-        except Exception as exc:
-            logger.debug("MDS server detection failed: %s", exc)
-        try:
-            await self._mds_catch_up()
-        except Exception as exc:
-            logger.debug("MDS catch-up failed: %s", exc)
+        if self.message_displayed_sync:
+            try:
+                await self._mds_detect_server()
+            except Exception as exc:
+                logger.debug("MDS server detection failed: %s", exc)
+            try:
+                await self._mds_catch_up()
+            except Exception as exc:
+                logger.debug("MDS catch-up failed: %s", exc)
+        # The UI now starts the account-wide MAM pass.  It can store every
+        # displayed point cheaply and then ask the archive what is actually new.
+        self.emit("mds_catchup_done")
 
     async def _mds_detect_server(self) -> None:
         iq = self.xmpp.Iq()
@@ -6252,6 +6262,231 @@ class JabberClient:
         self._mds_local[chat_jid] = sid
         logger.debug("MDS: %s displayed up to %s", chat_jid, sid)
         self.emit("mds_displayed", chat_jid, sid, force)
+
+    # ── Account-wide MAM catch-up (one pass for all conversations) ─
+
+    @staticmethod
+    def _mam_start_datetime(value: str):
+        if not value:
+            return None
+        try:
+            start = datetime.datetime.fromisoformat(
+                str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=datetime.timezone.utc)
+        return start
+
+    @staticmethod
+    def _now_utc() -> str:
+        return datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="seconds").replace("+00:00", "Z")
+
+    def _mam_error_unsupported(self, exc) -> bool:
+        """Whether *exc* means the server has no account-wide MAM."""
+        condition = str(getattr(exc, "condition", "") or "")
+        text = str(exc)
+        return condition in ("feature-not-implemented", "service-unavailable",
+                             "item-not-found") or \
+            "feature-not-implemented" in text or "service-unavailable" in text
+
+    async def newest_global_mam_cursor(self):
+        """Return ``(archive_id, timestamp)`` of the newest archived message.
+
+        ``None`` means MAM is unavailable (the caller keeps the legacy
+        per-chat path).  An empty archive yields the current UTC timestamp so
+        the next pass starts at a stable point.
+        """
+        if self._global_mam_unsupported:
+            return None
+        mam = self.xmpp.plugin.get("xep_0313")
+        if mam is None:
+            self._global_mam_unsupported = True
+            return None
+        try:
+            iq = await asyncio.wait_for(
+                mam.retrieve(rsm={"max": 1, "before": True}), timeout=25.0)
+        except Exception as exc:  # noqa: BLE001 - capability probe
+            logger.debug("Global MAM cursor probe failed: %r", exc)
+            if self._mam_error_unsupported(exc):
+                self._global_mam_unsupported = True
+                return None
+            return None
+        if str(iq.get("type", "result")) == "error":
+            self._global_mam_unsupported = True
+            logger.debug("Global MAM cursor probe returned an error: %s", iq)
+            return None
+        results = iq.get("mam", {}).get("results") or []
+        if not results:
+            return "", self._now_utc()
+        result = results[-1]
+        fwd = _stanza_value(result, "forwarded")
+        msg = _as_message_stanza(_forwarded_stanza(fwd) or result)
+        stamp = _message_timestamp(msg, result) if msg is not None else ""
+        return (_archive_result_id(result) or "",
+                _normalize_ts(stamp) if stamp else self._now_utc())
+
+    def _global_mam_target(self, result) -> tuple[str, bool]:
+        """Conversation key and MUC flag of one account-archive result."""
+        fwd = _stanza_value(result, "forwarded")
+        msg = _as_message_stanza(_forwarded_stanza(fwd) or result)
+        if msg is None or not hasattr(msg, "get"):
+            return "", False
+        frm = str(_stanza_value(msg, "from") or "")
+        to = str(_stanza_value(msg, "to") or "")
+        mtype = str(_stanza_value(msg, "type") or "")
+        frm_bare = frm.split("/", 1)[0]
+        to_bare = to.split("/", 1)[0]
+        if not frm_bare:
+            return "", False
+        if frm_bare != self.jid_str and to_bare != self.jid_str:
+            # A misbehaving archive must not create conversations for
+            # unrelated accounts.
+            return "", False
+        if mtype == "groupchat":
+            # Our own outgoing room copies are represented by the room echo;
+            # importing them from the personal archive would duplicate them.
+            if frm_bare == self.jid_str:
+                return "", False
+            return frm_bare, True
+        if frm_bare in self.groupchats or frm_bare in self._known_rooms:
+            # A MUC private message needs the occupant context carried by the
+            # live stanza; without it the join/open path remains authoritative.
+            return "", False
+        if frm_bare == self.jid_str:
+            chat = to_bare
+            if chat in self.groupchats or chat in self._known_rooms:
+                return "", False
+        else:
+            chat = frm_bare
+        if not chat or chat == self.jid_str or "/" in chat:
+            return "", False
+        return chat, False
+
+    def _global_mam_groups(self, results) -> dict[str, tuple[bool, list]]:
+        """Group raw MAM results by conversation (order preserved)."""
+        grouped: dict[str, tuple[bool, list]] = {}
+        for result in results:
+            chat, is_muc = self._global_mam_target(result)
+            if not chat:
+                continue
+            entry = grouped.get(chat)
+            if entry is None:
+                grouped[chat] = (is_muc, [result])
+            else:
+                entry[1].append(result)
+        return grouped
+
+    def _global_mam_result_stamp(self, result) -> str:
+        fwd = _stanza_value(result, "forwarded")
+        msg = _as_message_stanza(_forwarded_stanza(fwd) or result)
+        if msg is None:
+            return ""
+        stamp = _message_timestamp(msg, result)
+        return _normalize_ts(stamp) if stamp else ""
+
+    async def sync_global_mam(self, max_pages: int = 200) -> set[str]:
+        """Fetch every account-archive message after the stored cursor.
+
+        Rows are grouped by conversation and stored one batch per chat, so a
+        startup with 200 quiet contacts opens no SQLite store for them.  The
+        returned set names the chats whose local archive changed; the UI
+        recomputes their unread counters from local read points and MDS.
+        """
+        if self._global_mam_inflight or self._global_mam_unsupported:
+            return set()
+        from stanza_im.core import history, sync_state
+        affected: set[str] = set()
+        cursor = sync_state.load_cursor(self.jid_str)
+        last_id = str(cursor.get("archive_id") or "")
+        last_ts = str(cursor.get("ts") or "")
+        self._global_sync_start_ts = last_ts
+        if not last_ts and not last_id:
+            logger.debug("MAM[global] no cursor; skipping")
+            return affected
+        self._global_mam_inflight = True
+        try:
+            try:
+                mam = self.xmpp.plugin["xep_0313"]
+            except (KeyError, AttributeError):
+                self._global_mam_unsupported = True
+                return affected
+            pages = 0
+            while pages < max(1, int(max_pages)):
+                pages += 1
+                rsm = {"max": 500}
+                if last_id:
+                    rsm["after"] = last_id
+                start = self._mam_start_datetime(last_ts)
+                if start is None and not last_id:
+                    break
+                logger.info("MAM[global] page %d start=%s after=%s",
+                            pages, last_ts, rsm.get("after", ""))
+                try:
+                    iq = await asyncio.wait_for(
+                        mam.retrieve(start=start, rsm=rsm), timeout=30.0)
+                except asyncio.TimeoutError:
+                    logger.info("MAM[global] page %d timed out", pages)
+                    break
+                except Exception as exc:  # noqa: BLE001 - best effort catch-up
+                    logger.debug("MAM[global] page %d failed: %r", pages, exc)
+                    if self._mam_error_unsupported(exc):
+                        self._global_mam_unsupported = True
+                    break
+                if str(iq.get("type", "result")) == "error":
+                    logger.warning("MAM[global] page %d IQ error: %s",
+                                   pages, iq)
+                    self._global_mam_unsupported = True
+                    break
+                results = iq.get("mam", {}).get("results") or []
+                if not results:
+                    break
+                page_ts = ""
+                groups = self._global_mam_groups(results)
+                for chat, (is_muc, group) in groups.items():
+                    reaction_events: list[dict] = []
+                    rows, _parsed, _skipped, _reasons = self._mam_rows(
+                        chat, group, is_muc=is_muc,
+                        reactions_out=reaction_events)
+                    rows = await self._decrypt_mam_rows(
+                        chat, rows, is_muc=is_muc)
+                    edits = [row for row in rows if row.get("replace_id")]
+                    rows = [row for row in rows if not row.get("replace_id")]
+                    if rows:
+                        await history.store_many_async(chat, rows)
+                        affected.add(chat)
+                    if edits:
+                        await self._apply_mam_edits(chat, edits)
+                        affected.add(chat)
+                    if reaction_events:
+                        await self._apply_mam_reactions(chat, reaction_events)
+                        affected.add(chat)
+                    for row in rows:
+                        stamp = str(row.get("timestamp") or "")
+                        if stamp > page_ts:
+                            page_ts = stamp
+                for result in results:
+                    stamp = self._global_mam_result_stamp(result)
+                    if stamp > page_ts:
+                        page_ts = stamp
+                complete, fin_last = self._mam_fin_state(iq)
+                next_cursor = fin_last or _archive_result_id(results[-1])
+                if next_cursor:
+                    last_id = str(next_cursor)
+                    if page_ts:
+                        last_ts = page_ts
+                    sync_state.save_cursor(
+                        archive_id=last_id, ts=last_ts, migrated=True,
+                        account=self.jid_str)
+                if complete or not next_cursor:
+                    break
+                await asyncio.sleep(0)
+            logger.info("MAM[global] done pages=%d chats=%d last=%s ts=%s",
+                        pages, len(affected), last_id, last_ts)
+            return affected
+        finally:
+            self._global_mam_inflight = False
 
     # ── Extended presence: XEP-0080/0107/0108/0118 ────────────────
 

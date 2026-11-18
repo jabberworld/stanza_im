@@ -371,6 +371,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._unread_chats: dict[str, dict] = {}
         self._unread_jids: set[str] = set()
         self._unread_total = 0
+        # Another device's XEP-0490 displayed point, kept apart from our own
+        # read_sid so the global MAM pass can compare both.
+        self._mds_remote: dict[str, str] = {}
+        self._startup_sync_task = None
         # Restored counters must not blink the tray on the login screen.
         self._tray_blink_allowed = False
         # JIDs known (from the persisted registry) to be conferences, so a room
@@ -624,6 +628,7 @@ class MainWindow(QtWidgets.QMainWindow):
         #: MDS+MAM unread reconstruction: in-flight and already-resolved points.
         self._mds_reconciling: set[str] = set()
         self._mds_reconciled: set[tuple[str, str]] = set()
+
         # Shared by the XEP-0490 clamp and the ordinary MDS/MAM reconcile.
         # Keeping both paths behind the same small pool prevents a startup
         # catch-up from launching one MAM query per historical chat at once.
@@ -4392,6 +4397,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._history_sync_pending.clear()
         self._history_reload_pending.clear()
         self._unread_chats = {}
+        self._mds_remote.clear()
         if self._client is not None:
             for attr in ("_mds_local", "_mds_own_sids"):
                 value = getattr(self._client, attr, None)
@@ -4662,6 +4668,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("message_received", self._on_message_received)
         c.on("message_carbon_sent", self._on_message_carbon_sent)
         c.on("mds_displayed", self._on_mds_displayed)
+        c.on("mds_catchup_done", self._on_mds_catchup_done)
         c.on("message_corrected", self._on_message_corrected)
         c.on("groupchat_message_corrected", self._on_groupchat_message_corrected)
         c.on("message_retracted", self._on_message_retracted)
@@ -8155,6 +8162,7 @@ class MainWindow(QtWidgets.QMainWindow):
         the previous account's counters.
         """
         self._unread_chats = unread_state.load_chats(jid)
+        self._mds_remote.clear()
         self._load_known_conferences()
         self._load_notification_priorities()
         self._load_transports()
@@ -9086,7 +9094,183 @@ class MainWindow(QtWidgets.QMainWindow):
         key = self._resolve_mds_key(chat_jid)
         if not key or not sid:
             return
+        self._mds_remote[key] = sid
+        if not self._mds_foreground(key):
+            # Keep the point in memory only.  The account-wide MAM pass will
+            # tell us whether anything newer exists; persisting a remote sid
+            # before comparing it could overwrite a newer local read anchor.
+            return
         self._start_task(self._run_mds_clamp(key, sid, force=force))
+
+    def _on_mds_catchup_done(self) -> None:
+        """Start the account-wide history catch-up after MDS is collected."""
+        if self._client is None:
+            return
+        task = self._startup_sync_task
+        if task is not None and not task.done():
+            return
+        self._startup_sync_task = self._start_task(self._run_startup_sync())
+
+    async def _run_startup_sync(self) -> None:
+        """Migrate once, then fetch every offline message through one MAM pass."""
+        client = self._client
+        if client is None:
+            return
+        from stanza_im.core import sync_state
+        account = client.jid_str
+        cursor = sync_state.load_cursor(account)
+        if not cursor.get("migrated"):
+            newest = await client.newest_global_mam_cursor()
+            if self._client is not client:
+                return
+            if newest is None:
+                # MAM is unavailable: keep the old per-chat behaviour rather
+                # than silently losing offline messages.
+                await self._legacy_startup_reconcile()
+                return
+            if self._has_local_state():
+                await self._legacy_startup_reconcile()
+                if self._client is not client:
+                    return
+            # Seed the cursor with the pre-migration point; anything arriving
+            # during the legacy pass is fetched by the global pass below.
+            sync_state.save_cursor(
+                archive_id=newest[0], ts=newest[1], migrated=True,
+                account=account)
+        if client._global_mam_unsupported:
+            await self._legacy_startup_reconcile()
+            return
+        affected = await client.sync_global_mam()
+        if self._client is not client:
+            return
+        if affected:
+            await self._recompute_global_unread(
+                affected, client._global_sync_start_ts)
+        if client._global_mam_unsupported:
+            await self._legacy_startup_reconcile()
+
+    def _has_local_state(self) -> bool:
+        """Whether this profile already has local history/read state."""
+        if self._unread_chats:
+            return True
+        from stanza_im.core import history
+        try:
+            return bool(history.list_history_jids())
+        except Exception:  # noqa: BLE001 - migration must not crash login
+            return False
+
+    async def _legacy_startup_reconcile(self) -> None:
+        """One-time pre-global reconciliation for an existing profile."""
+        keys = set(self._mds_remote)
+        keys.update(
+            key for key, entry in self._unread_chats.items()
+            if any(int(entry.get(field) or 0)
+                   for field in ("unread", "mentions", "important")))
+
+        async def reconcile_one(key: str) -> None:
+            if self._client is None:
+                return
+            if self._is_conference_jid(key) and key not in self._muc_joined:
+                return
+            try:
+                async with self._mds_semaphore:
+                    await self._reconcile_mds_unread(key, force=True)
+            except Exception:  # noqa: BLE001 - one chat must not stop migration
+                logger.debug("Legacy startup reconcile failed for %s", key,
+                             exc_info=True)
+
+        await asyncio.gather(*(reconcile_one(key) for key in sorted(keys)))
+
+    async def _recompute_global_unread(self, keys, start_ts: str = "") -> None:
+        """Count unread locally after the account-wide MAM pass.
+
+        The archive now contains every message received while offline.  A
+        remote displayed point, when resolvable, is the *effective* read point
+        even when it lies in the middle of a block (partial read on another
+        device); when it cannot be resolved the existing unread block is kept
+        untouched instead of being declared read.
+        """
+        from stanza_im.core import history
+        changed = False
+        for key in sorted(keys):
+            if not key:
+                continue
+            if self._is_conference_jid(key) and key not in self._muc_joined:
+                # An unjoined room has no actionable badge; its join path
+                # reconciles the room archive later.
+                continue
+            entry = self._unread_chats.get(key)
+            current = int((entry or {}).get("unread") or 0)
+            local_ts = max(str((entry or {}).get("read_ts") or ""),
+                           str((entry or {}).get("seen_ts") or ""))
+            remote_sid = self._mds_remote.get(key, "")
+            remote_ts = ""
+            if remote_sid:
+                remote_ts = await history.timestamp_for_server_ref_async(
+                    key, remote_sid)
+                # An unresolved shared point is never treated as "everything
+                # read".  It simply does not move the anchor; the local point
+                # (or the start of this sync) still counts new offline rows.
+            remote_ahead = bool(remote_ts and remote_ts > local_ts)
+            if remote_sid and not remote_ahead and local_ts and entry:
+                # Our own point is newer (or the remote one is unresolved):
+                # repair the client's shared map so the later unread flush
+                # cannot overwrite it with an older remote sid.
+                local_sid = await self._mds_point_sid(key, entry, local_ts)
+                if local_sid:
+                    self._publish_mds_point(key, local_sid)
+                    if self._client is not None:
+                        self._client._mds_local[key] = local_sid
+            anchor_ts = max(local_ts, remote_ts)
+            if not anchor_ts:
+                anchor_ts = str(start_ts or "")
+            count = (await history.count_incoming_after_async(key, anchor_ts)
+                     if anchor_ts else 0)
+            if remote_ahead:
+                # The other device displayed further than us: its point is
+                # authoritative and the prefix may be cleared.
+                new_unread = count
+            else:
+                # Our point is newer (or equal), so preserve an existing block
+                # that predates this page rather than shrinking it.
+                new_unread = max(count, current)
+            record = entry or unread_state.blank()
+            record["unread"] = max(0, int(new_unread))
+            if remote_ahead:
+                record["read_sid"] = remote_sid
+                record["read_ts"] = remote_ts
+                record["read_ref"] = ""
+                record["seen_sid"] = remote_sid
+                record["seen_ts"] = remote_ts
+                record["seen_ref"] = ""
+            self_nick = self._muc_self_nicks.get(key, "")
+            if self_nick and anchor_ts:
+                rows = await history.load_history_async(
+                    key, limit=500, since=anchor_ts)
+                mentions = sum(
+                    1 for row in rows
+                    if row.get("direction") != "outgoing"
+                    and mentions_nick(str(row.get("body") or ""), self_nick))
+            elif not anchor_ts:
+                mentions = int((entry or {}).get("mentions") or 0)
+            else:
+                mentions = 0
+            record["mentions"] = mentions
+            if any(record.get(field) for field in record):
+                self._unread_chats[key] = record
+            else:
+                self._unread_chats.pop(key, None)
+            self._refresh_unread_badge(key)
+            self._push_unread_to_chat(key)
+            changed = True
+            logger.debug(
+                "UNREAD[global] jid=%s unread=%d mentions=%d local_ts=%s "
+                "remote_ts=%s", key, record["unread"], mentions, local_ts,
+                remote_ts)
+        if changed:
+            self._recount_unread()
+            self._schedule_unread_save()
+            self.unread_changed.emit()
 
     def _mds_foreground(self, key: str) -> bool:
         """Whether *key* deserves an immediate archive pass at startup."""
@@ -9103,7 +9287,21 @@ class MainWindow(QtWidgets.QMainWindow):
     async def _run_mds_clamp(self, key: str, sid: str, *,
                              force: bool = False) -> None:
         """Apply a displayed point through the bounded MDS pool."""
+        is_conf = getattr(self, "_is_conference_jid", None)
+        if (callable(is_conf) and is_conf(key)
+                and key not in getattr(self, "_muc_joined", ())):
+            if hasattr(self, "_mds_remote"):
+                self._mds_remote[key] = sid
+            return
         if not self._mds_foreground(key):
+            # Background displayed points are kept in memory by
+            # _on_mds_displayed; the account-wide MAM pass handles their
+            # messages.  Keep a delayed fallback only for callers that
+            # explicitly want a clamp.
+            if not force:
+                if hasattr(self, "_mds_remote"):
+                    self._mds_remote[key] = sid
+                return
             await asyncio.sleep(_MDS_BACKGROUND_DELAY_S)
         async with self._mds_semaphore:
             await self._clamp_read_state(key, sid, force=force)
@@ -13162,6 +13360,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mam_unsupported.clear()
         self._mds_reconciling.clear()
         self._mds_reconciled.clear()
+        self._mds_remote.clear()
+        task = self._startup_sync_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._startup_sync_task = None
         self._history_sync_pending.clear()
         self._history_reload_pending.clear()
         self._history_gap_checked.clear()

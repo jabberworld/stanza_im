@@ -58,6 +58,7 @@ stanza_im/                      # Python package
 │   ├── notification_priorities.py # Per-contact priority (private PEP node)
 │   ├── private_pep.py           # Raw private-PEP publish helper (XML publish-options)
 │   ├── unread_state.py          # Persisted per-chat read state (unread/mentions/anchor)
+│   ├── sync_state.py            # Account-wide XEP-0313 MAM catch-up cursor
 │   ├── profiles.py              # Account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
 │   ├── client_features_dialog.py # Peer client caps viewer (vCard resource click)
@@ -1070,6 +1071,7 @@ Everything follows the XDG Base Directory spec:
 | Profiles (JSON) | `$XDG_CONFIG_HOME/stanza-im/profiles.json` (0600) |
 | Chat history (JSONL) | `$XDG_DATA_HOME/stanza-im/<jid>/history/<bare-jid>.jsonl` (0600) |
 | Unread counters (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/unread.json` (0600) |
+| Account MAM cursor (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/sync_state.json` (0600) |
 | OMEMO keys (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Notification priorities (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` (0600) |
 | Classified transports (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` (0600) |
@@ -1087,11 +1089,11 @@ appended line-by-line as JSON, keyed by bare JID, one file per contact.
 
 **Per-profile data.** Every account (Jabber ID) keeps its own state under
 `$XDG_DATA_HOME/stanza-im/<jid>/`: `history/`, `roster/<account>.json`,
-`unread.json`, `known_contacts.json`, `notification_priorities.json` and
-`transports.json`
+`unread.json`, `sync_state.json`, `known_contacts.json`,
+`notification_priorities.json` and `transports.json`
 (`core/profiles.py` `set_active`).
 `include/constants.set_active_profile` selects the subdirectory; each store
-(`history`, `roster_cache`, `unread_state`, `known_contacts`,
+(`history`, `roster_cache`, `unread_state`, `sync_state`, `known_contacts`,
 `notification_priorities`, `transports`) exposes
 `set_profile(jid)` that re-bases its module-level path and the pooled history
 connections are closed, so a contact's history from one account is never served
@@ -2381,8 +2383,10 @@ persisted unread state, and an equal point must still trigger the rebuild or a
 second client would keep its stale local counters. Startup work is bounded:
 `MainWindow._run_mds_clamp`/`_run_mds_reconcile` share `_mds_semaphore`
 (`_MDS_CONCURRENCY`, 3) so a catch-up cannot launch one MAM query per historical
-chat at once; a non-foreground key waits `_MDS_BACKGROUND_DELAY_S` first, while
-an open/joined/bookmarked/unread chat runs immediately. A forced rebuild uses the
+chat at once; a non-foreground key no longer starts a per-chat MAM query at all:
+`_on_mds_displayed` stores its displayed `sid` as a cheap pending anchor and the
+account-wide MAM pass below finds the actual messages, while an
+open/joined/bookmarked/unread chat still runs immediately. A forced rebuild uses the
 **newer** of the shared and the local `seen_ts`/`read_ts` point: when the local
 point is newer (a throttled publish was lost, or an older build never sent it)
 it rebuilds from the local timestamp and republishes that point
@@ -2416,6 +2420,24 @@ Partial progress made by the visibility reconciliation
 (`_apply_visible_unread`) is published too (`_queue_seen_progress_mds` →
 `_queue_mds_displayed`): opening a chat can mark visible rows seen without a
 scroll poll, and that point must reach the shared node.
+
+**Account-wide offline catch-up**: a login with many historical chats must not
+turn into one MAM query per chat. `core/sync_state.py` stores the account's
+forward archive cursor (`sync_state.json`, per-profile, 0600);
+`JabberClient.sync_global_mam()` queries the **own archive** without
+`with_jid` from that cursor, groups each page by conversation (1:1 bare JID,
+groupchat room; an ambiguous room PM stays on the join/open path), stores one
+`history.store_many` batch per affected chat and advances the cursor after the
+page. The UI receives the affected keys and recomputes only those counters:
+`effective = max(local read/seen point, remote MDS displayed point)`, incoming
+rows after it are unread, and an unresolved remote id never clears a block.
+A remote point in the middle of a block clears the read prefix and leaves the
+tail unread. Thus offline messages from many contacts are found by one archive
+stream, not by 200 per-chat queries; the sub-query path remains for
+open/joined/bookmarked/unread chats, ambiguous shared ids and servers without
+global MAM. The first run without a cursor executes the old per-chat reconcile
+once and seeds the cursor at the pre-migration point; a fresh profile only
+seeds it. [`tests/test_global_mam_sync.py`]
 
 **Partial read progress (`seen`)**: the WebEngine scroll poll returns every
 visible `#chat .stanza-message` ref (not only the bottom-most one), so
