@@ -98,6 +98,56 @@ MainWindow._on_chat_files_upload(
 check("MainWindow opens the image dialog for pasted-image",
       opened == [("bob@example.com", "/tmp/pasted.png", mw)])
 
+# The image dialog owns upload progress; the chat must not keep a permanent
+# "Uploading ..." status line after the dialog closes.
+class _StatusChat:
+    def __init__(self):
+        self.statuses = []
+
+    def add_status(self, text, ts):
+        self.statuses.append(text)
+
+
+class _ImageProgress:
+    def set_sending(self):
+        pass
+
+    def set_progress(self, value):
+        pass
+
+    def mark_success(self):
+        pass
+
+    def set_error(self, message):
+        pass
+
+
+class _ChatWindow:
+    def __init__(self, chat):
+        self.chat = chat
+
+    def get_chat(self, _jid):
+        return self.chat
+
+
+status_chat = _StatusChat()
+mw2 = MainWindow.__new__(MainWindow)
+mw2._file_upload_states = {}
+mw2._file_uploads = {}
+mw2._image_send_context = (_ImageProgress(), "bob@example.com",
+                           "/tmp/stanza-paste-x.png")
+mw2._chat_window = _ChatWindow(status_chat)
+mw2._client = None
+MainWindow._on_file_upload_progress(
+    mw2, "bob@example.com", "start", "", "/tmp/stanza-paste-x.png")
+check("Ctrl+V upload start adds no permanent chat status",
+      status_chat.statuses == [])
+MainWindow._on_file_upload_progress(
+    mw2, "bob@example.com", "error", "connection lost",
+    "/tmp/stanza-paste-x.png")
+check("Ctrl+V upload error stays in its dialog",
+      status_chat.statuses == [])
+
 print()
 if FAILURES:
     print("FAILURES:", FAILURES)

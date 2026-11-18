@@ -11392,7 +11392,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if row is not None:
                 row.set_status(tr("ft_status_transferring"))
                 row.set_encrypted(encrypted)
-            if chat:
+            if chat and image_dlg is None:
+                # The Ctrl+V image dialog already owns the progress UI; a
+                # permanent status line in the chat would survive the upload.
                 key = ("file_transfer_encrypted" if encrypted
                        else "ft_upload_started")
                 chat.add_status(tr(key,
@@ -11421,7 +11423,7 @@ class MainWindow(QtWidgets.QMainWindow):
             reason = self._transfer_error_text(detail)
             if row is not None:
                 row.fail(reason)
-            if chat:
+            if chat and image_dlg is None:
                 chat.add_status(tr("ft_upload_failed", error=reason),
                                 time.strftime("%H:%M:%S"))
         self._check_uploads_finished(jid)
