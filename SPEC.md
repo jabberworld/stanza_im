@@ -1822,7 +1822,9 @@ normal form shows no horizontal scrollbar):
 - «Участники» — a `QTreeWidget` with the four affiliation groups (Владельцы =
   owner, Администраторы = admin, Зарегистрированные пользователи = member,
   Заблокированные = outcast), columns «Jabber ID» and «Примечание» (the
-  XEP-0045 `<reason>`), and Add/Edit/Delete buttons (Edit/Delete enabled only
+  XEP-0045 `<reason>`), a live filter over JID/note/category (NFKC + case-fold,
+  native clear button, matched/total group counts, empty categories hidden),
+  and Add/Edit/Delete buttons (Edit/Delete enabled only
   with a selected participant). Add/Edit use `_ParticipantEditDialog`
   (category + JID + note); Delete confirms and sets affiliation `none`.
   `client.muc_get_affiliations` builds a custom `muc#admin` IQ so the `reason`

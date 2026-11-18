@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 
 from PyQt6 import QtCore, QtWidgets
 
@@ -132,6 +133,11 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._participants_status = QtWidgets.QLabel(tr("muc_config_loading"))
         self._participants_status.setWordWrap(True)
         p_layout.addWidget(self._participants_status)
+        self._filter = QtWidgets.QLineEdit()
+        self._filter.setPlaceholderText(tr("muc_config_filter_placeholder"))
+        self._filter.setClearButtonEnabled(True)
+        self._filter.textChanged.connect(self._on_filter_changed)
+        p_layout.addWidget(self._filter)
         row = QtWidgets.QHBoxLayout()
         self._tree = QtWidgets.QTreeWidget()
         self._tree.setColumnCount(2)
@@ -325,22 +331,46 @@ class MucConfigDialog(QtWidgets.QDialog):
         self._rebuild_tree()
         self._schedule_fit()
 
+    def _on_filter_changed(self, _text: str = "") -> None:
+        self._rebuild_tree()
+
+    def _filter_query(self) -> str:
+        """Normalize the live filter (NFKC + case-fold, trimmed)."""
+        text = self._filter.text() if hasattr(self, "_filter") else ""
+        return unicodedata.normalize("NFKC", text or "").casefold().strip()
+
     def _rebuild_tree(self) -> None:
         selected = self._selected_jid()
+        query = self._filter_query()
         self._tree.clear()
         for aff in _AFFILIATIONS:
             members = sorted(
                 (jid for jid, entry in self._participants.items()
                  if entry.get("affiliation") == aff),
                 key=str.lower)
-            top = QtWidgets.QTreeWidgetItem(
-                [f"{tr(_CATEGORY_KEYS[aff])} ({len(members)})", ""])
+            category = tr(_CATEGORY_KEYS[aff])
+            matched = members
+            if query:
+                matched = [
+                    jid for jid in members
+                    if query in unicodedata.normalize(
+                        "NFKC",
+                        "\n".join((jid,
+                                    str(self._participants[jid].get("note")
+                                        or ""),
+                                    category))).casefold()
+                ]
+                if not matched:
+                    continue
+            count = (f"{len(matched)}/{len(members)}" if query
+                     else str(len(members)))
+            top = QtWidgets.QTreeWidgetItem([f"{category} ({count})", ""])
             font = top.font(0)
             font.setBold(True)
             top.setFont(0, font)
             top.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled)
             self._tree.addTopLevelItem(top)
-            for jid in members:
+            for jid in matched:
                 child = QtWidgets.QTreeWidgetItem(
                     [jid, self._participants[jid].get("note", "")])
                 child.setData(0, QtCore.Qt.ItemDataRole.UserRole, jid)

@@ -879,6 +879,7 @@ STRINGS = {
     "event_voice_denied": "Відмовлено",
     "muc_config_title": "Налаштування кімнати — {room}",
     "muc_config_participants_tab": "Учасники",
+    "muc_config_filter_placeholder": "Фільтр за JID, приміткою або категорією…",
     "muc_config_settings_tab": "Налаштування",
     "muc_management_tab": "Керування",
     "muc_management_info": "Знищення конференції видаляє її для всіх учасників. Закладка зберігається.",

@@ -368,8 +368,10 @@ and enabled only for owners/admins (`MainWindow._apply_muc_admin` derives our
 affiliation from `_muc_users`). It opens a non-modal `MucConfigDialog` with four
 tabs: «Участники» — a `QTreeWidget` grouped into Владельцы/Администраторы/
 Зарегистрированные пользователи/Заблокированные (owner/admin/member/outcast)
-with «Jabber ID» and «Примечание» columns (the note is the XEP-0045 `<reason>`)
-and Add/Edit/Delete buttons (Delete sets affiliation `none`); «Шапки» —
+with «Jabber ID» and «Примечание» columns (the note is the XEP-0045 `<reason>`),
+a live filter (JID/note/category, native clear button, matched/total group
+counts, empty categories hidden) and Add/Edit/Delete buttons (Delete sets
+affiliation `none`); «Шапки» —
 XEP-0317 hats (see below); «Настройки» —
 enabled for the owner only and hosts the `muc#owner` room-configuration
 `DataFormWidget` (its `list-single` selectors are aligned to one width via

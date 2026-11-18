@@ -879,6 +879,7 @@ STRINGS = {
     "event_voice_denied": "Refused",
     "muc_config_title": "Room settings — {room}",
     "muc_config_participants_tab": "Participants",
+    "muc_config_filter_placeholder": "Filter by JID, note or category…",
     "muc_config_settings_tab": "Settings",
     "muc_management_tab": "Management",
     "muc_management_info": "Destroying the conference removes it for every participant. The bookmark is kept.",

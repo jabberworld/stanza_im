@@ -879,6 +879,7 @@ STRINGS = {
     "event_voice_denied": "Отклонено",
     "muc_config_title": "Настройки конференции — {room}",
     "muc_config_participants_tab": "Участники",
+    "muc_config_filter_placeholder": "Фильтр по JID, примечанию или категории…",
     "muc_config_settings_tab": "Настройки",
     "muc_management_tab": "Управление",
     "muc_management_info": "Удаление конференции отключает её для всех участников. Закладка сохраняется.",

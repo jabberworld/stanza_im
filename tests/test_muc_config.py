@@ -157,6 +157,35 @@ try:
     counts = [dlg._tree.topLevelItem(i).childCount() for i in range(4)]
     check("category counts", counts == [1, 1, 2, 1])
     check("form widget built for owner", dlg._form_widget is not None)
+    check("participant filter has a clear button",
+          dlg._filter.isClearButtonEnabled())
+
+    dlg._filter.setText("m1@")
+    check("JID filter keeps only the matching category",
+          dlg._tree.topLevelItemCount() == 1)
+    check("JID filter shows matched/total",
+          "(1/2)" in dlg._tree.topLevelItem(0).text(0))
+    check("JID filter keeps only the matching participant",
+          dlg._tree.topLevelItem(0).childCount() == 1
+          and dlg._tree.topLevelItem(0).child(0).text(0) == "m1@x")
+
+    dlg._filter.setText("spam")
+    check("note filter matches the participant",
+          dlg._tree.topLevelItemCount() == 1
+          and dlg._tree.topLevelItem(0).child(0).text(0) == "bad@x")
+
+    dlg._filter.setText("administrators")
+    check("category name filter keeps that category",
+          dlg._tree.topLevelItemCount() == 1
+          and dlg._tree.topLevelItem(0).child(0).text(0) == "admin@x")
+
+    dlg._filter.setText("missing@example")
+    check("filter with no matches hides every category",
+          dlg._tree.topLevelItemCount() == 0)
+
+    dlg._filter.clear()
+    check("clearing the filter restores every category",
+          dlg._tree.topLevelItemCount() == 4)
 
     child = dlg._tree.topLevelItem(2).child(0)
     dlg._tree.setCurrentItem(child)
