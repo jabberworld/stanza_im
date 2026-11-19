@@ -56,7 +56,7 @@ class _Chat:
         self.remaining = remaining
         self.mentions = mentions
 
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         return self.remaining
 
     def mark_visible_mentions(self):

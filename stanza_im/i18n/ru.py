@@ -843,6 +843,8 @@ STRINGS = {
     "vcard_field_last_seen": "Последнее появление",
     "vcard_field_last_status": "Последний статус",
     # Groupchat
+    "tab_hide": "Скрыть",
+    "tab_leave_conference": "Покинуть конференцию",
     "muc_leave": "Покинуть комнату",
     "muc_leave_confirm": "Покинуть конференцию {room}?",
     "muc_topic": "{topic}",

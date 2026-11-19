@@ -293,6 +293,11 @@ check("the unread divider (not the message) is flashed",
       w._view.flashed == 1 and w._view.highlighted == [])
 check("the anchor scroll itself never flashes a message",
       "highlight=False" in method_source(_cw_src, "_restore_from_anchor"))
+check("an anchor found after paging does not flash a message",
+      "highlight=not fallback_unread" in
+      method_source(_cw_src, "_finish_unread_resolve")
+      and "fallback_unread=fallback_unread"
+      in method_source(_cw_src, "_load_jump_pages_async"))
 
 # 3c. the separator is emitted once per render ---------------------------------
 w = widget()
@@ -475,6 +480,13 @@ w3.set_history([row("2026-10-02T10:01:00Z", "one", "m-1"),
                 row("2026-10-02T10:02:00Z", "two", "m-2")], 50, False)
 w3._render_all()
 check("a re-render does not recount the block", w3._view.seeded == [])
+
+w4 = widget()
+w4._unread_boundary = {"ref": "m-1", "ts": "2026-10-02T10:00:00Z"}
+w4._unread_resolving = True
+w4._seed_unseen([row("2026-10-02T10:04:00Z", "four", "m-4")])
+check("the floating count is seeded while an anchor is resolving",
+      w4._view.seeded == [(1, "m-4")])
 
 # 7c. the @ button is rebuilt from the window -----------------------------------
 w = widget()

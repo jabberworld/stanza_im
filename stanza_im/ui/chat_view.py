@@ -315,10 +315,13 @@ class _JumpButtonMixin:
         # The seen point only matters while the view is scrolled up; a view at
         # the bottom is "read" and its owner (the bottom report) handles that.
         if getattr(self, "_scroll_suspended", False):
+            self._anchor_move_pending = False
             return
         if getattr(self, "_deferred_scroll", None) is not None:
+            self._anchor_move_pending = False
             return
         if not force and not self.is_scrolled_up():
+            self._anchor_move_pending = False
             return
         try:
             self._find_last_visible_ref()
@@ -327,8 +330,18 @@ class _JumpButtonMixin:
 
     def request_anchor_update(self) -> None:
         """Refresh the unread anchor after a focus/activation event."""
+        if not self.is_scrolled_up():
+            self._anchor_move_pending = False
+            return
         self._anchor_update_armed = True
+        self._anchor_move_pending = True
         self._maybe_emit_last_seen(force=True)
+
+    def consume_anchor_move(self) -> bool:
+        """Take the one-shot permission to move the unread divider."""
+        pending = bool(getattr(self, "_anchor_move_pending", False))
+        self._anchor_move_pending = False
+        return pending
 
     def suspend_scroll_reports(self) -> None:
         """Ignore bottom/seen reports while a programmatic scroll is pending."""
@@ -360,6 +373,7 @@ class _JumpButtonMixin:
         self._last_scroll_offset = None
         self._scroll_direction = ""
         self._anchor_update_armed = True
+        self._anchor_move_pending = False
         self._anchor_scroll = None
         self._anchor_restore_pending = True
         self._bottom_locked = True
@@ -854,6 +868,7 @@ if HAS_WEBENGINE:
             self._last_scroll_offset = None
             self._scroll_direction = ""
             self._anchor_update_armed = True
+            self._anchor_move_pending = False
             self._loading = False
             self.loadFinished.connect(self._on_load_finished)
             self.loadStarted.connect(self._on_load_started)
@@ -1090,6 +1105,7 @@ if HAS_WEBENGINE:
                     return
                 if (self._scroll_suspended
                         or self._deferred_scroll is not None):
+                    self._anchor_move_pending = False
                     return
                 ref = str(result.get("ref") or "")
                 ts = str(result.get("ts") or "")
@@ -1099,6 +1115,7 @@ if HAS_WEBENGINE:
                                  ref, ts, sid, result)
                 self._last_seen_cache = (ref, ts, sid)
                 self._emit_last_seen(ref, ts, sid)
+                self._anchor_move_pending = False
             except Exception:
                 pass
 
@@ -2566,10 +2583,18 @@ window.__stanzaMentionRef = '';
                 armed=bool(self._anchor_update_armed))
             self._last_scroll_offset = offset
             if action == "update":
-                # One update at the start of the upward movement; dragging
-                # further through history must not move the divider again.
+                # One divider move at the start of the upward movement;
+                # dragging further through history must not move it again.
+                self._anchor_move_pending = True
                 try:
                     self._maybe_emit_last_seen(force=True)
+                except Exception:
+                    pass
+            else:
+                # Keep the unread counter live on every scroll.  The divider
+                # itself is moved only by the one-shot flag above (or focus).
+                try:
+                    self._maybe_emit_last_seen()
                 except Exception:
                     pass
             near_top = offset <= max(24.0, viewport)
@@ -3408,6 +3433,7 @@ window.__stanzaMentionRef = '';
             self._last_scroll_offset = None
             self._scroll_direction = ""
             self._anchor_update_armed = True
+            self._anchor_move_pending = False
             self._divider_passed_emitted = False
             self._clear_jump_pin()
             self._fraction = 1.0

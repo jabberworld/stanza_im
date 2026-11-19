@@ -136,7 +136,7 @@ check("an unread room without an anchor returns a truthy sentinel",
 
 # A background auto-joined tab must not reconcile/clear its stale counter.
 class _BackgroundChat:
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         return 0
 
     def mark_visible_mentions(self):
@@ -165,8 +165,11 @@ check("a background room keeps its counter until the user opens it",
 
 
 class _FakeChat:
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         return 68
+
+    def take_seen_move(self):
+        return False
 
     def mark_visible_mentions(self):
         return 0
@@ -223,7 +226,7 @@ class _SuspendedChat:
         self._view = view
         self._remaining = remaining
 
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         return self._remaining
 
     def mark_visible_mentions(self):
@@ -279,7 +282,7 @@ class _SeenChat:
         self._view = view
         self._remaining = remaining
 
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         return self._remaining
 
     def mark_visible_mentions(self):

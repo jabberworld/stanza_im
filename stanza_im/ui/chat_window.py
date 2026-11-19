@@ -103,6 +103,10 @@ class ChatWindow(QtWidgets.QMainWindow):
         self._tab_widget.tabCloseRequested.connect(self._close_tab)
         self._tab_widget.tabBar().tabMoved.connect(self._on_tab_moved)
         self._tab_widget.currentChanged.connect(self._on_tab_changed)
+        tab_bar = self._tab_widget.tabBar()
+        tab_bar.setContextMenuPolicy(
+            QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        tab_bar.customContextMenuRequested.connect(self._on_tab_context_menu)
         layout.addWidget(self._tab_widget)
 
         self._install_shortcuts()
@@ -952,6 +956,55 @@ class ChatWindow(QtWidgets.QMainWindow):
                 self.activity_changed.emit(widget.jid, "gone")
                 self.tab_closed.emit(widget.jid)
             self.close_chat(widget.jid)
+
+
+    def _tab_icon(self, name: str) -> QtGui.QIcon:
+        """Resolve a menu icon through the shared icon cache (if present)."""
+        if self._icons is None:
+            return QtGui.QIcon()
+        try:
+            return self._icons.get_icon(name, 16)
+        except Exception:  # noqa: BLE001 - menu icon is presentation only
+            return QtGui.QIcon()
+
+    def _build_tab_context_menu(self, widget: ChatWidget) -> QtWidgets.QMenu:
+        """Build the context menu for one conversation tab."""
+        menu = QtWidgets.QMenu(self)
+        hide = menu.addAction(self._tab_icon("process-stop.png"),
+                              tr("tab_hide"))
+        hide.triggered.connect(
+            lambda checked=False, w=widget: self._hide_tab(w))
+        if widget.is_muc:
+            leave = menu.addAction(self._tab_icon("gtk-quit.png"),
+                                   tr("tab_leave_conference"))
+            leave.triggered.connect(
+                lambda checked=False, w=widget: self._leave_tab(w))
+        return menu
+
+    def _on_tab_context_menu(self, pos) -> None:
+        bar = self._tab_widget.tabBar()
+        index = bar.tabAt(pos)
+        if index < 0:
+            return
+        widget = self._tab_widget.widget(index)
+        if not isinstance(widget, ChatWidget):
+            return
+        self._build_tab_context_menu(widget).exec(bar.mapToGlobal(pos))
+
+    def _hide_tab(self, widget: ChatWidget) -> None:
+        """Close a tab without leaving a conference (Esc semantics)."""
+        if widget.is_muc:
+            self.close_chat(widget.jid)
+            return
+        index = self._tab_widget.indexOf(widget)
+        if index >= 0:
+            self._close_tab(index)
+
+    def _leave_tab(self, widget: ChatWidget) -> None:
+        """Leave a conference and close its tab (confirmed by the owner)."""
+        index = self._tab_widget.indexOf(widget)
+        if index >= 0:
+            self._close_tab(index)
 
     def _on_tab_moved(self, from_index: int, to_index: int):
         """Keep the ordered jid list in sync with drag-reordered tabs."""

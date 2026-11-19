@@ -1577,7 +1577,10 @@ window collapses a conference back to the roster without leaving the room (the
 tab is removed, the room stays joined, other tabs keep the window open); on a
 1:1 tab Esc closes it. `Ctrl+W` leaves a conference (with the optional confirm,
 `MainWindow._confirm_muc_leave`, shown over the chat window via
-`_chat_dialog_parent`) and closes a 1:1 tab.
+`_chat_dialog_parent`) and closes a 1:1 tab. The tab bar's context menu offers
+«Скрыть» for every conversation (for a conference this closes the tab **without**
+leaving, exactly like Esc) and, for conferences, «Покинуть конференцию» (the
+confirmed `_close_tab` leave path).
 
 **OSD notifications** (`ui/osd.py`): `OsdManager` owns a stack of translucent
 frameless always-on-top windows (flags include `X11BypassWindowManagerHint`,
@@ -2449,7 +2452,12 @@ upward user scroll away from the bottom, or reaching the bottom
 (`anchor_update_action`/`ChatView.request_anchor_update`). A normal downward
 read therefore does not move/reflow the divider for every visible message.
 `MainWindow._on_chat_last_seen` then removes exactly the unread rows that are
-on screen (`ChatWidget.mark_visible_unread`). Counts are derived from the
+on screen (`ChatWidget.mark_visible_unread`); the counter updates on every
+scroll report, while the rendered divider moves only when a one-shot
+`move_divider` permission was set by focus/activation or an upward-scroll
+start. `_apply_visible_unread` updates the counter with
+`move_divider=False`, so opening/reconciling a tab cannot move the restored
+anchor. Counts are derived from the
 **deduplicated chronological unread suffix** (`_ordered_entries` /
 `_unread_block_entries`); live and SQLite copies are counted once, and outgoing
 messages never consume unread. The seen anchor is the **topmost visible unread**
@@ -2460,7 +2468,10 @@ the unread separator boundary — `mark_visible_unread` advances it from the
 visible block. Delayed messages whose timestamp is not newer than the read/seen
 point stay in chronological history and do not increase unread (variant A).
 `ChatWindow.last_seen` relays the report; the `▼ N` number and the roster badge
-use the same block count on open, bump, seen and reset. Programmatic scrolls
+use the same block count on open, bump, seen and reset. `_seed_unseen` seeds the
+floating count even while an old anchor is still resolving, and a one-shot
+watchdog falls back to the first unread message if the view never confirms the
+anchor scroll. Programmatic scrolls
 (initial render, read-anchor restore, jump-to-message) suspend both the bottom
 and last-seen reports, and `_apply_visible_unread` skips the transient viewport
 until the restore finished, so a loading page cannot mark the block read. `_restore_anchor_for`

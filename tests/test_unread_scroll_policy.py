@@ -13,8 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6 import QtWidgets
 
 from stanza_im.ui.chat_themes import ChatThemeFactory
-from stanza_im.ui.chat_view import anchor_update_action
+from stanza_im.ui.chat_view import ChatView, anchor_update_action
 from stanza_im.ui.chat_widget import ChatWidget
+from stanza_im.ui.main_window import MainWindow
 
 FAILURES = []
 
@@ -60,6 +61,14 @@ _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 css = ChatThemeFactory().generate_empty_page("")
 check("the divider has its own flash class",
       ".stanza-unread-flash" in css and "stanza-unread-flash" in css)
+poll = inspect.getsource(ChatView._on_scroll_position)
+check("the counter is reported on every scroll poll",
+      "self._maybe_emit_last_seen()" in poll)
+check("only the upward action carries a divider-move flag",
+      "self._anchor_move_pending = True" in poll)
+apply_src = inspect.getsource(MainWindow._apply_visible_unread)
+check("visible reconciliation only updates the counter",
+      "mark_visible_unread(move_divider=False)" in apply_src)
 
 print()
 if FAILURES:

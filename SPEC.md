@@ -1304,6 +1304,9 @@ show/raise/activate calls and emits `attention_requested` instead, so
   it hides only once the last tab is closed.
 - For 1-on-1 chats Esc and Ctrl+W both close the tab; for MUCs Ctrl+W is the
   equivalent of "Leave conference" (with `muc_confirm_leave` when enabled).
+- The tab-bar context menu offers «Скрыть» for every conversation (a MUC tab
+  closes without leaving, like Esc) and «Покинуть конференцию» for conferences
+  (the confirmed `_close_tab` leave path).
 
 ### 8.3 Tab Lifecycle
 
@@ -2573,8 +2576,11 @@ Registers XEP plugins (conditionally where noted):
   scroll away from the bottom, or reaching the bottom (`anchor_update_action`,
   `ChatView.request_anchor_update`); a downward read keeps it static.
   `ChatWidget.mark_visible_unread` removes exactly those unread rows and the
-  count comes from the deduplicated chronological unread suffix (live+history
-  copies count once, outgoing is excluded). The seen anchor is the topmost
+  counter updates on every scroll report; the rendered divider moves only when
+  a one-shot `move_divider` permission was set by focus/activation or an
+  upward-scroll start. `_apply_visible_unread` is counter-only
+  (`move_divider=False`). The count comes from the deduplicated chronological
+  unread suffix (live+history copies count once, outgoing is excluded). The seen anchor is the topmost
   visible unread message; a fully visible block becomes zero at once, and
   messages above the viewport are not subtracted. It advances only while the
   view is scrolled up (`ChatWidget._on_last_seen`), so the transient bottom of

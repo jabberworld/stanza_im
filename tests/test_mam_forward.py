@@ -300,7 +300,7 @@ class _SyncChat:
     def __init__(self):
         self.marked = 0
 
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         self.marked += 1
         return 0
 

@@ -59,7 +59,7 @@ class _Chat:
     _unread_resolving = False
     _view = SimpleNamespace(_scroll_suspended=False, _deferred_scroll=None)
 
-    def mark_visible_unread(self):
+    def mark_visible_unread(self, move_divider=True):
         return 0
 
     def mark_visible_mentions(self):

@@ -627,6 +627,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._seen_ts = ""
         self._seen_sid = ""
         self._seen_at = 0.0
+        # One-shot permission to move the rendered divider with the next seen
+        # report.  The counter changes on every scroll; the DOM anchor does not.
+        self._seen_move_divider = False
         self._build_ui(theme)
 
     # ── UI construction ───────────────────────────────────────────
@@ -1675,8 +1678,12 @@ class ChatWidget(QtWidgets.QWidget):
             return set()
         return {str(ref) for ref in refs if ref}
 
-    def mark_visible_unread(self) -> int:
-        """Remove visible unread entries from the counter; return the rest."""
+    def mark_visible_unread(self, move_divider: bool = True) -> int:
+        """Remove visible unread entries from the counter; return the rest.
+
+        *move_divider* is separate from the counter: ordinary downward scrolling
+        updates the badge but must not reflow the unread divider.
+        """
         block = self.unread_block()
         visible = self.visible_refs()
         topmost = None
@@ -1700,7 +1707,7 @@ class ChatWidget(QtWidgets.QWidget):
         remaining = [
             entry for entry in block
             if self._unread_entry_ref(entry) not in self._seen_unread_refs]
-        if remaining:
+        if remaining and move_divider:
             move = getattr(self._view, "move_unread_separator", None)
             target = self._reply_target_id(remaining[0])
             if callable(move) and target:
@@ -2797,6 +2804,16 @@ class ChatWidget(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(0, self._apply_pending_navigation)
         elif self._restore_anchor:
             QtCore.QTimer.singleShot(0, self._restore_from_anchor)
+        try:
+            anchor_visible = self.isVisible()
+        except Exception:  # noqa: BLE001 - test stubs may skip QWidget init
+            anchor_visible = False
+        if self._unread_boundary and anchor_visible:
+            # The anchor scroll is normally confirmed by the view's poll.  A
+            # page that never reports its viewport (or a target the DOM cannot
+            # address) must still open at the first unread message rather than
+            # silently staying at the bottom.
+            QtCore.QTimer.singleShot(2500, self._anchor_watchdog)
         if self.is_muc and not self._history:
             QtCore.QTimer.singleShot(0, self._on_near_top)
 
@@ -2959,9 +2976,10 @@ class ChatWidget(QtWidgets.QWidget):
         re-render — there the user may already have scrolled into the block, and
         counting it whole again would overstate what is below the viewport.
         """
-        if (self._released or self._unread_resolving
-                or not self._unread_marker_shown):
+        if self._released or not self._unread_boundary:
             return
+        # The floating button must already show the unread block while an old
+        # anchor is still being resolved/paged; the separator can arrive later.
         count, first = self._measure_unread_block(entries)
         self._view.seed_unseen(count, first)
 
@@ -3242,6 +3260,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._restore_anchor = {}
         if not anchor or self._released:
             return
+        logger.debug("ANCHOR[restore] jid=%s ref=%r ts=%r",
+                     self.jid, anchor.get("ref"), anchor.get("ts"))
         ref = str(anchor.get("ref") or "")
         entry = self._find_message(ref) if ref else None
         if entry is not None and self._scroll_to_entry(
@@ -3266,6 +3286,19 @@ class ChatWidget(QtWidgets.QWidget):
         self._flash_first_unread()
         if not self._unread_boundary:
             self._view.scroll_to_bottom()
+
+    def _anchor_watchdog(self) -> None:
+        """Fallback when an automatic anchor restore never settles."""
+        if self._released or not self._unread_boundary:
+            return
+        if not (self._restore_anchor or self.anchor_restore_pending()):
+            return
+        logger.info("ANCHOR[watchdog] jid=%s fallback first unread", self.jid)
+        self._finish_unread_resolve(None, fallback_unread=True)
+        self._flash_first_unread()
+        cancel = getattr(self._view, "cancel_anchor_restore", None)
+        if callable(cancel):
+            cancel()
 
     def _on_anchor_scroll_failed(self) -> None:
         """The stored read point could not be reached in the rendered window.
@@ -3328,9 +3361,16 @@ class ChatWidget(QtWidgets.QWidget):
 
     def request_anchor_update(self) -> None:
         """Refresh the unread anchor after the tab/window regains focus."""
+        if self.anchor_restore_pending():
+            return
         updater = getattr(self._view, "request_anchor_update", None)
         if callable(updater):
             updater()
+
+    def take_seen_move(self) -> bool:
+        """Consume the one-shot divider-move permission from the last report."""
+        move, self._seen_move_divider = self._seen_move_divider, False
+        return bool(move)
 
     def _flash_first_unread(self) -> None:
         """Flash the unread divider without touching the message beneath it.
@@ -3776,7 +3816,8 @@ class ChatWidget(QtWidgets.QWidget):
                 self._jump_fallback_unread = False
                 logger.debug("JUMP[found] jid=%s ref=%s pages=%d",
                              self.jid, ref_id, self._jump_pages)
-                self._finish_unread_resolve(entry, pin=pin)
+                self._finish_unread_resolve(
+                    entry, fallback_unread=fallback_unread, pin=pin)
                 return
             before = self.oldest_ts()
             if not before or not await \
@@ -3816,8 +3857,16 @@ class ChatWidget(QtWidgets.QWidget):
         if entry is None and fallback_unread and self._unread_boundary:
             entry = self._first_unread_entry()
         if entry is not None:
+            logger.debug("ANCHOR[finish] jid=%s fallback=%s ref=%r ts=%r",
+                         self.jid, fallback_unread,
+                         entry.get("stanza_id") or entry.get("archive_id"),
+                         entry.get("timestamp"))
+            # An anchor restore must never flash a message: the animation
+            # covers links inside the following message for 1.6 s.  Only an
+            # explicit reply/jump (fallback_unread False) keeps its highlight.
             self._scroll_to_entry(entry, pin=pin,
-                                  anchor_restore=bool(fallback_unread))
+                                  anchor_restore=bool(fallback_unread),
+                                  highlight=not fallback_unread)
         # The automatic read-anchor resume has finished (including its
         # fallback); let the owner reconcile the visible unread block now.
         try:
@@ -4971,6 +5020,9 @@ class ChatWidget(QtWidgets.QWidget):
     def _on_last_seen(self, ref: str = "", ts: str = "", sid: str = ""):
         try:
             ref, ts, sid = str(ref or ""), str(ts or ""), str(sid or "")
+            consumer = getattr(self._view, "consume_anchor_move", None)
+            self._seen_move_divider = (bool(consumer())
+                                       if callable(consumer) else False)
             scrolled_up = self._view.is_scrolled_up()
             if scrolled_up:
                 self._user_scrolled_up = True
@@ -4988,6 +5040,7 @@ class ChatWidget(QtWidgets.QWidget):
             # stops the transient "at the bottom" position during an anchor
             # restore from advancing the seen point to the newest message.
             if not scrolled_up:
+                self._seen_move_divider = False
                 return
             # Only a forward move is a new "seen" point; scrolling back up or
             # re-showing an already seen message changes nothing, so it must not
@@ -4995,6 +5048,7 @@ class ChatWidget(QtWidgets.QWidget):
             # ``_last_seen_ts`` tracks the highest point ever reported, and it is
             # never moved back, so a return to an earlier message stays ignored.
             if same or not_newer:
+                self._seen_move_divider = False
                 return
             self._last_seen_ref, self._last_seen_ts, self._last_seen_sid = (
                 ref, ts, sid)
@@ -5003,8 +5057,8 @@ class ChatWidget(QtWidgets.QWidget):
             self._drop_seen_mentions()
             try:
                 self.last_seen_changed.emit(ref, ts, sid)
-            except Exception:
-                pass
+            finally:
+                self._seen_move_divider = False
         except Exception:
             logger.debug("SEEN[widget] failed", exc_info=True)
 

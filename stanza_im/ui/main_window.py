@@ -3077,6 +3077,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._request_vcard(room, force=True)
         if (chat and not history_started and not chat._history):
             anchor = self._restore_anchor_for(room)
+            logger.debug("MUC[history] room=%s anchor=%r",
+                         room, anchor)
             if anchor:
                 chat.set_restore_anchor(anchor)
             self._load_history(room, anchor)
@@ -8806,7 +8808,8 @@ class MainWindow(QtWidgets.QMainWindow):
             entry["seen_at"] = time.time()
             chat = self._chat_window.get_chat(jid)
             if chat is not None:
-                remaining = chat.mark_visible_unread()
+                remaining = chat.mark_visible_unread(
+                    move_divider=chat.take_seen_move())
                 mentions = chat.mark_visible_mentions()
                 seen_anchor = chat.seen_anchor()
                 if seen_anchor.get("sid"):
@@ -8877,7 +8880,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtCore.QTimer.singleShot(
                     150, lambda: self._apply_visible_unread(jid, attempt + 1))
             return
-        remaining = chat.mark_visible_unread()
+        remaining = chat.mark_visible_unread(move_divider=False)
         mentions = chat.mark_visible_mentions()
         MainWindow._queue_seen_progress_mds(self, jid, chat, entry, remaining)
         if remaining == entry.get("unread") and mentions == entry.get("mentions"):
