@@ -4714,7 +4714,7 @@ class MainWindow(QtWidgets.QMainWindow):
         c.on("typing", self._on_typing)
         c.on("chatstate_received", self._on_chatstate_received)
         c.on("receipt_delivered", self._on_receipt_delivered)
-        c.on("chat_marker_displayed", self._on_receipt_delivered)
+        c.on("chat_marker_displayed", self._on_chat_marker_displayed)
         c.on("muc_joined", self._on_muc_joined)
         c.on("muc_subject_changed", self._on_muc_subject_changed)
         c.on("muc_info_received", self._on_muc_info_received)
@@ -12521,6 +12521,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if chat:
             chat.mark_delivered(message_id)
 
+    def _on_chat_marker_displayed(self, sender: str, message_id: str = ""):
+        """Apply a XEP-0333 displayed marker as a session-only read eye."""
+        if not self._config.chat.show_receipts or not message_id:
+            return
+        sender = str(sender or "")
+        if not sender:
+            return
+        bare, _sep, resource = sender.partition("/")
+        target = bare
+        viewer = resource or self._roster_name(bare) or bare
+        # A room PM is keyed by room/nick; prefer that open conversation over
+        # the room itself when the marker names the occupant directly.
+        if sender in self._pm_targets and self._chat_window.get_chat(sender):
+            target = sender
+            pm = self._pm_targets.get(sender) or ("", "")
+            viewer = resource or pm[1] or viewer
+        elif (bare in self._muc_self_nicks
+              or self._is_conference_jid(bare)):
+            target = bare
+            viewer = resource or self._roster_name(bare) or bare
+        else:
+            target = bare
+            viewer = self._roster_name(bare) or resource or bare
+        chat = self._chat_window.get_chat(target)
+        if chat is not None:
+            chat.mark_message_read(message_id, viewer)
+
     # ── OSD helpers ─────────────────────────────────────────────
 
     @staticmethod
@@ -12540,6 +12567,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     and self._chat_window.current_jid() == jid)
 
     def _osd_click(self, jid, nick: str = ""):
+        # During an anchor animation the same OSD could be clicked again; do
+        # not restart the opening/anchor, only bring the chat forward.
+        chat = self._chat_window.get_chat(jid)
+        if self._chat_window.current_jid() == jid:
+            self._raise_chat_area()
+            logger.debug("OSD[click] jid=%s already-current", jid)
+            return
+        if chat is not None and chat.anchor_restore_pending():
+            self._raise_chat_area()
+            logger.debug("OSD[click] jid=%s anchor-pending", jid)
+            return
+        logger.debug("OSD[click] jid=%s", jid)
         self._raise_chat_area()
         self._on_contact_open(jid)
 

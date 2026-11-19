@@ -2811,7 +2811,8 @@ window.__stanzaMentionRef = '';
                                 stanza_id: str = "",
                                 quick_response: dict | None = None,
                                 quick_response_active: bool = False,
-                                quick_response_ref: str = "") -> str:
+                                quick_response_ref: str = "",
+                                read_title: str = "") -> str:
             """Render (and mark) a single message's full HTML node."""
             phrase = self._action_phrase(body)
             if phrase is not None:
@@ -2830,7 +2831,8 @@ window.__stanzaMentionRef = '';
                     media=media, encrypted=encrypted, markup=markup,
                     quick_response=quick_response,
                     quick_response_active=quick_response_active,
-                    quick_response_ref=quick_response_ref)
+                    quick_response_ref=quick_response_ref,
+                    read_title=read_title)
             if reply_quote is not None:
                 ref_sender, ref_snippet, ref_target = reply_quote
                 html = self._theme.render_reply(
@@ -2863,7 +2865,8 @@ window.__stanzaMentionRef = '';
                         stanza_id: str = "",
                         quick_response: dict | None = None,
                         quick_response_active: bool = False,
-                        quick_response_ref: str = ""):
+                        quick_response_ref: str = "",
+                        read_title: str = ""):
             """Add a message to the chat view.
 
             *reply_quote* is an optional ``(ref_sender, ref_snippet)`` shown
@@ -2877,7 +2880,8 @@ window.__stanzaMentionRef = '';
                 outgoing, edited, hats, retracted, retract_marker,
                 retract_reason, retract_by, moderatable, reactions,
                 unread_marker, media, encrypted, markup, stanza_id,
-                quick_response, quick_response_active, quick_response_ref)
+                quick_response, quick_response_active, quick_response_ref,
+                read_title)
             if not self._ready:
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
@@ -3170,6 +3174,31 @@ window.__stanzaMentionRef = '';
                 mark.className = 'delivery'; mark.textContent = '✓'; stamp.appendChild(mark);
             }}
             """)
+
+        def mark_message_read(self, message_id: str, title: str = "") -> None:
+            """Add/update the session-only XEP-0333 read eye on a message."""
+            if not message_id:
+                return
+            safe = json.dumps(str(message_id))
+            safe_title = json.dumps(str(title or tr("msg_read_seen")))
+            try:
+                self.page().runJavaScript(f"""
+                var node = document.querySelector('[data-stanza-id=' + JSON.stringify({safe}) + ']');
+                if (!node) {{ node = document.querySelector('[data-reply-id=' + JSON.stringify({safe}) + ']'); }}
+                var stamp = node && node.querySelector('.time_initial');
+                if (stamp) {{
+                    var mark = stamp.querySelector('.read-receipt');
+                    if (!mark) {{
+                        mark = document.createElement('span');
+                        mark.className = 'read-receipt';
+                        mark.textContent = '\U0001F441';
+                        stamp.appendChild(mark);
+                    }}
+                    mark.title = {safe_title};
+                }}
+                """)
+            except RuntimeError:
+                pass
 
         def _arm_anchor_scroll(self, kind: str, target: str,
                                restore: bool = False) -> None:
@@ -3876,11 +3905,17 @@ else:
                         stanza_id: str = "",
                         quick_response: dict | None = None,
                         quick_response_active: bool = False,
-                        quick_response_ref: str = ""):
+                        quick_response_ref: str = "",
+                        read_title: str = ""):
             # *markup* (XEP-0394) is accepted for API parity with the WebEngine
             # view but the plain fallback does not render it.
             marker_html = (ChatThemeFactory.render_unread_marker()
                            if unread_marker else "")
+            read_suffix = ""
+            if read_title and outgoing:
+                read_suffix = (' <span class="read-receipt" title="%s">'
+                               '\U0001F441</span>'
+                               % html.escape(read_title))
             if retracted:
                 text = tr('msg_retracted')
                 if retract_reason or retract_by:
@@ -3920,18 +3955,19 @@ else:
             if phrase is not None:
                 self._append_before_typing(
                     marker_html + reply_line +
-                    f"<i>({timestamp}) * {sender or 'Me'} "
-                    f"{phrase}{edited_suffix}{reactions_suffix}</i>")
+                    f"<i>({timestamp}) * {sender or 'Me'}"
+                    f"{read_suffix} {phrase}{edited_suffix}{reactions_suffix}</i>")
             elif direction == "incoming":
                 self._append_before_typing(
                     marker_html + reply_line +
-                    f"<b>{sender}</b>{hats_suffix} <i>({timestamp})</i>: "
+                    f"<b>{sender}</b>{hats_suffix} <i>({timestamp})</i>"
+                    f"{read_suffix}: "
                     f"{body_html}{edited_suffix}{reactions_suffix}")
             else:
                 self._append_before_typing(
                     marker_html + reply_line +
                     f"<b style='color:#0066cc'>{sender}</b>{hats_suffix} "
-                    f"<i>({timestamp})</i>: "
+                    f"<i>({timestamp})</i>{read_suffix}: "
                     f"{body_html}{edited_suffix}{reactions_suffix}")
 
         @staticmethod
@@ -4039,6 +4075,9 @@ else:
             pass
 
         def mark_message_delivered(self, message_id: str) -> None:
+            pass
+
+        def mark_message_read(self, message_id: str, title: str = "") -> None:
             pass
 
         def set_typing_indicator(self, text: str):

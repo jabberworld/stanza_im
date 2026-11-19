@@ -292,6 +292,43 @@ check("a participant nick follows a Ctrl+wheel zoom under an app stylesheet",
       _row["label"]._effective_font.pointSize() == 26)
 app.setStyleSheet("")
 
+# A repeated OSD click must not reopen the same chat or restart its anchor.
+class _OscChat:
+    def __init__(self, pending=False):
+        self._pending = pending
+
+    def anchor_restore_pending(self):
+        return self._pending
+
+
+class _OscChatWindow:
+    def __init__(self, current):
+        self._current = current
+        self._chat = _OscChat(pending=True)
+
+    def current_jid(self):
+        return self._current
+
+    def get_chat(self, jid):
+        return self._chat
+
+
+_mw = MainWindow.__new__(MainWindow)
+_opens = []
+_raises = []
+_mw._chat_window = _OscChatWindow("bob@example.com")
+_mw._raise_chat_area = lambda: _raises.append(True)
+_mw._on_contact_open = lambda jid: _opens.append(jid)
+MainWindow._osd_click(_mw, "bob@example.com")
+check("an OSD click on the current chat only raises it",
+      len(_opens) == 0 and _raises == [True])
+
+_mw._chat_window = _OscChatWindow("other@example.com")
+_raises.clear()
+MainWindow._osd_click(_mw, "bob@example.com")
+check("an OSD click while the anchor is pending does not reopen",
+      len(_opens) == 0 and _raises == [True])
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

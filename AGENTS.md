@@ -1618,7 +1618,12 @@ contact online/offline sound), `osd_conference` (`never`/`mention`/`all`), plus 
 button (`#osd-close`) is 24×24; because the frame and its children are
 mouse-transparent, a press that lands on its rectangle is routed to `_close()`
 in `_OsdWindow.mousePressEvent` (never to the notification's `_click()`), so
-the corner always dismisses. `OsdManager` also offers a **sticky** OSD
+the corner always dismisses. A transient OSD is dismissed in `OsdManager._clicked`'s
+`finally`, so a failing chat/anchor open cannot leave the same bubble clickable;
+`MainWindow._osd_click` only raises an already current chat or one whose anchor
+is still pending instead of re-opening it, and `_on_chat_marker_displayed`
+routes a XEP-0333 marker to the outgoing row's session-only read eye.
+`OsdManager` also offers a **sticky** OSD
 (`show_sticky(key, …)` / `update_sticky` / `dismiss_sticky`): no auto-hide,
 excluded from the `osd_max` eviction, updated in place via
 `_OsdWindow.set_text`, kept on a plain click and removed only by its close
@@ -1886,6 +1891,11 @@ chunk by chunk, and scrolling each one to the end used to hide the anchor and
 let the transient bottom mark the whole block read. A failed anchor scroll
 emits `anchor_scroll_failed`, and `ChatWidget` opens the first unread message
 instead; the bottom report is ignored while `anchor_restore_pending()` holds.
+A tab hidden during that first restore replays it from `ChatWidget.showEvent`
+(`_replay_pending_anchor`): when the unread boundary still exists and the view
+is pending, the consumed `_restore_anchor` is rebuilt from the boundary/current
+first unread row, the scroll is queued again and the watchdog is armed, so the
+first open cannot stay at the bottom because the page was not visible yet.
 [`tests/test_read_anchor_restore.py`]
 
 A conversation is marked read when its view **reaches the newest
@@ -2382,7 +2392,14 @@ also runs when the local block is non-zero and when the local read timestamp is
 **equal** to the displayed point (only a strictly newer local point skips it),
 so a stale 2-message block grows to the real 23. A server-assist XEP-0333
 `<displayed/>` that also carries an embedded MDS payload is applied as MDS in
-`_on_bodyless_chat_marker_stanza` (the bare receipt is still emitted).
+`_on_bodyless_chat_marker_stanza`; the same stanza separately emits
+`chat_marker_displayed` for the session-only read eye on our outgoing message.
+The delivery check (`receipt_delivered`, XEP-0184) and the read eye
+(`chat_marker_displayed`, XEP-0333) are independent; the eye is not persisted.
+For a MUC the marker sender is `room/nick`, so the viewer is the nick and the
+eye lives on the room's outgoing row; a private-message key is preferred when
+it is open. Its tooltip lists up to ten viewers plus «и ещё N».
+[`tests/test_read_receipts.py`]
 `_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
 the startup catch-up passes `force=True`: the map is seeded at connect from the
 persisted unread state, and an equal point must still trigger the rebuild or a

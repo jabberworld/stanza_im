@@ -140,6 +140,7 @@ _UNREAD_CSS = """
 .stanza-unread { margin: 8px 2px 6px; padding-top: 3px; text-align: center;
                  font-size: 0.85em; color: #888;
                  border-top: 1px solid rgba(127,127,127,.45); }
+.read-receipt { margin-left: 3px; cursor: help; }
 """
 
 _emoji_font_family_cache: str | None = None
@@ -534,7 +535,7 @@ class ChatThemeFactory:
                 f"\n.time_initial, .typing-indicator, .stanza-action, "
                 f".stanza-action .time, .stanza-reply, "
                 f".stanza-reply .reply-quote, .stanza-unread, .delivery, "
-                f".stanza-edited, .stanza-retracted, "
+                f".read-receipt, .stanza-edited, .stanza-retracted, "
                 f".stanza-retracted-text {{ color: {muted} !important; }}"
                 f"\n.container, .container_next {{ border-top-color: "
                 f"{separator} !important; }}"
@@ -711,7 +712,8 @@ class ChatThemeFactory:
                        markup: dict | None = None,
                        quick_response: dict | None = None,
                        quick_response_active: bool = False,
-                       quick_response_ref: str = "") -> str:
+                       quick_response_ref: str = "",
+                       read_title: str = "") -> str:
         """Render a single message to HTML using the skin template.
 
         With *mention* the incoming sender name is wrapped in a clickable
@@ -810,9 +812,13 @@ class ChatThemeFactory:
             sender_html = f'<span class="sender">{sender_html}</span>'
         sender_html += self._render_hats(hats)
 
+        time_html = timestamp
+        if read_title and direction == "outgoing":
+            time_html += ('<span class="read-receipt" title="%s">'
+                          '\U0001F441</span>' % escape_html(read_title))
         html = template.replace("%sender%", sender_html) \
                        .replace("%message%", body_html) \
-                       .replace("%time%", timestamp) \
+                       .replace("%time%", time_html) \
                        .replace("%senderColor%", sender_color) \
                        .replace("%userIconPath%", user_icon_path) \
                        .replace("%reply_title%", tr("chat_reply")) \

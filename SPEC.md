@@ -2158,8 +2158,12 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   an anchor restore cannot wipe it. An automatic anchor restore also holds
   `ChatView._bottom_locked`; its first bottom position is ignored until the user
   scrolls away and back or explicitly marks the chat read, so a short unread
-  block cannot lose its divider as soon as the restore starts. A live row and
-  its later MAM copy share `origin_id`, which `ChatWidget._entry_key` checks
+  block cannot lose its divider as soon as the restore starts. A tab hidden
+  during the first restore replays it in `ChatWidget.showEvent`: if the unread
+  boundary still exists, the consumed `_restore_anchor` is rebuilt from it (or
+  from the first unread row), the scroll is queued after the page is visible and
+  the watchdog is armed, so a first open cannot stay at the bottom. A live row
+  and its later MAM copy share `origin_id`, which `ChatWidget._entry_key` checks
   before the server stanza/archive ids, so they render once.
   A hidden tab (opened with `focus=False` by an incoming message) loads
   its archive when it is first shown. The file is a **v2 payload**
@@ -2226,10 +2230,13 @@ _on_groupchat_presence` parses it with `hats.parse_hats` into
   and each transient window auto-hides after `osd_duration` seconds. Hovering
   **any** OSD pauses the auto-hide timer of the whole stack
   (`_hovered`/`_pause_all`/`_resume_all`) and resumes it once the cursor leaves
-  all of them. A **sticky** OSD (`show_sticky(key, …)` / `update_sticky` /
-  `dismiss_sticky`) never auto-hides, is updated in place via
-  `_OsdWindow.set_text`, and calls its owner's `on_close` when dismissed; it
-  backs the Digest plugin.
+  all of them. A click runs the notification's `on_click` and dismisses a
+  transient bubble in a `finally` block, so a failing open can never leave the
+  same OSD clickable; `MainWindow._osd_click` raises an already current chat or
+  one whose read anchor is still pending instead of re-opening it. A **sticky**
+  OSD (`show_sticky(key, …)` / `update_sticky` / `dismiss_sticky`) never
+  auto-hides, is updated in place via `_OsdWindow.set_text`, and calls its
+  owner's `on_close` when dismissed; it backs the Digest plugin.
 - Preferences → Notifications → OSD shows a draggable preview at the saved
   base position; dragging moves it by grabbing the mouse and calling
   `move()` on X11 (works even when the window manager ignores the
@@ -3189,7 +3196,13 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   no hash was announced.
 - XEP-0333: outgoing chat/groupchat messages carry `<markable/>`; an incoming
   bodyless `<displayed id='…'/>` (own `MatchXPath` handler) marks the message
-  delivered.
+  read with a session-only eye (XEP-0184 delivery keeps the separate `✓`).
+  `MainWindow._on_chat_marker_displayed` resolves a 1:1 bare JID, a MUC
+  `room/nick` to the room (or an open private-message key), and `ChatWidget.
+  mark_message_read` stores the viewer list on the outgoing row. The eye is
+  rendered in `.time_initial` (outgoing only), is kept across a tab re-render,
+  and its MUC tooltip names at most ten viewers plus «и ещё N». No SQLite
+  schema is changed.
 
 ### 14.5.3 Whiteboard (`ui/whiteboard_dialog.py`, `ui/whiteboard_canvas.py`)
 

@@ -2263,6 +2263,7 @@ class ChatWidget(QtWidgets.QWidget):
                 self._quick_response_ref(entry)
                 in self._quick_response_refs),
             "quick_response_ref": self._quick_response_ref(entry),
+            "read_title": self._read_receipt_title(entry),
         }
 
     def compute_reactions(self, entry: dict) -> list[dict]:
@@ -4857,6 +4858,43 @@ class ChatWidget(QtWidgets.QWidget):
                 entry["delivered"] = True
                 self._view.mark_message_delivered(message_id)
                 return
+
+    @staticmethod
+    def _read_receipt_title(entry: dict) -> str:
+        """Tooltip for the session-only XEP-0333 read eye."""
+        viewers = [str(v) for v in (entry.get("read_by") or []) if v]
+        if not viewers:
+            return ""
+        chat = entry.get("_read_chat")
+        if chat == "muc":
+            shown = viewers[:10]
+            names = ", ".join(shown)
+            if len(viewers) > len(shown):
+                names += " " + tr("msg_read_more",
+                                  count=len(viewers) - len(shown))
+            return tr("msg_read_seen_by", names=names)
+        return tr("msg_read_seen")
+
+    def mark_message_read(self, ref: str, viewer: str = "") -> None:
+        """Record a XEP-0333 displayed marker for one of our messages.
+
+        The state is deliberately session-only: the server may replay a read
+        marker from an older session, but that is not persisted as SQLite
+        history metadata.
+        """
+        entry = self._find_message(ref)
+        if entry is None or not self._is_mine(entry):
+            return
+        viewers = list(entry.get("read_by") or [])
+        if viewer and viewer not in viewers:
+            viewers.append(viewer)
+        entry["read_by"] = viewers
+        if self.is_muc:
+            entry["_read_chat"] = "muc"
+        title = self._read_receipt_title(entry)
+        self._view.mark_message_read(ref, title)
+        logger.debug("READ[mark] jid=%s ref=%s viewer=%s title=%r",
+                     self.jid, ref, viewer, title)
 
     def refresh_avatar_for_sender(self, sender: str, sender_jid: str,
                                   force: bool = False) -> None:
