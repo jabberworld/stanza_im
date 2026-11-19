@@ -4684,9 +4684,44 @@ class ChatWidget(QtWidgets.QWidget):
                 self.set_participant_font(family, size)
 
     def showEvent(self, event) -> None:
-        """Re-apply the fonts once the tab becomes visible (see reapply_fonts)."""
+        """Re-apply fonts and replay an anchor parked while the tab was hidden."""
         super().showEvent(event)
         self.reapply_fonts()
+        self._replay_pending_anchor()
+
+    def _replay_pending_anchor(self) -> None:
+        """Retry a read-anchor restore once the tab is actually visible.
+
+        ``set_history`` can schedule the restore before the QTabWidget shows
+        the page; the WebEngine document is still empty and the scroll request
+        is parked.  Without a retry from ``showEvent`` the first open of an
+        unread conversation stayed at the bottom (the second open worked
+        because the history was already loaded).
+        """
+        if self._released or not self._unread_boundary:
+            return
+        if not (self._restore_anchor or self.anchor_restore_pending()):
+            return
+        if not self._restore_anchor:
+            anchor = dict(self._unread_boundary)
+            if not (anchor.get("ref") or anchor.get("ts")):
+                entry = self._first_unread_entry()
+                if entry is not None:
+                    anchor = {
+                        "ref": self._reply_target_id(entry),
+                        "ts": str(entry.get("timestamp") or ""),
+                        "sid": str(entry.get("stanza_id")
+                                   or entry.get("archive_id") or ""),
+                    }
+            self._restore_anchor = anchor
+        if not (self._restore_anchor.get("ref")
+                or self._restore_anchor.get("ts")):
+            return
+        logger.debug("ANCHOR[shown] jid=%s ref=%r ts=%r", self.jid,
+                     self._restore_anchor.get("ref"),
+                     self._restore_anchor.get("ts"))
+        QtCore.QTimer.singleShot(0, self._restore_from_anchor)
+        QtCore.QTimer.singleShot(2500, self._anchor_watchdog)
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self.is_muc:

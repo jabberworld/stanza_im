@@ -22,7 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6 import QtWidgets  # noqa: E402
+from PyQt6 import QtCore, QtWidgets  # noqa: E402
 
 from stanza_im.core import history  # noqa: E402
 from stanza_im.i18n import load as i18n_load  # noqa: E402
@@ -457,6 +457,25 @@ w._render_all()
 check("a re-render cannot resurrect the divider",
       not any(m["unread_marker"] for m in w._view.messages))
 
+# 8. a hidden first open re-arms the consumed anchor on show ------------------
+w = widget()
+w.set_history([row("2026-10-02T10:03:00Z", "three", "m-3"),
+               row("2026-10-02T10:04:00Z", "four", "m-4")],
+              50, False, anchor=ANCHOR)
+w._restore_anchor = {}
+w._view.anchor_restore_pending = lambda: True
+w._view.scrolled.clear()
+_single = QtCore.QTimer.singleShot
+QtCore.QTimer.singleShot = staticmethod(lambda *a, **k: None)
+try:
+    w._replay_pending_anchor()
+finally:
+    QtCore.QTimer.singleShot = _single
+check("show re-arms the anchor from the unread boundary",
+      w._restore_anchor.get("ref") == "m-3")
+w._restore_from_anchor()
+check("the re-armed anchor actually scrolls to the read point",
+      "m-3" in w._view.scrolled)
 w = widget()
 w.set_history([row("2026-10-02T10:04:00Z", "four", "m-4")],
               50, False, anchor=ANCHOR)
