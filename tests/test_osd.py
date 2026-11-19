@@ -414,6 +414,18 @@ _swin._close()
 check("closing a sticky reports and dismisses",
       _closed == [True] and len(_m10c._windows) == 0)
 
+# 10d. a failing click still dismisses the transient OSD --------------------
+_m10d = OsdManager(make_cfg())
+def _boom():
+    raise RuntimeError("open failed")
+_m10d.show(None, "t", "b", on_click=_boom)
+try:
+    _m10d._clicked(_m10d._windows[0])
+except RuntimeError:
+    pass
+check("a failing click still dismisses the transient OSD",
+      len(_m10d._windows) == 0)
+
 # 11. hover pauses the auto-hide timer ---------------------------------------
 m7 = OsdManager(make_cfg(osd_duration=30))
 m7.show(None, "one", "first")

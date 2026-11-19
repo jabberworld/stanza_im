@@ -565,13 +565,15 @@ class OsdManager:
             self._cfg.osd_y = int(y) + height
 
     def _clicked(self, rec: dict) -> None:
-        cb = rec.get("on_click")
-        if cb:
-            cb()
-        # A sticky notification stays on screen when clicked (only its close
-        # button dismisses it); a transient one is dismissed.
-        if not rec.get("sticky"):
-            self._dismiss(rec)
+        try:
+            cb = rec.get("on_click")
+            if cb:
+                cb()
+        finally:
+            # A failing chat/anchor open must not leave the same transient OSD
+            # clickable for a second attempt; a sticky one stays by design.
+            if not rec.get("sticky"):
+                self._dismiss(rec)
 
     def _closed(self, rec: dict) -> None:
         """Close-button handler: notify the owner, then dismiss."""
