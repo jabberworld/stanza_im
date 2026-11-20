@@ -8,6 +8,8 @@ MUC participants in a side panel.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import tempfile
 import time
 import webbrowser
@@ -552,6 +554,11 @@ class ChatWidget(QtWidgets.QWidget):
         self._notes_enabled = False
         self._last_sender: str = ""
         self._history: list[dict] = []
+        self._prepared_html: list[str] = []
+        self._prepared_settings = ""
+        self._render_cache_fragments: list[str] = []
+        self._render_cache_refs: list[str] = []
+        self._render_cache_settings = ""
         self._status_lines: list[tuple[str, str]] = []
         self._messages: list[dict] = []
         self._quick_response_refs: set[str] = set()
@@ -2326,7 +2333,7 @@ class ChatWidget(QtWidgets.QWidget):
         return ""
 
     def _render_entry(self, entry: dict):
-        self._view.add_message(
+        return self._view.add_message(
             **self._entry_view_kwargs(entry, self._take_unread_marker(entry)))
 
     def _user_icon(self, direction: str, sender_jid: str = "",
@@ -2488,8 +2495,34 @@ class ChatWidget(QtWidgets.QWidget):
         self._unread_armed = False
         self._unread_passed = False
         self._quick_response_refs = self._compute_quick_response_refs(entries)
-        for entry in entries:
-            self._render_entry(entry)
+        prepared = self.__dict__.get("_prepared_html", [])
+        current_settings = self._render_settings_hash()
+        if (prepared and (len(prepared) != len(entries)
+                          or self._prepared_settings != current_settings
+                          or not getattr(self._view, "supports_prepared",
+                                         False))):
+            prepared = []
+        self._prepared_html = []
+        fragments: list[str] = []
+        refs = [self._render_ref(entry) for entry in entries]
+        marker_html = ChatThemeFactory.render_unread_marker()
+        for index, entry in enumerate(entries):
+            if prepared:
+                html_cache = prepared[index]
+                html = ((marker_html if self._take_unread_marker(entry)
+                         else "") + html_cache)
+                self._view.add_prepared(html)
+            else:
+                html = self._render_entry(entry)
+                html_cache = html or ""
+                if html_cache.startswith(marker_html):
+                    html_cache = html_cache[len(marker_html):]
+            fragments.append(html_cache)
+        self._render_cache_refs = refs
+        self._render_cache_fragments = fragments
+        self._render_cache_settings = current_settings
+        if fragments and all(fragments):
+            QtCore.QTimer.singleShot(1500, self._save_render_cache)
         self._set_rendered(entries)
         self._preserve_fraction = None
         if self._anchor_bottom:
@@ -2505,6 +2538,97 @@ class ChatWidget(QtWidgets.QWidget):
             except (AttributeError, RuntimeError):
                 pass
         return entries
+
+    def _render_ref(self, entry: dict) -> str:
+        """Content-sensitive cache key for one rendered row."""
+        payload = (
+            self._entry_key(entry),
+            entry.get("body"), entry.get("timestamp"), entry.get("sender"),
+            entry.get("direction"), entry.get("is_next"),
+            entry.get("unstyled"), entry.get("edited"),
+            entry.get("retracted"), entry.get("retract_marker"),
+            entry.get("retract_reason"), entry.get("retract_by"),
+            entry.get("reply_id"), entry.get("reply_to"),
+            entry.get("reply_author"), entry.get("reactions"),
+            entry.get("media"), entry.get("encrypted"),
+            entry.get("markup"), entry.get("quick_response"),
+            entry.get("sender_jid"),
+        )
+        return hashlib.sha1(repr(payload).encode("utf-8")).hexdigest()
+
+    def _render_settings_hash(self) -> str:
+        """Hash every setting that changes prepared message HTML."""
+        from stanza_im.include.constants import VERSION_DISPLAY
+        theme = self.__dict__.get("_theme")
+        if theme is None:
+            return ""
+        payload = (
+            VERSION_DISPLAY, self.is_muc, self._own_jid,
+            self._own_avatar, self._peer_avatar, self._avatar_radius,
+            self._colored_muc_nicks, self._show_muc_hats, self._show_avatars,
+            self._text_scale,
+            self.__dict__.get("_moderation_enabled", False),
+            getattr(theme, "_skin_dir", ""),
+            getattr(theme, "_current_variant_css", ""),
+            getattr(theme, "_emoticon_skin", ""),
+            getattr(theme, "_unicode_smiley_replace", None),
+            getattr(theme, "_message_styling", None),
+            getattr(theme, "_highlight_mode", None),
+            getattr(theme, "_media_mode", None),
+            getattr(theme, "_media_size", None),
+            getattr(theme, "_font_family", None),
+            getattr(theme, "_font_size_pt", None),
+            getattr(theme, "_nick_font_family", None),
+            getattr(theme, "_nick_font_size_pt", None),
+            getattr(theme, "_chat_bg_color", None),
+            getattr(theme, "_chat_text_color", None),
+            getattr(theme, "_highlight_color", None),
+        )
+        return hashlib.sha1(repr(payload).encode("utf-8")).hexdigest()
+
+    def load_prepared(self, entries: list[dict]) -> list[str] | None:
+        """Read a prepared HTML window from disk (call from a worker)."""
+        view = self.__dict__.get("_view")
+        if (not self._own_jid or not entries
+                or not getattr(view, "supports_prepared", False)):
+            return None
+        try:
+            from stanza_im.core import chat_render_cache
+            return chat_render_cache.get(
+                self._own_jid, self.jid, self._render_settings_hash(),
+                [self._render_ref(entry) for entry in entries])
+        except Exception:  # noqa: BLE001 - cache is best-effort
+            return None
+
+    def invalidate_render_cache(self) -> None:
+        if not self._own_jid:
+            return
+        try:
+            from stanza_im.core import chat_render_cache
+            chat_render_cache.invalidate(self._own_jid, self.jid)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _save_render_cache(self) -> None:
+        refs = list(self._render_cache_refs)
+        fragments = list(self._render_cache_fragments)
+        if (not self._own_jid or not refs or len(refs) != len(fragments)
+                or not all(fragments) or self._released):
+            return
+        self._start_task(self._save_render_cache_async(
+            self._own_jid, self.jid, self._render_cache_settings,
+            refs, fragments, self._window_size))
+
+    async def _save_render_cache_async(self, account: str, jid: str,
+                                       settings: str, refs: list[str],
+                                       fragments: list[str], size: int) -> None:
+        try:
+            from stanza_im.core import chat_render_cache
+            await asyncio.to_thread(
+                chat_render_cache.put, account, jid, settings,
+                refs, fragments, size)
+        except Exception:  # noqa: BLE001
+            logger.debug("PREP[write] failed for %s", jid, exc_info=True)
 
     def _ordered_entries(self) -> list[dict]:
         """The whole window (history + live rows) de-duplicated, oldest first."""
@@ -2745,7 +2869,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_history(self, entries: list[dict], window_size: int,
                     exhausted: bool, anchor: dict | None = None,
-                    seen_anchor: dict | None = None):
+                    seen_anchor: dict | None = None,
+                    prepared: list[str] | None = None):
         """Initial window: replace history rows and re-render from bottom.
 
         *anchor* is the persisted read state of a conversation with unread
@@ -2757,6 +2882,9 @@ class ChatWidget(QtWidgets.QWidget):
         forward pager.  Without an anchor the window carries no separator.
         """
         self._history = list(entries or [])
+        self._prepared_html = list(prepared or [])
+        self._prepared_settings = (self._render_settings_hash()
+                                   if self._prepared_html else "")
         self._initial_load_done = True
         self._user_scrolled_up = False
         self._window_size = max(50, int(window_size))

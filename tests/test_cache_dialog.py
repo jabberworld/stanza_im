@@ -224,8 +224,8 @@ win._media_cache = media.MediaCache(os.path.join(work, "media2"))
 win._tile_cache = None
 rows = {entry.key: entry for entry in win._cache_entries()}
 check("MainWindow exposes every cache row",
-      list(rows) == ["media", "avatars", "tiles", "vcard", "discovery",
-                     "roster", "webengine", "history"])
+      list(rows) == ["media", "avatars", "tiles", "vcard", "chat_render",
+                     "discovery", "roster", "webengine", "history"])
 check("the MainWindow size probes run",
       all(entry.size() is not None for entry in rows.values()))
 check("the web engine cache path is known without importing Chromium",

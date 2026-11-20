@@ -53,6 +53,7 @@ stanza_im/                      # Python package
 │   ├── client.py                # JabberClient: slixmpp wrapper, TLS/proxy/SM/CSI
 │   ├── storage.py               # Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py               # SQLite history; RLock + store_many + async wrappers
+│   ├── chat_render_cache.py     # Persistent prepared chat HTML (100 chats / 64 MiB)
 │   ├── known_contacts.py        # Persisted JID → name/groups/conference registry
 │   ├── omemo_aliases.py         # XEP-0384 device-name aliases (private PEP node)
 │   ├── notification_priorities.py # Per-contact priority (private PEP node)
@@ -81,6 +82,7 @@ stanza_im/                      # Python package
 │   ├── resource_tree.py         # Shared per-resource client-block HTML
 │   ├── chat_window.py           # Tab container for conversations
 │   ├── chat_widget.py           # Single chat tab content
+│   ├── chat_render_prepare.py   # Headless prepared HTML renderer/warmup
 │   ├── chat_view.py             # QWebEngineView + QWebChannel bridge
 │   ├── chat_themes.py           # Adium-style theme HTML generator
 │   ├── theme.py                 # Palette/contrast helpers (light & dark Qt themes)
@@ -563,7 +565,11 @@ failed fetch is retried (1/2 s) in the background. The fetched list is handed
 to the Bookmarks tab once (`bookmarks_snapshot()`), so it needs no second
 request. PEP subscriptions are gated by the contact's advertised caps, paced by
 a small semaphore, and unknown/non-PEP peers (RSS/transports) are not sent the
-five-node burst.
+five-node burst. vCard/version/PEP work is **held back** until the presence,
+autojoin and unread/MDS phases have settled (`_deferred_startup_work`): a large
+roster no longer puts hundreds of decorative IQs into the same event-loop turns
+as the MUC join presence. vCards are then requested in small idle batches, not
+all at once.
 Auto-joined rooms are retried on transient
 `muc_join_error` conditions (`timeout`/`unknown`/`remote-server-timeout`/
 `internal-server-error`/`service-unavailable`) with a 5/15/45 s backoff, and
@@ -1310,7 +1316,7 @@ pending-delete row); roster and participant avatars are clipped by
 applied live via `MainWindow._apply_avatar_radius`). A participant's vCard is
 resolved **cache-first**: `MainWindow._on_groupchat_presence` only calls
 `client.queue_participant_vcard(room, nick)` (never one vCard IQ per presence),
-which applies a cached card at once (participant TTL 24 h) or appends the nick
+which applies a cached card at once (participant TTL 3 days) or appends the nick
 to a single rate-limited background worker (2 requests/s, skipping occupants
 who left); `_seed_muc_chat` uses the same queue for the join-time occupant list
 (never one vCard IQ per occupant); a cached avatar **file** for `room/nick` is used immediately
@@ -1373,6 +1379,20 @@ bottom report (`_note_bottom`) and the **near-top report** (`_check_scroll` →
 restore, prepend) exactly like the WebEngine view — otherwise a transient
 bottom would mark the conversation read / drop the unread separator, and a MAM
 prepend would re-trigger the next page forever.
+
+**Prepared chat cache** (`core/chat_render_cache.py`,
+`ui/chat_render_prepare.py`): a disk SQLite cache (`chat-render.sqlite3`, WAL,
+0600) stores zlib-compressed prepared HTML fragments for closed chats. Limits
+are **100 chats / 64 MiB**, LRU by access; the unread divider, delivery checks
+and read eyes are never baked in and are applied at open. `ChatWidget` loads a
+matching window in `_load_history_async` (content refs + settings hash) and
+`ChatView.add_prepared` inserts the fragments without per-message Python
+rendering. After an open render, `ChatWidget` saves the fragments in the
+background. A low-priority idle warmup prepares up to 20 unread/bookmarked
+conversations through `chat_render_prepare.render_prepared` without creating
+WebEngine tabs; cache entries are invalidated by message edits/retractions/
+reactions, theme/font changes (settings hash), avatar updates and history clear.
+[`tests/test_chat_render_cache.py`, `tests/test_chat_render_prepare.py`]
 
 **Theme engine** (`chat_themes.py`): Loads HTML templates and CSS variants from
 `resources/chatskins/minimal-mod/` or `candy/`. Templates use `%sender%`,
@@ -3262,7 +3282,10 @@ short SHA-1 suffix is appended (`…______-ed48fde817.png`) so two non-Latin
 nicks of the same length never share one cached file. A path from the older
 naming scheme (e.g. a vCard cache entry) is copied to the current name by
 `include.avatars.ensure_avatar` when it is applied
-(`MainWindow._refresh_avatar`), so the sidebar and the chat agree on the file. `xep_0153` advertises our vCard avatar hash in presence
+(`MainWindow._refresh_avatar`), so the sidebar and the chat agree on the file.
+`VCardCache` metadata has a **3-day TTL**; its JSON write is deferred/coalesced
+(`put(..., defer=True)` + background `flush`) and PHOTO base64 is removed from
+the card/contact/event after the avatar file is saved. `xep_0153` advertises our vCard avatar hash in presence
 (`<x xmlns='vcard-temp:x:update'><photo>sha1</photo></x>`); its
 `vcard_avatar_update` event makes `_on_vcard_avatar_update` refetch a contact's
 vCard (`get_vcard(bare, force=True)`) when the hash changes. `xep_0084`
@@ -4231,7 +4254,9 @@ text is kept. Returning activity (`eventFilter`) resumes
    immutable); `forget(path)` drops one file whose content changed (avatar)
 2. **Avatars**: stored as `str` path; the roster caches only the scaled/rounded
    variants per `(file, size, radius)` (`RosterStyle._scaled`, invalidated by
-   `clear_pixmaps()` on an avatar update), never the full pixmap in `UserItem`
+   `clear_pixmaps()` on an avatar update), never the full pixmap in `UserItem`;
+   the data-URI LRU is capped at 128 entries and identical avatar bytes are not
+   rewritten. vCard PHOTO bytes are dropped after the avatar file is saved
 3. **ChatView**: shared `QWebEngineProfile` (not per-tab)
 4. **Idle tab suspension**: `chat.idle_unload_minutes` (default `10`, `0` = off,
    Preferences → Chat → «General»). `MainWindow._maybe_suspend_tabs` (per-minute
@@ -4286,7 +4311,9 @@ Ctrl+C forces `os._exit(130)`.
 
 Command-line keys: `-d/--debug` (console debug output), `-x/--xml` (raw
 SEND/RECV XML), `-l/--log` (full debug log), `--log-suffix NAME` (log-name
-suffix; `STANZA_LOG_SUFFIX` is also honoured), `-m/--memstat` (periodic memory
+suffix; `STANZA_LOG_SUFFIX` is also honoured); the file logger redacts
+`<BINVAL>…</BINVAL>` PHOTO payloads so a roster refresh cannot create a
+30–80 MiB base64 log. `-m/--memstat` (periodic memory
 statistics; repeat as `-mm` for the deep Python-heap breakdown),
 `-C/--cpustat` (periodic CPU statistics; repeat as `-CC` for per-child process
 detail), `-h/--help`.

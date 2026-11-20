@@ -351,6 +351,14 @@ class VCardEditDialog(QtWidgets.QDialog):
                 self._photo = base64.b64decode(card["photo"])
             except Exception:
                 self._photo = None
+        if self._photo is None and card.get("avatar_path"):
+            # The client keeps PHOTO bytes only in the avatar cache; reload the
+            # file so editing an existing card does not silently drop its photo.
+            try:
+                with open(card["avatar_path"], "rb") as fh:
+                    self._photo = fh.read()
+            except OSError:
+                self._photo = None
 
         layout = QtWidgets.QVBoxLayout(self)
 

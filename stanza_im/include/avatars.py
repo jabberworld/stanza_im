@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import shutil
+from collections import OrderedDict
 
 from PyQt6 import QtCore, QtGui
 
@@ -20,7 +21,8 @@ PLACEHOLDER_FILENAME = "_default.png"
 
 _VCARD_NS = "vcard-temp"
 _SAFE_RE = re.compile(r"[^A-Za-z0-9_.@-]")
-_URI_CACHE: dict[str, str | None] = {}
+_URI_CACHE: OrderedDict[str, str | None] = OrderedDict()
+_MAX_URI_CACHE = 128
 _MISSING = object()
 # A non-ASCII key (a conference nick, a Unicode localpart) is sanitised to
 # underscores; the digest keeps two such keys from sharing one file.
@@ -80,9 +82,24 @@ def clear_cache() -> int:
 
 
 def save_avatar(jid: str, raw: bytes) -> str:
-    """Persist avatar bytes for *jid* and return the cache path."""
+    """Persist avatar bytes for *jid* and return the cache path.
+
+    vCard refreshes often return the same photo again; rewriting hundreds of
+    identical files is pure disk churn, so an existing file with identical
+    bytes is left untouched.
+    """
     ensure_dirs()
     path = avatar_path(jid)
+    raw = bytes(raw or b"")
+    try:
+        if (os.path.isfile(path)
+                and os.path.getsize(path) == len(raw)):
+            with open(path, "rb") as fh:
+                if fh.read() == raw:
+                    _URI_CACHE.pop(_key(jid), None)
+                    return path
+    except OSError:
+        pass
     with open(path, "wb") as fh:
         fh.write(raw)
     _URI_CACHE.pop(_key(jid), None)
@@ -177,18 +194,26 @@ def default_avatar_uri() -> str:
     return uri or ""
 
 
+def _remember_uri(key: str, uri: str | None) -> None:
+    _URI_CACHE[key] = uri
+    _URI_CACHE.move_to_end(key)
+    while len(_URI_CACHE) > _MAX_URI_CACHE:
+        _URI_CACHE.popitem(last=False)
+
+
 def avatar_data_uri(jid: str) -> str | None:
     """Return a PNG data-URI for *jid*'s cached avatar, or ``None``."""
     jid = _key(jid)
     uri = _URI_CACHE.get(jid, _MISSING)
     if uri is not _MISSING:
+        _URI_CACHE.move_to_end(jid)
         return uri
     path = avatar_path(jid)
     uri = None
     if os.path.isfile(path):
         with open(path, "rb") as fh:
             uri = png_data_uri(fh.read())
-    _URI_CACHE[jid] = uri
+    _remember_uri(jid, uri)
     return uri
 
 

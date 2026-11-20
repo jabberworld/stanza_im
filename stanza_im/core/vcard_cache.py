@@ -4,12 +4,16 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import time
 
 from stanza_im.include.constants import CACHE_DIR
 
 _PATH = os.path.join(CACHE_DIR, "vcard-cache.json")
-MAX_AGE = 60 * 60
+MAX_AGE = 3 * 24 * 60 * 60
+# Roster refresh is deliberately slow: XEP-0153 photo hashes and explicit
+# vCard refresh keep avatars current without refetching every login.
+_FLUSH_DELAY = 1.0
 _CARD_VERSION = 3
 
 
@@ -23,6 +27,9 @@ class VCardCache:
     def __init__(self, path: str = _PATH):
         self.path = path
         self._items: dict[str, dict] = {}
+        self._dirty = False
+        self._timer: threading.Timer | None = None
+        self._lock = threading.RLock()
         self._load()
 
     def _load(self) -> None:
@@ -36,7 +43,12 @@ class VCardCache:
 
     def clear(self) -> None:
         """Forget every cached card and remove the backing file."""
-        self._items = {}
+        with self._lock:
+            self._items = {}
+            self._dirty = False
+            timer, self._timer = self._timer, None
+        if timer is not None:
+            timer.cancel()
         try:
             os.remove(self.path)
         except OSError:
@@ -65,21 +77,57 @@ class VCardCache:
         result.setdefault("fetched_at", fetched_at)
         return result
 
-    def put(self, jid: str, card: dict) -> None:
+    def put(self, jid: str, card: dict, defer: bool = False) -> None:
+        """Store a card; *defer* batches the JSON rewrite.
+
+        The client receives hundreds of cards during a roster refresh.  Writing
+        the whole growing JSON file after each one is quadratic and blocks the
+        GUI thread, so the network path defers and a single background flush
+        persists the batch.  Tests and explicit callers keep the immediate file
+        write (``defer=False``).
+        """
         bare = self._key(jid)
         safe = {key: value for key, value in card.items()
                 if key != "photo" and isinstance(value, (str, int, float, bool, type(None)))}
-        self._items[bare] = {"version": _CARD_VERSION,
-                             "fetched_at": time.time(), "card": safe}
+        with self._lock:
+            self._items[bare] = {"version": _CARD_VERSION,
+                                 "fetched_at": time.time(), "card": safe}
+            self._dirty = True
+            if not defer:
+                timer, self._timer = self._timer, None
+                if timer is not None:
+                    timer.cancel()
+                self._write_locked()
+                return
+            if self._timer is None:
+                timer = threading.Timer(_FLUSH_DELAY, self.flush)
+                timer.daemon = True
+                self._timer = timer
+                timer.start()
+
+    def _write_locked(self) -> None:
+        if not self._dirty:
+            return
+        snapshot = self._items
+        self._dirty = False
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix="vcard-", dir=os.path.dirname(self.path))
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(self._items, fh, ensure_ascii=True, indent=2)
+                json.dump(snapshot, fh, ensure_ascii=True, indent=2)
                 fh.write("\n")
             os.replace(tmp, self.path)
         except OSError:
+            self._dirty = True
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+
+    def flush(self) -> None:
+        """Persist a deferred batch now (also used on logout/shutdown)."""
+        with self._lock:
+            timer, self._timer = self._timer, None
+            if timer is not None:
+                timer.cancel()
+            self._write_locked()

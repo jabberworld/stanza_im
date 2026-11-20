@@ -744,6 +744,7 @@ if HAS_WEBENGINE:
             return self._view._accept_navigation(url)
 
     class ChatView(_JumpButtonMixin, QtWebEngineWidgets.QWebEngineView):
+        supports_prepared = True
         """Chat display widget backed by QWebEngineView."""
 
         link_clicked = QtCore.pyqtSignal(str)
@@ -2886,8 +2887,16 @@ window.__stanzaMentionRef = '';
                 logger.debug("chat add_message buffered (page not ready, "
                              "pending=%d)", len(self._pending))
                 self._pending.append(html)
-                return
+                return html
             self._append_chunk(html)
+            return html
+
+        def add_prepared(self, html_node: str) -> None:
+            """Append a pre-rendered message node (prepared chat cache)."""
+            if not self._ready:
+                self._pending.append(html_node)
+                return
+            self._append_chunk(html_node)
 
         def replace_message_ref(self, ref_id: str, html_node: str) -> None:
             """Replace an existing message node identified by *ref_id*."""
@@ -3519,6 +3528,7 @@ window.__stanzaMentionRef = '';
 else:
     # Fallback: QTextBrowser when QWebEngine is not available
     class ChatView(_JumpButtonMixin, QtWidgets.QTextBrowser):
+        supports_prepared = False
         """Fallback chat display using QTextBrowser (no CSS themes)."""
 
         link_clicked = QtCore.pyqtSignal(str)
@@ -3969,6 +3979,12 @@ else:
                     f"<b style='color:#0066cc'>{sender}</b>{hats_suffix} "
                     f"<i>({timestamp})</i>{read_suffix}: "
                     f"{body_html}{edited_suffix}{reactions_suffix}")
+            return ""
+
+        def add_prepared(self, html_node: str) -> None:
+            # The fallback has no per-message HTML cache; prepared nodes are a
+            # WebEngine feature.
+            return
 
         @staticmethod
         def _reactions_text(reactions) -> str:

@@ -191,8 +191,8 @@ asyncio.run(departed())
 asyncio.run(ordered())
 asyncio.run(revalidate())
 
-check("participant cards have a day-long TTL",
-      JabberClient.PARTICIPANT_VCARD_MAX_AGE == 24 * 60 * 60)
+check("participant cards have a three-day TTL",
+      JabberClient.PARTICIPANT_VCARD_MAX_AGE == 3 * 24 * 60 * 60)
 check("participant fetches run at two per second",
       JabberClient.PARTICIPANT_VCARD_INTERVAL == 0.5)
 

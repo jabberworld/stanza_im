@@ -238,9 +238,10 @@ w3.detach()
 # The archived replay and the MAM fetch both schedule the refresh.
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 
-check("an archived history replay schedules a tail refresh",
-      "schedule_tail_refresh(" in inspect.getsource(
-          MainWindow._on_groupchat_message))
+check("an archived history replay is batched and schedules a tail refresh",
+      "store_many_async(" in inspect.getsource(MainWindow._store_muc_replay)
+      and "schedule_tail_refresh(" in inspect.getsource(
+          MainWindow._store_muc_replay))
 check("a MAM backfill schedules a tail refresh",
       "schedule_tail_refresh(" in inspect.getsource(
           MainWindow._fetch_server_history))

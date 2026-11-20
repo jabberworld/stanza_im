@@ -44,6 +44,7 @@ stanza_im/
 │   ├── client.py       — XMPP client wrapper (slixmpp), TLS/proxy/SM/CSI
 │   ├── storage.py      — Config (TOML) + JSONL chat history (XDG)
 │   ├── history.py      — SQLite chat-history access (day/summary + async wrappers)
+│   ├── chat_render_cache.py — persistent prepared chat HTML (100 chats / 64 MiB)
 │   ├── known_contacts.py — persisted JID → name/groups/conference registry
 │   ├── omemo_aliases.py — XEP-0384 device-name aliases (private PEP node)
 │   ├── notification_priorities.py — per-contact priority (private PEP node)
@@ -69,6 +70,7 @@ stanza_im/
 │   ├── resource_tree.py — Shared per-resource client-block HTML
 │   ├── chat_window.py  — Tab container for conversations
 │   ├── chat_widget.py  — Single chat tab (header + view + input)
+│   ├── chat_render_prepare.py — headless prepared HTML renderer/warmup
 │   ├── chat_view.py    — QWebEngineView + JS bridge (QTextBrowser fallback)
 │   ├── chat_themes.py  — Adium-style HTML generator
 │   ├── theme.py        — palette/contrast helpers (light & dark Qt themes)
@@ -1368,6 +1370,14 @@ Single conversation tab. Layout:
 - Input: `QPlainTextEdit`, max height 60px, placeholder "Send"
 - Send on Enter (without Shift), Shift+Enter for newline
 - Signal: `message_sent(jid, body)`
+- Prepared window: `ChatWidget.load_prepared(entries)` reads the disk
+  `chat_render_cache` and `set_history(..., prepared=…)` inserts pre-rendered
+  fragments through `ChatView.add_prepared`; the unread divider and delivery/read
+  eyes are applied at open, never baked into the cached HTML. The cache holds up
+  to **100 chats / 64 MiB** (zlib, LRU) and is invalidated by content refs,
+  theme/font settings, avatars and history mutations. A low-priority idle
+  warmup (`ui/chat_render_prepare.render_prepared`) prepares up to 20
+  unread/bookmarked conversations without WebEngine tabs.
 - Jump-to-bottom button (`_JumpButtonMixin`): shown while the view overflows and
   is not at the bottom. It shows the count of incoming, non-own messages that
   arrived while scrolled up (`ChatWidget.add_message` →
@@ -1423,7 +1433,7 @@ Single conversation tab. Layout:
   geometry pass then calls `QWidget::show()` on the deleted row (a native
   segfault). A participant's vCard is cache-first:
   `MainWindow._on_groupchat_presence` only enqueues it
-  (`client.queue_participant_vcard`), a cached card (24 h) is applied at once,
+  (`client.queue_participant_vcard`), a cached card (3 days) is applied at once,
   the misses are fetched one at a time (2/s, departing occupants skipped; the
   join-time `_seed_muc_chat` uses the same queue), and
   a cached avatar file for `room/nick` is used without any request
@@ -4198,7 +4208,11 @@ client.leave_muji(room)
   message avatars are clipped by `appearance.avatar_radius` as PNG data URIs
   (`ChatWidget._rounded_avatar_uri`, cached by `(uri, radius)`; the image
   format is auto-detected and the clipped result re-encoded as PNG), so the
-  QTextBrowser fallback rounds them too. A CSS fallback
+  QTextBrowser fallback rounds them too. The data-URI LRU is capped at 128
+  entries; identical avatar bytes are not rewritten. vCard PHOTO bytes are
+  saved to the avatar file and then dropped from the card/cache/event, so a
+  200-contact refresh does not keep tens of megabytes of base64 in
+  `ContactInfo.vcard`. A CSS fallback
   (`img.avatar { border-radius: …% }`, injected by `ChatView.set_avatar_radius`;
   `avatar_css_radius` uses **half** the setting, since CSS percentages are
   relative to the whole box while `rounded_avatar` uses the half-size) also

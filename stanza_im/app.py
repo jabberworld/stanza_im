@@ -180,6 +180,24 @@ class _ConsoleFilter(logging.Filter):
         return self._debug
 
 
+class _XmlRedactFilter(logging.Filter):
+    """Keep binary vCard payloads out of the diagnostic file log.
+
+    A roster refresh can log hundreds of vCards with base64 PHOTO data; this
+    dominated the 32-81 MiB startup logs and added NFS I/O without helping
+    protocol diagnosis.
+    """
+
+    _binval = re.compile(r"<BINVAL>.*?</BINVAL>", re.DOTALL)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str) and "<BINVAL>" in record.msg:
+            record.msg = self._binval.sub("<BINVAL>[omitted]</BINVAL>",
+                                          record.msg)
+            record.args = ()
+        return True
+
+
 class _SlixmppNoiseFilter(logging.Filter):
     """Trim slixmpp's noisy records.
 
@@ -246,7 +264,9 @@ def configure_logging(debug: bool, xml_dump: bool,
             os.replace(log_path, previous_path)
         except FileNotFoundError:
             pass
-        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.addFilter(_XmlRedactFilter())
+        handlers.append(file_handler)
 
     logging.basicConfig(
         level=root_level,

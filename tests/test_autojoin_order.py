@@ -97,15 +97,16 @@ joined_client.list_bookmarks = lambda: _return(BOOKMARKS)
 asyncio.run(joined_client._autojoin_bookmarks())
 check("an already joined room is skipped", joined_client.joined == [])
 
-# 5. the session order: auto-join (fresh) before the initial presence ------
+# 5. the session order: presence first, autojoin in the background ----------
 source = inspect.getsource(JabberClient._on_session_start)
-check("the bookmarks are fetched/joined before the presence",
-      source.index("await self._autojoin_bookmarks()")
-      < source.index("self.send_presence()"))
-check("the PEP subscriptions are background work",
-      "loop.create_task(self._subscribe_pep_contacts())" in source)
-check("the auto-join is no longer a late task",
-      "create_task(self._autojoin_bookmarks())" not in source)
+check("the initial presence is sent before the autojoin task",
+      source.index("self.send_presence()")
+      < source.index("loop.create_task(self._autojoin_bookmarks())"))
+check("the PEP subscriptions are deferred to startup phase two",
+      "loop.create_task(self._subscribe_pep_contacts())" not in source
+      and "_deferred_startup_work" in source)
+check("the auto-join is background work",
+      "loop.create_task(self._autojoin_bookmarks())" in source)
 
 from stanza_im.ui.main_window import MainWindow  # noqa: E402
 

@@ -423,6 +423,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Room configuration to apply once a room we are creating is joined.
         self._muc_create_opts: dict[str, dict] = {}
         self._muc_history_pending: set[str] = set()
+        self._muc_replay_buffers: dict[str, list[dict]] = {}
+        self._muc_replay_timers: dict[str, bool] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
         # Roster contacts classified as transports/gateways (disco category
@@ -503,6 +505,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # must wait for the final reload.
         self._history_sync_pending: set[str] = set()
         self._history_reload_pending: set[str] = set()
+        self._render_warmup_scheduled = False
+        self._render_warmup_queue: list[str] = []
+        self._render_warmup_active = False
 
         # Unload the WebEngine page of tabs that stay cold (see P7).
         self._tab_activity: dict[str, float] = {}
@@ -4272,6 +4277,7 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.include import avatars as avatars_mod
         from stanza_im.include import constants as constants_mod
         from stanza_im.include import geo as geo_mod
+        from stanza_im.core import chat_render_cache as render_cache_mod
         from stanza_im.core import history as history_mod
         from stanza_im.core import roster_cache as roster_cache_mod
         from stanza_im.ui.cache_dialog import (
@@ -4301,6 +4307,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 lambda: file_size(os.path.join(
                     constants_mod.CACHE_DIR, "vcard-cache.json")),
                 self._clear_vcard_cache),
+            CacheEntry(
+                "chat_render", tr("cache_chat_render"),
+                tr("cache_chat_render_hint"),
+                tr("cache_chat_render_warning"),
+                lambda: render_cache_mod.total_bytes(),
+                self._clear_chat_render_cache),
             CacheEntry(
                 "discovery", tr("cache_discovery"), tr("cache_discovery_hint"),
                 tr("cache_discovery_warning"),
@@ -4370,6 +4382,10 @@ class MainWindow(QtWidgets.QMainWindow):
         from stanza_im.core.vcard_cache import VCardCache
         VCardCache().clear()
 
+    def _clear_chat_render_cache(self) -> None:
+        from stanza_im.core import chat_render_cache
+        chat_render_cache.clear()
+
     def _clear_discovery_cache(self) -> None:
         from stanza_im.core.discovery import DiscoveryCache
         DiscoveryCache().clear()
@@ -4392,7 +4408,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _clear_history_all(self) -> None:
         """Wipe the local message history and every restored read state."""
-        from stanza_im.core import history as history_mod
+        from stanza_im.core import chat_render_cache, history as history_mod
+        chat_render_cache.clear()
         history_mod.clear_all()
         self._history_loading.clear()
         self._history_load_seq.clear()
@@ -4639,6 +4656,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._stack.setCurrentIndex(_PAGE_ROSTER)
         self._tray.show_message(APP_NAME, message)
         QtCore.QTimer.singleShot(0, self._process_pending_uris)
+        QtCore.QTimer.singleShot(15000, self._schedule_render_warmup)
 
     def _set_connect_progress(self, text: str, percent: int) -> None:
         """Update the splash and the roster connection progress together."""
@@ -5104,12 +5122,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._cached_roster_key = None
         if same_as_cached:
             logger.debug("ROSTER[ui] reuse cached rows (server roster identical)")
-            # The cached pass had no client and could not request cards; keep
-            # the post-login prefetch lazy so it never blocks the roster paint.
-            QtCore.QTimer.singleShot(
-                0, lambda rows=list(items): self._prefetch_roster_vcards(rows))
         else:
             self._rebuild_roster(items)
+        # Cards are decorative and requested in the low-priority phase, never
+        # in the same turns as the MUC presence/autojoin.
+        self._schedule_roster_vcard_prefetch(list(items))
         self._sync_all_conference_roster()
         self._sync_all_pm_roster()
         self._sync_self_roster()
@@ -5171,7 +5188,8 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.debug("ROSTER[ui] rebuild n=%d jids=%s", len(items),
                          [i.get("jid") for i in items])
             for item in items:
-                remembered_row = self._add_roster_item(item, remember=False)
+                remembered_row = self._add_roster_item(
+                    item, remember=False, request_vcard=False)
                 if remembered_row is not None:
                     remembered.append(remembered_row)
             known_contacts.update_many(remembered)
@@ -5210,14 +5228,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_conn_progress(5)
         return True
 
-    def _prefetch_roster_vcards(self, items: list) -> None:
-        """Request roster vCards after the first roster paint."""
-        if self._client is None:
+    def _schedule_roster_vcard_prefetch(self, items: list) -> None:
+        """Queue roster vCards for the low-priority startup phase."""
+        rows = [str(item.get("jid") or "") for item in items
+                if str(item.get("jid") or "")]
+        if not rows:
             return
-        for item in items:
-            jid = str(item.get("jid") or "")
-            if jid:
-                self._request_vcard(jid)
+        self._roster_vcard_queue = rows
+        QtCore.QTimer.singleShot(5000, self._prefetch_roster_vcards)
+
+    def _prefetch_roster_vcards(self, items=None) -> None:
+        """Request roster vCards in small idle batches.
+
+        The roster is painted from its cache; a fresh vCard is decorative and
+        used to be requested for every contact in the same turns as the MUC
+        join presence.  Batches keep the event loop responsive.
+        """
+        if self._client is None or getattr(self, "_shutting_down", False):
+            return
+        rows = (list(self._roster_vcard_queue)
+                if items is None else [str(item.get("jid") or "")
+                                       for item in items
+                                       if str(item.get("jid") or "")])
+        if items is None:
+            self._roster_vcard_queue = []
+        if not rows:
+            return
+        for jid in rows[:8]:
+            self._request_vcard(jid)
+        rest = rows[8:]
+        if rest:
+            self._roster_vcard_queue = rest
+            QtCore.QTimer.singleShot(250, self._prefetch_roster_vcards)
 
     def _prefill_avatars(self, items: list) -> None:
         """Show cached avatar files before the vCards are (re)fetched."""
@@ -5227,7 +5269,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if path and os.path.isfile(path):
                 self._roster.update_user(item["jid"], avatar_path=path)
 
-    def _add_roster_item(self, item: dict, remember: bool = True):
+    def _add_roster_item(self, item: dict, remember: bool = True,
+                         request_vcard: bool = True):
         jid = item["jid"]
         own = (self._client.jid_str if self._client is not None
                else (getattr(self, "_login_jid", "")
@@ -5278,7 +5321,8 @@ class MainWindow(QtWidgets.QMainWindow):
                              if self._client else ""),
             )
             self._roster.add_user(user)
-        self._request_vcard(jid)
+        if request_vcard:
+            self._request_vcard(jid)
         return (jid, name, groups, False)
 
     def _request_vcard(self, jid: str, force: bool = False):
@@ -5385,6 +5429,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_avatar_updated(self, jid: str, path: str):
         """A contact's avatar changed via PEP (XEP-0084)."""
         self._refresh_avatar(jid, path)
+        # Prepared HTML embeds avatar data-URIs; a changed avatar invalidates it.
+        try:
+            from stanza_im.core import chat_render_cache
+            account = str(getattr(self._client, "jid_str", "") or "")
+            chat_render_cache.invalidate(account)
+        except Exception:  # noqa: BLE001 - cache is best-effort
+            pass
 
     def _own_avatar_uri(self) -> str:
         """Resolve our own avatar (outgoing chat messages) to a data-URI."""
@@ -5400,7 +5451,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     or jid in self._muc_self_nicks else "")
         path = card.get("avatar_path") or ""
         raw = card.get("photo")
-        if raw:
+        if raw and not path:
             try:
                 path = save_avatar(jid, raw)
             except Exception:
@@ -7271,6 +7322,129 @@ class MainWindow(QtWidgets.QMainWindow):
         """True while a MAM sync or a forced post-sync reload owns *jid*."""
         return _history_sync_state(self, jid)
 
+    def _schedule_render_warmup(self) -> None:
+        """Queue a small set of prepared chats after unread work settles."""
+        if self._render_warmup_scheduled or self._client is None:
+            return
+        self._render_warmup_scheduled = True
+        keys: list[str] = []
+        seen: set[str] = set()
+
+        def add(key: str) -> None:
+            key = str(key or "")
+            if (not key or key in seen or self._chat_window.get_chat(key)
+                    or len(keys) >= 20):
+                return
+            seen.add(key)
+            keys.append(key)
+
+        for key, entry in sorted(
+                self._unread_chats.items(),
+                key=lambda item: -int((item[1] or {}).get("unread") or 0)):
+            if int((entry or {}).get("unread") or 0) > 0:
+                add(key)
+        for key in self._conference_roster:
+            add(key)
+        for key in self._bookmarks:
+            add(key)
+        self._render_warmup_queue = keys
+        logger.debug("PREP[warm] queued=%d", len(keys))
+        if keys:
+            QtCore.QTimer.singleShot(500, self._warm_next_prepared)
+
+    def _warm_next_prepared(self) -> None:
+        if self._render_warmup_active or not self._render_warmup_queue:
+            return
+        if self._client is None or getattr(self, "_shutting_down", False):
+            self._render_warmup_queue = []
+            return
+        key = self._render_warmup_queue.pop(0)
+        if self._chat_window.get_chat(key) is not None:
+            QtCore.QTimer.singleShot(0, self._warm_next_prepared)
+            return
+        self._render_warmup_active = True
+        self._start_task(self._warm_prepared_chat(key))
+
+    async def _warm_prepared_chat(self, key: str) -> None:
+        try:
+            from stanza_im.core import chat_render_cache, history
+            client = self._client
+            if client is None:
+                return
+            try:
+                window = int(self._config.chat.history_limit)
+            except (TypeError, ValueError):
+                window = _HISTORY_PAGE
+            window = max(10, min(window, _HISTORY_WINDOW_MAX))
+            unread = int(self._read_state(key).get("unread") or 0)
+            window = max(window, min(unread + window, _HISTORY_WINDOW_MAX))
+            entries = await history.load_history_async(key, limit=window)
+            if not entries or self._client is not client:
+                return
+            if self._chat_window.get_chat(key) is not None:
+                return
+            ctx = self._render_warmup_context(key)
+            if ctx is None:
+                return
+            from stanza_im.ui.chat_render_prepare import render_prepared
+            result = render_prepared(entries, **ctx)
+            if result is None:
+                self._render_warmup_queue = []
+                return
+            settings, refs, html = result
+            await asyncio.to_thread(
+                chat_render_cache.put, client.jid_str.split("/", 1)[0],
+                key, settings, refs, html, len(entries))
+            logger.debug("PREP[warm] jid=%s rows=%d", key, len(entries))
+        except Exception:  # noqa: BLE001 - warmup must never break startup
+            logger.debug("PREP[warm] failed for %s", key, exc_info=True)
+        finally:
+            self._render_warmup_active = False
+            if self._render_warmup_queue and self._client is not None:
+                QtCore.QTimer.singleShot(600, self._warm_next_prepared)
+
+    def _render_warmup_context(self, key: str) -> dict | None:
+        from stanza_im.include.avatars import avatar_data_uri
+        chat_window = self._chat_window
+        if chat_window is None:
+            return None
+        is_muc = bool(self._is_conference_jid(key))
+        options = dict(getattr(chat_window, "_chat_options", {}) or {})
+        theme = (getattr(chat_window, "_muc_theme", None) if is_muc
+                 else getattr(chat_window, "_theme", None))
+        if theme is None:
+            return None
+        users = (list(self._muc_users.get(key, {}).values())
+                 if is_muc else [])
+        display_name = (self._muc_display_name(key) if is_muc
+                        else (self._roster_name(key)
+                              or key.split("@", 1)[0]))
+        # A normal 1:1 tab leaves ``_peer_avatar`` empty and resolves the
+        # sender's image from the JID; only a PM tab sets it explicitly.
+        peer_avatar = ""
+        if not is_muc and key in self._pm_targets:
+            room, nick = self._pm_targets.get(key, ("", ""))
+            peer_avatar = avatar_data_uri(key) or avatar_data_uri(nick) or ""
+        return {
+            "display_name": display_name,
+            "is_muc": is_muc,
+            "own_jid": str(getattr(self._client, "jid_str", "") or "")
+                       .split("/", 1)[0],
+            "own_avatar": self._own_avatar_uri(),
+            "peer_avatar": peer_avatar,
+            "users": users,
+            "self_nick": self._muc_self_nicks.get(key, "") if is_muc else "",
+            "theme": theme,
+            "avatar_radius": int(getattr(chat_window, "_avatar_radius", 20)),
+            "colored_nicks": bool(getattr(chat_window,
+                                          "_colored_muc_nicks", True)),
+            "show_hats": bool(getattr(chat_window,
+                                      "_muc_hats_visible", True)),
+            "show_avatars": bool(options.get("show_avatars", True)),
+            "moderation": bool(self._muc_moderation.get(key, False)),
+            "text_scale": float(options.get("text_scale", 1.0) or 1.0),
+        }
+
     def _load_history(self, jid: str, anchor: dict | None = None,
                       seen_anchor: dict | None = None, force: bool = False,
                       **kwargs):
@@ -7293,6 +7467,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                   seen_anchor: dict | None = None,
                                   background: bool = False,
                                   force: bool = False):
+        started = time.monotonic()
         from stanza_im.core import history
         chat = self._chat_window.get_chat(jid)
         if not chat:
@@ -7349,7 +7524,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if chat is None or self._chat_window.get_chat(jid) is not chat:
             return
-        chat.set_history(entries, window, exhausted, anchor=anchor, seen_anchor=seen_anchor)
+        loader = getattr(chat, "load_prepared", None)
+        prepared = (await asyncio.to_thread(loader, entries)
+                    if callable(loader) else None)
+        if prepared:
+            logger.debug("PREP[hit] jid=%s rows=%d", jid, len(prepared))
+        chat.set_history(entries, window, exhausted, anchor=anchor,
+                         seen_anchor=seen_anchor, prepared=prepared)
+        logger.info("CHAT[open] jid=%s rows=%d prepared=%s elapsed_ms=%d",
+                    jid, len(entries), bool(prepared),
+                    int((time.monotonic() - started) * 1000))
         entry = self._unread_chats.get(jid)
         active = (not background and self._chat_area_available()
                   and self._chat_window.current_jid() == jid)
@@ -7736,8 +7920,10 @@ class MainWindow(QtWidgets.QMainWindow):
             tr("ctx_clear_history_confirm", jid=jid))
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
             return
-        from stanza_im.core import history
+        from stanza_im.core import chat_render_cache, history
         history.clear(jid)
+        chat_render_cache.invalidate(
+            str(getattr(self._client, "jid_str", "") or ""), jid)
         chat = self._chat_window.get_chat(jid)
         if chat:
             chat.history_cleared()
@@ -9168,6 +9354,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 affected, client._global_sync_start_ts)
         if client._global_mam_unsupported:
             await self._legacy_startup_reconcile()
+        QtCore.QTimer.singleShot(2000, self._schedule_render_warmup)
 
     def _has_local_state(self) -> bool:
         """Whether this profile already has local history/read state."""
@@ -9972,23 +10159,9 @@ class MainWindow(QtWidgets.QMainWindow):
                               quick_response: dict | None = None):
         self._touch_tab_activity(room)
         if archived:
-            from stanza_im.core import history
-            self._start_task(history.store_message_async(
-                room, "incoming", body,
-                timestamp=ts or _current_timestamp(),
-                sender=nick, archive_id=archive_id,
-                stanza_id=stanza_id, origin_id=reply_able_id,
-                reply_to=reply_to, reply_id=reply_id, markup=markup,
-                quick_response=quick_response, archived=True))
-            # A join-time history replay is stored, not rendered: merge it into
-            # the window when the room is the conversation on screen.  A replay
-            # has no archive id and is usually older than the tail this client
-            # already has, so it needs a forced reload (a MAM page does not).
-            chat = self._chat_window.get_chat(room)
-            if (chat is not None and self._chat_area_visible()
-                    and self._chat_window.current_jid() == room
-                    and not getattr(chat, "_user_scrolled_up", False)):
-                chat.schedule_tail_refresh(force=not archive_id)
+            self._buffer_muc_replay(room, nick, body, ts, archive_id,
+                                    stanza_id, reply_able_id, reply_to,
+                                    reply_id, markup, quick_response)
             return
         logger.debug("Live groupchat message: room=%s nick=%s archive_id=%s",
                      room, nick, archive_id or "none")
@@ -10056,6 +10229,69 @@ class MainWindow(QtWidgets.QMainWindow):
         self._remember_contact(room, name=self._muc_display_name(room),
                                groups=[tr("roster_group_conferences")],
                                is_conference=True)
+
+    def _buffer_muc_replay(self, room: str, nick: str, body: str, ts,
+                           archive_id: str, stanza_id: str,
+                           origin_id: str, reply_to: str, reply_id: str,
+                           markup, quick_response) -> None:
+        """Batch join-time history instead of one SQLite write per message."""
+        row = {
+            "direction": "incoming", "body": body,
+            "timestamp": ts or _current_timestamp(), "sender": nick,
+            "archive_id": archive_id, "stanza_id": stanza_id,
+            "origin_id": origin_id, "reply_to": reply_to,
+            "reply_id": reply_id, "markup": markup,
+            "quick_response": quick_response,
+        }
+        self._muc_replay_buffers.setdefault(room, []).append(row)
+        if room in self._muc_replay_timers:
+            return
+        self._muc_replay_timers[room] = True
+        QtCore.QTimer.singleShot(
+            400, lambda r=room: self._flush_muc_replay(r))
+
+    def _flush_muc_replay(self, room: str) -> None:
+        self._muc_replay_timers.pop(room, None)
+        rows = self._muc_replay_buffers.pop(room, [])
+        if not rows:
+            return
+        rows = self._replay_rows_to_store(room, rows)
+        if not rows:
+            return
+        self._start_task(self._store_muc_replay(room, rows))
+
+    async def _store_muc_replay(self, room: str, rows: list[dict]) -> None:
+        from stanza_im.core import history
+        await history.store_many_async(room, rows)
+        chat = self._chat_window.get_chat(room)
+        if (chat is not None and self._chat_area_visible()
+                and self._chat_window.current_jid() == room
+                and not getattr(chat, "_user_scrolled_up", False)):
+            chat.schedule_tail_refresh(
+                force=any(not row.get("archive_id") for row in rows))
+
+    def _replay_rows_to_store(self, room: str,
+                              rows: list[dict]) -> list[dict]:
+        """Trim old replay for minimized autojoin rooms without losing unread.
+
+        A room that is open keeps the full replay.  For a minimized room the
+        unread suffix is preserved: all rows when no read anchor exists, only
+        rows after the read/seen point when one does.  A fully read room keeps
+        a short tail as a local fallback for servers without MAM.
+        """
+        chat = self._chat_window.get_chat(room)
+        if chat is not None or not self._should_minimize_muc(room):
+            return rows
+        entry = self._read_state(room)
+        unread = int(entry.get("unread") or 0)
+        anchor = max(str(entry.get("read_ts") or ""),
+                     str(entry.get("seen_ts") or ""))
+        if unread > 0:
+            if not anchor:
+                return rows
+            return [row for row in rows
+                    if str(row.get("timestamp") or "") > anchor]
+        return rows[-50:]
 
     def _muc_caps_node(self, room: str, nick: str, previous: dict) -> str:
         """The occupant's XEP-0115 caps node (from the client's groupchat)."""
@@ -13431,6 +13667,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_avatar_paths.clear()
         self._muc_room_features.clear()
         self._muc_history_pending.clear()
+        self._muc_replay_buffers.clear()
+        self._muc_replay_timers.clear()
+        self._render_warmup_scheduled = False
+        self._render_warmup_queue = []
+        self._render_warmup_active = False
         self._mam_unsupported.clear()
         self._mds_reconciling.clear()
         self._mds_reconciled.clear()

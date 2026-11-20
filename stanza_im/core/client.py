@@ -1534,6 +1534,13 @@ class JabberClient:
         self._pep_subscribe_sem = asyncio.Semaphore(2)
         self._pep_sweep_task: asyncio.Task | None = None
         self._pep_sweep_paused = False
+        # Startup low-priority work is held back until the presence/autojoin
+        # burst and the unread reconciliation have had a chance to run.
+        self._startup_settled = True
+        self._startup_deferred_versions: set[str] = set()
+        self._startup_deferred_pep: set[str] = set()
+        self._startup_deferred_subs: set[str] = set()
+        self._startup_low_task: asyncio.Task | None = None
         # XEP-0115 features per full JID (for call-capability gating)
         self.contact_features: dict[str, set] = {}
         # Full caps data per resource (features, identities, raw XML) for the
@@ -2215,6 +2222,9 @@ class JabberClient:
         session's UI (e.g. show a stale "connection lost" status).
         """
         self._callbacks.clear()
+        cache = getattr(self, "_vcard_cache", None)
+        if cache is not None:
+            cache.flush()
 
     def emit(self, event: str, *args: Any, **kwargs: Any) -> None:
         """Invoke all callbacks registered for *event*."""
@@ -3266,6 +3276,9 @@ class JabberClient:
         if handle is not None:
             handle.cancel()
         self._save_roster_cache()
+        cache = getattr(self, "_vcard_cache", None)
+        if cache is not None:
+            cache.flush()
 
     def get_contact(self, bare_jid: str) -> ContactInfo:
         """Return (creating if needed) the ContactInfo for a bare JID."""
@@ -3366,6 +3379,7 @@ class JabberClient:
 
     async def _join_muc_task(self, room: str, nick: str, password: str) -> None:
         muc = self.xmpp.plugin["xep_0045"]
+        started = time.monotonic()
         try:
             result = await muc.join_muc_wait(room=room, nick=nick,
                                              password=password, timeout=90)
@@ -3404,6 +3418,8 @@ class JabberClient:
             self.emit("muc_join_error", room, "unknown", "")
             return
 
+        logger.info("MUC[join] room=%s elapsed_ms=%d", room,
+                    int((time.monotonic() - started) * 1000))
         pres, subject_msg, occupants, _history = result
         # XEP-0045 §10.1.3: status code 201 marks a room we just created.
         created = False
@@ -5266,6 +5282,9 @@ class JabberClient:
         bare = requested.split("/", 1)[0]
         cache_key = requested if "/" in requested else bare
         cached = None if force else self._vcard_cache.get(cache_key)
+        logger.debug("VCARD[cache] jid=%s %s", requested,
+                     "hit" if cached is not None else
+                     ("force" if force else "miss"))
         if cached is not None:
             if "/" not in requested:
                 contact = self.get_contact(bare)
@@ -5295,7 +5314,7 @@ class JabberClient:
     #: A conference participant's card is reused for a day: a nick's avatar
     #: and name rarely change, and refetching one per presence floods the
     #: server during a large-room join.
-    PARTICIPANT_VCARD_MAX_AGE = 24 * 60 * 60
+    PARTICIPANT_VCARD_MAX_AGE = 3 * 24 * 60 * 60
     #: Spacing between two background participant-vCard requests (seconds):
     #: two per second, so a large room never floods the server.
     PARTICIPANT_VCARD_INTERVAL = 0.5
@@ -5921,6 +5940,7 @@ class JabberClient:
 
     async def _on_session_start(self, event) -> None:
         logger.info("Session started, requesting roster...")
+        self._startup_settled = False
         self._cert_blocked = False
         self._cert_error_sent = False
         # Re-register our disco features under the freshly bound JID (see
@@ -5958,10 +5978,12 @@ class JabberClient:
         # messages.  _mds_init gates only the MDS-specific part.
         self._global_mam_inflight = False
         loop.create_task(self._mds_init())
-        # PEP subscriptions survive a reconnect, so re-subscribe to the
-        # currently known contacts (servers typically drop them on session end).
-        # This is background work: it must not hold up the session start.
-        loop.create_task(self._subscribe_pep_contacts())
+        # The vCard/version/PEP burst is deliberately held back: the autojoin
+        # presence and the unread/MDS pass are user-visible, while client
+        # versions and decorative presence are not.
+        if self._startup_low_task is None or self._startup_low_task.done():
+            self._startup_low_task = loop.create_task(
+                self._deferred_startup_work())
         self._start_pep_sweep()
         self._start_muc_self_ping()
         self.emit("session_started")
@@ -5978,6 +6000,44 @@ class JabberClient:
         for bare in list(self.contacts):
             self._ensure_pep_subscription(bare)
             await asyncio.sleep(0)
+
+    async def _deferred_startup_work(self) -> None:
+        """Run low-priority network work after presence/autojoin/unread.
+
+        A large roster used to produce hundreds of vCard/version/PEP IQs in the
+        same event-loop turns as the MUC joins, delaying the join presence by
+        10+ seconds.  This phase waits for the initial joins (bounded) and then
+        drains the deferred probes in small batches.
+        """
+        try:
+            await asyncio.sleep(3.0)
+            for _ in range(50):
+                tasks = [task for task in self._muc_join_tasks.values()
+                         if not task.done()]
+                if not tasks:
+                    break
+                await asyncio.sleep(0.1)
+            self._startup_settled = True
+            logger.info("STARTUP[low] versions=%d pep=%d subs=%d",
+                        len(self._startup_deferred_versions),
+                        len(self._startup_deferred_pep),
+                        len(self._startup_deferred_subs))
+            versions = list(self._startup_deferred_versions)
+            self._startup_deferred_versions.clear()
+            for offset in range(0, len(versions), 8):
+                for full_jid in versions[offset:offset + 8]:
+                    self._start_task(self._prefetch_version(full_jid))
+                await asyncio.sleep(0.05)
+            await self._subscribe_pep_contacts()
+            self._startup_deferred_subs.clear()
+            pep = list(self._startup_deferred_pep)
+            self._startup_deferred_pep.clear()
+            for offset in range(0, len(pep), 10):
+                for bare in pep[offset:offset + 10]:
+                    self._pep_refresh(bare)
+                await asyncio.sleep(0.05)
+        finally:
+            self._startup_low_task = None
 
     def bookmarks_snapshot(self) -> list[dict] | None:
         """The list fetched at session start (one-shot; ``None`` when absent)."""
@@ -6703,6 +6763,9 @@ class JabberClient:
         if not bare or not self.xmpp.is_connected():
             return
         if self.jid_str and self.jid_str == bare:
+            return
+        if not getattr(self, "_startup_settled", True):
+            self._startup_deferred_subs.add(bare)
             return
         now = time.monotonic()
         last_fail = self._pep_subscribe_failed.get(bare, 0.0)
@@ -7440,7 +7503,10 @@ class JabberClient:
             }
             if resource and frm not in self._version_probed:
                 self._version_probed.add(frm)
-                self._start_task(self._prefetch_version(frm))
+                if getattr(self, "_startup_settled", True):
+                    self._start_task(self._prefetch_version(frm))
+                else:
+                    self._startup_deferred_versions.add(frm)
             if resource:
                 self._start_task(self._load_caps(frm))
             # Refresh last-seen for OMEMO devices already mapped to this
@@ -7493,6 +7559,9 @@ class JabberClient:
                 < self._pep_refresh_interval:
             return
         self._pep_last_refresh[bare] = now
+        if not getattr(self, "_startup_settled", True):
+            self._startup_deferred_pep.add(bare)
+            return
         self._pep_refresh(bare)
 
     async def _prefetch_version(self, full_jid: str) -> None:
@@ -8344,13 +8413,18 @@ class JabberClient:
                 self._avatar_ids[bare] = card["photo_hash"]
             except Exception:
                 pass
+        # The binary PHOTO is already on disk under avatar_path.  Keeping the
+        # base64 bytes in every contact's card (hundreds of roster entries)
+        # wastes tens of megabytes and makes each vCard event unserialisable
+        # for the cache.  The editor reloads the file when it needs the photo.
+        card.pop("photo", None)
         if "/" not in jid:
             contact = self.get_contact(bare)
             if not card.get("avatar_path") and contact.avatar_path:
                 card["avatar_path"] = contact.avatar_path
             contact.vcard = card
         card["fetched_at"] = time.time()
-        self._vcard_cache.put(jid or bare, card)
+        self._vcard_cache.put(jid or bare, card, defer=True)
         logger.debug("vCard received for %s", jid or bare)
         self.emit("vcard_received", jid or bare, card)
 
