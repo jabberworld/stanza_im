@@ -2017,7 +2017,10 @@ not downloaded for previews, so no size gate applies to them.
 The thumbnail is scaled to fit `media_preview_size` in **both** dimensions
 (KeepAspectRatio), so `set_media_thumbnail` drops the placeholder's forced
 `width` once the image loads — a portrait picture then shows at its real
-(bounded) height instead of being stretched into a tall preview. The message
+(bounded) height instead of being stretched into a tall preview. Every image
+preview also carries an inline `max-width`/`max-height` equal to
+`media_preview_size`, so dropping the `width` attribute cannot expose an older
+or larger cached thumbnail at natural/full-screen size. The message
 grows, so the view scrolls back to the end when it was already there (the same
 `stick` rule as `update_reactions`).
 `thumbnail_ready` is pushed into every open

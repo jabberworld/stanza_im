@@ -181,13 +181,17 @@ class MediaPreviewService(QtCore.QObject):
                     f'<a class="stanza-media stanza-media-image" '
                     f'href="stanza:view:image/{enc}" data-media-url="{data}">'
                     f'<img class="stanza-media-thumb" data-media-url="{data}" '
-                    f'src="{uri}" width="{self._size}" alt=""></a>')
+                    f'src="{uri}" width="{self._size}" '
+                    f'style="max-width:{self._size}px;max-height:{self._size}px" '
+                    f'alt=""></a>')
             self.request(url)
             return (
                 f'<a class="stanza-media stanza-media-image stanza-media-loading" '
                 f'href="stanza:view:image/{enc}" data-media-url="{data}">'
                 f'<img class="stanza-media-thumb" data-media-url="{data}" '
-                f'width="{self._size}" alt=""></a>')
+                f'width="{self._size}" '
+                f'style="max-width:{self._size}px;max-height:{self._size}px" '
+                f'alt=""></a>')
         if url.startswith("aesgcm://"):
             # Encrypted media can't be played inline (the browser can't read
             # the aesgcm: scheme); decrypt and open it in the viewer instead.

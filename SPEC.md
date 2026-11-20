@@ -3186,6 +3186,9 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
 - Rendering (`ChatThemeFactory.render_message(media=…)`): the fallback body
   range is stripped and a file card (name, size) plus the preview (classified
   by the announced media-type when the URL has no useful extension) is shown.
+  Image previews carry inline `max-width`/`max-height` bounds from
+  `media_preview_size`, including cached and loading placeholders, so removing
+  the `width` attribute after load cannot stretch an older cached thumbnail.
 - Sending (`JabberClient._attach_media_sharing`, from `_http_upload_flow`)
   builds the same block with XEP-0300 sha-256 + sha-1 hashes, the OOB URL,
   optional OOB/SIMS `<desc>` and the two fallback ranges; a batch caption is

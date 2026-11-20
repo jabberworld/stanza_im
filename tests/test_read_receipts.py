@@ -8,6 +8,7 @@ Run with:
     LD_LIBRARY_PATH=$HOME/.local/qtlibs/usr/lib/x86_64-linux-gnu \
     QT_QPA_PLATFORM=offscreen python3 tests/test_read_receipts.py
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -23,6 +24,7 @@ from types import SimpleNamespace
 from stanza_im.i18n import load as i18n_load
 from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_themes import ChatThemeFactory
+from stanza_im.ui.chat_view import ChatView
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.main_window import MainWindow
 
@@ -110,6 +112,9 @@ plain = ChatThemeFactory().render_message("Me", "hello", "10:00", "outgoing")
 check("an unread outgoing message carries no eye", "read-receipt" not in plain)
 check("the read eye is a block below the timestamp",
       ".read-receipt { display: block;" in chat_themes._UNREAD_CSS)
+read_src = inspect.getsource(ChatView.mark_message_read)
+check("the read eye also matches the server stanza id",
+      "data-stanza-sid" in read_src)
 
 # 5. Re-rendering keeps the session read state ------------------------------
 src = open(os.path.join(os.path.dirname(os.path.dirname(

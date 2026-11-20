@@ -141,7 +141,8 @@ service.set_size(180)
 service.set_mode("all")
 img_html = service.markup(url)
 check("image markup embed", img_html and "stanza:view:image/" in img_html
-      and "data:image/png;base64," in img_html and 'width="180"' in img_html)
+      and "data:image/png;base64," in img_html and 'width="180"' in img_html
+      and 'max-width:180px' in img_html and 'max-height:180px' in img_html)
 audio_html = service.markup("https://h/a/song.mp3")
 check("audio markup", audio_html and "<audio" in audio_html
       and 'data-media-url="https://h/a/song.mp3"' in audio_html)
@@ -187,7 +188,9 @@ service.request = lambda _u: None
 placeholder = service.markup("https://h/p/uncached.png")
 check("uncached image placeholder", placeholder
       and "stanza-media-loading" in placeholder
-      and "data:image/png;base64," not in placeholder)
+      and "data:image/png;base64," not in placeholder
+      and 'max-width:180px' in placeholder
+      and 'max-height:180px' in placeholder)
 
 # Per-chat image limit: known oversized images are gated; unknown sizes load.
 _gated = service.markup("https://h/p/large.png",

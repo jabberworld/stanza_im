@@ -3208,6 +3208,7 @@ window.__stanzaMentionRef = '';
             try:
                 self.page().runJavaScript(f"""
                 var node = document.querySelector('[data-stanza-id=' + JSON.stringify({safe}) + ']');
+                if (!node) {{ node = document.querySelector('[data-stanza-sid=' + JSON.stringify({safe}) + ']'); }}
                 if (!node) {{ node = document.querySelector('[data-reply-id=' + JSON.stringify({safe}) + ']'); }}
                 var stamp = node && node.querySelector('.time_initial');
                 if (stamp) {{
