@@ -379,7 +379,6 @@ def run() -> int:
     asyncio.set_event_loop(loop)
     _loop = loop
 
-    from PyQt6 import QtCore
     from stanza_im.ui.main_window import MainWindow
 
     window = MainWindow(app, defer=defer_build, initial_uris=initial_uris)

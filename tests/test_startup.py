@@ -83,6 +83,18 @@ for module in ("stanza_im.xmpp.media", "aiortc", "av"):
     check("importing jingle_rtp does not load %s" % module,
           module not in sys.modules)
 
+# `run()` must not shadow the module-level QtCore import with a local one: an
+# import below the first use makes Python treat QtCore as local for the whole
+# function and raises UnboundLocalError during startup.
+import inspect  # noqa: E402
+from stanza_im import app as app_module  # noqa: E402
+
+run_source = inspect.getsource(app_module.run)
+check("run() does not shadow the module-level QtCore import",
+      "from PyQt6 import QtCore" not in run_source)
+check("the app module imports QtCore at module level",
+      "from PyQt6 import QtCore" in inspect.getsource(app_module))
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")
