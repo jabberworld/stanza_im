@@ -2646,7 +2646,9 @@ previous set (keyed by occupant-id in MUC — `_occupant_id(pres)` is stored in
 `history.set_reactions` (SQLite `reactions` JSON column, migration); the target
 is matched by any of `message_id`/`origin_id`/`stanza_id`/`archive_id` (the MUC
 target id is usually a server `stanza-id`) and the open tab is refreshed in
-place with `ChatWindow.update_reactions` → `ChatWidget.set_reactions`.
+place with `ChatWindow.update_reactions` → `ChatWidget.set_reactions`. The DOM
+update matches `data-stanza-id`, `data-stanza-sid` and `data-reply-id`, because
+a MUC message's server stanza-id is rendered separately from its local id.
 MAM reaction stanzas are collected during `_mam_rows` and applied to their
 target after the page is stored, so a reaction received while offline is
 recovered too. `ChatWidget.compute_reactions` aggregates chips

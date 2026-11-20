@@ -2053,6 +2053,7 @@ class ChatWidget(QtWidgets.QWidget):
                 self._view.update_reactions(
                     ref_id, _render_reactions_chips(
                         self.compute_reactions(entry)))
+                logger.debug("REACT[update] jid=%s ref=%s", self.jid, ref_id)
             except Exception:
                 logger.debug("Could not update reactions", exc_info=True)
             return True

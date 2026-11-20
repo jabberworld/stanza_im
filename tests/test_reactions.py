@@ -270,6 +270,9 @@ check("ChatWidget declares reaction signals",
       and hasattr(_CW, "unreaction_requested"))
 check("ChatView declares the picker anchor signal",
       hasattr(ChatView, "reaction_anchor"))
+_reaction_js = inspect.getsource(ChatView.update_reactions)
+check("reaction updates also match the server stanza id",
+      "data-stanza-sid" in _reaction_js)
 check("ChatView defines the reaction-ref clearers",
       hasattr(ChatView, "_clear_reactions_request")
       and hasattr(ChatView, "_clear_unreact_request")

@@ -2925,6 +2925,11 @@ window.__stanzaMentionRef = '';
                     "var ref = " + json.dumps(str(ref_id)) + ";"
                     "var n = document.querySelector('[data-stanza-id=' +"
                     " JSON.stringify(ref) + ']');"
+                    # A MUC reaction targets the server stanza-id, while the
+                    # rendered node's data-stanza-id is the local/origin id;
+                    # data-stanza-sid carries the server id separately.
+                    "if (!n) { n = document.querySelector('[data-stanza-sid=' +"
+                    " JSON.stringify(ref) + ']'); }"
                     "if (!n) { n = document.querySelector('[data-reply-id=' +"
                     " JSON.stringify(ref) + ']'); }"
                     "if (n) { var box = n.querySelector('.stanza-reactions');"
