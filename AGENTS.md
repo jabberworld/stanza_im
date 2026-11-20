@@ -2425,7 +2425,9 @@ The delivery check (`receipt_delivered`, XEP-0184) and the read eye
 (`chat_marker_displayed`, XEP-0333) are independent; the eye is not persisted.
 For a MUC the marker sender is `room/nick`, so the viewer is the nick and the
 eye lives on the room's outgoing row; a private-message key is preferred when
-it is open. Its tooltip lists up to ten viewers plus «и ещё N».
+it is open. Its tooltip lists up to ten viewers plus «и ещё N». The eye is a
+block element under the timestamp (`.read-receipt { display: block; }`), so it
+never shifts the timestamp text and works with both minimal-mod and Candy.
 [`tests/test_read_receipts.py`]
 `_mds_apply_remote` skips a state equal to `_mds_local` for live PEP events, but
 the startup catch-up passes `force=True`: the map is seeded at connect from the

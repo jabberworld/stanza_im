@@ -3217,9 +3217,10 @@ except XEP-0096 `wontfix`). `tools/build_doap.py` regenerates it and
   `MainWindow._on_chat_marker_displayed` resolves a 1:1 bare JID, a MUC
   `room/nick` to the room (or an open private-message key), and `ChatWidget.
   mark_message_read` stores the viewer list on the outgoing row. The eye is
-  rendered in `.time_initial` (outgoing only), is kept across a tab re-render,
-  and its MUC tooltip names at most ten viewers plus «и ещё N». No SQLite
-  schema is changed.
+  rendered in `.time_initial`/`.timestamp` (outgoing only) as a block element
+  under the time, so it never shifts the timestamp; it is kept across a tab
+  re-render, and its MUC tooltip names at most ten viewers plus «и ещё N». No
+  SQLite schema is changed.
 
 ### 14.5.3 Whiteboard (`ui/whiteboard_dialog.py`, `ui/whiteboard_canvas.py`)
 

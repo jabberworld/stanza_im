@@ -140,7 +140,7 @@ _UNREAD_CSS = """
 .stanza-unread { margin: 8px 2px 6px; padding-top: 3px; text-align: center;
                  font-size: 0.85em; color: #888;
                  border-top: 1px solid rgba(127,127,127,.45); }
-.read-receipt { margin-left: 3px; cursor: help; }
+.read-receipt { display: block; margin-left: 0; cursor: help; }
 """
 
 _emoji_font_family_cache: str | None = None

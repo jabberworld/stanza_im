@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from types import SimpleNamespace
 
 from stanza_im.i18n import load as i18n_load
+from stanza_im.ui import chat_themes
 from stanza_im.ui.chat_themes import ChatThemeFactory
 from stanza_im.ui.chat_widget import ChatWidget
 from stanza_im.ui.main_window import MainWindow
@@ -107,6 +108,8 @@ check("outgoing HTML carries the tooltip", 'title="Seen"' in out)
 check("incoming HTML never carries the eye", "read-receipt" not in inc)
 plain = ChatThemeFactory().render_message("Me", "hello", "10:00", "outgoing")
 check("an unread outgoing message carries no eye", "read-receipt" not in plain)
+check("the read eye is a block below the timestamp",
+      ".read-receipt { display: block;" in chat_themes._UNREAD_CSS)
 
 # 5. Re-rendering keeps the session read state ------------------------------
 src = open(os.path.join(os.path.dirname(os.path.dirname(
