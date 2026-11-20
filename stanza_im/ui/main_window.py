@@ -8996,7 +8996,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if chat is not None:
                 remaining = chat.mark_visible_unread(
                     move_divider=chat.take_seen_move())
-                mentions = chat.mark_visible_mentions()
+                mentions = (chat.mark_visible_mentions()
+                            if int(entry.get("mentions") or 0) > 0 else 0)
                 seen_anchor = chat.seen_anchor()
                 if seen_anchor.get("sid"):
                     entry["seen_sid"] = str(seen_anchor["sid"])
@@ -9067,7 +9068,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     150, lambda: self._apply_visible_unread(jid, attempt + 1))
             return
         remaining = chat.mark_visible_unread(move_divider=False)
-        mentions = chat.mark_visible_mentions()
+        mentions = (chat.mark_visible_mentions()
+                    if int(entry.get("mentions") or 0) > 0 else 0)
         MainWindow._queue_seen_progress_mds(self, jid, chat, entry, remaining)
         if remaining == entry.get("unread") and mentions == entry.get("mentions"):
             # The counters are unchanged, but ``_unread_total`` may still be

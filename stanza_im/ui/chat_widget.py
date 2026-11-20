@@ -554,6 +554,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._notes_enabled = False
         self._last_sender: str = ""
         self._history: list[dict] = []
+        self._ordered_cache: list[dict] | None = None
+        self._ordered_cache_sig = None
         self._prepared_html: list[str] = []
         self._prepared_settings = ""
         self._render_cache_fragments: list[str] = []
@@ -1105,10 +1107,21 @@ class ChatWidget(QtWidgets.QWidget):
         self._typing_timer.setSingleShot(True)
         self._typing_timer.setInterval(_TYPING_DEBOUNCE_MS)
         self._typing_timer.timeout.connect(self._typing_paused)
+        self._pending_link_focus = False
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.applicationStateChanged.connect(self._on_app_state_changed)
 
     # ── Link / marker handling ────────────────────────────────────
 
     def _open_link(self, url: str):
+        """Handle a chat control/link click and keep the composer ready."""
+        try:
+            self._handle_link(url)
+        finally:
+            self._focus_input_after_link()
+
+    def _handle_link(self, url: str):
         if url.startswith("stanza:quick:"):
             self._handle_quick_uri(url)
             return
@@ -1201,9 +1214,50 @@ class ChatWidget(QtWidgets.QWidget):
             self.xmpp_link_clicked.emit(url)
             return
         if low.startswith(("http://", "https://", "mailto:")):
+            # Starting the browser may deactivate this application; leave the
+            # composer focused so returning to Stanza IM needs no extra click.
+            inp = self.__dict__.get("_input")
+            if inp is not None:
+                inp.setFocus()
             webbrowser.open(url)
             return
         self.link_clicked.emit(url)
+
+    def _focus_input_after_link(self) -> None:
+        """Focus the composer after a link without stealing dialog focus."""
+        if QtWidgets.QApplication.instance() is None:
+            return
+        self._pending_link_focus = True
+        QtCore.QTimer.singleShot(0, self._restore_input_focus)
+
+    def _restore_input_focus(self) -> None:
+        if self.__dict__.get("_released"):
+            return
+        inp = self.__dict__.get("_input")
+        if inp is None or not inp.isVisible():
+            return
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return
+        if app.activeModalWidget() is not None:
+            return
+        focus = app.focusWidget()
+        focus_window = focus.window() if focus is not None else None
+        if (isinstance(focus_window, QtWidgets.QDialog)
+                and focus_window is not self.window()):
+            # A vCard/join/media dialog opened from the link owns the focus.
+            return
+        if app.applicationState() != QtCore.Qt.ApplicationState.ApplicationActive:
+            # The external browser is in front; the pending flag makes the
+            # next activation restore the composer focus.
+            return
+        self._pending_link_focus = False
+        inp.setFocus()
+
+    def _on_app_state_changed(self, state) -> None:
+        if (state == QtCore.Qt.ApplicationState.ApplicationActive
+                and getattr(self, "_pending_link_focus", False)):
+            QtCore.QTimer.singleShot(0, self._restore_input_focus)
 
     def _handle_quick_uri(self, url: str) -> None:
         """A XEP-0439 response/action button was clicked."""
@@ -2632,10 +2686,29 @@ class ChatWidget(QtWidgets.QWidget):
             logger.debug("PREP[write] failed for %s", jid, exc_info=True)
 
     def _ordered_entries(self) -> list[dict]:
-        """The whole window (history + live rows) de-duplicated, oldest first."""
+        """The whole window (history + live rows) de-duplicated, oldest first.
+
+        Scrolling asks for this list several times per poll; sorting the whole
+        conversation on every visible-row update made scrolling through new
+        messages noticeably slower than scrolling through already-read history.
+        The cache signature covers all list mutations that can change the
+        chronological order (lengths and edge keys).
+        """
+        history = self._history
+        messages = self._messages
+        first_h = self._entry_key(history[0]) if history else None
+        last_h = self._entry_key(history[-1]) if history else None
+        first_m = self._entry_key(messages[0]) if messages else None
+        last_m = self._entry_key(messages[-1]) if messages else None
+        signature = (len(history), len(messages), first_h, last_h,
+                     first_m, last_m)
+        cached = self.__dict__.get("_ordered_cache")
+        if (cached is not None
+                and self.__dict__.get("_ordered_cache_sig") == signature):
+            return cached
         entries = []
         seen = set()
-        for entry in self._history + self._messages:
+        for entry in history + messages:
             key = self._entry_key(entry)
             if key in seen:
                 continue
@@ -2643,6 +2716,8 @@ class ChatWidget(QtWidgets.QWidget):
             entries.append(entry)
         entries.sort(key=lambda entry: (
             entry.get("timestamp", "") or "", entry.get("id", 0) or 0))
+        self._ordered_cache = entries
+        self._ordered_cache_sig = signature
         return entries
 
     @staticmethod
@@ -2785,6 +2860,14 @@ class ChatWidget(QtWidgets.QWidget):
         except RuntimeError:
             pass
         self._tail_refresh_on_resume = False
+        self._pending_link_focus = False
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            try:
+                app.applicationStateChanged.disconnect(
+                    self._on_app_state_changed)
+            except (TypeError, RuntimeError):
+                pass
         try:
             self._view.shutdown()
         except (AttributeError, RuntimeError):
@@ -2793,6 +2876,8 @@ class ChatWidget(QtWidgets.QWidget):
         # does not keep message bodies alive until the widget is destroyed.
         self._history.clear()
         self._messages.clear()
+        self._ordered_cache = None
+        self._ordered_cache_sig = None
         self._status_lines.clear()
         self._users.clear()
         self._subjects.clear()
@@ -2883,6 +2968,8 @@ class ChatWidget(QtWidgets.QWidget):
         forward pager.  Without an anchor the window carries no separator.
         """
         self._history = list(entries or [])
+        self._ordered_cache = None
+        self._ordered_cache_sig = None
         self._prepared_html = list(prepared or [])
         self._prepared_settings = (self._render_settings_hash()
                                    if self._prepared_html else "")

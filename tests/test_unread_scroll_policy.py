@@ -62,8 +62,12 @@ css = ChatThemeFactory().generate_empty_page("")
 check("the divider has its own flash class",
       ".stanza-unread-flash" in css and "stanza-unread-flash" in css)
 poll = inspect.getsource(ChatView._on_scroll_position)
-check("the counter is reported on every scroll poll",
-      "self._maybe_emit_last_seen()" in poll)
+view_src = inspect.getsource(ChatView)
+check("the counter is reported on a dirty scroll poll",
+      "elif dirty:" in poll and "self._maybe_emit_last_seen()" in poll)
+check("idle polls reuse cached visible refs",
+      "__stanzaScrollDirty" in view_src
+      and "__stanzaVisibleCache" in view_src)
 check("only the upward action carries a divider-move flag",
       "self._anchor_move_pending = True" in poll)
 apply_src = inspect.getsource(MainWindow._apply_visible_unread)

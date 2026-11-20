@@ -86,6 +86,18 @@ entry["body"] = "edited"
 check("an edited row invalidates the prepared window",
       w.load_prepared([entry]) is None)
 
+# Ordered-entry cache: scrolling asks for this list repeatedly.
+from stanza_im.ui.chat_widget import ChatWidget as _CW
+w2 = _CW.__new__(_CW)
+w2._history = [{"origin_id": "a", "timestamp": "1", "body": "a"}]
+w2._messages = []
+first = w2._ordered_entries()
+check("the ordered list is cached", w2._ordered_entries() is first)
+w2._messages.append({"origin_id": "b", "timestamp": "2", "body": "b"})
+second = w2._ordered_entries()
+check("a new message invalidates the ordered cache",
+      second is not first and [e["origin_id"] for e in second] == ["a", "b"])
+
 if FAILURES:
     print("FAILURES:", FAILURES)
     sys.exit(1)

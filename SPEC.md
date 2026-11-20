@@ -333,6 +333,8 @@ avatar updates never overwrite emoticon images inside a message.
 ## 4. Configuration & Persistence
 
 Follows the XDG Base Directory spec. All files created with **0600** perms.
+Qt's own cache/runtime paths use the same `stanza-im` application name; the
+human-readable display name is set separately with `setApplicationDisplayName`.
 
 | Path | Location |
 |------|----------|
@@ -350,6 +352,7 @@ Follows the XDG Base Directory spec. All files created with **0600** perms.
 | Client PARS invitation tokens | `$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json` (one use, seven days) |
 | OMEMO keys | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Cache (shared) | `$XDG_CACHE_HOME/stanza-im/` |
+| Prepared chat windows | `$XDG_CACHE_HOME/stanza-im/chat-render.sqlite3` (100 chats / 64 MiB, zlib, LRU) |
 | Discovery cache | `$XDG_CACHE_HOME/stanza-im/discovery.json` |
 
 - Config uses nested tables: `config.ui.auto_connect`, `config.account.password`, ...
@@ -1370,6 +1373,9 @@ Single conversation tab. Layout:
 - Input: `QPlainTextEdit`, max height 60px, placeholder "Send"
 - Send on Enter (without Shift), Shift+Enter for newline
 - Signal: `message_sent(jid, body)`
+- Link clicks restore composer focus: `ChatWidget._open_link` wraps the handler
+  in a focus restore, and an external `http(s)`/`mailto` link focuses the input
+  before `webbrowser.open`; dialogs opened by a link keep their focus.
 - Prepared window: `ChatWidget.load_prepared(entries)` reads the disk
   `chat_render_cache` and `set_history(..., prepared=…)` inserts pre-rendered
   fragments through `ChatView.add_prepared`; the unread divider and delivery/read

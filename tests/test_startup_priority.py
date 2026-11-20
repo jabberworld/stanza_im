@@ -85,7 +85,16 @@ win._chat_window = type("CW", (), {
 kept = MainWindow._replay_rows_to_store(win, "room@conf.example", rows)
 check("an open room keeps the full replay", kept == rows)
 
-# 4. diagnostic XML logging does not retain base64 PHOTO payloads -------------
+# 4. Qt application/cache names are unified --------------------------------
+import inspect
+from stanza_im import app as app_module
+main_src = inspect.getsource(app_module.run)
+check("Qt uses the same stanza-im directory as the XDG stores",
+      'setApplicationName("stanza-im")' in main_src)
+check("the human-readable app name stays the display name",
+      "setApplicationDisplayName(APP_NAME)" in main_src)
+
+# 5. diagnostic XML logging does not retain base64 PHOTO payloads -------------
 record = logging.LogRecord(
     "slixmpp.xmlstream.xmlstream", logging.DEBUG, __file__, 1,
     "SEND: <vCard><PHOTO><BINVAL>%s</BINVAL></PHOTO></vCard>",

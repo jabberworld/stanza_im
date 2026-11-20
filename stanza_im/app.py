@@ -7,7 +7,7 @@ import sys
 import logging
 import os
 
-from PyQt6 import QtWidgets
+from PyQt6 import QtCore, QtWidgets
 
 from stanza_im.include.constants import (APP_NAME, APP_LOG_FILE,
                                          APP_LOG_FILE_1, VERSION_DISPLAY)
@@ -353,8 +353,13 @@ def run() -> int:
         logger.info("Detailed file logging enabled (-l): %s",
                     log_paths(log_suffix)[0])
 
+    # Keep Qt's own cache/data paths in the same XDG directory as our stores.
+    # Using the display name ("Stanza IM") here made Qt create a second
+    # ~/.cache/Stanza IM tree (qtpipelinecache, WebEngine profile).
+    QtCore.QCoreApplication.setApplicationName("stanza-im")
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName("stanza-im")
+    app.setApplicationDisplayName(APP_NAME)
     app.setApplicationVersion(VERSION_DISPLAY)
     app.setQuitOnLastWindowClosed(False)
 

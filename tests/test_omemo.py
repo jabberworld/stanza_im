@@ -351,7 +351,7 @@ check("the last-seen label exists", "omemo_last_seen" in _EN)
 check("the alias-sync tip exists", "prefs_omemo_alias_sync_tip" in _EN)
 import inspect
 check("the stanza:omemo link is routed",
-      "stanza:omemo:" in inspect.getsource(ChatWidget._open_link))
+      "stanza:omemo:" in inspect.getsource(ChatWidget._handle_link))
 _view_path = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "stanza_im", "ui", "chat_view.py")

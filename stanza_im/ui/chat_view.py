@@ -1305,6 +1305,7 @@ if HAS_WEBENGINE:
             if (!window.__stanzaUserScrollHooked) {
                 window.__stanzaUserScrollHooked = true;
                 window.__stanzaUserScrolled = 0;
+                window.__stanzaScrollDirty = 1;
                 var markUserScroll = function () {
                     window.__stanzaUserScrolled = 1;
                 };
@@ -1329,6 +1330,7 @@ if HAS_WEBENGINE:
             window.__stanzaScrollInstalled = true;
             var last = 0;
             window.addEventListener('scroll', function () {
+                window.__stanzaScrollDirty = 1;
                 var now = Date.now();
                 if (now - last < 120) return;
                 last = now;
@@ -2162,12 +2164,16 @@ window.__stanzaMentionRef = '';
                 " window.__stanzaOmemoRef || '',"
                 " window.innerWidth || 0,"
                 " window.devicePixelRatio || 0,"
-                " (function(){var m=document.querySelectorAll('#chat .stanza-message');"
+                " (function(){"
+                "if(!window.__stanzaScrollDirty && window.__stanzaVisibleCache)"
+                " return window.__stanzaVisibleCache;"
+                "var m=document.querySelectorAll('#chat .stanza-message');"
                 "var vh=window.innerHeight||0;var out=[];"
                 "for(var i=0;i<m.length;i++){var r=m[i].getBoundingClientRect();"
                 "if(r.bottom>0&&r.top<vh){var id=m[i].getAttribute('data-stanza-id')"
                 "||m[i].getAttribute('data-reply-id')||'';if(id)out.push(id);}}"
-                "return JSON.stringify(out);})(),"
+                "var result=JSON.stringify(out);"
+                "window.__stanzaVisibleCache=result;return result;})(),"
                 " window.__stanzaImageLoadRef || '',"
                 " window.__stanzaQuickRef || '',"
                 " (function(){var s=document.querySelector('#chat .stanza-unread');"
@@ -2576,6 +2582,7 @@ window.__stanzaMentionRef = '';
             else:
                 self._fraction = 1.0
             at_bottom = offset + viewport >= total - 2 or total <= viewport
+            dirty = bool(len(value) > 33 and value[33])
             action, self._anchor_update_armed = anchor_update_action(
                 self._last_scroll_offset, offset,
                 user_scrolled=bool(self._user_scrolled),
@@ -2591,9 +2598,9 @@ window.__stanzaMentionRef = '';
                     self._maybe_emit_last_seen(force=True)
                 except Exception:
                     pass
-            else:
-                # Keep the unread counter live on every scroll.  The divider
-                # itself is moved only by the one-shot flag above (or focus).
+            elif dirty:
+                # Keep the unread counter live on actual scroll/DOM changes,
+                # not on every idle poll.
                 try:
                     self._maybe_emit_last_seen()
                 except Exception:
@@ -3115,6 +3122,7 @@ window.__stanzaMentionRef = '';
             (function() {{
                 var chat = document.getElementById('chat');
                 if (!chat) return;
+                window.__stanzaScrollDirty = 1;
                 var keep = {keep};
                 var anchor = keep ? document.elementFromPoint(
                     Math.max(4, window.innerWidth / 2),
@@ -3330,6 +3338,7 @@ window.__stanzaMentionRef = '';
                     target = nodes[0];
                 }}
                 if (!target) return {{ref: ''}};
+                window.__stanzaScrollDirty = 1;
                 target.scrollIntoView({{block: 'center'}});
                 return {{ref: target.getAttribute('data-stanza-id')
                     || target.getAttribute('data-reply-id') || ''}};
@@ -3502,7 +3511,9 @@ window.__stanzaMentionRef = '';
                 # replay this after the buffered markup is in the DOM.
                 self._deferred_scroll = ("bottom",)
                 return
-            self.evaluate_js("window.scrollTo(0, document.body.scrollHeight);")
+            self.evaluate_js(
+                "window.__stanzaScrollDirty = 1;"
+                "window.scrollTo(0, document.body.scrollHeight);")
 
         def pause_media(self) -> None:
             """Pause inline audio/video when a media viewer opens."""

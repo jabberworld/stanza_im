@@ -1106,7 +1106,10 @@ connections are closed, so a contact's history from one account is never served
 to another (the pool is keyed by the *contact* JID). With no profile selected
 (tests, before the first login) the unscoped `DATA_DIR` layout is used. The
 `CACHE_DIR` stores (avatars, media, tiles, discovery, vCard cache) stay shared
-across profiles.
+across profiles. Qt's own paths use the same `stanza-im` application name
+(`QCoreApplication.setApplicationName("stanza-im")`; `setApplicationDisplayName`
+keeps the human-readable «Stanza IM»), so QtWebEngine and
+`qtpipelinecache-*` do not create a second `~/.cache/Stanza IM` tree.
 
 **Application profiles** (`core/profiles.py` + `ui/profiles_dialog.py`): a
 profile is one account — its name is the Jabber ID. The registry
@@ -1443,7 +1446,9 @@ array **at the end** (indices are positional — never renumber the earlier
 entries); `_on_scroll_position` reads it, guards the repeat with
 `self._last_<name>_ref`, and emits `link_clicked`; and a matching
 `_clear_<name>_request()` helper resets the variable. `ChatWidget._open_link`
-then routes the scheme. A missing branch means Chromium navigates, the request
+then routes the scheme; its `finally` restores composer focus, and external
+`http(s)`/`mailto` links focus the input before `webbrowser.open` so returning
+from the browser needs no extra click. A missing branch means Chromium navigates, the request
 is denied by `_StanzaPage.acceptNavigationRequest`, and the resulting
 `loadFinished(false)` makes `_probe_chat_alive` reload the document — the user
 sees the whole conversation disappear. `tests/test_ui_tweaks.py` enforces this
@@ -1519,7 +1524,9 @@ it, and a load starts it only when visible) **and while the application is
 active** (`poll_allowed(QApplication.applicationState())`: an inactive app
 skips the `runJavaScript`, so a background window does not churn IPC/JS), so
 background tabs are never polled; the last-seen query is skipped while the view
-sits at the bottom. The
+sits at the bottom. A `__stanzaScrollDirty` flag set by real scrolls/DOM
+appends lets an idle poll reuse `__stanzaVisibleCache` instead of scanning
+every `.stanza-message`; the seen/unread update runs only for a dirty poll. The
 `▼` shares a centred
 bottom row (`#stanza-fabs` / `_position_fab_buttons`) with the mention `@`
 button (left) and the reaction `♥` button (right, see below); all three labels
@@ -2496,7 +2503,9 @@ start. `_apply_visible_unread` updates the counter with
 `move_divider=False`, so opening/reconciling a tab cannot move the restored
 anchor. Counts are derived from the
 **deduplicated chronological unread suffix** (`_ordered_entries` /
-`_unread_block_entries`); live and SQLite copies are counted once, and outgoing
+`_unread_block_entries`); live and SQLite copies are counted once, and the
+chronological list is cached until the list edges/lengths change so scrolling
+through new messages no longer re-sorts the whole conversation per poll. and outgoing
 messages never consume unread. The seen anchor is the **topmost visible unread**
 message, so a viewport that shows only 2–3 new messages subtracts 2–3 and a
 block that fits entirely becomes zero immediately; messages above the viewport
