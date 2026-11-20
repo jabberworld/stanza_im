@@ -2179,7 +2179,9 @@ window.__stanzaMentionRef = '';
                 " (function(){var s=document.querySelector('#chat .stanza-unread');"
                 "if(!s)return 0;var r=s.getBoundingClientRect();"
                 "return r.bottom<=0 ? 1 : 0;})(),"
-                " window.__stanzaUserScrolled ? 1 : 0]",
+                " window.__stanzaUserScrolled ? 1 : 0,"
+                " (function(){var d=window.__stanzaScrollDirty?1:0;"
+                "window.__stanzaScrollDirty=0;return d;})()]",
                 self._on_scroll_position,
             )
 

@@ -68,6 +68,10 @@ check("the counter is reported on a dirty scroll poll",
 check("idle polls reuse cached visible refs",
       "__stanzaScrollDirty" in view_src
       and "__stanzaVisibleCache" in view_src)
+poll_js = inspect.getsource(ChatView._poll_scroll_position)
+check("the poll returns the dirty flag at index 33",
+      "window.__stanzaScrollDirty=0" in poll_js
+      and "return d;})()]" in poll_js)
 check("only the upward action carries a divider-move flag",
       "self._anchor_move_pending = True" in poll)
 apply_src = inspect.getsource(MainWindow._apply_visible_unread)
