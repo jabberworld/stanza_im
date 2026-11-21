@@ -44,6 +44,7 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._search_text: str = ""
         self._filter: str = ""
         self._show_offline = True
+        self._show_offline_groups = False
         self._sort_by_status = True
         self._sort_by_unread = True
         self._show_groups = True
@@ -234,6 +235,12 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._recalc_heights()
         self.update()
 
+    def set_show_offline_groups(self, value: bool) -> None:
+        """Show or hide contact groups whose members are all offline."""
+        self._show_offline_groups = bool(value)
+        self._recalc_heights()
+        self.update()
+
     def set_sort_by_status(self, value: bool) -> None:
         """Sort contacts by presence first (chat→online→away→xa→dnd→offline)
         instead of alphabetically inside each group."""
@@ -304,12 +311,16 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
         self._flat_sorted = flat
 
     def _filtered(self, users: list[UserItem]) -> list[UserItem]:
-        """Apply the show-offline flag and the search filter to *users*."""
-        if not self._show_offline:
-            users = [u for u in users if u.status != "offline"]
+        """Apply the show-offline flag and the search filter to *users*.
+
+        A search is an explicit request to find a contact, so it must not hide
+        an offline match just because «Показывать оффлайн-контакты» is off.
+        """
         if self._filter:
-            users = [u for u in users if self._filter in u.name.lower()
-                     or self._filter in u.jid.lower()]
+            return [u for u in users if self._filter in u.name.lower()
+                    or self._filter in u.jid.lower()]
+        if not self._show_offline:
+            return [u for u in users if u.status != "offline"]
         return users
 
     def _visible_items(self) -> list[tuple[str, GroupItem | UserItem]]:
@@ -329,8 +340,16 @@ class RosterWidget(FontZoomMixin, QtWidgets.QWidget):
             if not self._show_groups and group_name not in virtual:
                 continue
             group = self._groups[group_name]
-            users = self._filtered(self._sorted_users.get(group_name, []))
+            all_users = self._sorted_users.get(group_name, [])
+            users = self._filtered(all_users)
             if self._filter and not users:
+                continue
+            if (self._show_groups and not self._show_offline_groups
+                    and group_name not in virtual and not self._filter
+                    and all_users
+                    and all((u.status or "online") == "offline"
+                            for u in all_users)
+                    and not any(u.unread_count for u in all_users)):
                 continue
             result.append(("group", group))
             if group.expanded:

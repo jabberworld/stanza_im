@@ -145,6 +145,7 @@ STRINGS = {
     "menu_sort_by_status": "Sort by status",
     "menu_sort_by_unread": "Sort by unread",
     "menu_show_groups": "Show groups",
+    "menu_show_offline_groups": "Show offline groups",
     "menu_show_self": "Show own contact",
     "menu_show_transports": "Show &transports",
     # Login

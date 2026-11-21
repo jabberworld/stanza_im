@@ -145,6 +145,7 @@ STRINGS = {
     "menu_sort_by_status": "Сортувати за статусом",
     "menu_sort_by_unread": "Сортувати за непрочитаними",
     "menu_show_groups": "Показувати групи",
+    "menu_show_offline_groups": "Показувати групи не в мережі",
     "menu_show_self": "Показувати власний контакт",
     "menu_show_transports": "Показувати &транспорти",
     # Login

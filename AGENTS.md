@@ -1227,10 +1227,15 @@ presence/name order applies inside each part. `set_show_groups` (View menu's
 «Показывать группы», default on) draws the real contacts as one flat list
 (one row per JID, sorted by the active options) when turned off, while the
 virtual groups — conferences and private messages (`_trailing_groups`) and the
-self-contact (`_leading_groups`) — keep their header. The flags live in
+self-contact (`_leading_groups`) — keep their header. `set_show_offline_groups`
+(View menu's «Показывать оффлайн-группы», default off) hides a real contact
+group when every member is offline and has no unread messages; virtual groups
+are never hidden. A non-empty search bypasses both this rule and the
+`_show_offline` contact filter, so an offline contact is still found when
+«Показывать оффлайн-контакты» is off. The flags live in
 `appearance.roster_sort_by_status`/`roster_sort_by_unread`/`roster_show_groups`/
-`roster_show_offline`/`roster_show_self` and are applied/toggled from the View
-menu. Collapsed group names are persisted in
+`roster_show_offline`/`roster_show_offline_groups`/`roster_show_self` and are
+applied/toggled from the View menu. Collapsed group names are persisted in
 `appearance.roster_collapsed_groups`: `RosterWidget.group_toggled` updates the
 set, `MainWindow._on_roster_group_toggled` saves it, and `add_group` applies it
 after a roster rebuild.

@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6 import QtWidgets  # noqa: E402
 
+from stanza_im.include.constants import find_icon  # noqa: E402
 from stanza_im.ui.roster_style import UserItem  # noqa: E402
 from stanza_im.ui.roster_widget import RosterWidget  # noqa: E402
 
@@ -95,6 +96,47 @@ check("flat mode keeps the virtual groups",
       headers == ["Conferences", "Personal"])
 check("flat mode keeps the virtual group rows",
       "Room" in users and "Carol" in users)
+
+# 3. offline contact groups ---------------------------------------------------
+w = RosterWidget()
+w.set_trailing_groups({"Conferences"})
+w.add_user(UserItem(jid="a@x", name="Alice", group="Friends",
+                    status="online"))
+w.add_user(UserItem(jid="b@x", name="Bob", group="Friends",
+                    status="offline"))
+w.add_user(UserItem(jid="c@x", name="Carol", group="Quiet",
+                    status="offline"))
+w.add_user(UserItem(jid="d@x", name="Dan", group="Quiet",
+                    status="offline"))
+w.add_user(UserItem(jid="e@x", name="Eve", group="Unread",
+                    status="offline", unread_count=2))
+w.add_user(UserItem(jid="room@conf", name="Room", group="Conferences",
+                    status="offline"))
+w.sort_and_update()
+headers = [item.name for kind, item in w._visible_items()
+           if kind == "group"]
+check("all-offline contact groups are hidden by default",
+      "Quiet" not in headers)
+check("groups with an online member stay visible", "Friends" in headers)
+check("offline groups with unread messages stay visible", "Unread" in headers)
+check("virtual groups are never hidden", "Conferences" in headers)
+w.set_show_offline_groups(True)
+headers = [item.name for kind, item in w._visible_items()
+           if kind == "group"]
+check("the option shows all-offline contact groups", "Quiet" in headers)
+
+w.set_show_offline_groups(False)
+w.set_show_offline(False)
+w.set_search_filter("carol")
+items = w._visible_items()
+users = [item.name for kind, item in items if kind == "user"]
+headers = [item.name for kind, item in items if kind == "group"]
+check("search finds an offline contact with show-offline off",
+      "Carol" in users)
+check("search keeps the matching all-offline group visible",
+      "Quiet" in headers)
+check("the muted group icon is installed",
+      bool(find_icon("system-users-muted.png")))
 
 print()
 if FAILURES:

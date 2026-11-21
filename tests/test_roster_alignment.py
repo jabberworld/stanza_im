@@ -84,6 +84,7 @@ check("group rows grow with the font",
       style.group_height(large) > style.group_height(small))
 
 roster = RosterWidget()
+roster.set_show_offline_groups(True)
 roster.add_group("G")
 roster.add_user(short)
 roster.setFont(small)

@@ -42,6 +42,7 @@ def _press(button):
 
 
 w = RosterWidget()
+w.set_show_offline_groups(True)
 w.resize(200, 200)
 group = w.add_group("Friends")
 w.add_user(UserItem(jid="bob@example.com", name="Bob", group="Friends"))

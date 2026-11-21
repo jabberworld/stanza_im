@@ -182,6 +182,7 @@ class Config:
                         "roster_show_mood": True,
                         "roster_show_clients": True,
                         "roster_show_offline": True,
+                        "roster_show_offline_groups": False,
                         "roster_sort_by_status": True,
                         "roster_sort_by_unread": True,
                         "roster_show_groups": True,
