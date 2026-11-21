@@ -59,6 +59,8 @@ stanza_im/                      # Python package
 │   ├── notification_priorities.py # Per-contact priority (private PEP node)
 │   ├── private_pep.py           # Raw private-PEP publish helper (XML publish-options)
 │   ├── unread_state.py          # Persisted per-chat read state (unread/mentions/anchor)
+│   ├── servers.py               # Explicitly added server JIDs (virtual «Сервер» group)
+│   ├── transports.py            # Explicitly classified gateway transports
 │   ├── sync_state.py            # Account-wide XEP-0313 MAM catch-up cursor
 │   ├── profiles.py              # Account registry + per-profile data dirs (JSON)
 │   ├── vcard_cache.py           # vCard avatar download coordination
@@ -254,24 +256,25 @@ single widget-less item" wrongly wiped the first event on the second push).
 A smooth tab-icon blink
 (`_start_event_blink`/`_event_blink_step`, the same cosine fade as the tray)
 stops and clears when the tab is shown. The **Transports** tab (icon
-`transports.png`) lists the roster contacts classified as gateways and manages
-them: `_classify_transports` probes the roster's **server JIDs (no `@`)** once
-each (cached in `_transport_jids`/`_transport_probed`,
-`client.discover_service_info` identity `category == "gateway"`) on roster load
-(`_on_roster_received`/`_on_roster_item_added`) and on tab activation — an
-ordinary `user@host` contact or `room@conf` conference is never probed. The
-result is persisted per profile (`core/transports.py` → `transports.json`) and
-read back in `_load_transports` **before** the roster is built, so a gateway
-never flashes in the Contacts roster (nor lingers there on a slow/offline
-login); a definite non-gateway answer for a persisted JID drops it back into the
-roster and a full roster prunes JIDs the server no longer returns
-(`_prune_transports`). An unknown service JID (no `@`) that sends a 1:1
-message is shown on the Transports tab for the session only
-(`_session_transports`), never in «Не в списке»; its «Добавить в список»
-context action adds the server JID to the roster and lets the normal
-classification persist it. A classified transport is filtered out of the
-Contacts roster (`_add_roster_item` skips it, `_probe_transport` removes the row)
-and
+`transports.png`) lists only transports the user explicitly added and that a
+background probe identified as gateways. An unknown JID without `@` first gets
+a session row in «Не в списке», exactly like an unknown user contact — an
+incoming message or a plain roster refresh never moves it to Transports. The
+context action «Добавить в список» adds the server JID to the roster, shows it
+immediately in the virtual **«Сервер»** group (`roster_group_server`,
+`_sync_server_roster`) and starts one `client.discover_service_info(bare)`
+probe; `category == "gateway"` moves it to `_transport_jids`, removes it from
+«Сервер» and persists `core/transports.py` → `transports.json`, while any other
+answer (or a failed probe) leaves it in «Сервер». The «Сервер» list itself is
+persisted per profile in `core/servers.py` → `servers.json`; `_load_servers`
+reads it **before** the roster is built so the rows do not flash as ordinary
+contacts, and a full roster prunes JIDs the server no longer returns
+(`_prune_servers`/`_prune_transports`). `_classify_transports` only starts a
+probe for an explicitly added pending JID — ordinary `user@host` contacts and
+`room@conf` conferences are never probed. A server row's context menu offers
+chat, vCard, history, priority, ad-hoc commands, «Проверить как транспорт» and
+«Убрать из серверов». A classified transport is filtered out of the
+Contacts roster (`_add_roster_item` skips it) and
 rendered by a **second `RosterWidget`** (`_transport_roster`, same
 renderer/tooltip/font/colors, no group header). Its
 context menu (`_on_transport_context`) offers Connect/Disconnect (a **directed**
@@ -1081,6 +1084,7 @@ Everything follows the XDG Base Directory spec:
 | OMEMO keys (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Notification priorities (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` (0600) |
 | Classified transports (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` (0600) |
+| Explicitly added servers (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/servers.json` (0600) |
 | Client PARS invitation tokens (JSON) | `$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json` (0600, one use/7 days) |
 
 `Config` has nested-table helpers, so `config.ui.auto_connect = True` works.
@@ -1096,11 +1100,11 @@ appended line-by-line as JSON, keyed by bare JID, one file per contact.
 **Per-profile data.** Every account (Jabber ID) keeps its own state under
 `$XDG_DATA_HOME/stanza-im/<jid>/`: `history/`, `roster/<account>.json`,
 `unread.json`, `sync_state.json`, `known_contacts.json`,
-`notification_priorities.json` and `transports.json`
+`notification_priorities.json`, `transports.json` and `servers.json`
 (`core/profiles.py` `set_active`).
 `include/constants.set_active_profile` selects the subdirectory; each store
 (`history`, `roster_cache`, `unread_state`, `sync_state`, `known_contacts`,
-`notification_priorities`, `transports`) exposes
+`notification_priorities`, `transports`, `servers`) exposes
 `set_profile(jid)` that re-bases its module-level path and the pooled history
 connections are closed, so a contact's history from one account is never served
 to another (the pool is keyed by the *contact* JID). With no profile selected
@@ -1154,17 +1158,18 @@ only append to the internal lists, and sorting, height recalculation and the
 single repaint happen once at the end (a 200-contact login used to recalculate
 every visible row per contact).
 Groups sort case-folded, except the trailing groups (`set_trailing_groups`,
-used by `MainWindow` for the conferences group **and** the private-messages
-group) which always come last, and the leading groups (`set_leading_groups`,
-used for the self-contact group) which always come first. Four groups hold an
-app-computed row rather than a real contact group — conferences
-(`MainWindow._sync_conference_roster`, one row per joined room), MUC private
-messages, the account's own contact (`MainWindow._sync_self_roster`) and the
-session-only «Не в списке» group for unknown 1:1 **user** peers
-(`MainWindow._track_not_in_roster`; a service JID without an `@` is kept on
-the Transports tab for the session instead; a user row's context menu's
-«Добавить в список» reuses `AddContactDialog` with the JID/localpart
-prefilled) — so
+used by `MainWindow` for the conferences, server, private-messages and
+not-in-list groups) which always come last, and the leading groups
+(`set_leading_groups`, used for the self-contact group) which always come first.
+Five groups hold an app-computed row rather than a real contact group —
+conferences (`MainWindow._sync_conference_roster`, one row per joined room),
+MUC private messages, the account's own contact (`MainWindow._sync_self_roster`),
+the virtual «Сервер» group (`_sync_server_roster`) and the session-only «Не в
+списке» group for unknown 1:1 peers, including service JIDs
+without `@` (`MainWindow._track_not_in_roster`; an explicitly added server JID
+then moves to the virtual «Сервер» group or, after a gateway probe, to
+Transports; a row's context menu's «Добавить в список» reuses
+`AddContactDialog` with the JID/localpart prefilled) — so
 they are excluded from the group pickers and roster sharing via
 `_virtual_roster_groups()` and are never persisted into
 `core/known_contacts.py`. The server often returns the account itself in the

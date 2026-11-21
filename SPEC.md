@@ -186,14 +186,16 @@ old menu; Ctrl+wheel font zoom and click-on-empty clears the selection) and
 events fed by `MainWindow._push_system_event`, plus a smooth tab-icon blink;
 new entries accumulate — the `events_empty` placeholder carries a `UserRole`
 marker so only it is removed on the first real event) and **Transports**
-(icon `transports.png`; the roster's **server JIDs (no `@`)** whose `disco#info`
-identity is a gateway, classified once each into `_transport_jids` on roster load
-and tab activation, the set cached per profile in `transports.json` and loaded
-before the roster so a gateway never flashes in the Contacts roster, and rendered
-by a second `RosterWidget`; an unknown service JID (no `@`) that sends a 1:1
-message is listed there for the session only (`_session_transports`) and is not
-put in «Не в списке»; «Добавить в список» adds it to the roster and persists it
-through the normal gateway classification. The tab has a bookmarks-style
+(icon `transports.png`; only transports the user explicitly added and that a
+`disco#info` probe identified as gateways, cached per profile in
+`transports.json` and loaded before the roster so a gateway never flashes in the
+Contacts roster, rendered by a second `RosterWidget`; an unknown JID without `@`
+starts in «Не в списке», never in Transports, and an incoming message or plain
+roster refresh never classifies it; «Добавить в список» adds it to the roster,
+shows it immediately in the virtual «Сервер» group and starts one background
+probe: gateway moves it to `_transport_jids` and `transports.json`, while any
+other answer (or a failure) leaves it in «Сервер», whose JIDs are persisted in
+`servers.json`). The tab has a bookmarks-style
 fixed-height toolbar of wide 2:1
 icon-only buttons — Connect/Disconnect (`connected.svg`/`disconnected.svg`, a
 diagonal chain intact vs. with the middle link broken, showing the current
@@ -349,6 +351,7 @@ human-readable display name is set separately with `setApplicationDisplayName`.
 | Known contacts | `$XDG_DATA_HOME/stanza-im/<jid>/known_contacts.json` |
 | Notification priorities | `$XDG_DATA_HOME/stanza-im/<jid>/notification_priorities.json` |
 | Classified transports | `$XDG_DATA_HOME/stanza-im/<jid>/transports.json` |
+| Explicitly added servers | `$XDG_DATA_HOME/stanza-im/<jid>/servers.json` |
 | Client PARS invitation tokens | `$XDG_DATA_HOME/stanza-im/<jid>/pars_tokens.json` (one use, seven days) |
 | OMEMO keys | `$XDG_DATA_HOME/stanza-im/<jid>/omemo.json` (0600) |
 | Cache (shared) | `$XDG_CACHE_HOME/stanza-im/` |
@@ -833,9 +836,11 @@ server when nothing is selected), non-modally. It has three tabs and one
   `xmpp:` links are forwarded through `ServiceBrowserDialog.xmpp_uri_requested`
   → `MainWindow._on_xmpp_uri`.
 
-Gateways (transports): the transports the user actually added are classified via
-`discover_service_info` (`category == "gateway"`) and cached in `transports.json`.
-`AddContactDialog` lists only those added transports in its service selector
+Gateways (transports): an explicitly added no-`@` JID is shown in «Сервер»
+immediately and classified via `discover_service_info`
+(`category == "gateway"`); only a gateway is cached in `transports.json`, while
+a non-gateway stays in the profile's `servers.json`. `AddContactDialog` lists
+only those added transports in its service selector
 (`gateways=[(name, jid)]`, and can be opened with `preselect=<jid>`) so a contact
 can be added through a transport, and the service in-band registration dialog
 (`ui/registration_dialog.py`, XEP-0077) wraps its form in an inner container so
@@ -1127,16 +1132,18 @@ matches. `Config.load` migrates the old forced-light defaults (`config_version
 < 1`) to the empty/system values.
 
 Groups sort case-folded, but `RosterWidget.set_trailing_groups` (set by
-`MainWindow` to the conferences group, `roster_group_conferences`, the
-private-messages group, `roster_group_personal_messages`, and the session-only
+`MainWindow` to the conferences group, `roster_group_conferences`, the server
+group `roster_group_server`, the private-messages group
+`roster_group_personal_messages`, and the session-only
 `roster_group_not_in_list`) forces those groups after all contact groups, and
 `set_leading_groups` (set to the self-contact group, `roster_group_self`)
-forces it before them. An unknown 1:1 **user** peer that messages us while
-absent from the XMPP roster gets a session row in «Не в списке» (offline icon);
-its context menu offers «Добавить в список», reusing `AddContactDialog` with
-the JID and localpart prefilled. A service/transport JID (no `@`) is shown on
-the Transports tab instead, also session-only until the user adds it. The row
-is removed once the JID enters the roster and is kept until logout otherwise.
+forces it before them. An unknown 1:1 peer that messages us while absent from
+the XMPP roster gets a session row in «Не в списке» (offline icon), including a
+service JID without `@`; its context menu offers «Добавить в список», reusing
+`AddContactDialog` with the JID and localpart prefilled. An explicitly added
+server JID moves to the virtual «Сервер» group; a gateway answer moves it to
+Transports. The «Не в списке» row is removed once the JID enters the roster and
+is kept until logout otherwise.
 
 Those groups hold a row **computed by the app** rather than a real
 contact group, so they are excluded from the group pickers and from

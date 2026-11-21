@@ -1,4 +1,5 @@
-"""Session-only «Не в списке» contacts."""
+"""Session-only «Не в списке» contacts and explicit server JIDs."""
+import asyncio
 import os
 import sys
 import tempfile
@@ -33,6 +34,7 @@ class _Client:
 
     def __init__(self):
         self.updated = []
+        self.probed = []
 
     def get_contact(self, jid):
         return _Contact()
@@ -43,6 +45,14 @@ class _Client:
     def update_contact(self, jid, name="", groups=None):
         self.updated.append((jid, name, groups))
 
+    async def discover_service_info(self, jid, node=""):
+        self.probed.append(jid)
+        return {"jid": jid, "category": "gateway" if jid == "gw.example.org"
+                else "", "type": "", "features": []}
+
+    async def remove_contact(self, jid):
+        pass
+
     def request_roster(self):
         pass
 
@@ -51,6 +61,8 @@ def _win():
     win = MainWindow.__new__(MainWindow)
     win._client = _Client()
     win._transport_jids = set()
+    win._server_jids = set()
+    win._server_pending = set()
     win._pm_targets = {}
     win._muc_self_nicks = {}
     win._known_conferences = set()
@@ -61,9 +73,11 @@ def _win():
         connection=SimpleNamespace(conference_servers=[]))
     win._unread_chats = {}
     win._roster = RosterWidget()
-    win._roster.set_trailing_groups({tr("roster_group_not_in_list")})
+    win._roster.set_trailing_groups({tr("roster_group_not_in_list"),
+                                     tr("roster_group_server")})
     win._roster_name = lambda jid: ""
     win._schedule_roster_repaint = lambda: None
+    win._remember_contact = lambda *a, **k: None
     win._not_in_roster = set()
     win._session_transports = set()
     win._transport_probed = set()
@@ -73,6 +87,7 @@ def _win():
     win._transport_connect_btn = None
     win._transport_command_btn = None
     win._transport_remove_btn = None
+    win._start_task = lambda coro: asyncio.get_event_loop().create_task(coro)
     return win
 
 
@@ -102,25 +117,63 @@ checks.extend([
     ("the session set is pruned", jid not in win._not_in_roster),
 ])
 
-# A server/transport JID is listed in the Transports tab for this session,
-# never in «Не в списке» and never persisted without an explicit add.
+# An unknown server JID starts in «Не в списке», never in Transports.
 server = "xmpp.example.org"
 win._track_not_in_roster(server)
 checks.extend([
-    ("a transport JID is not a «Не в списке» contact",
-     all(u.jid != server for u in win._roster._users)),
-    ("a transport JID is kept as a session transport",
-     server in win._session_transports),
-    ("a session transport is shown in the Transports tab",
-     any(u.jid == server for u in win._transport_roster._users)),
-    ("a session transport uses the service name",
-     any(u.jid == server and u.name == server
-         for u in win._transport_roster._users)),
+    ("an unknown server JID is a «Не в списке» contact",
+     any(u.jid == server and u.group == group
+         for u in win._roster._users)),
+    ("an unknown server JID is not a session transport",
+     server not in win._session_transports),
+    ("an unknown server JID is not in the Transports tab",
+     all(u.jid != server for u in win._transport_roster._users)),
 ])
-win._add_session_transport(server)
-checks.append(("adding a session transport updates the roster without persisting",
-               (server, server, []) in win._client.updated
-               and server not in win._transport_jids))
+
+from stanza_im.core import servers as servers_store
+from stanza_im.core import transports as transports_store
+
+servers_store.set_profile("me@example.com")
+transports_store.set_profile("me@example.com")
+
+# Explicit add: immediately in «Сервер», then a non-gateway stays there.
+win._begin_explicit_server_add(server, name="News")
+server_row = next((u for u in win._roster._users if u.jid == server), None)
+checks.extend([
+    ("an explicitly added server is shown in «Сервер» at once",
+     server_row is not None and server_row.group == tr("roster_group_server")),
+    ("the explicit add updates the roster",
+     (server, "News", []) in win._client.updated),
+])
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.05))
+checks.extend([
+    ("a non-gateway server stays in «Сервер»",
+     server in win._server_jids
+     and any(u.jid == server and u.group == tr("roster_group_server")
+             for u in win._roster._users)),
+    ("the server set is persisted", servers_store.load() == {server}),
+    ("the server was probed", server in win._client.probed),
+])
+fresh = _win()
+fresh._load_servers()
+checks.append(("the server list is restored before the roster",
+               fresh._server_jids == {server}))
+
+# Explicit gateway: shown in «Сервер» first, then moved to Transports.
+gateway = "gw.example.org"
+win._begin_explicit_server_add(gateway)
+checks.append(("a gateway is visible in «Сервер» while probing",
+               any(u.jid == gateway and u.group == tr("roster_group_server")
+                   for u in win._roster._users)))
+asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.05))
+checks.extend([
+    ("a gateway is moved to Transports", gateway in win._transport_jids),
+    ("a gateway leaves «Сервер»",
+     all(u.jid != gateway for u in win._roster._users)),
+    ("a gateway leaves the server store", gateway not in servers_store.load()),
+    ("a gateway is persisted as a transport",
+     gateway in transports_store.load()),
+])
 
 # The context-menu action reuses AddContactDialog with the JID/name prefilled.
 _dlg = AddContactDialog([], None, jid=jid, name="Роман")

@@ -77,7 +77,7 @@ def _virtual_roster_groups() -> set[str]:
     """
     return {tr("roster_group_conferences"), tr("roster_group_transports"),
             tr("roster_group_personal_messages"), tr("roster_group_self"),
-            tr("roster_group_not_in_list")}
+            tr("roster_group_server"), tr("roster_group_not_in_list")}
 
 _PAGE_LOGIN = 0
 _PAGE_SPLASH = 1
@@ -390,6 +390,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._priority_sticky_closed_at: int | None = None
         self._private_pep_refresh_at = 0.0
         self._omemo_views: list = []
+        # Roster contacts classified as transports/gateways (disco category
+        # "gateway"); shown in their own tab, never as ordinary contacts.
+        self._transport_jids: set[str] = set()
+        # Seeded before _load_unread_for() so the server/transport lists are
+        # available to the cached-roster renderer.
+        self._server_jids: set[str] = set()
+        self._server_pending: set[str] = set()
         self._load_unread_for(self._config.jid)
         # Unseen reactions on our own messages, keyed by chat-tab key then by
         # the message reference; the value is the number of reactions not yet
@@ -427,13 +434,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._muc_replay_timers: dict[str, bool] = {}
         self._muc_user_nick_change_from: dict[str, str] = {}
         self._conference_roster: set[str] = set()
-        # Roster contacts classified as transports/gateways (disco category
-        # "gateway"); shown in their own tab, never as ordinary contacts.
-        self._transport_jids: set[str] = set()
         # Transports discovered from a live conversation but not explicitly
-        # added to the roster yet.  They are listed in the Transports tab for
-        # this session only; transports.json changes only after «Добавить в
-        # список».
+        # added to the roster yet.  Kept for compatibility with older session
+        # paths; new incoming service JIDs start in «Не в списке».
         self._session_transports: set[str] = set()
         self._transport_probed: set[str] = set()
         self._transport_pending: set[str] = set()
@@ -891,6 +894,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster = RosterWidget()
         self._roster.set_trailing_groups({
             tr("roster_group_conferences"),
+            tr("roster_group_server"),
             tr("roster_group_personal_messages"),
             tr("roster_group_not_in_list")})
         self._roster.set_leading_groups({tr("roster_group_self")})
@@ -1293,58 +1297,17 @@ class MainWindow(QtWidgets.QMainWindow):
         return page
 
     def _classify_transports(self) -> None:
-        """Probe the roster's server JIDs for the gateway identity (once each).
+        """Classify only explicitly added server JIDs still awaiting a probe.
 
-        Only JIDs **without a localpart** (no ``@``) are probed — a gateway is
-        a bare server JID, while ordinary contacts (``user@host``) and
-        conferences (``room@conf``) never are.
+        Ordinary roster JIDs are never auto-classified: an incoming message or
+        a roster refresh must not move an unknown server into Transports.
         """
         if self._client is None:
             return
-        for item in self._client.get_roster_snapshot():
-            bare = str(item.get("jid") or "").split("/", 1)[0]
-            if (not bare or "@" in bare
-                    or bare == self._client.jid_str
-                    or bare in self._transport_probed
-                    or bare in self._transport_pending):
+        for bare in list(getattr(self, "_server_pending", set())):
+            if bare not in getattr(self, "_server_jids", set()):
                 continue
-            self._transport_pending.add(bare)
-            self._start_task(self._probe_transport(bare))
-
-    async def _probe_transport(self, bare: str) -> None:
-        self._transport_pending.discard(bare)
-        self._transport_probed.add(bare)
-        if self._client is None:
-            return
-        try:
-            info = await self._client.discover_service_info(bare)
-        except Exception:
-            return
-        if str(info.get("category") or "").lower() != "gateway":
-            # A persisted transport whose identity changed is no longer one:
-            # drop it from the cache and put it back into the ordinary roster.
-            if bare in self._transport_jids and self._client is not None:
-                self._transport_jids.discard(bare)
-                self._save_transports()
-                self._rebuild_transports()
-                for item in self._client.get_roster_snapshot():
-                    if str(item.get("jid") or "") == bare:
-                        self._add_roster_item(item)
-                        break
-                self._roster.sort_and_update()
-            self._session_transports.discard(bare)
-            self._rebuild_transports()
-            return
-        if bare in self._transport_jids:
-            self._session_transports.discard(bare)
-            return
-        self._transport_jids.add(bare)
-        self._session_transports.discard(bare)
-        self._save_transports()
-        # The transport must leave the ordinary roster.
-        self._roster.remove_user(bare)
-        self._roster.sort_and_update()
-        self._rebuild_transports()
+            self._start_task(self._probe_explicit_server(bare))
 
     def _save_transports(self) -> None:
         """Persist the classified transport JIDs for the next login."""
@@ -1765,7 +1728,6 @@ class MainWindow(QtWidgets.QMainWindow):
         elif key == "events":
             self._stop_event_blink()
         elif key == "transports" and self._client:
-            self._classify_transports()
             self._rebuild_transports()
         elif key and key.startswith("plugin:") and self._client:
             page = self._roster_tab_pages.get(key)
@@ -2096,6 +2058,11 @@ class MainWindow(QtWidgets.QMainWindow):
             data = dlg.collect()
             target = normalize_jid(data["jid"])
             if not target:
+                return
+            if "@" not in target:
+                # A server/service JID is not an ordinary contact: show it in
+                # «Сервер» at once, then let disco move a gateway to Transports.
+                self._begin_explicit_server_add(target, name=data["name"])
                 return
             self._client.add_contact(
                 target, data["name"],
@@ -2650,6 +2617,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         if bare in getattr(self, "_transport_jids", set()):
             return False
+        if bare in getattr(self, "_server_jids", set()):
+            return False
         if bare in getattr(self, "_pm_targets", {}):
             return False
         if bare in getattr(self, "_muc_self_nicks", {}):
@@ -2686,11 +2655,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._is_unknown_contact(bare):
             self._drop_not_in_roster(bare)
             return
-        if "@" not in bare:
-            # A service/transport JID is not a personal contact; show it on
-            # the Transports tab for this session instead.
-            self._track_session_transport(bare, name)
-            return
         # A session-only peer has no authoritative roster nickname; never use
         # a domain/service name left in an old row as its nickname.
         name = bare.split("@", 1)[0]
@@ -2725,6 +2689,163 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roster.add_group(group)
         self._schedule_roster_repaint()
 
+    def _server_group(self) -> str:
+        return tr("roster_group_server")
+
+    def _server_name(self, jid: str) -> str:
+        """Display name of an explicitly added server JID."""
+        bare = str(jid or "").split("/", 1)[0]
+        contact = self._client.get_contact(bare) if self._client else None
+        return (getattr(contact, "name", "")
+                or self._roster_name(bare) or bare)
+
+    def _drop_empty_server_group(self) -> None:
+        group = self._server_group()
+        if group in self._roster._groups \
+                and not self._roster._sorted_users.get(group):
+            self._roster.remove_group(group)
+
+    def _sync_server_roster(self, jid: str) -> None:
+        """Render an explicitly added server JID in the virtual «Сервер» group."""
+        bare = str(jid or "").split("/", 1)[0]
+        if bare in getattr(self, "_transport_jids", set()):
+            self._server_jids.discard(bare)
+            self._save_servers()
+        if not bare or bare not in getattr(self, "_server_jids", set()):
+            if bare and any(user.jid == bare and user.group == self._server_group()
+                            for user in self._roster._users):
+                self._roster.remove_user(bare)
+                self._drop_empty_server_group()
+                self._schedule_roster_repaint()
+            return
+        contact = self._client.get_contact(bare) if self._client else None
+        show = getattr(contact, "show", "") or "offline"
+        name = self._server_name(bare)
+        group = self._server_group()
+        fields = {
+            "name": name or bare,
+            "status": show,
+            "status_message": getattr(contact, "status", "") or "",
+            "icon_key": show_to_icon_key(show),
+            "avatar_path": getattr(contact, "avatar_path", None),
+            "unread_count": self._unread_counts.get(bare, 0),
+            "unread_mentions": self._unread_mentions.get(bare, 0),
+            "blocked": bare in getattr(self, "_blocked_jids", set()),
+            "client_icon": (self._client.client_icon(bare)
+                            if self._client else ""),
+        }
+        existing = next((user for user in self._roster._users
+                         if user.jid == bare), None)
+        if existing is not None and existing.group != group:
+            self._roster.remove_user(bare)
+            existing = None
+        if existing is not None:
+            self._roster.update_user(bare, **fields)
+        else:
+            self._roster.add_user(UserItem(jid=bare, group=group, **fields))
+        self._roster.add_group(group)
+        self._remember_contact(bare, name=name or bare, groups=[])
+        self._schedule_roster_repaint()
+
+    def _sync_all_server_roster(self) -> None:
+        for jid in list(getattr(self, "_server_jids", set())):
+            self._sync_server_roster(jid)
+        if not getattr(self, "_server_jids", set()):
+            self._drop_empty_server_group()
+
+    def _prune_servers(self, roster_jids: set[str]) -> None:
+        """Drop explicitly added servers no longer present in the roster."""
+        stale = set(getattr(self, "_server_jids", set())) - {
+            str(jid or "").split("/", 1)[0] for jid in (roster_jids or ())}
+        stale -= set(getattr(self, "_server_pending", set()))
+        if not stale:
+            return
+        self._server_jids -= stale
+        self._save_servers()
+        for jid in stale:
+            self._roster.remove_user(jid)
+        self._drop_empty_server_group()
+        self._schedule_roster_repaint()
+
+    def _begin_explicit_server_add(self, jid: str, name: str = "") -> None:
+        """Add a no-localpart JID to the server group and classify it."""
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare or "@" in bare or self._client is None:
+            return
+        own = str(getattr(self._client, "jid_str", "") or "").split("/", 1)[0]
+        if bare == own:
+            return
+        if bare in getattr(self, "_server_pending", set()):
+            return
+        self._server_jids.add(bare)
+        self._server_pending.add(bare)
+        self._save_servers()
+        self._drop_not_in_roster(bare)
+        self._session_transports.discard(bare)
+        if name:
+            self._remember_contact(bare, name=name)
+        try:
+            self._client.update_contact(bare, name=name or self._server_name(bare),
+                                        groups=[])
+        except Exception:  # noqa: BLE001 - keep the local row
+            logger.debug("Could not add server %s to the roster", bare,
+                         exc_info=True)
+        self._sync_server_roster(bare)
+        self._start_task(self._probe_explicit_server(bare))
+
+    async def _probe_explicit_server(self, bare: str) -> None:
+        """Classify an explicitly added server JID as a gateway or a server."""
+        bare = str(bare or "").split("/", 1)[0]
+        if not bare or self._client is None:
+            return
+        try:
+            info = await self._client.discover_service_info(bare)
+        except Exception:  # noqa: BLE001 - keep the server row
+            info = {}
+        self._server_pending.discard(bare)
+        if self._client is None or bare not in getattr(self, "_server_jids", set()):
+            return
+        if str((info or {}).get("category") or "").lower() == "gateway":
+            self._server_jids.discard(bare)
+            self._save_servers()
+            self._roster.remove_user(bare)
+            self._drop_empty_server_group()
+            self._transport_jids.add(bare)
+            self._transport_probed.add(bare)
+            self._save_transports()
+            self._rebuild_transports()
+            self._schedule_roster_repaint()
+            return
+        self._save_servers()
+        self._sync_server_roster(bare)
+
+    def _recheck_server(self, jid: str) -> None:
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare or bare not in getattr(self, "_server_jids", set()):
+            return
+        if bare in getattr(self, "_server_pending", set()):
+            return
+        self._server_pending.add(bare)
+        self._start_task(self._probe_explicit_server(bare))
+
+    def _remove_server_confirmed(self, jid: str) -> None:
+        bare = str(jid or "").split("/", 1)[0]
+        if not bare:
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self, tr("ctx_server_remove"),
+            tr("server_remove_confirm", jid=bare))
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self._server_pending.discard(bare)
+        self._server_jids.discard(bare)
+        self._save_servers()
+        self._roster.remove_user(bare)
+        self._drop_empty_server_group()
+        self._schedule_roster_repaint()
+        if self._client is not None:
+            self._start_task(self._client.remove_contact(bare))
+
     def _transport_name(self, jid: str) -> str:
         """Display name of a transport (a server JID has no localpart)."""
         return self._roster_name(jid) or str(jid or "")
@@ -2746,14 +2867,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._rebuild_transports()
 
     def _add_session_transport(self, jid: str) -> None:
-        """Add a session-only transport to the roster and persist after probe."""
-        bare = str(jid or "").split("/", 1)[0]
-        if not bare or self._client is None:
-            return
-        self._transport_probed.discard(bare)
-        self._transport_pending.discard(bare)
-        self._client.update_contact(
-            bare, name=self._transport_name(bare), groups=[])
+        """Explicitly add a session service, then classify it in the background."""
+        self._begin_explicit_server_add(jid, name=self._transport_name(jid))
 
     def _sync_not_in_roster(self) -> None:
         """Drop session rows that entered the roster and restore the others.
@@ -5130,15 +5245,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_all_conference_roster()
         self._sync_all_pm_roster()
         self._sync_self_roster()
+        roster_jids = {str(i.get("jid") or "").split("/", 1)[0]
+                       for i in items}
+        self._prune_transports(roster_jids)
+        self._prune_servers(roster_jids)
+        self._sync_all_server_roster()
         self._recount_groups()
         self._roster.sort_and_update()
         self._resolve_pending_subscriptions()
-        # Drop persisted transports the server no longer returns, then classify
-        # the roster's server JIDs right away, so they never linger in the
-        # Contacts tab until the Transports tab is opened.
-        self._prune_transports({
-            str(i.get("jid") or "").split("/", 1)[0] for i in items})
-        self._classify_transports()
         # Prefetch bookmarks so MUC bookmark buttons are correct before the
         # Bookmarks menu is ever opened.
         self._start_task(self._load_bookmarks())
@@ -5147,14 +5261,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_roster_item(item)
         self._sync_not_in_roster()
         self._classify_bookmarked_conferences()
-        self._classify_transports()
+        bare = str(item.get("jid") or "").split("/", 1)[0]
+        if bare in getattr(self, "_server_jids", set()):
+            self._sync_server_roster(bare)
         self._roster.sort_and_update()
         self._resolve_pending_subscriptions()
 
     def _on_roster_item_removed(self, jid: str):
-        self._roster.remove_user(jid)
-        if self._chat_window.get_chat(jid) is not None:
-            self._track_not_in_roster(jid)
+        bare = str(jid or "").split("/", 1)[0]
+        self._roster.remove_user(bare)
+        if bare in getattr(self, "_server_jids", set()):
+            self._server_jids.discard(bare)
+            self._save_servers()
+            self._drop_empty_server_group()
+        if self._chat_window.get_chat(bare) is not None:
+            self._track_not_in_roster(bare)
         self._roster.sort_and_update()
 
     @staticmethod
@@ -5220,6 +5341,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             self._rebuild_roster(items)
             self._prefill_avatars(items)
+            self._sync_all_server_roster()
             self._recount_groups()
             self._roster.sort_and_update()
         finally:
@@ -5285,6 +5407,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return None
         if jid in self._transport_jids:
             # A classified transport lives in its own tab, not in the roster.
+            return None
+        if jid in getattr(self, "_server_jids", set()):
+            # An explicitly added server lives in the virtual «Сервер» group.
+            self._sync_server_roster(jid)
             return None
         if jid in getattr(self, "_not_in_roster", set()):
             self._not_in_roster.discard(jid)
@@ -7581,6 +7707,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if jid in self._pm_roster:
             self._build_pm_menu(jid).exec(pos)
             return
+        if jid in getattr(self, "_server_jids", set()):
+            self._build_server_menu(jid).exec(pos)
+            return
         if jid in getattr(self, "_not_in_roster", set()):
             domain = jid.split("@", 1)[1] if "@" in jid else ""
             preselect = (domain if any(
@@ -7730,6 +7859,33 @@ class MainWindow(QtWidgets.QMainWindow):
             menu.addAction(self._menu_icon("process-stop.png"),
                            tr("ctx_remove_contact"), lambda: self._on_remove_contact(jid))
         menu.exec(pos)
+
+    def _build_server_menu(self, jid: str) -> QtWidgets.QMenu:
+        """Context menu of an explicitly added server JID."""
+        menu = QtWidgets.QMenu()
+
+        def defer(callback):
+            menu.close()
+            QtCore.QTimer.singleShot(0, callback)
+
+        menu.addAction(self._menu_icon("message.png"), tr("ctx_open_chat"),
+                       lambda: self._on_contact_open(jid))
+        menu.addAction(self._menu_icon("v-card-48.svg"), tr("ctx_view_profile"),
+                       lambda checked=False: defer(lambda: self._show_profile(jid)))
+        menu.addAction(self._menu_icon("history.png"), tr("ctx_show_history"),
+                       lambda checked=False: defer(lambda: self._on_history_contact(jid)))
+        if self._client:
+            self._build_priority_menu(menu, jid=jid)
+            self._build_adhoc_menu(menu, jid)
+        menu.addSeparator()
+        menu.addAction(self._menu_icon("service-discovery.png"),
+                       tr("ctx_server_check"),
+                       lambda checked=False: defer(lambda: self._recheck_server(jid)))
+        menu.addAction(self._menu_icon("process-stop.png"),
+                       tr("ctx_server_remove"),
+                       lambda checked=False: defer(
+                           lambda: self._remove_server_confirmed(jid)))
+        return menu
 
     def _build_pm_menu(self, target: str) -> QtWidgets.QMenu:
         """Context menu of a private-message row (occupant features only)."""
@@ -8354,6 +8510,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._load_known_conferences()
         self._load_notification_priorities()
         self._load_transports()
+        self._load_servers()
         self._recount_unread()
 
     def _load_transports(self) -> None:
@@ -8367,6 +8524,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._transport_jids = transports.load()
         except Exception:  # noqa: BLE001 - best effort
             self._transport_jids = set()
+
+    def _load_servers(self) -> None:
+        """Seed explicitly added server JIDs before the roster is rendered."""
+        from stanza_im.core import servers
+        try:
+            self._server_jids = servers.load()
+        except Exception:  # noqa: BLE001 - best effort
+            self._server_jids = set()
+
+    def _save_servers(self) -> None:
+        """Persist the explicitly added server JIDs for the next login."""
+        from stanza_im.core import servers
+        try:
+            servers.save(self._server_jids)
+        except Exception:  # noqa: BLE001 - best effort
+            pass
 
     def _load_notification_priorities(self) -> None:
         """Load the persisted per-contact notification priorities."""
@@ -13661,6 +13834,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pm_roster = set()
         self._pm_targets = {}
         self._not_in_roster = set()
+        self._server_jids = set()
+        self._server_pending = set()
         self._session_transports = set()
         self._cached_roster_key = None
         self._muc_self_nicks.clear()

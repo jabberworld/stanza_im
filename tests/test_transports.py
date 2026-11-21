@@ -79,6 +79,10 @@ class _FakeClient:
     async def remove_contact(self, jid):
         self.removed.append(jid)
 
+    def update_contact(self, jid, name="", groups=None):
+        self.updated = getattr(self, "updated", [])
+        self.updated.append((jid, name, groups))
+
     def send_directed_presence(self, to, ptype="", status="", priority=None):
         self.presences.append((to, ptype))
 
@@ -106,8 +110,10 @@ check("the transports tab is registered", "transports" in win._roster_tab_keys)
 check("the transports roster exists", win._transport_roster is not None)
 
 # ── persisted transport cache ────────────────────────────────────
+from stanza_im.core import servers as servers_store
 from stanza_im.core import transports as transports_store
 
+servers_store.set_profile("me@example.com")
 transports_store.set_profile("me@example.com")
 transports_store.save({GW2, "old.example.com"})
 check("the transport cache round-trips",
@@ -122,17 +128,23 @@ check("a persisted transport never enters the roster",
       win._add_roster_item({"jid": GW2, "name": "ICQ", "groups": []}) is None
       and all(u.jid != GW2 for u in win._roster._users))
 
-# Seed the ordinary roster with the gateway, then classify.
+# Seed the ordinary roster with the gateway, then add it explicitly.
 win._add_roster_item({"jid": GW, "name": "J2J", "groups": []})
 win._add_roster_item({"jid": "bob@example.com", "name": "Bob", "groups": []})
 check("the gateway starts as a normal contact",
       any(u.jid == GW for u in win._roster._users))
+check("a plain roster item is not auto-classified",
+      GW not in win._transport_jids)
 
 loop = asyncio.get_event_loop()
-win._classify_transports()
+win._begin_explicit_server_add(GW, name="J2J")
+check("an explicitly added gateway is visible in «Сервер» while probing",
+      any(u.jid == GW and u.group == tr("roster_group_server")
+          for u in win._roster._users))
 loop.run_until_complete(asyncio.sleep(0.2))
 
 check("the gateway is classified", GW in win._transport_jids)
+check("the gateway leaves the server store", GW not in servers_store.load())
 check("only server JIDs (no @) are probed",
       GW in client.probed and "bob@example.com" not in client.probed)
 check("the gateway left the contacts roster",
